@@ -1,52 +1,5 @@
 #!/usr/bin/env python3
-"""main-canary-state.py — is main red right now, and who says so?
-
-LAYER 3 of the 2026-08-23 CI-failures council: merge freeze and attribution
-while main is red. Both chairs asked for it and Codex attached the kill
-criterion that shapes the whole file: "Kill any implementation under which a
-skipped or neutral check accidentally satisfies branch protection." So this
-file never reports a state it does not have. Not-knowing is a refusal, never a
-pass.
-
-BE HONEST ABOUT WHAT THE FREEZE ACTUALLY IS. Most of the blocking was already
-there before this file existed, and pretending otherwise would misdescribe the
-system: the required check builds refs/pull/N/merge, so a broken main is inside
-every open PR's run and turns it red, and ruleset 20824501 will not let a red PR
-merge. Main being red already stops merges. What was missing is everything
-around that fact --
-
-  1. THE PILOT. .github/workflows/automerge-pilot.yml is an unattended overnight
-     merge lane. It would happily plan a merge against a broken main and find
-     out 20 minutes later in its verify job. It now asks here first and declines
-     in five seconds.
-  2. THE NAME. Six sessions on 2026-08-22 saw an opaque red and each diagnosed
-     it separately. ops/inherited-from-main.py tells a victim "not yours"; this
-     tells anyone who asks WHOSE it is, which run found it, and on which commit.
-  3. A LEVER. Joe can freeze merges by hand -- repository variable
-     CARR_MAIN_FREEZE=on -- without editing a workflow or a ruleset.
-
-There is deliberately NO force-green. A lever that can declare a broken main
-healthy is a verdict weakener wearing a convenience hat, and the council
-forbade weakening any verdict to improve the number.
-
-WHERE THE STATE LIVES: nowhere. It is DERIVED, each time, from the canary's own
-run history through the Actions API. That is the whole reason this design was
-chosen over a repository variable: a variable has to be WRITTEN, the default
-GITHUB_TOKEN cannot write repository variables (that needs a PAT), and a stored
-flag can get stuck red after the fix lands and quietly freeze the repository
-until someone remembers it exists. A derived state cannot get stuck -- the next
-green canary run is the unfreeze, with nothing to remember and nothing to reset.
-
-CANCELLED RUNS ARE NOT VERDICTS. The canary debounces by cancelling itself
-during a merge burst, so most of its recent runs conclude "cancelled". Reading
-one of those as a state is how a freeze would flap. Only success, failure and
-timed_out count.
-
-Exit 0 green (or reporting only) · 1 red or unknown under --require-green
-  ops/main-canary-state.py                    # say what main's state is
-  ops/main-canary-state.py --require-green    # refuse unless it is provably green
-  ops/main-canary-state.py --json
-"""
+"""Read main CI health and the optional manual merge freeze."""
 from __future__ import annotations
 
 import argparse

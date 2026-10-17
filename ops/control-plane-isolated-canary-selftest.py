@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import json
@@ -56,7 +57,7 @@ def main() -> int:
                 "CARR_INGEST_URL": "https://live.invalid/ingest"}
 
         def run_calendar() -> subprocess.CompletedProcess[str]:
-            return subprocess.run(["python3", str(CALENDAR), "--canary"], env={**os.environ, **base}, text=True, capture_output=True)
+            return subprocess.run([sys.executable, str(CALENDAR), "--canary"], env={**os.environ, **base}, text=True, capture_output=True)
 
         def run_notes(*args: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(["zsh", str(NOTES), "--canary", *args], env={**os.environ, **base}, text=True, capture_output=True)
@@ -88,18 +89,18 @@ def main() -> int:
 
         rejected("calendar missing config refuses before isolated writes", run_calendar)
         rejected("Notes missing config refuses before isolated writes", lambda: run_notes("--status"))
-        normal = subprocess.run(["python3", str(CALENDAR)],
+        normal = subprocess.run([sys.executable, str(CALENDAR)],
                                 env={**os.environ, **base, "CARR_RECOVERY_REASON": "ambient-bypass"},
                                 text=True, capture_output=True)
         check("calendar normal mode refuses before ambient Drive or recovery state",
               normal.returncode == 69 and "MISSING_CANONICAL_SEAM" in normal.stderr
               and "empty-vault" not in normal.stderr)
-        missing_root = subprocess.run(["python3", str(CALENDAR), "--recovery", "--reason", "direct"],
+        missing_root = subprocess.run([sys.executable, str(CALENDAR), "--recovery", "--reason", "direct"],
                                       env={**os.environ, **base}, text=True, capture_output=True)
         check("calendar legacy recovery requires a directly supplied root",
               missing_root.returncode == 2 and "--recovery-root" in missing_root.stderr)
         recovery_root = tmp / "recovery"
-        recovery = subprocess.run(["python3", str(CALENDAR), "--recovery", "--reason", "direct",
+        recovery = subprocess.run([sys.executable, str(CALENDAR), "--recovery", "--reason", "direct",
                                    "--recovery-root", str(recovery_root), "--dry-run"],
                                   env={**os.environ, **base, "CARR_CONTROL_PLANE_MODE": ""},
                                   text=True, capture_output=True)
@@ -107,7 +108,7 @@ def main() -> int:
               recovery.returncode == 0 and "RECOVERY NONCANONICAL" in recovery.stderr)
         live_log = REPO / "out" / "capture-lanes.log"
         before_live = live_log.read_bytes() if live_log.exists() else None
-        gmail = subprocess.run(["python3", str(CALENDAR), "--gmail"], env={**os.environ, **base}, text=True, capture_output=True)
+        gmail = subprocess.run([sys.executable, str(CALENDAR), "--gmail"], env={**os.environ, **base}, text=True, capture_output=True)
         after_live = live_log.read_bytes() if live_log.exists() else None
         check("calendar canary-mode Gmail boundary refuses before any live write", gmail.returncode == 78 and before_live == after_live)
 

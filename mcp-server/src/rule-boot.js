@@ -1,11 +1,20 @@
 // rule-boot.js — the gated rule boot's text, rendered from the store.
 //
+// WHAT IT CARRIES (slimmed 2026-10-07 on Joe's ruling that loading every rule's
+// full text "after every compaction and every session start" is not good
+// design): Part 1 is the full text of class A (always-on conduct and standing
+// facts), retained B/C route gaps and unclassified rules (U). Part 2 indexes
+// every other active rule. Unretained B/C rules reach a context through the
+// PreToolUse route hook, D rules are held by their gates, E rules are stale.
+// Every active rule appears exactly once. standing-context rule_ids returns any
+// rule's full text.
+//
 // WHY THIS EXISTS. A session or subagent that has not read the rules cannot
 // follow them, and until this module nothing put the rules in front of a
 // context before it acted: standing-context returned one-line gists when a
 // session remembered to call it. Joe asked for 100% recall on relevant rules.
 // The design (Jev, p=1.00): every context fetches, through standing-context
-// `detail: "boot"`, (1) a one-line index of EVERY active rule and (2) the FULL
+// `detail: "boot"`, (1) a one-line index of the active rules and (2) the FULL
 // TEXT of the always-on set, and hooks/rule-boot-gate.py denies every other
 // tool call in that context until all pages of the current digest are fetched.
 //
@@ -28,11 +37,9 @@ import {
 } from "./rule-boot-classes.js";
 
 export const RULE_BOOT_SCHEMA = "carr-rule-boot/v1";
-export const RULE_BOOT_PAGE_CHARS = 20000;
-
-const UNCLASSIFIED_SUMMARY =
-  "(unclassified since the last classification; its full text is in the always-on section)";
-const UNCLASSIFIED_WHEN = "until classified: treat it as always relevant";
+// 25k characters of text print as ~26k through `./run.sh call` (JSON escaping
+// adds 2-4%), inside a 30k Bash result; the test pins the JSON-encoded size.
+export const RULE_BOOT_PAGE_CHARS = 25000;
 
 // One view of the corpus for ONE sponsor. The SQL that feeds this already
 // scopes personal rules to the authenticated sponsor; the two checks below are
@@ -56,17 +63,18 @@ function scopedRules(rows, sponsor, classes) {
 export function renderRuleBoot(rows, sponsor, classes = RULE_BOOT_CLASSES) {
   const rules = scopedRules(rows, sponsor, classes);
   const alwaysOn = rules.filter(r => !r.cls || r.cls.on);
+  const indexed = rules.filter(r => r.cls && !r.cls.on);
   const unclassified = rules.filter(r => !r.cls).map(r => r.id);
   const out = [];
   out.push("# CARR RULE BOOT — read every page before acting");
   out.push("");
   out.push(`Served live from the CARR doctrine store (the only source of truth) for ${sponsor ? `sponsor ${sponsor}` : "an unsponsored runtime (shared rules only)"}.`);
-  out.push("Part 1 is the FULL TEXT of retained rules. Each binds at its stated moment, not on every turn.");
-  out.push("Part 2 is a one-line INDEX of every active rule: `id | class | summary | when it applies`.");
-  out.push("Classes: A always-on (full text in Part 1); B binds at an action point; C binds when a topic is present;");
-  out.push("D already enforced by a gate; E stale or duplicate; U unclassified (full text in Part 1).");
-  out.push("If a rule's full text is missing from Part 1, fetch its binding text:");
-  out.push("standing-context with rule_ids:[\"<id>\"]. Never quote an index summary as the rule itself.");
+  out.push("Part 1 is the FULL TEXT of the always-on rules (class A) plus retained route-gap rules and any rule not yet classified (U).");
+  out.push("Part 2 is a one-line INDEX of every other active rule: `id | class | summary | when it applies`.");
+  out.push("B binds at an action point and C when a topic is present: proven route gaps stay in Part 1;");
+  out.push("other B/C rules arrive through the route hook. D is already enforced by a gate. E is stale or duplicate. Each rule appears once.");
+  out.push("Before acting on an index line, fetch its binding text: standing-context with rule_ids:[\"<id>\"].");
+  out.push("Never quote an index summary as the rule itself.");
   out.push(`Classification: ${RULE_BOOT_CLASSES_DIGEST}.`);
   out.push("");
   out.push(`## PART 1 — ALWAYS-ON RULES, FULL TEXT (${alwaysOn.length})`);
@@ -76,23 +84,20 @@ export function renderRuleBoot(rows, sponsor, classes = RULE_BOOT_CLASSES) {
     out.push(r.statement);
     out.push("");
   }
-  out.push(`## PART 2 — INDEX OF EVERY ACTIVE RULE (${rules.length})`);
+  out.push(`## PART 2 — INDEX OF EVERY OTHER ACTIVE RULE (${indexed.length})`);
   out.push("");
-  for (const r of rules) {
-    const cls = r.cls ? r.cls.cls.toUpperCase() : "U";
-    const summary = r.cls ? r.cls.summary : UNCLASSIFIED_SUMMARY;
-    const when = r.cls ? r.cls.when : UNCLASSIFIED_WHEN;
-    out.push(`${r.id} | ${cls} | ${summary} | ${when}`);
+  for (const r of indexed) {
+    out.push(`${r.id} | ${r.cls.cls.toUpperCase()} | ${r.cls.summary} | ${r.cls.when}`);
   }
   out.push("");
   out.push("## END OF RULE BOOT");
   const text = out.join("\n") + "\n";
   return {
     text,
-    counts: { rules: rules.length, always_on: alwaysOn.length, index: rules.length,
+    counts: { rules: rules.length, always_on: alwaysOn.length, index: indexed.length,
               unclassified: unclassified.length },
     unclassified,
-    index_ids: rules.map(r => r.id),
+    index_ids: indexed.map(r => r.id),
     always_on_ids: alwaysOn.map(r => r.id),
   };
 }

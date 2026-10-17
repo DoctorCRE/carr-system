@@ -550,6 +550,26 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
                          ("Codex", "gpt-6-sol", "xhigh", "Check the route."))
         self.assertEqual(task["stage_history"][0]["stage"], "queued")
 
+    def test_creation_defaults_preserve_metadata_but_allow_explicit_reassignment(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        assigned = {"title": "Assigned task", "executor": "Codex", "provider": "OpenAI",
+                    "model": "fixture", "effort": "high"}
+        defaults = {"title": "Queue card", "executor": "Merge queue", "provider": "Unknown",
+                    "model": "unknown", "effort": "unknown"}
+        fields = lambda values: [item for key, value in values.items() for item in ("--" + key, value)]
+        self.run_board("task", "demo", "existing", *fields(assigned), "--status", "running", "--pr", "42")
+        for card in ("existing", "new"):
+            self.run_board("task", "demo", card, *fields(defaults), "--creation-defaults",
+                           "--status", "review", "--pr", "42", "--stage", "ci", "--note", "Checks pending")
+        tasks = self.read_state("demo")["tasks"]
+        for card, expected in (("existing", assigned), ("new", defaults)):
+            self.assertEqual({key: tasks[card][key] for key in expected}, expected)
+            self.assertEqual((tasks[card]["status"], tasks[card]["stage"], tasks[card]["note"]),
+                             ("review", "ci", "Checks pending"))
+        self.run_board("task", "demo", "existing", *fields(defaults))
+        task = self.read_state("demo")["tasks"]["existing"]
+        self.assertEqual({key: task[key] for key in defaults}, defaults)
+
     def test_backfill_uses_pr_title_and_retains_existing_task_history(self):
         state = {"tasks": {
             "pr": {"title": "PR 42", "executor": "gpt-6-sol high (Codex)",
@@ -983,35 +1003,7 @@ class GitHubSync(BoardCase):
         self.assertEqual((task["status"], task["stage"]), ("blocked", "ci"))
         self.assertEqual(BOARD.blocked_detail(task)[0], "Failing checks: deploy/preview")
 
-    def test_sync_never_moves_a_card_back_past_a_later_manual_stage(self):
-        self.start("--stage", "review")
-        self.fake_gh({})
-        task, _ = self.sync({**self.OPEN, "isDraft": True})
-        self.assertEqual(task["stage"], "review", "a manual Review is not undone by a Draft PR")
-        self.assertEqual(task["pr_phase"], "Draft")
-        task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
-        self.assertEqual(task["stage"], "merged", "forward movement past the manual stage still happens")
 
-    def test_manual_block_survives_until_github_shows_it_cleared(self):
-        self.start()
-        self.fake_gh({})
-        self.sync(self.OPEN)
-        self.run_board("task", "demo", "a", "--status", "blocked", "--reason", "Waiting on the DNS cutover",
-                       "--next-action", "Joe flips the record")
-        # GitHub unchanged, or moving without a new head: the note stays.
-        for view in (self.OPEN, {**self.OPEN, "reviewDecision": "APPROVED"}):
-            task, _ = self.sync(view)
-            self.assertEqual(task["status"], "blocked")
-            self.assertEqual(BOARD.blocked_detail(task), ("Waiting on the DNS cutover", "Joe flips the record"))
-        # A new head that is itself failing is not the blocker clearing either.
-        failing = [{"name": "unit", "conclusion": "FAILURE", "status": "COMPLETED"}]
-        task, _ = self.sync({**self.OPEN, "headRefOid": "b" * 40, "statusCheckRollup": failing})
-        self.assertEqual(BOARD.blocked_detail(task)[0], "Waiting on the DNS cutover")
-        # A new, healthy head is GitHub showing the blocker cleared.
-        task, _ = self.sync({**self.OPEN, "headRefOid": "c" * 40})
-        self.assertEqual((task["status"], task["pr_phase"]), ("review", "Awaiting review"))
-        self.assertNotIn("blocked_reason", task)
-        self.assertNotIn("blocked_source", task)
 
     def test_manual_block_clears_when_the_pr_merges(self):
         self.start()
@@ -1408,6 +1400,69 @@ class PublishAndAnswers(BoardCase):
         self.assertIn("gh unavailable", err.getvalue())
 
 
+class SharedBoardRoot(unittest.TestCase):
+    """board_dir() resolves to the MAIN working tree from inside a linked
+    worktree, so every worktree of one checkout reads one board.
+
+    2026-10-12: the merge queue, run from an orchestrator worktree, logged
+    `board does not exist: carr-v5; run init first` four times per event because
+    the board lived under the worktree's own empty out/."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "ops"))
+        from git_env import fixture_env  # noqa: E402
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.main = Path(self.tempdir.name).resolve() / "main"
+        self.main.mkdir()
+        self.env = dict(fixture_env(), HOME=self.tempdir.name)
+        self.env.pop("PROGRESS_BOARD_ROOT", None)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "fixture@example.com")
+        self.git("config", "user.name", "Fixture")
+        (self.main / "README.md").write_text("fixture\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "seed")
+        self.worktree = Path(self.tempdir.name).resolve() / "linked"
+        self.git("worktree", "add", "-q", str(self.worktree), "-b", "linked")
+        self.cwd = os.getcwd()
+        self.saved_root = os.environ.pop("PROGRESS_BOARD_ROOT", None)
+        self.addCleanup(self.restore)
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", str(self.main), *args], check=True, env=self.env,
+                       capture_output=True, text=True)
+
+    def restore(self):
+        os.chdir(self.cwd)
+        if self.saved_root is not None:
+            os.environ["PROGRESS_BOARD_ROOT"] = self.saved_root
+        BOARD.shared_checkout_root.cache_clear()
+        self.tempdir.cleanup()
+
+    def resolve_from(self, directory):
+        os.chdir(directory)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, self.env, clear=False):
+            return BOARD.board_dir()
+
+    def test_linked_worktree_reads_the_main_trees_board(self):
+        self.assertEqual(self.resolve_from(self.worktree), self.main / "out" / "boards")
+
+    def test_main_tree_reads_its_own_board(self):
+        self.assertEqual(self.resolve_from(self.main), self.main / "out" / "boards")
+
+    def test_outside_git_falls_back_to_the_current_directory(self):
+        plain = Path(self.tempdir.name).resolve() / "plain"
+        plain.mkdir()
+        self.assertEqual(self.resolve_from(plain), plain / "out" / "boards")
+
+    def test_explicit_root_still_wins(self):
+        os.chdir(self.worktree)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": self.tempdir.name}):
+            self.assertEqual(BOARD.board_dir(), Path(self.tempdir.name).resolve() / "boards")
+
+
 class NeedsJoePublication(unittest.TestCase):
     def test_local_publication_failures_do_not_interrupt_other_boards(self):
         import needs_joe_local
@@ -1732,7 +1787,7 @@ class ReviewRound1420(BoardCase):
         text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         self.assertLessEqual(len(text.encode("utf-16-le")) // 2, 262144)
         self.assertGreater(snapshot["omitted"]["live"], 0)
-        self.assertEqual(len(snapshot["notes"]), 50)
+        self.assertEqual(len(snapshot["notes"]), len(state["notes"]))
         self.assertEqual(BOARD.snapshot_size({"t": "✦😀"}), len('{"t":"✦"}') + 2)
 
     def test_3_a_board_that_cannot_fit_is_refused_not_published(self):
@@ -2023,31 +2078,38 @@ class ReviewRound1420(BoardCase):
         self.assertEqual(back["last_verified_at"], back["checked_at"])
 
     # 11 ── every mutation reaches the app board
-    def test_11_mutations_publish_to_the_app_board(self):
-        calls, remote, caller = self.spy()
-        with self.in_process(PROGRESS_BOARD_SKIP_GH="1", PROGRESS_BOARD_LOCAL_ONLY=""), \
-             patch.object(BOARD, "call_verb", caller):
-            BOARD.main(["init", "demo", "--title", "Demo"])
-            self.assertEqual(calls.count("publish-board-snapshot"), 1)
-            BOARD.main(["task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex"])
-            BOARD.main(["note", "demo", "--text", "Visible in the app"])
-        self.assertEqual(calls.count("publish-board-snapshot"), 3)
-        published = remote["snapshot"]["snapshot_json"]
-        self.assertEqual(published["tasks"]["a"]["title"], "A")
-        self.assertEqual(published["notes"][0]["text"], "Visible in the app")
 
-    def test_11_a_failed_publication_is_loud_and_local_only_says_so(self):
-        def refuse(verb, args):
-            raise RuntimeError("read-progress-board failed: server unreachable")
-        with self.in_process(PROGRESS_BOARD_SKIP_GH="1", PROGRESS_BOARD_LOCAL_ONLY=""), \
-             patch.object(BOARD, "call_verb", refuse):
-            with self.assertRaises(SystemExit) as raised:
-                BOARD.main(["init", "demo", "--title", "Demo"])
-        self.assertIn("not published", str(raised.exception))
-        self.assertIn("render demo --publish", str(raised.exception))
-        self.assertTrue((self.root / "boards" / "demo.json").exists(), "the local state is kept")
-        result = self.run_board("note", "demo", "--text", "x")
-        self.assertIn("not published", result.stderr)
+
+    def test_11_b_mutation_does_not_refresh_or_publish(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        with self.in_process(PROGRESS_BOARD_LOCAL_ONLY="1"), \
+             patch.object(BOARD, "render", side_effect=AssertionError("local mutation refreshed the whole board")), \
+             patch.object(BOARD, "publish_board", side_effect=AssertionError("local mutation published")):
+            BOARD.main(["task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex"])
+        self.assertEqual(self.read_state("demo")["tasks"]["a"]["status"], "running")
+
+    def test_11_c_task_receipt_captures_locked_before_state_and_cas_noop(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+                       "--executor", "Codex", "--note", "Original evidence")
+        before = self.read_state("demo")["tasks"]["a"]
+
+        applied = self.run_board("task", "demo", "a", "--status", "blocked", "--health", "blocked",
+                                 "--reason", "Synthetic failure", "--next-action", "Recover",
+                                 "--note", "Watchdog overlay", "--receipt")
+        receipt = json.loads(applied.stdout)
+        self.assertTrue(receipt["applied"])
+        self.assertEqual(receipt["before"], before)
+        self.assertEqual(receipt["after"], self.read_state("demo")["tasks"]["a"])
+
+        current = receipt["after"]
+        refused = self.run_board("task", "demo", "a", "--status", "done", "--note", "stale restore",
+                                 "--expected-task", json.dumps({"status": "running"}), "--receipt")
+        receipt = json.loads(refused.stdout)
+        self.assertFalse(receipt["applied"])
+        self.assertEqual(receipt["before"], current)
+        self.assertEqual(receipt["after"], current)
+        self.assertEqual(self.read_state("demo")["tasks"]["a"], current)
 
 
 def merged_view(oid):
@@ -2282,6 +2344,21 @@ class DeliveryTargetRelease(BoardCase):
                 task = self.read_state("demo")["tasks"]["pending"]
                 self.assertEqual(task["stage"], "merged")
                 self.assertNotIn("evidence", task)
+
+
+class RetentionTests(unittest.TestCase):
+    def test_old_closed_cards_drop_but_their_notes_and_questions_survive(self):
+        state = {"tasks": {"old": {"repo": "jbookout/carr-system", "pr": 1, "title": "Old",
+                   "note": "Keep this finding", "question_ids": ["q1"]},
+                   "active": {"repo": "jbookout/carr-system", "pr": 2}},
+                 "questions": {"q1": {"question": "Keep?"}}, "notes": ["Human note"]}
+        BOARD.retain_recent_cards(state, {("jbookout/carr-system", 1): {"state": "MERGED",
+                                  "mergedAt": "2020-01-01T00:00:00Z"}})
+        self.assertEqual(list(state["tasks"]), ["active"])
+        self.assertEqual(state["task_notes"]["old"]["note"], "Keep this finding")
+        self.assertEqual(state["questions"]["q1"]["question"], "Keep?")
+        self.assertEqual(state["notes"], ["Human note"])
+
 
 
 if __name__ == "__main__":

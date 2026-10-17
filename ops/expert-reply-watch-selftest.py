@@ -152,7 +152,10 @@ class WatchTests(unittest.TestCase):
     def test_schedule_and_installer_registration(self):
         plist = plistlib.loads((ROOT / 'ops/launchd/com.carr.expert-reply-watch.plist').read_bytes())
         self.assertEqual(plist['StartCalendarInterval'], {'Weekday': 1, 'Hour': 6, 'Minute': 0})
-        jobs = json.loads((ROOT / 'ops/config/scheduled-jobs.v1.json').read_text())
+        sys.path.insert(0, str(ROOT))
+        sys.path.insert(0, str(ROOT / "lib"))
+        from scheduled_jobs import native_manifest
+        jobs = native_manifest()
         job = next(row for row in jobs['jobs'] if row['label'] == plist['Label'])
         expected = [v.replace('{{REPO}}', '~/carr-system') for v in plist['ProgramArguments']]
         self.assertEqual(job['program_arguments'], expected)

@@ -189,6 +189,24 @@ class ValueTests(unittest.TestCase):
                 self.assertEqual((jvr.positive_attribution(commit) is not None,
                                   report["totals"]["outcomes_verified"]), (True, 1))
 
+    def test_historical_adverb_on_suspicion_denies_while_on_test_subject_credits(self):
+        """#1538 finding 6, fixed by #1556: the adverb qualifies the suspicion, not the denial."""
+        cases = (
+            ("Contrary to the suspicion raised previously, the investigation did not find a bug.", False),
+            ("Despite the suspicion raised earlier, our tests did not confirm a bug.", False),
+            ("Earlier, our tests did not find any bug.", True),
+            ("Previously, our tests did not identify a bug.", True),
+        )
+        for statement, credited in cases:
+            with self.subTest(statement=statement):
+                subject = "Fix bug Jev found" if credited else "Fix suspected bug Jev flagged"
+                commit = {"sha": "synthetic", "date": "2026-10-01T00:00:00Z",
+                          "subject": subject, "body": statement}
+                report = jvr.build_report(sources(commits=[commit]), START, END)
+                self.assertEqual((jvr.positive_attribution(commit) is not None,
+                                  report["totals"]["outcomes_verified"]),
+                                 (credited, int(credited)))
+
     def test_negative_investigation_and_coincident_verdict_do_not_earn_credit(self):
         for denial in ("No bug found", "Investigation did not find a bug",
                        "Investigation did not identify any bug",

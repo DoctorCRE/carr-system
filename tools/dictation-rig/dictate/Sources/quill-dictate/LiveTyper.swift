@@ -27,10 +27,6 @@
 // would look like "another key pressed" and would abort the capture
 // (GestureEngine.swift's cancelTriggerGesture fires on exactly that).
 //
-// All methods run on the main thread — callers (App.swift) already funnel
-// preview ticks and the final-transcription completion through
-// DispatchQueue.main.async for exactly this reason, so nothing here takes
-// its own lock or queue.
 
 import AppKit
 import CoreGraphics
@@ -40,13 +36,23 @@ final class LiveTyper {
     /// What we have synthetically typed into the focused field so far, for
     /// THIS capture. Reset by handing App.swift a fresh LiveTyper() at
     /// capture start; cleared to "" by finalize(with:) and retractAll().
-    private(set) var typed: String = ""
+    @MainActor private(set) var typed: String = ""
+
+    #if LIVE_TYPER_CHECK
+    enum CheckEvent: Equatable { case backspaces(Int), text(String) }
+    @MainActor private let checkEmit: (CheckEvent) -> Void
+    @MainActor init(checkEmit: @escaping (CheckEvent) -> Void) {
+        self.checkEmit = checkEmit
+    }
+    #else
+    init() {}
+    #endif
 
     private static let backspaceKeyCode: CGKeyCode = 51
 
     /// Revise the field to match a new hypothesis: backspace the part of
     /// `typed` that no longer matches, then type the new remainder.
-    func apply(hypothesis: String) {
+    @MainActor func apply(hypothesis: String) {
         guard hypothesis != typed else { return }
         let typedChars = Array(typed)
         let hypChars = Array(hypothesis)
@@ -81,7 +87,7 @@ final class LiveTyper {
     /// after releasing the trigger, then clear state for the next capture.
     /// Treating that suffix as part of our current logical text lets the
     /// normal diff retract and replay it without losing the user's typing.
-    func finalize(with finalText: String, preservingAppended appendedText: String = "") {
+    @MainActor func finalize(with finalText: String, preservingAppended appendedText: String = "") {
         typed.append(appendedText)
         apply(hypothesis: finalText + appendedText)
         typed = ""
@@ -90,7 +96,7 @@ final class LiveTyper {
     /// Backspace away everything typed this capture and reset. Used on
     /// abort, on a silence-gated or empty capture, and when whisper's final
     /// pass heard nothing.
-    func retractAll() {
+    @MainActor func retractAll() {
         guard !typed.isEmpty else { return }
         postBackspaces(typed.count)
         typed = ""
@@ -99,7 +105,7 @@ final class LiveTyper {
     /// Remove this capture's preview while preserving plain text appended
     /// after trigger release. Used when the final pass is empty or fails;
     /// the old bare retractAll() would backspace the user's new suffix first.
-    func retractAll(preservingAppended appendedText: String) {
+    @MainActor func retractAll(preservingAppended appendedText: String) {
         typed.append(appendedText)
         apply(hypothesis: appendedText)
         typed = ""
@@ -110,7 +116,7 @@ final class LiveTyper {
     /// PRIOR, already-completed insertion, not anything tracked by this
     /// capture's own `typed` state, so it must not go through the normal
     /// diff path.
-    func backspaceCharacters(_ count: Int) {
+    @MainActor func backspaceCharacters(_ count: Int) {
         guard count > 0 else { return }
         postBackspaces(count)
     }
@@ -184,7 +190,10 @@ final class LiveTyper {
 
     // MARK: - Synthetic input
 
-    private func postBackspaces(_ count: Int) {
+    @MainActor private func postBackspaces(_ count: Int) {
+        #if LIVE_TYPER_CHECK
+        checkEmit(.backspaces(count))
+        #else
         let source = CGEventSource(stateID: .combinedSessionState)
         for _ in 0..<count {
             guard let down = CGEvent(keyboardEventSource: source, virtualKey: LiveTyper.backspaceKeyCode, keyDown: true),
@@ -195,9 +204,13 @@ final class LiveTyper {
             up.post(tap: .cghidEventTap)
             usleep(2000)
         }
+        #endif
     }
 
-    private func typeChunked(_ text: String) {
+    @MainActor private func typeChunked(_ text: String) {
+        #if LIVE_TYPER_CHECK
+        checkEmit(.text(text))
+        #else
         let source = CGEventSource(stateID: .combinedSessionState)
         // Chunked: keyboardSetUnicodeString tops out around 20 UTF-16 units
         // per event in practice (same limit Inserter.typeOut works around).
@@ -217,5 +230,6 @@ final class LiveTyper {
             index += 16
             usleep(4000)
         }
+        #endif
     }
 }

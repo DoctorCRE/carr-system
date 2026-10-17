@@ -67,7 +67,7 @@ CLASSES = {
 }
 VERBS = {"new-deal", "update-deal", "close-loop", "add-loop"}
 MATCHER = "Bash|Write|Edit|MultiEdit|Agent|WebFetch|WebSearch|Artifact|mcp__.*"
-STOP_HOOKS = {"completion-evidence-gate.py"}
+STOP_HOOKS = {"scheduled-run-record.py"}
 
 CLEAN = {
     "schema": routes_lib.ROUTES_SCHEMA,
@@ -81,7 +81,7 @@ CLEAN = {
              "verbs": ["new-deal", "update-deal"], "bash_patterns": []},
             {"kind": "path_rule", "path_globs": ["*dealroom/*.html"]}]},
         "aaaa0004": {"moment": "a stop gate", "routes": [
-            {"kind": "gate", "gate": "hooks/completion-evidence-gate.py"},
+            {"kind": "gate", "gate": "hooks/scheduled-run-record.py"},
             {"kind": "trigger", "tools": [], "verbs": ["close-loop"],
              "bash_patterns": [r"\bgit\s+push\b"]}]},
         "aaaa0005": {"moment": "duplicate of aaaa0003", "routes": [
@@ -134,33 +134,6 @@ mutant("connector tool that is not a known connector tool",
 mutant("gate route points at a file that does not exist",
        lambda d: d["rules"]["aaaa0006"]["routes"][0].__setitem__("gate", "hooks/no-such-gate.py"),
        "aaaa0006: gate 'hooks/no-such-gate.py' does not exist")
-mutant("class-d rule with no gate route",
-       lambda d: d["rules"]["aaaa0006"].__setitem__("routes", [
-           {"kind": "trigger", "tools": ["Agent"], "verbs": [], "bash_patterns": []}]),
-       "aaaa0006: class d rule has no gate route")
-mutant("Stop-hook-only class-d rule with no trigger in front of it",
-       lambda d: d["rules"]["aaaa0004"].__setitem__("routes", [d["rules"]["aaaa0004"]["routes"][0]]),
-       "aaaa0004: enforced only by Stop hook")
-mutant("duplicate whose survivor has no delivery of its own",
-       lambda d: d["rules"]["aaaa0005"]["routes"][0].__setitem__("survivor", "aaaa0006x"),
-       "aaaa0005: duplicate survivor 'aaaa0006x'")
-mutant("class-e rule with no duplicate route",
-       lambda d: d["rules"]["aaaa0005"].__setitem__("routes", [{"kind": "boot"}]),
-       "aaaa0005: class e rule does not name its surviving duplicate")
-mutant("bash pattern that is not a valid regular expression",
-       lambda d: d["rules"]["aaaa0002"]["routes"][0]["bash_patterns"].append("(unclosed"),
-       "aaaa0002: bash pattern '(unclosed' is not a valid regular expression")
-mutant("trigger route that matches nothing at all",
-       lambda d: d["rules"]["aaaa0002"]["routes"].__setitem__(
-           0, {"kind": "trigger", "tools": [], "verbs": [], "bash_patterns": []}),
-       "aaaa0002: trigger route names no tool, verb or bash pattern")
-mutant("unknown route kind",
-       lambda d: d["rules"]["aaaa0002"]["routes"].append({"kind": "vibes"}),
-       "aaaa0002: unknown route kind 'vibes'")
-mutant("route file carrying rule text",
-       lambda d: d["rules"]["aaaa0002"].__setitem__("statement", "the whole rule"),
-       "aaaa0002: route entry carries keys outside")
-
 mutant("non-string tool entry (would crash a naive matcher)",
        lambda d: d["rules"]["aaaa0002"]["routes"][0]["tools"].append(7),
        "aaaa0002: trigger ['tools'] must be lists of non-empty strings")

@@ -148,6 +148,9 @@ class LockRepairTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node") and renovate_dist(),
                          f"needs node and Renovate {RENOVATE_VERSION} (set RENOVATE_DIST)")
     def test_renovate_labels_security_updates_with_their_update_type(self):
+        runtime = subprocess.run(["node", "-p", "typeof RegExp.escape"], capture_output=True, text=True, check=True)
+        if runtime.stdout.strip() != "function":
+            self.skipTest(f"Renovate {RENOVATE_VERSION} needs a Node runtime with RegExp.escape")
         result = subprocess.run(
             ["node", "--input-type=module", "-e", RENOVATE_LABELS, str(renovate_dist()), str(ROOT / "renovate.json")],
             capture_output=True, text=True, env={**os.environ, "LOG_LEVEL": "fatal"})

@@ -1,11 +1,3 @@
-// WR-000111 — the producer cost ledger acceptance proofs.
-//
-// Collected by the test/*.test.mjs glob. The cases that need a real PostgreSQL
-// skip when the unit class runs them and are REQUIRED in the migration class,
-// which supplies DATABASE_URL.
-//
-//   DATABASE_URL=postgresql://localhost/... node --test \
-//     mcp-server/test/cost-ledger-projection.v5.test.mjs
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -56,10 +48,6 @@ async function connect(pg) {
 
 const wrap = client => ({ query: (text, values = []) => client.query(text, values) });
 
-/**
- * A fresh tree, created the ONLY way there is: every direct write on the five
- * relations is revoked, so ops.initialize_cost_scope_tree is the door.
- */
 async function freshTree(client) {
   const treeRef = `wr111:${randomUUID()}`;
   const tree = compileScopeTree(TREE);
@@ -96,7 +84,6 @@ async function inTransaction(client, fn) {
   }
 }
 
-// ---------------------------------------------------------------------------
 
 test("T-CONST: the 0519 enum lists equal the module's closed constants in both directions",
   () => {
@@ -155,7 +142,6 @@ test("MTR-TREE-ROUNDTRIP: a stored ledger reads back deep-equal to the in-memory
       await inTransaction(client, () => commitLedgerOperation({ client: c, tree_ref: treeRef, step }));
     }
 
-    // The in-memory value the same steps produce, with no database anywhere.
     const memory = applyOperations(openLedger(compileScopeTree(TREE)), steps).ledger;
     const expected = projectLedger(memory);
 
@@ -165,9 +151,6 @@ test("MTR-TREE-ROUNDTRIP: a stored ledger reads back deep-equal to the in-memory
     assert.equal(stored.as_of.quantity, expected.by_node[expected.root_node_id].rolled_up.committed_units);
     assert.equal(stored.estimate.units, expected.by_node[expected.root_node_id].rolled_up.estimate_units);
 
-    // And the projection itself, deep-equal: tree_id, tree_version, every
-    // entry_id and every kind included. THIS is what proves the mapping in §0.4
-    // rather than asserting it.
     const rows = await client.query(
       `select sequence, entry_id, kind, node_id, amount_units, operation_id
          from ops.cost_ledger_entry where tree_ref = $1 order by sequence`, [treeRef]);
@@ -194,8 +177,6 @@ test("MTR-CAS-CONFLICT (a): two library callers from one base land once and refu
     t.after(() => Promise.all([owner, first, second].map(x => x.end().catch(() => {}))));
     const { treeRef } = await freshTree(wrap(owner));
 
-    // Both prepare against version 0. The first lands; the second meets the
-    // moved cell.
     await first.query("begin");
     const landed = await commitLedgerOperation({
       client: wrap(first), tree_ref: treeRef, step: reserve("op-1", "res-1", 10) });
@@ -203,9 +184,6 @@ test("MTR-CAS-CONFLICT (a): two library callers from one base land once and refu
     assert.equal(landed.result.ok, true);
 
     await second.query("begin");
-    // The loser is forced onto the ORIGINAL base by calling the function
-    // directly with the base it prepared against, which is exactly the state a
-    // concurrent caller holds.
     const refused = (await second.query(
       `select ops.commit_cost_ledger_operation(
          $1::text,0::integer,$2::text,'op-2'::text,$3::text,'reserve'::text,
@@ -215,9 +193,6 @@ test("MTR-CAS-CONFLICT (a): two library callers from one base land once and refu
        `sha256:${"b".repeat(64)}`])).rows[0].result;
     await second.query("rollback");
 
-    // A conflict is a conflict only when the base it names is genuinely stale;
-    // the case above deliberately offers the CURRENT digest with a STALE
-    // version, which is the shape a lost update would take.
     assert.equal(refused.ok, false);
     assert.equal(refused.reason_id, "version_conflict");
     for (const name of ["base_version", "current_version", "base_state_digest", "current_state_digest"]) {
@@ -226,7 +201,6 @@ test("MTR-CAS-CONFLICT (a): two library callers from one base land once and refu
     for (const alias of ["expected_version", "actual_version", "expected_state_digest", "actual_state_digest"]) {
       assert.ok(!Object.hasOwn(refused, alias), `the refusal speaks an alias: ${alias}`);
     }
-    // AND IT WROTE NOTHING.
     const rows = await owner.query(
       `select (select count(*) from ops.cost_ledger_operation where tree_ref=$1) ops,
               (select count(*) from ops.cost_ledger_entry where tree_ref=$1) entries`, [treeRef]);
@@ -247,7 +221,6 @@ test("MTR-IDEMPOTENT-REPLAY: the same operation replays from its ORIGINAL base a
       commitLedgerOperation({ client: c, tree_ref: treeRef, step: reserve("op-1", "res-1", 10) }));
     const afterFirst = (await client.query(
       "select ledger_version from ops.cost_ledger_cell where tree_ref=$1", [treeRef])).rows[0];
-    // The cell MOVES underneath the replay.
     await inTransaction(client, () =>
       commitLedgerOperation({ client: c, tree_ref: treeRef, step: reserve("op-2", "res-2", 10) }));
 
@@ -270,7 +243,6 @@ test("MTR-IDEMPOTENT-REPLAY: the same operation replays from its ORIGINAL base a
     assert.equal(Number(counts.ops), 2);
     assert.equal(Number(counts.entries), 2);
 
-    // The same operation_id with DIFFERENT arguments is not a replay.
     await assert.rejects(client.query(
       `select ops.commit_cost_ledger_operation($1::text,0::integer,'stale'::text,'op-1'::text,
          $2::text,'reserve'::text,'{}'::jsonb,null::text,1::integer,'x'::text,'[]'::jsonb)`,
@@ -310,16 +282,12 @@ test("MTR-CEILING-REFUSAL: an overdrawn projection requires the module's own two
     t.after(() => client.end().catch(() => {}));
     const c = wrap(client);
     const { treeRef } = await freshTree(c);
-    // A late liability is accepted above the ceiling by design, which is the
-    // only honest way to overdraw a node.
     await inTransaction(client, () => commitLedgerOperation({ client: c, tree_ref: treeRef,
       step: { kind: "record_late_liability", operation: { operation_id: "op-late",
         node_id: "slice", liability_id: "lia-1", amount_units: 400,
         vendor_reference: "VENDOR-LATE", incurred_at: "2026-09-03T00:00:00.000Z" } } }));
     const payload = await readMeteringProjection({
       client: c, actor: { slug: "joe" }, correlationId: "x", tree_ref: treeRef, period: null });
-    // The slice's own ceiling is 100 and 400 was incurred against it, so the
-    // slice breaches and the breach marks every ancestor up to the root.
     assert.equal(payload.hierarchy_overdrawn, true);
     assert.deepEqual(payload.requires, [...V5_OVERDRAWN_REMEDIES],
       "an overdrawn projection publishes the module's own two remedies, not a message");
@@ -361,7 +329,6 @@ test("MTR-DOCTORED-SUCCESSOR: a digest a direct authority caller invented is ref
     t.after(() => client.end().catch(() => {}));
     const c = wrap(client);
     const { treeRef } = await freshTree(c);
-    // A direct call installing a digest no replay produces, with no entries.
     await client.query(
       `select ops.commit_cost_ledger_operation($1::text,0::integer,$2::text,'op-doctored'::text,
          $3::text,'reserve'::text,'{"accepted":true}'::jsonb,null::text,
@@ -371,8 +338,6 @@ test("MTR-DOCTORED-SUCCESSOR: a digest a direct authority caller invented is ref
          [treeRef])).rows[0].state_digest,
        `sha256:${"d".repeat(64)}`]);
 
-    // The NEXT READ refuses: the cell claims nine applied operations and the log
-    // a reader can enumerate accounts for one.
     const payload = await readMeteringProjection({
       client: c, actor: { slug: "joe" }, correlationId: "x", tree_ref: treeRef, period: null });
     assert.equal(payload.coverage.complete, false);
@@ -380,8 +345,6 @@ test("MTR-DOCTORED-SUCCESSOR: a digest a direct authority caller invented is ref
     assert.equal(payload.coverage.sources[0].reason_id, "operation_log_incomplete");
     assert.equal(payload.as_of.quantity, null, "the quantity is WITHHELD, never 0-imputed");
 
-    // And the NEXT COMMIT refuses too: the writer path rebuilds and finds the
-    // cell standing on a value its own rows do not produce.
     await client.query("begin");
     await assert.rejects(
       commitLedgerOperation({ client: c, tree_ref: treeRef, step: reserve("op-after", "res-after", 5) }),
@@ -389,19 +352,6 @@ test("MTR-DOCTORED-SUCCESSOR: a digest a direct authority caller invented is ref
     await client.query("rollback");
   });
 
-// MTR-CONSERVATION, BOTH HALVES, and the second half is the one that matters.
-//
-// This case previously stood on the immutability trigger: it tried to UPDATE a
-// stored amount, the trigger refused, and the test called that the mutated-row
-// proof. It is not. "You cannot mutate the row" and "if the row WERE mutated the
-// conservation law would catch it" are different guarantees, and only the second
-// is what planned_checks[7] asks for -- a refused UPDATE means
-// assertLedgerConservation is never asked the question at all.
-//
-// So: replay the STORED rows back into a ledger value, assert the law passes and
-// assert against the PROOF NUMBERS it returns (the module's own docstring asks
-// for exactly that, rather than the absence of a throw), then tamper ONE entry's
-// amount_units in that replayed value and require the law to throw.
 test("MTR-CONSERVATION: the replayed ledger passes the law, and its proof numbers are the assertion",
   async t => {
     const pg = await skipUnlessDatabase(t);
@@ -422,15 +372,12 @@ test("MTR-CONSERVATION: the replayed ledger passes the law, and its proof number
       client: c, actor: { slug: "joe" }, correlationId: "x", tree_ref: treeRef, period: null });
     assert.equal(payload.coverage.complete, true);
 
-    // The replay is from the STORED rows: the entry ids and amounts below are
-    // read out of ops.cost_ledger_entry, not carried over from the step list.
     const stored = (await client.query(
       `select sequence, entry_id, amount_units from ops.cost_ledger_entry
         where tree_ref = $1 order by sequence`, [treeRef])).rows;
     const replayed = applyOperations(openLedger(compileScopeTree(TREE)), steps).ledger;
     assert.deepEqual(replayed.entries.map(entry => entry.entry_id), stored.map(row => row.entry_id));
 
-    // THE PROOF NUMBERS, not the absence of a throw.
     const proof = assertLedgerConservation(replayed);
     assert.deepEqual(proof, {
       entry_count: 2,
@@ -448,10 +395,6 @@ test("MTR-CONSERVATION: the replayed ledger passes the law, and its proof number
   });
 
 test("MTR-CONSERVATION: mutating the NAMED stored amount makes the law throw", async t => {
-  // No database in this half, deliberately: the criterion is about the LAW, and
-  // a case that needs a cluster to ask the law a question is a case that stays
-  // unasked in the unit class. The tampered value is the same shape a doctored
-  // row would replay into.
   const honest = applyOperations(openLedger(compileScopeTree(TREE)),
     [reserve("op-1", "res-1", 40)]).ledger;
   assert.equal(assertLedgerConservation(honest).open_reservation_units, 40);
@@ -460,10 +403,6 @@ test("MTR-CONSERVATION: mutating the NAMED stored amount makes the law throw", a
   const tampered = structuredClone(honest);
   tampered.entries[0].amount_units = 41;
   assert.equal(tampered.entries[0].entry_id, namedEntryId);
-  // The module's real failure token is the ERROR CODE, not the message: every
-  // one of the law's six clauses raises V5CostLedgerError("conservation_violated",
-  // <which clause>, <detail>). Asserting the code AND the clause is what makes
-  // this case fail if the throw ever comes from somewhere else.
   assert.throws(() => assertLedgerConservation(tampered), error => {
     assert.equal(error.code, "conservation_violated");
     assert.equal(error.message,
@@ -472,16 +411,11 @@ test("MTR-CONSERVATION: mutating the NAMED stored amount makes the law throw", a
     return true;
   });
 
-  // And the honest value is untouched by the tampering, so the throw above is
-  // the mutation's doing rather than a shared-reference accident.
   assert.equal(assertLedgerConservation(honest).open_reservation_units, 40);
 });
 
 test("MTR-CONSERVATION (supporting): the stored entry log refuses an UPDATE outright",
   async t => {
-    // A good assertion in its own right -- it is why a doctored row cannot reach
-    // production in the first place -- but it is NOT the conservation criterion,
-    // so it carries its own name.
     const pg = await skipUnlessDatabase(t);
     if (!pg) return;
     const client = await connect(pg);
@@ -516,11 +450,6 @@ test("MTR-CAP-NOT-USAGE: a cap is never usage, and an unenumerable source withho
     assert.equal(empty.coverage.sources[0].enumerable, true);
   });
 
-// ---------------------------------------------------------------------------
-// V5-A04: budget signals fire on the durable path, once per crossing, and two
-// real connections racing each other cannot both fire one crossing or both
-// take one headroom.
-// ---------------------------------------------------------------------------
 
 const estimateSlice = units => ({
   kind: "record_estimate",
@@ -576,9 +505,6 @@ test("A04-SIGNAL-RACE: two connections racing one crossing under the row lock fi
   await inTransaction(owner, () => commitLedgerOperation({ client: o, tree_ref: treeRef, step: estimateSlice(100) }));
   await inTransaction(owner, () => commitLedgerOperation({ client: o, tree_ref: treeRef, step: actual("op-base", 130) }));
 
-  // FIRST takes the lock and commits a 30-unit actual (130 -> 160). SECOND,
-  // offering its own 30-unit actual from the same starting point, blocks on
-  // the lock until FIRST commits, then loads 160 and moves it to 190.
   await first.query("begin");
   const firstResult = await commitLedgerOperation({ client: wrap(first), tree_ref: treeRef, step: actual("op-first", 30) });
   await second.query("begin");
@@ -605,8 +531,6 @@ test("A04-RESERVE-RACE: two connections racing reservations past the ceiling adm
   t.after(() => Promise.all([owner, first, second].map(x => x.end().catch(() => {}))));
   const { treeRef } = await freshTree(wrap(owner));
 
-  // The slice ceiling is 100. Each reservation of 60 fits an empty ledger on
-  // its own; together they do not.
   await first.query("begin");
   const firstResult = await commitLedgerOperation({ client: wrap(first), tree_ref: treeRef, step: reserve("op-r1", "res-r1", 60) });
   await second.query("begin");
@@ -638,7 +562,6 @@ test("A04-OVERDRAWN-DURABLE: an overdrawn stored hierarchy refuses a new reserva
     await commit(actual("op-over", 200));
     const denied = await commit(reserve("op-new", "res-new", 1));
     assert.equal(denied.outcome.reason_id, "ancestor_overdrawn");
-    // The slice breached its own ceiling, and a breach marks every ancestor.
     assert.deepEqual(denied.outcome.overdrawn_node_ids, ["slice", "child", "root"]);
     assert.deepEqual(denied.outcome.overdrawn_caused_by_node_ids, ["slice"]);
     assert.match(denied.outcome.detail, /Nothing already reserved is changed/);

@@ -62,7 +62,7 @@ test("dark assurance and ownership rows are projected without expanding accepted
 
 test("automatic invoker runs trusted protected-main code with narrowly named credentials", () => {
   assert.match(workflow, /workflow_run:[\s\S]+workflows:\s*\[CI\]/i);
-  assert.match(workflow, /schedule:[\s\S]+cron:\s*"\*\/15 \* \* \* \*"/i);
+  assert.match(workflow, /schedule:[\s\S]+cron:\s*"\*\/15 0-5,12-23 \* \* \*"/i);
   assert.match(workflow, /uses:\s*actions\/checkout@[0-9a-f]{40}[\s\S]+ref:\s*main[\s\S]+persist-credentials:\s*false/i);
   assert.match(workflow, /CARR_SOURCE_MERGE_READER_TOKEN:\s*\$\{\{ secrets\.CARR_SOURCE_MERGE_READER_TOKEN \}\}/);
   assert.match(workflow, /run:\s*node mcp-server\/bin\/run-source-merge\.mjs auto/i);

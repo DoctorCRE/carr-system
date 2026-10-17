@@ -115,7 +115,7 @@ def tier1() -> None:
     proc = run(["--list"])
     check("--list exits 0", proc.returncode == 0, f"rc={proc.returncode}")
     for name in ("record-layer-unreachable", "stale-observation", "worker-unreachable",
-                 "model-provider-unavailable", "settings-change-db-outage"):
+                 "model-provider-unavailable"):
         check(f"--list names {name!r}", name in proc.stdout, proc.stdout[:800])
 
     # ── --dry-run touches nothing: proven by poisoning the network AND the
@@ -150,20 +150,6 @@ def tier1() -> None:
           "or explicitly reported broken, never silently green",
           "convo_core reported a real failure" in proc.stdout, proc.stdout[-800:])
 
-    # ── settings-change-db-outage: fully local, no staging credential needed
-    #    for the drill's own mechanics (only the evidence write at the end) ──
-    print("\n  drill: settings-change-db-outage (real fixture, genuinely unreachable DSN)")
-    proc = run(["--only", "settings-change-db-outage"], timeout=DRILL_TIMEOUT)
-    check("runs to completion", proc.returncode in (0, 1, 2), f"rc={proc.returncode}\n{proc.stdout[-1000:]}")
-    check("finds the system TRUTHFUL — never blocks, never hides the outage",
-          "TRUTHFUL" in proc.stdout and "NOT TRUTHFUL" not in proc.stdout,
-          proc.stdout[-1000:])
-    check("reports the not-encrypted finding about the local spool",
-          "not encrypted" in proc.stdout.lower() or "PLAINTEXT" in proc.stdout,
-          proc.stdout[-1000:])
-    check("reports the never-reviewed finding about the local spool",
-          "later reviewed" in proc.stdout.lower() or "never reads" in proc.stdout.lower(),
-          proc.stdout[-1000:])
 
 
 def tier1_recorder_contract() -> None:

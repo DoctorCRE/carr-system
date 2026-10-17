@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Minimal Claude-facing MCP proxy for the three Claude continuity verbs.
+// Minimal Claude-facing MCP proxy for the Claude checkpoint and recovery verbs.
 // The bearer stays in the existing 0600 token file and never enters Claude's
 // JSON configuration, argv, transcript, or tracked source.
 import fs from "node:fs";
@@ -16,7 +16,7 @@ const { REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, splitReferenceManifest }
   : {};
 const PROFILE = CODEX ? "codex-continuity" : "claude-continuity";
 const ALLOWED = new Set(CODEX ? ["codex-checkpoint", "codex-read-recovery"] :
-  ["claude-checkpoint", "claude-read-recovery", "claude-record-event"]);
+  ["claude-checkpoint", "claude-read-recovery"]);
 const TOKEN_FILE = process.env.CARR_MCP_ENV || path.join(os.homedir(), ".config/carr/mcp-tokens.env");
 const URL = process.env.CARR_MCP_URL || "https://api.doctorcre.com/mcp";
 const MAX_MESSAGE_BYTES = 2_000_000;

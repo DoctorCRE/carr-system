@@ -223,4 +223,5 @@ if [[ -f "$HOME/Library/LaunchAgents/local.carr-progress-board.plist" ]]; then
 fi
 
 print -r -- "fleet-sync: installed wiring re-rendered from $(git rev-parse --short HEAD)"
+
 exit 0

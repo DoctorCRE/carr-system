@@ -79,10 +79,6 @@ BUNDLE_ITEM_FIELDS = {
 }
 BUNDLE_ITEM_OPTIONAL_FIELDS = {"artifact_kind", "scope_redaction", "trigger_ref", "consumer_ref", "delivery_mode", "representation_kind", "freshness_sla", "selection_reason", "selection_rank", "requirement_class"}
 BUNDLE_FIELDS = {"schema_version", "header", "items", "bundle_digest"}
-# These facts are issued by the server at admission time and are deliberately
-# not part of the frozen plan/compiler preimage.  Including either a clock
-# value or a generated binding identifier here made proposal and acceptance
-# compute different hashes for the same canonical source revisions.
 _BUNDLE_RUNTIME_HEADER_FIELDS = {"issued_at", "expires_at", "binding_id"}
 
 
@@ -460,8 +456,6 @@ RELIABILITY_CLOSURE_FIELDS = {"state", "reasons", "derived_by"}
 def _validate_action_telemetry(rows: Any) -> None:
     if not isinstance(rows, list):
         raise ActivationReliabilityError("reliability telemetry must be a list")
-    # Receipt telemetry is executable-side input.  Observatory signals are
-    # instead derived after admission from the canonical receipt/events.
     if rows:
         raise ActivationReliabilityError("executor receipt telemetry must be empty; server derives canonical signals")
     for index, raw in enumerate(rows):
@@ -600,9 +594,6 @@ def validate_reliability(value: Any, *, envelope: Any | None = None, attempt_id:
         if evaluator["status"] == "passed" and not evaluator["evidence_refs"]: raise ActivationReliabilityError("passed evaluator needs evidence")
         if evaluator["kind"] == "judge" and not evaluator["calibration_evidence_refs"]: raise ActivationReliabilityError("judge evaluator needs calibration evidence")
         evaluator_kinds.add(evaluator["kind"]); held_out += evaluator["held_out_case_count"]
-        # An executor cannot make itself independent by assertion.  Only a
-        # separately admitted authority/evaluation event can later establish
-        # that fact, and this receipt is never that event.
         if evaluator["independence_state"] == "independent":
             raise ActivationReliabilityError("executor receipt cannot self-attest evaluator independence")
         critical_eval_failure = critical_eval_failure or (evaluator["critical"] and evaluator["status"] in {"failed", "blocked"})
@@ -645,9 +636,6 @@ def validate_reliability(value: Any, *, envelope: Any | None = None, attempt_id:
     if requirements.get("outcome_horizon_required", True) and horizon["state"] != "mature": blockers.append("outcome_horizon_" + horizon["state"])
     if not required_kinds <= evaluator_kinds: blockers.append("required_evaluator_kind_missing")
     if held_out < requirements.get("minimum_held_out_case_count", 1): blockers.append("held_out_evidence_insufficient")
-    # The independent evaluator/held-out/calibration authority is not carried
-    # by executor receipts.  Canonical authority records may be projected by
-    # the existing evaluation kernel later; this layer cannot promote itself.
     blockers.append("authority_evaluation_evidence_missing")
     if requirements.get("confidence_posture", "lower_bound_required") == "lower_bound_required" and any(not item["calibration_evidence_refs"] for item in row["evaluator_results"] if item["kind"] == "judge"):
         blockers.append("lower_bound_or_calibration_evidence_missing")

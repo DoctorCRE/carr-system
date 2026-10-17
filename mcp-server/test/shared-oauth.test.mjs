@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
 import * as policy from "../src/oauth-policy.js";
 import { OAuthConsentState } from "../src/oauth-consent-state.js";
@@ -478,8 +478,8 @@ test("denial completes the registered client attempt with access_denied and orig
 });
 
 test("Chrome completes approve and deny at an external client while consent form stays restricted", { timeout: 90000 }, async t => {
-  const chrome = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
-  if (!chrome) { t.skip("Chrome is unavailable"); return; }
+  const chrome = await findDisposableChromium();
+  if (!chrome) { t.skip("Chrome for Testing/Playwright Chromium is unavailable"); return; }
   const browser = await launchChrome(chrome);
   const socket = new WebSocket(browser.pageWsUrl);
   const servers = [];

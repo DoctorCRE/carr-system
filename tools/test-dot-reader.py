@@ -602,6 +602,18 @@ class ReleaseAbandonFixture(unittest.TestCase):
         self.abandon = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.abandon)
 
+    def test_prepared_database_clone_preserves_schema_but_isolates_rows(self):
+        with self.abandon.isolated_ci_database("host=127.0.0.1") as source:
+            with psycopg.connect(source) as connection:
+                connection.execute("create table public.fixture_probe (value text)")
+                connection.execute("insert into public.fixture_probe values ('pristine')")
+            clone = self.abandon.clone_fixture_database(source, "abandon_legacy")
+            with psycopg.connect(clone) as connection:
+                self.assertEqual(connection.execute("select value from public.fixture_probe").fetchone(), ("pristine",))
+                connection.execute("update public.fixture_probe set value='legacy' where value='pristine'")
+            with psycopg.connect(source) as connection:
+                self.assertEqual(connection.execute("select value from public.fixture_probe").fetchone(), ("pristine",))
+
     def test_tcp_fixture_accepts_spaced_and_long_temporary_roots(self):
         for prefix in ("review space ", "review-" + "x" * 100):
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory(prefix=prefix, dir="/tmp") as parent:
@@ -684,7 +696,10 @@ class ReleaseAbandonFixture(unittest.TestCase):
             with patch.dict(os.environ, {"CARR_CI_DATABASE_URL": "host=127.0.0.1"}), \
                  patch.object(tempfile, "tempdir", "/tmp"), \
                  patch.object(subprocess, "run", side_effect=fail_stop), \
+                 patch.object(self.abandon, "psql", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                 patch.object(self.abandon, "clone_fixture_database", return_value="host=127.0.0.1"), \
                  patch.object(self.abandon, "legacy_approval_receipt_refusal"), \
+                 patch.object(self.abandon, "run_cases"), \
                  contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 self.assertEqual(self.abandon.main(), 1)
             self.assertTrue(observed["data"].exists())

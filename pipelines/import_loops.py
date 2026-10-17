@@ -187,17 +187,11 @@ def parse_file(text):
 
 
 # ── marker parsing ───────────────────────────────────────────────────────────
-# The glyph is SPLIT OFF the text and stored as marker_literal, so a marker change
-# is a real field change rather than a string edit inside prose. The split is
-# verified by reassembly per row (below): if `literal + " " + rest` is not the
-# original character for character, the whole cell stays in the text field and the
-# marker is recorded as derived-only. Nothing is normalized into a shape the file
-# does not already have.
 MARKER_RE = re.compile(r"^(🔔|❓|🗓\S*)(\s+)(.*)$", re.DOTALL)
 
 
 def parse_marker(cell):
-    """-> (marker, marker_literal, remainder). Non-destructive: verified by caller."""
+    """-> (marker, marker_literal, remainder). Non-destructive."""
     m = MARKER_RE.match(cell)
     if not m:
         return "none", None, cell
@@ -210,8 +204,6 @@ def parse_marker(cell):
         marker = "decision"
     else:
         marker = "dated"
-    if literal + " " + rest != cell:       # belt and braces
-        return "none", None, cell
     return marker, literal, rest
 
 

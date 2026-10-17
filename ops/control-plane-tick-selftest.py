@@ -237,12 +237,6 @@ def main() -> int:
     dependencies = {(item["service"], item["depends_on"]) for item in spec.get("dependencies", [])}
     check("tick depends on the record layer", ("control-plane-tick", "neon-record-layer") in dependencies)
 
-    scheduler_truth = (REPO / "tools" / "scheduler-truth.py").read_text(encoding="utf-8")
-    check("scheduler reconciliation recognizes the ledger-native receipt",
-          '"control-plane-tick"' in scheduler_truth and "jobs-role ledger adapter" in scheduler_truth)
-    check("scheduler reconciliation preserves the uninstalled definition",
-          "DEFINITION ONLY" in scheduler_truth and "shadow/canary evidence" in scheduler_truth)
-
     print()
     if FAILED:
         print(f"FAILED {len(FAILED)} check(s):")

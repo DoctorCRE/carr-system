@@ -58,9 +58,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "eaa31ac5",
+    "f04a05aa",
+    "fa217e48"
    ],
    "id": "v2-disp-001",
    "origin": "session-turn",
@@ -188,14 +194,22 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "20d106f1",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "9310827b",
     "b1521526",
     "b3ea627f",
+    "bbffc139",
     "d3774a28",
-    "fb2b263d"
+    "f04a05aa",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-disp-002",
    "origin": "session-turn",
@@ -299,8 +313,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-disp-003",
    "origin": "session-turn",
@@ -402,11 +423,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
     "80def9d2",
     "b3ea627f",
-    "c1db316c"
+    "c1db316c",
+    "f04a05aa"
    ],
    "id": "v2-disp-004",
    "origin": "session-turn",
@@ -499,14 +524,19 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
     "2e362970",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
+    "847f9995",
     "9310827b",
     "a3f6c7f9",
     "b3ea627f",
-    "df8f1da0"
+    "df8f1da0",
+    "f04a05aa",
+    "f47a8fe9"
    ],
    "id": "v2-disp-005",
    "origin": "session-turn",
@@ -633,11 +663,17 @@
     "e78dd5b3-69b2-406d-b690-3fc468c835f9#e4f91ff4-8f13-4e89-9b69-03b77f6720fa"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "43e2ef76",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "b3ea627f",
-    "c1db316c"
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-disp-006",
    "origin": "session-turn",
@@ -740,6 +776,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "df8f1da0"
@@ -837,8 +876,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f04a05aa",
+    "f47a8fe9",
+    "fc21a431"
    ],
    "id": "v2-disp-008",
    "origin": "session-turn",
@@ -960,7 +1005,10 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "3a9dbafd",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "80def9d2",
@@ -968,8 +1016,13 @@
     "a3f6c7f9",
     "b3ea627f",
     "b587f6c2",
+    "bbffc139",
     "c1db316c",
+    "e8868cbe",
+    "f04a05aa",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-disp-009",
@@ -1091,14 +1144,20 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "19304882",
     "20d106f1",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "a3f6c7f9",
     "b3ea627f",
+    "bbffc139",
     "d3774a28",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-disp-010",
@@ -1183,10 +1242,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "179be4b8",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
+    "a6e6ab4e",
     "b3ea627f",
-    "c1db316c"
+    "bc9188b4",
+    "c1db316c",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-disp-011",
    "origin": "session-turn",
@@ -1339,14 +1406,25 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "1f3a7372",
     "27277539",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "86647daf",
+    "a9ecd5b4",
     "b3ea627f",
+    "bbffc139",
     "c1547ed1",
     "c1db316c",
-    "fb2b263d"
+    "f04a05aa",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-disp-012",
    "origin": "session-turn",
@@ -1434,8 +1512,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f04a05aa"
    ],
    "id": "v2-disp-013",
    "origin": "session-turn",
@@ -1533,8 +1614,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f04a05aa"
    ],
    "id": "v2-disp-014",
    "origin": "session-turn",
@@ -1637,8 +1721,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-disp-015",
    "origin": "session-turn",
@@ -1740,11 +1828,17 @@
     "fc90b513-7d3a-4fc2-bec3-2e423976eabd#d4c033a3-beb4-46c3-b8ed-9581c9525e70"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "2e362970",
+    "4a9188f3",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "b3ea627f",
-    "c1db316c"
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-disp-016",
    "origin": "session-turn",
@@ -1859,12 +1953,19 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "19304882",
     "20d106f1",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "b3ea627f",
-    "fb2b263d"
+    "bbffc139",
+    "f04a05aa",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-disp-017",
    "origin": "session-turn",
@@ -1995,14 +2096,20 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
     "1c42d80c",
     "204391be",
     "3578d799",
+    "43e2ef76",
     "49c627cc",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c1db316c"
+    "bbffc139",
+    "c1db316c",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-disp-018",
    "origin": "session-turn",
@@ -2121,13 +2228,21 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#01dc6fe2-a052-4203-aeb1-1ad06c070ee1"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
     "2e362970",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "9310827b",
     "b3ea627f",
     "c1547ed1",
     "c1db316c",
+    "dcf98880",
+    "e313a3ca",
+    "f04a05aa",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-disp-019",
@@ -2192,7 +2307,10 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
     "27277539",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -2251,8 +2369,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-disp-021",
    "origin": "selector-log",
@@ -2308,7 +2432,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "c20dc3d5",
@@ -2390,7 +2516,10 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9"
    ],
    "id": "v2-disp-023",
    "origin": "subagent-brief",
@@ -2513,12 +2642,19 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "596f7549",
     "a3f6c7f9",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "bc9188b4",
     "c1db316c",
     "c20dc3d5",
     "d9ce2b08",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-disp-024",
    "origin": "subagent-brief",
@@ -2601,6 +2737,7 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#5eadfcad-7402-45f7-8945-6cf49355e02f"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "c20dc3d5"
    ],
    "id": "v2-disp-025",
@@ -2657,6 +2794,7 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "015183f5",
     "c20dc3d5"
    ],
    "id": "v2-disp-026",
@@ -2713,7 +2851,8 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "c20dc3d5",
+    "f47a8fe9"
    ],
    "id": "v2-disp-027",
    "origin": "subagent-brief",
@@ -2783,6 +2922,7 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "2271e684",
     "c20dc3d5"
    ],
    "id": "v2-disp-028",
@@ -2865,10 +3005,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "86647daf",
+    "97326357",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-disp-029",
    "origin": "defect",
@@ -2924,6 +3072,8 @@
     "2b25d74f-47a9-4377-9e25-63ba2ce16700#f739143a-78e7-4887-b984-93c1cced7d17"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -2970,7 +3120,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -3022,8 +3174,12 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#89023e8c-d338-4db4-9006-a30b8492a4ba"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9"
    ],
    "id": "v2-chat-002",
    "origin": "session-turn",
@@ -3069,8 +3225,14 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-chat-003",
    "origin": "session-turn",
@@ -3140,8 +3302,12 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "eaa31ac5"
    ],
    "id": "v2-chat-004",
    "origin": "session-turn",
@@ -3189,8 +3355,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-005",
    "origin": "defect",
@@ -3272,12 +3444,22 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "2271e684",
+    "24e10ee8",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
     "9530fb1c",
     "b3ea627f",
-    "df8f1da0"
+    "bbffc139",
+    "df8f1da0",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-chat-006",
    "origin": "session-turn",
@@ -3344,8 +3526,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "dcf98880",
+    "e313a3ca",
+    "eaa31ac5"
    ],
    "id": "v2-chat-007",
    "origin": "session-turn",
@@ -3401,10 +3588,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
     "2b889e80",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-008",
    "origin": "session-turn",
@@ -3447,6 +3639,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -3490,8 +3685,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-010",
    "origin": "defect",
@@ -3525,6 +3725,8 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -3576,8 +3778,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "24e10ee8",
+    "3a9dbafd",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-012",
    "origin": "session-turn",
@@ -3655,10 +3863,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
+    "a6e6ab4e",
+    "a9ecd5b4",
     "b3ea627f",
     "c1db316c",
-    "e65efc68"
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-chat-013",
    "origin": "session-turn",
@@ -3713,8 +3927,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139"
    ],
    "id": "v2-chat-014",
    "origin": "session-turn",
@@ -3769,9 +3987,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "2b889e80",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-015",
    "origin": "defect",
@@ -3853,10 +4076,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
     "9530fb1c",
     "b3ea627f",
-    "c1db316c"
+    "c1db316c",
+    "e313a3ca"
    ],
    "id": "v2-chat-016",
    "origin": "session-turn",
@@ -3900,9 +4127,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c1547ed1"
+    "c1547ed1",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-chat-017",
    "origin": "session-turn",
@@ -3956,10 +4188,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c1db316c"
+    "c1db316c",
+    "e313a3ca"
    ],
    "id": "v2-chat-018",
    "origin": "session-turn",
@@ -4004,8 +4240,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-019",
    "origin": "session-turn",
@@ -4049,7 +4289,10 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -4108,8 +4351,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "fc21a431"
    ],
    "id": "v2-chat-021",
    "origin": "session-turn",
@@ -4165,10 +4412,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-chat-022",
    "origin": "session-turn",
@@ -4237,10 +4488,20 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
+    "a6e6ab4e",
     "b3ea627f",
-    "c1db316c"
+    "bbffc139",
+    "c1db316c",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-chat-023",
    "origin": "session-turn",
@@ -4289,8 +4550,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca"
    ],
    "id": "v2-chat-024",
    "origin": "session-turn",
@@ -4351,9 +4615,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "bbffc139",
+    "c20dc3d5",
+    "fc21a431"
    ],
    "id": "v2-chat-025",
    "origin": "defect",
@@ -4391,6 +4659,8 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -4442,9 +4712,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-chat-027",
    "origin": "session-turn",
@@ -4494,9 +4769,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fc21a431"
    ],
    "id": "v2-chat-028",
    "origin": "session-turn",
@@ -4526,6 +4804,8 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -4593,8 +4873,12 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fc21a431"
    ],
    "id": "v2-chat-030",
    "origin": "defect",
@@ -4710,15 +4994,23 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
     "80def9d2",
     "9310827b",
     "a8f159ad",
     "b3ea627f",
+    "bbffc139",
     "d3774a28",
-    "f2d58a30"
+    "e313a3ca",
+    "f2d58a30",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-deal-001",
    "origin": "session-turn",
@@ -4803,11 +5095,18 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "b3ea627f",
+    "bbffc139",
     "d3774a28",
-    "fb2b263d"
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-deal-002",
    "origin": "session-turn",
@@ -4910,10 +5209,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "b3ea627f",
+    "bbffc139",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-deal-003",
@@ -5001,12 +5307,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "9310827b",
+    "ab814a26",
     "b3ea627f",
-    "f5beac20"
+    "bbffc139",
+    "f5beac20",
+    "fc21a431"
    ],
    "id": "v2-deal-004",
    "origin": "delivery-log",
@@ -5051,6 +5363,7 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "2271e684",
     "c20dc3d5"
    ],
    "id": "v2-deal-005",
@@ -5130,7 +5443,10 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#89023e8c-d338-4db4-9006-a30b8492a4ba"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "2271e684",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-deal-006",
    "origin": "subagent-brief",
@@ -5210,7 +5526,11 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#06484e95-b5ec-4fda-bda6-b7d540fa946e"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-deal-007",
    "origin": "subagent-brief",
@@ -5317,7 +5637,11 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-008",
    "origin": "subagent-brief",
@@ -5422,11 +5746,16 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "67580c28",
     "9293d609",
+    "a6e6ab4e",
     "b7ec8f3b",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-deal-009",
    "origin": "subagent-brief",
@@ -5502,8 +5831,12 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#52880de2-ab90-4673-b046-b74f900aa2de"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "43e2ef76",
+    "bc9188b4",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-deal-010",
    "origin": "subagent-brief",
@@ -5595,12 +5928,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "1c42d80c",
+    "43e2ef76",
     "596f7549",
     "67580c28",
+    "a6e6ab4e",
+    "a9ecd5b4",
     "c1db316c",
     "e65efc68",
-    "eeb3d106"
+    "eeb3d106",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-011",
    "origin": "subagent-brief",
@@ -5701,12 +6040,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "43e2ef76",
     "67580c28",
     "80def9d2",
     "9293d609",
     "b7ec8f3b",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-deal-012",
    "origin": "subagent-brief",
@@ -5832,13 +6174,18 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#8a8040c6-f652-4b95-bb2b-39cfecfa5783"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
     "2b889e80",
+    "43e2ef76",
     "67580c28",
     "9293d609",
     "a8f159ad",
     "b7ec8f3b",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-013",
    "origin": "subagent-brief",
@@ -5947,8 +6294,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "43e2ef76",
+    "a6e6ab4e",
     "b1521526",
-    "c1db316c"
+    "c1db316c",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-014",
    "origin": "subagent-brief",
@@ -6035,7 +6387,11 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#89023e8c-d338-4db4-9006-a30b8492a4ba"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-deal-015",
    "origin": "subagent-brief",
@@ -6119,8 +6475,12 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "43e2ef76",
+    "a6e6ab4e",
     "b1521526",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-deal-016",
    "origin": "subagent-brief",
@@ -6222,7 +6582,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
     "80def9d2",
     "b3ea627f",
@@ -6336,9 +6698,14 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
     "2e362970",
+    "43e2ef76",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-018",
    "origin": "subagent-brief",
@@ -6406,6 +6773,8 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "2271e684",
     "c20dc3d5"
    ],
    "id": "v2-deal-019",
@@ -6493,7 +6862,12 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-020",
    "origin": "subagent-brief",
@@ -6539,8 +6913,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-deal-021",
    "origin": "selector-log",
@@ -6605,9 +6982,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "2b889e80",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-022",
    "origin": "defect",
@@ -6721,10 +7103,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
     "2b889e80",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-deal-023",
    "origin": "defect",
@@ -6797,7 +7185,10 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "d9ce2b08"
@@ -6861,8 +7252,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
     "596f7549",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "d9ce2b08"
@@ -6944,8 +7338,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-deal-026",
    "origin": "verb-grounded",
@@ -7082,12 +7480,19 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "4399df76",
+    "5be2f462",
     "67580c28",
+    "6a4e6283",
     "7e9739f2",
     "80def9d2",
+    "8c1e6057",
     "b3ea627f",
-    "f2d58a30"
+    "c315befa",
+    "ede4c735",
+    "f2d58a30",
+    "fa217e48"
    ],
    "id": "v2-deal-027",
    "origin": "verb-grounded",
@@ -7193,9 +7598,13 @@
     "e18b7f3d-78a8-47d0-887d-8b520b7b34c9#58a43518-db78-4bde-82db-c2b741dfd964"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d26d63b0"
+    "d26d63b0",
+    "fa217e48"
    ],
    "id": "v2-deal-028",
    "origin": "verb-grounded",
@@ -7295,7 +7704,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -7388,9 +7799,12 @@
     "e4c7c718-6b02-4649-b103-7465a1dfb46f#adaaeb71-e61a-469c-8020-516e9929da15"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "9d80fd2d",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-deal-030",
    "origin": "verb-grounded",
@@ -7470,11 +7884,18 @@
     "f30598c2-da3a-4a61-9571-ad81a36589df#daeec06c-6e7b-4804-a8b7-ccee36e01548"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
+    "ab814a26",
     "b3ea627f",
+    "bbffc139",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-eng-001",
@@ -7580,13 +8001,20 @@
     "f30598c2-da3a-4a61-9571-ad81a36589df#daeec06c-6e7b-4804-a8b7-ccee36e01548"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
     "1c42d80c",
     "1fddcffb",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
+    "ab814a26",
     "b3ea627f",
+    "bbffc139",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-eng-002",
@@ -7696,8 +8124,16 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "24e10ee8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-eng-003",
    "origin": "session-turn",
@@ -7786,10 +8222,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "20d106f1",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "a3f6c7f9",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-eng-004",
    "origin": "session-turn",
@@ -7875,9 +8316,18 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "bc9188b4",
+    "c20dc3d5",
+    "d5dcfe26",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-005",
    "origin": "defect",
@@ -7953,9 +8403,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
-    "b3ea627f"
+    "ab814a26",
+    "b3ea627f",
+    "bbffc139",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-eng-006",
    "origin": "session-turn",
@@ -8025,11 +8482,15 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
     "596f7549",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca"
    ],
    "id": "v2-eng-007",
    "origin": "session-turn",
@@ -8094,8 +8555,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
     "58cef3a1",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "b3ea627f"
@@ -8176,9 +8640,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-eng-009",
    "origin": "session-turn",
@@ -8255,11 +8724,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
     "2b889e80",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-010",
    "origin": "defect",
@@ -8346,6 +8821,10 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "3a9dbafd",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
     "b3ea627f",
@@ -8447,15 +8926,22 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
     "20d106f1",
+    "2271e684",
+    "4a9188f3",
     "58cef3a1",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "b3ea627f",
+    "bbffc139",
     "c1db316c",
     "d3774a28",
-    "df8f1da0"
+    "df8f1da0",
+    "f47a8fe9",
+    "fc21a431"
    ],
    "id": "v2-eng-012",
    "origin": "session-turn",
@@ -8539,10 +9025,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "4fae20f4",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9"
    ],
    "id": "v2-eng-013",
    "origin": "session-turn",
@@ -8607,9 +9096,13 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-eng-014",
    "origin": "session-turn",
@@ -8695,10 +9188,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "86647daf",
     "9310827b",
-    "b3ea627f"
+    "97326357",
+    "a9ecd5b4",
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-015",
    "origin": "defect",
@@ -8776,8 +9277,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
     "58cef3a1",
+    "5be2f462",
     "7e9739f2",
+    "97326357",
     "b3ea627f",
     "b42f11a0",
     "df8f1da0"
@@ -8893,13 +9398,21 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "3a9dbafd",
+    "43e2ef76",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
+    "a6e6ab4e",
+    "a9ecd5b4",
     "b3ea627f",
     "c1db316c",
     "d9ce2b08",
-    "e65efc68"
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-eng-017",
    "origin": "session-turn",
@@ -8992,11 +9505,22 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "1c42d80c",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "a9ecd5b4",
+    "ab814a26",
     "b3ea627f",
+    "bbffc139",
     "c1db316c",
-    "e65efc68"
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-eng-018",
    "origin": "session-turn",
@@ -9095,10 +9619,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
     "58cef3a1",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d3774a28"
+    "bbffc139",
+    "d3774a28",
+    "f47a8fe9",
+    "fc21a431"
    ],
    "id": "v2-eng-019",
    "origin": "session-turn",
@@ -9159,7 +9689,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -9252,9 +9784,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "b3ea627f",
-    "c1db316c"
+    "c1db316c",
+    "e313a3ca",
+    "e8868cbe",
+    "f04a05aa",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-eng-021",
    "origin": "session-turn",
@@ -9399,18 +9940,25 @@
     "fc90b513-7d3a-4fc2-bec3-2e423976eabd#d4c033a3-beb4-46c3-b8ed-9581c9525e70"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
     "20d106f1",
     "27277539",
+    "4a9188f3",
     "58cef3a1",
+    "5be2f462",
     "6330bec8",
     "7e9739f2",
     "86647daf",
     "95e76c1f",
+    "97326357",
     "b3ea627f",
+    "bbffc139",
     "c1db316c",
     "d3774a28",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "id": "v2-eng-022",
@@ -9496,8 +10044,14 @@
     "e78dd5b3-69b2-406d-b690-3fc468c835f9#e4f91ff4-8f13-4e89-9b69-03b77f6720fa"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-023",
    "origin": "session-turn",
@@ -9582,11 +10136,19 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "95e76c1f",
+    "a6e6ab4e",
+    "a9ecd5b4",
     "b3ea627f",
     "c20dc3d5",
-    "df8f1da0"
+    "df8f1da0",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-024",
    "origin": "session-turn",
@@ -9693,10 +10255,21 @@
     "f6115565-46bf-41c2-885d-04e7bfd5451d#406e9751-4802-4d1c-be19-00500abcf84c"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "9310827b",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-eng-025",
    "origin": "defect",
@@ -9776,6 +10349,8 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "2271e684",
+    "847f9995",
     "a8c55a47",
     "c20dc3d5"
    ],
@@ -9852,10 +10427,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca"
    ],
    "id": "v2-eng-027",
    "origin": "session-turn",
@@ -9935,9 +10514,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "df8f1da0"
+    "bbffc139",
+    "df8f1da0",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-eng-028",
    "origin": "session-turn",
@@ -10018,10 +10602,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "20d106f1",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "a3f6c7f9",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-eng-029",
    "origin": "session-turn",
@@ -10097,11 +10687,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-eng-030",
    "origin": "defect",
@@ -10174,8 +10770,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "eaa31ac5",
+    "f47a8fe9"
    ],
    "id": "v2-rel-001",
    "origin": "session-turn",
@@ -10259,10 +10859,19 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#de8395c2-7bf5-44d2-b7a5-1285c0ef5ae8"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "e313a3ca",
+    "e8868cbe",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-002",
    "origin": "session-turn",
@@ -10365,14 +10974,21 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#d1bb9220-39e0-4b68-954e-45c519dd52d2"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1b8e7f43",
     "1c42d80c",
+    "3a9dbafd",
+    "5be2f462",
     "5cd8d0f6",
     "7e9739f2",
     "86647daf",
+    "88e9b5eb",
     "9530fb1c",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-003",
    "origin": "session-turn",
@@ -10487,9 +11103,14 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "847f9995",
+    "b3ea627f",
+    "f04a05aa",
+    "fc21a431"
    ],
    "id": "v2-rel-004",
    "origin": "session-turn",
@@ -10640,14 +11261,23 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#d1bb9220-39e0-4b68-954e-45c519dd52d2"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "1f3a7372",
     "20d106f1",
     "2e362970",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "a3f6c7f9",
+    "a9ecd5b4",
     "b3ea627f",
+    "bbffc139",
     "c1547ed1",
-    "c1db316c"
+    "c1db316c",
+    "f04a05aa"
    ],
    "id": "v2-rel-005",
    "origin": "session-turn",
@@ -10716,9 +11346,14 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-rel-006",
    "origin": "session-turn",
@@ -10812,12 +11447,22 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "24e10ee8",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "9530fb1c",
     "b3ea627f",
-    "c20dc3d5"
+    "bbffc139",
+    "c20dc3d5",
+    "e313a3ca",
+    "e8868cbe",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-007",
    "origin": "session-turn",
@@ -10899,9 +11544,14 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#52880de2-ab90-4673-b046-b74f900aa2de"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "a3f6c7f9",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fc21a431"
    ],
    "id": "v2-rel-008",
    "origin": "session-turn",
@@ -11013,11 +11663,19 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#f6287fac-848d-4d83-bac0-46ccc2ce8515"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "179be4b8",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d5dcfe26",
+    "d9ce2b08",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-rel-009",
    "origin": "session-turn",
@@ -11091,7 +11749,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-010",
    "origin": "subagent-brief",
@@ -11175,7 +11837,10 @@
     "2087076d-205f-4500-adff-b861d9c841a6#fce3dd03-b36c-44ba-9910-177639d53b16"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-011",
    "origin": "subagent-brief",
@@ -11260,7 +11925,10 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-012",
    "origin": "subagent-brief",
@@ -11362,9 +12030,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-rel-013",
    "origin": "verb-grounded",
@@ -11451,8 +12126,11 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "67580c28",
-    "c20dc3d5"
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-014",
    "origin": "subagent-brief",
@@ -11573,7 +12251,14 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "bc9188b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-015",
    "origin": "subagent-brief",
@@ -11693,13 +12378,18 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "67580c28",
     "9293d609",
     "b7ec8f3b",
+    "bc9188b4",
     "c1db316c",
     "c20dc3d5",
     "e65efc68",
-    "eeb3d106"
+    "eeb3d106",
+    "fa217e48"
    ],
    "id": "v2-rel-016",
    "origin": "subagent-brief",
@@ -11784,7 +12474,12 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#5eadfcad-7402-45f7-8945-6cf49355e02f"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "847f9995",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-017",
    "origin": "subagent-brief",
@@ -11869,7 +12564,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#e02c6992-b8fd-4ec5-8868-5cd7eb8c6dca"
    ],
    "gold_guidance_deferred": [
-    "c1db316c"
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "a6e6ab4e",
+    "bc9188b4",
+    "c1db316c",
+    "fa217e48"
    ],
    "id": "v2-rel-018",
    "origin": "subagent-brief",
@@ -11991,14 +12692,21 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "1c42d80c",
+    "24e10ee8",
+    "43e2ef76",
     "596f7549",
     "6330bec8",
+    "847f9995",
     "a3f6c7f9",
+    "a6e6ab4e",
+    "a9ecd5b4",
     "c1db316c",
     "c20dc3d5",
     "d9ce2b08",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-rel-019",
    "origin": "subagent-brief",
@@ -12120,8 +12828,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#e02c6992-b8fd-4ec5-8868-5cd7eb8c6dca"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "1c42d80c",
-    "c1db316c"
+    "24e10ee8",
+    "bc9188b4",
+    "c1db316c",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-020",
    "origin": "subagent-brief",
@@ -12241,8 +12954,14 @@
     "d16e6d99-4a5a-40c2-a867-64aa43070791#af6e61db-4128-45ec-81ca-49f3965da45a"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "a9ecd5b4",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "e8868cbe",
+    "fa217e48"
    ],
    "id": "v2-rel-021",
    "origin": "subagent-brief",
@@ -12346,8 +13065,12 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "1c42d80c",
-    "c20dc3d5"
+    "847f9995",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-022",
    "origin": "subagent-brief",
@@ -12436,7 +13159,11 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-023",
    "origin": "subagent-brief",
@@ -12540,7 +13267,12 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#80634896-24d4-446a-9d91-b2bb5f6d2ba1",
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#d1bb9220-39e0-4b68-954e-45c519dd52d2"
    ],
-   "gold_guidance_deferred": [],
+   "gold_guidance_deferred": [
+    "015183f5",
+    "a6e6ab4e",
+    "e8868cbe",
+    "fa217e48"
+   ],
    "id": "v2-rel-024",
    "origin": "subagent-brief",
    "prompt": "Executor: Sonnet in the release lane. Jev is mandatory under the standing decision: before promoting, have Jev decide which post-release checks fit this change and then run them, calling the typesafe client with evidence as named state, and include the scores, or a refusal that says which, in what you report. The job is to release today's fifth production key from main at the merge commit of the fix to the regex for tour PDF storage refs, which includes DB migration 0583 bounding the regex's repetition; reuse the procedure that worked for the day's fourth release, whose step logs may still be in the scratch area, and if they're gone, read the usage of the worker deploy and prod migrate scripts. (1) Hold until main's canary run after that merge, or on a later main commit that includes it, succeeds; should a newer merge cancel it, take the next passing canary on a descendant commit, telling me which. (2) Do the work in a new detached worktree of that commit inside the scratchpad, deleting it afterwards. (3) Run the staging-project-replacement prepare step, then the staging app-writer provisioning script. (4) With the prod migrate script, dry-run first and require that only 0583 is pending, then apply; this migration requires a verifier besides the jobs role, so do what the script itself demands. (5) Upload the version with the worker deploy script, passing test evidence from the fix PR's green CI run, the ci-secret-class security evidence, and a claude verifier whose evidence is the reviewer comment on that PR; read that comment first and require it to come from OWNER with a Reviewed-SHA equal to the merged PR head. (6) Stage with forward_fix as the recovery step, then promote the version. (7) Check the production release endpoint to confirm source_commit is the merge commit, and run the server's smoke-reads script; (8) as a read-only tour check, confirm through an existing read path, if there is one, that production now has the new repetition-bound constraint, follow the Worker's logs for a minute filtered on tour, and cause no writes. The deploy token is loaded by the scripts themselves; never print or log it. No force pushes and no reset --hard; prefer unlink over rm -f; leave the project settings file alone; and when any step fails, stop rather than retrying blindly, and name the step and the exact error. Report in 250 words or fewer: the version id, source_commit, migration result, smoke counts, Jev receipt and where the step logs are.",
@@ -12645,7 +13377,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "847f9995",
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-025",
    "origin": "subagent-brief",
@@ -12722,7 +13460,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#52880de2-ab90-4673-b046-b74f900aa2de",
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
-   "gold_guidance_deferred": [],
+   "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "4a9188f3",
+    "f47a8fe9",
+    "fa217e48"
+   ],
    "id": "v2-rel-026",
    "origin": "subagent-brief",
    "prompt": "Mechanical job, no Jev: re-chain the complete-set review PR from its provisional seal to the next free one, since main has merged two other seals in the meantime. The content already passed independent review, so make no product judgment calls; if something genuinely ambiguous turns up, stop and report. Check out the branch and bring in origin/main with a normal merge commit, not a rebase.",
@@ -12849,10 +13593,20 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#d1bb9220-39e0-4b68-954e-45c519dd52d2"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "1c42d80c",
+    "2271e684",
+    "24e10ee8",
+    "43e2ef76",
+    "847f9995",
+    "a6e6ab4e",
     "a8c55a47",
+    "a9ecd5b4",
+    "bc9188b4",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-027",
    "origin": "subagent-brief",
@@ -12955,7 +13709,10 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-rel-028",
    "origin": "subagent-brief",
@@ -13026,11 +13783,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "b3ea627f",
     "c20dc3d5",
     "d9ce2b08",
-    "df8f1da0"
+    "df8f1da0",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-029",
    "origin": "defect",
@@ -13122,12 +13885,21 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1c42d80c",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
+    "a6e6ab4e",
     "b3ea627f",
-    "d9ce2b08"
+    "bbffc139",
+    "d9ce2b08",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-rel-030",
    "origin": "defect",
@@ -13188,8 +13960,12 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-001",
    "origin": "notification",
@@ -13253,10 +14029,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-notif-002",
    "origin": "notification",
@@ -13378,10 +14157,16 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-003",
    "origin": "notification",
@@ -13445,9 +14230,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-004",
    "origin": "notification",
@@ -13538,10 +14328,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-notif-005",
    "origin": "notification",
@@ -13643,11 +14437,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
     "b1521526",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-006",
    "origin": "notification",
@@ -13708,8 +14506,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-007",
    "origin": "notification",
@@ -13783,8 +14586,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a9ecd5b4",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-008",
    "origin": "notification",
@@ -13866,8 +14675,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-009",
    "origin": "notification",
@@ -13930,9 +14744,12 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#52880de2-ab90-4673-b046-b74f900aa2de"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-notif-010",
    "origin": "notification",
@@ -14009,9 +14826,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-011",
    "origin": "notification",
@@ -14159,11 +14980,17 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "c20dc3d5",
-    "d3774a28"
+    "d3774a28",
+    "f04a05aa",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-012",
    "origin": "notification",
@@ -14272,10 +15099,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f04a05aa",
+    "fa217e48"
    ],
    "id": "v2-notif-013",
    "origin": "notification",
@@ -14342,8 +15174,13 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-014",
    "origin": "notification",
@@ -14430,9 +15267,14 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "3a9dbafd",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-015",
    "origin": "notification",
@@ -14515,12 +15357,17 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#d1bb9220-39e0-4b68-954e-45c519dd52d2"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1b8e7f43",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-016",
    "origin": "notification",
@@ -14607,9 +15454,20 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "bc9188b4",
+    "e313a3ca",
+    "e8868cbe",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-017",
    "origin": "notification",
@@ -14696,9 +15554,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-018",
    "origin": "notification",
@@ -14773,10 +15637,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-notif-019",
    "origin": "notification",
@@ -14846,9 +15713,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-notif-020",
    "origin": "notification",
@@ -14940,14 +15812,20 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1b8e7f43",
     "1c42d80c",
+    "5be2f462",
     "5cd8d0f6",
     "7e9739f2",
+    "88e9b5eb",
     "b3ea627f",
     "c20dc3d5",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-021",
    "origin": "notification",
@@ -15009,11 +15887,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "fa217e48"
    ],
    "id": "v2-notif-022",
    "origin": "notification",
@@ -15088,11 +15969,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "d9ce2b08"
+    "d9ce2b08",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-023",
    "origin": "notification",
@@ -15164,9 +16049,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-notif-024",
    "origin": "notification",
@@ -15247,10 +16136,16 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-025",
    "origin": "notification",
@@ -15323,9 +16218,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
-    "b3ea627f"
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-026",
    "origin": "notification",
@@ -15396,7 +16298,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "d9ce2b08"
@@ -15454,9 +16358,13 @@
     "91c709b1-24cb-4b32-aa34-c67a7a82830d#4f57497c-0284-45f7-8c95-bbdbbef4a7d8"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-028",
    "origin": "defect",
@@ -15538,7 +16446,10 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "1d50a3bb",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -15589,10 +16500,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
+    "a9ecd5b4",
     "b3ea627f",
-    "c20dc3d5"
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-notif-030",
    "origin": "defect",
@@ -15691,7 +16608,10 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-sfb-001",
    "origin": "subagent-brief",
@@ -15794,7 +16714,9 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#06484e95-b5ec-4fda-bda6-b7d540fa946e"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-sfb-002",
    "origin": "subagent-brief",
@@ -15862,10 +16784,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "5be2f462",
     "7e9739f2",
+    "847f9995",
     "b3ea627f",
-    "c1db316c"
+    "c1db316c",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-sfb-003",
    "origin": "session-turn",
@@ -15960,9 +16887,13 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
     "2e362970",
+    "43e2ef76",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-sfb-004",
    "origin": "subagent-brief",
@@ -16061,7 +16992,10 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-sfb-005",
    "origin": "subagent-brief",
@@ -16146,7 +17080,10 @@
     "fe7ffd9c-9afe-4138-9e1b-97d3f6b8c9f5#01dc6fe2-a052-4203-aeb1-1ad06c070ee1"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "2271e684",
+    "847f9995",
+    "c20dc3d5",
+    "f47a8fe9"
    ],
    "id": "v2-sfb-006",
    "origin": "subagent-brief",
@@ -16214,11 +17151,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
     "c1db316c",
-    "d9ce2b08"
+    "d9ce2b08",
+    "e313a3ca",
+    "fc21a431"
    ],
    "id": "v2-sfb-007",
    "origin": "session-turn",
@@ -16320,9 +17262,15 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "596f7549",
     "67580c28",
-    "c1db316c"
+    "a9ecd5b4",
+    "bc9188b4",
+    "c1db316c",
+    "fa217e48"
    ],
    "id": "v2-sfb-008",
    "origin": "subagent-brief",
@@ -16368,8 +17316,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-sfb-009",
    "origin": "delivery-log",
@@ -16439,7 +17390,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
-    "c1db316c"
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "c1db316c",
+    "fa217e48"
    ],
    "id": "v2-sfb-010",
    "origin": "subagent-brief",
@@ -16486,8 +17441,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9"
    ],
    "id": "v2-sfb-011",
    "origin": "session-turn",
@@ -16562,6 +17521,7 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "2271e684",
     "c20dc3d5"
    ],
    "id": "v2-sfb-012",
@@ -16646,10 +17606,17 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
+    "ab814a26",
     "b3ea627f",
-    "fb2b263d"
+    "bbffc139",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-sfb-013",
    "origin": "session-turn",
@@ -16736,8 +17703,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "a9ecd5b4",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-sfb-014",
    "origin": "subagent-brief",
@@ -16824,8 +17796,12 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#89023e8c-d338-4db4-9006-a30b8492a4ba"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "67580c28",
-    "c20dc3d5"
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-sfb-015",
    "origin": "subagent-brief",
@@ -16891,12 +17867,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
     "9310827b",
     "b3ea627f",
-    "f5beac20"
+    "bbffc139",
+    "f5beac20",
+    "fc21a431"
    ],
    "id": "v2-sfb-016",
    "origin": "delivery-log",
@@ -16987,7 +17968,10 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#89023e8c-d338-4db4-9006-a30b8492a4ba"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-sfb-017",
    "origin": "subagent-brief",
@@ -17097,12 +18081,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "2b889e80",
+    "43e2ef76",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
     "80def9d2",
     "a8f159ad",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-sfb-018",
    "origin": "session-turn",
@@ -17185,9 +18175,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "58cef3a1",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-sfb-019",
    "origin": "session-turn",
@@ -17242,8 +18238,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-sfb-020",
    "origin": "selector-log",
@@ -17325,9 +18324,14 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
+    "a9ecd5b4",
     "c1db316c",
     "c20dc3d5",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-sfb-021",
    "origin": "subagent-brief",
@@ -17413,12 +18417,20 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "3a9dbafd",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
+    "ab814a26",
     "b1521526",
     "b3ea627f",
-    "fb2b263d"
+    "bbffc139",
+    "fa217e48",
+    "fb2b263d",
+    "fc21a431"
    ],
    "id": "v2-sfb-022",
    "origin": "session-turn",
@@ -17462,8 +18474,13 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-sfb-023",
    "origin": "session-turn",
@@ -17526,9 +18543,15 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
+    "2271e684",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fc21a431"
    ],
    "id": "v2-sfb-024",
    "origin": "session-turn",
@@ -17604,9 +18627,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
     "b3ea627f",
+    "dcf98880",
+    "e313a3ca",
     "e4d965d9"
    ],
    "id": "v2-sfb-025",
@@ -17701,10 +18728,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "0f38532e",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
+    "a6e6ab4e",
     "b1521526",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-sfb-026",
    "origin": "verb-grounded",
@@ -17792,6 +18827,8 @@
     "e501cde4-c892-49ce-b842-fae4ecf7e965#7c822b62-cb60-4c6e-a38c-be733285e2ad"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -17932,12 +18969,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "152ceb65",
     "2ca2add2",
+    "5be2f462",
     "7e9739f2",
     "9310827b",
     "94806da2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-sfb-028",
    "origin": "verb-grounded",
@@ -18015,9 +19057,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "2b889e80",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9"
    ],
    "id": "v2-sfb-029",
    "origin": "defect",
@@ -18073,8 +19119,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9"
    ],
    "id": "v2-sfb-030",
    "origin": "defect",
@@ -18192,8 +19241,15 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "e313a3ca",
+    "fa217e48"
    ],
    "id": "v2-tour-001",
    "origin": "session-turn",
@@ -18290,9 +19346,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f",
-    "f5beac20"
+    "bbffc139",
+    "f5beac20",
+    "fa217e48"
    ],
    "id": "v2-tour-002",
    "origin": "session-turn",
@@ -18357,8 +19417,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-tour-003",
    "origin": "session-turn",
@@ -18433,9 +19498,16 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "179be4b8",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48"
    ],
    "id": "v2-tour-004",
    "origin": "session-turn",
@@ -18536,12 +19608,19 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "43e2ef76",
+    "4a9188f3",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
     "80def9d2",
     "a8f159ad",
     "b3ea627f",
-    "d3774a28"
+    "bbffc139",
+    "c315befa",
+    "d3774a28",
+    "fc21a431"
    ],
    "id": "v2-tour-005",
    "origin": "session-turn",
@@ -18659,12 +19738,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "152ceb65",
+    "43e2ef76",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
     "80def9d2",
     "a8f159ad",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-tour-006",
    "origin": "session-turn",
@@ -18730,9 +19815,17 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "2271e684",
+    "5be2f462",
+    "767f9b41",
     "7e9739f2",
     "95e76c1f",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "f47a8fe9",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-tour-007",
    "origin": "selector-log",
@@ -18781,7 +19874,9 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "179be4b8",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -18818,6 +19913,8 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
     "b3ea627f"
    ],
@@ -18907,9 +20004,16 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
     "152ceb65",
+    "43e2ef76",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "e313a3ca",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-tour-010",
    "origin": "selector-log",
@@ -19019,9 +20123,14 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#06484e95-b5ec-4fda-bda6-b7d540fa946e"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "67580c28",
+    "a6e6ab4e",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-tour-011",
    "origin": "subagent-brief",
@@ -19073,8 +20182,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-012",
    "origin": "selector-log",
@@ -19175,9 +20287,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "67580c28",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-tour-013",
    "origin": "subagent-brief",
@@ -19279,8 +20395,12 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ceaf2dda-4864-455a-9f8f-5d4a9edc44ce"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
     "67580c28",
-    "c20dc3d5"
+    "a6e6ab4e",
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-tour-014",
    "origin": "subagent-brief",
@@ -19398,9 +20518,13 @@
     "ec27abaf-bec5-434c-9dff-920f67459ce3#ef79d631-1996-461e-b97c-f8a2bdfae3f5"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "24e10ee8",
+    "43e2ef76",
     "9293d609",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-tour-015",
    "origin": "subagent-brief",
@@ -19489,8 +20613,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "015183f5",
     "67580c28",
-    "c20dc3d5"
+    "a9ecd5b4",
+    "c20dc3d5",
+    "fa217e48"
    ],
    "id": "v2-tour-016",
    "origin": "subagent-brief",
@@ -19599,8 +20726,14 @@
     "cc088ce7-e8a4-4e5b-8cab-8a9f735f6ea8#c1035316-5b4d-4f62-9a3c-84fb7634b639"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "2271e684",
+    "43e2ef76",
+    "a9ecd5b4",
+    "bc9188b4",
     "c1db316c",
-    "e65efc68"
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-tour-017",
    "origin": "subagent-brief",
@@ -19692,11 +20825,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
     "80def9d2",
     "a8f159ad",
-    "b3ea627f"
+    "b3ea627f",
+    "f47a8fe9"
    ],
    "id": "v2-tour-018",
    "origin": "verb-grounded",
@@ -19783,9 +20919,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-019",
    "origin": "verb-grounded",
@@ -19865,7 +21005,11 @@
     "7360938f-77ed-4ea9-9867-264eb8191ad4#5eadfcad-7402-45f7-8945-6cf49355e02f"
    ],
    "gold_guidance_deferred": [
-    "c20dc3d5"
+    "015183f5",
+    "a6e6ab4e",
+    "c20dc3d5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-tour-020",
    "origin": "subagent-brief",
@@ -19912,8 +21056,11 @@
    ],
    "gold_doctrine": [],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-021",
    "origin": "selector-log",
@@ -19956,8 +21103,11 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-022",
    "origin": "selector-log",
@@ -20020,6 +21170,7 @@
    ],
    "gold_guidance_deferred": [
     "1c42d80c",
+    "2271e684",
     "596f7549",
     "6330bec8",
     "c20dc3d5",
@@ -20137,9 +21288,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "015183f5",
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "86647daf",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "bbffc139",
+    "e313a3ca",
+    "e8868cbe",
+    "fa217e48"
    ],
    "id": "v2-tour-024",
    "origin": "defect",
@@ -20223,9 +21383,12 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-025",
    "origin": "defect",
@@ -20292,9 +21455,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
     "67580c28",
+    "6a4e6283",
     "7e9739f2",
-    "b3ea627f"
+    "8c1e6057",
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-026",
    "origin": "defect",
@@ -20391,14 +21559,20 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "1c42d80c",
     "596f7549",
+    "5be2f462",
     "67580c28",
     "7e9739f2",
+    "a6e6ab4e",
     "b3ea627f",
+    "bc9188b4",
     "c1db316c",
     "c20dc3d5",
-    "e65efc68"
+    "e313a3ca",
+    "e65efc68",
+    "fa217e48"
    ],
    "id": "v2-tour-027",
    "origin": "defect",
@@ -20465,9 +21639,13 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
     "152ceb65",
+    "5be2f462",
     "7e9739f2",
-    "b3ea627f"
+    "a6e6ab4e",
+    "b3ea627f",
+    "fa217e48"
    ],
    "id": "v2-tour-028",
    "origin": "verb-grounded",
@@ -20555,8 +21733,14 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "5be2f462",
+    "6a4e6283",
     "7e9739f2",
-    "b3ea627f"
+    "b3ea627f",
+    "eaa31ac5",
+    "f47a8fe9",
+    "fa217e48"
    ],
    "id": "v2-tour-029",
    "origin": "verb-grounded",
@@ -20653,11 +21837,18 @@
     "e1253a19-0f6c-4fda-a14f-7f1f3b7bb5c0#2e23a16c-c33b-4294-86f8-b495946c8da0"
    ],
    "gold_guidance_deferred": [
+    "0156e9fa",
+    "4a9188f3",
+    "5be2f462",
     "7e9739f2",
     "9530fb1c",
+    "a6e6ab4e",
     "a8f159ad",
     "b1521526",
-    "b3ea627f"
+    "b3ea627f",
+    "bbffc139",
+    "fa217e48",
+    "fc21a431"
    ],
    "id": "v2-tour-030",
    "origin": "verb-grounded",
@@ -20783,6 +21974,8 @@
   "guidance_deferred": {
    "note": "Rules retyped as judgment_ambient guidance in August and deferred by standing-context to consumers never built. A reporting split only.",
    "rules": [
+    "015183f5",
+    "0156e9fa",
     "018ce972",
     "0c1bac27",
     "0f38532e",
@@ -20794,27 +21987,38 @@
     "1b8e7f43",
     "1c21263c",
     "1c42d80c",
+    "1d50a3bb",
+    "1f3a7372",
     "1fcaa63a",
     "1fddcffb",
     "204391be",
     "20d106f1",
+    "2271e684",
+    "24e10ee8",
     "27277539",
     "2b889e80",
     "2ca2add2",
     "2e362970",
     "347a9ca6",
     "3578d799",
+    "38b15dc6",
+    "3a9dbafd",
     "3d185f2b",
+    "412d37d3",
     "424ba0cc",
     "4399df76",
+    "43e2ef76",
     "466a545a",
     "48083552",
     "49c627cc",
+    "4a9188f3",
+    "4e104d4c",
     "4fae20f4",
     "51d9f05f",
-    "5697071b",
     "58cef3a1",
+    "590b11e1",
     "596f7549",
+    "5be2f462",
     "5cd8d0f6",
     "5e896ed6",
     "614c1209",
@@ -20824,57 +22028,84 @@
     "6437ae15",
     "67580c28",
     "6901cc3b",
+    "6a4e6283",
     "70e372f0",
+    "725dff46",
+    "73381d78",
     "740bb505",
+    "767f9b41",
     "7e9739f2",
     "80def9d2",
     "81709f57",
+    "847f9995",
     "86647daf",
+    "88e9b5eb",
     "8aefcdce",
+    "8c1e6057",
     "8c812bed",
     "9293d609",
     "9310827b",
     "94806da2",
     "9530fb1c",
     "95e76c1f",
+    "97326357",
     "9873a0d2",
     "98e74e7c",
     "9d80fd2d",
     "9e3fb6d0",
     "a2e78f48",
     "a3f6c7f9",
+    "a6e6ab4e",
     "a8c55a47",
     "a8f159ad",
+    "a9ecd5b4",
+    "ab814a26",
     "af7de070",
     "b1521526",
     "b3ea627f",
     "b42f11a0",
     "b587f6c2",
     "b7ec8f3b",
+    "bbffc139",
     "bc4145f6",
+    "bc9188b4",
     "bd4a6d22",
+    "c0b38d80",
     "c1547ed1",
     "c1db316c",
     "c20dc3d5",
+    "c315befa",
     "c4a284b2",
+    "c864b8cb",
     "c8ebeb5b",
     "cd84d22a",
     "ce12c11e",
     "d26d63b0",
     "d3774a28",
+    "d5dcfe26",
+    "d7f74c93",
     "d8c9b1f0",
     "d9ce2b08",
+    "dcf98880",
     "def3e84e",
     "df8f1da0",
+    "e313a3ca",
     "e4d965d9",
     "e65efc68",
+    "e8868cbe",
+    "eaa31ac5",
+    "ede4c735",
     "eeb3d106",
     "efbdfb1a",
+    "f04a05aa",
     "f0f9156e",
     "f2d58a30",
+    "f47a8fe9",
     "f5bac101",
     "f5beac20",
+    "fa217e48",
     "fb2b263d",
+    "fc21a431",
     "fc4d7753"
    ],
    "source": "audits/guidance-migration-manifest.v1.tsv"

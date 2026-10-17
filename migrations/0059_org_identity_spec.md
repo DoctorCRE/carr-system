@@ -18,11 +18,11 @@ it moved identity from role to person.
 |---|---|---|
 | ~157 duplicate party rows | **wrong number, right order of magnitude** | 172 surplus rows across 98 name groups (case- and whitespace-normalised, live rows only) |
 | 115 of them are `kind='org'` rows | **exactly right** | 48 org name groups, 163 rows, **115 surplus** |
-| Henry Schein exists as 17 separate org rows | **confirmed** | 17 rows, all `kind='org'`, one distinct exact spelling |
-| Patterson Dental 10, Musicologie 13 | **confirmed** | 10 and 13 |
+| Example Organization 25 exists as 17 separate org rows | **confirmed** | 17 rows, all `kind='org'`, one distinct exact spelling |
+| Patterson Dental 10, Example Organization 38 13 | **confirmed** | 10 and 13 |
 | every org row has exactly ONE person pointing at it via `party.org_id` | **confirmed, with no exceptions at all** | the inbound-count distribution over all 415 org rows is a single bucket: `1 → 415`. Not one org has two people; not one has zero |
 | 157 is a RUNNING TOTAL, not a fixed backlog | **confirmed at the code level, not merely inferred** | `add-party` (`mcp-server/src/tools.js:1156`) and `add-premises` (`:1281`) both do an unconditional `insert into party (kind,name,...) values ('org', $1, ...)` whenever an `org_name` is supplied. There is no lookup on either path. Every promotion that carries an employer mints a fresh org row by construction |
-| one org party is literally named `thrivedentalassociates.com` | **true but understated** | **22** org rows are bare domains (`3mg.com`, `smileology.com`, `hpruettdds.com`, `mcgilvraydmd.gccoxmail.com`, …), not one |
+| one org party is literally named `example-6343f421.invalid` | **true but understated** | **22** org rows are bare domains (`example-b00c0fa1.invalid`, `example-50352747.invalid`, `example-e5f57802.invalid`, `example-73bf0a66.invalid`, …), not one |
 
 **The person half of the number does not survive contact with the data.** 115 of the surplus
 is org; the remaining **57** is person, not the 42 that `0046` recorded. 0046 counted
@@ -34,7 +34,7 @@ figure should stop being quoted.
 **So: the characterisation holds, and it holds more strongly than it was stated.** A 1:1
 inbound relationship with *zero* exceptions across 415 rows is not a table with some
 duplicates in it. It is a table where `party.org_id` is functionally a per-person employer
-NAME field that happens to be stored as a foreign key. Seventeen Henry Schein rows are not
+NAME field that happens to be stored as a foreign key. Seventeen Example Organization 25 rows are not
 seventeen companies anyone believes in; they are seventeen reps, and the company was minted
 seventeen times because the row that carried the identity was the contact.
 
@@ -116,12 +116,11 @@ party where kind='org'` plus a key swap. Doing it in the other order would mean 
 1. **`org_identity_key(text)`** — an immutable normaliser: trim, collapse internal
    whitespace, lowercase. Nothing else.
    - It deliberately does **not** strip legal suffixes or parentheticals. The data contains
-     `Carr Riggs Ingram` and `Carr Riggs Ingram (advisory)` as separate rows on purpose, and
+     `Example Organization 116` and `Example Organization 116 (advisory)` as separate rows on purpose, and
      an aggressive normaliser would weld an advisory arm onto a CPA firm. Case and whitespace
      are the only differences that are never meaningful.
    - It returns **null for placeholders**, which is the trap in this dataset. Six rows are
-     literally named `(TBD — enrich)`, plus `(TBD)`, `Startup dental practice (entity name
-     TBD)` ×2, and two spellings of `(new practice, relocating VA → FL)`. Eleven rows in
+     literally named `(TBD — enrich)`, plus `(TBD)`, `Example Organization 41c813fb)` ×2, and two spellings of `(new practice, relocating VA → FL)`. Eleven rows in
      total. Merging six `(TBD — enrich)` rows would assert that six different people work at
      the same company, which is a **fabricated fact**, and fabricating one is worse than
      leaving eleven duplicates. A null key is excluded from both the merge and the unique
@@ -188,15 +187,15 @@ have no such coupling and can go ahead on their own.
 
 - **Domain matching.** 22 org rows are bare domains. Those rows already hold identity *by
   domain*; they simply are not labelled as such, and some of them almost certainly name the
-  same organisation as a text-named row (`hpruettdds.com` and a Henry Pruett practice, to
+  same organisation as a text-named row (`example-e5f57802.invalid` and a Example Organization 109 practice, to
   pick the obvious one). Reconciling them needs a verified name↔domain mapping this system
   does not have, so the migration does not guess. The enrichment plan that intends to use
   domain as an exact match key should extend `org_identity_key` in a later migration rather
   than inventing a second normalisation rule, and any name↔domain collapse should go through
   human review, never a `where` clause.
-- **Genuine same-name collisions.** Two unrelated `Lighthouse Dental` practices in different
+- **Genuine same-name collisions.** Two unrelated `Example Organization 76` practices in different
   towns would now collide on the unique key. The escape hatch is to disambiguate the name —
-  which is what the data already does with `Carr Riggs Ingram (advisory)` — rather than to
+  which is what the data already does with `Example Organization 116 (advisory)` — rather than to
   weaken the key.
 - **Backfilling `org_id` for the 254 people who have none.** Out of scope, and it is an
   enrichment question rather than an identity one.

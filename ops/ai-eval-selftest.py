@@ -7,6 +7,7 @@ import copy
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,7 +110,7 @@ class SuiteTests(unittest.TestCase):
             json.dump(responses, handle)
             handle.flush()
             run = subprocess.run(
-                ["python3", str(MODULE_PATH), "--suite", str(SUITE_PATH), "--responses", handle.name],
+                [sys.executable, str(MODULE_PATH), "--suite", str(SUITE_PATH), "--responses", handle.name],
                 check=False,
                 capture_output=True,
                 text=True,

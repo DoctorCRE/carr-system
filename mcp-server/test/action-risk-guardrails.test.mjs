@@ -1,6 +1,3 @@
-// Deterministic guardrail coverage: untrusted authority fields must stop at the
-// registered-tool choke point, and the human ownership handoff must be both
-// human-gated and optimistic-concurrency guarded.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -198,17 +195,10 @@ test("freeform nested business data may use reserved-like names without widening
 
 test("set-lead is a human-only optimistic-concurrency mutation", async () => {
   const tool = TOOLS["set-lead"];
-  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): dead since
-  // executeRegisteredTool stopped reading it 2026-08-26 (decision dc57f62d);
-  // this slice drops the stale declaration from tools.js. The behavioral
-  // proof that a machine actor is admitted now lives in the assertion below.
   assert.equal(tool.humanOnly, undefined);
   assert.ok(tool.inputSchema.required.includes("base_version"));
   assert.ok(Object.hasOwn(tool.inputSchema.properties, "base_version"));
 
-  // INVERTED (Joe's ruling 2026-08-26, decision dc57f62d): set-lead admits a
-  // machine actor now. The optimistic-concurrency checks below are NOT
-  // authority checks and must keep firing for every actor.
   let nonhuman;
   try { await executeRegisteredTool(new SetLeadFake(), AGENT, "set-lead", payload()); }
   catch (error) { nonhuman = error.payload; }
@@ -236,8 +226,6 @@ test("two concurrent same-version set-lead transactions lock, then emit one even
   assert.equal(shared.eventWrites, 1);
   assert.equal(shared.participantWrites.first, 2);
 
-  // The caller's transaction commits only after its handler returns. Releasing
-  // this controlled lock models that commit; the second then reads version 2.
   shared.committed.resolve();
   const stale = await rejected(() => second);
   assert.equal(stale.error, "version_conflict");
