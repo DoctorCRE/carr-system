@@ -2,7 +2,12 @@
 """Static contract: approval is impossible without immediate enforcement."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 
 REPO = Path(__file__).resolve().parent.parent
 LEGACY_MIGRATION = REPO / "migrations" / "0194_atomic_rule_approval.sql"
@@ -19,17 +24,17 @@ LOCAL_ACCEPTANCE = REPO / "ops" / "atomic-rule-approval-local-pg-acceptance.py"
 
 
 def main() -> int:
-    forward_sql = MIGRATION.read_text(encoding="utf-8").lower()
-    scope_fix = SCOPE_FIX.read_text(encoding="utf-8").lower() if SCOPE_FIX.exists() else ""
+    forward_sql = read_migration(MIGRATION.parent.parent, MIGRATION.name).lower()
+    scope_fix = read_migration(SCOPE_FIX.parent.parent, SCOPE_FIX.name).lower() if SCOPE_FIX.name in migration_names(SCOPE_FIX.parent.parent) else ""
     catalog_seed = forward_sql.split("-- two joe-approved system rules", 1)[0]
-    binding_repair = BINDING_REPAIR.read_text(encoding="utf-8").lower() if BINDING_REPAIR.exists() else ""
-    delivery_repair = DELIVERY_REPAIR.read_text(encoding="utf-8").lower() if DELIVERY_REPAIR.exists() else ""
-    sql = (LEGACY_MIGRATION.read_text(encoding="utf-8").lower()
+    binding_repair = read_migration(BINDING_REPAIR.parent.parent, BINDING_REPAIR.name).lower() if BINDING_REPAIR.name in migration_names(BINDING_REPAIR.parent.parent) else ""
+    delivery_repair = read_migration(DELIVERY_REPAIR.parent.parent, DELIVERY_REPAIR.name).lower() if DELIVERY_REPAIR.name in migration_names(DELIVERY_REPAIR.parent.parent) else ""
+    sql = (read_migration(LEGACY_MIGRATION.parent.parent, LEGACY_MIGRATION.name).lower()
            + forward_sql + binding_repair + delivery_repair)
     tools = TOOLS.read_text(encoding="utf-8")
     gate = DB_GATE.read_text(encoding="utf-8")
     acceptance = LOCAL_ACCEPTANCE.read_text(encoding="utf-8")
-    adoption = LEGACY_ADOPTION.read_text(encoding="utf-8").lower() if LEGACY_ADOPTION.exists() else ""
+    adoption = read_migration(LEGACY_ADOPTION.parent.parent, LEGACY_ADOPTION.name).lower() if LEGACY_ADOPTION.name in migration_names(LEGACY_ADOPTION.parent.parent) else ""
     adoption_proof = ADOPTION_PROOF.read_text(encoding="utf-8") if ADOPTION_PROOF.exists() else ""
     ci = CI.read_text(encoding="utf-8")
     failures: list[str] = []

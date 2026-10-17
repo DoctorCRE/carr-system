@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // self-closing-records-sql.test.mjs — the SQL half of migration 0872, run on a
 // real disposable PostgreSQL rather than a fake that answers marker comments.
 //
@@ -44,7 +45,7 @@ for (const pgConfig of ["pg_config", "/opt/homebrew/opt/postgresql@17/bin/pg_con
   } catch { /* try the next candidate */ }
 }
 
-const migration = readFileSync(path.join(root, "migrations/0872_self_closing_records.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0872_self_closing_records.sql"));
 const schema = readFileSync(path.join(root, "db/schema.sql"), "utf8");
 const lift = (pattern, label) => {
   const found = migration.match(pattern)?.[0];

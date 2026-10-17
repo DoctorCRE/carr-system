@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -37,7 +38,7 @@ const APPROVED_TITLES = [
 ];
 
 function seededRows() {
-  const sql = fs.readFileSync(MIGRATION, "utf8");
+  const sql = readMigration(MIGRATION);
   const rows = [...sql.matchAll(/\(\s*(\d+)\s*,\s*'carr-ai-engineering-suite-v1'\s*,\s*'(WR-AI-\d+)'\s*,\s*'([^']+)'\s*,\s*'(build|extend|adopt|decline)'\s*,[\s\S]*?'(\{[^']+\})'::jsonb,\s*'joe',\s*'joe'\)/g)]
     .map(([, sequence, ref, title, disposition, context]) => ({
       sequence: Number(sequence), ref, title, disposition, context: JSON.parse(context),
@@ -71,7 +72,7 @@ test("the capability portfolio is seeded once in the approved usefulness order",
 });
 
 test("Joe's retrieval decision moves RAG first without renaming or skipping another project", () => {
-  const sql = fs.readFileSync(REPRIORITIZATION, "utf8");
+  const sql = readMigration(REPRIORITIZATION);
   const expectedRefs = [
     "WR-AI-006", ...Array.from({ length: 5 }, (_, i) => `WR-AI-${String(i + 1).padStart(3, "0")}`),
     ...Array.from({ length: 45 }, (_, i) => `WR-AI-${String(i + 7).padStart(3, "0")}`),

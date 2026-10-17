@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
 import hashlib
 import os
 import re
-import sys
 import time
-from pathlib import Path
 
 from rule_projection_fixture import seed_reviewed_rule_projection as seed_rule_projection
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
@@ -359,7 +362,7 @@ def main() -> int:
             "expected_v2": generated_registry_digest(2),
         }
         migration = REPO / "migrations/0455_siep12_policy_epoch.sql"
-        ctx["migration_sha"] = hashlib.sha256(migration.read_bytes()).hexdigest()
+        ctx["migration_sha"] = hashlib.sha256(read_migration(REPO, migration.name).encode()).hexdigest()
         started = time.monotonic()
         with rollback_only_connection(dsn) as conn, conn.cursor() as cur:
             if STATIC_SCENARIO[0] in mine:

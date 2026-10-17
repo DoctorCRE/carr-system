@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tools'))
 import migrate
+from migration_baseline import MigrationBaseline, repository_ledger
 from schema_snapshot_grants import role_acl_facts_sql
 from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 from lib.secret_redaction import redact_text, sensitive_env_values
@@ -39,16 +40,17 @@ def load(name, path):
     return module
 
 
-def ledger_proof(repository, applied):
-    migrations = [(name, '', digest) for name, digest in sorted(repository.items())]
+def ledger_proof(repository, applied, baseline=None):
     try:
         if not applied:
             raise ValueError('production migration ledger is empty')
-        migrate.validate_applied_ledger(migrations, applied)
+        if baseline is not None:
+            baseline.validate_coverage(applied)
+        migrate.validate_ledger_identities(repository, applied)
     except ValueError as exc:
         return dict(ok=False, error=str(exc))
     return dict(ok=True, applied=len(applied),
-                pending=[name for name, sql, digest in migrate.pending_migrations(migrations, applied)])
+                pending=sorted(set(repository) - set(applied)))
 
 
 comparison = load('production_proof_comparison', ROOT / 'ops/migration-shadow.py')
@@ -145,9 +147,11 @@ def privilege_catalog(conn):
                 memberships=memberships, role_attributes=attributes)
 
 
-def privilege_difference(production, snapshot):
+def privilege_difference(production, snapshot, comparison_roles=None):
     left_roles, right_roles = set(production['roles']), set(snapshot['roles'])
     common = left_roles & right_roles
+    if comparison_roles is not None:
+        common &= set(comparison_roles)
     def comparable(row):
         return ((row[3] in common or row[3] == '<owner>')
                 and (row[0] != 'ROLE' or row[1] in common)
@@ -161,6 +165,9 @@ def privilege_difference(production, snapshot):
     return dict(ok=left == right and
                 not any(row[0] not in owner_roles for row in left_only_attributes | right_only_attributes),
                 common_roles=sorted(common),
+                informational_external_acl_counts=dict(
+                    production=sum(not comparable(row) for row in production['privileges']),
+                    snapshot=sum(not comparable(row) for row in snapshot['privileges'])),
                 production_only_attributes=sorted(row for row in left_only_attributes if row[0] not in owner_roles),
                 snapshot_only_attributes=sorted(row for row in right_only_attributes if row[0] not in owner_roles),
                 informational_owner_attributes=dict(
@@ -174,6 +181,7 @@ def privilege_difference(production, snapshot):
 
 def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=None):
     import psycopg
+    from psycopg.conninfo import make_conninfo
     local_pg = load('production_proof_local_pg', ROOT / 'ops/local-pg-ci.py')
     env = local_pg.scrub_cloud_environment(os.environ)
     env['PATH'] = str(bins) + os.pathsep + env.get('PATH', '')
@@ -210,6 +218,10 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 conn.execute(sql.SQL('grant {} to {} with admin {}, inherit {}, set {}').format(
                     sql.Identifier(role), sql.Identifier(member), sql.Literal(admin),
                     sql.Literal(inherit), sql.Literal(set_option)))
+        if grants and grants.get('database_owner'):
+            with psycopg.connect(bootstrap, autocommit=True) as conn:
+                conn.execute(sql.SQL('alter database carr_ci owner to {}').format(
+                    sql.Identifier(grants['database_owner'])))
         checked([bins / 'psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-q', '-f', schema_path],
                 dict(env, PGOPTIONS='--client-min-messages=warning'), 'restore schema into disposable database')
         if production_ledger is not None:
@@ -217,11 +229,23 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 # Only this disposable ledger import lacks the SCAC config rows.
                 # Pending migrations run with normal triggers in a new session.
                 conn.execute("set local session_replication_role = replica")
+                # A schema-only copy has no policy singleton. Use the same
+                # shadow default as schema-snapshot.sh so the existing empty
+                # projection bootstrap can run. Pending migrations execute in
+                # a new session with every trigger active; never replace an
+                # existing policy or seed rule, epoch, or registry history.
+                if conn.execute("select to_regclass('ops.rule_delivery_policy')").fetchone()[0]:
+                    conn.execute("""insert into ops.rule_delivery_policy(singleton,mode,changed_by,reason)
+                        values(true,'shadow','production-schema-proof',
+                          'Fresh schema-only reconstruction; no rule projection or cutover evidence.')
+                        on conflict(singleton) do nothing""")
                 with conn.cursor() as cursor:
                     cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
                                        sorted(production_ledger.items()))
             checked([sys.executable, repo / 'tools/migrate.py', '--apply', '--yes'],
-                    dict(env, DATABASE_URL=dsn), 'apply pending migrations to disposable production schema')
+                    dict(env, DATABASE_URL=make_conninfo(
+                        dsn, user=(grants or {}).get('migration_role', 'carr_ci'))),
+                    'apply pending migrations to disposable production schema')
         ledger, schema, grants = read_source(dsn, bins)
         return dict(dump=schema, grants=grants, ledger=ledger)
 
@@ -241,40 +265,56 @@ def read_source(dsn, bins=None, include_acl=False):
         exported = conn.execute('select pg_export_snapshot()').fetchone()[0]
         production = schema_dump(dsn, bins, os.environ, exported, include_acl=include_acl)
         grants = privilege_catalog(conn)
+        grants['migration_role'] = conn.execute('select session_user').fetchone()[0]
+        grants['database_owner'] = conn.execute(
+            'select pg_get_userbyid(datdba) from pg_database where datname=current_database()').fetchone()[0]
         conn.rollback()
     return applied, production, grants
 
 
 def live_proof(ledger_only=True):
     import psycopg
-    migrations = migrate.load_migrations()
-    validate_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_problems']
-    problems = validate_snapshot({name: sql for name, sql, digest in migrations},
-                                (ROOT / 'db/schema.sql').read_text())
+    baseline = MigrationBaseline.load(ROOT)
+    repository = repository_ledger(ROOT, baseline)
+    parse_snapshot = runpy.run_path(str(ROOT / 'ops/migration-safety-gate.py'))['ledger_rows']
+    snapshot_ledger = parse_snapshot((ROOT / 'db/schema.sql').read_text())
+    problems = []
+    if snapshot_ledger is None:
+        problems.append('db/schema.sql has no complete schema_migrations ledger section')
+    else:
+        for name in sorted(repository.keys() | snapshot_ledger.keys()):
+            if repository.get(name) != snapshot_ledger.get(name):
+                problems.append(f'{name} differs between repository and snapshot ledger')
     if problems:
         raise RuntimeError('; '.join(problems))
-    repository = {name: digest for name, sql, digest in migrations}
     bins = comparison.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
     applied, production, grants = read_source(production_dsn(), bins, include_acl=True)
-    result = dict(ledger=ledger_proof(repository, applied))
+    result = dict(ledger=ledger_proof(repository, applied, baseline))
     if ledger_only or not result['ledger']['ok']:
         return result
     result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
         scope='all pg_dump schema objects; internal namespace ACLs, database ACLs and large objects excluded; role passwords and grantor identities excluded',
-        normalization='owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared by common role without grantor identity; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
+        normalization='same runtime roles and migration principal; public snapshot identity-prose projection; owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; explicit non-owner ACLs compared for original snapshot-declared common roles without grantor identity; external-principal ACL counts informational; owners normalized to <owner>; implicit ACL defaults excluded, including PUBLIC defaults; owner role attributes informational')
     result['grants'] = dict(ok=None, status='not_run', stage='production plus pending',
                             reason='disposable reconstruction did not complete')
     try:
-        reference = build_schema(ROOT / 'db/schema.sql', bins)
+        # The unprovisioned rebuild defines the original common-role ACL scope.
+        # Provision external roles only for conditional schema objects and
+        # preserve observed owner/membership options in the comparison fixture.
+        declared = build_schema(ROOT / 'db/schema.sql', bins)
+        reference = build_schema(ROOT / 'db/schema.sql', bins, grants=grants)
         with tempfile.TemporaryDirectory(prefix='production-schema-proof-') as directory:
             source = Path(directory) / 'production.sql'
             source.write_text(production)
             built = build_schema(source, bins, production_ledger=applied, grants=grants)
-        difference = schema_difference(built['dump'], reference['dump'])
-        result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending', status='complete')
+        from pii_guard import load_corpus, sanitize_snapshot
+        corpus = load_corpus(ROOT / 'ops/config/public-source-identities.v1.json')
+        difference = schema_difference(sanitize_snapshot(built['dump'], corpus),
+                                       sanitize_snapshot(reference['dump'], corpus))
+        result['grants'] = dict(privilege_difference(built['grants'], reference['grants'], declared['grants']['roles']), stage='production plus pending', status='complete')
         result['equivalence'].update(ok=built['ledger'] == reference['ledger'] == repository and not difference,
             ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)
     except RuntimeError as exc:
@@ -317,6 +357,9 @@ def main():
             print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
                   f"stage={result['grants']['stage']} production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])} "
                   f"role_attribute_differences={len(result['grants']['production_only_attributes']) + len(result['grants']['snapshot_only_attributes'])}")
+            external = result['grants']['informational_external_acl_counts']
+            print('external-principal ACLs: INFO',
+                  f"production={external['production']} snapshot={external['snapshot']}")
             informational = result['grants']['informational_owner_attributes']
             print('owner role attributes: INFO',
                   f"differences={len(informational['production_only']) + len(informational['snapshot_only'])}")

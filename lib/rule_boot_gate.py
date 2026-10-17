@@ -67,10 +67,13 @@ WHEN THE DIGEST MOVES MID-SESSION. Every boot page carries the corpus digest
 and page count. When a fetch in any context returns a digest or page count
 that differs from the arm, PostToolUse re-arms the session with it, so every
 context of the session is held again at its next call until it has the new
-pages. There is no timer and no network in the gate: a change is seen at
+pages. There is no timer or network in PreToolUse: a change is seen at
 SessionStart or at the next boot fetch by any context in the session (every
 new subagent makes one). A session whose contexts are all complete and that
 starts no subagent keeps the digest it has until one of those happens.
+A successful canonical compact receipt with a changed digest triggers a bounded
+store read in PostToolUse to recover page count and length before re-arming.
+That metadata probe confirms no page for any context.
 
 DELIVERY BEFORE EFFECTS. Ordinary tools remain held until every full page is
 confirmed. Outages, repeated attempts, missing adapters and unwritable state
@@ -1284,6 +1287,28 @@ def _filtered_success(response, digest):
             and receipt["rule_boot"].get("digest") == digest)
 
 
+def _arm_from_boot(session_id, arm, boot):
+    total = int((boot or {}).get("pages_total") or 0)
+    digest = str((boot or {}).get("digest") or "")
+    if total >= 1 and digest and (not arm or arm.get("status") != "armed"
+                                  or arm.get("digest") != digest
+                                  or int(arm.get("pages_total") or 0) != total):
+        arm = {**(arm or {}), "schema": SCHEMA, "status": "armed", "digest": digest,
+               "pages_total": total, "rearmed_by": "fetch", "armed_at": int(time.time())}
+        # No arm yet (SessionStart did not arm, or parallel fetches each see
+        # none): derive the epoch from the digest, so racing writes agree and
+        # no fetch's confirmed pages are stranded under a losing epoch.
+        arm.setdefault("epoch", "fetch-" + safe_key(digest.replace("sha256:", ""), "none")[:12])
+        arm.pop("reason", None)
+        arm.pop("total_chars", None)
+        arm.pop("carry_epoch", None)
+        arm.pop("by_agent", None)
+        if int((boot or {}).get("total_chars") or 0) >= 1:
+            arm["total_chars"] = int(boot["total_chars"])
+        write_arm(session_id, arm)
+    return arm
+
+
 def observe(payload):
     """PostToolUse on a boot fetch: record what came back, re-arm the session
     on a new digest or page count. Returns a notice for the context, or None.
@@ -1319,6 +1344,18 @@ def observe(payload):
     if not direct and answer != "boot":
         answer = "inconclusive"
     arm = read_arm(session_id)
+    if (preserves_success and not direct and answer == "inconclusive" and succeeded
+            and arm and arm.get("status") == "armed" and isinstance(boot, dict)
+            and boot.get("digest") != arm.get("digest")
+            and _filtered_success(response, boot.get("digest"))):
+        # Compact receipts omit page count and length. Verify those against the
+        # store before changing the arm; this probe never confirms a page read.
+        live, _reason = _live_page_one(timeout=2)
+        current = live.get("rule_boot") if isinstance(live, dict) else None
+        if (isinstance(current, dict) and _is_page(current, 1)
+                and int(current.get("pages_total") or 0) >= 1
+                and current.get("digest") == boot.get("digest")):
+            arm = _arm_from_boot(session_id, arm, current)
     # Only a FILTERED fetch can be confirmed by its digest alone: an unfiltered
     # answer printed everything, so a wrong page or a missing text is just that.
     if (not direct and answer == "inconclusive" and succeeded and arm and arm.get("status") == "armed"
@@ -1331,27 +1368,8 @@ def observe(payload):
         _clear_stale(folder, page)
         return None
     if answer in ("boot", "out_of_range"):
+        arm = _arm_from_boot(session_id, arm, boot)
         total = int((boot or {}).get("pages_total") or 0)
-        digest = str((boot or {}).get("digest") or "")
-        if total >= 1 and digest and (not arm or arm.get("status") != "armed"
-                                      or arm.get("digest") != digest
-                                      or int(arm.get("pages_total") or 0) != total):
-            arm = {**(arm or {}), "schema": SCHEMA, "status": "armed", "digest": digest,
-                   "pages_total": total, "rearmed_by": "fetch", "armed_at": int(time.time())}
-            # No arm yet (SessionStart did not arm, or parallel fetches each see
-            # none): derive the epoch from the digest, so racing writes agree and
-            # no fetch's confirmed pages are stranded under a losing epoch.
-            arm.setdefault("epoch", "fetch-" + safe_key(digest.replace("sha256:", ""), "none")[:12])
-            arm.pop("reason", None)
-            arm.pop("total_chars", None)
-            arm.pop("carry_epoch", None)
-            arm.pop("by_agent", None)
-            if int((boot or {}).get("total_chars") or 0) >= 1:
-                arm["total_chars"] = int(boot["total_chars"])
-            try:
-                write_arm(session_id, arm)
-            except OSError:
-                return None
         if answer == "boot" and not arm.get("total_chars"):
             arm["total_chars"] = int(boot["total_chars"])
             try:

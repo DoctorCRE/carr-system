@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 from pathlib import Path
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from migration_source import migration_names, read_migration
 
 
 SECTION_MARKER = "-- CARR GRANTS (bin/schema-snapshot.sh) — not produced by pg_dump."
@@ -638,9 +642,8 @@ def load_current_grants_to_role(
     schema_path: Path, migrations_dir: Path, role: str
 ) -> list[str]:
     migrations = [
-        (path.name, path.read_text(encoding="utf-8"))
-        for path in sorted(migrations_dir.iterdir())
-        if path.suffix == ".sql"
+        (name, read_migration(migrations_dir.parent, name))
+        for name in sorted(migration_names(migrations_dir.parent))
     ]
     return compose_grants_to_role(
         schema_path.read_text(encoding="utf-8"), migrations, role

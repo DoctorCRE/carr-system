@@ -33,7 +33,6 @@ insert into dot_definer_calls(signature,arguments,writing) values
  ('ops.fence_jobs_when_definition_disabled()', '', true),
  ('ops.foundation_assurance_accepted_manifest(uuid)', $$'00000000-0000-4000-8000-000000000001'::uuid$$, false),
  ('ops.foundation_assurance_subject_maker(uuid)', $$'00000000-0000-4000-8000-000000000001'::uuid$$, false),
- ('ops.heavy_build_ready_plan_gate()', '', false),
  ('ops.hermes_runtime_admission_for_brief(text,text,text,text,text)',
   $$'synthetic-runtime'::text,'synthetic-profile'::text,'synthetic-sponsor'::text,'WR-DOT-SYNTHETIC'::text,'synthetic-binding'::text$$, false),
  ('ops.issue_execution_envelope_v1(text,text,uuid)',

@@ -1,6 +1,6 @@
 {
-  "exported_at": "2026-10-13T22:31:01Z",
-  "rule_count": 222,
+  "exported_at": "2026-10-17T06:16:36Z",
+  "rule_count": 221,
   "rules": {
     "015183f5": {
       "enforcement_class": "machine_enforceable",
@@ -100,10 +100,6 @@
     },
     "1f750181": {
       "enforcement_class": "judgment_advisory",
-      "state": "admitted"
-    },
-    "1fcaa63a": {
-      "enforcement_class": "machine_enforceable",
       "state": "admitted"
     },
     "1fddcffb": {
@@ -382,10 +378,6 @@
       "enforcement_class": "human_only",
       "state": "admitted"
     },
-    "67580c28": {
-      "enforcement_class": "judgment_advisory",
-      "state": "admitted"
-    },
     "67e48aaf": {
       "enforcement_class": "human_only",
       "state": "admitted"
@@ -472,6 +464,10 @@
     },
     "83b9a362": {
       "enforcement_class": "judgment_advisory",
+      "state": "admitted"
+    },
+    "8400cd3d": {
+      "enforcement_class": "human_only",
       "state": "admitted"
     },
     "847f9995": {

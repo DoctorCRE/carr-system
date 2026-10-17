@@ -217,14 +217,14 @@ if len(routing_rows) == 1:
 # starts or hands off new work: the plan tool, a subagent, a cloud builder, a
 # workflow, a Codex desk dispatch, and the record-layer intake verbs. Only
 # structural kinds count, because content_regex rows no longer run on tool
-# payloads. Like ede4b241 it is still PROPOSED (see 9): its detectors are
-# tested from PROPOSED_ROWS, and the committed table delivers nothing for it.
+# payloads. Keep the saved detector examples tested, and separately verify
+# that the active sizing rule is present in the committed planning table.
 SIZING = "8400cd3d"
 sizing_rows = [t for t in proposed_triggers if SIZING in t["rule_ids"]]
 sizing_planning_rows = [row for row in sizing_rows
                         if row["source"] == "seeded_detector"]
-check("proposed new-work sizing rule is in neither the map nor triage, and delivers nothing",
-      proposed_and_undelivered(SIZING), sizing_rows)
+check("active new-work sizing rule has a triage row and a compiled planning detector",
+      SIZING in JIT_IDS and any(SIZING in row["rule_ids"] for row in triggers), sizing_rows)
 check("new-work sizing rule compiles one row per declared detector, none content_regex",
       sorted(row["kind"] for row in sizing_planning_rows)
       == ["bash_family", "verb", "verb"], sizing_rows)

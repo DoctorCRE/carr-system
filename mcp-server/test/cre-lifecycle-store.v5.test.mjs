@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -2243,8 +2244,8 @@ const CANDIDATE_SQL = readFileSync(
   new URL("../../ops/cre-lifecycle.candidate.sql", import.meta.url), "utf8");
 
 test("migration 0704 IS the reviewed candidate, byte for byte", () => {
-  const migration = readFileSync(
-    new URL("../../migrations/0704_cre_lifecycle.sql", import.meta.url), "utf8");
+  const migration = readMigration(
+    new URL("../../migrations/0704_cre_lifecycle.sql", import.meta.url));
   assert.equal(migration, CANDIDATE_SQL);
   assert.match(CANDIDATE_SQL, /NUMBERED AS migrations\/0704_cre_lifecycle\.sql, byte for byte/);
 });

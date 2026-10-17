@@ -1,7 +1,8 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { randomUUID } from "node:crypto";
 
 import {
@@ -87,7 +88,7 @@ async function inTransaction(client, fn) {
 
 test("T-CONST: the 0519 enum lists equal the module's closed constants in both directions",
   () => {
-    const sql = readFileSync(MIGRATION, "utf8");
+    const sql = readMigration(MIGRATION);
     const entryKinds = sql.match(/NOT entry_kind\.[\s\S]*?\(([^)]*)'\)\)/);
     const listed = `${entryKinds[1]}'`.replace(/^[\s\S]*?\(/, "")
       .replace(/\s|'/g, "").split(",").filter(Boolean);
@@ -105,7 +106,7 @@ test("T-CONST: the 0519 enum lists equal the module's closed constants in both d
   });
 
 test("T-CONST: 0519 stores the module's own field names, never the request's older words", () => {
-  const sql = readFileSync(MIGRATION, "utf8");
+  const sql = readMigration(MIGRATION);
   for (const frozen of ["amount_units", "vendor_reference", "authorization_ceiling_units",
     "entry_id", "conversion_id", "basis_digest", "tree_version"]) {
     assert.ok(sql.includes(frozen), `0519 does not carry the frozen module field ${frozen}`);

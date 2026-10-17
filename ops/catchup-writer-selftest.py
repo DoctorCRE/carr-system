@@ -5,12 +5,15 @@ The timeline definition and its ACL come from the committed schema contract.
 Only ref resolution is reduced to a fixture view; timeline/replay queries run
 through the real registered handler and PostgreSQL privilege enforcement.
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
 import importlib.util
 import os
-from pathlib import Path
 import re
 import subprocess
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -78,9 +81,9 @@ def main():
             select summary from v_subject_timeline; rollback;
         """)
         # Located by name so a renumber cannot silently drop the grant under test.
-        [migration] = ROOT.glob("migrations/[0-9][0-9][0-9][0-9]_catchup_writer_timeline_read.sql")
-        sql(migration.read_text())
-        sql(migration.read_text())  # Reapplication must preserve the contract.
+        [migration] = [name for name in migration_names(ROOT) if name.endswith("_catchup_writer_timeline_read.sql")]
+        sql(read_migration(ROOT, migration))
+        sql(read_migration(ROOT, migration))  # Reapplication must preserve the contract.
         node_env = dict(env, CARR_FIXTURE_PG_SOCKET=str(socket))
         result = subprocess.run(["node", "--input-type=module", "-"], cwd=ROOT,
             env=node_env, text=True, capture_output=True, timeout=60, input="""

@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -248,32 +249,16 @@ test("a sourced triaged disposition uses the exact receipt-backed database trans
   assert.equal(events[0][2], "set-work-shape-disposition");
 });
 
-test("a sourced initial not_required is preflighted: heavy refuses without mutation, standard proceeds, zero rows defers to the setter", async () => {
+test("a sourced initial not_required goes directly to the receipt-backed setter", async () => {
   const args = { idempotency_key: "44444444-4444-4444-8444-444444444444", work_request: SOURCED_WORK.ref, base_version: 3, disposition: "not_required", fixed_surface_ref: "safe:fixed", rationale: "The surface is fixed." };
-  const heavy = dispositionFake(SOURCED_WORK, { classify: [{ work_request_id: SOURCED_WORK.id, ref: SOURCED_WORK.ref, tier: "heavy", reasons: ["signal:new_capability"], shape_disposition: null, shape_ready: false }] });
-  await assert.rejects(
-    heavy.tools["set-work-shape-disposition"].handler(heavy.db, actor, args),
-    error => error instanceof ToolError && error.payload.error === "heavy_build_shape_required" && error.payload.classification_reasons[0] === "signal:new_capability",
-  );
-  assert.equal(heavy.calls.some(call => call.sql.includes("set_sourced_work_request_shape_disposition")), false);
-  assert.equal(heavy.calls.some(call => call.sql.includes("update ops.work_request")), false);
-  assert.equal(heavy.events.length, 0);
-  const classify = heavy.calls.find(call => call.sql.includes("classify_sourced_work_request_build"));
-  assert.deepEqual(classify.params, [SOURCED_WORK.ref, 3, "", "[]", "{}"]);
-
-  const standard = dispositionFake(SOURCED_WORK, { classify: [{ tier: "standard", reasons: [] }], setter: settled });
-  const result = await standard.tools["set-work-shape-disposition"].handler(standard.db, actor, args);
+  const fake = dispositionFake(SOURCED_WORK, { setter: settled });
+  const result = await fake.tools["set-work-shape-disposition"].handler(fake.db, actor, args);
   assert.equal(result.work_request.shape_disposition, "not_required");
   assert.equal(result.work_request.version, 4);
-  const transition = standard.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
+  assert.equal(fake.calls.some(call => call.sql.includes("classify_sourced_work_request_build")), false);
+  const transition = fake.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
   assert.deepEqual(transition.params, [SOURCED_WORK.ref, 3, "not_required", "safe:fixed", "The surface is fixed.", actor.id, args.idempotency_key]);
-  assert.equal(standard.events.length, 1);
-
-  // A zero-row wrapper answer is not "standard": the sourced setter's own
-  // classifier call decides, so the call still goes to the setter.
-  const deferred = dispositionFake(SOURCED_WORK, { classify: [], setter: settled });
-  await deferred.tools["set-work-shape-disposition"].handler(deferred.db, actor, args);
-  assert.equal(deferred.calls.filter(call => call.sql.includes("set_sourced_work_request_shape_disposition")).length, 1);
+  assert.equal(fake.events.length, 1);
 });
 
 test("a sourced initial required and a not_required to required correction never consult the classifier", async () => {
@@ -378,7 +363,7 @@ test("write-work-shape requires the effective receipt-backed required dispositio
 });
 
 test("migration 0492 admits one linked forward correction behind the exact sourced setter", () => {
-  const sql = fs.readFileSync(FORWARD_CORRECTION_MIGRATION, "utf8");
+  const sql = readMigration(FORWARD_CORRECTION_MIGRATION);
   assert.doesNotMatch(sql, /^\s*(begin|commit)\s*;\s*$/im, "0339+ migrations use the runner's single transaction");
   assert.match(sql, /create table ops\.sourced_work_request_shape_disposition_correction_receipt \(\n  id uuid primary key default gen_random_uuid\(\),\n  work_request_id uuid not null unique references ops\.work_request\(id\),\n  idempotency_key uuid not null unique,\n  original_receipt_id uuid not null unique references ops\.sourced_work_request_shape_disposition_receipt\(id\)/);
   assert.match(sql, /result_version integer not null check \(result_version = base_version \+ 1\)/);
@@ -397,11 +382,7 @@ test("migration 0492 admits one linked forward correction behind the exact sourc
   const correctionLookup = setter.indexOf("from ops.sourced_work_request_shape_disposition_correction_receipt c\n   where c.idempotency_key = p_idempotency_key");
   const rowLock = setter.indexOf("where x.ref = p_work_request\n   for update");
   const correctionInsert = setter.indexOf("insert into ops.sourced_work_request_shape_disposition_correction_receipt");
-  const classifier = setter.indexOf("ops.heavy_build_classification(w.id, '', '[]'::jsonb, '{}'::jsonb)");
   assert.ok(lock >= 0 && lock < originalLookup && originalLookup < correctionLookup && correctionLookup < rowLock && rowLock < correctionInsert);
-  assert.equal((setter.match(/ops\.heavy_build_classification\(/g) || []).length, 1);
-  assert.ok(classifier > correctionInsert, "the classifier refusal belongs to the initial not_required branch only");
-  assert.match(setter, /if p_disposition = 'not_required' then\n      classification := ops\.heavy_build_classification/);
   assert.match(setter, /or w\.program_key is not null or w\.program_ordinal is not null then/);
   assert.match(setter, /is distinct from \(null::text,null::text,null::text,null::uuid,null::timestamptz\)\n       or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\) then/);
   assert.match(setter, /or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\)\n       or exists \(select 1 from ops\.sourced_work_request_shape_disposition_correction_receipt c/);
