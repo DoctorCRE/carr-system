@@ -13,8 +13,10 @@ sys.path.insert(0, str(REPO))
 from lib.rule_scope_lookup import lookup
 from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION,
     canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text)
-from lib import rule_routes
+from lib import rule_cards, rule_routes
 from lib.hook_runtime import decision, run
+
+CARD_TOOL = 'rule-cards'
 
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
 UNAVAILABLE = "RULE LOOKUP UNAVAILABLE. The rule store could not be reached for this action; it was not blocked. Recover rules through standing-context if the work depends on them."
@@ -77,16 +79,58 @@ def refused(event, text=FAILURE):
     return {'decision': 'block', 'reason': text}
 
 
+def select_cards(payload, inherited_rule_ids, identity, cards, *, corpus_digest, dedupe=True):
+    """Fresh PLANNING/TOOL/PROMPT cards for this event, at most three, once per context epoch."""
+    session = payload['session_id']
+    agent = payload.get('agent_id') or payload.get('agentId')
+    keys = {rule_cards.card_key(c['id']): c['id'] for c in cards if c['placement'] != 'CORE'}
+    seen = set()
+    if dedupe:
+        fresh = set(rule_routes.fresh_ids(session, CARD_TOOL, list(keys), agent_id=agent,
+                                          corpus_digest=corpus_digest))
+        seen = {card_id for key, card_id in keys.items() if key not in fresh}
+    event = {k: payload[k] for k in ('hook_event_name', 'tool_name', 'tool_input', 'prompt') if k in payload}
+    chosen, _ = rule_cards.routed_cards(event, inherited_rule_ids, seen, cards=cards,
+                                        scope=rule_cards.personal_scope(identity))
+    return chosen
+
+
+def apply_cards(payload, selection, *, dedupe=True):
+    """Card-covered rules leave the rule receipt and arrive only as cards.
+
+    Fails open: if the cards cannot load, the selection is delivered as before;
+    if card selection fails, no cards are added. Neither ever blocks a tool.
+    """
+    try:
+        cards = rule_cards.load_cards()
+        covered = rule_cards.covered_rule_ids(cards)
+    except Exception:
+        return selection, []
+    inherited = sorted({r['id'][:8] for r in selection['rules']})
+    unresolved = [i for i in selection['unresolved'] if i['rule_id'][:8] not in covered]
+    trimmed = dict(selection, rules=[r for r in selection['rules'] if r['id'][:8] not in covered],
+                   unresolved=unresolved, complete=not selection['data_defects'] and not unresolved)
+    chosen = []
+    if payload['hook_event_name'] in rule_cards.ROUTED_EVENTS:
+        try:
+            chosen = select_cards(payload, inherited, selection['identity'], cards,
+                                  corpus_digest=selection['corpus_digest'], dedupe=dedupe)
+        except Exception:
+            chosen = []
+    return trimmed, chosen
+
+
 def delivery_receipt(payload, selection, task, *, dedupe=True):
     event = payload['hook_event_name']
     session = payload['session_id']
     agent = payload.get('agent_id') or payload.get('agentId')
     tool = payload.get('tool_name', '')
+    selection, cards = apply_cards(payload, selection, dedupe=dedupe)
     ids = [r['id'] for r in selection['rules']]
     if dedupe:
         ids = rule_routes.fresh_ids(session, tool or event, ids, agent_id=agent, corpus_digest=selection["corpus_digest"])
     rules = [r for r in selection['rules'] if r['id'] in ids]
-    if not rules and (selection['complete'] or event == 'Stop'):
+    if not rules and not cards and (selection['complete'] or event == 'Stop'):
         # Nothing to deliver. On Stop, an advisory gap notice re-opens the turn and loops.
         return None
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,
@@ -99,6 +143,8 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
             'rule_ids': sorted(ids), 'data_defects': selection['data_defects'],
             'unresolved': selection['unresolved'], 'models': selection['models'],
             'complete': selection['complete'], 'instruction': LOOKUP_INSTRUCTION}
+    if cards:
+        base['cards'] = [rule_cards.card_view(c) for c in cards]
     def render(full, overflow):
         row = dict(base, rules=full, overflow=overflow)
         row['receipt_id'] = receipt_id(row)
@@ -122,6 +168,9 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
         return refused(event)
     if dedupe:
         rule_routes.record_delivered(session, tool or event, [r['id'] for r in full], agent_id=agent, corpus_digest=selection["corpus_digest"])
+        if cards:
+            rule_routes.record_delivered(session, CARD_TOOL, [rule_cards.card_key(c['id']) for c in cards],
+                                         agent_id=agent, corpus_digest=selection["corpus_digest"])
     if event == 'Stop' and rules:
         return refused(event, text)
     return context(text, event)
