@@ -1,4 +1,5 @@
 import { canonicalJson } from "./artifact-trust.js";
+import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
@@ -511,11 +512,7 @@ function industryEventId(value) {
 }
 
 function industryEventRecord(row) {
-  const version = typeof row.version === "string" && /^[1-9][0-9]*$/.test(row.version)
-    ? Number(row.version) : row.version;
-  if (!Number.isSafeInteger(version) || version < 1)
-    throw new ToolError({ error: "industry_event_version_invalid" });
-  return { ...row, version };
+  return integerFields(row, ["version"], "industry_event_version_invalid");
 }
 
 // [defect 18b12fda-b79c-43a1-86c4-51b9623e12fd, 2026-08-14] THE VIOLATION WAS OURS.
@@ -8519,8 +8516,7 @@ export const TOOLS = {
     }, required: ["idempotency_key", "event_id", "base_version"] },
     handler: async (c, actor, args) => {
       const eventId = industryEventId(args.event_id);
-      if (!Number.isSafeInteger(args.base_version) || args.base_version < 1)
-        throw new ToolError({ error: "industry_event_base_version_invalid" });
+      safeInteger(args.base_version, "industry_event_base_version_invalid", { allowString: false });
       const clean = validateIndustryEventFields(args, { partial: true });
       const keys = ["title", "organizer", "kind", "starts_at", "ends_at", "location", "is_virtual",
         "url", "relevance_note", "attendance_intent", "owner_partner", "status", "source"]
