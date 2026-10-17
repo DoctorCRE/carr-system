@@ -214,13 +214,13 @@ class Processes:
     def users(self, target, census):
         table, _, opened, _ = census
         known = {p.pid for p in table}
+        target_name, prefix = str(target), str(target) + os.sep
+        users = {pid for pid, names in opened.items()
+                 if any(str(n) == target_name or str(n).startswith(prefix) for n in names)}
         # A process born after ps but before lsof still vetoes deletion.
         unknown = [orphan.Process(pid, 0, -1, "", 0, 0, "", "", "")
-                   for pid, names in opened.items() if pid not in known
-                   and any(n == target or n.is_relative_to(target) for n in names)]
-        return unknown + [p for p in table if any(n == target or n.is_relative_to(target)
-                                       for n in opened.get(p.pid, set()))
-                or str(target) in p.args]
+                   for pid in sorted(users - known)]
+        return unknown + [p for p in table if p.pid in users or target_name in p.args]
 
     def stop_orphans(self, target, config, ended, census):
         if not ended:
