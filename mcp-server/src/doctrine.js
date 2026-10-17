@@ -907,7 +907,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
     "standing-context": {
       description: "THE SESSION BRIEFING VERB (the #219 design, P6 of the doctrine-store build): everything a session must load before working, served from the store — the taught rules (shared + this partner's personal set, with the counts to recite), pending action-required items, and the doctrine catalog pointer. This replaces file-based rule loading: a session that calls this needs no compiled-rules file, no vault read, no Drive. Call it FIRST in any session; recite the counts back to the partner. DEFAULT detail is `gist` — one line per rule, which is what a boot call can actually hold. Pull full text for the handful you need with rule_ids, or everything with detail=full (large; see the payload note in the handler).",
       inputSchema: { type: "object", properties: {
-        detail: { type: "string", enum: ["gist", "full", "boot"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: the full text of every always-on rule plus a one-line index of every active rule, paged (see `page`); hooks/rule-boot-gate.py denies other tools in a context until it has fetched every page of the current digest." },
+        detail: { type: "string", enum: ["gist", "full", "boot", "scopes"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: the full text of every always-on rule plus a one-line index of every active rule, paged (see `page`); hooks/rule-boot-gate.py denies other tools in a context until it has fetched every page of the current digest. scopes = machine lookup input: all sponsor-visible active rules, including introduction rules, with original scope and complete binding text. This catalog is not a delivery receipt or a boot replacement." },
         page: { type: "integer", minimum: 1, description: "detail=boot only: which page of the rule boot to return (1-based, DEFAULT 1). Each response carries pages_total and the exact next call; read every page." },
         rule_ids: { type: "array", items: { type: "string" }, description: "Short ids (the 8-char form the gist prints, e.g. '4e104d4c'). These rules come back in FULL regardless of detail — the lookup path for 'read the binding text before acting on a gist'." },
         workflow: { type: "string", description: "Optional current workflow key used to select applicable typed constraints after registry activation. It is ALSO read as a rule pack name: pass the pack the observed work belongs to and its rules compile into the payload. `rule_delivery.pack_index` lists the names and what triggers each." },
@@ -934,6 +934,20 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             hint: "this authenticated runtime expected a server-derived sponsoring human. Reconnect through the registered OAuth flow; do not supply a partner argument." });
         }
         const who = scope.sponsor;
+        if (args.detail === "scopes") {
+          const rules = (await c.query(
+            `select id, statement, scope, personal_to, taught_by, human_quote
+               from v_compiled_rules
+              where (personal_to is null or ($1::text is not null and personal_to = $1))
+              order by id
+              /* standing-context:scope-catalog */`, [who])).rows;
+          const material = JSON.stringify({ sponsor: who, rules });
+          const corpusDigest = await sha256hex(material);
+          return { ok: true, schema: "rule-scope-catalog/v1", corpus_digest: corpusDigest,
+            identity: { organization_tenant_id: organizationTenantForActor(actor),
+              sponsoring_human_id: who, agent_principal_id: actor.slug,
+              runtime_principal: actor.slug }, rules };
+        }
         // THE GATED RULE BOOT (mcp-server/src/rule-boot.js). Its own branch,
         // ahead of every other read: it needs only the sponsor-scoped rule
         // rows (same filter as the recitation below) and must stay cheap,
