@@ -954,6 +954,47 @@ failed = rail.process(prompt_payload(client="codex"), runner=Runner(returncode=1
 check("rule failure stays visible and redacts provider output",
       "RULE DELIVERY FAILED: selector_call (nonzero)" in context(failed) and "SUPER-SECRET" not in context(failed))
 
+# Replay the 2026-10-17 selections with obsolete 1fcaa63a absent at the door.
+recorded_ids = ["49533583", "c66dc739", "1fcaa63a", "df55c398", "b42f11a0"]
+recorded_ids, recorded_packs = rail.semantic_delivery(REPO, recorded_ids)
+recorded_advice = [{"id": rid, "probability": 1.0,
+                    "binding_model": "compiled-trigger", "source": "compiled_trigger"}
+                   for rid in recorded_ids]
+partial_response = gen_selector_result(
+    packs=recorded_packs, ids=[rid for rid in recorded_ids if rid != "1fcaa63a"])
+partial_output = rail.process(prompt_payload(), runner=Runner(partial_response),
+                              adviser=lambda _: recorded_advice)
+partial_text = context(partial_output)
+check("a missing obsolete rule cannot discard authenticated deterministic matches",
+      all(f"binding jit rule {rid}" in partial_text
+          for rid in recorded_ids if rid != "1fcaa63a")
+      and "1fcaa63a" in partial_text and "RULE DELIVERY FAILED" in partial_text,
+      partial_text[:200])
+
+for label, broken_runner in [
+        ("unavailable", Runner(returncode=1, stderr="SUPER-SECRET")),
+        ("invalid JSON", Runner(stdout="not-json SUPER-SECRET")),
+        ("invalid identity", Runner(dict(partial_response, identity={}))),
+        ("timeout", Runner(error=subprocess.TimeoutExpired("selector", 1)))]:
+    fallback_text = context(rail.process(
+        prompt_payload(client="codex"), runner=broken_runner,
+        adviser=lambda _: recorded_advice))
+    check(f"{label} preserves computed matches with a redacted failure",
+          all(rid in fallback_text for rid in recorded_ids)
+          and "RULE DELIVERY FAILED" in fallback_text
+          and "SUPER-SECRET" not in fallback_text
+          and "binding jit rule" not in fallback_text, fallback_text[:200])
+
+large_partial = copy.deepcopy(partial_response)
+large_partial["shared_rules"][0]["statement"] = "binding huge rule " + "x" * 12000
+large_partial_text = context(rail.process(
+    prompt_payload(), runner=Runner(large_partial), adviser=lambda _: recorded_advice))
+check("partial prompt delivery fits the visible cap and names every match",
+      rail.rule_routes.within_cap(large_partial_text)
+      and all(rid in large_partial_text for rid in recorded_ids)
+      and "binding jit rule" in large_partial_text
+      and "overflow" in large_partial_text, large_partial_text[:200])
+
 # The verdict cache is keyed on the hook payload's OWN session id — never the
 # environment, never a shared default — so the default adviser must carry it.
 default_adviser_calls: list[tuple] = []
