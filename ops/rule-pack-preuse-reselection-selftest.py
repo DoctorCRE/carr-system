@@ -192,6 +192,37 @@ check("receipt carries every dynamic member and full binding text",
       and all(item["statement"].startswith("binding scheduled rule") for item in row["rules"]),
       row.get("rules"))
 
+# A retired store row is different from a missing row in a stale local pack.
+retired_id = EXPECTED_IDS[0]
+remaining_ids = EXPECTED_IDS[1:]
+retired_response = selector_result(ids=remaining_ids)
+retired_response["rule_ids_retired"] = [retired_id]
+retired_output = rail.process(payload(client="codex"), runner=Runner(retired_response))
+try:
+    retired_row = receipt(retired_output)
+except ValueError:
+    retired_row = {}
+check("scheduled retirement preserves delivery of remaining binding rules",
+      retired_row.get("rule_ids") == remaining_ids
+      and [r["id"] for r in retired_row.get("rules", [])] == remaining_ids
+      and retired_row.get("retired_rule_ids") == [retired_id], retired_output)
+check("scheduled retirement receipt validates without crediting retired text",
+      contract.validate_receipt(retired_row, repo=REPO), retired_row)
+
+missing_response = copy.deepcopy(retired_response)
+missing_response["shared_rules"] = missing_response["shared_rules"][1:]
+missing_response["rule_ids_not_found"] = remaining_ids[:1]
+check("a genuinely missing scheduled rule still surfaces beside retirement",
+      "selector did not return every scheduled rule" in context(
+          rail.process(payload(client="codex"), runner=Runner(missing_response))))
+
+for bad_retired in ([retired_id, retired_id], ["not-an-id"], retired_id):
+    malformed_response = copy.deepcopy(retired_response)
+    malformed_response["rule_ids_retired"] = bad_retired
+    check("malformed retirement evidence cannot drop a scheduled rule: " + repr(bad_retired),
+          "selector_unavailable" in context(rail.process(
+              payload(client="codex"), runner=Runner(malformed_response))))
+
 # Claude persists additionalContext over 10,000 characters behind a preview.
 # A full receipt beyond that limit is a false delivery claim: the model only
 # sees the preview, while Stop telemetry may credit every scheduled rule.
