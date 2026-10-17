@@ -10,7 +10,7 @@ import time
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from lib.rule_scope_lookup import lookup, moment_judge
+from lib.rule_scope_lookup import lookup
 from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION,
     canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text)
 from lib import rule_routes
@@ -139,7 +139,6 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
             return None
     if not payload.get('session_id') or (event == 'PreToolUse' and not payload.get('tool_use_id')):
         return refused(event)
-    deadline = time.monotonic() + 18
     try:
         task = task_text(payload)
         current = {'hook_event_name': event, 'task': task,
@@ -147,7 +146,7 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
         if payload.get('last_assistant_message'):
             current['response'] = payload['last_assistant_message']
         selection = lookup(current, runner=runner,
-                           judge=judge or moment_judge(payload['session_id'], deadline=deadline))
+                           judge=judge)
         if not valid_local_identity(selection['identity']):
             return refused(event)
         return delivery_receipt(payload, selection, task, dedupe=dedupe)
