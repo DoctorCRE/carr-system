@@ -409,6 +409,13 @@ def document(entries):
     }
 
 
+def prune_inactive(doc, rules):
+    """Retain reviewed compilation evidence verbatim for surviving pack rules."""
+    live = {row["id"] for row in rules}
+    return document([entry for group in ("rules", "proposals")
+                     for rid, entry in doc.get(group, {}).items() if rid in live])
+
+
 PROMOTABLE_MODES = {"triggered", "residual", "always_on"}
 
 

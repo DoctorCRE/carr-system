@@ -1,16 +1,16 @@
 {
  "counts": {
-  "jev_compiled_triggers": 118,
+  "jev_compiled_triggers": 106,
   "pack_fallback_triggers": 9,
-  "seeded_detector_rule_ids": 49,
-  "seeded_detector_triggers": 14,
+  "seeded_detector_rule_ids": 47,
+  "seeded_detector_triggers": 13,
   "structural_extra_triggers": 2,
-  "triggers": 149
+  "triggers": 136
  },
  "generated_from": {
-  "jev_triggers_sha256": "f9d9f31c3f713dd62d5c9ea9c31bdbaffd6fe08435ae63b61cb0d706aac70a38",
-  "map_sha256": "eed92f90f880c10c4aeaad4a1220de16d59f38a3eaf4e7a2bee7f14e155546cb",
-  "triage_sha256": "8d16cb0706a1d568fa31df27a08cb1d880863e4456e700b041afb63ae7bde924"
+  "jev_triggers_sha256": "e9e34e24f1cebcb8539ce8397d4616450181f6efac137ace828e5fa7d760d400",
+  "map_sha256": "cdc4747ce0916966f2b24f255483da1c4fcaca064e982d9a8d98ec3fdb8415d7",
+  "triage_sha256": "2a852dcbebf20dc7b2a8cb814a28e1ba4aca1c33e275b805a7db41ab1d01401f"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
@@ -39,7 +39,6 @@
     "173119a8",
     "b42f11a0",
     "bd4a6d22",
-    "c1547ed1",
     "e65efc68"
    ],
    "source": "seeded_detector",
@@ -122,8 +121,8 @@
     "018ce972",
     "19304882",
     "20d106f1",
-    "bbffc139",
-    "bc4145f6"
+    "bc4145f6",
+    "d3774a28"
    ],
    "source": "pack_fallback",
    "trigger_id": "cc742ee35ba5"
@@ -146,27 +145,15 @@
   {
    "kind": "content_regex",
    "packs": [
-    "delegation-council"
-   ],
-   "pattern": "\\bfable\\b",
-   "rule_ids": [
-    "fb110a39"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "5616fb7fb4fd"
-  },
-  {
-   "kind": "content_regex",
-   "packs": [
     "engineering-git"
    ],
    "pattern": "\\bgit\\b|\\bbranch\\b|\\bworktree\\b|\\bcommit\\b|\\bpush\\b|\\bpull\\ request\\b|\\bci\\b|\\bgate\\b|\\bhook\\b|\\bmigration\\b|\\bschema\\b|\\bdeploy\\b|\\bwrangler\\b|\\btest\\b|\\bselftest\\b|\\bconfig\\ file\\b|\\bbaseline\\b|\\brefactor\\b|\\barchitecture\\ fork\\b",
    "rule_ids": [
-    "204391be",
     "43e2ef76",
     "486584d6",
     "4e104d4c",
-    "67e48aaf"
+    "67e48aaf",
+    "73381d78"
    ],
    "source": "pack_fallback",
    "trigger_id": "963b8f2da763"
@@ -210,7 +197,6 @@
    ],
    "pattern": "\\bsubagent\\b|\\bdelegate\\b|\\bfan\\-out\\b|\\bcouncil\\b|\\bchair\\b|\\bred\\ team\\b|\\bexecutor\\b|\\bgrok\\b|\\bcopilot\\b|\\bworkflow\\b|\\bseat\\b|\\bbrief\\b",
    "rule_ids": [
-    "4a77c35d",
     "661d7757",
     "d7f74c93",
     "f673326b"
@@ -243,9 +229,9 @@
    "rule_ids": [
     "015183f5",
     "0c1bac27",
-    "113b3833",
     "179be4b8",
-    "19ebbeb3"
+    "19ebbeb3",
+    "1c21263c"
    ],
    "source": "pack_fallback",
    "trigger_id": "33efd5146cbe"
@@ -302,30 +288,6 @@
   {
    "kind": "path_pattern",
    "packs": [
-    "engineering-git"
-   ],
-   "pattern": "*Management/system-evolution-plan.md",
-   "rule_ids": [
-    "c1547ed1"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "2ccbe25e82a5"
-  },
-  {
-   "kind": "path_pattern",
-   "packs": [
-    "joe-development"
-   ],
-   "pattern": "*hooks/ledger-sweep.py",
-   "rule_ids": [
-    "bbffc139"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "de72ad57b2c8"
-  },
-  {
-   "kind": "path_pattern",
-   "packs": [
     "governance-rules"
    ],
    "pattern": "*lib/record_sources.py",
@@ -370,18 +332,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "c3707ba54fd2"
-  },
-  {
-   "kind": "path_pattern",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "*system/run.sh",
-   "rule_ids": [
-    "113b3833"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "c51770627e7f"
   },
   {
    "kind": "path_pattern",
@@ -925,19 +875,6 @@
   },
   {
    "kind": "prompt_regex",
-   "negative_pattern": "\\bvertical\\s+state\\b|\\bscaffold\\s+repo\\b|\\bwrite\\s+test\\b",
-   "packs": [
-    "engineering-git"
-   ],
-   "pattern": "\\bconverted\\-and\\-deleted\\b|\\bderived\\s+outputs\\b|\\bplacement\\s+test\\b|\\bdrive\\s+vault\\b|\\bstate\\s+lives\\b|\\blives\\s+repo\\b|\\bplacement\\b|\\bsop\\b",
-   "rule_ids": [
-    "c1547ed1"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "f915813ace73"
-  },
-  {
-   "kind": "prompt_regex",
    "negative_pattern": "\\bknowing\\s+everything\\b",
    "packs": [
     "delegation-council"
@@ -1203,18 +1140,6 @@
   {
    "kind": "prompt_regex",
    "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bimmediately\\s+check\\b|\\banything\\s+decided\\b|\\bdecided\\s+built\\b|\\bcheck\\s+index\\b|\\bgrep\\b",
-   "rule_ids": [
-    "fb2b263d"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "0a75cbf28fa8"
-  },
-  {
-   "kind": "prompt_regex",
-   "packs": [
     "source-study"
    ],
    "pattern": "\\bincorporates\\s+applicable\\b|\\bapplicable\\s+learnings\\b|\\bhonestly\\s+including\\b|\\bincluding\\s+declined\\b|\\bdoctrine\\s+file\\b|\\bcapture\\s+row\\b|\\bfeeds\\s+link\\b|\\bfile\\s+log\\b|\\bmerged\\b|\\bfeeds\\b",
@@ -1287,20 +1212,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "da1b71174421"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bteach\\s+verb\\b",
-   "packs": [
-    "engineering-git",
-    "governance-rules"
-   ],
-   "pattern": "\\bmissing\\s+verb\\b|\\bverb\\s+build\\b",
-   "rule_ids": [
-    "204391be"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "50d5f24099f8"
   },
   {
    "kind": "prompt_regex",
@@ -1548,31 +1459,6 @@
   },
   {
    "kind": "prompt_regex",
-   "negative_pattern": "\\bquestion\\s+practitioners\\b|\\brun\\s+passes\\b",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bretrieval\\-as\\-code\\b|\\bretrieve\\s+question\\b|\\bbeyond\\s+standing\\b|\\blookup\\s+beyond\\b|\\bstanding\\s+core\\b|\\brun\\s+retrieve\\b|\\bretrieve\\b|\\blookup\\b|\\bno\\-hit\\b",
-   "rule_ids": [
-    "113b3833"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "83a59b29320d"
-  },
-  {
-   "kind": "prompt_regex",
-   "packs": [
-    "delegation-council"
-   ],
-   "pattern": "\\bscaffold\\s+code\\b|\\bdelegate\\b|\\bsweep\\b",
-   "rule_ids": [
-    "fb110a39"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "ff27328696dd"
-  },
-  {
-   "kind": "prompt_regex",
    "negative_pattern": "\\bcodex\\s+grok\\b|\\bvotes\\s+seat\\b",
    "packs": [
     "source-study"
@@ -1621,18 +1507,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "ae226821b186"
-  },
-  {
-   "kind": "prompt_regex",
-   "packs": [
-    "engineering-git"
-   ],
-   "pattern": "\\bsingle\\s+source\\b|\\bsource\\s+truth\\b|\\bduplicated\\b|\\bfact\\s+home\\b",
-   "rule_ids": [
-    "0f38532e"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "dc771601ddf8"
   },
   {
    "kind": "prompt_regex",
@@ -1695,19 +1569,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "798c515225ca"
-  },
-  {
-   "kind": "prompt_regex",
-   "negative_pattern": "\\bnames\\s+known\\b",
-   "packs": [
-    "engineering-git"
-   ],
-   "pattern": "\\bwas\\s+detected\\s+and\\s+a\\s+repair\\s+was\\s+made\\b|\\bautonomous\\s+repair\\b|\\brepair\\s+known\\b|\\bbriefing\\b",
-   "rule_ids": [
-    "a2e78f48"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "646ea9819317"
   },
   {
    "kind": "prompt_regex",
@@ -1919,31 +1780,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "3c6bbe715c00"
-  },
-  {
-   "kind": "verb",
-   "packs": [
-    "engineering-git",
-    "governance-rules"
-   ],
-   "pattern": "__list\\-verbs$",
-   "rule_ids": [
-    "204391be"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "0dfeaae99dd0"
-  },
-  {
-   "kind": "verb",
-   "packs": [
-    "joe-development"
-   ],
-   "pattern": "__log\\-decision$",
-   "rule_ids": [
-    "bbffc139"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "2f1a8b12cd26"
   }
  ],
  "work_request": "WR-000019"

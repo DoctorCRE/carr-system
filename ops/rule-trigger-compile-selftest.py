@@ -48,6 +48,25 @@ rtc = load("rule_trigger_compile_t", RTC_PATH)
 rtd = load("rule_trigger_delivery_t", RTD_PATH)
 
 
+# Retirement maintenance preserves a reviewed survivor and an unreviewed proposal,
+# including their exact evidence, while removing inactive entries in both groups.
+prune_rows = [
+    {"id": "11111111", "mode": "triggered", "review": {"reviewer": "independent"},
+     "statement_sha256": "old-evidence", "triggers": {"keywords": {"bounded cue": 0.91}}},
+    {"id": "22222222", "mode": "review_required", "proposed_mode": "residual"},
+    {"id": "33333333", "mode": "residual"},
+    {"id": "44444444", "mode": "review_required", "proposed_mode": "triggered"},
+]
+prune_input = rtc.document(prune_rows)
+prune_result = rtc.prune_inactive(prune_input, [{"id": "11111111"}, {"id": "22222222"}])
+check("retirement pruning preserves reviewed evidence without promoting a proposal",
+      prune_result["rules"] == {"11111111": prune_rows[0]}
+      and prune_result["proposals"] == {"22222222": prune_rows[1]})
+check("retirement pruning is idempotent and does not mutate its input",
+      rtc.prune_inactive(prune_result, [{"id": "11111111"}, {"id": "22222222"}]) == prune_result
+      and len(prune_input["rules"]) == 2 and len(prune_input["proposals"]) == 2)
+
+
 class Client:
     @staticmethod
     def noul(instructions, true=None, false=None):

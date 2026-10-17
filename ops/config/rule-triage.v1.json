@@ -1,9 +1,9 @@
 {
   "counts": {
-    "core": 20,
-    "gate": 33,
+    "core": 16,
+    "gate": 30,
     "gone": 0,
-    "jit": 169
+    "jit": 158
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -79,24 +79,11 @@
       "title_gist": "3\u20134 levels deep max; unambiguous folder names"
     },
     {
-      "home": "core",
-      "id": "0f38532e",
-      "reason": "Single source of truth: every file, idea and fact has ONE home, everything else points at it. Foundational architecture law; absorbs d367188d's terser restatement of the same consolidation bias (below).",
-      "title_gist": "Single source of truth: every file, idea and fact has ONE home, and every other mention points at it rather"
-    },
-    {
       "home": "jit",
       "id": "1021fa84",
       "jit_trigger_hint": "Fires on the specific moment named in the rule: Read Joe brokerage-first, not system-first",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
       "title_gist": "Read Joe brokerage-first, not system-first"
-    },
-    {
-      "home": "jit",
-      "id": "113b3833",
-      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Retrieval-as-code: for any lookup beyond the standing core, run `~/carr-system/run.sh\u2026",
-      "reason": "Currently only SURFACED (a reminder via 'session_boot' at file lookup, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
-      "title_gist": "Retrieval-as-code: for any lookup beyond the standing core, run `~/carr-system/run.sh retrieve \"<question>\"`"
     },
     {
       "home": "jit",
@@ -191,13 +178,6 @@
     },
     {
       "home": "jit",
-      "id": "1d50a3bb",
-      "reason": "PR #1801 retires conduct_stop; the rule remains binding prose without this automated control.",
-      "title_gist": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN",
-      "jit_trigger_hint": "a Stop-blocked turn being re-sent"
-    },
-    {
-      "home": "jit",
       "id": "1f3a7372",
       "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
       "title_gist": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a",
@@ -213,19 +193,6 @@
       "jit_trigger_hint": "Drafting a vendor introduction, a shared guest list, or answering 'who do we know' for a specific client/vendor pairing.",
       "reason": "No verb represents 'co-invite'; guest lists live in prose a human sends, and the exception is Joe's to give for a given event. (planned_control on record: a guest-list check running the same pairing predicate as e6e0b0e7, once events and vendor Category are both on the record.)",
       "title_gist": "A shared-event guest list is assembled outside any tool call"
-    },
-    {
-      "home": "core",
-      "id": "1fddcffb",
-      "reason": "Core routing test: the always-read core holds only what every session needs regardless of task. The founding definition of 'core' itself, which this very S7 triage operationalizes. Its named enforcement (00_Context/sweep-sop.md) is a pre-cutover file pointer and reads stale; the TEST it states is exactly what this slice applies via rule-triage.v1.json instead.",
-      "title_gist": "Core routing test: the always-read core holds ONLY what every session needs regardless of task"
-    },
-    {
-      "home": "jit",
-      "id": "204391be",
-      "jit_trigger_hint": "Deliver with engineering-git or governance-rules when product work discovers a missing record-layer verb.",
-      "reason": "The missing-verb obligation binds during a product build or research task; its existing production load tag names both packs.",
-      "title_gist": "MISSING VERB, BUILD IT"
     },
     {
       "home": "jit",
@@ -330,13 +297,6 @@
       "id": "2e8b4840",
       "reason": "Already machine-enforced via control 'lead_client_pair' (mcp-server/src/tools.js); binds confirm-merge, before anything is written. Failure mode on violation: verb refuses the write",
       "title_gist": "A lead record and a client record for the same person are not a duplicate"
-    },
-    {
-      "carrying_control": "pr_only_main_ruleset",
-      "home": "gate",
-      "id": "308ef1de",
-      "reason": "WR-000019 slice S3 (2026-08-27) retired hooks/git-writer-gate.py; reassigned to control 'pr_only_main_ruleset' (the PR-only main ruleset + required hosted CI, backed locally by ops/githooks/pre-commit), the same structural control the enforcement map itself now names for this rule. Binds later than the retired gate did -- at merge, not the git command itself. Failure mode on violation: server-side push rejection / local pre-commit refusal on a direct main commit",
-      "title_gist": "TWO-WRITER DISCIPLINE COVERS THE GIT WORKING TREE"
     },
     {
       "home": "jit",
@@ -457,13 +417,6 @@
       "jit_trigger_hint": "non-trivial build completion"
     },
     {
-      "carrying_control": "vault_salvage",
-      "home": "gate",
-      "id": "4402973a",
-      "reason": "Already machine-enforced via control 'vault_salvage' (ops/vault-drift-watch.py); binds after drift detection and before any regeneration or overwrite. Failure mode on violation: quarantine, diff and intake evidence precede healing",
-      "title_gist": "SALVAGE BEFORE HEAL. When any healing, regeneration, or rewrite process detects content that was written to"
-    },
-    {
       "detector": {
         "kind": "verb",
         "pattern": "^(WebFetch|WebSearch)$"
@@ -519,13 +472,6 @@
     },
     {
       "home": "jit",
-      "id": "4a77c35d",
-      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires when a session fills or orders the Dot's work queue.",
-      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
-      "title_gist": "THE DOT WORKS REAL TASKS THAT SAVE PAID CLAUDE TOKENS FIRST"
-    },
-    {
-      "home": "jit",
       "id": "4a9188f3",
       "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: THE TEST FOR CAPTURING A TAUGHT RULE IS 'would the system have to ask this again?' \u2014\u2026",
       "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at partner correction, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
@@ -551,12 +497,6 @@
       "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
       "title_gist": "A NEWLY DEPLOYED VERB IS REACHABLE IMMEDIATELY THROUGH `call-verb`",
       "jit_trigger_hint": "new-verb deployment claim"
-    },
-    {
-      "home": "core",
-      "id": "4f7c348f",
-      "reason": "Session-boot recitation law. Its literal wording (recite both rule FILES) is stale post the 2026-08-19 md-cutoff per Joe's own A28 note \u2014 the files are gone, counts now come from standing-context \u2014 but the underlying obligation (state what's loaded, both counts) is still every session's opening act. Stays CORE pending the wording fix Joe owns; not this slice's to amend.",
-      "title_gist": "EVERY session recites BOTH rule files for its partner \u2014 the shared file AND that partner's own personal file"
     },
     {
       "home": "jit",
@@ -625,12 +565,6 @@
       "id": "57d83b75",
       "reason": "Already machine-enforced via control 'record_research' (mcp-server/src/tools.js); binds new-client creation. Failure mode on violation: record verb refuses an unsourced intake",
       "title_gist": "On every new client, run open-source research before working from the handed-over record alone"
-    },
-    {
-      "home": "core",
-      "id": "58b44ccb",
-      "reason": "A session that cannot reach the code repo stops and says so; a cloud session teleports rather than improvising. The base 'no second surface, say so' law this repo's own CLAUDE.md restates verbatim.",
-      "title_gist": "A SESSION THAT CANNOT REACH THE CODE REPO STOPS, AND IF IT IS A CLAUDE CODE CLOUD SESSION IT TELEPORTS RATHER"
     },
     {
       "home": "jit",
@@ -1089,13 +1023,6 @@
       "title_gist": "When Joe feeds a link or source, never evaluate it only against its stated use case"
     },
     {
-      "carrying_control": "index_upkeep",
-      "home": "gate",
-      "id": "99e951b9",
-      "reason": "Already machine-enforced via control 'index_upkeep' (ops/githooks/index-upkeep-check.py, ops/githooks/pre-commit); binds pre-commit when content is added under an indexed multi-folder category. Failure mode on violation: pre-commit refusal",
-      "title_gist": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes"
-    },
-    {
       "detector": {
         "kind": "verb",
         "pattern": "__(new-deal|update-deal|patch-deal-field|reassign-deal|revert-deal-field)$"
@@ -1126,13 +1053,6 @@
       "id": "9ff56260",
       "reason": "Already machine-enforced via control 'egress_guard' (hooks/guard-unattended.py); binds before command exposes key path. Failure mode on violation: PreToolUse deny",
       "title_gist": "A command a session issues never names a private key path"
-    },
-    {
-      "home": "jit",
-      "id": "a2e78f48",
-      "jit_trigger_hint": "Deliver with engineering-git when a known defect is found and its repair is available.",
-      "reason": "Autonomous repair binds when engineering work finds a known fix; the existing production load tag names engineering-git.",
-      "title_gist": "AUTONOMOUS REPAIR OF KNOWN ISSUES"
     },
     {
       "home": "jit",
@@ -1277,13 +1197,6 @@
     },
     {
       "home": "jit",
-      "id": "bbffc139",
-      "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: THE LEDGER TRIGGERS. Joe's development kit has produced ZERO entries since it was\u2026",
-      "reason": "Currently only SURFACED (a reminder via 'ledger_capture' at ledger trigger, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
-      "title_gist": "THE LEDGER TRIGGERS. Joe's development kit has produced ZERO entries since it was enacted, and the cause is"
-    },
-    {
-      "home": "jit",
       "id": "bc4145f6",
       "jit_trigger_hint": "Delivered by pack(s) joe-development \u2014 fires on: Joe's curriculum rule: as sessions observe his working patterns through the development\u2026",
       "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
@@ -1323,17 +1236,6 @@
       "reason": "PR #1801 retires staged_gate_bless; the rule remains binding prose without this automated control.",
       "title_gist": "RE-BLESS THE GATE BASELINE IN THE SAME COMMIT THAT CHANGES A GATE",
       "jit_trigger_hint": "committing a change to a gate"
-    },
-    {
-      "detector": {
-        "kind": "bash_family",
-        "pattern": "\\bgit\\s+push\\b|\\bgh\\s+pr\\s+(?:create|merge)\\b"
-      },
-      "home": "jit",
-      "id": "c1547ed1",
-      "jit_trigger_hint": "Delivered by pack(s) engineering-git \u2014 fires on: The placement test: state WHERE it lives and why \u2014 repo `~/carr-system` vs the Drive\u2026",
-      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
-      "title_gist": "The placement test: state WHERE it lives and why \u2014 repo `~/carr-system` vs the Drive vault vs BOTH"
     },
     {
       "home": "jit",
@@ -1475,13 +1377,6 @@
       "title_gist": "Concept coherence is his edge: when the conceptual model and file reality diverge, surface it explicitly and"
     },
     {
-      "home": "jit",
-      "id": "d5dcfe26",
-      "jit_trigger_hint": "Fires on the specific moment named in the rule: A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER\u2026",
-      "reason": "Currently only SURFACED (a reminder via 'drift_claim' at asserting a present state is wrong, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
-      "title_gist": "A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER BY ITS LABEL"
-    },
-    {
       "carrying_control": "calendar_intake",
       "home": "gate",
       "id": "d7c69aa6",
@@ -1603,13 +1498,6 @@
     },
     {
       "home": "jit",
-      "id": "e8868cbe",
-      "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
-      "title_gist": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION",
-      "jit_trigger_hint": "system acceptance claim"
-    },
-    {
-      "home": "jit",
       "id": "eaa31ac5",
       "reason": "PR #1801 retires completion_evidence; the rule remains binding prose without this automated control.",
       "title_gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or",
@@ -1727,24 +1615,6 @@
       "jit_trigger_hint": "Delivered by pack(s) records-intake \u2014 fires on: Vendor relationship levels are defined by countable events, never by impression",
       "reason": "Currently only SURFACED (a reminder via 'vendor_level_drift' at nightly, over every active vendor, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core.",
       "title_gist": "Vendor relationship levels are defined by countable events, never by impression"
-    },
-    {
-      "detector": {
-        "kind": "content_regex",
-        "pattern": "\\bfable\\b"
-      },
-      "home": "jit",
-      "id": "fb110a39",
-      "jit_trigger_hint": "Delivered by pack(s) delegation-council \u2014 fires on: FABLE IS RESERVED FOR ITS BEST USE CASES",
-      "reason": "Reclassified 2026-08-27 (WR-000019 slice S4): hooks/delegation-gate.py stopped denying anything and now only records a per-session ledger, with a Stop ANNOUNCE for a materially under-delegated session \u2014 never a hard deny. Currently only SURFACED (a reminder via 'delegation_tripwire' at fan-out brief, not a hard deny) \u2014 situational content, belongs delivered by pack/moment rather than the always-loaded core, matching this map's other delegation_tripwire rules (2b66211d, df55c398).",
-      "title_gist": "FABLE IS RESERVED FOR ITS BEST USE CASES"
-    },
-    {
-      "home": "jit",
-      "id": "fb2b263d",
-      "jit_trigger_hint": "Delivered by pack(s) governance-rules \u2014 fires on: Cross-references at the point of change: anything decided/built \u2192 immediately check other\u2026",
-      "reason": "No machine predicate exists for this today (judgment_ambient) \u2014 a real situational judgment call, not a universal law.",
-      "title_gist": "Cross-references at the point of change: anything decided/built \u2192 immediately check other INDEX/context files"
     },
     {
       "home": "jit",

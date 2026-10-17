@@ -1,8 +1,8 @@
 {
  "counts": {
-  "residual": 16,
-  "rules": 118,
-  "triggered": 102
+  "residual": 15,
+  "rules": 109,
+  "triggered": 94
  },
  "generated_note": "Written only by ops/rule-trigger-compile.py: one Jev request per pack-layer rule, keyed to the rule's statement digest. ops/rule-jit-compile.py turns these into rows of ops/config/rule-jit-triggers.v1.json. Never hand-edit.",
  "proposals": {},
@@ -130,64 +130,6 @@
      "partnership complementarity": 0.67
     },
     "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "0f38532e": {
-   "always_on_probability": 0.2,
-   "id": "0f38532e",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.31,
-   "packs": [
-    "engineering-git"
-   ],
-   "statement_sha256": "e493035f9798dffeaa9a531bf05775986b823fe4a9b416b4f5a641de0fc83e18",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "duplicated": 0.66,
-     "fact home": 0.5,
-     "single source": 0.55,
-     "source truth": 0.54
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "113b3833": {
-   "always_on_probability": 0.12,
-   "id": "113b3833",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "question practitioners": 0.66,
-    "run passes": 0.72
-   },
-   "no_cue_probability": 0.11,
-   "packs": [
-    "governance-rules"
-   ],
-   "statement_sha256": "007285563e76e05bf4b8a99e35cc32ae17730270e30fb694fad890b6a40d9b5c",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "beyond standing": 0.59,
-     "lookup": 0.5,
-     "lookup beyond": 0.62,
-     "no-hit": 0.54,
-     "retrieval-as-code": 0.54,
-     "retrieve": 0.63,
-     "retrieve question": 0.65,
-     "run retrieve": 0.65,
-     "standing core": 0.52
-    },
-    "paths": {
-     "system/run.sh": 0.53
-    },
     "tools": {},
     "verbs": {}
    }
@@ -406,33 +348,6 @@
     "paths": {},
     "tools": {},
     "verbs": {}
-   }
-  },
-  "204391be": {
-   "always_on_probability": 0.04,
-   "id": "204391be",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "teach verb": 0.83
-   },
-   "no_cue_probability": 0.16,
-   "packs": [
-    "engineering-git",
-    "governance-rules"
-   ],
-   "statement_sha256": "b960534b6aa8eceb2281e086a53479ae161a748742e20831e82f35ea7e1df28f",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "missing verb": 0.66,
-     "verb build": 0.59
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {
-     "list-verbs": 0.57
-    }
    }
   },
   "20d106f1": {
@@ -914,29 +829,6 @@
      "local/fetch-calendar.sh": 0.67,
      "out/calendar-archive/calendar-joe-*.ics": 0.73
     },
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "4a77c35d": {
-   "always_on_probability": 0.11,
-   "id": "4a77c35d",
-   "mode": "residual",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.34,
-   "packs": [
-    "delegation-council"
-   ],
-   "rejected_proposed_mode": "triggered",
-   "review_note": "The only surviving cue 'dot chatgpt' requires 'dot' immediately followed by 'chatgpt', which natural prompts ('the Dot', 'send it to ChatGPT') will not contain, so a triggered rule with no live cue is effectively never delivered; needs cues like 'the dot' or 'chatgpt'.",
-   "reviewed_at": "2026-10-15",
-   "reviewed_by": "independent-subagent-opus",
-   "statement_sha256": "e70472ec4fc8a2fed61fd07cd0f14bc25e47cea152eadbc0f577e4ac666ef96e",
-   "triggers": {
-    "commands": {},
-    "keywords": {},
-    "paths": {},
     "tools": {},
     "verbs": {}
    }
@@ -2074,32 +1966,6 @@
     "verbs": {}
    }
   },
-  "a2e78f48": {
-   "always_on_probability": 0.06,
-   "id": "a2e78f48",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "names known": 0.79
-   },
-   "no_cue_probability": 0.29,
-   "packs": [
-    "engineering-git"
-   ],
-   "statement_sha256": "02cf08cb028b84cdfc42195054ed5b48b0475dc972ac953de4ed66e1103dbc31",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "autonomous repair": 0.57,
-     "briefing": 0.54,
-     "repair known": 0.52,
-     "was detected and a repair was made": 0.8
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
   "a3da3d39": {
    "always_on_probability": 0.14,
    "id": "a3da3d39",
@@ -2422,29 +2288,6 @@
     "verbs": {}
    }
   },
-  "bbffc139": {
-   "always_on_probability": 0.06,
-   "id": "bbffc139",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.14,
-   "packs": [
-    "joe-development"
-   ],
-   "statement_sha256": "dd60cd601382d047b2bd2e237e5b4eeda47ac65ebbed421779b4e58574503f2c",
-   "triggers": {
-    "commands": {},
-    "keywords": {},
-    "paths": {
-     "hooks/ledger-sweep.py": 0.57
-    },
-    "tools": {},
-    "verbs": {
-     "log-decision": 0.62
-    }
-   }
-  },
   "bc4145f6": {
    "always_on_probability": 0.14,
    "id": "bc4145f6",
@@ -2524,40 +2367,6 @@
      "vendor compatibility": 0.59
     },
     "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "c1547ed1": {
-   "always_on_probability": 0.22,
-   "id": "c1547ed1",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {
-    "scaffold repo": 0.61,
-    "vertical state": 0.66,
-    "write test": 0.66
-   },
-   "no_cue_probability": 0.14,
-   "packs": [
-    "engineering-git"
-   ],
-   "statement_sha256": "735cbf2c794641019058283b3714e483e6a36669229f95356131464180c6b0f9",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "converted-and-deleted": 0.58,
-     "derived outputs": 0.64,
-     "drive vault": 0.52,
-     "lives repo": 0.51,
-     "placement": 0.58,
-     "placement test": 0.72,
-     "sop": 0.52,
-     "state lives": 0.51
-    },
-    "paths": {
-     "Management/system-evolution-plan.md": 0.57
-    },
     "tools": {},
     "verbs": {}
    }
@@ -3384,54 +3193,6 @@
      "two-way": 0.71,
      "two-way contact": 0.74,
      "vendor relationship": 0.5
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "fb110a39": {
-   "always_on_probability": 0.34,
-   "id": "fb110a39",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.06,
-   "packs": [
-    "delegation-council"
-   ],
-   "statement_sha256": "b5b0b3b57c962093d60af775ff96732fa6068ffa4975e7eb221f8df5a48fe9ae",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "delegate": 0.78,
-     "scaffold code": 0.65,
-     "sweep": 0.73
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
-  "fb2b263d": {
-   "always_on_probability": 0.1,
-   "id": "fb2b263d",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.18,
-   "packs": [
-    "governance-rules"
-   ],
-   "statement_sha256": "da7ecf902a515233282af02b563c463502834e94c3b9197249e1d9f948b1082b",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "anything decided": 0.61,
-     "check index": 0.57,
-     "decided built": 0.56,
-     "grep": 0.63,
-     "immediately check": 0.58
     },
     "paths": {},
     "tools": {},

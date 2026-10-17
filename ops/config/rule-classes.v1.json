@@ -76,14 +76,6 @@
    "summary": "When creating folders or filenames, keep 3-4 levels deep, descriptive names, no final_v2.",
    "when": "naming files or folders"
   },
-  "0f38532e": {
-   "always_on": false,
-   "chars": 597,
-   "class": "e",
-   "moment": "duplicate of 14181e60 (single source of truth / DB-first)",
-   "summary": "Near-duplicate of 14181e60: single-source-of-truth doctrine already covered by the DB-first gate.",
-   "when": "duplicate DB-first rule"
-  },
   "1021fa84": {
    "always_on": true,
    "always_on_reason": "class-a",
@@ -93,15 +85,6 @@
    "personal_to": "joe",
    "summary": "When assessing Joe's work patterns, read him as brokerage-first; don't infer unfinished-project habits from build-phase files.",
    "when": "any turn - assessing Joe's work patterns/history"
-  },
-  "113b3833": {
-   "always_on": false,
-   "chars": 283,
-   "class": "b",
-   "moment": "run.sh retrieve lookup beyond standing core",
-   "personal_to": "joe",
-   "summary": "When looking up anything beyond core memory, run retrieve script first, read only that",
-   "when": "run.sh retrieve lookup beyond standing core"
   },
   "11b2b73b": {
    "always_on": false,
@@ -206,14 +189,6 @@
    "summary": "When friction (refusal, error, workaround) hits, fix the root cause in-session; never route around it silently.",
    "when": "unexpected friction"
   },
-  "1d50a3bb": {
-   "always_on": false,
-   "chars": 1393,
-   "class": "d",
-   "moment": "conduct_stop gate",
-   "summary": "When a Stop gate reopens a turn, resend only the missing delta, never the whole message",
-   "when": "conduct_stop gate"
-  },
   "1f3a7372": {
    "always_on": false,
    "chars": 1516,
@@ -221,23 +196,6 @@
    "moment": "completion_evidence gate",
    "summary": "When a scheduled run ends, write its findings, decisions, and rulings to the record before it ends.",
    "when": "completion_evidence gate"
-  },
-  "1fddcffb": {
-   "always_on": true,
-   "always_on_reason": "class-a",
-   "chars": 217,
-   "class": "a",
-   "moment": "deciding what belongs in always-read core vs task-loaded files",
-   "summary": "When deciding what's always-loaded, keep the core to universal needs and push task-specific content to loaded files.",
-   "when": "choosing core versus task-loaded context"
-  },
-  "204391be": {
-   "always_on": false,
-   "chars": 1298,
-   "class": "b",
-   "moment": "discovering a missing record-layer verb while building",
-   "summary": "When a needed record-layer verb is missing, build it via the heavy path, don't just ask",
-   "when": "discovering a missing record-layer verb while building"
   },
   "20d106f1": {
    "always_on": false,
@@ -356,14 +314,6 @@
    "summary": "At confirm-merge, never flag or merge a lead/client pair for the same person as duplicates.",
    "when": "confirm-merge verb"
   },
-  "308ef1de": {
-   "always_on": false,
-   "chars": 1245,
-   "class": "d",
-   "moment": "pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main",
-   "summary": "Before branching or switching in a shared checkout, claim the working tree or use a worktree instead.",
-   "when": "before a change reaches main"
-  },
   "30a189fb": {
    "always_on": true,
    "chars": 138,
@@ -475,14 +425,6 @@
    "summary": "Before building anything non-trivial, plan how it will be verified before implementation starts",
    "when": "completion_evidence gate"
   },
-  "4402973a": {
-   "always_on": false,
-   "chars": 860,
-   "class": "b",
-   "moment": "healing/regenerating detected drifted vault content",
-   "summary": "Before regenerating or overwriting drifted content, quarantine it and route it through intake verbs first.",
-   "when": "healing/regenerating detected drifted vault content"
-  },
   "466a545a": {
    "always_on": false,
    "chars": 1188,
@@ -535,14 +477,6 @@
    "summary": "Before any first edit to tracked repo files, take an isolated worktree; never edit the canonical tree.",
    "when": "first tracked repository edit"
   },
-  "4a77c35d": {
-   "always_on": false,
-   "chars": 712,
-   "class": "b",
-   "moment": "filling or ordering the Dot's work queue",
-   "summary": "Fill the Dot's queue with token-saving research and build-support first; PR reviews only where useful.",
-   "when": "filling or ordering the Dot's work queue"
-  },
   "4a9188f3": {
    "always_on": false,
    "chars": 1773,
@@ -574,15 +508,6 @@
    "moment": "completion_evidence gate, new-verb deployment claim",
    "summary": "Before claiming a verb is missing, run list-verbs/call-verb; never assume a redeploy is needed.",
    "when": "completion_evidence gate, new-verb deployment claim"
-  },
-  "4f7c348f": {
-   "always_on": true,
-   "always_on_reason": "class-a",
-   "chars": 652,
-   "class": "a",
-   "moment": "session start",
-   "summary": "At session start, recite both shared and that partner's personal rule files before any other output.",
-   "when": "session start"
   },
   "4fae20f4": {
    "always_on": true,
@@ -651,14 +576,6 @@
    "moment": "record_research deny_gate (tools.js) - new-client creation",
    "summary": "On every new client, verify the intake record against open-source research and report discrepancies.",
    "when": "creating a client"
-  },
-  "58b44ccb": {
-   "always_on": false,
-   "chars": 1270,
-   "class": "d",
-   "moment": "one_repo gate",
-   "summary": "If the code repo is unreachable, stop and say so; cloud sessions teleport instead",
-   "when": "one_repo gate"
   },
   "58cef3a1": {
    "always_on": true,
@@ -876,9 +793,9 @@
    "always_on": false,
    "chars": 198,
    "class": "e",
-   "moment": "duplicate of 204391be",
-   "summary": "Duplicate of 204391be: a missing record-layer verb should be built immediately, not left manual",
-   "when": "duplicate of 204391be"
+   "moment": "duplicate of 49c627cc",
+   "summary": "Duplicate of 49c627cc: verify record-layer capabilities and build a genuinely missing verb",
+   "when": "duplicate of 49c627cc"
   },
   "740bb505": {
    "always_on": false,
@@ -1082,14 +999,6 @@
    "summary": "When reviewing a source, run a lateral pass against the whole system, not just its stated use case.",
    "when": "reviewing a fed link or source"
   },
-  "99e951b9": {
-   "always_on": false,
-   "chars": 221,
-   "class": "d",
-   "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
-   "summary": "When adding content under an indexed multi-folder category, update its INDEX.md in the same session.",
-   "when": "adding content under an indexed category"
-  },
   "9d80fd2d": {
    "always_on": false,
    "chars": 277,
@@ -1121,14 +1030,6 @@
    "moment": "egress_guard gate",
    "summary": "Never name a private key path in a command; let the script resolve its own secret",
    "when": "egress_guard gate"
-  },
-  "a2e78f48": {
-   "always_on": false,
-   "chars": 693,
-   "class": "c",
-   "moment": "detecting a known broken thing with a known fix",
-   "summary": "When a known issue with a known fix is found, repair it immediately and brief; heavy-path still gates.",
-   "when": "detecting a known broken thing with a known fix"
   },
   "a3da3d39": {
    "always_on": false,
@@ -1281,15 +1182,6 @@
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:team_identity"
   },
-  "bbffc139": {
-   "always_on": false,
-   "chars": 4416,
-   "class": "c",
-   "moment": "Joe overrules, predicts, compresses, rules, or corrects within CARR work",
-   "personal_to": "joe",
-   "summary": "When Joe overrules, predicts, compresses, rules, or corrects within work scope, log it to the ledger.",
-   "when": "Joe overrides, predicts, compresses, rules or corrects"
-  },
   "bc4145f6": {
    "always_on": false,
    "chars": 858,
@@ -1322,14 +1214,6 @@
    "moment": "committing a change to a gate script or enforcement map",
    "summary": "When committing a change to a gate script, re-bless the baseline hash in the same commit.",
    "when": "committing a change to a gate script or enforcement map"
-  },
-  "c1547ed1": {
-   "always_on": false,
-   "chars": 433,
-   "class": "b",
-   "moment": "creating a new workflow/system/asset",
-   "summary": "For any new workflow or asset, state where it lives (repo, vault, or both) and why.",
-   "when": "creating a new workflow/system/asset"
   },
   "c1db316c": {
    "always_on": true,
@@ -1477,15 +1361,6 @@
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:partner_persona"
   },
-  "d5dcfe26": {
-   "always_on": true,
-   "always_on_reason": "class-a",
-   "chars": 2579,
-   "class": "a",
-   "moment": "asserting a decision or memo state is stale or unruled",
-   "summary": "Before asserting a memo is current or a decision unruled, check for later amendments and search by behavior.",
-   "when": "asserting a decision or memo state is stale or unruled"
-  },
   "d7c69aa6": {
    "always_on": false,
    "chars": 2586,
@@ -1597,14 +1472,6 @@
    "moment": "building any gate, hook, linter, or CI validator",
    "summary": "When building any gate, hook, linter, or CI check, write and run its test before the implementation.",
    "when": "building any gate, hook, linter, or CI validator"
-  },
-  "e8868cbe": {
-   "always_on": false,
-   "chars": 2852,
-   "class": "d",
-   "moment": "completion_evidence gate",
-   "summary": "(Full text is in the always-on section; no summary is faithful enough to stand for it.)",
-   "when": "shipping, parking work on Joe, or weekend-spanning runs"
   },
   "eaa31ac5": {
    "always_on": false,
@@ -1740,22 +1607,6 @@
    "summary": "Nightly, flag vendors whose recorded relationship level disagrees with countable two-way contact/value evidence.",
    "when": "nightly vendor-level-drift check over active vendors"
   },
-  "fb110a39": {
-   "always_on": false,
-   "chars": 2299,
-   "class": "b",
-   "moment": "starting a task or fan-out brief (model choice)",
-   "summary": "Reserve Fable for design/judgment; delegate execution work to Opus/Sonnet/Codex/Grok subagents by default",
-   "when": "starting a task or fan-out brief (model choice)"
-  },
-  "fb2b263d": {
-   "always_on": false,
-   "chars": 211,
-   "class": "b",
-   "moment": "after deciding or building, checking other index/context files",
-   "summary": "After deciding or building anything, grep other index files for stale phrasing before declaring it propagated.",
-   "when": "after decisions or builds, checking propagation"
-  },
   "fc21a431": {
    "always_on": true,
    "always_on_reason": "conversational-moment (b->a, Jev-confirmed)",
@@ -1779,10 +1630,8 @@
  "schema": "carr-rule-classes/v1",
  "keep_full_text": {
   "0e22e34a": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "113b3833": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 11 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "185013c6": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "1b8e7f43": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "204391be": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "20d106f1": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "24e10ee8": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 23 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "25fcddee": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
@@ -1799,14 +1648,11 @@
   "a7784a18": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 24 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "a8c55a47": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "b42f11a0": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "bbffc139": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 38 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "c1547ed1": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "c20dc3d5": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 55 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "c66dc739": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "d26d63b0": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "e65efc68": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 21 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
   "ede4c735": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "eeb3d106": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
-  "fb110a39": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 17 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01."
+  "eeb3d106": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01."
  }
 }

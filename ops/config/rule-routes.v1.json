@@ -57,36 +57,11 @@
     }
    ]
   },
-  "0f38532e": {
-   "moment": "duplicate of 14181e60 (single source of truth / DB-first)",
-   "routes": [
-    {
-     "kind": "duplicate",
-     "survivor": "14181e60"
-    }
-   ]
-  },
   "1021fa84": {
    "moment": "any turn - assessing Joe's work patterns/history",
    "routes": [
     {
      "kind": "boot"
-    }
-   ]
-  },
-  "113b3833": {
-   "moment": "run.sh retrieve lookup beyond standing core",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "find-precedent",
-      "search-doctrine"
-     ],
-     "bash_patterns": [
-      "\\brun\\.sh\\s+retrieve\\b"
-     ]
     }
    ]
   },
@@ -233,15 +208,6 @@
     }
    ]
   },
-  "1d50a3bb": {
-   "moment": "conduct_stop gate",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ],
-   "no_trigger_reason": "binds on the reply after a Stop gate reopens the turn; no tool call marks it"
-  },
   "1f3a7372": {
    "moment": "completion_evidence gate",
    "routes": [
@@ -285,28 +251,6 @@
       "prepare-conversation",
       "update-vendor",
       "who-do-we-know"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
-  "1fddcffb": {
-   "moment": "deciding what belongs in always-read core vs task-loaded files",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ]
-  },
-  "204391be": {
-   "moment": "discovering a missing record-layer verb while building",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "call-verb",
-      "list-verbs"
      ],
      "bash_patterns": []
     }
@@ -553,23 +497,6 @@
       "resolve-candidate"
      ],
      "bash_patterns": []
-    }
-   ]
-  },
-  "308ef1de": {
-   "moment": "pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "github-ruleset:main-pr-only"
-    },
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgit\\s+(?:checkout|switch|branch|worktree)\\b"
-     ]
     }
    ]
   },
@@ -824,21 +751,6 @@
     }
    ]
   },
-  "4402973a": {
-   "moment": "healing/regenerating detected drifted vault content",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Write"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bvault-drift-watch\\b"
-     ]
-    }
-   ]
-  },
   "466a545a": {
    "moment": "grading a fed source against the system",
    "routes": [
@@ -998,14 +910,6 @@
     }
    ]
   },
-  "4f7c348f": {
-   "moment": "session start",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ]
-  },
   "4fae20f4": {
    "moment": "before stating a rate/average as a baseline",
    "routes": [
@@ -1141,34 +1045,6 @@
      "bash_patterns": []
     }
    ]
-  },
-  "58b44ccb": {
-   "moment": "one_repo gate",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/one-repo-gate.py"
-    },
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgit\\s+clone\\b"
-     ]
-    },
-    {
-     "kind": "trigger",
-     "verbs": [],
-     "tools": [
-      "Write",
-      "Edit",
-      "MultiEdit"
-     ],
-     "bash_patterns": []
-    }
-   ],
-   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "58cef3a1": {
    "moment": "correcting one of Joe's mislabeled statements",
@@ -1636,11 +1512,11 @@
    ]
   },
   "737a68d6": {
-   "moment": "duplicate of 204391be",
+   "moment": "duplicate of 49c627cc: discover and build a missing record-layer verb",
    "routes": [
     {
      "kind": "duplicate",
-     "survivor": "204391be"
+     "survivor": "49c627cc"
     }
    ]
   },
@@ -2141,24 +2017,6 @@
     }
    ]
   },
-  "99e951b9": {
-   "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "ops/githooks/index-upkeep-check.py"
-    },
-    {
-     "kind": "trigger",
-     "verbs": [],
-     "tools": [
-      "Write"
-     ],
-     "bash_patterns": []
-    }
-   ],
-   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
-  },
   "9d80fd2d": {
    "moment": "planning prospect outreach cadence",
    "routes": [
@@ -2234,21 +2092,6 @@
      "bash_patterns": [
       "\\b(?:ssh|scp|sftp)\\b"
      ]
-    }
-   ]
-  },
-  "a2e78f48": {
-   "moment": "detecting a known broken thing with a known fix",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "open-incident",
-      "record-defect",
-      "report-problem"
-     ],
-     "bash_patterns": []
     }
    ]
   },
@@ -2516,19 +2359,6 @@
     }
    ]
   },
-  "bbffc139": {
-   "moment": "Joe overrules, predicts, compresses, rules, or corrects within CARR work",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "log-decision"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "bc4145f6": {
    "moment": "monthly review or recurring behavior pattern",
    "routes": [
@@ -2610,31 +2440,6 @@
       "*hooks/*.py",
       "*ops/*-check.py",
       "*ops/githooks/*"
-     ]
-    }
-   ]
-  },
-  "c1547ed1": {
-   "moment": "creating a new workflow/system/asset",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_scheduled_task"
-     ],
-     "verbs": [
-      "propose-ready-plan",
-      "register-engineering-slice-plan",
-      "write-work-shape"
-     ],
-     "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*Management/system-evolution-plan.md",
-      "*ops/scheduled-tasks/*",
-      "*ops/launchd/*"
      ]
     }
    ]
@@ -2893,14 +2698,6 @@
     }
    ]
   },
-  "d5dcfe26": {
-   "moment": "asserting a decision or memo state is stale or unruled",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ]
-  },
   "d7c69aa6": {
    "moment": "calendar ingest surfaces an unmatched attendee",
    "routes": [
@@ -3115,31 +2912,6 @@
       "who-do-we-know"
      ],
      "bash_patterns": []
-    }
-   ]
-  },
-  "e8868cbe": {
-   "moment": "completion_evidence gate",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_scheduled_task",
-      "mcp__*__update_scheduled_task"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\blaunchctl\\b",
-      "\\bcrontab\\b"
-     ]
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*ops/scheduled-tasks/*",
-      "*ops/launchd/*",
-      "*.plist"
-     ]
     }
    ]
   },
@@ -3420,47 +3192,6 @@
     }
    ]
   },
-  "fb110a39": {
-   "moment": "starting a task or fan-out brief (model choice)",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Agent"
-     ],
-     "verbs": [
-      "record-dispatch-link"
-     ],
-     "bash_patterns": [
-      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
-      "\\bcodex\\s+exec\\b",
-      "\\bgrok\\b",
-      "\\brun-engineering-dispatch\\b",
-      "\\bclaude\\s+-p\\b"
-     ]
-    }
-   ]
-  },
-  "fb2b263d": {
-   "moment": "after deciding or building, checking other index/context files",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "log-decision"
-     ],
-     "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*INDEX.md",
-      "*.md"
-     ]
-    }
-   ]
-  },
   "fc21a431": {
    "moment": "any partner correction",
    "routes": [
@@ -3574,19 +3305,6 @@
       "record-loi-submission"
      ],
      "bash_patterns": []
-    }
-   ]
-  },
-  "4a77c35d": {
-   "moment": "filling or ordering the Dot's work queue",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bdot-relay\\b"
-     ]
     }
    ]
   },
