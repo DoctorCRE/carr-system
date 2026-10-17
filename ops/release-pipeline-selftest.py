@@ -234,6 +234,8 @@ def pr_head(n: int) -> str:
 class FakeGitHub:
     """Merged source with green CI and canary results unless overridden."""
 
+    _pr_numbers: dict[str, int] = {}
+
     def __init__(self, canary: dict | None = None,
                  red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None,
                  ci_runs: dict | None = None):
@@ -246,7 +248,7 @@ class FakeGitHub:
         self.merge_commit: dict[str, str] = {}   # commit -> the PR's merge_commit_sha, when not itself
 
     def pr_number(self, sha):
-        return 100 + int(sha[:4], 16) % 800
+        return self._pr_numbers.setdefault(sha, 100 + len(self._pr_numbers))
 
     def pr_for_commit(self, sha):
         if self.raise_on == "pr_for_commit":
