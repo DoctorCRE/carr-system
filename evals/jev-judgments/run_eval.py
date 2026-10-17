@@ -226,7 +226,7 @@ class _Response:
 
 
 def observe(client, case, scratch):
-    from ops import jev_semantic as semantic
+    import ops.jev_semantic as semantic
     state = "eval state"
     questions = {"q": client.noul("Eval judgment")}
     sent = []
