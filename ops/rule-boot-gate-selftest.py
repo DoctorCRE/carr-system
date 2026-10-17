@@ -1381,6 +1381,30 @@ def case_no_transcript_keeps_todays_behaviour(c):
     assert c.call(*READ, agent="sub-a") is None, "and no child is re-gated on a guess"
 
 
+def case_child_filtered_boot_after_corpus_change(c):
+    for total in (2, 4):
+        c.stub_sized("a", pages=2)
+        c.arm()
+        for page in (1, 2):
+            c.fetch(page)
+            c.fetch(page, agent="sibling")
+        assert c.call(*READ) is None
+        c.stub_sized("b", pages=total)
+        # New children have no SessionStart; their first fetch discovers drift.
+        for page in range(1, total + 1):
+            assert denied(c.call(*READ, agent="new-child")), "every page is required"
+            command = abs_cmd(page) + " | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'"
+            pre, post = c.fetch_cmd(command, page, agent="new-child", stdout=lambda body:
+                json.dumps({"ok": True, "rule_boot": {"digest": json.loads(body)["rule_boot"]["digest"]}}))
+            assert not denied(pre)
+            assert post is None, f"current store digest must refresh a stale arm: {post}"
+        assert c.call(*READ, agent="new-child") is None, "the child's current boot is complete"
+        assert c.arm_state()["digest"] == "sha256:" + "b" * 8
+        assert c.arm_state()["pages_total"] == total
+        assert denied(c.call(*READ)), "parent must read the new corpus too"
+        assert denied(c.call(*READ, agent="sibling")), "sibling's old boot cannot count"
+
+
 def case_fetch_instructions_leads_with_digest_only(c):
     """The re-arm message's FIRST instruction is the cheapest accepted form,
     and the gate itself parses that exact line as a page fetch (filtered, so
@@ -1401,7 +1425,7 @@ def case_fetch_instructions_leads_with_digest_only(c):
     assert parsed is not None and parsed[1] is True and lib._page_of(parsed[0]) == 1, plain
 
 
-CASES = [case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
+CASES = [case_child_filtered_boot_after_corpus_change, case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
          case_child_start_keeps_parent_boot, case_child_compaction_rearms_only_that_child,
          case_child_rearm_digest_change_regates_all, case_child_rearm_outage_keeps_parent,
          case_unflagged_child_compaction_keeps_parent, case_unflagged_child_compactions_chain,
