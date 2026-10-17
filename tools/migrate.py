@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import NoReturn
 
 import migration_0882
+import migration_0884
 
 from migration_number_contract import (
     LEGACY_APPLIED_ALIASES,
@@ -730,6 +731,13 @@ def main() -> None:
                             execution_sql = migration_0882.retirement_sql(cur, sql, digest)
                             if execution_sql != sql:
                                 print('retained retired-v3 historical controls; '
+                                      f'source sha256={digest}; execution sha256='
+                                      + hashlib.sha256(execution_sql.encode()).hexdigest(),
+                                      end=' ... ', flush=True)
+                        if name == migration_0884.FILENAME:
+                            execution_sql = migration_0884.catalog_sql(cur, sql, digest)
+                            if execution_sql != sql:
+                                print('retained immutable pack_delivery catalog; '
                                       f'source sha256={digest}; execution sha256='
                                       + hashlib.sha256(execution_sql.encode()).hexdigest(),
                                       end=' ... ', flush=True)

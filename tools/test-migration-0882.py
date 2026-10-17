@@ -147,9 +147,9 @@ class Recovery(unittest.TestCase):
                           'encode(digest(\'{}\'::jsonb::text,\'sha256\'),\'hex\'),array[\'fixture\'])', (COMPLETION,'a'*64))
         self.conn.commit()
 
-    def run_runner(self):
+    def run_runner(self, through='0886_active_rule_scope_backfill.sql'):
         return subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'), '--apply','--yes',
-                               '--through','0886_active_rule_scope_backfill.sql'],
+                               '--through',through],
                               env={**os.environ,'DATABASE_URL':self.dsn}, capture_output=True,text=True)
 
     def test_retired_history_survives_and_suffix_applies(self):
@@ -193,8 +193,81 @@ class Recovery(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertNotIn('retained retired-v3 historical controls',result.stdout)
         self.assertEqual(self.conn.execute('select control_key from ops.enforcement_control_catalog order by 1').fetchall(), [('pack_delivery',)])
+        self.assertEqual(self.conn.execute("select implementation_ref,test_ref from ops.enforcement_control_catalog where control_key='pack_delivery'").fetchone(),
+                         ('hooks/rule-pack-preuse-reselection.py',
+                          'ops/rule-load-layer-check-selftest.py; ops/rule-pack-preuse-reselection-selftest.py'))
         self.conn.commit()
         self.assertEqual(self.run_runner().returncode,0)
+
+    def seed_pack_approval(self):
+        rule_id = '1fcaa63a-73d7-498d-9f76-e99bcd821a89'
+        self.conn.execute('insert into rule(id,statement,status,version,taught_by,activated_by) '
+                          "values(%s,'pack fixture','active',2,gen_random_uuid(),gen_random_uuid())", (rule_id,))
+        self.conn.execute('insert into ops.rule_control_binding(rule_id,control_key,statement_hash,binding_contract) '
+                          "values(%s,'pack_delivery',%s,'{}')", (rule_id,'b'*64))
+        self.conn.execute('insert into ops.rule_approval_receipt '
+                          '(idempotency_key,rule_id,rule_version,statement_hash,actor_id,reason,policy_kind,'
+                          'enforcement_status,normalized_contract,requested_control_keys,installed_control_keys,contract_hash,evidence_refs) '
+                          "values('active-pack',%s,2,%s,gen_random_uuid(),'fixture','machine_enforceable',"
+                          "'hard_enforced','{}',array['pack_delivery'],array['pack_delivery'],"
+                          "encode(digest('{}'::jsonb::text,'sha256'),'hex'),array['fixture'])", (rule_id,'b'*64))
+        self.conn.commit()
+
+    def pack_snapshot(self):
+        return [self.conn.execute(query).fetchall() for query in (
+            "select to_jsonb(c) from ops.enforcement_control_catalog c where control_key='pack_delivery'",
+            'select to_jsonb(b) from ops.rule_control_binding b order by control_key',
+            'select to_jsonb(ar) from ops.rule_approval_receipt ar order by id',
+            'select to_jsonb(r) from rule r order by id')]
+
+    def test_active_pack_approval_retains_catalog_and_finishes_suffix(self):
+        self.seed()
+        self.seed_pack_approval()
+        prefix = self.run_runner('0883_repin_rule_delivery_activation_after_reply_control_retirement.sql')
+        self.assertEqual(prefix.returncode, 0, prefix.stdout + prefix.stderr)
+        original = (ROOT / 'migrations/0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql').read_text()
+        with self.assertRaisesRegex(psycopg.errors.RaiseException, 'backs an active approved rule and is immutable'):
+            with self.conn.transaction():
+                self.conn.execute(original)
+        before = self.pack_snapshot()
+        self.conn.commit()
+        result = self.run_runner()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('retained immutable pack_delivery catalog', result.stdout)
+        self.assertEqual(self.pack_snapshot(), before)
+        for name, _, digest in self.migrations:
+            if TARGET <= name <= '0886_active_rule_scope_backfill.sql':
+                self.assertEqual(self.conn.execute('select sha256 from schema_migrations where filename=%s', (name,)).fetchone()[0], digest)
+        for statement in (
+            "update ops.enforcement_control_catalog set implementation_ref='replacement' where control_key='pack_delivery'",
+            "delete from ops.enforcement_control_catalog where control_key='pack_delivery'"):
+            with self.assertRaisesRegex(psycopg.errors.RaiseException, 'backs an active approved rule and is immutable'):
+                with self.conn.transaction():
+                    self.conn.execute(statement)
+        self.conn.commit()
+        repeat = self.run_runner()
+        self.assertEqual(repeat.returncode, 0, repeat.stdout + repeat.stderr)
+        self.assertIn('nothing to do', repeat.stdout)
+
+    def test_active_pack_approval_with_catalog_drift_refuses(self):
+        self.conn.execute("update ops.enforcement_control_catalog set test_ref='unexpected' where control_key='pack_delivery'")
+        self.conn.commit()
+        self.seed_pack_approval()
+        before = self.pack_snapshot()
+        self.conn.commit()
+        result = self.run_runner()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('0884 recovery REFUSED', result.stderr)
+        self.assertEqual(self.pack_snapshot(), before)
+        self.assertIsNone(self.conn.execute("select 1 from schema_migrations where filename like '0884%' ").fetchone())
+
+    def test_0884_checksum_change_refuses(self):
+        import migration_0884
+        _, source, digest = next(row for row in self.migrations if row[0] == migration_0884.FILENAME)
+        with self.assertRaisesRegex(ValueError, 'source checksum changed'):
+            migration_0884.catalog_sql(self.conn.cursor(), source + '\n', digest)
+        with self.assertRaisesRegex(ValueError, 'source checksum changed'):
+            migration_0884.catalog_sql(self.conn.cursor(), source, '0'*64)
 
     def test_active_rule_refuses_atomically(self):
         self.seed(active=True)
