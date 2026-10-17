@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -42,8 +43,10 @@ def ddl(kind, name):
 class Recovery(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        paths = [Path('/opt/homebrew/opt/postgresql@18/bin'),
-                 Path('/usr/lib/postgresql/18/bin'), Path('/usr/lib/postgresql/17/bin')]
+        initdb = shutil.which('initdb')
+        paths = [Path(initdb).parent] if initdb else []
+        paths.extend([Path('/opt/homebrew/opt/postgresql@18/bin'),
+                      Path('/usr/lib/postgresql/18/bin'), Path('/usr/lib/postgresql/17/bin')])
         cls.bindir = next((p for p in paths if (p / 'initdb').is_file()), None)
         if cls.bindir is None:
             raise unittest.SkipTest('PostgreSQL server binaries unavailable')
@@ -171,10 +174,12 @@ class Recovery(unittest.TestCase):
             with self.conn.transaction():
                 self.conn.execute('delete from ops.rule_control_binding where rule_id=%s', (COMPLETION,))
         # PostgreSQL 18 gives RESTRICT its own SQLSTATE; 17 uses ForeignKeyViolation.
-        with self.assertRaises((psycopg.errors.RestrictViolation, psycopg.errors.ForeignKeyViolation)) as denied:
+        with self.assertRaises((psycopg.errors.ForeignKeyViolation,
+                                psycopg.errors.RestrictViolation)) as refusal:
             with self.conn.transaction():
                 self.conn.execute("delete from ops.enforcement_control_catalog where control_key='conduct_stop'")
-        self.assertEqual(denied.exception.diag.constraint_name, 'rule_control_binding_control_key_fkey')
+        self.assertEqual(refusal.exception.diag.constraint_name,
+                         'rule_control_binding_control_key_fkey')
         self.assertEqual(self.conn.execute('select to_jsonb(b) from ops.rule_control_binding b order by control_key').fetchall(), bindings)
         self.assertEqual(self.conn.execute('select control_key from ops.enforcement_control_catalog order by 1').fetchall(),
                          [('completion_evidence',),('conduct_stop',),('pack_delivery',)])
