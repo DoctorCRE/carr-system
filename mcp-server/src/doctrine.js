@@ -1274,8 +1274,24 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           }
           return { id, gist: gist(r.statement) };
         };
-        const missing = [...wanted].filter(
+        const absent = [...wanted].filter(
           w => !allRules.some(r => String(r.id).slice(0, 8).toLowerCase() === w));
+        // Boot readers need no base-table grant. Only an explicit unresolved
+        // lookup needs authoritative retirement status, and a denied read must
+        // not turn an unknown rule into permission to skip it.
+        const retired = absent.length ? (await c.query(
+          `select left(id::text,8) as short_id
+             from rule
+            where status = 'retired'
+              and left(id::text,8) = any($2::text[])
+              and (personal_to is null or ($1::text is not null and personal_to =
+                    retrieval_visibility_actor_id($1)))
+              and coalesce(scope->>'kind','') <> 'intro_politics'
+            order by short_id
+            /* standing-context:retired-requested-rules */`, [who, absent])).rows
+          .map(r => r.short_id) : [];
+        const retiredIds = new Set(retired);
+        const missing = absent.filter(id => !retiredIds.has(id));
         const constitutionLoaded = standingRules.filter(r => r.is_constitution).length;
         const constraintLoaded = standingRules.filter(
           r => r.guidance_type === "constraint" && !r.is_constitution).length;
@@ -1326,6 +1342,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             human_only_authority: actor.human === true,
           },
           detail,
+          ...(retired.length ? { rule_ids_retired: retired } : {}),
           ...(missing.length ? { rule_ids_not_found: missing } : {}),
           ...(detail === "gist" ? { hint_full_text:
             "One line per rule. NEVER quote a gist as the rule — call standing-context again with rule_ids:['<id>',…] for the binding text before acting on one." } : {}),
