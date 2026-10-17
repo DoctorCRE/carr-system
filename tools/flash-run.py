@@ -455,9 +455,9 @@ def pick_rules(task, situation=RULE_SITUATION, **judge):
     active corpus. Injected judgment arguments use the same bounded batch interface.
     """
     try:
-        from lib.rule_scope_lookup import lookup, moment_judge
+        from lib.rule_scope_lookup import lookup
         result = lookup({'hook_event_name': 'UserPromptSubmit', 'task': situation + task},
-                        judge=judge.get('judge') or moment_judge('flash-task'))
+                        judge=judge.get('judge'))
         if len(json.dumps(result['rules'])) > 90000:
             return [], 'selected rule text exceeds the task context budget'
         note = None
