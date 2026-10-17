@@ -20,6 +20,7 @@ from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 import migration_0882
 
 spec = importlib.util.spec_from_file_location('migrate', ROOT / 'tools/migrate.py')
+assert spec is not None and spec.loader is not None
 migrate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migrate)
 
