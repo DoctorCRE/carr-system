@@ -41,6 +41,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools" / "room-bridge"))
 import evaluation_kernel as kernel
 
@@ -210,7 +211,7 @@ class _Response:
     status = 200
 
     def __init__(self):
-        self.body = json.dumps({"model": "jev-eval", "answers": {"q": {"type": "noul", "noul": 0.5}},
+        self.body = json.dumps({"model": "jev-1.13.0", "answers": {"q": {"type": "noul", "noul": 0.5}},
                                 "usage": {"input_tokens": 600, "output_tokens": 10}}).encode()
 
     def read(self, *a):
@@ -225,6 +226,9 @@ class _Response:
 
 
 def observe(client, case, scratch):
+    from ops import jev_semantic as semantic
+    state = "eval state"
+    questions = {"q": client.noul("Eval judgment")}
     sent = []
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CARR_JEV", "CARR_HOOK"))
            and k not in ("XPC_SERVICE_NAME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID",
@@ -241,13 +245,15 @@ def observe(client, case, scratch):
         env["CARR_JEV_JOB"] = case["carr_job"]
     log = scratch / "calls.jsonl"
     refusal = None
-    with mock.patch.dict(os.environ, env, clear=True), \
+    with tempfile.TemporaryDirectory(dir=scratch, prefix="cold-") as cache, \
+            mock.patch.dict(os.environ, env, clear=True), \
             mock.patch.object(client, "JEV_DAILY_CAP_LOG", str(log)), \
             mock.patch.object(client, "_launch_spend_alert_worker", lambda *a: None, create=True), \
             mock.patch.object(client.urllib.request, "urlopen",
                               lambda request, timeout=None: sent.append(1) or _Response()):
         try:
-            client.ask("eval state", {"q": client.noul("Eval judgment")}, api_key="eval-fixture",
+            semantic.ask(state, questions, client=client, api_key="eval-fixture",
+                       version="admission-eval-v1", cache_path=str(Path(cache) / "semantic.json"),
                        calls_log=str(log), cache_ttl_seconds=0, retries=0, caller=case["site"],
                        session_id="eval-session" if case.get("session") else None)
         except Exception as exc:  # a refusal is the observation, not a crash

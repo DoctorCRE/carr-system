@@ -19,6 +19,14 @@ class AdmissionEvalTests(unittest.TestCase):
         test = {case['input_sha256'] for case in cases if case['split'] == 'test'}
         self.assertFalse(train & test)
 
+    def test_each_observation_measures_a_cold_transport_attempt(self):
+        client = evaluation._load(ROOT)
+        with tempfile.TemporaryDirectory() as scratch:
+            for _ in range(2):
+                self.assertEqual(evaluation.observe(client, {'site': 'rule_scope_lookup', 'session': True},
+                                                    pathlib.Path(scratch)),
+                                 {'paid': True, 'refusal': None})
+
     def test_retired_mechanical_sites_are_not_owed_paid_calls(self):
         for site in ('rule_trigger_delivery', 'rule_trigger_compile', 'jev_session_watch', 'jev_defect_class',
                      'jev_executor_tier', 'jev_code_review', 'jev_requirements'):
