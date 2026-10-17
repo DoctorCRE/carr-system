@@ -486,20 +486,29 @@ def _generalized_receipt(payload: dict, response: dict, trigger_ids: list[str],
     return row
 
 
-def _semantic_adviser(situation: str, session_id: str | None = None) -> list[dict]:
-    # Compiled-trigger match, then (human prompts only) one budgeted Jev
-    # judgment of at most 8 requests (ops/rule_trigger_delivery.py). The
-    # session is the hook payload's own session_id; with none, nothing is
-    # deduped or pooled.
+def _prompt_selector_module():
     path = REPO / "ops/rule_trigger_delivery.py"
     spec = importlib.util.spec_from_file_location("rule_trigger_delivery_live", path)
     if spec is None or spec.loader is None:
         raise RuntimeError("semantic selector unavailable")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _semantic_adviser(situation: str, session_id: str | None = None) -> list[dict]:
+    module = _prompt_selector_module()
     deadline = min(time.monotonic() + module.DEADLINE_SECONDS,
                    _hook_deadline() - SELECTOR_RESERVE_SECONDS)
-    return module.advise(situation, session_id=session_id, deadline=deadline)
+    return module.advise(situation, session_id=session_id, deadline=deadline,
+                         defer_delivery=True)
+
+
+def _record_prompt_delivery(payload: dict, ids: list[str]) -> None:
+    try:
+        _prompt_selector_module().record_delivered(payload["session_id"], ids)
+    except Exception:
+        pass
 
 
 def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
@@ -547,6 +556,38 @@ def _semantic_receipt(payload: dict, response: dict, selected: list[dict],
     return row
 
 
+def _prompt_failure(payload: dict, stage: str, reason: str, ids: list[str],
+                    packs: list[str], response: dict | None, *, acknowledge: bool) -> dict:
+    notice = f"RULE DELIVERY FAILED: {stage} ({reason}). "
+    found = {}
+    if response is not None:
+        try:
+            _, _, found, _ = _route_statements(response, packs, ids)
+        except Exception:
+            pass
+    notice += (
+        "Computed rule matches are retained below. Only rules with full statements "
+        "were delivered from authenticated standing-context. not_found IDs were "
+        "not returned and may be obsolete; do not substitute local snapshot text. "
+        "Before acting, read overflow rules through standing-context. "
+        "If no statements were returned, read the applicable rules before acting.\n")
+
+    def render(full, overflow):
+        return notice + canonical({
+            "rule_ids": ids, "rules": full, "overflow": overflow,
+            "not_found": sorted(set(ids) - set(found)),
+        }).decode("utf-8")
+
+    rules = [{"id": rid, "statement": found[rid]} for rid in sorted(found)]
+    full, overflow = rule_routes.fit_rules(rules, render, always_on=rule_routes.always_on_ids())
+    text = render(full, overflow)
+    if not rule_routes.within_cap(text):
+        text = notice + "Computed rule matches: " + ", ".join(ids)
+    elif acknowledge:
+        _record_prompt_delivery(payload, [row["id"] for row in full])
+    return _context(text, "UserPromptSubmit")
+
+
 def _process_prompt(payload: dict, runner: Callable,
                     adviser: Callable[[str], list[dict]] | None) -> dict | None:
     prompt = payload.get("prompt")
@@ -556,6 +597,9 @@ def _process_prompt(payload: dict, runner: Callable,
     if len(prompt) > MESSAGE_LIMIT_CHARS:
         return _context("RULE DELIVERY NOT ATTEMPTED: prompt exceeds the context limit.", "UserPromptSubmit")
     failure_stage = "semantic_adviser"
+    ids: list[str] = []
+    packs: list[str] = []
+    response = None
     try:
         selected = (adviser(prompt) if adviser is not None
                     else _semantic_adviser(prompt, payload["session_id"]))
@@ -581,17 +625,24 @@ def _process_prompt(payload: dict, runner: Callable,
         failure_stage = "receipt_assembly"
         receipt = _semantic_receipt(
             payload, response, selected, packs, ids)
-        return _context(canonical(receipt).decode("utf-8"), "UserPromptSubmit")
+        text = canonical(receipt).decode("utf-8")
+        if not rule_routes.within_cap(text):
+            return _prompt_failure(payload, "receipt_assembly", "context_limit", ids, packs, response,
+                                   acknowledge=adviser is None)
+        if adviser is None:
+            _record_prompt_delivery(payload, ids)
+        return _context(text, "UserPromptSubmit")
     except Exception as exc:
         if isinstance(exc, SelectorError):
-            failure_reason = exc.reason
+            failure_reason = exc.reason if exc.reason in {"nonzero", "invalid_json", "not_ok"} else "invalid_data"
         elif isinstance(exc, subprocess.TimeoutExpired):
             failure_reason = "timeout"
         elif isinstance(exc, (RuntimeError, TypeError, ValueError, KeyError)):
             failure_reason = "invalid_data"
         else:
             failure_reason = "exception"
-        return _context(f"RULE DELIVERY FAILED: {failure_stage} ({failure_reason}); read the applicable rules before acting.", "UserPromptSubmit")
+        return _prompt_failure(payload, failure_stage, failure_reason, ids, packs, response,
+                               acknowledge=adviser is None)
 
 
 # ---------------------------------------------------------------------------
