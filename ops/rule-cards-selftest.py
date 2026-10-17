@@ -50,6 +50,30 @@ class CardTests(unittest.TestCase):
                 selector = CardSelector([card])
                 self.assertNotIn(card['id'], self.ids(selector, {'hook_event_name': 'UserPromptSubmit', 'prompt': card['fixtures']['negative_prompt']}))
 
+    def test_inherited_routing_matches_without_pattern(self):
+        card = next(c for c in self.cards if c['id'] == 'R07')
+        selector = CardSelector([card])
+        event = card['fixtures']['negative']['event']
+        selected = selector.select(event, inherited_rule_ids={'67e48aaf'})
+        self.assertEqual([c['id'] for c in selected], ['R07'])
+        self.assertEqual(selector.last_selection['inherited_card_ids'], ['R07'])
+        self.assertEqual(selector.select(event, inherited_rule_ids={'67e48aaf'}), [])
+
+    def test_cap_reports_inherited_deferrals_and_uncapped_counterfactual(self):
+        ids = {'L01', 'L02', 'L03', 'L04'}
+        cards = [c for c in self.cards if c['id'] in ids]
+        sources = {rid for c in cards for rid in c['source_rule_ids']}
+        event = {'hook_event_name': 'PreToolUse', 'tool_name': 'Read', 'tool_input': {}}
+        capped = CardSelector(cards)
+        got = capped.select(event, inherited_rule_ids=sources)
+        self.assertEqual([c['id'] for c in got], ['L02', 'L04', 'L03'])
+        self.assertEqual(capped.last_selection['deferred_card_ids'], ['L01'])
+        self.assertEqual(capped.last_selection['inherited_deferred_card_ids'], ['L01'])
+        self.assertEqual([c['id'] for c in capped.select(event, inherited_rule_ids=sources)], ['L01'])
+        uncapped = CardSelector(cards)
+        self.assertEqual(len(uncapped.select(event, inherited_rule_ids=sources, cap=None)), 4)
+        self.assertEqual(uncapped.last_selection['deferred_card_ids'], [])
+
     def test_collision_priority_and_deferred_delivery(self):
         selector = CardSelector(self.cards)
         card = next(c for c in self.cards if c['id'] == 'L07')
@@ -69,7 +93,8 @@ class CardTests(unittest.TestCase):
     def test_personal_scope(self):
         card = next(c for c in self.cards if c['id'] == 'R07')
         selector = CardSelector(self.cards, personal_scope='dell-personal')
-        self.assertNotIn('R07', self.ids(selector, card['fixtures']['positive']['event']))
+        self.assertNotIn('R07', {c['id'] for c in selector.select(
+            card['fixtures']['positive']['event'], inherited_rule_ids={'67e48aaf'})})
 
     def test_non_check_failures_do_not_advance_counter(self):
         card = next(c for c in self.cards if c['id'] == 'A15')
@@ -119,9 +144,27 @@ class ReplayTests(unittest.TestCase):
 
     def test_card_replay_isolates_epochs_between_cases(self):
         case = {'id': 'fixture', 'prompt': 'heres the token use it for the cf deploy', 'tool_calls': []}
-        first = self.eval.replay(None, case, variant='cards')
-        self.assertEqual(first, self.eval.replay(None, case, variant='cards'))
+        world = self.eval.World(self.eval.load_expectations())
+        first = self.eval.replay(world, case, variant='cards')
+        self.assertEqual(first, self.eval.replay(world, case, variant='cards'))
         self.assertIn('67e48aaf', first[0]['ids'])
+
+    def test_uncapped_inheritance_preserves_covered_baseline_availability(self):
+        world = self.eval.World(self.eval.load_expectations())
+        cards = load_cards()
+        mapped = {rid for card in cards for rid in card['source_rule_ids']}
+        core = {rid for card in cards if card['placement'] == 'CORE' for rid in card['source_rule_ids']}
+        for case in self.eval.load_cases('all'):
+            with self.subTest(case=case['id']):
+                base = self.eval.replay(world, case)
+                capped = self.eval.replay(world, case, 'cards')
+                uncapped = self.eval.replay(world, case, 'cards-uncapped')
+                baseline_ids = {rid for ev in base for rid in ev['ids']} & mapped
+                available = core | {rid for ev in uncapped for rid in ev['ids']}
+                self.assertLessEqual(baseline_ids, available)
+                self.assertTrue(all(len(ev['card_ids']) <= 3 for ev in capped))
+                for ev in capped:
+                    self.assertLessEqual(set(ev['inherited_deferred_card_ids']), set(ev['deferred_card_ids']))
 
 
 

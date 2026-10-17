@@ -42,6 +42,7 @@ Usage:
   run_eval.py --observe OUT.jsonl [--trace-reads READS.json]
   run_eval.py --freeze-expectations
   run_eval.py --variant cards --print
+  run_eval.py --variant cards-uncapped --print
   run_eval.py --card-report OUT.json
 """
 import argparse
@@ -326,8 +327,8 @@ def _raise(*_args, **_kwargs):
 
 def replay(world, case, variant="baseline"):
     """[{kind, ids, fresh, tokens, overflow}] for the case's events, in order."""
-    if variant == "cards":
-        return replay_cards(case)
+    if variant in ("cards", "cards-uncapped"):
+        return replay_cards(world, case, cap=None if variant == "cards-uncapped" else 3)
     events = []
     ids = world.prompt_ids(case)
     if case["prompt"].strip():
@@ -345,22 +346,26 @@ def replay(world, case, variant="baseline"):
     return events
 
 
-def replay_cards(case):
+def replay_cards(world, case, *, cap=3):
     """One independent boot epoch per frozen case, no invented post-tool events."""
     from lib.rule_cards import CardSelector, load_cards
     selector = CardSelector(load_cards())
     payloads = []
     if case['prompt'].strip():
-        payloads.append(('prompt', {'hook_event_name': 'UserPromptSubmit', 'prompt': case['prompt']}))
-    payloads.extend(('tool', {'hook_event_name': 'PreToolUse', **call}) for call in case['tool_calls'])
+        payloads.append(('prompt', {'hook_event_name': 'UserPromptSubmit', 'prompt': case['prompt']},
+                         world.prompt_ids(case)))
+    payloads.extend(('tool', {'hook_event_name': 'PreToolUse', **call}, world.tool_ids(case, index, call))
+                    for index, call in enumerate(case['tool_calls']))
     events = []
-    for kind, payload in payloads:
-        cards = [c for c in selector.select(payload) if c['placement'] != 'CORE']
+    for kind, payload, inherited in payloads:
+        cards = [c for c in selector.select(payload, inherited_rule_ids=inherited, cap=cap)
+                 if c['placement'] != 'CORE']
         ids = sorted({rid for c in cards for rid in c['source_rule_ids']})
         receipt = [{key: c[key] for key in ('id', 'wording', 'source_rule_ids', 'acknowledgement')} for c in cards]
         chars = len(json.dumps(receipt, ensure_ascii=False)) if receipt else 0
         events.append({'kind': kind, 'tool': payload.get('tool_name'), 'ids': ids, 'fresh': ids,
                        'card_ids': [c['id'] for c in cards],
+                       'inherited_rule_ids': inherited, **selector.last_selection,
                        'tokens': chars / CHARS_PER_TOKEN, 'overflow': False})
     return events
 
@@ -403,23 +408,24 @@ def card_comparison():
     cards = load_cards()
     core = {rid for c in cards if c['placement'] == 'CORE' for rid in c['source_rule_ids']}
     mapped = {rid for c in cards for rid in c['source_rule_ids']}
-    boots = {'baseline': set(world.ev.boot_always_on_ids(REPO)), 'cards': core}
+    boots = {'baseline': set(world.ev.boot_always_on_ids(REPO)), 'cards': core, 'cards-uncapped': core}
     observations = []
     for case in cases:
-        arms = {}
-        for variant in ('baseline', 'cards'):
+        arms, details = {}, {}
+        for variant in ('baseline', 'cards', 'cards-uncapped'):
             events = replay(world, case, variant)
+            details[variant] = events
             arms[variant] = {'boot': sorted(boots[variant]),
                              'prompt': sorted({rid for ev in events if ev['kind'] == 'prompt' for rid in ev['ids']}),
                              'tool': sorted({rid for ev in events if ev['kind'] == 'tool' for rid in ev['ids']})}
         observations.append({'case_id': case['id'], 'split': case['split'],
-                             'input_sha256': case['input_sha256'], 'arms': arms})
+                             'input_sha256': case['input_sha256'], 'arms': arms, 'event_details': details})
     table, misses, rule_metrics = [], {}, []
     for population in ('frozen_incremental', 'all_gold', 'card_source_gold'):
         misses[population] = {}
         for split_name in ('all', 'train', 'test'):
             cohort = [(c, o) for c, o in zip(cases, observations) if split_name in ('all', c['split'])]
-            for variant in ('baseline', 'cards'):
+            for variant in ('baseline', 'cards', 'cards-uncapped'):
                 totals = {}
                 missed = Counter()
                 per_rule = {}
@@ -448,8 +454,18 @@ def card_comparison():
                         counts['false_deliveries'] += rid in (available - allowed) & world.labelled
                 for path, counts in totals.items():
                     graded = counts['true_deliveries'] + counts['false_deliveries']
+                    if variant == 'baseline':
+                        mean_cards = None
+                    elif path == 'boot':
+                        mean_cards = sum(c['placement'] == 'CORE' for c in cards)
+                    else:
+                        selected_events = [ev for _, obs in cohort for ev in obs['event_details'][variant]
+                                           if path in ('events', 'available') or ev['kind'] == path]
+                        mean_cards = (sum(len(ev['card_ids']) for ev in selected_events) / len(selected_events)
+                                      if selected_events else None)
                     table.append({'population': population, 'split': split_name, 'variant': variant,
                                   'path': path, 'cases': len(cohort), **counts,
+                                  'average_cards_per_event': mean_cards,
                                   'recall': counts['hits'] / counts['expected'] if counts['expected'] else None,
                                   'precision': counts['true_deliveries'] / graded if graded else None})
                 for rid, counts in sorted(per_rule.items()):
@@ -463,6 +479,7 @@ def card_comparison():
                         {'rule_id': rid, 'missed_cases': count, 'covered_by_card': rid in mapped,
                          'card_ids': [c['id'] for c in cards if rid in c['source_rule_ids']],
                          **per_rule[rid]} for rid, count in sorted(missed.items())]
+    cap_impact = card_cap_impact(observations, table, core, mapped, expectations['cases'])
     dependencies = ['evals/rule-delivery/run_eval.py', 'evals/rule-delivery/split.json',
                     'evals/rule-delivery/expectations.v4.json', 'evals/rule-delivery/hard_cases.v1.json',
                     'ops/fixtures/rule-delivery-eval/cases.v2.json', 'lib/rule_cards.py',
@@ -472,21 +489,81 @@ def card_comparison():
                     'ops/rule_trigger_delivery.py', 'lib/rule_delivery_preuse.py', 'lib/rule_routes.py',
                     'hooks/rule-pack-preuse-reselection.py', 'ops/config/rule-enforcement-map.json',
                     'ops/config/rule-jit-triggers.v1.json', 'ops/config/rule-jev-triggers.v1.json']
-    return {'schema': 'rule-card-comparison/v1',
+    return {'schema': 'rule-card-comparison/v2',
             'method': {'recall': 'source-rule ID intersections; case-level unions, then micro counts',
                        'precision': 'allowed delivered IDs / labelled delivered IDs; pending IDs ungraded',
                        'frozen_incremental': 'unchanged expectations.v4 expected sets, 1278 occurrences',
                        'all_gold': 'all case gold minus disputed; includes non-judgment rules',
                        'card_source_gold': 'all_gold and deliveries intersect the 112 approved card source_rule_ids; selection-only comparison, not a current judgment census',
-                       'events': 'prompt plus recorded PreToolUse only; core excluded',
+                       'events': 'prompt plus recorded PreToolUse only; fresh non-core cards, core availability reported at boot',
+                       'inheritance': 'own patterns OR any source ID selected by World.prompt_ids / World.tool_ids, the exact baseline production matchers',
+                       'cap': 'cards uses three fresh non-core cards per event; cards-uncapped is a separate measurement only',
+                       'average_cards_per_event': 'fresh non-core deliveries / recorded prompt or tool events, including zero-delivery events; boot row is core cards per boot; available row uses the same runtime-event mean as events; baseline has no cards',
                        'available': 'boot union events',
                        'epoch': 'fresh independent session/boot per case; Joe personal scope',
                        'limitations': 'selected source IDs, not semantic equivalence, full-text receipt success, or adherence; no model calls; no held-out tuning'},
             'input_sha256': {path: hashlib.sha256(Path(REPO, path).read_bytes()).hexdigest() for path in dependencies},
-            'table': table, 'card_misses': misses, 'per_rule': rule_metrics,
+            'table': table, 'cap_impact': cap_impact, 'card_misses': misses, 'per_rule': rule_metrics,
             'boot_ids': {k: sorted(v) for k, v in boots.items()},
-            'observations': [{**o, 'arms': {variant: {path: ids for path, ids in paths.items() if path != 'boot'}
+            'observations': [{**o, 'event_details': {variant: [{key: value for key, value in ev.items()
+                                                            if key not in ('tokens', 'overflow', 'fresh')} for ev in events]
+                                                     for variant, events in o['event_details'].items() if variant != 'baseline'}, 'arms': {variant: {path: ids for path, ids in paths.items() if path != 'boot'}
                                          for variant, paths in o['arms'].items()}} for o in observations]}
+
+
+def card_cap_impact(observations, table, core, mapped, labels):
+    """Count blocked inherited opportunities, eventual loss, and paired recall cost."""
+    result = []
+    for split_name in ('all', 'train', 'test'):
+        cohort = [o for o in observations if split_name in ('all', o['split'])]
+        events = [ev for o in cohort for ev in o['event_details']['cards']]
+        opportunities = sum(len(set(ev['eligible_card_ids']) & set(ev['inherited_card_ids'])) for ev in events)
+        deferred = {(o['case_id'], cid) for o in cohort for ev in o['event_details']['cards']
+                    for cid in ev['inherited_deferred_card_ids']}
+        delivered = {(o['case_id'], cid) for o in cohort for ev in o['event_details']['cards']
+                     for cid in ev['card_ids']}
+        unavailable = []
+        boundary = {key: 0 for key in ('baseline_incremental_hits', 'covered_baseline_incremental_hits',
+                    'baseline_incremental_hits_without_card', 'covered_baseline_incremental_hits_in_core',
+                    'covered_baseline_incremental_hits_lost_with_cap')}
+        for obs in cohort:
+            baseline = set(obs['arms']['baseline']['prompt']) | set(obs['arms']['baseline']['tool'])
+            uncapped = core | set(obs['arms']['cards-uncapped']['prompt']) | set(obs['arms']['cards-uncapped']['tool'])
+            capped = core | set(obs['arms']['cards']['prompt']) | set(obs['arms']['cards']['tool'])
+            hit = baseline & set(labels[obs['case_id']]['expected'])
+            boundary['baseline_incremental_hits'] += len(hit)
+            boundary['covered_baseline_incremental_hits'] += len(hit & mapped)
+            boundary['baseline_incremental_hits_without_card'] += len(hit - mapped)
+            boundary['covered_baseline_incremental_hits_in_core'] += len(hit & core)
+            boundary['covered_baseline_incremental_hits_lost_with_cap'] += len((hit & mapped) - capped)
+            missing = (baseline & mapped) - uncapped
+            if missing:
+                unavailable.append({'case_id': obs['case_id'], 'rule_ids': sorted(missing)})
+        if unavailable:
+            raise AssertionError(f'uncapped inheritance lost covered baseline IDs: {unavailable}')
+        costs = []
+        for population in ('frozen_incremental', 'all_gold', 'card_source_gold'):
+            for path in ('prompt', 'tool', 'events', 'available'):
+                pair = {row['variant']: row for row in table if row['population'] == population
+                        and row['split'] == split_name and row['path'] == path}
+                capped, uncapped = pair['cards'], pair['cards-uncapped']
+                costs.append({'population': population, 'path': path,
+                              'expected': capped['expected'],
+                              'capped_hits': capped['hits'], 'uncapped_hits': uncapped['hits'],
+                              'lost_hit_occurrences': uncapped['hits'] - capped['hits'],
+                              'recall_cost': uncapped['recall'] - capped['recall']})
+        result.append({'split': split_name, 'cases': len(cohort), 'events': len(events),
+                       'cap_limited_events': sum(bool(ev['deferred_card_ids']) for ev in events),
+                       'inherited_card_opportunities': opportunities,
+                       'inherited_drop_events': sum(bool(ev['inherited_deferred_card_ids']) for ev in events),
+                       'inherited_card_deferrals': sum(len(ev['inherited_deferred_card_ids']) for ev in events),
+                       'inherited_card_deferral_rate': (sum(len(ev['inherited_deferred_card_ids']) for ev in events)
+                                                        / opportunities if opportunities else None),
+                       'distinct_inherited_deferred_case_cards': len(deferred),
+                       'inherited_case_cards_never_delivered': len(deferred - delivered),
+                       'uncapped_inheritance_missing': unavailable, 'frozen_incremental_coverage_boundary': boundary,
+                       'recall_cost': costs})
+    return result
 
 
 def observe(case, events, boot_ids=None):
@@ -625,7 +702,7 @@ def expectation_drift(world, cases, expectations):
 def observe_all(variant="baseline"):
     world = World()
     boot_ids = world.ev.boot_always_on_ids(REPO)
-    if variant == "cards":
+    if variant in ("cards", "cards-uncapped"):
         from lib.rule_cards import load_cards
         boot_ids = {rid for c in load_cards() if c["placement"] == "CORE" for rid in c["source_rule_ids"]}
     return [observe(case, replay(world, case, variant), boot_ids)
@@ -865,7 +942,7 @@ def load_run(variant, split=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--variant", default="baseline", help="cards selects the offline card variant; other names retain baseline behavior")
+    parser.add_argument("--variant", default="baseline", help="cards selects inherited routing with cap 3; cards-uncapped measures no cap; other names retain baseline behavior")
     parser.add_argument("--card-report", metavar="OUT", help="write baseline/card path counts and missed gold rules as JSON")
     parser.add_argument("--split", default="all", choices=("train", "test", "all"))
     parser.add_argument("--compare", nargs=2, metavar=("BASE", "NEW"))

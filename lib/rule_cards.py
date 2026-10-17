@@ -22,6 +22,8 @@ class CardSelector:
 
     now is caller-supplied monotonic seconds, so replay never reads a wall clock.
     reset_boot re-arms delivery, retaining the session's rolling failure history.
+    inherited_rule_ids come from the existing deterministic routing adapter.
+    cap=None is the offline uncapped counterfactual; normal delivery uses three.
     """
     def __init__(self, cards, personal_scope='joe-personal'):
         self.core = []
@@ -48,7 +50,8 @@ class CardSelector:
     def reset_boot(self):
         self.seen.clear()
 
-    def select(self, event, *, now=0):
+    def select(self, event, *, now=0, inherited_rule_ids=(), cap=3):
+        inherited_rule_ids = set(inherited_rule_ids)
         fields = {'tool_name_regex': event.get('tool_name', ''),
                   'input_regex': json.dumps(event.get('tool_input', {}), ensure_ascii=False, sort_keys=True),
                   'response_regex': json.dumps(event.get('tool_response', {}), ensure_ascii=False, sort_keys=True),
@@ -71,6 +74,18 @@ class CardSelector:
                         continue
                 matched.append(card)
                 break
-        fresh = [card for card in matched if card['id'] not in self.seen][:3]
+        inherited = {card['id'] for card, _ in self.routed
+                     if set(card['source_rule_ids']) & inherited_rule_ids}
+        pattern_ids = {card['id'] for card in matched}
+        eligible = [card for card, _ in self.routed
+                    if card['id'] in pattern_ids | inherited and card['id'] not in self.seen]
+        fresh = eligible if cap is None else eligible[:cap]
+        deferred = eligible[len(fresh):]
+        self.last_selection = {
+            'inherited_card_ids': sorted(inherited),
+            'eligible_card_ids': [card['id'] for card in eligible],
+            'deferred_card_ids': [card['id'] for card in deferred],
+            'inherited_deferred_card_ids': [card['id'] for card in deferred if card['id'] in inherited],
+        }
         self.seen.update(card['id'] for card in fresh)
         return self.core + fresh
