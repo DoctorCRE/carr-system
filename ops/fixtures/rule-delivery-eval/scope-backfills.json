@@ -27,7 +27,6 @@
     "1d50a3bb": {"moment": "When a Stop gate reopens a turn for missing evidence or action"},
     "1f3a7372": {"moment": "Before a scheduled task, cron job, heartbeat, nightly step, or autonomous routine ends"},
     "1f750181": {"moment": "Before compiling the invite list for a joint event"},
-    "1fcaa63a": {"moment": "When a partner invokes the heavy build protocol or admission derives the work as heavy"},
     "1fddcffb": {"moment": "When placing guidance in always-read core versus task-loaded context"},
     "20d106f1": {"moment": "When Joe opens a substantial build/design, predicts an outcome, makes a major call, directs in an unproven domain, or during monthly calibration"},
     "2271e684": {"moment": "Before delivering a result or stating technical specifics about pricing, APIs, features, or data access"},

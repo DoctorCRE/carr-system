@@ -1381,6 +1381,70 @@ def case_no_transcript_keeps_todays_behaviour(c):
     assert c.call(*READ, agent="sub-a") is None, "and no child is re-gated on a guess"
 
 
+def case_child_filtered_boot_after_corpus_change(c):
+    for total in (2, 4):
+        child = f"new-child-{total}"
+        c.stub_sized("a", pages=2)
+        c.arm()
+        for page in (1, 2):
+            c.fetch(page)
+            c.fetch(page, agent="sibling")
+        assert c.call(*READ) is None
+        c.stub_sized("b", pages=total)
+        # New children have no SessionStart; their first fetch discovers drift.
+        for page in range(1, total + 1):
+            assert denied(c.call(*READ, agent=child)), "every page is required"
+            command = abs_cmd(page) + " | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'"
+            pre, post = c.fetch_cmd(command, page, agent=child, stdout=lambda body:
+                json.dumps({"ok": True, "rule_boot": {"digest": json.loads(body)["rule_boot"]["digest"]}}))
+            assert not denied(pre)
+            assert post is None, f"current store digest must refresh a stale arm: {post}"
+        assert c.call(*READ, agent=child) is None, "the child's current boot is complete"
+        assert c.arm_state()["digest"] == "sha256:" + "b" * 8
+        assert c.arm_state()["pages_total"] == total
+        assert denied(c.call(*READ)), "parent must read the new corpus too"
+        assert denied(c.call(*READ, agent="sibling")), "sibling's old boot cannot count"
+
+
+def case_parallel_child_filtered_boot_after_corpus_change(c):
+    c.stub_sized("a", pages=2)
+    c.arm()
+    c.stub_sized("b", pages=4)
+    payloads = []
+    for page in range(1, 5):
+        command = abs_cmd(page) + " | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'"
+        assert not denied(c.call("Bash", {"command": command}, agent="parallel-child"))
+        payloads.append({"hook_event_name": "PostToolUse", "session_id": SESSION,
+            "cwd": REPO, "agent_id": "parallel-child", "tool_name": "Bash",
+            "tool_input": {"command": command}, "tool_response": {"stdout": json.dumps({
+                "ok": True, "rule_boot": {"digest": "sha256:" + "b" * 8}})}})
+    assert all(post is None for post in c.hooks_parallel(payloads)), "all current pages must count"
+    assert c.call(*READ, agent="parallel-child") is None
+    assert denied(c.call(*READ)), "parallel probes do not read pages for the parent"
+
+
+def case_filtered_drift_requires_current_store_metadata(c):
+    c.stub_sized("a", pages=2)
+    c.arm()
+    before = c.arm_state()
+    command = abs_cmd(2) + " | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'"
+    receipt = lambda body: json.dumps({"ok": True, "rule_boot": {"digest": "sha256:" + "b" * 8}})
+    for store in (None, "not_deployed", "c", "a"):
+        c.stub(store, pages=3)
+        _, post = c.fetch_cmd(command, 2, agent="child", stdout=receipt)
+        assert post and "does not count as read" in post["additionalContext"]
+        assert c.arm_state() == before, "unverified receipts must not change the expectation"
+        assert denied(c.call(*READ, agent="child"))
+    c.stub_sized("b", pages=2)
+    _, post = c.fetch_cmd(command, 2, agent="child", stdout=receipt)
+    assert post is None, post
+    pending = c.call(*READ, agent="child")
+    assert denied(pending) and "missing page (1)" in pending["permissionDecisionReason"], pending
+    assert denied(c.call(*READ)), "metadata read must not confirm page 1 for the parent"
+    c.fetch(1, agent="child")
+    assert c.call(*READ, agent="child") is None
+
+
 def case_fetch_instructions_leads_with_digest_only(c):
     """The re-arm message's FIRST instruction is the cheapest accepted form,
     and the gate itself parses that exact line as a page fetch (filtered, so
@@ -1401,7 +1465,7 @@ def case_fetch_instructions_leads_with_digest_only(c):
     assert parsed is not None and parsed[1] is True and lib._page_of(parsed[0]) == 1, plain
 
 
-CASES = [case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
+CASES = [case_parallel_child_filtered_boot_after_corpus_change, case_filtered_drift_requires_current_store_metadata, case_child_filtered_boot_after_corpus_change, case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
          case_child_start_keeps_parent_boot, case_child_compaction_rearms_only_that_child,
          case_child_rearm_digest_change_regates_all, case_child_rearm_outage_keeps_parent,
          case_unflagged_child_compaction_keeps_parent, case_unflagged_child_compactions_chain,
@@ -1476,6 +1540,12 @@ def check_session_start_rearms():
 # ------------------------------------------------------------------ mutants
 
 MUTANTS = {
+    "filtered-drift-not-refreshed": [(
+        '        live, _reason = _live_page_one(timeout=2)',
+        '        live, _reason = None, "unreachable"')],
+    "filtered-drift-store-digest-unchecked": [(
+        '                and current.get("digest") == boot.get("digest")):',
+        '                ):')],
     "identity-prefix-rejected": [(
         '        lines = stdout.splitlines()\n        start = next(i for i, line in enumerate(lines) if line.lstrip().startswith("{"))\n        receipt = json.loads("\\n".join(lines[start:]))',
         '        receipt = json.loads(stdout)')],
@@ -1497,7 +1567,7 @@ MUTANTS = {
                              '\n        return "allow", UNAVAILABLE_NOTICE #')],
     "not-deployed-read-as-unreachable": [('    if str(reason or "").startswith("not_deployed"):',
                                           '    if False:')],
-    "mid-session-digest-ignored": [('        if total >= 1 and digest and (', '        if False and (')],
+    "mid-session-digest-ignored": [('    if total >= 1 and digest and (', '    if False and (')],
     "any-mcp-prefix": [('def _carr_verb(name):\n    for prefix in CARR_MCP_PREFIXES:',
                         'def _carr_verb(name):\n    m = re.match(r"^mcp__.+__([a-z][a-z0-9-]*)$", name)\n'
                         '    return m.group(1) if m else None\n    for prefix in CARR_MCP_PREFIXES:')],
@@ -1524,8 +1594,8 @@ MUTANTS = {
                                    '            and True):')],
     "success-provenance-ignored": [('    preserves_success = not direct and _bash_preserves_success((payload.get("tool_input") or payload.get("toolInput") or {}).get("command"))',
                                      '    preserves_success = True')],
-    "racing-epochs": [('            arm.setdefault("epoch", "fetch-" + safe_key(digest.replace("sha256:", ""), "none")[:12])',
-                       '            arm.setdefault("epoch", secrets.token_hex(6))')],
+    "racing-epochs": [('        arm.setdefault("epoch", "fetch-" + safe_key(digest.replace("sha256:", ""), "none")[:12])',
+                       '        arm.setdefault("epoch", secrets.token_hex(6))')],
     "python-unsafe-builtins": [('            elif node.id in _PY_UNSAFE_BUILTINS:\n                return False',
                                 '            elif False:\n                return False')],
     "python-any-attribute": [('            if node.attr.startswith("_") or not _py_attr_ok(node):',

@@ -3,7 +3,7 @@
     "evals/rule-delivery/evidence/candidate.jsonl": "965094c8e226eb69fd68be208952bfd0d37127951965c33a7d228ff0956b13f9",
     "evals/rule-delivery/expectations.v3.json": "95f5aa5ab29ac117829afd9dd6b9a5beecdd029a8c8c82860b31b59e9e7d19f7",
     "evals/rule-delivery/hard_cases.v1.json": "00e0060a82b58aacec8ae4861d50460d97c155413bd39fadc39ceedde6681078",
-    "ops/config/rule-classes.v1.json": "fec56bcff6575c469466c4758b42b8cbf42d7de2daf0de75dc131ded1950401a",
+    "ops/config/rule-classes.v1.json": "8ccef583381969e9b01eb6bae4c6b184fee50338d7a02cd87b7f783ffb5203b2",
     "ops/fixtures/rule-delivery-eval/cases.v2.json": "c5900f0fd5343b78209fb248e018cae322f865540ea1cb30837884b8c70151ed"
   },
   "method": "Subtract candidate.delivered from every frozen v2 gold and hard-case required set, then keep class B/C. Count train + test for retention; acceptable-only hard labels are excluded. Boot availability is excluded from gap derivation.",
