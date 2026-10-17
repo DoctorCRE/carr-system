@@ -143,11 +143,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(summary['ungraded_rules'], 1)
 
     def test_card_replay_isolates_epochs_between_cases(self):
-        case = {'id': 'fixture', 'prompt': 'heres the token use it for the cf deploy', 'tool_calls': []}
+        case = next(case for case in self.eval.load_cases('all') if case['id'] == 'v2-disp-007')
         world = self.eval.World(self.eval.load_expectations())
         first = self.eval.replay(world, case, variant='cards')
         self.assertEqual(first, self.eval.replay(world, case, variant='cards'))
-        self.assertIn('67e48aaf', first[0]['ids'])
+        self.assertIn('b1521526', first[0]['ids'])
+        self.assertEqual(first[0]['inherited_rule_ids'],
+                         world.selection.fixture['cases'][case['id']]['events'][0])
 
     def test_uncapped_inheritance_preserves_covered_baseline_availability(self):
         world = self.eval.World(self.eval.load_expectations())
