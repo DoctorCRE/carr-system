@@ -458,6 +458,11 @@ class Queue:
             if cur.rowcount:
                 self.event(repo, n, 'queued', f'Queued head {head}', e['id'])
             elif rearm and e['phase'] == 'exhausted':
+                with self.github_scope(f'enqueue:{e["id"]}'):
+                    current = self.pr(repo, n)
+                if current['head']['sha'] != e['approved']:
+                    self.report(e, 'head_moved', 'Live head differs from the approved SHA; exhausted entry retained')
+                    return e['id']
                 self._clear_reads(e['id'])
                 self.db.execute("UPDATE entries SET phase='pending',outcome='requeued',note=? WHERE id=?", (note, e['id']))
                 self.event(repo, n, 'requeued', f'Rearmed exhausted head {head}; merge and CI caps retained', e['id'])
@@ -903,6 +908,9 @@ class Queue:
                 if p['state'] != 'open':
                     self.report(e, 'closed', 'PR closed without merge', 'done')
                     continue
+                if p['head']['sha'] != e['approved']:
+                    self.report(e, 'head_moved', 'Live head differs from the approved SHA')
+                    continue
                 if p.get('draft'):
                     self.report(e, 'draft', 'Waiting for PR to be marked ready')
                     continue
@@ -961,6 +969,7 @@ class Queue:
                     return
                 current = self.pr(repo, n)
                 if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
+                    self.report(e, 'head_moved', 'Head, base or hold changed before merge')
                     return
                 if self.stopped:
                     return

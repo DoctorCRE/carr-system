@@ -184,18 +184,18 @@ class RunLoop:
         f.pr(1, head=f.updated if scenario == 'fetch' else f.approved,
              state='behind' if scenario == 'behind' else 'clean', draft=scenario == 'draft',
              base='branch-90' if scenario == 'retarget' else 'main')
-        entry = f.q.enqueue(mq.REPOS[0], 1, f.approved)
+        entry = f.q.enqueue(mq.REPOS[0], 1, f.updated if scenario == 'fetch' else f.approved)
         if scenario == 'fetch':
             with f.q.db:
                 f.q.db.execute("UPDATE entries SET phase='review' WHERE id=?", (entry,))
         f.pr(2, head=f.approved if scenario == 'fetch' else f.updated)
-        f.q.enqueue(mq.REPOS[0], 2, f.approved)
+        f.q.enqueue(mq.REPOS[0], 2, f.approved if scenario == 'fetch' else f.updated)
         f.pr(3, held=True)
         f.pr(4, head=f.changed)
         f.pr(5, head=f.updated)
         f.pr(6, head=f.updated)
         for n in (3, 4, 5, 6):
-            f.q.enqueue(mq.REPOS[0], n, f.approved)
+            f.q.enqueue(mq.REPOS[0], n, f.updated if n in (5, 6) else f.approved)
         for repo in mq.REPOS[1:]:
             f.pr(2, repo=repo)
             f.q.enqueue(repo, 2, f.approved)
@@ -344,6 +344,9 @@ class LivenessTests(unittest.TestCase):
                     self.assertTrue({(r, 2) for r in mq.REPOS} <= progressed)
                     loop.active = False
                     loop.session()
+                    if name == 'update':
+                        self.assertEqual(f.q.db.execute('SELECT outcome FROM entries WHERE id=?', (entry,)).fetchone()[0], 'head_moved')
+                        f.q.enqueue(mq.REPOS[0], 1, f.updated)
                     f.restart()
                     loop.session()
                     self.assertIn((mq.REPOS[0], 1), {(r, n) for r, n, _ in loop.merged})
@@ -617,7 +620,9 @@ class LivenessTests(unittest.TestCase):
                     elif route=='merge_confirmation':
                         p.update(merged=True,state='closed',merge_commit_sha=f.merge_sha)
                         with f.q.db: f.q.db.execute("UPDATE entries SET phase='merging',tested=? WHERE id=?",(f.approved,entry))
-                    else: p['head']['sha']=f.updated
+                    else:
+                        p['head']['sha']=f.updated
+                        entry=f.q.enqueue(mq.REPOS[0],1,f.updated)
                     if route in ('git_init','git_remote'):
                         shutil.rmtree(f.state/'repos/carr-system.git')
                     original=subprocess.run; faults=[]

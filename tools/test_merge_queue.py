@@ -192,7 +192,18 @@ class QueueTests(unittest.TestCase):
         self.addCleanup(self.q.db.close)
 
 
-    def test_current_head_merges_without_approval_or_local_review_events(self):
+    def test_head_move_after_enqueue_refuses_merge_without_reset(self):
+        self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.pr(head=self.changed)
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['approved'], row['tested'], row['outcome']),
+                         (self.approved, None, 'head_moved'))
+
+    def test_legacy_review_entry_preserves_approved_head_on_restart(self):
         self.pr(head=self.changed)
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
         with self.q.db:
@@ -200,7 +211,8 @@ class QueueTests(unittest.TestCase):
             self.q.db.execute('INSERT INTO waits(owner,kind,deadline) VALUES(?,?,?)', (f'entry:{entry}', 'entry', 0))
         self.restart()
         self.q.tick()
-        self.assertEqual(self.calls('merge')[0][-1], self.changed)
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'head_moved')
         self.assertFalse(any('/comments' in str(a) for a in self.load()['calls']))
 
     def test_sigterm_during_checks_prevents_every_later_effect(self):
@@ -731,6 +743,20 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
 
+    def test_enqueue_does_not_rearm_exhausted_entry_when_live_head_moved(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='exhausted',outcome='retry_exhausted',"
+                              "transient_attempts=4 WHERE id=?", (entry,))
+        self.pr(head=self.changed)
+        self.assertEqual(self.q.enqueue(module.REPOS[0], 1, self.approved), entry)
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['transient_attempts']),
+                         ('exhausted', 'head_moved', 4))
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+
     def test_discovery_does_not_rearm_exhausted_entries(self):
         self.pr()
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
@@ -772,9 +798,9 @@ class QueueTests(unittest.TestCase):
                 clock.return_value = self.q.db.execute('SELECT retry_at FROM entries').fetchone()[0]
             self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'exhausted')
             self.assertEqual(len(self.load()['calls']), 4)
+            self.load(); del self.data['gh_failure']; self.save()
             self.assertEqual(self.q.enqueue(module.REPOS[0], 1, self.approved), entry)
             self.restart()
-            self.load(); del self.data['gh_failure']; self.save()
             self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
 
@@ -834,7 +860,7 @@ class QueueTests(unittest.TestCase):
                         fixture.restart()
                     prefix = failure['prefix']
                     self.assertEqual(sum(a[:len(prefix)]==prefix for a in fixture.load()['calls']), 4)
-                    fixture.q.enqueue(repo, 2, fixture.approved); fixture.q.tick()
+                    fixture.q.enqueue(repo, 2, fixture.updated); fixture.q.tick()
                     self.assertEqual([a[2] for a in fixture.calls('merge')], ['2'])
                 finally:
                     fixture.doCleanups()
@@ -848,7 +874,7 @@ class QueueTests(unittest.TestCase):
                     fixture.pr(1); fixture.pr(2, head=fixture.updated)
                     fixture.data['gh_failure'] = dict(prefix=['pr', verb, '1']); fixture.save()
                     fixture.q.enqueue(repo, 1, fixture.approved)
-                    fixture.q.enqueue(repo, 2, fixture.approved)
+                    fixture.q.enqueue(repo, 2, fixture.updated)
                     for _ in range(12):
                         fixture.q.tick(); fixture.restart()
                     self.assertEqual(len([a for a in fixture.calls(verb) if a[2]=='1']), 4)
@@ -891,7 +917,7 @@ class QueueTests(unittest.TestCase):
         self.data['api_failure'] = {'path': path, 'status': status}
         self.save()
         first = self.q.enqueue(module.REPOS[0], 1, self.approved)
-        self.q.enqueue(module.REPOS[0], 2, self.approved)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
         for _ in range(8):
             self.q.tick()
             self.restart()
@@ -1018,10 +1044,14 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.calls('merge'), [])
 
 
-    def test_behind_updates_once_then_retests_equivalent_patch(self):
+    def test_behind_update_requires_enqueue_of_new_head_before_merge(self):
         self.pr(state='behind')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         self.q.tick()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'head_moved')
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
@@ -1199,6 +1229,9 @@ class QueueTests(unittest.TestCase):
         self.pr(state='behind');self.data['update_reject']=True;self.save()
         self.q.enqueue(module.REPOS[0],1,self.approved);self.q.tick()
         self.load();self.data['update_reject']=False;self.save();self.q.tick();self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'head_moved')
+        self.q.enqueue(module.REPOS[0], 1, self.updated);self.q.tick()
         self.assertEqual(len(self.calls('merge')),1)
 
     def test_operator_can_reconcile_interrupted_update(self):
