@@ -293,7 +293,7 @@ class LivenessTests(unittest.TestCase):
                         loop = RunLoop(f, effect, fault)
                         entry = loop.seed()
                         for _ in range(4):
-                            loop.session()
+                            loop.session(polls=16)
                             f.restart()
                         self.assertGreater(loop.failures, 0, 'Fault site was never reached')
                         limit = 8 if effect.name == 'merge_intent' else 4

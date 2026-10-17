@@ -37,7 +37,7 @@ failure=d.get('gh_failure')
 if failure and a[:len(failure['prefix'])]==failure['prefix'] and all(x in a for x in failure.get('contains',[])):
  if 'response' in failure: emit(failure['response']);sys.exit()
  if failure.get('malformed'): save();print('{broken');sys.exit()
- save();print(f"gh: Forbidden (HTTP {failure.get('status',403)})",file=sys.stderr);sys.exit(1)
+ save();print(failure.get('stderr', f"gh: Forbidden (HTTP {failure.get('status',403)})"),file=sys.stderr);sys.exit(1)
 if a[:2]==['label','create']: emit({'name':'do_not_merge'});sys.exit()
 if a[:2]==['api','graphql']:
  repo=next(x[5:] for x in a if x.startswith('repo='));owner=next(x[6:] for x in a if x.startswith('owner='));n=next(x[2:] for x in a if x.startswith('n='));p=d['prs'][owner+'/'+repo+'#'+n]
@@ -657,12 +657,153 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase,attempts FROM actions').fetchone()[:], ('planned', 0))
         self.assertFalse(any('update-branch' in str(a) for a in self.load()['calls']))
 
+    def test_transient_github_backoff_survives_restart_and_recovers(self):
+        self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls/1'],
+                                       stderr='HTTP 502: Bad Gateway')
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            self.assertGreaterEqual(row['retry_at'], 10096)
+            self.assertLessEqual(row['retry_at'], 10120)
+            self.restart()
+            self.q.tick()
+            self.assertEqual(len(self.load()['calls']), 1)
+            clock.return_value = row['retry_at']
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            self.assertGreaterEqual(row['retry_at'] - clock.return_value, 288)
+            clock.return_value = row['retry_at']
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            self.assertGreaterEqual(row['retry_at'] - clock.return_value, 864)
+            self.assertLessEqual(row['retry_at'], 11800)
+            self.load(); del self.data['gh_failure']; self.save()
+            clock.return_value = row['retry_at']
+            self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_transient_github_window_expires_without_another_call(self):
+        self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls/1'],
+                                       stderr='HTTP 503: unavailable')
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            self.restart()
+            clock.return_value = 11800
+            self.q.tick()
+        self.assertEqual(len(self.load()['calls']), 1)
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:],
+                         ('exhausted', 'retry_exhausted'))
+
+    def test_gh_failure_log_contains_bounded_redacted_stderr(self):
+        self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
+        token = 'ghp_' + 'a' * 40
+        known = 'opaque-environment-secret'
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls/1'],
+                                       stderr='x' * 3000 + ' Bad Gateway ' + token + ' ' + known)
+        self.save()
+        with patch.dict(os.environ, {'GH_TOKEN': known}):
+            self.q.tick()
+        self.q.flush_events()
+        log = (self.state / 'queue.log').read_text()
+        self.assertIn('Bad Gateway', log)
+        self.assertIn('[REDACTED]', log)
+        self.assertNotIn(token, log)
+        self.assertNotIn(known, log)
+        detail = json.loads(log.splitlines()[-1])['detail']
+        self.assertLess(len(detail), 2300)
+
+    def test_enqueue_rearms_exhausted_entry_without_resetting_merge_or_ci_caps(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='exhausted',outcome='retry_exhausted',"
+                              "transient_attempts=4,github_attempts=4,merge_attempts=4,ci_since=1,ci_head=? WHERE id=?",
+                              (self.approved, entry))
+        self.assertEqual(self.q.enqueue(module.REPOS[0], 1, self.approved, 'try again'), entry)
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual((row['phase'], row['transient_attempts'], row['github_attempts']), ('pending', 0, 0))
+        self.assertEqual((row['merge_attempts'], row['ci_since']), (4, 1))
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_discovery_does_not_rearm_exhausted_entries(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='exhausted' WHERE id=?", (entry,))
+        self.q.discover()
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'exhausted')
+
+    def test_transient_merge_failure_reconciles_before_retry(self):
+        self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.data['gh_failure'] = dict(prefix=['pr', 'merge', '1'], stderr='HTTP 502: Bad Gateway')
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            row = self.q.db.execute('SELECT * FROM entries').fetchone()
+            self.assertEqual((row['phase'], row['merge_attempts']), ('merge_rejected', 1))
+            self.restart()
+            self.load(); del self.data['gh_failure']; self.data['server_queued'] = True; self.save()
+            clock.return_value = row['retry_at']
+            self.q.tick()
+            self.assertEqual(len(self.calls('merge')), 1)
+            self.load(); self.data['server_queued'] = False; self.save()
+            self.q.tick()
+            self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 2)
+        calls = self.load()['calls']
+        merges = [i for i, a in enumerate(calls) if a[:2] == ['pr', 'merge']]
+        self.assertTrue(any(a[:2] == ['api', 'graphql'] for a in calls[merges[0]+1:merges[1]]))
+
+    def test_enqueue_recovers_exhausted_transient_read_budget(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls/1'],
+                                       stderr='HTTP 502: Bad Gateway')
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            for _ in range(4):
+                self.q.tick()
+                clock.return_value = self.q.db.execute('SELECT retry_at FROM entries').fetchone()[0]
+            self.assertEqual(self.q.db.execute('SELECT phase FROM entries').fetchone()[0], 'exhausted')
+            self.assertEqual(len(self.load()['calls']), 4)
+            self.assertEqual(self.q.enqueue(module.REPOS[0], 1, self.approved), entry)
+            self.restart()
+            self.load(); del self.data['gh_failure']; self.save()
+            self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_ci_wait_keeps_75_minutes_after_transient_recovery(self):
+        self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.data['gh_failure'] = dict(prefix=['api', f'repos/{module.REPOS[0]}/pulls/1'],
+                                       stderr='HTTP 502: Bad Gateway')
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            self.load(); del self.data['gh_failure']; self.data['required'] = [{'bucket':'pending'}]; self.save()
+            clock.return_value = 10120
+            self.q.tick()
+            self.restart()
+            clock.return_value = 11801
+            self.q.tick()
+            self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:], ('pending', 'waiting_ci'))
+            clock.return_value = 14620
+            self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:], ('exhausted', 'ci_timeout'))
+
     def test_transient_read_failures_have_three_retries(self):
         self.pr(); self.q.enqueue(module.REPOS[0], 1, self.approved)
-        for _ in range(8):
-            with patch.object(self.q, 'pr', side_effect=RuntimeError('gh api failed (exit 1)')):
-                self.q.tick()
-            self.restart()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            for _ in range(8):
+                with patch.object(self.q, 'pr', side_effect=RuntimeError('gh api failed (exit 1)')):
+                    self.q.tick()
+                clock.return_value = max(clock.return_value, self.q.db.execute('SELECT retry_at FROM entries').fetchone()[0])
+                self.restart()
         self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries').fetchone()[:],
                          ('exhausted', 'retry_exhausted'))
 
@@ -799,9 +940,11 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len(self.calls('merge')), 1)
         self.data['api_failure'] = {'path': 'repos/jbookout/carr-system/pulls/1', 'status': status}
         self.save()
-        for _ in range(4):
-            self.q.tick()
-            self.restart()
+        with patch.object(module.time, 'time', return_value=time.time()) as clock:
+            for _ in range(4):
+                self.q.tick()
+                clock.return_value = max(clock.return_value, self.q.db.execute('SELECT retry_at FROM entries WHERE id=?', (entry,)).fetchone()[0])
+                self.restart()
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0],
                          phase)
         self.load()
@@ -818,7 +961,9 @@ class QueueTests(unittest.TestCase):
         self.load()
         del self.data['api_failure']
         self.save()
-        self.q.tick()
+        retry_at = self.q.db.execute('SELECT retry_at FROM entries WHERE id=?', (entry,)).fetchone()[0]
+        with patch.object(module.time, 'time', return_value=max(time.time(), retry_at)):
+            self.q.tick()
         self.assertEqual(self.q.db.execute('SELECT phase,outcome,tested,merge_attempts FROM entries WHERE id=?',
                                           (entry,)).fetchone()[:], ('done', 'merged', self.approved, 1))
         self.assertEqual(len(self.calls('merge')), 1)
@@ -862,8 +1007,10 @@ class QueueTests(unittest.TestCase):
             reads += 1
             read(*args)
             raise RuntimeError('provider observation failed')
-        with patch.object(self.q, 'pr', side_effect=fail):
-            for _ in range(8): self.q.tick()
+        with patch.object(self.q, 'pr', side_effect=fail), patch.object(module.time, 'time', return_value=10000) as clock:
+            for _ in range(8):
+                self.q.tick()
+                clock.return_value = max(clock.return_value, self.q.db.execute('SELECT retry_at FROM entries').fetchone()[0])
         self.assertEqual(reads, 4)
         self.assertEqual(self.q.db.execute('SELECT phase,tested,outcome FROM entries').fetchone()[:],
                          ('exhausted', self.approved, 'retry_exhausted'))
