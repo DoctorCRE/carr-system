@@ -18,18 +18,23 @@ assert spec is not None and spec.loader is not None
 recovery = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(recovery)
 OLD_MAP = recovery.OLD_MAP
+POSTGRES = "--postgres" in sys.argv
+if POSTGRES:
+    sys.argv.remove("--postgres")
 
 
 class RetainedCatalog(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        recovery.Recovery.setUpClass.__func__(cls)
+        if POSTGRES:
+            recovery.Recovery.setUpClass.__func__(cls)
 
     setUp = recovery.Recovery.setUp
     seed_pack_approval = recovery.Recovery.seed_pack_approval
     run_runner = recovery.Recovery.run_runner
     pack_snapshot = recovery.Recovery.pack_snapshot
 
+    @unittest.skipUnless(POSTGRES, 'full snapshot refresh runs in the PostgreSQL 18 migration lane')
     def test_postapply_snapshot_refresh_and_other_drift_refusal(self):
         import sync_control_catalog
         from retained_pack_delivery import RETAINED_PACK_DELIVERY

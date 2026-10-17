@@ -216,7 +216,7 @@ class ProofTests(unittest.TestCase):
             return read_source(dsn, bins)
         with patch.object(proof, 'read_source', side_effect=capture_source):
             reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(len(reference['ledger']), 558)
+        self.assertEqual(reference['ledger'], {name: digest for name, sql, digest in proof.migrate.load_migrations()})
         self.assertEqual(proof.ledger_proof(
             {name: digest for name, sql, digest in proof.migrate.load_migrations()},
             reference['ledger'])['pending'], [])
@@ -253,7 +253,7 @@ class ProofTests(unittest.TestCase):
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])
-        self.assertEqual(result['ledger']['applied'], 558)
+        self.assertEqual(result['ledger']['applied'], len(proof.migrate.load_migrations()))
         self.assertEqual(result['ledger']['pending'], [])
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
@@ -355,7 +355,8 @@ create table public.schema_migrations (filename text primary key, sha256 text);
             root = Path(directory)
             (root / 'tools').mkdir()
             (root / 'migrations').mkdir()
-            for name in ['migrate.py', 'migration_number_contract.py', 'migration_0882.py']:
+            for name in ['migrate.py', 'migration_number_contract.py', 'migration_0882.py',
+                         'migration_0884.py', 'retained_pack_delivery.py']:
                 shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
             scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
             scripts.update({'0900_base.sql': 'create table public.example (id integer);',

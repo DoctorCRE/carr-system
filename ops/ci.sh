@@ -580,6 +580,13 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
   _mstep production-proof-fixture
+  if ! run_quiet "$LOGDIR/migration-retained-pack-delivery.log" \
+       "$PY" tools/test-retained-pack-delivery.py --postgres -v; then
+    tail -30 "$LOGDIR/migration-retained-pack-delivery.log" >&2
+    bad migration "historical pack_delivery reader and full snapshot refresh proof failed"
+    return
+  fi
+  _mstep retained-pack-delivery
   if ! DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration.log" "$PY" tools/migrate.py --apply --yes; then
     tail -30 "$LOGDIR/migration.log" >&2
     bad migration "a pending migration did not apply to the committed schema"
