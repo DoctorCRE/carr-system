@@ -8,10 +8,7 @@
       "label": "com.carr.routine-lead-signals-weekly",
       "weekday": 1,
       "hour": 7,
-      "minute": 30,
-      "replaces": [
-        "npi-sweep-weekly"
-      ],
+      "minute": 0,
       "model": null
     }
   ]

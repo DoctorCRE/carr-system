@@ -582,6 +582,25 @@
       ]
     },
     {
+      "key": "npi-sweep-weekly",
+      "name": "Weekly NPI new-provider sweep",
+      "purpose": "NPPES weekly file to territory lead digest and hot-leads dashboard.",
+      "family": "Studio edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "/Users/booko/.claude/scheduled-tasks/npi-sweep-weekly/SKILL.md",
+      "runtime": "claude-code-scheduled-task",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "Claude Code scheduled task (native), cron 30 7 * * 1",
+          "expected_cadence_seconds": 604800,
+          "cadence_grace_seconds": 172800,
+          "notes": "Re-registered on the Studio 2026-09-26; verification pending: the first proof run stalled on a tool-approval prompt (session local_e02d4dc8-67ed-4b3c-b9be-8ad1aa39cbf2, still 'running', 39 messages, no readback yet). Cause: an in-progress MacBook->Studio hub move on 2026-09-23 copied this task's SKILL.md onto the Studio (one of 22 folders copied that day) but never registered it with create_scheduled_task, while the MacBook copy was deleted; the MacBook's own scheduled-tasks.json kept the stale enabled row pointing at the now-missing file. Family changed from Local Mac edge to Studio edge: the Studio is the host now, MacBook is a thin client over SSH."
+        }
+      ]
+    },
+    {
       "key": "social-metrics-pull-weekly",
       "name": "Weekly social analytics pull",
       "purpose": "Pulls X/FB/IG/LinkedIn metrics and records them via measure-placement.",
@@ -1095,8 +1114,8 @@
     },
     {
       "key": "lead-signals-weekly",
-      "name": "Weekly code lead intake",
-      "purpose": "NPPES new-provider intake to the Lead Board; radar research remains with radar-weekly.",
+      "name": "Weekly NPPES signal preparation",
+      "purpose": "Classified NPPES proposals pending Joe/Dell verdicts; npi-sweep-weekly retains research, recommendations and ranked Hot output.",
       "family": "Studio edge",
       "criticality": "medium",
       "owner_actor": "joe",
@@ -1109,7 +1128,7 @@
           "runs_on": "primary",
           "expected_cadence_seconds": 604800,
           "cadence_grace_seconds": 172800,
-          "notes": "Monday 07:30 America/Chicago machine timezone. Orchestrator installs after merge and disables only npi-sweep-weekly after launchctl readback. Existing run-scheduled wrapper records the actual exit."
+          "notes": "Monday 07:00 America/Chicago machine timezone. Preparation only. Keep npi-sweep-weekly enabled at 07:30 for judgment and ranked Hot output. Existing run-scheduled wrapper records the actual exit."
         }
       ]
     }

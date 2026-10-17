@@ -71,7 +71,7 @@ class Context:
         payload = dict(args, idempotency_key=str(uuid.uuid5(NAMESPACE, f'{self.ident}:{key}')))
         if self.dry_run:
             self.effects.append({'verb': verb, 'key': key})
-            return {'ok': True, 'dry_run': True, 'party_id': '00000000-0000-4000-8000-000000000001'}
+            return {'ok': True, 'dry_run': True}
         cached = self.state.setdefault('effects', {}).get(key)
         if cached:
             if cached['args'] != payload or cached['verb'] != verb:
@@ -87,13 +87,6 @@ class Context:
         self.state['effects'][key]['reply'] = result.reply
         self.save()
         return result.reply
-
-    def review_item(self, title, body, key):
-        return self.write('report-problem', {
-            'situation': 'scheduled NPPES lead intake identity verification primary source evidence',
-            'title': title[:200], 'desired_outcome': body[:2000],
-            'acceptance_criteria': [{'id': 'REVIEW', 'text': 'Resolve the cited lead evidence and identity on the app.'}]
-        }, key)
 
     def failure(self, detail):
         title = f'{self.ident}: repair failed code routine'

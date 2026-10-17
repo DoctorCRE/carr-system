@@ -18,6 +18,14 @@ COUNTIES = {"ESCAMBIA", "SANTA ROSA", "OKALOOSA", "WALTON", "BAY", "LEON", "MOBI
 CITIES = {"PENSACOLA", "MILTON", "PACE", "GULF BREEZE", "CANTONMENT", "NAVARRE", "JAY", "CENTURY", "TALLAHASSEE", "PANAMA CITY", "LYNN HAVEN", "DESTIN", "FORT WALTON BEACH", "CRESTVIEW", "NICEVILLE", "SANTA ROSA BEACH", "MARY ESTHER", "SHALIMAR", "FREEPORT", "DEFUNIAK SPRINGS", "MOBILE", "DAPHNE", "FAIRHOPE", "SPANISH FORT", "GULF SHORES", "FOLEY", "BONIFAY", "CHIPLEY", "PANAMA CITY BEACH", "DOTHAN", "ENTERPRISE"}
 WEIGHTS = {"nppes-org": 4, "nppes-person": 1}
 
+EXCLUDED_TAXONOMIES = {
+    "251E": "home health", "28": "hospital", "313M": "skilled nursing",
+    "3104A0630X": "assisted living", "332B": "durable medical equipment",
+    "3416": "medical transport", "3439": "medical transport", "3446": "medical transport",
+    "261QF0400X": "FQHC",
+}
+PRACTICE_TAXONOMIES = ("1223", "152W", "111N", "207", "208", "225", "103T", "101Y", "1041", "106H", "261Q")
+
 
 def _text(value):
     return str(value or "").strip()
@@ -112,7 +120,9 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
                        "phone": _text(selected.get("phone")), "address": _text(selected.get("address")),
                        "specialty": ", ".join(c for c in codes if c), "signal": "nppes-org" if entity == "2" else "nppes-person",
                        "source": source, "mailing_only": local is None,
-                       "raw": raw})
+                       "authorized_official": {
+                           "name": " ".join(value for field in ("First Name", "Middle Name", "Last Name") if (value := _text(raw.get("Authorized Official " + field)))),
+                           "title": _text(raw.get("Authorized Official Title or Position"))}})
     return result
 
 
@@ -160,6 +170,22 @@ def candidates(rows):
     return result
 
 
+def classify(row):
+    codes = row["specialty"].split(", ")
+    for prefix, reason in EXCLUDED_TAXONOMIES.items():
+        if any(code.startswith(prefix) for code in codes):
+            return "EXCLUDE", "Institutional exclusion: " + reason, "excluded"
+    if re.search(r"\b(HOSPITAL|FQHC|HEALTH DEPARTMENT|DEPARTMENT OF HEALTH|VETERANS AFFAIRS|WALMART|WALGREENS|CVS)\b", row["name"], re.I):
+        return "EXCLUDE", "Institutional, government or big-box employer profile", "excluded"
+    if row["mailing_only"]:
+        return "REVIEW", "Mailing-only territory tie; verify secondary practice locations and address before qualification", "research"
+    if row["kind"] == "person":
+        return "WATCH", "Individual enumeration is weak intel, not evidence of an independent practice", "watch"
+    if any(code.startswith(PRACTICE_TAXONOMIES) for code in codes):
+        return "STRONG", "New practice organization in territory; independence and space need remain unverified", "research"
+    return "REVIEW", "Unknown taxonomy or practice profile; retained for human classification", "research"
+
+
 def _fetch(url):
     request = urllib.request.Request(url, headers={"User-Agent": "CARR lead-signals weekly public data reader"})
     with urllib.request.urlopen(request, timeout=60) as response:
@@ -170,26 +196,35 @@ def prepare(ctx):
     fixture = ctx.fixture
     if fixture is not None:
         rows = parse_nppes(fixture.get("nppes_rows", []), as_of=ctx.now.date(), source=INDEX_URL)
-        claims = fixture.get("claims", [])
     else:
         urls = weekly_files(_fetch(INDEX_URL).decode("utf-8"), ctx.now.date())
         rows = []
         for url in urls:
             rows.extend(parse_weekly_zip(_fetch(url), as_of=ctx.now.date(), source=url))
-        reservoir = ctx.read("claim-card", {"include_needs_contact": True, "limit": 100000})
-        claims = reservoir.get("candidates", [])
-        if len(claims) < reservoir.get("claimable", len(claims)):
-            raise ValueError("claim-card truncated the lead reservoir")
     consumed_path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
     consumed = set(fixture.get("consumed_keys", [])) if fixture is not None else set(json.loads(consumed_path.read_text()) if consumed_path.exists() else [])
     proposed = [row for row in candidates(rows) if row["source_key"] not in consumed]
     for row in proposed:
-        row["existing_candidates"] = [
-            {"pool_id": c.get("pool_id"), "name": c.get("display_name"), "org_name": c.get("org_name"), "city": c.get("city")}
-            for c in claims
-            if _text(c.get("display_name")).casefold() == row["name"].casefold()
-            and _text(c.get("city")).casefold() == _text(row.get("city")).casefold()
-        ]
+        row["classification"], row["classification_reason"], row["route"] = classify(row)
+        matches = {}
+        names = {row["name"], row["authorized_official"]["name"]} - {""}
+        for name in sorted(names):
+            found = (fixture.get("matches", {}).get(name, {}) if fixture is not None
+                     else ctx.read("find", {"query": name}))
+            for match in found.get("parties", []):
+                if not match.get("merged"):
+                    matches[match["ref"]] = {key: match.get(key) for key in ("ref", "kind", "name", "city")}
+            for org in found.get("organizations", []):
+                for ref in org.get("refs", []) + org.get("role_refs", []):
+                    matches.setdefault(ref, {"ref": ref, "name": org["name"]})
+        row["existing_candidates"] = [matches[ref] for ref in sorted(matches)]
+        row["identity_status"] = "PENDING confirmation"
+        if matches:
+            possible = row["existing_candidates"]
+            match = possible[0]
+            exact = (len(possible) == 1 and _text(match.get("name")).casefold() == row["name"].casefold()
+                     and _text(match.get("city")).casefold() == row["city"].casefold())
+            row["route"] = {"client": "client-intel", "vendor": "vendor-intel", "lead": "prospect-intel"}.get(match.get("kind"), "identity-review") if exact else "identity-review"
     return {"work": bool(proposed), "candidates": proposed, "consumed_keys": sorted(consumed)}
 
 
@@ -200,44 +235,39 @@ def execute(ctx, plan):
                 "estimated_scores": [r["score"] for r in plan["candidates"]],
                 "model_calls": 0,
                 "record_writes": 0, "local_writes": 0}
-    created, reviews = [], []
+    proposed, holds, signals = [], [], []
     consumed = set(plan.get("consumed_keys", []))
-    def remember(key):
-        consumed.add(key)
-        if ctx.fixture is not None:
-            return
-        path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(sorted(consumed)))
-        temporary.replace(path)
-    for row in plan["candidates"]:
-        key = row["source_key"]
-        if row.get("existing_candidates"):
-            reviews.append(ctx.review_item("Confirm a lead already in the candidate board: " + row["name"],
-                json.dumps({"candidate": row["name"], "sources": row["sources"],
-                            "matches": row["existing_candidates"], "fix": "Confirm which candidate this new signal belongs to; a name and city are not an automatic person match."})[:2000],
-                "lead-signals:candidate-review:" + key))
-            remember(key)
-            continue
-        sources = [{"url": url, "observed_at": ctx.now.isoformat()} for url in row["sources"] if url.startswith("https://")]
-        if not sources:
-            reviews.append(ctx.review_item("Verify a new lead's source: " + row["name"],
-                json.dumps({"candidate": row["name"], "source_key": key, "sources": row["sources"],
-                            "estimated_score": row["score"], "fix": "Resolve this NPPES signal to primary-source evidence before identity intake."})[:2000],
-                "lead-signals:source-review:" + key))
-            remember(key)
-            continue
-        evidence = {"sources": sources, "field_evidence": {field: [0] for field in ("name", "company", "phone", "specialty", "market")}, "discrepancies": []}
-        party = ctx.write("add-party", {"name": row["name"], "kind": row["kind"], "city": _text(row.get("city")), "state": _text(row.get("state")), "phone": _text(row.get("phone")), "specialty": _text(row.get("specialty")), "research_evidence": evidence}, "lead-signals:party:" + key)
-        if party.get("needs_confirm") or not party.get("party_id"):
-            reviews.append(ctx.review_item("Confirm the identity of a new lead: " + row["name"],
-                json.dumps({"candidate": row["name"], "source_key": key, "sources": row["sources"],
-                            "matches": party.get("candidates", []), "fix": "Confirm the correct identity on this review; the routine did not merge or force-create a party."})[:2000],
-                "lead-signals:identity-review:" + key))
-            remember(key)
-            continue
-        lead = ctx.write("new-lead", {"party_id": party["party_id"], "stage": "new", "source_type": "lead-signals-weekly", "source_detail": json.dumps({"source_key": key, "npi": row.get("npi"), "sources": row["sources"], "estimated": True}), "score": row["score"], "score_basis": row["score_basis"]}, "lead-signals:lead:" + key)
-        created.append(lead)
-        remember(key)
-    return {"created": created, "reviews": reviews, "candidate_count": len(plan["candidates"]), "model_calls": 0}
+    for row in sorted(plan["candidates"], key=lambda r: (-r["score"], r["source_key"])):
+        proposal = dict(row)
+        proposal.update(status="proposed", research_status="PENDING",
+                        research_owner="npi-sweep-weekly",
+                        space_need="VERIFY; unresearched, no probability or lease horizon assigned",
+                        next_action="Research the principal, verify the address and space claim, work the recommendation and Winning it, then request Joe/Dell's touch/watch/skip verdict. No registry entry or outreach before that verdict.")
+        if row["classification"] == "EXCLUDE":
+            proposal["status"] = "excluded"
+            proposal["next_action"] = "Institutional exclusion; keep the reason in the digest. The retained routine can review National Accounts scope before any pursuit."
+            holds.append(proposal)
+        elif row["existing_candidates"]:
+            proposal["status"] = "intel_pending_confirmation"
+            proposal["next_action"] = "Confirm the possible existing identity, then file dated intel with record-finding on that record. Do not treat an existing client, vendor or prospect as a new lead."
+            signals.append(proposal)
+        else:
+            proposed.append(proposal)
+        ctx.write("add-loop", {"kind": "team_loop", "owner": "claude", "domain": "prospecting",
+                  "title": "NPPES proposal: " + row["name"], "body": json.dumps(proposal),
+                  "marker": "none", "source_note": "NPPES " + row["npi"] + " " + " ".join(row["sources"])},
+                  "lead-signals:proposal:" + row["source_key"])
+        consumed.add(row["source_key"])
+        if ctx.fixture is None:
+            path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(sorted(consumed)))
+            temporary.replace(path)
+    output = {"status": "prepared", "proposed": proposed, "holds": holds, "signals": signals, "candidate_count": len(plan["candidates"]), "model_calls": 0,
+              "ranked": [], "ranking_status": "PENDING npi-sweep-weekly research and radar rubric"}
+    ctx.write("add-loop", {"kind": "team_loop", "owner": "claude", "domain": "prospecting",
+              "title": "NPPES preparation " + ctx.now.date().isoformat(),
+              "body": json.dumps(output), "marker": "none", "source_note": INDEX_URL},
+              "lead-signals:run:" + ctx.now.date().isoformat())
+    return output

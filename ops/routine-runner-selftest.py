@@ -15,12 +15,12 @@ sys.path.insert(0, str(ROOT))
 from lib.record_call import VerbResult, OK, TRANSIENT
 from tools.routines import runtime
 
-NOW = datetime.fromisoformat('2026-10-05T07:30:00-05:00')
+NOW = datetime.fromisoformat('2026-10-05T07:00:00-05:00')
 
 
 class RunnerTests(unittest.TestCase):
     def test_due_respects_chicago_schedule_and_completion(self):
-        self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=7, minute=29), False))
+        self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=6, minute=59), False))
         self.assertTrue(runtime.due('lead-signals-weekly', NOW, False))
         self.assertFalse(runtime.due('lead-signals-weekly', NOW, True))
         self.assertEqual(runtime.period(datetime.fromisoformat('2026-10-05T00:30:00+00:00')), '2026-09-28')
@@ -117,11 +117,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(value['local_writes'], 0)
         self.assertEqual(value['model_calls'], 0)
 
-    def test_only_replaced_claude_entrypoint_is_code_owned(self):
-        from lib.headless_tasks import code_owned_tasks, main
-        self.assertEqual(code_owned_tasks(ROOT), {'npi-sweep-weekly'})
-        with patch('sys.stderr', new_callable=io.StringIO):
-            self.assertEqual(main(['npi-sweep-weekly', '--repo', str(ROOT)]), 78)
+    def test_judgment_routine_remains_configured(self):
+        from lib.headless_tasks import config
+        self.assertIn('npi-sweep-weekly', config(ROOT)['tasks'])
+
 
 
 if __name__ == '__main__':

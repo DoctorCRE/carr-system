@@ -59,14 +59,6 @@ def log_text(text: str) -> str:
     return json.dumps(projected) + '\n'
 
 
-def code_owned_tasks(repo: Path) -> set[str]:
-    path = repo / 'ops/routines/jobs.v1.json'
-    if not path.exists():
-        return set()
-    manifest = json.loads(path.read_text())
-    return {name for job in manifest['jobs'] for name in job['replaces']}
-
-
 def stamp(instant: datetime) -> str:
     return instant.astimezone(UTC).isoformat().replace('+00:00', 'Z')
 
@@ -588,9 +580,6 @@ def main(argv=None) -> int:
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', args.task_id):
         parser.error('task id must contain lowercase letters, digits and hyphens')
     repo = args.repo.resolve()
-    if args.task_id in code_owned_tasks(repo):
-        print(f'REFUSED {args.task_id}: code-owned; use bin/routine-run.sh, not a Claude model start', file=sys.stderr)
-        return 78
     settings = config(repo)
     task = settings['tasks'][args.task_id]
     timeout = args.timeout_seconds if args.timeout_seconds is not None else task.get('timeout_seconds', 5400)
@@ -771,8 +760,6 @@ def install_main(argv=None) -> int:
     repo = home/'carr-system'
     settings = config(repo)
     selected = args.task_ids or sorted(settings['tasks'])
-    if args.action == 'install' and set(selected) & code_owned_tasks(repo):
-        parser.error('code-owned routines cannot install Claude headless jobs; use the launchd installer')
     if set(selected)-set(settings['tasks']):
         parser.error('unknown task id')
     from lib.claude_scheduler_native import system_timezone
