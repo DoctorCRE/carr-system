@@ -432,9 +432,13 @@ def main():
     # PR #1801 removed 19 automated gates; their 42 rules became judgment_ambient
     # manifest rows typed from each statement (17 procedure, 16 rubric,
     # 9 preference). Active rule IDs and split types stay fixed.
+    # constraint 38 -> 34, procedure 92 -> 83, doctrine 12 -> 11, rubric
+    # 53 -> 50, preference 24 -> 23 on 2026-10-17 (PR #1859): 18 retired or
+    # pending-retirement rules left the active map, each one whole compiled
+    # item; none was a split and nothing was reclassified.
     reviewed_counts = {
-        "constraint": 38, "procedure": 92, "doctrine": 12, "rubric": 53,
-        "preference": 24, "precedent": 3, "example": 0,
+        "constraint": 34, "procedure": 83, "doctrine": 11, "rubric": 50,
+        "preference": 23, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
         not reviewed_errors and not reviewed_compile_errors
@@ -471,7 +475,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 148,
+            "source_classification": "judgment_ambient", "entry_count": 137,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,
@@ -507,6 +511,7 @@ def main():
         # d367188d -- were judgment_ambient rows in the TSV; the other 8
         # were built classes with no manifest row to begin with).
         # Current map tracks the live active rule set; retired rows leave the manifest.
+        # 148 -> 137 on 2026-10-17 (PR #1859): 11 of the 18 retired ids had manifest rows.
         # Historical 209 -> 211 on 2026-09-05: the isolated-delivery and create-missing-
         # verbs rules are both session rails, so each compiles as one procedure.
         and len(activation_manifest["entries"]) == len(reviewed_registry["items"])
