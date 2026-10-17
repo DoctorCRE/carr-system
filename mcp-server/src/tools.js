@@ -6557,7 +6557,7 @@ export const TOOLS = {
 
   "retire-rule": {
     write: true, authorityOnly: true,
-    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
+    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval or explicit missing-approval marker, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Accepts either the full 36-character uuid or the 8-character SHORT FORM the gist index and standing-context print (e.g. '179be4b8'); an ambiguous prefix returns the candidates rather than guessing." },
@@ -6585,9 +6585,16 @@ export const TOOLS = {
       }
 
       const was = cur.rows[0].status;
-      const retired = await c.query(
-        "select ops.retire_rule($1,$2,$3,$4) as result",
-        [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      let retired;
+      try {
+        retired = await c.query(
+          "select ops.retire_rule($1,$2,$3,$4) as result",
+          [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      } catch (error) {
+        if (error.code !== "P0001") throw error;
+        throw new ToolError({ error: "rule_retirement_refused", rule_id: args.rule_id,
+          message: redact(error.message) });
+      }
       const result = retired.rows[0].result;
       await writeEvent(c, actor, "retire-rule", "rule", args.rule_id, {
         field: "status", old: { status: was }, new: { status: "retired" },
