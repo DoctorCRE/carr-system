@@ -715,6 +715,167 @@ class TestReaper(unittest.TestCase):
                 processes.stop_orphans(p, self.config, ended, census)
                 self.assertEqual(kill.call_count, expected)
 
+    def test_out_retention_is_read_only_then_stages_old_outputs(self):
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/build-runs/*'),
+                                          kind='output', series='{parent}')]
+        self.config['retention_seconds']['output'] = 86400
+        runs = []
+        for i in range(4):
+            p = self.root / f'out/build-runs/run-{i}'
+            p.mkdir(parents=True)
+            (p / 'result.txt').write_text('regenerable')
+            self.age(p, 200000 + (4-i)*100)
+            runs.append(p)
+        before = sorted(str(p.relative_to(self.root)) for p in self.root.rglob('*'))
+        result = self.engine().run(out_only=True)
+        self.assertEqual([self.row(result, p)['action'] for p in runs],
+                         ['would_stage', 'would_stage', 'keep', 'keep'])
+        self.assertEqual(sorted(str(p.relative_to(self.root)) for p in self.root.rglob('*')), before)
+        self.assertGreater(result['would_stage_bytes'], 0)
+        self.assertEqual(result['freed_bytes'], 0)
+        result = self.engine().run(execute=True, out_only=True)
+        self.assertEqual([p.exists() for p in runs], [False, False, True, True])
+        staged = self.row(result, runs[0])
+        self.assertEqual(staged['action'], 'staged')
+        self.assertEqual((Path(staged['destination']) / 'result.txt').read_text(), 'regenerable')
+        self.assertIn('_to_delete', staged['destination'])
+        self.assertEqual(result['freed_bytes'], 0)
+
+    def test_execute_pr_evidence_cost_is_per_run_not_per_output(self):
+        roots = [self.root]
+        for name in ('app', 'factory'):
+            root = self.base / name
+            self.git(self.base, 'clone', '-q', str(self.remote), str(root))
+            roots.append(root)
+        for i, root in enumerate(roots):
+            self.git(root, 'remote', 'set-url', 'origin', f'https://github.com/fixture/repo-{i}.git')
+        self.config['repositories'] = [str(root) for root in roots]
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/cache/*'), kind='output')]
+        self.config['retention_seconds']['output'] = 86400
+        cache = self.root / 'out/cache'
+        cache.mkdir(parents=True)
+        counts = {'lists': 0, 'details': 0}
+        original = reaper.command
+        def github(argv, **kwargs):
+            if argv[:2] == ['gh', 'api']:
+                counts['lists'] += 1
+                return subprocess.CompletedProcess(argv, 0, json.dumps([
+                    [dict(number=n, body='') for n in range(1, 6)]]), '')
+            if argv[:3] == ['gh', 'pr', 'view']:
+                counts['details'] += 1
+                detail = dict(body='Evidence out/cache/0' if argv[3] == '1' else '',
+                              title='', comments=[], reviews=[], files=[])
+                return subprocess.CompletedProcess(argv, 0, json.dumps(detail), '')
+            return original(argv, **kwargs)
+        engine = reaper.Reaper(self.root, self.config, pulls=reaper.Pulls(),
+                               processes=self.processes, usage=lambda _: (10**12, 0, 5*10**11))
+        with patch.object(reaper, 'command', side_effect=github):
+            for batch in range(2):
+                for n in range(batch * 8, (batch + 1) * 8):
+                    (cache / str(n)).write_text('regenerable')
+                for file in cache.iterdir():
+                    stamp = time.time() - 200000 + int(file.name) * 100
+                    os.utime(file, (stamp, stamp))
+                report = engine.run(execute=True, out_only=True)
+                self.assertEqual(report['errors'], [])
+                self.assertTrue((cache / '0').exists(), report)
+                self.assertEqual(sum(r['action'] == 'staged' for r in report['rows']), 5 if batch == 0 else 8)
+                self.assertEqual(counts, {'lists': 3 * (batch + 1), 'details': 15 * (batch + 1)})
+
+    def test_output_protects_audits_state_recent_live_and_unknown(self):
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/build-runs/*'),
+                                          kind='output', series='{parent}')]
+        self.config['retention_seconds']['output'] = 86400
+        runs = []
+        for i in range(8):
+            p = self.root / f'out/build-runs/run-{i}'
+            p.mkdir(parents=True)
+            (p / 'result').write_text('output')
+            self.age(p, 200000 + (8-i)*100)
+            runs.append(p)
+        (runs[0] / 'gate-audit.jsonl').write_text('{}')
+        self.age(runs[0])
+        (runs[1] / 'ledger.json').write_text('{}')
+        self.age(runs[1])
+        state = self.root / 'out/release-pipeline/state.json'
+        state.parent.mkdir()
+        state.write_text(json.dumps({'pending': str(runs[2] / 'result')}))
+        (runs[3].parent / 'latest').symlink_to(runs[3], target_is_directory=True)
+        Path(self.config['session_directory']).write_text(json.dumps({'sessions': {'one': {'cwd': str(runs[4])}}}))
+        unknown = self.root / 'out/unclassified'
+        unknown.mkdir()
+        (unknown / 'precious').write_text('keep')
+        result = self.engine().run(out_only=True, execute=True)
+        self.assertEqual([self.row(result, p)['action'] for p in runs], ['keep']*5 + ['staged', 'keep', 'keep'], result)
+        self.assertTrue((unknown / 'precious').exists())
+        self.assertTrue(state.exists())
+        staged = Path(self.row(result, runs[5])['destination'])
+        self.config['locations'].append(dict(pattern=str(self.root / 'out/_to_delete/*'), kind='staged'))
+        self.age(staged.parent)
+        result = self.run_reaper(execute=True)
+        self.assertTrue(staged.exists())
+
+    def test_output_cache_files_recent_writes_and_census_failure(self):
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/cache/*'), kind='output')]
+        self.config['retention_seconds']['output'] = 86400
+        cache = self.root / 'out/cache'
+        cache.mkdir(parents=True)
+        files = []
+        for i in range(4):
+            p = cache / str(i)
+            p.write_text('regenerable')
+            self.age(cache)
+            files.append(p)
+        self.processes.failed = True
+        result = self.engine().run(out_only=True, execute=True)
+        self.assertTrue(all(p.exists() for p in files))
+        self.assertEqual(result['staged_bytes'], 0)
+        self.processes.failed = False
+        files[0].write_text('recent write')
+        result = self.engine().run(out_only=True, execute=True)
+        self.assertEqual(self.row(result, files[0])['action'], 'keep')
+
+    def test_unregistered_diagnosis_copies_stage_without_losing_git_metadata(self):
+        parent = self.root / 'out/release-pipeline/worktrees-cleared'
+        self.config['locations'] = [dict(pattern=str(parent / '*'), kind='output', series='{parent}')]
+        self.config['retention_seconds']['output'] = 86400
+        copies = []
+        for i in range(3):
+            p = parent / f'copy-{i}'
+            p.mkdir(parents=True)
+            (p / '.git').write_text(f'gitdir: {self.root}/.git/worktrees/retired-{i}\n')
+            (p / 'uncommitted').write_text('diagnosis contents')
+            stamp = time.time() - 200000 - (3-i)*100
+            for item in (p, p / '.git', p / 'uncommitted'):
+                os.utime(item, (stamp, stamp))
+            copies.append(p)
+        result = self.engine().run(execute=True, out_only=True)
+        self.assertEqual([self.row(result, p)['action'] for p in copies], ['staged', 'keep', 'keep'], result)
+        destination = Path(self.row(result, copies[0])['destination'])
+        self.assertEqual((destination / '.git').read_text(), f'gitdir: {self.root}/.git/worktrees/retired-0\n')
+        self.assertEqual((destination / 'uncommitted').read_text(), 'diagnosis contents')
+
+    def test_output_does_not_stop_live_readers_or_follow_staging_symlink(self):
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/runs/*'), kind='output', series='{parent}')]
+        self.config['retention_seconds']['output'] = 86400
+        for i in range(3):
+            p = self.root / f'out/runs/{i}'
+            p.mkdir(parents=True)
+            (p / 'result').write_text('output')
+            self.age(p, 200000 + (3-i)*100)
+        self.processes.busy = True
+        with patch.object(self.processes, 'stop_orphans', side_effect=AssertionError('must preserve readers')):
+            result = self.engine().run(execute=True, out_only=True)
+        old = self.root / 'out/runs/0'
+        self.assertEqual(self.row(result, old)['action'], 'keep')
+        self.processes.busy = False
+        outside = self.base / 'outside'
+        outside.mkdir()
+        (self.root / 'out/_to_delete').symlink_to(outside, target_is_directory=True)
+        result = self.engine().run(execute=True, out_only=True)
+        self.assertEqual(self.row(result, old)['action'], 'keep')
+        self.assertEqual(list(outside.iterdir()), [])
+
     def test_launchd_calendar_and_config_contract(self):
         plist = plistlib.loads((SOURCE / 'ops/launchd/com.carr.disk-reaper.plist').read_bytes())
         self.assertNotIn('StartInterval', plist)
