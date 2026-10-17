@@ -77,7 +77,7 @@ test("missing, wildcard, cycle, dynamic SQL, opaque, and unintegrated paths defa
     "db-function-acl:ops.discover_ready_plan_amendments(bigint,int):execute",
     "db-function-acl:ops.effective_ready_plan(text):execute",
     "db-function-acl:ops.mint_canonical_ownership_runtime_session(uuid,uuid,uuid,integer,text,text,timestamptz,uuid):execute",
-    "db-function-acl:ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid):execute",
+    "db-function-acl:ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid):execute",
     "db-function-acl:ops.release_canonical_ownership_lease(uuid,uuid,bigint):execute",
     "db-function-acl:ops.renew_canonical_ownership_lease(uuid,uuid,bigint,integer):execute",
     "mcp-tool:accept-ready-plan-amendment",
@@ -101,10 +101,10 @@ test("missing, wildcard, cycle, dynamic SQL, opaque, and unintegrated paths defa
     { kind: "execute", function_signature: "ops.acknowledge_ready_plan_amendment(bigint,uuid)" },
     { kind: "execute", function_signature: "ops.discover_ready_plan_amendments(bigint,int)" },
     { kind: "execute", function_signature: "ops.effective_ready_plan(text)" },
-    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid)" },
+    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid)" },
   ]);
   assert.deepEqual(resolveExactEffects("mcp-tool:propose-ready-plan-amendment"), [
-    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid)" },
+    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid)" },
   ]);
   assert.throws(() => resolveExactEffects("mcp-tool:unknown"),
     error => error instanceof ExactEffectRefusal && error.error === "effect_contract_missing");

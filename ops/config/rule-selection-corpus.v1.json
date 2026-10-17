@@ -193,12 +193,6 @@
    }
   },
   {
-   "id": "1fcaa63a",
-   "gist": "RUN THE FULL HEAVY BUILD PROTOCOL WITHOUT BEING REMINDED OF ANY PHASE",
-   "statement": "When a partner invokes the heavy build protocol \u2014 or the admission machinery derives work heavy \u2014 the session runs the FULL protocol defined in doctrine `heavy-build-protocol` without being reminded of any phase. Non-negotiable phases the partner should never have to prompt: (1) the heavy research fleet UPFRONT \u2014 parallel cheapest-qualified seats across domain/competitive, practitioner/community, technical, and data-supply lanes, persisted as a digested corpus with digests, plus a measured baseline of the actual system \u2014 before any design; (2) the plan in the required structure \u2014 atomic slice register where every slice names its cheapest-qualified model routing, cross-family reviewer at the risk-appropriate effort, dependencies, write set, authority, and falsifiable acceptance; (3) the adversarial \u2192 cross-family \u2192 recheck review chain with genuinely fresh seats; (4) admission with the typed manifest and master plan, the fresh review of the exact filed proposal, and the receipt; (5) dispatcher-managed execution after acceptance \u2014 immutable packets, exclusive write-set leases, Model Room structured events, serialized integration, builder-never-verifies-itself, close on consumer receipts. Delegation to the cheapest qualified seat applies to every mechanical phase throughout.",
-   "scope": {}
-  },
-  {
    "id": "1fddcffb",
    "gist": "Core routing test: the always-read core holds ONLY what every session needs regardless of task",
    "statement": "Core routing test (Jul 15): the always-read core holds ONLY what every session needs regardless of task; anything task-specific becomes a task-loaded file with a one-line pointer. Enforcement: 00_Context/sweep-sop.md.",
@@ -939,12 +933,6 @@
    }
   },
   {
-   "id": "8400cd3d",
-   "gist": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP",
-   "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP. Tiny work is built in one go. Medium-to-large work opens with /grill-with-docs. Work that outgrows one session moves to /wayfinder. Never start with /wayfinder.",
-   "scope": {}
-  },
-  {
    "id": "83b9a362",
    "gist": "Suggest a pairing with a caveat until a partner rules on it",
    "statement": "UNCONFIRMED VENDOR PAIRINGS \u2014 SUGGEST WITH A CAVEAT, NEVER AS SETTLED. These are plausible introduction pairs that NEITHER JOE NOR DELL HAS RULED ON. They were proposed by the system, not taught by a partner, and imported unattributed by ORDER 37. Treat every one as a hypothesis: suggest it only with the caveat \"confirm this pairing logic\", and the moment a partner rules on it, replace that line with a confirmed rule or drop it. THE SIX, verbatim as imported: (1) Lender \u2194 CPA \u2014 financing and financials on the same startup. (2) CPA \u2194 Attorney \u2014 entity formation and transaction work. (3) Practice broker \u2194 Lender \u2014 acquisitions need financing. (4) Supply/equipment rep \u2194 GC or Architect \u2014 equipment specs drive buildout design. (5) Demographics/Marketing \u2194 Developer \u2014 site selection data. (6) Banker \u2194 SBDC consultant \u2014 startup pipeline in both directions. THIS RULE DOES NOT OVERRIDE THE HARD BLOCKS, which are settled policy and outrank every suggestion here: same category means competitors by default and never gets introduced or co-invited; Example Organization 25 and Patterson are a named rivalry; and any vendor at Stage \"Avoid\" gets no introductions at all. Contractor \u2194 Architect is the one CONFIRMED pair and is good sometimes rather than by default. WHY THIS IS ONE RULE AND NOT SIX: the pairings are data with a confidence flag, and data does not earn a rule slot each \u2014 the binding instruction is identical for all six and is stated once, at the top. A seventh pairing is added as a line here, never as a new rule.",
@@ -955,6 +943,18 @@
     "section": "unconfirmed_defaults",
     "taught_on": null
    }
+  },
+  {
+   "id": "8400cd3d",
+   "gist": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP",
+   "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP. Tiny work is built in one go. Medium-to-large work opens with /grill-with-docs. Work that outgrows one session moves to /wayfinder. Never start with /wayfinder.",
+   "scope": {}
+  },
+  {
+   "id": "8400cd3d",
+   "gist": "Size each new build before starting; use the bounded pstack and Pocock workflow for its rung.",
+   "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP BEFORE ANY BUILDING. Binding at the moment a session or brief begins a new build, plan or queued item, and at every dispatch to a builder. Ordered questions: (1) Is it tiny (a small, obvious change one session finishes with no open design question)? Build it in one go. (2) Otherwise, if it fits in one session: open with a grilling interview against the docs (the Pocock grilling skill, .agents/skills/grilling), one question at a time, until the design questions are settled; then build under /poteto-mode (plugins/pstack/skills/poteto-mode) and run the two AGENTS.md design-and-debt passes (codebase-design, zero-tech-debt) before the PR. (3) If it outgrows one session: never start building it in-session. File a Work Request (report-problem / write-work-shape) whose criteria are the slices, then hand each slice to a builder; each slice is sized again by this rule when dispatched. The brief for every dispatched slice states which rung it sits on. Origin: Joe adopted the sizing step from Matt Pocock's 2026-10-08 post; the beyond-one-session rung originally named a Wayfinder map, replaced 2026-10-13 because that skill exists nowhere.",
+   "scope": {}
   },
   {
    "id": "847f9995",

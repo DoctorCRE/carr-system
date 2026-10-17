@@ -18,7 +18,7 @@ const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor"
   "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
 const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"]);
 const ACCEPT_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash"]);
-const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
+const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"]);
 const ACK_AMENDMENT_FIELDS = new Set(["idempotency_key","notice_id"]);
 const OUTCOME_PROPOSAL_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash","criterion_results","evidence_refs","blocker_code","result_summary","observed_minutes","interaction_surface","heavy_session_used","manual_context_transfers"]);
 const ACCEPT_OUTCOME_FIELDS = new Set(["idempotency_key","human_ref","base_version","feedback_hash"]);
@@ -26,13 +26,7 @@ const SAFE_REF = /^safe:[a-z0-9][a-z0-9:_./-]*$/;
 const CRITERION_RESULT = new Set(["met", "not_met", "not_observed"]);
 const INTERACTION_SURFACE = new Set(["workspace", "control_room", "mcp", "codex", "claude_code", "other"]);
 const OUTCOME_BLOCKER = new Set(["none", "evidence_missing", "criterion_not_met", "external_dependency", "system_error"]);
-const SESSION_REF = /^session:[a-z0-9][a-z0-9:._/-]{8,199}$/;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
-const HEAVY_RESEARCH_FIELDS = ["primary_sources", "maintained_repositories", "practitioner_evidence", "current_baseline", "failure_modes"];
-const HEAVY_MASTER_PLAN_FIELDS = ["product_goal", "non_goals", "architecture", "authority_boundaries", "dependency_dag", "planned_checks", "baseline_comparison", "release_strategy", "rollback_strategy", "observability_strategy", "fully_shipped_definition", "prerequisite_policy"];
-const EVIDENCE_CLASS = Object.freeze({ primary_sources: "primary_source", maintained_repositories: "maintained_repository",
-  practitioner_evidence: "practitioner_evidence", current_baseline: "current_baseline", failure_modes: "failure_mode" });
-
 function text(value) { return typeof value === "string" ? value.trim() : ""; }
 
 async function deliverySourceForPlan(c, actor, row, args) {
@@ -95,64 +89,6 @@ async function deliverySourceForPlan(c, actor, row, args) {
       reason: "rule_delivery_source_invalid", detail: String(error?.message || error).slice(0, 160) };
   }
 }
-function exactKeys(value, keys) {
-  return value && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).sort().join(",") === [...keys].sort().join(",");
-}
-function boundedStrings(value, min, max, minLength = 10, maxLength = 1000) {
-  return Array.isArray(value) && value.length >= min && value.length <= max &&
-    value.every(item => text(item).length >= minLength && text(item).length <= maxLength);
-}
-
-function validateHeavyBuildContract(raw, ToolError) {
-  const fail = (field, detail) => { throw new ToolError({ error: "invalid_heavy_build_contract", field, detail }); };
-  if (!exactKeys(raw, ["builder_session_ref", "research_manifest", "master_plan"])) fail("heavy_build", "closed typed contract required");
-  if (!SESSION_REF.test(raw.builder_session_ref || "")) fail("builder_session_ref", "use session:<stable-fresh-context-ref>");
-  const research = raw.research_manifest;
-  if (!exactKeys(research, [...HEAVY_RESEARCH_FIELDS, "unresolved_contradictions", "conclusion"])) fail("research_manifest", "all research classes are required");
-  const seen = new Set();
-  for (const field of HEAVY_RESEARCH_FIELDS) {
-    const items = research[field];
-    const minimum = field === "maintained_repositories" ? 2 : 1;
-    if (!Array.isArray(items) || items.length < minimum || items.length > 12) fail(`research_manifest.${field}`, `requires ${minimum}-12 evidence items`);
-    for (const item of items) {
-      if (!exactKeys(item, ["source_ref", "source_class", "locator", "observed_at", "content_digest", "finding"])) fail(`research_manifest.${field}`, "evidence item shape is not exact");
-      if (!SAFE_REF.test(item.source_ref || "") || seen.has(item.source_ref)) fail(`research_manifest.${field}.source_ref`, "safe refs must be unique");
-      seen.add(item.source_ref);
-      if (item.source_class !== EVIDENCE_CLASS[field]) fail(`research_manifest.${field}.source_class`, `expected ${EVIDENCE_CLASS[field]}`);
-      let locator;
-      try { locator = new URL(String(item.locator || "")); } catch { fail(`research_manifest.${field}.locator`, "HTTPS source required"); }
-      if (locator.protocol !== "https:") fail(`research_manifest.${field}.locator`, "HTTPS source required");
-      const observed = new Date(String(item.observed_at || ""));
-      if (Number.isNaN(observed.getTime()) || observed.getTime() > Date.now() + 300000) fail(`research_manifest.${field}.observed_at`, "non-future timestamp required");
-      if (!SHA256.test(item.content_digest || "")) fail(`research_manifest.${field}.content_digest`, "exact sha256 digest required");
-      if (text(item.finding).length < 20 || text(item.finding).length > 1000) fail(`research_manifest.${field}.finding`, "20-1000 character finding required");
-    }
-  }
-  if (!boundedStrings(research.unresolved_contradictions, 0, 12, 10, 500) || text(research.conclusion).length < 20 || text(research.conclusion).length > 1000)
-    fail("research_manifest", "contradictions[] and a substantive conclusion are required");
-
-  const plan = raw.master_plan;
-  if (!exactKeys(plan, HEAVY_MASTER_PLAN_FIELDS)) fail("master_plan", "complete target-product plan required");
-  for (const field of ["product_goal", "baseline_comparison", "release_strategy", "rollback_strategy", "observability_strategy", "fully_shipped_definition", "prerequisite_policy"])
-    if (text(plan[field]).length < 20 || text(plan[field]).length > 2000) fail(`master_plan.${field}`, "20-2000 character statement required");
-  if (!boundedStrings(plan.non_goals, 1, 12) || !boundedStrings(plan.architecture, 2, 20) || !boundedStrings(plan.authority_boundaries, 1, 12))
-    fail("master_plan", "non-goals, architecture, and authority boundaries must be explicit");
-  if (!Array.isArray(plan.dependency_dag) || !plan.dependency_dag.length || plan.dependency_dag.length > 20) fail("master_plan.dependency_dag", "1-20 typed steps required");
-  const steps = new Set();
-  for (const step of plan.dependency_dag) {
-    if (!exactKeys(step, ["step_ref", "depends_on"]) || !/^step:[a-z0-9][a-z0-9:._/-]*$/.test(step.step_ref || "") || steps.has(step.step_ref) ||
-        !Array.isArray(step.depends_on) || step.depends_on.some(ref => !/^step:[a-z0-9][a-z0-9:._/-]*$/.test(ref) || ref === step.step_ref))
-      fail("master_plan.dependency_dag", "unique step refs and non-self dependencies required");
-    steps.add(step.step_ref);
-  }
-  if (plan.dependency_dag.some(step => step.depends_on.some(ref => !steps.has(ref)))) fail("master_plan.dependency_dag", "every dependency must name a declared step");
-  if (!Array.isArray(plan.planned_checks) || !plan.planned_checks.length || plan.planned_checks.length > 20 || plan.planned_checks.some(check =>
-      !exactKeys(check, ["artifact", "comparator", "failure_condition"]) || [check.artifact, check.comparator, check.failure_condition].some(value => text(value).length < 5 || text(value).length > 500)))
-    fail("master_plan.planned_checks", "each check must name artifact, comparator, and failure condition");
-  return raw;
-}
-
 function validate(args, ToolError) {
   if (Object.keys(args).some(key => !FIELDS.has(key)))
     throw new ToolError({ error: "invalid_report_problem_fields" });
@@ -309,16 +245,10 @@ function validateAcceptPlan(args, ToolError) {
 function validatePlanAmendment(args, ToolError) {
   if (Object.keys(args).some(k => !AMEND_PLAN_FIELDS.has(k)))
     throw new ToolError({ error: "invalid_ready_plan_amendment_fields" });
-  const { predecessor_plan_hash: predecessorPlanHash, heavy_build: heavyBuild, ...plan } = args;
+  const { predecessor_plan_hash: predecessorPlanHash, ...plan } = args;
   validatePlan(plan, ToolError);
   if (!SHA256.test(predecessorPlanHash || ""))
     throw new ToolError({ error: "invalid_ready_plan_amendment_predecessor" });
-  // A successor replaces an already executable contract.  It therefore always
-  // carries its own closed heavy-build evidence; the DB records that evidence
-  // against the new immutable plan before any review or acceptance can see it.
-  if (!heavyBuild) throw new ToolError({ error: "heavy_build_admission_required",
-    missing: ["research_manifest", "master_plan", "builder_session_ref"] });
-  validateHeavyBuildContract(heavyBuild, ToolError);
 }
 
 function validateAmendmentAcknowledgement(args, ToolError) {
@@ -414,39 +344,6 @@ function validateOutcomeAcceptance(args, ToolError) {
       !Number.isInteger(args.base_version) || args.base_version < 1 || !/^sha256:[0-9a-f]{64}$/.test(args.feedback_hash || ""))
     throw new ToolError({ error: "invalid_accept_outcome" });
 }
-
-const HEAVY_EVIDENCE_SCHEMA = { type: "object", additionalProperties: false,
-  required: ["source_ref", "source_class", "locator", "observed_at", "content_digest", "finding"], properties: {
-    source_ref: { type: "string", minLength: 6, maxLength: 300 }, source_class: { type: "string" },
-    locator: { type: "string", minLength: 8, maxLength: 1000 }, observed_at: { type: "string" },
-    content_digest: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" }, finding: { type: "string", minLength: 20, maxLength: 1000 },
-  } };
-function heavyEvidenceArray(minItems = 1) { return { type: "array", minItems, maxItems: 12, items: HEAVY_EVIDENCE_SCHEMA }; }
-const HEAVY_BUILD_SCHEMA = { type: "object", additionalProperties: false,
-  required: ["builder_session_ref", "research_manifest", "master_plan"], properties: {
-    builder_session_ref: { type: "string", minLength: 17, maxLength: 207 },
-    research_manifest: { type: "object", additionalProperties: false,
-      required: [...HEAVY_RESEARCH_FIELDS, "unresolved_contradictions", "conclusion"], properties: {
-        primary_sources: heavyEvidenceArray(), maintained_repositories: heavyEvidenceArray(2), practitioner_evidence: heavyEvidenceArray(),
-        current_baseline: heavyEvidenceArray(), failure_modes: heavyEvidenceArray(),
-        unresolved_contradictions: { type: "array", maxItems: 12, items: { type: "string", minLength: 10, maxLength: 500 } },
-        conclusion: { type: "string", minLength: 20, maxLength: 1000 },
-      } },
-    master_plan: { type: "object", additionalProperties: false, required: HEAVY_MASTER_PLAN_FIELDS, properties: {
-      product_goal: { type: "string", minLength: 20, maxLength: 2000 },
-      non_goals: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      architecture: { type: "array", minItems: 2, maxItems: 20, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      authority_boundaries: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      dependency_dag: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", additionalProperties: false,
-        required: ["step_ref", "depends_on"], properties: { step_ref: { type: "string" }, depends_on: { type: "array", items: { type: "string" } } } } },
-      planned_checks: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", additionalProperties: false,
-        required: ["artifact", "comparator", "failure_condition"], properties: { artifact: { type: "string" }, comparator: { type: "string" }, failure_condition: { type: "string" } } } },
-      baseline_comparison: { type: "string", minLength: 20, maxLength: 2000 }, release_strategy: { type: "string", minLength: 20, maxLength: 2000 },
-      rollback_strategy: { type: "string", minLength: 20, maxLength: 2000 }, observability_strategy: { type: "string", minLength: 20, maxLength: 2000 },
-      fully_shipped_definition: { type: "string", minLength: 20, maxLength: 2000 }, prerequisite_policy: { type: "string", minLength: 20, maxLength: 2000 },
-    } },
-  } };
-
 
 // WHO ACTUALLY PERFORMED THE AUTHORITY ACTS ON THIS REQUEST.
 //
@@ -1065,35 +962,34 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "propose-ready-plan-amendment": {
       write: true,
-      description: "Append one immutable same-Work-Request ready-plan successor proposal with its closed heavy-build contract. The caller binds the exact accepted predecessor hash; the database records successor build admission, serializes the lineage, preserves history, and creates no acceptance, cancellation, assignment, dispatch, or execution authority.",
+      description: "Append one immutable same-Work-Request ready-plan successor proposal with its bounded plan contract. The caller binds the exact accepted predecessor hash; the database serializes the lineage, preserves history, and creates no acceptance, cancellation, assignment, dispatch, or execution authority.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" }, human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
         base_version: { type: "integer", minimum: 1 }, predecessor_plan_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
         scope_summary: { type: "string", minLength: 1, maxLength: 1000 }, runbook_ref: { type: "string" },
         dependency_refs: { type: "array", maxItems: 12, items: { type: "string" } }, recovery_ref: { type: "string" },
-        observability_ref: { type: "string" }, caps: { type: "object" }, heavy_build: HEAVY_BUILD_SCHEMA,
-      }, required: ["idempotency_key", "human_ref", "base_version", "predecessor_plan_hash", "scope_summary", "runbook_ref", "dependency_refs", "recovery_ref", "observability_ref", "caps", "heavy_build"] },
+        observability_ref: { type: "string" }, caps: { type: "object" },
+      }, required: ["idempotency_key", "human_ref", "base_version", "predecessor_plan_hash", "scope_summary", "runbook_ref", "dependency_refs", "recovery_ref", "observability_ref", "caps"] },
       handler: async (c, actor, args) => {
         validatePlanAmendment(args, ToolError);
         return withEnvelope(c, actor, "propose-ready-plan-amendment", { ...args, _server_actor_id: actor.id }, async () => {
           const result = await c.query(
-            `select ops.propose_ready_plan_amendment($1::text,$2::integer,$3::text,$4::text,$5::text,$6::jsonb,$7::text,$8::text,$9::jsonb,$10::jsonb,$11::uuid,$12::uuid) as amendment
+            `select ops.propose_ready_plan_amendment($1::text,$2::integer,$3::text,$4::text,$5::text,$6::jsonb,$7::text,$8::text,$9::jsonb,$10::uuid,$11::uuid) as amendment
                /* work-request-intake:propose-ready-plan-amendment */`,
             [args.human_ref, args.base_version, args.predecessor_plan_hash, text(args.scope_summary), args.runbook_ref,
               JSON.stringify(args.dependency_refs), args.recovery_ref, args.observability_ref, JSON.stringify(args.caps),
-              JSON.stringify(args.heavy_build), actor.id, args.idempotency_key]);
+              actor.id, args.idempotency_key]);
           const row = result.rows[0]?.amendment;
-          if (!row?.ok || !row.work_request || !row.plan || !row.build_admission)
+          if (!row?.ok || !row.work_request || !row.plan)
             throw new ToolError({ error: row?.error || "ready_plan_amendment_proposal_refused" });
           await writeEvent(c, actor, "propose-ready-plan-amendment", "ops_work_request", row.work_request.id, {
             field: "ready_plan_successor_proposed",
             new: { predecessor_plan_hash: args.predecessor_plan_hash, plan_ref: row.plan.ref, plan_hash: row.plan.hash,
-              plan_version: row.plan.version, admission_hash: row.build_admission.admission_hash,
-              admission_ref: row.build_admission.admission_ref, replayed: row.replayed === true },
+              plan_version: row.plan.version, replayed: row.replayed === true },
             idempotency_key: args.idempotency_key,
           });
           return { ok: true, work_request: row.work_request, plan: row.plan,
-            build_admission: row.build_admission, replayed: row.replayed === true };
+            replayed: row.replayed === true };
         });
       },
     },

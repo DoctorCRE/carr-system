@@ -369,6 +369,17 @@ grant select on public.example to reader;
 create function public.example_read() returns int language sql as 'select 1';
 create table public.schema_migrations (filename text primary key, sha256 text not null,
 applied_at timestamptz not null default now());
+create schema ops;
+create table ops.rule_delivery_policy(singleton boolean primary key, mode text, changed_by text, reason text);
+create function public.empty_policy_guard() returns trigger language plpgsql as $$
+begin
+  if not exists(select 1 from ops.rule_delivery_policy where mode='shadow') then
+    raise exception 'empty policy has no bootstrap configuration';
+  end if;
+  return null;
+end $$;
+create constraint trigger empty_policy_guard after insert on public.schema_migrations
+ deferrable initially deferred for each row execute function public.empty_policy_guard();
 """
             production = root / 'production.sql'
             production.write_text(base)
@@ -376,11 +387,16 @@ applied_at timestamptz not null default now());
             grants = dict(roles=['reader', 'reader_group', 'source_only'], memberships=[('reader_group', 'reader', False, True, False)])
             built = proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
             self.assertEqual(built['ledger'], hashes)
+            production.write_text(base + "insert into ops.rule_delivery_policy values(true,'full','fixture','existing policy');")
+            with self.assertRaisesRegex(RuntimeError, 'empty policy has no bootstrap configuration'):
+                proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
+            production.write_text(base)
             expected = root / 'expected.sql'
             ledger = ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{digest}');\n"
                              for name, digest in hashes.items())
             roles = 'create role reader; create role reader_group; grant reader_group to reader with admin false, inherit true, set false;'
-            expected.write_text(roles + base + scripts['0901_pending.sql'] + '\n' + ledger)
+            expected.write_text(roles + base + scripts['0901_pending.sql'] + \
+                "insert into ops.rule_delivery_policy values(true,'shadow','fixture','fresh snapshot');\n" + ledger)
             reference = proof.build_schema(expected, bins, root)
             self.assertEqual(proof.schema_difference(built['dump'], reference['dump']), [])
             self.assertTrue(proof.privilege_difference(built['grants'], reference['grants'])['ok'])

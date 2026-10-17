@@ -217,6 +217,16 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 # Only this disposable ledger import lacks the SCAC config rows.
                 # Pending migrations run with normal triggers in a new session.
                 conn.execute("set local session_replication_role = replica")
+                # A schema-only copy has no policy singleton. Use the same
+                # shadow default as schema-snapshot.sh so the existing empty
+                # projection bootstrap can run. Pending migrations execute in
+                # a new session with every trigger active; never replace an
+                # existing policy or seed rule, epoch, or registry history.
+                if conn.execute("select to_regclass('ops.rule_delivery_policy')").fetchone()[0]:
+                    conn.execute("""insert into ops.rule_delivery_policy(singleton,mode,changed_by,reason)
+                        values(true,'shadow','production-schema-proof',
+                          'Fresh schema-only reconstruction; no rule projection or cutover evidence.')
+                        on conflict(singleton) do nothing""")
                 with conn.cursor() as cursor:
                     cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
                                        sorted(production_ledger.items()))

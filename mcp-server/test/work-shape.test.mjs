@@ -381,11 +381,7 @@ test("migration 0492 admits one linked forward correction behind the exact sourc
   const correctionLookup = setter.indexOf("from ops.sourced_work_request_shape_disposition_correction_receipt c\n   where c.idempotency_key = p_idempotency_key");
   const rowLock = setter.indexOf("where x.ref = p_work_request\n   for update");
   const correctionInsert = setter.indexOf("insert into ops.sourced_work_request_shape_disposition_correction_receipt");
-  const classifier = setter.indexOf("ops.heavy_build_classification(w.id, '', '[]'::jsonb, '{}'::jsonb)");
   assert.ok(lock >= 0 && lock < originalLookup && originalLookup < correctionLookup && correctionLookup < rowLock && rowLock < correctionInsert);
-  assert.equal((setter.match(/ops\.heavy_build_classification\(/g) || []).length, 1);
-  assert.ok(classifier > correctionInsert, "the classifier refusal belongs to the initial not_required branch only");
-  assert.match(setter, /if p_disposition = 'not_required' then\n      classification := ops\.heavy_build_classification/);
   assert.match(setter, /or w\.program_key is not null or w\.program_ordinal is not null then/);
   assert.match(setter, /is distinct from \(null::text,null::text,null::text,null::uuid,null::timestamptz\)\n       or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\) then/);
   assert.match(setter, /or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\)\n       or exists \(select 1 from ops\.sourced_work_request_shape_disposition_correction_receipt c/);

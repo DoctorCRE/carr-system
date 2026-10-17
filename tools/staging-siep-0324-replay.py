@@ -8,7 +8,7 @@ skipped, so tools/migrate.py fails closed on the reordered ledger, and the
 typed staging readback refuses release rehearsals because staging's ledger
 (259 rows) does not equal the declared candidate set (260). Third instance of
 the same shape tonight; see tools/staging-ledger-repair-0315.py and
-tools/staging-heavy-build-parity.py for the pattern's provenance.
+the original isolated staging replay for the pattern's provenance.
 
 CONTRACT, same as its two siblings: marker-verified, repairs exactly one
 named skew, refuses any database not showing it (production records 0324, so

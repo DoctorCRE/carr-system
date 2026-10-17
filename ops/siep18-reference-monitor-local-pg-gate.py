@@ -31,7 +31,7 @@ SEALED_PREDECESSOR_ORDINAL = 117
 SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
 SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
 SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
-LIVE_REGISTRY_MIGRATION = 'migrations/0886_active_rule_scope_backfill.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0890_retire_heavy_build_runtime.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -129,10 +129,9 @@ def seed_reviewed_rule_projection(cur) -> None:
 # correction receipt, the effective-lineage resolver, and the rebased
 # consumers. The acceptance below exercises that surface on the same
 # rollback-only transaction: exact setter signature and grants, receipt
-# privacy and immutability, the classifier boundary on the sourced initial
-# not_required path, one durable not_required -> required correction, the
+# privacy and immutability, one durable not_required -> required correction, the
 # replay and cross-table refusal matrix, the synthetic corrected -> Shape ->
-# ready -> both 0333 outcome guards lifecycle, the lineage readback, a heavy
+# ready -> both 0333 outcome guards lifecycle, the lineage readback, a
 # legacy receipt's correction, and the unsourced survivors.
 
 WR68_SETTER = "ops.set_sourced_work_request_shape_disposition(text,integer,text,text,text,uuid,uuid)"
@@ -277,17 +276,6 @@ def wr68_lineage(cur, work_request_id):
         cur.execute("reset role")
 
 
-def wr68_classify(cur, ref: str, version: int):
-    set_local_role(cur, "carr_writer")
-    try:
-        return cur.execute(
-            "select tier,reasons from ops.classify_sourced_work_request_build(%s,%s,'','[]'::jsonb,'{}'::jsonb)",
-            (ref, version),
-        ).fetchall()
-    finally:
-        cur.execute("reset role")
-
-
 def wr68_shape_revision(cur, work_request_id, work_request_version: int, actor_id) -> None:
     set_local_role(cur, "carr_writer")
     try:
@@ -370,10 +358,6 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
     correction_insert = setter_source.index("insert into ops.sourced_work_request_shape_disposition_correction_receipt")
     if not (lock_at < original_lookup < correction_lookup < row_lock < correction_insert):
         raise RuntimeError("WR-000068 setter lock ordering drifted")
-    if setter_source.count("ops.heavy_build_classification(") != 1 or \
-       setter_source.index("ops.heavy_build_classification(") < correction_insert:
-        raise RuntimeError("WR-000068 classifier refusal is not confined to the initial disposition branch")
-
     # C. Standard sourced fixture: initial not_required -> one correction -> Shape -> ready -> 0333.
     source_section, source_rev, origin_ref, runbook_ref = wr68_doctrine_fixture(cur, joe_id, token)
     request_id, ref, _state, captured_version = wr68_capture(
@@ -381,11 +365,6 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
         "Record one receipt-backed forward shape correction",
         [{"id": "CORRECTED", "text": "The correction is receipt-backed and linked"}])
     triaged_version = wr68_triage(cur, ref, captured_version)
-    if wr68_classify(cur, ref, triaged_version) != [("standard", [])]:
-        raise RuntimeError("WR-000068 standard fixture did not classify standard")
-    if wr68_classify(cur, ref, triaged_version + 5) != []:
-        raise RuntimeError("WR-000068 wrapper returned rows for a stale version")
-
     key_initial, key_correction = uuid.uuid4(), uuid.uuid4()
     initial = wr68_setter(cur, ref, triaged_version, "not_required", "safe:fixed-surface",
                           "The surface is already fixed.", joe_id, key_initial)
@@ -415,7 +394,7 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
                         "one required correction before Shape", "second not_required disposition")
 
     corrected = wr68_setter(cur, ref, original_version, "required", None,
-                            "The request is intrinsically heavy and needs a Work Shape.", joe_id, key_correction)
+                            "The implementation surface remains open.", joe_id, key_correction)
     corrected_version = original_version + 1
     if corrected[1:6] != (ref, "triaged", corrected_version, "required", None) or corrected[-1] is not False:
         raise RuntimeError(f"WR-000068 correction was not persisted exactly: {corrected!r}")
@@ -440,7 +419,7 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
         raise RuntimeError(f"WR-000068 corrected lineage readback is not exact: {lineage!r}")
 
     replay = wr68_setter(cur, ref, original_version, "required", None,
-                         "The request is intrinsically heavy and needs a Work Shape.", joe_id, key_correction)
+                         "The implementation surface remains open.", joe_id, key_correction)
     if replay[:-1] != corrected[:-1] or replay[-1] is not True:
         raise RuntimeError("WR-000068 exact correction replay did not return the persisted correction")
     wr68_setter_refusal(cur, (ref, original_version, "required", None, "changed", joe_id, key_correction),
@@ -472,7 +451,7 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
     cur.execute("reset role")
     wr68_shape_revision(cur, request_id, corrected_version, joe_id)
     replay = wr68_setter(cur, ref, original_version, "required", None,
-                         "The request is intrinsically heavy and needs a Work Shape.", joe_id, key_correction)
+                         "The implementation surface remains open.", joe_id, key_correction)
     if replay[-1] is not True:
         raise RuntimeError("WR-000068 correction replay after Shape was not stable")
     wr68_setter_refusal(cur, (ref, corrected_version, "required", None, "Post-Shape correction", joe_id, uuid.uuid4()),
@@ -499,7 +478,7 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
           from ops.sourced_work_request_shape_disposition_correction_receipt where work_request_id=%s""", (request_id,))
     if binding != correction_row:
         raise RuntimeError(f"WR-000068 shape binding does not equal the correction: {binding!r} vs {correction_row!r}")
-    wr68_setter_refusal(cur, (ref, original_version, "required", None, "The request is intrinsically heavy and needs a Work Shape.", joe_id, key_correction),
+    wr68_setter_refusal(cur, (ref, original_version, "required", None, "The implementation surface remains open.", joe_id, key_correction),
                         "different sourced shape correction", "correction replay after ready")
     set_local_role(cur, "carr_writer")
     feedback = wr68_one(cur, """select * from ops.propose_sourced_work_request_outcome_feedback(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
@@ -529,26 +508,8 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
     cur.execute("rollback to savepoint wr68_binding_drift")
     cur.execute("release savepoint wr68_binding_drift")
 
-    # D. Heavy fixtures: initial not_required refused; a legacy heavy not_required receipt corrects.
-    heavy_id, heavy_ref, _s, heavy_captured = wr68_capture(
-        cur, source_section, source_rev, origin_ref, "Build a new governed heavy-build execution system",
-        "Implement the complete end-to-end platform", [{"id": "HEAVY", "text": "The heavy request is shaped"}])
-    heavy_version = wr68_triage(cur, heavy_ref, heavy_captured)
-    heavy_classification = wr68_classify(cur, heavy_ref, heavy_version)
-    if len(heavy_classification) != 1 or heavy_classification[0][0] != "heavy":
-        raise RuntimeError(f"WR-000068 heavy fixture did not classify heavy: {heavy_classification!r}")
-    heavy_before = wr68_row_image(cur, "ops.work_request", "id", heavy_id)
-    wr68_setter_refusal(cur, (heavy_ref, heavy_version, "not_required", "safe:fixed-surface", "Heavy not_required", joe_id, uuid.uuid4()),
-                        "intrinsically heavy", "heavy initial not_required")
-    if wr68_row_image(cur, "ops.work_request", "id", heavy_id) != heavy_before or cur.execute(
-            "select count(*) from ops.sourced_work_request_shape_disposition_receipt where work_request_id=%s", (heavy_id,)).fetchone()[0]:
-        raise RuntimeError("WR-000068 heavy refusal mutated state")
-    heavy_required = wr68_setter(cur, heavy_ref, heavy_version, "required", None, "Heavy work needs a Shape.", joe_id, uuid.uuid4())
-    if heavy_required[4] != "required":
-        raise RuntimeError(f"WR-000068 heavy initial required was refused: {heavy_required!r}")
-
     legacy_id, legacy_ref, _s, legacy_captured = wr68_capture(
-        cur, source_section, source_rev, origin_ref, "Build a new governed heavy-build execution system",
+        cur, source_section, source_rev, origin_ref, "Build a new governed capability",
         "Implement the complete end-to-end platform again", [{"id": "LEGACY", "text": "The legacy receipt is corrected"}])
     legacy_version = wr68_triage(cur, legacy_ref, legacy_captured)
     legacy_receipt = wr68_one(cur, """insert into ops.sourced_work_request_shape_disposition_receipt
@@ -562,18 +523,18 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
     legacy_corrected = wr68_setter(cur, legacy_ref, legacy_version + 1, "required", None,
                                    "WR-000063 shape correction", joe_id, uuid.uuid4())
     if legacy_corrected[3:6] != (legacy_version + 2, "required", None):
-        raise RuntimeError(f"WR-000068 heavy legacy correction failed: {legacy_corrected!r}")
+        raise RuntimeError(f"WR-000068 legacy correction failed: {legacy_corrected!r}")
     if wr68_lineage(cur, legacy_id)["status"] != "corrected":
-        raise RuntimeError("WR-000068 heavy legacy lineage did not read corrected")
+        raise RuntimeError("WR-000068 legacy lineage did not read corrected")
     wr68_shape_revision(cur, legacy_id, legacy_version + 2, joe_id)
     set_local_role(cur, "carr_writer")
     legacy_plan = wr68_one(cur, """select * from ops.propose_sourced_work_request_plan(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                           (legacy_ref, legacy_version + 2, "Plan the corrected heavy request", runbook_ref, Jsonb([]),
+                           (legacy_ref, legacy_version + 2, "Plan the corrected request", runbook_ref, Jsonb([]),
                             "safe:recovery:stop", "safe:observability:record",
                             Jsonb({"max_steps": 2, "max_duration_minutes": 15}), uuid.uuid4()))
     cur.execute("reset role")
     if legacy_plan[5:7] != ("triaged", legacy_version + 2):
-        raise RuntimeError(f"WR-000068 proposal over the corrected heavy request failed: {legacy_plan!r}")
+        raise RuntimeError(f"WR-000068 proposal over the corrected request failed: {legacy_plan!r}")
 
     # E. Unsourced survivors: direct update, no receipts, null lineage, Shape untouched, setter refused.
     unsourced_ref = f"WR-98{int(token[:6], 16) % 1000000:06d}"
@@ -608,8 +569,7 @@ def wr68_sourced_shape_forward_correction_acceptance(cur) -> dict:
         "receipt_tables_private": True,
         "lineage_projection": "carr_reader,carr_writer",
         "standard_lifecycle": "not_required -> correction -> Shape -> ready -> outcome proposed/accepted",
-        "heavy_initial_not_required": "refused",
-        "heavy_legacy_correction": "corrected -> Shape -> proposed",
+        "legacy_correction": "corrected -> Shape -> proposed",
         "unsourced_survivor": True,
     }
 

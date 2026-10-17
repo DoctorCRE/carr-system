@@ -408,33 +408,6 @@
     "verbs": {}
    }
   },
-  "1fcaa63a": {
-   "always_on_probability": 0.06,
-   "id": "1fcaa63a",
-   "mode": "triggered",
-   "model": "jev-1.13.0",
-   "negatives": {},
-   "no_cue_probability": 0.11,
-   "packs": [
-    "governance-rules"
-   ],
-   "statement_sha256": "89c34619c725c82a8ac0dba6c727b7129ddd74bc9887f44543d97380bc508601",
-   "triggers": {
-    "commands": {},
-    "keywords": {
-     "acceptance adversarial": 0.5,
-     "admission": 0.5,
-     "admission machinery": 0.68,
-     "admission typed": 0.57,
-     "adversarial cross-family": 0.52,
-     "build protocol": 0.76,
-     "heavy build": 0.8
-    },
-    "paths": {},
-    "tools": {},
-    "verbs": {}
-   }
-  },
   "204391be": {
    "always_on_probability": 0.04,
    "id": "204391be",

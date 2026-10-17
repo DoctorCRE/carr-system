@@ -290,19 +290,6 @@
     }
    ]
   },
-  "1fcaa63a": {
-   "moment": "heavy build protocol invoked",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "propose-ready-plan"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "1fddcffb": {
    "moment": "deciding what belongs in always-read core vs task-loaded files",
    "routes": [
@@ -1813,7 +1800,7 @@
    ]
   },
   "8400cd3d": {
-   "moment": "starting a plan, a heavy-build plan, propose-ready-plan, or a Codex or Dot brief",
+   "moment": "starting a plan, propose-ready-plan, or a Codex or Dot brief",
    "routes": [
     {
      "kind": "trigger",

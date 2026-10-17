@@ -222,14 +222,6 @@
    "summary": "When a scheduled run ends, write its findings, decisions, and rulings to the record before it ends.",
    "when": "completion_evidence gate"
   },
-  "1fcaa63a": {
-   "always_on": false,
-   "chars": 1292,
-   "class": "c",
-   "moment": "heavy build protocol invoked",
-   "summary": "When heavy build protocol is invoked, run all its research/plan/review/admission/dispatch phases unprompted.",
-   "when": "heavy build protocol invoked"
-  },
   "1fddcffb": {
    "always_on": true,
    "always_on_reason": "class-a",
@@ -946,6 +938,14 @@
    "moment": "convening a red team/review panel",
    "summary": "When convening a red team, assign distinct lenses and one seat that re-runs the evidence, never redundant votes.",
    "when": "convening a red team/review panel"
+  },
+  "8400cd3d": {
+   "always_on": false,
+   "chars": 1193,
+   "class": "b",
+   "moment": "starting a new build, plan, queued item, or builder dispatch",
+   "summary": "Size each new build before starting; use the bounded pstack and Pocock workflow for its rung.",
+   "when": "starting a new build, plan, queued item, or builder dispatch"
   },
   "847f9995": {
    "always_on": false,
