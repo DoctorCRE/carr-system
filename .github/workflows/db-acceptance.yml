@@ -178,8 +178,11 @@ jobs:
           # satisfies the pin without moving the server. The script probes this
           # absolute path by major, so no PATH change is needed. Same PGDG repo
           # already configured above; backup-nightly.yml does the same thing.
-          sudo apt-get install -y -qq postgresql-client-18
+          # The offline production-equivalence fixture creates a separate
+          # PostgreSQL 18 cluster. The primary acceptance database stays on 17.
+          sudo apt-get install -y -qq postgresql-client-18 postgresql-18
           /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/initdb --version
           # THE SOCKET DIRECTORY IS THE ONE REAL PLATFORM DIFFERENCE.
           # Snapshot export retains the build's default socket directory.
           # The serial and shard acceptance runners now supply a private -k.
