@@ -122,5 +122,4 @@ assert (tmp / "count").read_text() == "2"
 convo_core._BRAIN.close()
 PY
 
-python3 "$BIN/test-convo-shutdown.py"
 echo "brain streaming tests passed"

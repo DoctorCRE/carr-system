@@ -21,7 +21,7 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import IO
+from typing import IO, TextIO, cast
 
 import speak
 
@@ -129,7 +129,7 @@ class BrainProcess:
         self._finish(process)
 
     def _drain_stderr(self, process: subprocess.Popen[str], stop: threading.Event) -> None:
-        stream = _pipe(process.stderr, "stderr")
+        stream = cast(TextIO, _pipe(process.stderr, "stderr"))
         fd = stream.fileno()
         os.set_blocking(fd, False)
         decoder = codecs.getincrementaldecoder(stream.encoding)(errors="replace")

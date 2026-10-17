@@ -11,7 +11,7 @@ import threading
 import time
 import unittest
 
-BIN = Path(__file__).resolve().parent
+BIN = Path(__file__).resolve().parents[1] / "tools" / "doc-convo" / "bin"
 
 
 def brain_case(scratch: Path) -> None:
