@@ -90,7 +90,7 @@ name: CI
 # dependency, a date-sensitive test) while nobody is opening PRs. Weekends are not
 # workdays for either partner, so that is exactly the window with no other cover.
 #
-# Draft transitions cancel the prior run; ready_for_review runs every class.
+# ready_for_review runs every class; historical draft retries stay isolated.
 # After a base retarget, reopen the PR to test its new merge ref.
 on:
   pull_request:
@@ -102,7 +102,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.draft && 'draft' || 'ready' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -329,7 +329,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ always() }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
