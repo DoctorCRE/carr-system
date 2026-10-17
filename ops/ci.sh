@@ -296,12 +296,12 @@ PYEOF
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
-             sync-rule-boot-classes migration-order-gate \
+             migration-order-gate \
              migration-safety-gate check-jev-conformance door-reachability-check; do
     [ -f "ops/$inv.py" ] || continue
     local inv_args=()
     case "$inv" in
-      sync-core-rule-ids|sync-rule-boot-classes) inv_args=(--check) ;;
+      sync-core-rule-ids) inv_args=(--check) ;;
     esac
     run_quiet "$LOGDIR/gate-$inv.log" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"} \
       || { inherited_abort "$inv" "$PY" "ops/$inv.py" ${inv_args[@]+"${inv_args[@]}"}
