@@ -63,7 +63,7 @@ for (const file of files) {
     event.event.pull_request.draft = true;
     const draft = policy(workflow, event);
     assert.equal(draft.triggers, true);
-    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["classes"] : file === "doc-drift.yml" ? ["check"] : []);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["classes", "checks"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
@@ -112,7 +112,7 @@ test("metadata edits start no validation workflow, so no skipped suite replaces 
   assert.ok(read("ci.yml").jobs.classes.strategy.matrix.classes.includes("gates"));
 });
 
-test("strict aggregate runs after failed classes and accepts only success", () => {
+test("strict aggregate runs after failed classes and requires complete successful evidence", () => {
   const ci = read("ci.yml"), gate = ci.jobs.checks;
   assert.equal(gate.name, "ops/ci.sh --strict", "the required context name must be a literal");
   assert.equal(gate.needs, "classes");
@@ -124,16 +124,18 @@ test("strict aggregate runs after failed classes and accepts only success", () =
     const jobs = ci.jobs.classes.strategy.matrix.classes.map(group => ({
       name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
     const gh = join(fixture, "gh");
-    writeFileSync(gh, "#!/usr/bin/env node\nconsole.log(" + JSON.stringify(JSON.stringify([{ jobs }])) + ");\n");
-    chmodSync(gh, 0o755);
-    for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
-      const output = spawnSync("bash", ["-e", "-c", step.run], {
-        cwd: new URL("../../", import.meta.url),
-        env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
-          GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
-        encoding: "utf8", timeout: 5000 });
-      assert.ifError(output.error);
-      assert.equal(output.status === 0, result === "success", output.stderr);
+    for (const evidence of [jobs, jobs.slice(0, 1)]) {
+      writeFileSync(gh, "#!/usr/bin/env node\nconsole.log(" + JSON.stringify(JSON.stringify([{ jobs: evidence }])) + ");\n");
+      chmodSync(gh, 0o755);
+      for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
+        const output = spawnSync("bash", ["-e", "-c", step.run], {
+          cwd: new URL("../../", import.meta.url),
+          env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
+            GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
+          encoding: "utf8", timeout: 5000 });
+        assert.ifError(output.error);
+        assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stderr);
+      }
     }
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
