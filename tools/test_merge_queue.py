@@ -351,7 +351,8 @@ class QueueTests(unittest.TestCase):
         self.addCleanup(q.db.close)
         wall, monotonic, starts = [100.0], [100.0], []
         q.budget.clock = lambda: wall[0]
-        peer = module.GitHubReadBudget({}, path=q.budget.path, clock=lambda: wall[0])
+        peer = module.GitHubReadBudget({'GH_LIMITER_DIR': str(self.root / 'legacy-budget')},
+                                       path=q.budget.path, clock=lambda: wall[0])
         self.assertEqual(peer.reserve('core'), 0.0)
         peer_start = monotonic[0]
         def sleep(seconds):
@@ -378,7 +379,8 @@ class QueueTests(unittest.TestCase):
         self.addCleanup(q.db.close)
         wall, monotonic, starts = [100.0], [100.0], []
         q.budget.clock = lambda: wall[0]
-        peer = module.GitHubReadBudget({}, path=q.budget.path, clock=lambda: wall[0])
+        peer = module.GitHubReadBudget({'GH_LIMITER_DIR': str(self.root / 'legacy-budget')},
+                                       path=q.budget.path, clock=lambda: wall[0])
         self.assertEqual(peer.reserve('core'), 0.0)
         peer_start = monotonic[0]
         original_reserve = q.budget.reserve
