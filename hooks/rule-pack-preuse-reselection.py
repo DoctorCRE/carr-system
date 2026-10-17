@@ -86,7 +86,8 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     if dedupe:
         ids = rule_routes.fresh_ids(session, tool or event, ids, agent_id=agent, corpus_digest=selection["corpus_digest"])
     rules = [r for r in selection['rules'] if r['id'] in ids]
-    if not rules and selection['complete']:
+    if not rules and (selection['complete'] or event == 'Stop'):
+        # Nothing to deliver. On Stop, an advisory gap notice re-opens the turn and loops.
         return None
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,
             'client': 'codex' if payload.get('turn_id') else 'claude',
