@@ -650,3 +650,82 @@ def load_current_grants_to_role(
 def render_statements(statements: Iterable[str]) -> str:
     """Render an executable script without changing canonical statement bytes."""
     return "\n".join(statements) + "\n"
+
+
+def role_acl_facts_sql(*, all_roles: bool = False) -> str:
+    """Direct ACL facts for one role, or all roles with implicit ACL defaults.
+
+    The provisioner needs explicit grants only. Equivalence also needs PUBLIC's
+    default authority, so a missing function revoke cannot compare equal.
+    """
+    target = "select oid, rolname from pg_roles"
+    target += " union all select 0::oid, 'PUBLIC'" if all_roles else " where rolname=%s"
+    grantee = "target.rolname," if all_roles else ""
+    ordering = "1,2,3,4,5" if all_roles else "1,2,3,4"
+    namespace = (" and n.nspname not in ('pg_catalog','information_schema')"
+                 " and n.nspname !~ '^pg_(toast|temp)'" if all_roles else "")
+    defaults = {
+        'd.datacl': "coalesce(d.datacl, acldefault('d', d.datdba))",
+        'n.nspacl': "coalesce(n.nspacl, acldefault('n', n.nspowner))",
+        'c.relacl': 'coalesce(c.relacl, acldefault(case c.relkind when \'S\' then \'s\'::"char" else \'r\'::"char" end, c.relowner))',
+        'p.proacl': "coalesce(p.proacl, acldefault('f', p.proowner))",
+        't.typacl': "coalesce(t.typacl, acldefault('T', t.typowner))",
+        'l.lanacl': "coalesce(l.lanacl, acldefault('l', l.lanowner))",
+        'f.fdwacl': "coalesce(f.fdwacl, acldefault('F', f.fdwowner))",
+        's.srvacl': "coalesce(s.srvacl, acldefault('S', s.srvowner))",
+        'l.lomacl': "coalesce(l.lomacl, acldefault('L', l.lomowner))",
+    }
+    acls = {key: value if all_roles else key for key, value in defaults.items()}
+    return f"""
+with target as ({target})
+select {grantee}'database',d.datname::text,lower(a.privilege_type),a.is_grantable
+  from pg_database d cross join lateral aclexplode({acls["d.datacl"]}) a
+  join target on target.oid=a.grantee
+union all
+select {grantee}'schema',n.nspname,lower(a.privilege_type),a.is_grantable
+  from pg_namespace n cross join lateral aclexplode({acls["n.nspacl"]}) a
+  join target on target.oid=a.grantee{namespace}
+union all
+select {grantee}case c.relkind when 'S' then 'sequence' else 'table' end,
+       n.nspname||'.'||c.relname,lower(a.privilege_type),a.is_grantable
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  cross join lateral aclexplode({acls["c.relacl"]}) a join target on target.oid=a.grantee{namespace}
+union all
+select {grantee}'column',n.nspname||'.'||c.relname||'('||att.attname||')',lower(a.privilege_type),a.is_grantable
+  from pg_attribute att join pg_class c on c.oid=att.attrelid
+  join pg_namespace n on n.oid=c.relnamespace
+  cross join lateral aclexplode(att.attacl) a join target on target.oid=a.grantee
+ where not att.attisdropped{namespace}
+union all
+select {grantee}'function',n.nspname||'.'||p.proname||'('||oidvectortypes(p.proargtypes)||')',
+       lower(a.privilege_type),a.is_grantable
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  cross join lateral aclexplode({acls["p.proacl"]}) a join target on target.oid=a.grantee{namespace}
+union all
+select {grantee}'type',n.nspname||'.'||t.typname,lower(a.privilege_type),a.is_grantable
+  from pg_type t join pg_namespace n on n.oid=t.typnamespace
+  cross join lateral aclexplode({acls["t.typacl"]}) a join target on target.oid=a.grantee{namespace}
+union all
+select {grantee}'language',l.lanname,lower(a.privilege_type),a.is_grantable
+  from pg_language l cross join lateral aclexplode({acls["l.lanacl"]}) a
+  join target on target.oid=a.grantee
+union all
+select {grantee}'foreign_data_wrapper',f.fdwname,lower(a.privilege_type),a.is_grantable
+  from pg_foreign_data_wrapper f cross join lateral aclexplode({acls["f.fdwacl"]}) a
+  join target on target.oid=a.grantee
+union all
+select {grantee}'foreign_server',s.srvname,lower(a.privilege_type),a.is_grantable
+  from pg_foreign_server s cross join lateral aclexplode({acls["s.srvacl"]}) a
+  join target on target.oid=a.grantee
+union all
+select {grantee}'large_object',l.oid::text,lower(a.privilege_type),a.is_grantable
+  from pg_largeobject_metadata l cross join lateral aclexplode({acls["l.lomacl"]}) a
+  join target on target.oid=a.grantee
+union all
+select {grantee}'default_acl',coalesce(n.nspname,'*')||':'||d.defaclobjtype::text||':'||owner.rolname,
+       lower(a.privilege_type),a.is_grantable
+  from pg_default_acl d left join pg_namespace n on n.oid=d.defaclnamespace
+  join pg_roles owner on owner.oid=d.defaclrole
+  cross join lateral aclexplode(d.defaclacl) a join target on target.oid=a.grantee
+order by {ordering}
+"""
