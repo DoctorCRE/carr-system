@@ -31,6 +31,11 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
+    def test_stop_with_no_rules_and_gaps_stays_silent(self):
+        gap = dict(id='22222222', statement='Moment rule.', scope={'moment': 'Before review'}, personal_to=None)
+        out = self.invoke([gap], payload={'hook_event_name': 'Stop', 'last_assistant_message': 'done'})
+        self.assertIsNone(out)
+
     def test_sponsor_mismatch_still_refuses_the_action(self):
         out = self.invoke([dict(id='11111111', statement='Binding text',
                                scope={'tools': ['Bash']}, personal_to='dell')])
@@ -79,10 +84,11 @@ class DeliveryTests(unittest.TestCase):
         self.assertTrue(validate_lookup_receipt(row, repo=REPO))
 
     def test_defects_alone_do_not_block_prompt_or_stop(self):
-        for event in ('UserPromptSubmit', 'Stop'):
+        rows = [dict(id='11111111', statement='Undeliverable rule.', scope={}, personal_to=None)]
+        self.assertIsNone(self.invoke(rows, event='Stop'))
+        for event in ('UserPromptSubmit',):
             with self.subTest(event=event):
-                output = self.invoke([dict(id='11111111', statement='Undeliverable rule.',
-                                          scope={}, personal_to=None)], event=event)
+                output = self.invoke(rows, event=event)
                 self.assertNotIn('decision', output)
                 row = json.loads(output['hookSpecificOutput']['additionalContext'])
                 self.assertEqual(row['rules'], [])
