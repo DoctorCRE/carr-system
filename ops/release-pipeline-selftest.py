@@ -421,6 +421,152 @@ class Base(unittest.TestCase):
         self._tmp.cleanup()
 
 
+class WorkerIdentityReconciliation(Base):
+    def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        latest = self.fx.commit({"mcp-server/src/a.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        original = pipe.release_target
+
+        def target(gh, cfg, base, head):
+            self.assertEqual(base, live_sha)
+            self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+            return original(gh, cfg, base, head)
+
+        with mock.patch.object(pipe, "release_target", side_effect=target):
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        row = next(row for row in self.fx.records() if row["status"] == "live_identity_reconciled")
+        self.assertEqual((row["from_sha"], row["sha"]), (self.fx.base, live_sha))
+        self.assertEqual(row["provider_version_id"], PRIOR)
+
+    def test_already_live_main_is_reconciled_without_redeployment_or_slice_mark(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": latest})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                    "failed_sha": "f" * 40, "failed_step": "migrate-apply"}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], "f" * 40)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertEqual([row["status"] for row in self.fx.records()], ["live_identity_reconciled"])
+
+    def test_dry_run_uses_live_base_without_persisting_reconciliation(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        pipe = self.fx.pipeline(FakeRunner(), live={"sha": live_sha}, dry_run=True)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe, "release_target", return_value=live_sha) as target:
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(target.call_args.args[2], live_sha)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records(), [])
+
+    def test_failed_reconciliation_receipt_cannot_advance_checkpoint_or_select_target(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": live_sha})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture receipt failed")), \
+             mock.patch.object(pipe, "release_target") as target:
+            self.assertEqual(pipe.tick(["worker"]), 1)
+        target.assert_not_called()
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(runner.calls, [])
+
+    def test_identity_outside_main_history_is_refused(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": "e" * 40})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records()[-1]["reason"], "history_diverged")
+        self.assertEqual(runner.calls, [])
+
+    def test_target_before_merged_live_side_branch_is_refused(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        (self.fx.repo / "mcp-server/s.js").write_text("already live")
+        git(self.fx.repo, "add", "mcp-server/s.js")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        row = self.fx.records()[-1]
+        self.assertEqual(row["status"], "blocked")
+        self.assertEqual(row["reason"], "history_diverged")
+        self.assertEqual(row["sha"], candidate)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_docs_only_target_before_merged_live_side_branch_cannot_regress_checkpoint(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "same runtime", "docs/c.md": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        runtime = self.fx.repo / "mcp-server/src/c.js"
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text("same runtime")
+        (self.fx.repo / "README.md").write_text("live side")
+        git(self.fx.repo, "add", "mcp-server/src/c.js", "README.md")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        self.assertEqual(git(self.fx.repo, "rev-parse", f"{candidate}:mcp-server"),
+                         git(self.fx.repo, "rev-parse", f"{live_sha}:mcp-server"))
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        merge = git(self.fx.repo, "rev-parse", "HEAD")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               merge: ("in_progress", None), head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        rows = self.fx.records()
+        self.assertEqual([row["status"] for row in rows], ["live_identity_reconciled", "blocked"])
+        self.assertEqual((rows[0]["from_sha"], rows[0]["sha"]), (candidate, live_sha))
+        self.assertEqual((rows[-1]["reason"], rows[-1]["sha"]), ("history_diverged", candidate))
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_unreadable_identity_refuses_even_when_checkpoint_equals_main(self):
+        for response in [OSError("offline"), {}, {"git_sha": {"value": "short"}},
+                         {"git_sha": "malformed"},
+                         {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}}]:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                if isinstance(response, Exception):
+                    pipe.http = mock.Mock(side_effect=response)
+                else:
+                    pipe.http = mock.Mock(return_value=response)
+                pipe.tick(["worker"])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+
+
 class RejectionReconciliation(Base):
     def setUp(self):
         super().setUp()
@@ -434,7 +580,8 @@ class RejectionReconciliation(Base):
     def wire_live(self):
         live = {"sha": self.fx.base}
         self.runner.live = live
-        self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]}}
+        self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
 
 
     def test_health_recheck_is_bounded_and_recovery_runs_all_release_guards(self):
@@ -2644,10 +2791,13 @@ class ReleaseTarget(Base):
 
     GREEN, RED = ("completed", "success"), ("completed", "failure")
 
+    def setUp(self):
+        super().setUp()
+        self.live = {"sha": self.fx.base}
+
     def ship(self, gh):
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        rc = self.fx.pipeline(runner, github=gh, live=live).tick(["worker"])
+        runner = FakeRunner(live=self.live)
+        rc = self.fx.pipeline(runner, github=gh, live=self.live).tick(["worker"])
         return rc, runner
 
     def released(self, runner):
@@ -3914,7 +4064,8 @@ class DeployCredential(unittest.TestCase):
                 runner = FakeRunner(live=live)
                 pipe = self.pipeline(runner, app=lane == "app")
                 if lane == "worker":
-                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]}}
+                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
                 else:
                     pipe.http = lambda _u: {"source_commit": live["sha"], "environment": "production"}
                     original_run = runner.run
@@ -3936,7 +4087,7 @@ class DeployCredential(unittest.TestCase):
 
         def pipeline(runner):
             pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
-            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}}
+            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}, "worker_version": {"id": PRIOR}}
                                      if url == cfg["worker"]["live_release_url"] else
                                      {"source_commit": live["app"], "environment": "production"})
             return pipe
