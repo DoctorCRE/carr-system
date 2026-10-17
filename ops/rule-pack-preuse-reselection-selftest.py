@@ -216,6 +216,18 @@ check("a genuinely missing scheduled rule still surfaces beside retirement",
       "selector did not return every scheduled rule" in context(
           rail.process(payload(client="codex"), runner=Runner(missing_response))))
 
+all_retired_response = selector_result(ids=[])
+all_retired_response["rule_ids_retired"] = EXPECTED_IDS
+all_retired_row = receipt(rail.process(payload(client="codex"), runner=Runner(all_retired_response)))
+check("an entirely retired scheduled pack produces a valid empty delivery",
+      all_retired_row["rules"] == [] and all_retired_row["rule_ids"] == []
+      and contract.validate_receipt(all_retired_row, repo=REPO), all_retired_row)
+forged_retirement = copy.deepcopy(retired_row)
+forged_retirement["rule_ids"] = EXPECTED_IDS
+forged_retirement["receipt_id"] = contract.receipt_id(forged_retirement)
+check("a receipt cannot credit a retired rule as delivered",
+      not contract.validate_receipt(forged_retirement, repo=REPO))
+
 for bad_retired in ([retired_id, retired_id], ["not-an-id"], retired_id):
     malformed_response = copy.deepcopy(retired_response)
     malformed_response["rule_ids_retired"] = bad_retired
@@ -1328,6 +1340,20 @@ with tempfile.TemporaryDirectory() as dispatch_tmp:
                         check(f"background route receipt credits scheduled pack: {index} {client}",
                               contract.preuse_delivery(envelope, [prior], repo=REPO)
                               == ("shadow", ["scheduled-automation"], []))
+                        if index == 0 and client == "codex":
+                            retired_receipt = copy.deepcopy(row)
+                            retired_receipt["retired_rule_ids"] = [EXPECTED_IDS[0]]
+                            retired_receipt["rule_ids"].remove(EXPECTED_IDS[0])
+                            retired_receipt["route_rule_ids"] = [
+                                rid for rid in retired_receipt["route_rule_ids"] if rid != EXPECTED_IDS[0]]
+                            retired_receipt["rules"] = [
+                                r for r in retired_receipt["rules"] if r["id"] != EXPECTED_IDS[0]]
+                            retired_receipt["receipt_id"] = contract.receipt_id(retired_receipt)
+                            retired_envelope = copy.deepcopy(envelope)
+                            retired_envelope["payload"]["content"][0]["text"] = json.dumps(retired_receipt)
+                            check("routed retirement telemetry credits only the remaining scheduled rules",
+                                  contract.preuse_delivery(retired_envelope, [prior], repo=REPO)
+                                  == ("shadow", ["scheduled-automation"], []))
                         for label in ("overflow", "not_found", "tampered", "wrong-call"):
                             rejected = copy.deepcopy(row)
                             previous = copy.deepcopy(prior)
@@ -1869,6 +1895,29 @@ with tempfile.TemporaryDirectory() as route_tmp:
     finally:
         os.environ.clear()
         os.environ.update(saved_env)
+
+# A background tool can hit the route rail as well as the scheduled pack.
+routed_payload = gen_payload(tool="Bash", tool_input={
+    "command": DISPATCH_COMMANDS[0], "run_in_background": True,
+}, session="retired-routed", tool_use_id="retired-routed")
+routed_ids = rail.routed_rule_ids(routed_payload)
+routed_table_ids = rail.merge_trigger_delivery(rail.matched_triggers(routed_payload))[2]
+routed_union = sorted(set(routed_ids) | set(EXPECTED_IDS) | set(routed_table_ids))
+route_retired = EXPECTED_IDS[0]
+route_missing = next(rid for rid in routed_union if rid != route_retired)
+routed_response = route_result(routed_union, missing=(route_retired, route_missing))
+routed_response["rule_ids_retired"] = [route_retired]
+routed_response["rule_ids_not_found"] = [route_missing]
+routed_output = rail.process(routed_payload, runner=Runner(routed_response))
+try:
+    routed_row = receipt(routed_output)
+except ValueError:
+    raise AssertionError(routed_output)
+check("routed scheduled delivery drops retired rules but surfaces truly missing rules",
+      route_retired not in routed_row["rule_ids"]
+      and routed_row.get("retired_rule_ids") == [route_retired]
+      and routed_row["not_found"] == [route_missing]
+      and routes_lib.validate_route_receipt(routed_row, repo=REPO), routed_row)
 
 if FAILURES:
     print("rule-pack-preuse-reselection-selftest: FAIL")

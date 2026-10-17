@@ -164,6 +164,7 @@ SELECTOR_REASONS = frozenset({
     "selector returned malformed JSON",
     "selector returned nonzero",
     "selector rule pools are malformed",
+    "selector retirement status is malformed",
 })
 
 
@@ -313,6 +314,19 @@ def _run_selector(ids: list[str], runner: Callable) -> dict:
     return response
 
 
+def _retired_ids(response: dict, ids: list[str]) -> list[str]:
+    """Only explicit store status can excuse an absent configured rule."""
+    retired = response.get("rule_ids_retired", [])
+    if (not isinstance(retired, list)
+            or any(not isinstance(rid, str) or re.fullmatch(r"[0-9a-f]{8}", rid) is None
+                   for rid in retired)
+            or len(retired) != len(set(retired))
+            or not set(retired) <= set(ids)
+            or set(retired).intersection(response.get("rule_ids_not_found") or [])):
+        raise RuntimeError("selector retirement status is malformed")
+    return sorted(retired)
+
+
 def _validate_selector(response: dict, ids: list[str]):
     identity = response.get("identity")
     if not valid_local_identity(identity):
@@ -336,9 +350,10 @@ def _validate_selector(response: dict, ids: list[str]):
             if short in found or not _nonempty(item.get("statement")):
                 raise RuntimeError("selector returned duplicate or nonbinding rule")
             found[short] = item["statement"]
-    if sorted(found) != ids:
+    active_ids = sorted(set(ids) - set(_retired_ids(response, ids)))
+    if sorted(found) != active_ids:
         raise RuntimeError("selector did not return every scheduled rule")
-    return identity, delivery, [{"id": short, "statement": found[short]} for short in ids]
+    return identity, delivery, [{"id": short, "statement": found[short]} for short in active_ids]
 
 
 def _receipt(payload: dict, response: dict, ids: list[str]) -> dict:
@@ -357,7 +372,7 @@ def _receipt(payload: dict, response: dict, ids: list[str]) -> dict:
         "source_digest": source_sha256(REPO),
         "identity": {key: identity[key] for key in (
             "agent_principal_id", "runtime_principal", "sponsoring_human_id")},
-        "rule_ids": ids,
+        "rule_ids": [rule["id"] for rule in rules],
         "rules": rules,
         "rule_delivery": {
             "mode": delivery["mode"],
@@ -365,6 +380,9 @@ def _receipt(payload: dict, response: dict, ids: list[str]) -> dict:
             "packs_not_found": [],
         },
     }
+    retired = _retired_ids(response, ids)
+    if retired:
+        row["retired_rule_ids"] = retired
     row["receipt_id"] = receipt_id(row)
     return row
 
@@ -380,7 +398,7 @@ def _deduped_context(payload: dict, receipt: dict) -> dict | None:
     text = canonical(receipt).decode("utf-8")
     rule_set = {key: receipt.get(key) for key in (
         "schema", "pack", "packs", "trigger_ids", "rule_ids", "rules",
-        "map_digest", "source_digest", "triggers_digest", "rule_delivery")}
+        "map_digest", "source_digest", "triggers_digest", "rule_delivery", "retired_rule_ids")}
     if (_client(payload) == "claude"
             and _nonempty(payload.get("transcript_path"))
             and not should_deliver(payload["session_id"],
@@ -668,7 +686,10 @@ def _route_statements(response: dict, packs: list[str], ids: list[str]):
             if short in found or not _nonempty(item.get("statement")):
                 raise RuntimeError("selector returned duplicate or nonbinding rule")
             found[short] = item["statement"]
-    not_found = sorted(set(ids) - set(found))
+    retired = set(_retired_ids(response, ids))
+    if retired.intersection(found):
+        raise RuntimeError("selector retirement status is malformed")
+    not_found = sorted(set(ids) - set(found) - retired)
     return identity, delivery, found, not_found
 
 
@@ -694,6 +715,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         packs = _route_packs(ids)
         response = _run_generalized_selector(packs, ids, runner)
         identity, delivery, found, not_found = _route_statements(response, packs, ids)
+        retired = _retired_ids(response, ids)
+        ids = sorted(set(ids) - set(retired))
     except Exception:
         return _context(rule_routes.notice_door_failure(ids))
     client = _client(payload)
@@ -720,6 +743,9 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         "rule_delivery": {"mode": delivery["mode"], "declared_packs": packs,
                           "packs_not_found": []},
     }
+
+    if retired:
+        base["retired_rule_ids"] = retired
 
     def render(full: list[dict], overflow: list[dict]) -> str:
         row = dict(base, rules=[{"id": r["id"], "statement": r["statement"]} for r in full],

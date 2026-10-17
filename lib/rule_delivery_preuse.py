@@ -455,7 +455,8 @@ def valid_local_identity(identity: object) -> bool:
 
 
 def validate_receipt(row: object, *, repo: Path) -> bool:
-    if not isinstance(row, dict) or set(row) != RECEIPT_KEYS:
+    if (not isinstance(row, dict)
+            or set(row) not in (RECEIPT_KEYS, RECEIPT_KEYS | {"retired_rule_ids"})):
         return False
     if row.get("schema") != RECEIPT_SCHEMA or row.get("pack") != PACK:
         return False
@@ -479,7 +480,14 @@ def validate_receipt(row: object, *, repo: Path) -> bool:
     if (not isinstance(identity, dict) or set(identity) != IDENTITY_KEYS
             or not valid_local_identity(identity)):
         return False
-    expected_ids = scheduled_rule_ids(repo)
+    configured_ids = scheduled_rule_ids(repo)
+    retired = row.get("retired_rule_ids", [])
+    if (not isinstance(retired, list)
+            or any(not isinstance(rid, str) for rid in retired)
+            or retired != sorted(set(retired))
+            or not set(retired) <= set(configured_ids)):
+        return False
+    expected_ids = sorted(set(configured_ids) - set(retired))
     if row.get("rule_ids") != expected_ids:
         return False
     rules = row.get("rules")
@@ -678,7 +686,8 @@ def preuse_delivery(record: dict, prior_records: list[dict], *, repo: Path):
                 or not within_cap(canonical(row).decode("utf-8"))
                 or not matched_tool_call(row, prior_records)
                 or PACK not in row["packs"]
-                or not set(scheduled_rule_ids(repo)) <= {r["id"] for r in row["rules"]}):
+                or not set(scheduled_rule_ids(repo)) <= (
+                    {r["id"] for r in row["rules"]} | set(row.get("retired_rule_ids", [])))):
             return None
         return row["rule_delivery"]["mode"], [PACK], []
     if (not validate_receipt(row, repo=repo)

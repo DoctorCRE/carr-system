@@ -540,7 +540,8 @@ def validate_route_receipt(row: object, *, repo: Path) -> bool:
         DELIVERY_KEYS, IDENTITY_KEYS, RULE_KEYS, TRIGGER_TABLE_RELATIVE, receipt_id,
         valid_local_identity)
     from lib.rule_delivery_preuse import file_sha256, source_sha256
-    if not isinstance(row, dict) or set(row) != ROUTE_RECEIPT_KEYS:
+    if (not isinstance(row, dict)
+            or set(row) not in (ROUTE_RECEIPT_KEYS, ROUTE_RECEIPT_KEYS | {"retired_rule_ids"})):
         return False
     if row.get("schema") != ROUTE_RECEIPT_SCHEMA or row.get("client") not in {"claude", "codex"}:
         return False
@@ -552,7 +553,14 @@ def validate_route_receipt(row: object, *, repo: Path) -> bool:
             or not valid_local_identity(identity)):
         return False
     ids = row.get("rule_ids")
-    if not isinstance(ids, list) or not ids or ids != sorted(set(ids)):
+    retired = row.get("retired_rule_ids", [])
+    if (not isinstance(retired, list)
+            or any(not isinstance(rid, str) or re.fullmatch(r"[0-9a-f]{8}", rid) is None
+                   for rid in retired)
+            or retired != sorted(set(retired))):
+        return False
+    if (not isinstance(ids, list) or not (ids or retired) or ids != sorted(set(ids))
+            or set(ids).intersection(retired)):
         return False
     rules, overflow, not_found = row.get("rules"), row.get("overflow"), row.get("not_found")
     if (not isinstance(rules, list) or not isinstance(overflow, list)
