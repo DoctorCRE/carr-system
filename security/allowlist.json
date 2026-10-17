@@ -48,6 +48,34 @@
       "sha256": "76fdd7e7cb518323cd49d448aa67672bf0627902c2451d518fcad8f6085f1d88",
       "rule": "pii-phone",
       "reason": "a 10-digit sha256 prefix inside a case id, not a phone number"
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
+      "rule": "client-data",
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
     }
   ]
 }
