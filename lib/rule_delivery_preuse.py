@@ -8,7 +8,7 @@ from typing import Any
 from lib.rule_routes import within_cap
 
 LOOKUP_RECEIPT_SCHEMA = "rule-lookup-delivery/v1"
-LOOKUP_INSTRUCTION = "Read every rule in rules before acting. Fetch the full text of every overflow id with standing-context rule_ids before acting. Incomplete selection is not authorization to proceed."
+LOOKUP_INSTRUCTION = "Read every rule in rules before acting. Fetch the full text of every overflow id with standing-context rule_ids before acting. Selection gaps are advisory and do not deny this action; incomplete selection is not evidence of full rule coverage."
 IDENTITY_KEYS = frozenset({"agent_principal_id", "runtime_principal", "sponsoring_human_id"})
 SANCTIONED_LOCAL_SPONSORS = {"joe-local": "joe", "dell-local": "dell"}
 DELIVERY_SOURCE_PATHS = (

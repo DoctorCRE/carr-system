@@ -2,6 +2,7 @@
 """Deliver current store-scoped rules for prompt, tool, and response events."""
 from __future__ import annotations
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -18,33 +19,50 @@ from lib.hook_runtime import decision, run
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
 
 
+def _transcript_lines(path):
+    """Read newest lines first without dropping tasks outside a fixed tail."""
+    with open(path, 'rb') as handle:
+        position = handle.seek(0, 2)
+        pending = b''
+        while position:
+            length = min(position, 65536)
+            position -= length
+            handle.seek(position)
+            lines = (handle.read(length) + pending).split(b'\n')
+            pending = lines[0]
+            yield from reversed(lines[1:])
+        if pending:
+            yield pending
+
+
 def task_text(payload):
     for key in ('prompt', 'task'):
         if isinstance(payload.get(key), str):
             return payload[key]
-    path = payload.get('transcript_path')
+    path = payload.get('transcript_path') or payload.get('transcriptPath')
     if not path:
         return ''
-    latest = ''
-    with open(path, 'rb') as handle:
-        handle.seek(0, 2)
-        size = handle.tell()
-        handle.seek(max(0, size-200000))
-        if size > 200000:
-            handle.readline()
-        for line in handle:
-            record = json.loads(line)
-            text = _claude_user_text(record)
-            part = record.get('payload', {})
-            if record.get('type') == 'event_msg' and part.get('type') == 'user_message':
-                text = part.get('message')
-            if isinstance(text, str):
-                latest = text
-    if not latest:
-        raise ValueError('task_context_unavailable')
-    if len(latest) > 90000:
-        raise ValueError('task_too_large')
-    return latest
+    path = Path(path)
+    agent = payload.get('agent_id') or payload.get('agentId')
+    if agent:
+        if not isinstance(agent, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', agent):
+            raise ValueError('invalid_agent_id')
+        child_name = f'agent-{agent}.jsonl'
+        if path.name != child_name:
+            path = path.with_suffix('') / 'subagents' / child_name
+    for line in _transcript_lines(path):
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        text = _claude_user_text(record)
+        part = record.get('payload', {})
+        if record.get('type') == 'event_msg' and part.get('type') == 'user_message':
+            text = part.get('message')
+        if isinstance(text, str) and text:
+            if len(text) > 90000:
+                raise ValueError('task_too_large')
+            return text
+    raise ValueError('task_context_unavailable')
 
 
 def context(text, event):
@@ -85,13 +103,24 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
         return canonical(row).decode()
     full, overflow = rule_routes.fit_rules(rules, render, always_on=set())
     text = render(full, overflow)
+    if not rule_routes.within_cap(text) and not selection['complete']:
+        for field in ('data_defects', 'unresolved'):
+            grouped = {}
+            for issue in selection[field]:
+                grouped.setdefault(issue['reason'], []).append(issue['rule_id'][:8])
+            base[field] = [{'reason': reason, 'rule_ids': rule_ids}
+                           for reason, rule_ids in sorted(grouped.items())]
+        full, overflow = rule_routes.fit_rules(rules, render, always_on=set())
+        text = render(full, overflow)
     if not rule_routes.within_cap(text):
+        if not selection['complete']:
+            return context('RULE LOOKUP INCOMPLETE. Full text could not fit the delivery budget. '
+                           f"Data defects: {len(selection['data_defects'])}; unresolved judgments: {len(selection['unresolved'])}. "
+                           'Fetch matched rule IDs with standing-context: ' + ', '.join(rid[:8] for rid in ids), event)
         return refused(event)
-    if not selection['complete']:
-        return refused(event, FAILURE + ' ' + text)
     if dedupe:
         rule_routes.record_delivered(session, tool or event, [r['id'] for r in full], agent_id=agent, corpus_digest=selection["corpus_digest"])
-    if event == 'Stop':
+    if event == 'Stop' and rules:
         return refused(event, text)
     return context(text, event)
 
