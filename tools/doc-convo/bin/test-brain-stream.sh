@@ -62,7 +62,7 @@ for line in sys.stdin:
 PY
 chmod +x "$TMP/claude"
 
-PATH="$TMP:$PATH" FAKE_CLAUDE_COUNT="$TMP/count" python3 - "$BIN" "$TMP" <<'PY'
+HOME="$TMP" DOC_ROUTE_SHADOW=0 PATH="$TMP:$PATH" FAKE_CLAUDE_COUNT="$TMP/count" python3 - "$BIN" "$TMP" <<'PY'
 import pathlib
 import sys
 import time
@@ -122,4 +122,5 @@ assert (tmp / "count").read_text() == "2"
 convo_core._BRAIN.close()
 PY
 
+python3 "$BIN/test-convo-shutdown.py"
 echo "brain streaming tests passed"
