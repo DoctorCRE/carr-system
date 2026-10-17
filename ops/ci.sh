@@ -528,6 +528,11 @@ check_dependency() {
 }
 
 check_migration() {
+  if ! run_quiet "$LOGDIR/migration-open-pr.log" "$PY" ops/migration-open-pr-gate.py; then
+    cat "$LOGDIR/migration-open-pr.log" >&2
+    bad migration "an earlier PR or main owns a migration slot; run ./run.sh regen --pr <number>"
+    return
+  fi
   if ! run_quiet "$LOGDIR/migration-baseline.log" "$PY" -m unittest discover -s tools -p 'test_migr*.py'; then
     tail -30 "$LOGDIR/migration-baseline.log" >&2
     bad migration "migration baseline identity or historical source checks failed before database work"

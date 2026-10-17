@@ -169,6 +169,33 @@ class QueueTests(unittest.TestCase):
             "Path(__file__).with_suffix('.calls').open('a').write(repr(sys.argv[1:])+'\\n')\n"
             "sys.exit(1 if os.environ.get('BOARD_FAIL') else 0)\n")
 
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'import json,sys\nprint(json.dumps({"head":sys.argv[sys.argv.index("--head")+1],"changed":False}))\n')
+
+    def test_preparation_push_waits_for_checks_on_the_new_head(self):
+        self.pr()
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'import json\nprint(json.dumps({"head":"' + self.changed + '","changed":True}))\n')
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'regenerated')
+
+    def test_interrupted_preparation_is_not_replayed(self):
+        self.pr()
+        marker = self.root / 'preparation-calls'
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'from pathlib import Path\n'
+            + 'with Path(' + repr(str(marker)) + ').open("a") as f: f.write("call\\n")\n'
+            + 'raise SystemExit("seeded failure")\n')
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.q.tick()
+        self.restart()
+        self.q.tick()
+        self.assertEqual(marker.read_text().splitlines(), ['call'])
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+
     def git(self, *args):
         return subprocess.run(['git', '-C', str(self.remote), *args], text=True,
                               capture_output=True, check=True).stdout

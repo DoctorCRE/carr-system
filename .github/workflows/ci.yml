@@ -298,6 +298,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           # The migration shadow drops its regenerated db/schema.sql here; the
           # next step uploads it when the class fails, so a stale snapshot is
