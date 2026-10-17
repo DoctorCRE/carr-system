@@ -201,7 +201,14 @@ class FakeCodex:
     def __call__(self, argv: list[str], **kw: Any) -> subprocess.CompletedProcess:
         if argv[0] == "ssh":
             payload = json.loads(kw["input"])
-            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({payload["name"]: "ok"}), stderr="")
+            from lib import cloudflare_tokens as cf
+            from unittest.mock import patch
+            status = "ok"
+            if argv[-2] == "studio":
+                path = token_store.destination(payload["name"]).path
+                with patch.object(cf, "verify", return_value="ok"):
+                    status = cf.install(path, payload["name"], payload["value"])
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({payload["name"]: status}), stderr="")
         self.calls.append((list(argv), kw.get("input")))
         return subprocess.CompletedProcess(argv, 1 if self.fail else 0, stdout="", stderr="")
 
@@ -778,8 +785,11 @@ def test_interrupted_mint_is_recovered() -> None:
             pass
         finally:
             cm.Minter._adopt = real_adopt  # type: ignore[method-assign]
-        second = w.stored("CLOUDFLARE_API_TOKEN")
-        check("the second child was stored before the night died", second != first and second == w.http.minted[-1])
+        second = w.http.minted[-1]
+        candidate = w.home / ".config/carr/credential-mint-candidates.env"
+        check("the second child was staged while the installed original stayed intact",
+              read_env_file(candidate)["CLOUDFLARE_API_TOKEN"] == second
+              and w.stored("CLOUDFLARE_API_TOKEN") == first)
         receipts = w.night()
         check("the next night adopts the stored child instead of revoking it",
               second in w.http.active["cloudflare"]

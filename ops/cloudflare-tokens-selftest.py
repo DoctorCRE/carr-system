@@ -58,6 +58,9 @@ class TokenTests(unittest.TestCase):
                 self.assertIn(first, world.http.active['cloudflare'])
                 self.assertTrue(world.saved_state()['credentials']['cloudflare-deploy-token']['install_pending'])
                 candidate = candidates[-1]
+                staged = world.home / '.config/carr/credential-mint-candidates.env'
+                self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(cf.read_env_file(staged)[cf.TOKEN_NAMES[0]], candidate)
                 offline = False
                 with patch.object(cf, 'verify', return_value='ok'):
                     world.night()
@@ -162,6 +165,11 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
             offline = False
             def transport(machine, payload, **kwargs):
                 calls.append((machine, payload['value']))
+                if machine == 'studio':
+                    from lib import token_store
+                    with patch.object(cf, 'verify', return_value='ok'):
+                        return {payload['name']: cf.install(token_store.destination(payload['name']).path,
+                                                           payload['name'], payload['value'])}
                 return {payload['name']: 'unreachable' if offline and machine == 'dell' else 'ok'}
             with patch.object(cf, 'on_machine', side_effect=transport):
                 world.night()
