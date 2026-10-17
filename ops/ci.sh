@@ -200,8 +200,8 @@ check_gates() {
   excluded_reason() {  # excluded_reason <basename> -> reason, or empty
     [ -f "$scope" ] || return 0
     "$PY" - "$scope" "$1" "${CARR_CI_PORTABLE_ONLY:-0}" <<'PYEOF'
-import json, sys
-scope, name, portable = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+import json, os, sys
+scope, name, portable = sys.argv[1], sys.argv[2], sys.argv[3] == "1" or os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
 d = json.load(open(scope))
 if portable:
     for e in d.get("local_only", []):
@@ -214,7 +214,8 @@ PYEOF
   for t in ops/*-selftest.py tools/test-*.py tools/test_*.py tools/*-selftest.py \
            tools/room-bridge/test_*_unit.py \
            tools/room-bridge/test_activation_reliability.py \
-           test/doc_drift/test_*.py test/doc_drift_product/test_*.py; do
+           test/doc_drift/test_*.py test/doc_drift_product/test_*.py \
+           ops/migration-production-proof.py; do
     [ -f "$t" ] || continue
     local base; base="$(basename "$t")"
     local why; why="$(excluded_reason "$base")"
