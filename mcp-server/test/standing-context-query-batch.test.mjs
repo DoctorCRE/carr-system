@@ -127,3 +127,61 @@ test("standing-context launches independent snapshot reads concurrently", async 
   assert.deepEqual([...started].sort(), ["baseline", "proposed", "registry"]);
   assert.match(out.recite, /1 shared, 1 joe-personal/);
 });
+
+test("standing-context distinguishes scoped retired rules from truly missing requested IDs", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  const lookups = [];
+  c.query = async (sql, params) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    lookups.push(params);
+    assert.match(sql, /status = 'retired'/);
+    assert.match(sql, /personal_to is null or \(\$1::text is not null and personal_to =\s*retrieval_visibility_actor_id\(\$1\)\)/);
+    return { rows: [{ short_id: "0f38532e" }] };
+  };
+
+  const out = await executeRegisteredTool(c, ACTOR, "standing-context", {
+    rule_ids: ["1fddcffb", "0f38532e", "deadbeef"],
+  });
+
+  assert.deepEqual(lookups, [["joe", ["0f38532e", "deadbeef"]]]);
+  assert.deepEqual(out.rule_ids_retired, ["0f38532e"]);
+  assert.deepEqual(out.rule_ids_not_found, ["deadbeef"]);
+  assert.equal(out.shared_rules.some(rule => rule.id === "1fddcffb"), true);
+});
+
+test("standing-context does not inspect retired rows when requested rules are active", async () => {
+  const c = client();
+  const out = await executeRegisteredTool(c, ACTOR, "standing-context", {
+    rule_ids: ["1fddcffb"],
+  });
+  assert.equal(c.calls.length, 3);
+  assert.equal(out.rule_ids_retired, undefined);
+  assert.equal(out.rule_ids_not_found, undefined);
+});
+
+test("standing-context retirement lookups cannot select a personal sponsor for an unsponsored runtime", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  c.query = async (sql, params) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    assert.equal(params[0], null);
+    return { rows: [] };
+  };
+  const bare = { ...ACTOR, slug: "smoke-probe", human: false, probe: true, via: "probe-token" };
+  const out = await executeRegisteredTool(c, bare, "standing-context", { rule_ids: ["0f38532e"] });
+  assert.equal(out.rule_ids_retired, undefined);
+  assert.deepEqual(out.rule_ids_not_found, ["0f38532e"]);
+});
+
+test("standing-context fails closed when requested retirement status cannot be read", async () => {
+  const c = client();
+  const baselineQuery = c.query;
+  c.query = async (sql, params) => {
+    if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
+    throw Object.assign(new Error("permission denied for table rule"), { code: "42501" });
+  };
+  await assert.rejects(
+    executeRegisteredTool(c, ACTOR, "standing-context", { rule_ids: ["0f38532e"] }),
+    /database_refused_the_statement/);
+});
