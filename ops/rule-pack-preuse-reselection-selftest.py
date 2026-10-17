@@ -995,11 +995,18 @@ check("partial prompt delivery fits the visible cap and names every match",
       and "overflow" in large_partial_text, large_partial_text[:200])
 
 _real_prompt_module = rail._prompt_selector_module
-acknowledged_ids = []
-selector_options = []
+acknowledged_ids: list[tuple[str, list[str]]] = []
+selector_options: list[dict] = []
+
+
+def deferred_adviser(_, **kwargs):
+    selector_options.append(kwargs)
+    return recorded_advice
+
+
 fake_module = SimpleNamespace(
     DEADLINE_SECONDS=12.0,
-    advise=lambda _, **kwargs: selector_options.append(kwargs) or recorded_advice,
+    advise=deferred_adviser,
     record_delivered=lambda session, ids: acknowledged_ids.append((session, ids)))
 rail._prompt_selector_module = lambda: fake_module
 try:
