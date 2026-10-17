@@ -147,6 +147,11 @@ if CANONICAL_SECTION == "headless":
     sys.exit(int(any(row["status"] == "WARN" for row in _rows)))
 
 
+def _cloudflare_rows():
+    from lib.cloudflare_tokens import health_rows
+    return health_rows()
+
+
 def _jev_spend_row():
     """Use the same receipt reader and response loop for manual and nightly health."""
     spend_path = os.path.join(REPO_ROOT, "ops", "jev_spend_health.py")
@@ -1851,6 +1856,14 @@ def _canonical_health():
                       hard_error=_grok_line.startswith("UNAVAILABLE"), time_rolling=True)
 
     if CANONICAL_SECTION in ("all", "credentials"):
+        _GREEN_EVIDENCE["cloudflare_token"] = set()
+        if not CANONICAL_FIXTURE:
+            for token_row in _cloudflare_rows():
+                print("  " + token_row["line"])
+                if token_row["status"] == "ok":
+                    _GREEN_EVIDENCE["cloudflare_token"].add(token_row["subject"])
+                else:
+                    rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"])
         # The source log is canonical across worktrees. The row carries its
         # response action on both OK and WARN, and the helper owns one loop.
         try:
