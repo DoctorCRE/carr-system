@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs";
@@ -8,7 +9,7 @@ import { benchmarkReceiptPayload, deviceFactPayload, deviceProfileDigest,
   evaluateStudioBenchmarks, STUDIO_EXECUTOR_PROFILE,
   verifyDeviceFactEnvelope } from "../src/device-enrollment.js";
 
-const migration = fs.readFileSync(new URL("../../migrations/0460_siep15_device_enrollment.sql", import.meta.url), "utf8");
+const migration = readMigration(new URL("../../migrations/0460_siep15_device_enrollment.sql", import.meta.url));
 
 function fixture() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");

@@ -7,14 +7,19 @@ same predicate the audit itself uses. Both are checked without a database.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+
+
 import contextlib
 import importlib.util
 import io
 import os
 import re
-import sys
 import tempfile
-from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -39,8 +44,8 @@ def reader_relations() -> set[str]:
     (`grant select (a, b) on ...`) do not match and are not counted.
     """
     granted: set[str] = set()
-    for path in sorted((REPO / "migrations").glob("*.sql")):
-        sql = re.sub(r"--[^\n]*", "", path.read_text())
+    for path in sorted(((REPO / "migrations") / name for name in migration_names((REPO / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql"))):
+        sql = re.sub(r"--[^\n]*", "", read_migration(REPO, path.name))
         events = [(m.start(), True, m) for m in _GRANT.finditer(sql)]
         events += [(m.start(), False, m) for m in _REVOKE.finditer(sql)]
         for _, grant, match in sorted(events, key=lambda e: e[0]):
@@ -113,7 +118,7 @@ def main() -> int:
 
     # The installed writer as 0482 ships it; the preflight derives the keys an
     # admission must carry from whatever body is installed, never a copy.
-    installed = (REPO / "migrations/0482_rule_delivery_binding_writer.sql").read_text()
+    installed = read_migration(REPO, "0482_rule_delivery_binding_writer.sql")
     rule_id = "22222222-2222-4222-8222-222222222222"
     delivery = {"load_layer": "layer0", "packs": [], "why": "always"}
 

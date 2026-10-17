@@ -1,16 +1,21 @@
 """Inventory scalar polymorphic pointers without connecting to any database."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
 import hashlib
 import json
 import re
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def scan(include_usages=True):
     entries = {}
-    for path in sorted((ROOT / 'migrations').glob('*.sql')):
-        raw = path.read_text()
+    for path in sorted(((ROOT / 'migrations') / name for name in migration_names((ROOT / 'migrations').parent) if fnmatch.fnmatchcase(name, '*.sql'))):
+        raw = read_migration(ROOT, path.name)
         text = re.sub(r'/\*.*?\*/|--[^\n]*', lambda m: re.sub(r'[^\n]',' ',m[0]), raw, flags=re.S)
         for match in re.finditer(r'create\s+table\s+(?:if\s+not\s+exists\s+)?([\w.]+)\s*\(', text, re.I):
             start, end, depth = match.end(), match.end(), 1
@@ -46,8 +51,8 @@ def scan(include_usages=True):
     entries['public.candidate_pool'] = entries.pop('public.prospect_pool')
     entries['public.candidate_pool']['table'] = 'public.candidate_pool'
     entries['public.candidate_pool']['amendments'] = ['migrations/0048_candidate_pool.sql:35 (rename; prospect_pool becomes a compatibility view)']
-    for path in sorted((ROOT / 'migrations').glob('*.sql')):
-        raw = path.read_text()
+    for path in sorted(((ROOT / 'migrations') / name for name in migration_names((ROOT / 'migrations').parent) if fnmatch.fnmatchcase(name, '*.sql'))):
+        raw = read_migration(ROOT, path.name)
         text = re.sub(r'/\*.*?\*/|--[^\n]*', lambda m: re.sub(r'[^\n]',' ',m[0]), raw, flags=re.S)
         for match in re.finditer(r'alter\s+table\s+(?:only\s+)?([\w.]+)\s+[^;]*?add\s+constraint\s+\w+\s+check\s*\(\s*(\w+)\s+in\s*\(([^)]+)\)', text, re.I):
             table = match[1] if '.' in match[1] else 'public.' + match[1]

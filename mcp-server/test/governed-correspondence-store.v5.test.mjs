@@ -1,3 +1,4 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-J103 governed correspondence store: the verb layer, against a fake record
 // layer. The database half is proved by governed-correspondence-store-postgres.sql
 // on real PostgreSQL; this suite proves what the JavaScript adds — argument
@@ -236,9 +237,9 @@ test("consent is a positive allowlist: each partner only for their own carr.us m
   assert.equal(partnerOwnsMailbox("automation", "joe.bookout@carr.us"), false);
   assert.equal(partnerOwnsMailbox("__proto__", "joe.bookout@carr.us"), false);
   // Digest parity: the record layer holds exactly the same (partner, digest) pairs.
-  const migration = readdirSync(new URL("../../migrations/", import.meta.url))
+  const migration = listMigrationNames()
     .find(f => /_governed_correspondence_store\.sql$/.test(f));
-  const sql = readFileSync(new URL(`../../migrations/${migration}`, import.meta.url), "utf8");
+  const sql = readMigration(new URL(`../../migrations/${migration}`, import.meta.url));
   const body = sql.match(/create function ops\.correspondence_partner_owns_account\(p_partner_slug text, p_account_digest text\)[\s\S]*?\$\$([\s\S]*?)\$\$;/)[1];
   const sqlPairs = [...body.matchAll(/\('(\w+)', '(sha256:[0-9a-f]{64})'\)/g)].map(m => `${m[1]}=${m[2]}`).sort();
   const jsPairs = Object.entries(V5_J103_PARTNER_MAILBOXES)

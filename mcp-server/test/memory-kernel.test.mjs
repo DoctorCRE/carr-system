@@ -1,6 +1,7 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 
 import { memoryTools } from "../src/memory.js";
 import { ToolError } from "../src/tool-error.js";
@@ -299,7 +300,7 @@ test("memory lifecycle SQL names exact transition metadata and immutable core fi
   // Migration-level trigger proof is structural here; the live migration CI
   // exercises the trigger against PostgreSQL with illegal rewrites and valid
   // handler transitions.
-  const migration = readFileSync("../migrations/0299_memory_kernel.sql", "utf8");
+  const migration = readMigration("../migrations/0299_memory_kernel.sql");
   assert.match(migration, /memory_item_immutable_core/);
   assert.match(migration, /memory_item_insert_valid/);
   assert.match(migration, /new\.created_at := now\(\)/);

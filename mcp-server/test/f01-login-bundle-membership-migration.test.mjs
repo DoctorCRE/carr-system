@@ -1,12 +1,13 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // Static shape of 0732. The behaviour is proved on a real database by
 // mcp-server/test/f01-login-bundle-membership-postgres.sql in the migration
 // class; this pins the parts a later edit could quietly loosen.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
-const migration = readFileSync(
-  new URL("../../migrations/0732_f01_login_bundle_membership.sql", import.meta.url), "utf8");
+
+const migration = readMigration(
+  new URL("../../migrations/0732_f01_login_bundle_membership.sql", import.meta.url));
 const classifier = migration.slice(
   migration.indexOf("create or replace function ops.login_bundle_principal"),
   migration.indexOf("revoke all on function ops.login_bundle_principal"));
