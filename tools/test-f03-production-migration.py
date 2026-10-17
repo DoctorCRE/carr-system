@@ -2,15 +2,19 @@
 """Pin migration 0507a to the two reviewed F03 validator candidates."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import hashlib
 import importlib.util
 import os
 import re
 import subprocess
-import sys
 import tempfile
 import uuid
-from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "tools"))
@@ -220,7 +224,7 @@ def main() -> int:
         chunks.append(normalized_candidate(path))
 
     expected = "".join(chunks)
-    actual = MIGRATION.read_text(encoding="utf-8")
+    actual = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     assert actual == expected, "0507a is not the exact ordered candidate composition"
     assert not contains_transaction_control(actual), (
         "0507a contains explicit transaction control; the migration runner owns atomicity"

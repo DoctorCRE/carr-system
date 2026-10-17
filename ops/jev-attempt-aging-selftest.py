@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Exercise pending-attempt aging against a private throwaway PostgreSQL cluster."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
 import json
 import os
-from pathlib import Path
 import importlib.util
-import sys
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,8 +44,8 @@ def main():
                 idempotency_key text, actor_id uuid, model_answered text, usage jsonb);
             create table public.tool_call(idempotency_key text, verb text, actor_id uuid, response jsonb);
         """)
-        migration = sorted((ROOT / 'migrations').glob('*_jev_attempt*.sql'))[-1]
-        sql(migration.read_text())
+        migration = sorted(((ROOT / 'migrations') / name for name in migration_names((ROOT / 'migrations').parent) if fnmatch.fnmatchcase(name, '*_jev_attempt*.sql')))[-1]
+        sql(read_migration(ROOT, migration.name))
         sql("""insert into ops.jev_call_receipt
             select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
                 clock_timestamp() - case i when 1 then interval '30 minutes' else interval '2 hours' end,

@@ -61,7 +61,11 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
 
 DOLLAR = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*|)\$")
 
@@ -498,20 +502,18 @@ def applied_migrations(artifact):
 def seeded_tables(repo, applied):
     """table -> sorted migrations that write rows into it at migration time.
 
-    Also returns ledger entries with no file on disk. Those used to be skipped in
-    silence, which meant a renamed migration quietly removed its tables from the
-    question -- so they are reported rather than dropped.
+    Also returns ledger entries absent from logical history. Covered SQL is read
+    from its pinned source with its checksum checked before seed detection.
     """
     seeds, missing = {}, []
-    directory = os.path.join(repo, "migrations")
-    present = set(os.listdir(directory))
+    repository = Path(repo)
+    present = migration_names(repository)
     for name in sorted(applied):
         if name not in present:
             missing.append(name)
             continue
-        with open(os.path.join(directory, name), encoding="utf-8", errors="replace") as handle:
-            for table in written_tables(handle.read()):
-                seeds.setdefault(table, set()).add(name)
+        for table in written_tables(read_migration(repository, name)):
+            seeds.setdefault(table, set()).add(name)
     return {t: sorted(m) for t, m in seeds.items()}, sorted(missing)
 
 
@@ -720,11 +722,7 @@ def check(repo, artifact_text, seed_analysis=None):
     if seed_analysis is None:
         seed_analysis = analyze_seeds(repo, artifact_text)
     applied, seeds, missing = seed_analysis
-    migration_dir = os.path.join(repo, "migrations")
-    pending = {
-        name for name in os.listdir(migration_dir)
-        if name.endswith(".sql") and name not in applied
-    }
+    pending = migration_names(Path(repo)) - applied
     pending_seeds, _pending_missing = seeded_tables(repo, pending)
     present, carrying_rows = tables_with_data(artifact_text)
     failures = []
@@ -744,9 +742,9 @@ def check(repo, artifact_text, seed_analysis=None):
 
     for name in missing:
         failures.append(
-            f"LEDGER NAMES A MIGRATION THAT IS NOT ON DISK: {name}\n"
-            f"    It is applied, so a rebuild will not replay it, and its file is gone — so\n"
-            f"    whatever it seeded cannot be checked. Restore the file or record the rename.")
+            f"LEDGER NAMES A MIGRATION THAT HAS NO SOURCE: {name}\n"
+            f"    It is applied, so a rebuild will not replay it, and no file or baseline covers it.\n"
+            f"    Restore the source so its seeded tables can be checked.")
 
     for table in sorted(
         t for t in seeds

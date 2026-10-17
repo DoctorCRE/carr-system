@@ -26,12 +26,16 @@ nothing CI runs. ops/ci.sh's ops/*-selftest.py glob collects this one.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import importlib.util
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -57,7 +61,7 @@ insert into loop_item (number, kind, block_id, body, status, created_at) values
 
 
 def sql_classes() -> list[str]:
-    text = MIGRATION.read_text()
+    text = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     m = re.search(r"blocker_class in\s*\(([^)]*)\)", text)
     assert m, "0081 carries no blocker_class list"
     return re.findall(r"'([a-z_]+)'", m.group(1))
@@ -73,7 +77,7 @@ def js_classes() -> list[str]:
 
 def check_parity() -> None:
     assert sql_classes() == js_classes(), (sql_classes(), js_classes())
-    assert "length(btrim(blocker_detail)) >= 12" in MIGRATION.read_text()
+    assert "length(btrim(blocker_detail)) >= 12" in read_migration(MIGRATION.parent.parent, MIGRATION.name)
     tools = TOOLS.read_text()
     assert "if (detail.length < 12)" in tools, "add-loop's detail floor moved"
     assert 'const blockerGated = args.kind === "open_loop";' in tools
@@ -129,7 +133,7 @@ def main() -> int:
     # LC_ALL=C: on macOS a postmaster started with an unset locale goes
     # multithreaded during startup and refuses ("set LC_ALL to a valid locale").
     env = {**module.scrub_cloud_environment(os.environ), "LC_ALL": "C"}
-    migration = MIGRATION.read_text()
+    migration = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     with postgres_fixture_group(), DisposablePostgres("carr-loop-guard-", binaries["pg_ctl"], env=env) as fx:
         c = Cluster(fx, binaries, env)
         c.psql("postgres", ROLES)  # roles are cluster-wide: once, for every database

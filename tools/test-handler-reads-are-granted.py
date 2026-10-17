@@ -33,9 +33,13 @@ read on the reader connection still passes here. That is a narrower, harder
 question about routing; this one only refuses the case that is broken for
 everyone.
 """
-from pathlib import Path
-import re
+
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "db" / "schema.sql"
@@ -76,9 +80,9 @@ def main() -> int:
     schema = SNAPSHOT.read_text(encoding="utf-8", errors="replace")
     declared = {t.lower() for t in DECLARED.findall(schema)}
     granted = {t.lower() for t in GRANT.findall(schema)}
-    for migration in sorted((ROOT / "migrations").glob("*.sql")):
+    for migration in sorted(((ROOT / "migrations") / name for name in migration_names((ROOT / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql"))):
         granted |= {t.lower() for t in
-                    GRANT.findall(migration.read_text(encoding="utf-8", errors="replace"))}
+                    GRANT.findall(read_migration(ROOT, migration.name))}
 
     # A guard that passes because it parsed nothing is the failure mode here, so
     # the inputs are asserted before a clean verdict is trusted.
@@ -102,9 +106,9 @@ def main() -> int:
     for privs, table, roles in GRANT_FULL.findall(schema):
         if "carr_reader" in roles.lower() and ("select" in privs.lower() or "all" in privs.lower()):
             reader_ok.add(table.lower())
-    for migration in sorted((ROOT / "migrations").glob("*.sql")):
+    for migration in sorted(((ROOT / "migrations") / name for name in migration_names((ROOT / "migrations").parent) if fnmatch.fnmatchcase(name, "*.sql"))):
         for privs, table, roles in GRANT_FULL.findall(
-                migration.read_text(encoding="utf-8", errors="replace")):
+                read_migration(ROOT, migration.name)):
             if "carr_reader" in roles.lower() and ("select" in privs.lower() or "all" in privs.lower()):
                 reader_ok.add(table.lower())
 

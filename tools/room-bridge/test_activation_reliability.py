@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import copy
-import json
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+from migration_source import read_migration
+
+
+import copy
+import json
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -173,7 +177,7 @@ def test_legacy_receipt_posture_is_not_activated():
 
 
 def test_migration_uses_existing_control_plane_doors_and_append_only_projection():
-    migration = (ROOT / "migrations" / "0303_evidence_activation_reliability.sql").read_text()
+    migration = read_migration(ROOT, "0303_evidence_activation_reliability.sql")
     assert "security definer" in migration.lower()
     assert "grant select, insert" not in migration.lower()
     assert "before update or delete" in migration.lower()

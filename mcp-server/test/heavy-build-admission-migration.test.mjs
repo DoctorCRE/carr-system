@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const migration = fs.readFileSync(path.join(REPO, "migrations/0320_heavy_build_admission.sql"), "utf8");
+const migration = readMigration(path.join(REPO, "migrations/0320_heavy_build_admission.sql"));
 
 test("heavy-build tier is server-derived from the current Work Request and proposed plan", () => {
   assert.match(migration, /classify_sourced_work_request_build\s*\(/i);

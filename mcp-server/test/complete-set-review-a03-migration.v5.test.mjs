@@ -1,5 +1,6 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+
 import test from "node:test";
 
 const MIGRATION_URL = new URL("../../migrations/0719_doctorcre_a03_review_store.sql", import.meta.url);
@@ -7,7 +8,7 @@ const MIGRATION_URL = new URL("../../migrations/0719_doctorcre_a03_review_store.
 const TABLES = ["review_case", "review_participant", "finding_set", "review_round", "adjudication", "case_outcome"];
 
 test("0719 installs six append-only authorities behind SECURITY DEFINER functions", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   for (const table of TABLES)
     assert.match(sql, new RegExp(`create table ops\\.v5_a03_${table} \\(`));
   assert.match(sql, /create function ops\.v5_a03_rows_immutable\(\)/);
@@ -22,7 +23,7 @@ test("0719 installs six append-only authorities behind SECURITY DEFINER function
 });
 
 test("identity authority is server-derived and opposing actor or session reuse is refused", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.match(sql, /p_actor_id uuid/);
   assert.match(sql, /references public\.actor\(id\)/);
   assert.match(sql, /v5_a03_participant_actor_current/);
@@ -32,7 +33,7 @@ test("identity authority is server-derived and opposing actor or session reuse i
 });
 
 test("finding seal proves all dimensions, whole-set scope, one batch and non-weakened regression", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.match(sql, /v5_a03_review_dimensions\(\)/);
   assert.match(sql, /v_dimension_count<>cardinality\(ops\.v5_a03_review_dimensions\(\)\)/);
   assert.match(sql, /p_reviewed_set_digest is distinct from v_case\.delivered_set_digest/);
@@ -43,7 +44,7 @@ test("finding seal proves all dimensions, whole-set scope, one batch and non-wea
 });
 
 test("round-2 drift is recorded on the round and routes to adjudication; every path records an outcome", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.match(sql, /array\['circular_reversion','repeated_finding','reviewer_instability'\]/);
   for (const detection of ["repeated_finding", "circular_reversion", "reviewer_instability"])
     assert.match(sql, new RegExp(`v_detections:=v_detections\\|\\|'${detection}'::text`));
@@ -54,7 +55,7 @@ test("round-2 drift is recorded on the round and routes to adjudication; every p
 });
 
 test("the two-round bound is per change: one case per change_ref and per delivered set", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.match(sql, /constraint v5_a03_review_case_one_per_change unique\(tenant,change_ref\)/);
   assert.match(sql, /constraint v5_a03_review_case_one_per_delivered_set unique\(tenant,delivered_set_digest\)/);
   assert.match(sql, /v5_a03_change_already_under_review/);
@@ -63,7 +64,7 @@ test("the two-round bound is per change: one case per change_ref and per deliver
 });
 
 test("round and adjudication guards make a third loop structurally impossible", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.match(sql, /p_round_ordinal>2/);
   assert.match(sql, /v_round_count<>2/);
   assert.match(sql, /v5_a03_review_round_limit_exhausted/);
@@ -74,7 +75,7 @@ test("round and adjudication guards make a third loop structurally impossible", 
 });
 
 test("runtime roles receive functions only, never direct table mutation", async () => {
-  const sql = await readFile(MIGRATION_URL, "utf8");
+  const sql = await readMigration(MIGRATION_URL);
   assert.doesNotMatch(sql, /grant\s+(insert|update|delete|truncate|all)\s+on\s+(table\s+)?ops\.v5_a03_/i);
   assert.match(sql, /grant execute on function ops\.v5_a03_open_review_case/);
   assert.match(sql, /grant execute on function ops\.v5_a03_read_review_case/);

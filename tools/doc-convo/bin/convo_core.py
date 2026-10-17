@@ -2,6 +2,7 @@
 """Shared conversation pipeline for the terminal loop and panel engine."""
 
 import atexit
+import codecs
 import datetime
 import hashlib
 import importlib.util
@@ -12,13 +13,15 @@ import queue
 import socket as socketlib
 import uuid
 import re
+import select
+import signal
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from typing import IO
+from typing import IO, TextIO, cast
 
 import speak
 
@@ -68,28 +71,85 @@ def _pipe(stream: IO[str] | None, name: str) -> IO[str]:
 
 
 class BrainProcess:
+    CLOSE_TIMEOUT = 2.0
+
     def __init__(self) -> None:
         self.process: subprocess.Popen[str] | None = None
         self.system_prompt: str | None = None
         self.session_id: str | None = None
         self.stderr: deque[str] = deque(maxlen=100)
         self.lock = threading.Lock()
+        self._stderr_thread: threading.Thread | None = None
+        self._stderr_stop = threading.Event()
+
+    @staticmethod
+    def _kill_group(process: subprocess.Popen[str]) -> None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def _finish(self, process: subprocess.Popen[str]) -> int:
+        """Bound cleanup even when a descendant retains the child's stderr."""
+        deadline = time.monotonic() + self.CLOSE_TIMEOUT
+        grace = deadline - 0.5
+        try:
+            returncode = process.wait(timeout=max(0, grace - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            self._kill_group(process)
+            try:
+                returncode = process.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                returncode = 1
+        reader = self._stderr_thread
+        if reader is not None:
+            reader.join(timeout=max(0, grace - time.monotonic()))
+            if reader.is_alive():
+                self._kill_group(process)
+                self._stderr_stop.set()
+                reader.join(timeout=max(0, deadline - time.monotonic()))
+            self._stderr_thread = None
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        return returncode
 
     def _stop(self) -> None:
         process = self.process
         self.process = None
-        if process is None or process.poll() is not None:
+        if process is None:
             return
         try:
             _pipe(process.stdin, "stdin").close()
-            process.wait(timeout=2)
-        except (OSError, subprocess.TimeoutExpired):
-            process.kill()
-            process.wait()
+        except OSError:
+            pass
+        self._finish(process)
 
-    def _drain_stderr(self, process: subprocess.Popen[str]) -> None:
-        for line in _pipe(process.stderr, "stderr"):
-            self.stderr.append(line.rstrip())
+    def _drain_stderr(self, process: subprocess.Popen[str], stop: threading.Event) -> None:
+        stream = cast(TextIO, _pipe(process.stderr, "stderr"))
+        fd = stream.fileno()
+        os.set_blocking(fd, False)
+        decoder = codecs.getincrementaldecoder(stream.encoding)(errors="replace")
+        pending = ""
+        try:
+            while not stop.is_set():
+                if not select.select([fd], [], [], 0.05)[0]:
+                    continue
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    break
+                pending += decoder.decode(chunk)
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    self.stderr.append(line.rstrip())
+        except OSError:
+            pass
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            self.stderr.append(pending.rstrip())
 
     def _start(self, system_prompt: str) -> subprocess.Popen[str]:
         self._stop()
@@ -115,13 +175,16 @@ class BrainProcess:
         process = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, bufsize=1, env=child_env,
+            start_new_session=True,
         )
         self.process = process
         self.system_prompt = system_prompt
         self.stderr.clear()
-        threading.Thread(
-            target=self._drain_stderr, args=(process,), daemon=True,
-        ).start()
+        self._stderr_stop = threading.Event()
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, args=(process, self._stderr_stop), daemon=True,
+        )
+        self._stderr_thread.start()
         return process
 
     def _ensure(self, system_prompt: str) -> subprocess.Popen[str]:
@@ -167,11 +230,7 @@ class BrainProcess:
             while True:
                 line = stdout.readline()
                 if not line:
-                    try:
-                        code = process.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        code = process.wait()
+                    code = self._finish(process)
                     self.process = None
                     error = "\n".join(self.stderr) or "brain process ended mid-turn"
                     return subprocess.CompletedProcess([], code or 1, result, error)
@@ -295,6 +354,7 @@ class RouteShadow:
     DOC_ROUTE_SHADOW=0 disables it (read per turn, default on)."""
 
     QUEUE_MAX = 8
+    CLOSE_TIMEOUT = 0.25
 
     def __init__(self, router: Callable[[str], dict] | None = None,
                  log_path: pathlib.Path | None = None) -> None:
@@ -304,6 +364,8 @@ class RouteShadow:
         self.dropped = 0
         self._worker: threading.Thread | None = None
         self._start_lock = threading.Lock()
+        self._closed = False
+        self._shutdown_deadline: float | None = None
 
     @staticmethod
     def enabled() -> bool:
@@ -313,9 +375,14 @@ class RouteShadow:
         try:
             if not text or not text.strip() or not self.enabled():
                 return
-            self._ensure_worker()
-            self.queue.put_nowait({"text": text, "turn_id": uuid.uuid4().hex, "session_id": session_id,
-                                   "brain_returncode": brain_returncode})
+            with self._start_lock:
+                if self._closed:
+                    return
+                if self._worker is None or not self._worker.is_alive():
+                    self._worker = threading.Thread(target=self._run, name="doc-route-shadow", daemon=True)
+                    self._worker.start()
+                self.queue.put_nowait({"text": text, "turn_id": uuid.uuid4().hex, "session_id": session_id,
+                                       "brain_returncode": brain_returncode})
         except queue.Full:
             self.dropped += 1
         except Exception:
@@ -330,23 +397,44 @@ class RouteShadow:
             time.sleep(0.01)
         return True
 
-    def _ensure_worker(self) -> None:
-        if self._worker is not None and self._worker.is_alive():
-            return
-        with self._start_lock:
-            if self._worker is None or not self._worker.is_alive():
-                self._worker = threading.Thread(target=self._run, name="doc-route-shadow", daemon=True)
-                self._worker.start()
-
     def _run(self) -> None:
         while True:
             job = self.queue.get()
             try:
+                if job is None or (self._shutdown_deadline is not None and
+                                   time.monotonic() >= self._shutdown_deadline):
+                    return
                 self._record(job)
             except Exception:
                 pass
             finally:
                 self.queue.task_done()
+
+    def close(self) -> None:
+        """Give telemetry one short deadline; it must never hold process exit open."""
+        deadline = time.monotonic() + self.CLOSE_TIMEOUT
+        if not self._start_lock.acquire(timeout=self.CLOSE_TIMEOUT):
+            return
+        try:
+            if self._closed:
+                return
+            self._closed = True
+            self._shutdown_deadline = deadline
+            worker = self._worker
+            if worker is None:
+                return
+            try:
+                self.queue.put_nowait(None)
+            except queue.Full:
+                try:
+                    self.queue.get_nowait()
+                    self.queue.task_done()
+                except queue.Empty:
+                    pass
+                self.queue.put_nowait(None)
+        finally:
+            self._start_lock.release()
+        worker.join(timeout=max(0, deadline - time.monotonic()))
 
     @staticmethod
     def _error_class(message) -> str | None:
@@ -388,8 +476,9 @@ class RouteShadow:
 
 
 _BRAIN = BrainProcess()
-atexit.register(_BRAIN.close)
 _SHADOW = RouteShadow()
+atexit.register(_SHADOW.close)
+atexit.register(_BRAIN.close)
 
 
 def pick_mic() -> str:

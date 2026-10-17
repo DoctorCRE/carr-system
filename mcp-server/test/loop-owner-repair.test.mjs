@@ -1,5 +1,6 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+
 import test from "node:test";
 import { TOOLS } from "../src/tools.js";
 
@@ -17,7 +18,7 @@ const legacyOwnerMap = new Map([
 ]);
 
 test("0096 maps every reviewed historical owner, refuses unknown values, then validates 0089", async () => {
-  const sql = await readFile(migrationUrl, "utf8");
+  const sql = await readMigration(migrationUrl);
   const guard = sql.slice(sql.indexOf("and owner not in ("), sql.indexOf(")\n    ) unknown;"));
   for (const [oldOwner, newOwner] of legacyOwnerMap) {
     const sqlOwner = oldOwner.replaceAll("'", "''");
