@@ -62,6 +62,18 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(result["unresolved"][0]["rule_id"], row["id"])
             self.assertFalse(result["complete"])
 
+    def test_malformed_choice_is_explicitly_unresolved(self):
+        row = rule("11111111", {"moment": "Before replying"})
+        for choice in ([], {}):
+            with self.subTest(choice=choice):
+                result = select_rules(catalog(row), {}, judge=lambda *_: {
+                    "model": "jev-1.13.0", "answers": {"bind_11111111": {
+                        "type": "choice", "choice": choice, "confidence": 0.99}}})
+                self.assertEqual(result["rules"], [])
+                self.assertEqual(result["unresolved"], [{
+                    "rule_id": row["id"], "reason": "moment_judgment_uncertain"}])
+                self.assertFalse(result["complete"])
+
     def test_personal_rules_cannot_cross_sponsors(self):
         row = rule("11111111", {"tools": ["Bash"]})
         row["personal_to"] = "dell"
