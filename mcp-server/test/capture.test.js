@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCaptureHandler } from "../src/capture.js";
@@ -462,7 +463,7 @@ test("capture SQL casts every temporal response and the contract has no transcri
   assert.match(dealroom, /to_jsonb\(state_at\)#>>'\{\}' as state_at/);
   const tools = await import("node:fs/promises").then(fs => fs.readFile(new URL("../src/tools.js", import.meta.url), "utf8"));
   assert.match(tools, /to_jsonb\(created_at\)#>>'\{\}' as created_at/);
-  const migration = await import("node:fs/promises").then(fs => fs.readFile(new URL("../../migrations/0081_capture_bridge.sql", import.meta.url), "utf8"));
+  const migration = await import("node:fs/promises").then(fs => readMigration(new URL("../../migrations/0081_capture_bridge.sql", import.meta.url)));
   assert.doesNotMatch(migration, /^\s*transcript\w*\s+/im);
 });
 

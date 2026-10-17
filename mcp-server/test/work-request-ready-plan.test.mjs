@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -228,7 +229,7 @@ test("a sourced correction replays within one registry identity and returns key_
 });
 
 test("migration 0492 rebases proposal, acceptance, and both 0333 outcome guards on the effective lineage without touching human authority", () => {
-  const sql = fs.readFileSync(new URL("../../migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql", import.meta.url), "utf8");
+  const sql = readMigration(new URL("../../migrations/0492_sourced_shape_forward_correction_and_scac_successor.sql", import.meta.url));
   const between = (start, end) => sql.slice(sql.indexOf(start), sql.indexOf(end));
   const propose = between("create or replace function ops.propose_sourced_work_request_plan(", "create or replace function ops.accept_sourced_work_request_plan(");
   const accept = between("create or replace function ops.accept_sourced_work_request_plan(", "create or replace function ops.propose_sourced_work_request_outcome_feedback(");

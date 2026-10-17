@@ -1,10 +1,11 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const migration = fs.readFileSync(path.join(root, "migrations/0429_tour_domain_route_cheat_sheet.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0429_tour_domain_route_cheat_sheet.sql"));
 
 test("slice 4 is additive and binds new tours to an opaque client/work subject", () => {
   assert.match(migration, /^begin;/m);
@@ -80,8 +81,8 @@ test("slice 4 defaults neither revised route seam to public execution nor incomp
 
 // The successor adds only the stored subject fields to the deployed projection.
 test("internal detail subject successor preserves the prior read and its authorization predicates", () => {
-  const prior = fs.readFileSync(path.join(root, "migrations/0759_tour_reviewed_route_digest.sql"), "utf8");
-  const next = fs.readFileSync(path.join(root, "migrations/0813_tour_internal_subject_read.sql"), "utf8");
+  const prior = readMigration(path.join(root, "migrations/0759_tour_reviewed_route_digest.sql"));
+  const next = readMigration(path.join(root, "migrations/0813_tour_internal_subject_read.sql"));
   const functionBody = text => text.slice(text.indexOf("create or replace function ops.read_tour_internal_detail")).split("$$;")[0];
   assert.equal(functionBody(next).replace("'subject_type',t.subject_type,'subject_id',t.subject_id,\n    ", ""), functionBody(prior));
   const contract = JSON.parse(fs.readFileSync(path.join(root, "workspace/contracts/tour-operations-foundation.v1.json")));

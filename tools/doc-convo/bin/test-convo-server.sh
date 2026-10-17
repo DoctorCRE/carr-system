@@ -3,6 +3,13 @@ set -euo pipefail
 
 BIN="$(cd "$(dirname "$0")" && pwd)"
 TMP="$(mktemp -d)"
+PORT="${PORT:-$(python3 - <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)}"
 SERVER_PID=""
 CONTEXT="$BIN/../assets/hot-context.md"
 MADE_CONTEXT=0
@@ -37,10 +44,10 @@ exit 0
 EOF
 chmod +x "$TMP/ffmpeg" "$TMP/afplay"
 
-PATH="$TMP:$PATH" DOC_MIC_DEVICE=:0 python3 "$BIN/convo-server.py" >"$TMP/server.log" 2>&1 &
+PORT="$PORT" HOME="$TMP" PATH="$TMP:$PATH" DOC_MIC_DEVICE=:0 python3 "$BIN/convo-server.py" >"$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in {1..50}; do
-  curl -fsS http://127.0.0.1:4680/state >"$TMP/state" && break
+  curl -fsS "http://127.0.0.1:$PORT/state" >"$TMP/state" && break
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     cat "$TMP/server.log" >&2
     exit 1
@@ -53,20 +60,20 @@ import json, sys
 assert json.load(open(sys.argv[1]))["state"] == "idle"
 PY
 # GET / serves the panel when present, a designed 503 when not — both valid.
-STATUS=$(curl -sS -o "$TMP/panel" -w '%{http_code}' http://127.0.0.1:4680/)
+STATUS=$(curl -sS -o "$TMP/panel" -w '%{http_code}' "http://127.0.0.1:$PORT/")
 if [[ "$STATUS" == 200 ]]; then
-  grep -q '<title>Doc</title>' "$TMP/panel"
+  grep -Fq '<title>Dr. CRE</title>' "$TMP/panel"
 else
   [[ "$STATUS" == 503 ]]
   grep -q 'panel missing:' "$TMP/panel"
 fi
 
-curl -NsS --max-time 8 http://127.0.0.1:4680/events >"$TMP/events" &
+curl -NsS --max-time 8 "http://127.0.0.1:$PORT/events" >"$TMP/events" &
 EVENTS_PID=$!
 sleep 0.2
-curl -fsS -X POST -H 'Content-Type: application/json' -d '{"action":"start"}' http://127.0.0.1:4680/talk >/dev/null
+curl -fsS -X POST -H 'Content-Type: application/json' -d '{"action":"start"}' "http://127.0.0.1:$PORT/talk" >/dev/null
 sleep 0.2
-curl -fsS -X POST -H 'Content-Type: application/json' -d '{"action":"stop"}' http://127.0.0.1:4680/talk >/dev/null
+curl -fsS -X POST -H 'Content-Type: application/json' -d '{"action":"stop"}' "http://127.0.0.1:$PORT/talk" >/dev/null
 for _ in {1..50}; do
   grep -q 'data: {"state": "idle"}' "$TMP/events" && grep -q 'event: turn' "$TMP/events" && break
   sleep 0.1

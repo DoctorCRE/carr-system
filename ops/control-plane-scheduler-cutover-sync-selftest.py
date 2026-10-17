@@ -2,9 +2,13 @@
 """Hermetic fresh-order tests for the FK-bound scheduler surface projection."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import json
 from typing import Any, Literal
 
 REPO = Path(__file__).resolve().parents[1]
@@ -18,7 +22,7 @@ CONTROL_PLANE = load_module_from_path(
     "control_plane_scheduler_sync_under_test", str(REPO / "tools" / "control-plane.py"))
 MANIFEST = json.loads((REPO / "ops" / "config" / "control-plane-workflows.v1.json").read_text(encoding="utf-8"))
 REGISTRY = json.loads((REPO / "ops" / "config" / "control-plane-scheduler-cutover.v1.json").read_text(encoding="utf-8"))
-MIGRATION = (REPO / "migrations" / "0176_legacy_schedule_disable_receipt.sql").read_text(encoding="utf-8").lower()
+MIGRATION = read_migration(REPO, "0176_legacy_schedule_disable_receipt.sql").lower()
 REBUILD_GATE = (REPO / "ops" / "p1-rebuild-gate.py").read_text(encoding="utf-8").lower()
 DB_GATE = (REPO / "ops" / "control-plane-db-gate.py").read_text(encoding="utf-8").lower()
 CI = (REPO / "ops" / "ci.sh").read_text(encoding="utf-8").lower()

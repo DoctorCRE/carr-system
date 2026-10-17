@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
 import hashlib
 import json
 import math
 import os
 import statistics
-import sys
 import uuid
-from pathlib import Path
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -1130,13 +1133,11 @@ def main() -> int:
                     f"ops.scac_policy_epoch_snapshot() did not succeed on the real, "
                     f"non-bootstrap path with the repaired templates: {snapshot!r}"
                 )
-            v21_migration_sql = (REPO / LIVE_REGISTRY_MIGRATION).read_text(encoding="utf-8")
+            v21_migration_sql = read_migration(REPO, Path(LIVE_REGISTRY_MIGRATION).name)
             committed_v21_body = function_body(
                 current_function_sql(v21_migration_sql, LIVE_REGISTRY_ORDINAL)
             )
-            v20_migration_sql = (
-                REPO / SEALED_PREDECESSOR_MIGRATION
-            ).read_text(encoding="utf-8")
+            v20_migration_sql = read_migration(REPO, Path(SEALED_PREDECESSOR_MIGRATION).name)
             committed_v20_body = function_body(
                 current_function_sql(v20_migration_sql, SEALED_PREDECESSOR_ORDINAL))
 

@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -362,7 +363,7 @@ test("write-work-shape requires the effective receipt-backed required dispositio
 });
 
 test("migration 0492 admits one linked forward correction behind the exact sourced setter", () => {
-  const sql = fs.readFileSync(FORWARD_CORRECTION_MIGRATION, "utf8");
+  const sql = readMigration(FORWARD_CORRECTION_MIGRATION);
   assert.doesNotMatch(sql, /^\s*(begin|commit)\s*;\s*$/im, "0339+ migrations use the runner's single transaction");
   assert.match(sql, /create table ops\.sourced_work_request_shape_disposition_correction_receipt \(\n  id uuid primary key default gen_random_uuid\(\),\n  work_request_id uuid not null unique references ops\.work_request\(id\),\n  idempotency_key uuid not null unique,\n  original_receipt_id uuid not null unique references ops\.sourced_work_request_shape_disposition_receipt\(id\)/);
   assert.match(sql, /result_version integer not null check \(result_version = base_version \+ 1\)/);

@@ -1,10 +1,11 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const migration = fs.readFileSync(path.join(root, "migrations/0577_work_request_card_admits_needs_joe.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0577_work_request_card_admits_needs_joe.sql"));
 
 test("0577 widens ops.work_request_card to admit needs_joe without changing its signature", () => {
   assert.doesNotMatch(migration, /^(begin|commit);/m, "0339+ migrations run in the runner's single transaction");

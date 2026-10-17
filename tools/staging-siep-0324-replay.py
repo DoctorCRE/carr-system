@@ -26,10 +26,14 @@ Usage (through the documented staging door):
         tools/staging-siep-0324-replay.py --apply
 """
 
-import hashlib
-import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import hashlib
+import os
 from typing import Any, NoReturn
 
 import psycopg
@@ -63,7 +67,7 @@ def main() -> None:
     url = os.environ.get("DATABASE_URL")
     if not url:
         fail("DATABASE_URL is not set")
-    sql_text = MIGRATION.read_text()
+    sql_text = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     digest = hashlib.sha256(sql_text.encode()).hexdigest()
     if digest != PRODUCTION_SHA:
         fail(f"{MIGRATION.name} no longer hashes to what production ran "

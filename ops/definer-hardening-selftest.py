@@ -12,12 +12,16 @@ Paired with ops/definer-hardening-local-pg-gate.py. Needs no database:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import importlib.util
 import re
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "ops"))
@@ -85,7 +89,7 @@ class QualificationAudit(unittest.TestCase):
 
 class SubstitutionFixtureParity(unittest.TestCase):
     def test_legacy_clone_is_the_exact_0617_routine(self):
-        migration = (REPO / "migrations/0617_delivery_cadence_a05.sql").read_text(encoding="utf-8")
+        migration = read_migration(REPO, "0617_delivery_cadence_a05.sql")
         fixture = (REPO / "mcp-server/test/definer-temp-substitution-postgres.sql").read_text(encoding="utf-8")
         original = re.search(
             r"create or replace function ops\.v5_a05_assurance_cadence_batch\(p_recipient_slug text\)\n"

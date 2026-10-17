@@ -40,11 +40,16 @@ ops/backup-role-rls-coverage-evidence.txt.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+
+
 import os
 import re
-import sys
 import tempfile
-from pathlib import Path
 from urllib.parse import quote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,8 +128,8 @@ def backup_policy_re(table: str) -> re.Pattern[str]:
 
 def source_contract() -> None:
     corpus = "\n".join(
-        normalized(p.read_text(encoding="utf-8"))
-        for p in sorted(MIGRATIONS.glob("*.sql"))
+        normalized(read_migration(MIGRATIONS.parent, p.name))
+        for p in sorted(((MIGRATIONS) / name for name in migration_names((MIGRATIONS).parent) if fnmatch.fnmatchcase(name, "*.sql")))
     )
     enabled = set(ENABLE_RE.findall(corpus))
     disabled = set(DISABLE_RE.findall(corpus))
@@ -263,7 +268,7 @@ def live_proof(dsn: str) -> None:
 
         # Apply the fix (idempotent; carr_backup now exists so the policy is created).
         with conn.cursor() as cur:
-            cur.execute(MIGRATION_0475.read_text(encoding="utf-8"))
+            cur.execute(read_migration(MIGRATION_0475.parent.parent, MIGRATION_0475.name))
         conn.commit()
 
         with conn.cursor() as cur:

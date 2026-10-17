@@ -1,10 +1,11 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const migration = fs.readFileSync(path.join(root, "migrations/0565_tour_property_registration.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0565_tour_property_registration.sql"));
 
 test("0565 registers a property only together with its first rights-bound identifier assertion", () => {
   assert.doesNotMatch(migration, /^(begin|commit);/m, "0339+ migrations run in the runner's single transaction");

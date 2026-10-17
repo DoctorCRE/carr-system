@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -13,8 +14,8 @@ import {
 } from "../src/scac-exact-effects.js";
 import { executeWithTrustedPrincipal } from "../src/mcp.js";
 import { ToolError } from "../src/tools.js";
-const migration = fs.readFileSync(new URL(
-  "../../migrations/0469_siep18_exact_effects_trusted_principal.sql", import.meta.url), "utf8");
+const migration = readMigration(new URL(
+  "../../migrations/0469_siep18_exact_effects_trusted_principal.sql", import.meta.url));
 
 const contract = (ingress_key, direct_effects = [], delegates_to = [], extra = {}) => ({
   schema_version: "scac-exact-effect-contract.v1", ingress_key, direct_effects, delegates_to,
