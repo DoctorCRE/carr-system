@@ -160,7 +160,7 @@ export async function searchDoctrineSituations(c, actor, args) {
     `select * from search_doctrine_situations($1, $2::uuid, $3::text[], $4, $5, $6)`,
     [args.q, actorId, args.content_classes || null, args.limit || 20, policy, true]);
   const hits = result.rows.map(row => ({ ...row,
-    provenance: integerFields(row.provenance, ["policy_version"], "retrieval_version_invalid"),
+    ...(row.provenance && { provenance: integerFields(row.provenance, ["policy_version"], "retrieval_version_invalid") }),
   }));
   const policyId = hits[0]?.provenance?.policy_id || policy || "default";
   const fallbackUsed = hits.length > 0 && hits.every(r => r.provenance?.fallback === true);

@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "1285d38a947f4a0126386ae63c6ac8c4ad36db04711d89663b69c2dbc609d691";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "4390b654cacd2771d271e11d139dea39a2095e18ad1efb4b157acfe79a464ef5";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -480,7 +480,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "approve-retrieval-proposals": {
     "ingress_key": "mcp-tool:approve-retrieval-proposals",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
     "human_only": false,
@@ -1963,7 +1963,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-concept": {
     "ingress_key": "mcp-tool:propose-retrieval-concept",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "0cce99de34e57b5ca5a898696a622951b708d90dbc1dc854b588712937493bab",
     "write": true,
     "human_only": false,
@@ -1973,7 +1973,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-mapping": {
     "ingress_key": "mcp-tool:propose-retrieval-mapping",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "a481203d49233d5c52c879d00c0a5733fe5fc437dcfc613ae0e7515c72eac00f",
     "write": true,
     "human_only": false,
@@ -1983,7 +1983,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-phrase": {
     "ingress_key": "mcp-tool:propose-retrieval-phrase",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "5e10256c48824dd0d7e191f2ecae0885dd1fc24e39d8112ffbe9e25b2c9ad526",
     "write": true,
     "human_only": false,
@@ -1993,7 +1993,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-retirement": {
     "ingress_key": "mcp-tool:propose-retrieval-retirement",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "efbf95037c3a4b1ea73a10140b6cf48e6e3553888e2e3ab7a243d020661ee91d",
     "write": true,
     "human_only": false,
@@ -3148,7 +3148,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "retire-retrieval-curation": {
     "ingress_key": "mcp-tool:retire-retrieval-curation",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "27f2f1528b454a49dc21185e6a68a08be0df4142db6d644790373bf74e0b6d26",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
     "write": true,
     "human_only": false,
