@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Renumber a PR's pending migrations after rebasing onto fetched origin/main.
+"""Renumber a PR's pending migrations after merging fetched origin/main.
 
 The serialized merge queue runs these commands on its owned PR branch:
   git fetch origin main
-  git rebase origin/main
+  git merge origin/main
   python3 tools/renumber-at-merge.py
   git add -- <changed paths reported in the JSON summary>
   printf '%s\n' 'chore: renumber migrations at merge' > /tmp/renumber-commit.txt
   git commit -F /tmp/renumber-commit.txt
-  git push --force-with-lease origin HEAD
+  git push origin HEAD
   gh pr checks <PR> --watch
 Skip add/commit when the summary's changed_paths is empty. CI remains the gate.
 
@@ -165,12 +165,13 @@ class Plan:
                     renames=self.renames, changed_paths=sorted(changed), generators=self.commands)
 
 
-def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Plan:
+def plan(repo: Path, branch: str | None, generators: dict[str, list[str]],
+         claimed_slots: tuple[int, ...] = (), avoid_slots: tuple[int, ...] = ()) -> Plan:
     base = git(repo, "rev-parse", "origin/main^{commit}").decode().strip()
     head = git(repo, "rev-parse", f"{branch or 'HEAD'}^{{commit}}").decode().strip()
     ancestor = git(repo, "merge-base", base, head).decode().strip()
     if not branch and ancestor != base:
-        raise MigrationNumberError("rebase the PR branch on current origin/main before renumbering")
+        raise MigrationNumberError("merge current origin/main into the PR branch before renumbering")
     require_baseline_unchanged(repo, base, head if branch else None,
                                inherited_from=ancestor if branch else None)
     base_paths = paths(repo, base)
@@ -213,9 +214,11 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
     result = Plan(base, head, ancestor != base, {}, {}, [], {}, immutable)
     try:
         validate_integration_union(main, main | pending)
+        if any(int(name[:4]) in claimed_slots for name in pending):
+            raise MigrationNumberError("earlier open PR owns a pending slot")
         return result
     except MigrationNumberError:
-        allocated = allocate_integration_successors(main, pending)
+        allocated = allocate_integration_successors(main, pending, occupied_slots=(*claimed_slots, *avoid_slots))
         result.renames = {old: new for old, new in allocated.items() if old != new}
     if not result.renames:
         return result
@@ -348,6 +351,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--branch", help="revision to preview without checkout; requires --dry-run")
     parser.add_argument("--generator", nargs=2, action="append", default=[], metavar=("PATH", "JSON_ARGV"))
+    parser.add_argument("--claimed-slot", type=int, action="append", default=[])
+    parser.add_argument("--avoid-slot", type=int, action="append", default=[])
     args = parser.parse_args()
     def interrupted(signum, _frame):
         raise KeyboardInterrupt(f"renumbering cancelled by signal {signum}")
@@ -362,7 +367,8 @@ def main() -> int:
             if not isinstance(command, list) or not command or any(not isinstance(a, str) or not a for a in command):
                 raise MigrationNumberError("generator must be a nonempty JSON argv array")
             generators[path] = command
-        result = plan(args.repo.resolve(), args.branch, generators)
+        result = plan(args.repo.resolve(), args.branch, generators,
+                      tuple(args.claimed_slot), tuple(args.avoid_slot))
         if not args.dry_run:
             apply(args.repo.resolve(), result)
         print(json.dumps(result.summary(args.dry_run), indent=2, sort_keys=True))
