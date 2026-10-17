@@ -211,7 +211,9 @@ def test_deterministic_adapters(ev, cases, meta):
     check("deterministic adapters are all present",
           names >= {"prompt_compiled", "jit_pretooluse", "boot_layer0"}, names)
     deliveries, errors = ev.run_adapters(cases, adapters)
-    check("no deterministic adapter raised", not any(errors.values()), errors)
+    check("unanswered moments are reported explicitly; boot remains available",
+          not errors['boot_layer0'] and not errors['boot_always_on']
+          and all(reason=='rule_scope_selection_incomplete' for out in errors.values() for reason in out.values()), errors)
     for name, per_case in deliveries.items():
         unknown = sorted({rid for out in per_case.values() for rid in out["rules"]
                           if rid not in meta})
@@ -270,8 +272,10 @@ def test_jev_adapters(ev, meta):
         noul = choice = score = staticmethod(lambda *a, **kw: {})
         def __init__(self):
             self.sinks = []
+            self.caches = []
         def ask(self, state, questions, **kwargs):
             self.sinks.append(kwargs.get('calls_log'))
+            self.caches.append(kwargs.get('cache_path'))
             return {'model':'jev-1.13.0', 'answers':{k:{'type':'choice','choice':'applies' if k=='bind_113b3833' else 'not_applicable','confidence':.99} for k in questions}}
     fake=Fake()
     before=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])
@@ -280,6 +284,7 @@ def test_jev_adapters(ev, meta):
     result=adapter['select']({'prompt':'Read doctrine before code work','tool_calls':[]})
     check('typed moment delivery preserves the admitted full rule',result['rules']=={'113b3833'},result)
     check('every evaluation request uses the no-log sink',bool(fake.sinks) and all(s==os.devnull for s in fake.sinks))
+    check('transport cache is isolated from production', bool(fake.caches) and all('carr-rule-eval-' in path for path in fake.caches))
     after=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])
     check('model evaluation wrote no production cache, log or audit',before==after)
 
@@ -305,9 +310,18 @@ def test_cli():
             check("report is marked dry-run", data.get("dry_run") is True)
 
 
+def test_incomplete_selection(ev):
+    adapters=[{'name':'lookup','select':lambda _: {'rules':{'11111111'},'complete':False}}]
+    results,errors=ev.run_adapters([{'id':'uncertain'}],adapters)
+    check('incomplete selection is a reported failure, never credited delivery',
+          results['lookup']['uncertain']['rules']==set()
+          and errors['lookup'].get('uncertain')=='rule_scope_selection_incomplete')
+
+
 def main() -> int:
     ev = load(LIB, "rule_delivery_eval_for_selftest")
     report = test_scoring(ev)
+    test_incomplete_selection(ev)
     test_planted_misscore(ev, report)
     cases, meta = test_fixture(ev)
     test_deterministic_adapters(ev, cases, meta)

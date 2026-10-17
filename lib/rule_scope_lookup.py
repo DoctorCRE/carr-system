@@ -6,7 +6,6 @@ callers must handle incomplete results before claiming delivery coverage.
 from __future__ import annotations
 
 import json
-import importlib.util
 import time
 import math
 import os
@@ -186,11 +185,10 @@ def moment_judge(session_id: str, *, deadline: float | None = None) -> Callable:
     """Use the existing semantic cache and shared cognition admission on misses."""
     deadline = deadline or time.monotonic() + 12
     def judge(state, questions):
-        path = REPO / 'ops/jev_semantic.py'
-        spec = importlib.util.spec_from_file_location('scope_semantic', path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module.ask(state, questions, caller='rule_scope_lookup', version='stored-moment-v1',
-                          session_id=session_id, deadline=deadline,
-                          timeout=max(.01, deadline-time.monotonic()), retries=0)
+        from ops import jev_semantic as semantic
+        request = semantic.JudgmentRequest(state, questions, caller='rule_scope_lookup',
+                    version='stored-moment-v1', validate_confidence=True,
+                    session_id=session_id, deadline=deadline,
+                    timeout=max(.01, deadline-time.monotonic()), retries=0)
+        return semantic.evaluate(request).unwrap()
     return judge

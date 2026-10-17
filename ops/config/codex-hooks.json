@@ -142,7 +142,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
             "timeout": 20,
             "additionalContextLimit": 10000
           }

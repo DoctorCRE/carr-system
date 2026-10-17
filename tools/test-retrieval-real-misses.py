@@ -136,8 +136,8 @@ class ScoringTests(unittest.TestCase):
         c = case(request={'args': {'prompt': 'an unrelated quasar sunrise'}})
         def read(verb, args):
             return {'shared_rules': [{'id': '3fa17fa0', 'statement': 'Not requested'}], 'personal_rules': []}
-        refs = EVAL.routing_candidates(c, read, {'e313a3ca'})
-        self.assertEqual(refs, [{'refs': ['rule:e313a3ca'], 'eligible': True}])
+        with self.assertRaisesRegex(EVAL.ReadError, 'rule_scope_catalog_invalid'):
+            EVAL.routing_candidates(c, read, {'e313a3ca'})
 
     def test_names_are_never_persisted_as_refs(self):
         self.assertEqual(EVAL.candidate(['Example Doctor', 'secret text', 'P-0055']),

@@ -204,10 +204,13 @@ def routing_candidates(case, read, boot_ids):
     from lib.rule_scope_lookup import select_rules, moment_judge
     args = case['request']['args']
     catalog = read('standing-context', {'detail': 'scopes'})
-    result = select_rules(catalog, {'hook_event_name': 'PreToolUse' if 'tool_name' in args else 'UserPromptSubmit',
-                                   'task': args['prompt'], 'tool_name': args.get('tool_name', ''),
-                                   'tool_input': args.get('tool_input', {})},
-                          judge=moment_judge('retrieval-real-misses'))
+    try:
+        result = select_rules(catalog, {'hook_event_name': 'PreToolUse' if 'tool_name' in args else 'UserPromptSubmit',
+                                       'task': args['prompt'], 'tool_name': args.get('tool_name', ''),
+                                       'tool_input': args.get('tool_input', {})},
+                              judge=moment_judge('retrieval-real-misses'))
+    except ValueError:
+        raise ReadError('rule_scope_catalog_invalid') from None
     if not result['complete']:
         raise ReadError('rule_scope_selection_incomplete')
     delivered = boot_ids | {r['id'] for r in result['rules']}

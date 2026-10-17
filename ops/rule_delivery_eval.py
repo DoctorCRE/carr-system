@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import re
+import tempfile
 from collections import Counter
 
 CASES_SCHEMA = "rule-delivery-eval-cases/v1"
@@ -37,7 +38,7 @@ EVAL_SESSION = "rule-delivery-eval"
 GUARDED_OUT_FILES = (
     "rule-trigger-delivery.jsonl", "rule-prompt-delivered.json",
     "jev-rule-select.jsonl", "jev-rule-select-cache.json", "jev-judge.jsonl",
-    "jev-calls.jsonl",
+    "jev-calls.jsonl", "jev-semantic-cache.json", "jev-judge-cache.sqlite3",
 )
 
 PACK_LAYER = "pack"
@@ -181,14 +182,20 @@ class JevProxy:
     def __init__(self, tsc, calls_log):
         self._tsc = tsc
         self.calls_log = calls_log
+        self._cache = tempfile.TemporaryDirectory(prefix="carr-rule-eval-")
         self.noul, self.choice, self.score = tsc.noul, tsc.choice, tsc.score
 
     def ask(self, state, questions, **kwargs):
         kwargs.pop("caller", None)
         kwargs.pop("version", None)
         kwargs["calls_log"] = self.calls_log
+        from ops import jev_semantic as semantic
+        if kwargs.pop('model', 'jev-1.13.0') != 'jev-1.13.0':
+            raise ValueError('evaluation model must be pinned')
         return self._tsc.ask(state, questions, caller='rule_delivery_eval',
-                             model='jev-1.13.0', **kwargs)
+                             model='jev-1.13.0', cache_key=semantic.cache_key(
+                                 state, questions, 'rule_delivery_eval', 'stored-moment-eval-v1'),
+                             cache_path=os.path.join(self._cache.name, 'transport.sqlite3'), **kwargs)
 
 
 def _quiet_judge(repo, tag):
@@ -276,7 +283,7 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
     def delivery(case, *, prompt=False, live_judge=None):
         events = ([{'hook_event_name': 'UserPromptSubmit', 'task': case['prompt']}] if prompt else
                   [{'hook_event_name': 'PreToolUse', 'task': case['prompt'], **call} for call in case['tool_calls']])
-        rules, unresolved = set(), []
+        rules, unresolved, defects = set(), [], []
         for event in events:
             if live_judge:
                 result = select_rules(frozen.catalog, event, judge=live_judge)
@@ -287,8 +294,9 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
                     result = select_rules(frozen.catalog, event)
             rules.update(r['id'] for r in result['rules'])
             unresolved.extend(result['unresolved'])
+            defects.extend(result['data_defects'])
         return {'rules': rules, 'packs': {p for r in rules for p in meta.get(r, {}).get('packs', [])},
-                'unresolved': unresolved}
+                'unresolved': unresolved, 'data_defects': defects, 'complete': not unresolved and not defects}
 
     def prompt_compiled(case):
         return delivery(case, prompt=True)
@@ -344,6 +352,8 @@ def run_adapters(cases, adapters, *, workers=1):
         def one(case, adapter=adapter):
             try:
                 result = adapter["select"](case)
+                if result.get("complete") is False:
+                    return case["id"], {"rules": set(), "packs": set()}, "rule_scope_selection_incomplete"
                 return case["id"], {"rules": set(result.get("rules") or ()),
                                     "packs": (set(result["packs"]) if result.get("packs")
                                               is not None else None),
