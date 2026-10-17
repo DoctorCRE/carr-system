@@ -40,8 +40,15 @@ class DeletedCallers(unittest.TestCase):
 
     def test_prompt_has_no_build_annotation(self):
         hook = load('hooks/rule-pack-preuse-reselection.py')
+        import subprocess
+        catalog = {'ok':True, 'schema':'rule-scope-catalog/v1','corpus_digest':'a'*64,
+                   'identity':{'agent_principal_id':'joe-local','runtime_principal':'joe-local',
+                               'sponsoring_human_id':'joe'},'rules':[]}
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(command,0,json.dumps(catalog),'')
         result = hook.process({'hook_event_name': 'UserPromptSubmit', 'session_id': 'fake',
-                               'prompt': 'check this ordinary task'}, adviser=lambda _: [])
+                               'prompt': 'check this ordinary task'}, runner=runner,
+                              judge=lambda *_: self.fail('empty catalog must not judge'))
         self.assertIsNone(result)
 
 if __name__ == '__main__':
