@@ -70,8 +70,6 @@ def build_output(prompt, **judge):
     if note:
         row["error"] = note
     _log(row)
-    if note:
-        return {"decision": "block", "reason": note}
     if not block:
         return None
     return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
