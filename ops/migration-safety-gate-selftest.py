@@ -310,7 +310,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     git(repo, "checkout", "-q", "HEAD~1")
     established = git(repo, "rev-parse", "HEAD").strip()
-    manifest["snapshot"]["sha256"] = "f" * 64
+    manifest["snapshot"] = {"path": "db/schema.sql", "sha256": "f" * 64}
     write(repo, "db/migration-baseline.json", json.dumps(manifest))
     git(repo, "add", "db/migration-baseline.json")
     git(repo, "commit", "-q", "-m", "rewrite baseline snapshot binding")

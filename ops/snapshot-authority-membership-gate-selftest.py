@@ -15,6 +15,7 @@ from git_env import fixture_env
 
 spec = importlib.util.spec_from_file_location(
     "snapshot_authority_membership_gate", REPO / "ops/snapshot-authority-membership-gate.py")
+assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 
