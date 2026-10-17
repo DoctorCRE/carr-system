@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- doctrine: npi-sweep-sop -->
+<plist version="1.0">
+<dict>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>Label</key>
+	<string>com.carr.routine-lead-signals-weekly</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>{{REPO}}/bin/run-scheduled.sh</string>
+		<string>lead-signals-weekly</string>
+		<string>routine.weekly</string>
+		<string>/bin/sh</string>
+		<string>{{REPO}}/bin/routine-run.sh</string>
+		<string>lead-signals-weekly</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>{{REPO}}</string>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>1</integer>
+		<key>Hour</key>
+		<integer>7</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{{HOME}}/.local/bin:{{HOME}}/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>TZ</key>
+		<string>America/Chicago</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>{{REPO}}/out/lead-signals-weekly.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{REPO}}/out/lead-signals-weekly.error.log</string>
+</dict>
+</plist>

@@ -1,0 +1,18 @@
+{
+  "schema": "carr-code-routines.v1",
+  "timezone": "America/Chicago",
+  "jobs": [
+    {
+      "id": "lead-signals-weekly",
+      "module": "lead_signals",
+      "label": "com.carr.routine-lead-signals-weekly",
+      "weekday": 1,
+      "hour": 7,
+      "minute": 30,
+      "replaces": [
+        "npi-sweep-weekly"
+      ],
+      "model": null
+    }
+  ]
+}

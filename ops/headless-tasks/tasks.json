@@ -31,11 +31,6 @@
       "timeout_seconds": 5400,
       "grace_seconds": 3600
     },
-    "npi-sweep-weekly": {
-      "cron": "30 7 * * 1",
-      "timeout_seconds": 5400,
-      "grace_seconds": 3600
-    },
     "playbook-review-monthly": {
       "cron": "0 9 15-21 * *",
       "timeout_seconds": 5400,

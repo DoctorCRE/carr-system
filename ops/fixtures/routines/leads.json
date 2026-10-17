@@ -1,0 +1,58 @@
+{
+  "as_of": "2026-10-05T08:00:00-05:00",
+  "nppes_rows": [
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000001"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "08/01/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000002"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Miami",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "33101",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000003"
+    },
+    {
+      "Entity Type Code": "1",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "207Q00000X",
+      "NPI": "1000000004",
+      "Provider First Name": "Example",
+      "Provider Last Name (Legal Name)": "Associate"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000001"
+    }
+  ],
+  "claims": []
+}
