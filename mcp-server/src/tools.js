@@ -339,7 +339,10 @@ async function withEnvelope(client, actor, verb, args, fn) {
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
-    return { replayed: true, ...prior.rows[0].response };          // A1: replay, no second write
+    const response = prior.rows[0].response;
+    if (verb === "add-industry-event" || verb === "update-industry-event")
+      return { replayed: true, ...response, event: industryEventRecord(response.event) };
+    return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
   await client.query(

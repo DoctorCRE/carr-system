@@ -168,3 +168,45 @@ test("update-industry-event refuses an unsafe base version before SQL", async ()
   }), error => error instanceof ToolError && error.payload.error === "industry_event_base_version_invalid");
   assert.deepEqual(fake.sql, []);
 });
+
+for (const verb of ["add-industry-event", "update-industry-event"]) {
+  const args = verb === "add-industry-event" ? addArgs
+    : { idempotency_key: "event-legacy-update", event_id: EVENT.id, base_version: 1, title: "Updated event" };
+  async function replay(version) {
+    const fake = new Fake({
+      "insert into industry_event": [{ ...EVENT, version: 2 }],
+      "update industry_event": [{ ...EVENT, version: 2 }],
+    });
+    await TOOLS[verb].handler(fake, JOE, args);
+    const [, params] = fake.sql.find(([sql]) => sql.startsWith("insert into tool_call"));
+    const response = { ...JSON.parse(params[4]), event: { ...EVENT, version } };
+    fake.plan["from tool_call where idempotency_key"] = [{ request_hash: params[3], response }];
+    fake.sql = [];
+    return { fake, response };
+  }
+  test(`${verb} replays pre-fix receipts with a reusable integer version and no mutation`, async () => {
+    for (const version of ["2", String(Number.MAX_SAFE_INTEGER)]) {
+      const { fake, response } = await replay(version);
+      const result = await TOOLS[verb].handler(fake, JOE, args);
+      assert.deepEqual(result, { replayed: true, ok: true, event: { ...EVENT, version: Number(version) } });
+      assert.equal(response.event.version, version);
+      assert.equal(fake.sql.length, 1);
+      assert.match(fake.sql[0][0], /^select request_hash, response from tool_call/);
+      const update = new Fake({ "update industry_event": [{ ...EVENT, version: 3 }] });
+      await TOOLS["update-industry-event"].handler(update, JOE, {
+        idempotency_key: "event-after-replay", event_id: result.event.id,
+        base_version: result.event.version, title: "After replay",
+      });
+      assert.equal(update.sql.find(([sql]) => sql.startsWith("update industry_event"))[1].at(-1), Number(version));
+    }
+  });
+  test(`${verb} refuses unsafe cached versions without another mutation`, async () => {
+    for (const version of ["9007199254740993", "0", "-1", "2.5"]) {
+      const { fake } = await replay(version);
+      await assert.rejects(() => TOOLS[verb].handler(fake, JOE, args),
+        error => error instanceof ToolError && error.payload.error === "industry_event_version_invalid");
+      assert.equal(fake.sql.length, 1);
+      assert.match(fake.sql[0][0], /^select request_hash, response from tool_call/);
+    }
+  });
+}
