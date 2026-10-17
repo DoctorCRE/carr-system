@@ -127,7 +127,8 @@ def host_of(conn_string: str) -> str:
 
 
 def committed_migrations() -> list[str]:
-    return sorted(p.name for p in (REPO / "migrations").glob("*.sql"))
+    from migration_source import migration_names
+    return sorted(migration_names(REPO))
 
 
 def applied_migrations(conn_string: str, read_only: bool) -> list[str]:

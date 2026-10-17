@@ -49,6 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops"))
 from git_env import scrubbed_env
+from integration_candidate import require_baseline_unchanged
+from migration_baseline import MANIFEST
+from migration_source import migration_names, read_migration
 from migration_number_contract import (
     MigrationNumberError, SLOT_RE, allocate_integration_successors,
     validate_integration_union,
@@ -168,9 +171,11 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
     ancestor = git(repo, "merge-base", base, head).decode().strip()
     if not branch and ancestor != base:
         raise MigrationNumberError("rebase the PR branch on current origin/main before renumbering")
+    require_baseline_unchanged(repo, base, head if branch else None,
+                               inherited_from=ancestor if branch else None)
     base_paths = paths(repo, base)
-    main = {Path(p).name: blob(repo, base, p) for p in base_paths
-            if p.startswith("migrations/") and p.endswith(".sql")}
+    main = {name: read_migration(repo, name, base).encode()
+            for name in sorted(migration_names(repo, base))}
     comparison = ancestor if branch else base
     delta = git(repo, "diff", "--name-only", "--no-renames", "-z", comparison, *([head] if branch else [])).split(b"\0")
     changed = {p.decode() for p in delta if p}
@@ -184,9 +189,12 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
             contents[path] = read_file(repo, path)
         else:
             contents[path] = None
+    candidate_ref = head if branch else None
+    candidate_names = migration_names(repo, candidate_ref)
+    fork_names = migration_names(repo, ancestor) if branch else set()
     for name, content in main.items():
-        path = f"migrations/{name}"
-        candidate = contents.get(path, content) if branch else read_file(repo, path) if (repo / path).exists() else None
+        candidate = (read_migration(repo, name, candidate_ref).encode() if name in candidate_names
+                     else content if branch and name not in fork_names else None)
         if candidate != content:
             raise MigrationNumberError(f"applied main migration cannot be renamed, deleted or edited: {name}")
     pending = {Path(p).name: content for p, content in contents.items()
@@ -197,7 +205,8 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
     applied = applied_names(blob(repo, base, SNAPSHOT))
     if set(pending) & applied:
         raise MigrationNumberError("applied main migration cannot be reallocated: " + ", ".join(sorted(set(pending) & applied)))
-    immutable = {f"migrations/{name}": content for name, content in main.items() if content is not None}
+    immutable = {path: git(repo, "show", f"{base}:{path}") for path in base_paths
+                 if (path.startswith("migrations/") and path.endswith(".sql")) or path == MANIFEST}
     result = Plan(base, head, ancestor != base, {}, {}, [], {}, immutable)
     try:
         validate_integration_union(main, main | pending)
@@ -300,6 +309,10 @@ def apply(repo: Path, result: Plan) -> None:
         for path, content in result.immutable.items():
             if not (repo / path).is_file() or read_file(repo, path) != content:
                 raise MigrationNumberError(f"generator changed an applied main migration: {path}")
+        validate_integration_union(
+            {name: read_migration(repo, name, result.base).encode() for name in migration_names(repo, result.base)},
+            {name: read_migration(repo, name).encode() for name in migration_names(repo)},
+        )
         for path, expected in result.generated.items():
             observed = read_file(repo, path)
             if path == SNAPSHOT:
