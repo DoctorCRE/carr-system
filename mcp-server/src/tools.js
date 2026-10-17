@@ -507,6 +507,14 @@ function industryEventId(value) {
   return value;
 }
 
+function industryEventRecord(row) {
+  const version = typeof row.version === "string" && /^[1-9][0-9]*$/.test(row.version)
+    ? Number(row.version) : row.version;
+  if (!Number.isSafeInteger(version) || version < 1)
+    throw new ToolError({ error: "industry_event_version_invalid" });
+  return { ...row, version };
+}
+
 // [defect 18b12fda-b79c-43a1-86c4-51b9623e12fd, 2026-08-14] THE VIOLATION WAS OURS.
 // add-party (kind='org', name='Wagtail Lodge Resort') refused twice with
 // unique_violation on party_org_identity_uniq while a read-only tap of the same
@@ -8467,7 +8475,7 @@ export const TOOLS = {
           [tenant, clean.title, clean.organizer, clean.kind, clean.starts_at, clean.ends_at,
            clean.location, clean.is_virtual, clean.url, clean.relevance_note, clean.attendance_intent,
            clean.owner_partner, clean.status, clean.source, actor.id]);
-        const event = inserted.rows[0];
+        const event = industryEventRecord(inserted.rows[0]);
         await writeEvent(c, actor, "add-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
@@ -8490,7 +8498,7 @@ export const TOOLS = {
            from industry_event
           where organization_tenant_id=$1
           order by starts_at, id limit $2`, [organizationTenantForActor(actor), limit]);
-      return { ok: true, events: result.rows, count: result.rows.length };
+      return { ok: true, events: result.rows.map(industryEventRecord), count: result.rows.length };
     },
   },
 
@@ -8508,7 +8516,7 @@ export const TOOLS = {
     }, required: ["idempotency_key", "event_id", "base_version"] },
     handler: async (c, actor, args) => {
       const eventId = industryEventId(args.event_id);
-      if (!Number.isInteger(args.base_version) || args.base_version < 1)
+      if (!Number.isSafeInteger(args.base_version) || args.base_version < 1)
         throw new ToolError({ error: "industry_event_base_version_invalid" });
       const clean = validateIndustryEventFields(args, { partial: true });
       const keys = ["title", "organizer", "kind", "starts_at", "ends_at", "location", "is_virtual",
@@ -8535,7 +8543,7 @@ export const TOOLS = {
         if (!result.rows.length)
           throw new ToolError({ error: "industry_event_version_conflict",
             hint: "read the event again and retry with its current version" });
-        const event = result.rows[0];
+        const event = industryEventRecord(result.rows[0]);
         await writeEvent(c, actor, "update-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };

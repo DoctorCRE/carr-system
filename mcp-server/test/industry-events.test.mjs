@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import pg from "pg";
 import { TOOLS, ToolError } from "../src/tools.js";
 
 const JOE = {
@@ -100,7 +101,7 @@ test("add-industry-event writes the row and audit event through the envelope", a
     owner_partner: EVENT.owner_partner, status: EVENT.status, source: EVENT.source,
   });
   assert.equal(result.ok, true);
-  assert.equal(result.event, EVENT);
+  assert.deepEqual(result.event, EVENT);
   const [sql, params] = fake.sql.find(([text]) => text.includes("insert into industry_event"));
   assert.match(sql, /organization_tenant_id/);
   assert.equal(params[0], "carr-internal");
@@ -123,4 +124,47 @@ test("update-industry-event uses base_version and tenant in its optimistic updat
   assert.match(sql, /organization_tenant_id=\$\d+/);
   assert.match(sql, /version=\$\d+/);
   assert.deepEqual(params.slice(-3), [EVENT.id, "carr-internal", 1]);
+});
+
+const parseBigint = pg.types.getTypeParser(20, "text");
+const addArgs = {
+  idempotency_key: "event-bigint-add", title: EVENT.title, organizer: EVENT.organizer,
+  kind: EVENT.kind, starts_at: EVENT.starts_at, ends_at: EVENT.ends_at,
+  owner_partner: EVENT.owner_partner, source: EVENT.source,
+};
+
+for (const verb of ["list-industry-events", "add-industry-event", "update-industry-event"]) {
+  const run = version => {
+    const fake = new Fake({
+      "from industry_event": [{ ...EVENT, version: parseBigint(version) }],
+      "insert into industry_event": [{ ...EVENT, version: parseBigint(version) }],
+      "update industry_event": [{ ...EVENT, version: parseBigint(version) }],
+    });
+    const args = verb === "list-industry-events" ? {} : verb === "add-industry-event" ? addArgs
+      : { idempotency_key: "event-bigint-update", event_id: EVENT.id, base_version: 1, title: "Updated event" };
+    return TOOLS[verb].handler(fake, JOE, args);
+  };
+  test(`${verb} publishes PostgreSQL bigint versions as safe integers`, async () => {
+    assert.equal(typeof parseBigint("2"), "string");
+    for (const version of ["2", String(Number.MAX_SAFE_INTEGER)]) {
+      const result = await run(version);
+      const event = verb === "list-industry-events" ? result.events[0] : result.event;
+      assert.equal(event.version, Number(version));
+      assert.ok(Number.isSafeInteger(event.version));
+    }
+  });
+  test(`${verb} refuses versions that cannot be represented safely`, async () => {
+    for (const version of ["9007199254740993", "0", "-1"])
+      await assert.rejects(() => run(version), error => error instanceof ToolError
+        && error.payload.error === "industry_event_version_invalid");
+  });
+}
+
+test("update-industry-event refuses an unsafe base version before SQL", async () => {
+  const fake = new Fake();
+  await assert.rejects(() => TOOLS["update-industry-event"].handler(fake, JOE, {
+    idempotency_key: "event-unsafe-base", event_id: EVENT.id,
+    base_version: Number.MAX_SAFE_INTEGER + 1, title: "Updated event",
+  }), error => error instanceof ToolError && error.payload.error === "industry_event_base_version_invalid");
+  assert.deepEqual(fake.sql, []);
 });
