@@ -17,7 +17,9 @@ from git_env import scrubbed_env
 
 
 def _git(repo: Path, *args: str) -> bytes:
-    result = subprocess.run(['git', '-C', str(repo), *args], capture_output=True, env=scrubbed_env())
+    env = scrubbed_env()
+    env['GIT_NO_LAZY_FETCH'] = '1'
+    result = subprocess.run(['git', '-C', str(repo), *args], capture_output=True, env=env)
     if result.returncode:
         raise ValueError(f'migration source: Git read failed ({" ".join(args)}): '
                          + result.stderr.decode(errors='replace').strip())

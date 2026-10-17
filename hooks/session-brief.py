@@ -20,9 +20,13 @@ session that improvises files is the failure this whole build exists to end.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
 import json
 import os
-import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run, Event
 
@@ -280,9 +284,9 @@ def _seed_evidence_rows(repo=None):
     if repo is None:
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     migration = os.path.join(repo, "migrations", "0125_ai_capability_program.sql")
-    if not os.path.exists(migration):
+    if Path(migration).name not in migration_names(Path(repo)):
         return []
-    sql = open(migration, encoding="utf-8").read()
+    sql = read_migration(Path(repo), Path(migration).name)
     # The seed rows look like:
     # (N, 'carr-ai-engineering-suite-v1', 'WR-AI-00X', 'Title', 'build', ...,
     #  '{"scope":"...","evidence":["path/a","path/b"],...}'::jsonb, 'joe', 'joe')

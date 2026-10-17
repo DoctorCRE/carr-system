@@ -1,17 +1,18 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 
-const migration = fs.readFileSync(new URL("../../migrations/0310_engineering_execution_fabric.sql", import.meta.url), "utf8");
-const authorityRepair = fs.readFileSync(new URL("../../migrations/0311_sponsored_engineering_executor_authority.sql", import.meta.url), "utf8");
-const controllerMigration = fs.readFileSync(new URL("../../migrations/0312_engineering_dispatch_controller.sql", import.meta.url), "utf8");
-const successorPermissionRepair = fs.readFileSync(new URL("../../migrations/0319_engineering_envelope_writer_successor.sql", import.meta.url), "utf8");
-const claimOutputRepair = fs.readFileSync(new URL("../../migrations/0323_engineering_claim_output_qualification.sql", import.meta.url), "utf8");
-const claimEligibilityRepair = fs.readFileSync(new URL("../../migrations/0325_engineering_claim_envelope_eligibility.sql", import.meta.url), "utf8");
-const currentnessRepair = fs.readFileSync(new URL("../../migrations/0335_engineering_controller_currentness.sql", import.meta.url), "utf8");
-const engineeringMigrationCorpus = fs.readdirSync(new URL("../../migrations/", import.meta.url))
+const migration = readMigration(new URL("../../migrations/0310_engineering_execution_fabric.sql", import.meta.url));
+const authorityRepair = readMigration(new URL("../../migrations/0311_sponsored_engineering_executor_authority.sql", import.meta.url));
+const controllerMigration = readMigration(new URL("../../migrations/0312_engineering_dispatch_controller.sql", import.meta.url));
+const successorPermissionRepair = readMigration(new URL("../../migrations/0319_engineering_envelope_writer_successor.sql", import.meta.url));
+const claimOutputRepair = readMigration(new URL("../../migrations/0323_engineering_claim_output_qualification.sql", import.meta.url));
+const claimEligibilityRepair = readMigration(new URL("../../migrations/0325_engineering_claim_envelope_eligibility.sql", import.meta.url));
+const currentnessRepair = readMigration(new URL("../../migrations/0335_engineering_controller_currentness.sql", import.meta.url));
+const engineeringMigrationCorpus = listMigrationNames()
   .filter(name => /^\d+_.*engineering.*\.sql$/i.test(name))
-  .map(name => fs.readFileSync(new URL(`../../migrations/${name}`, import.meta.url), "utf8"))
+  .map(name => readMigration(new URL(`../../migrations/${name}`, import.meta.url)))
   .join("\n");
 const runtime = fs.readFileSync(new URL("../src/engineering-runtime.js", import.meta.url), "utf8");
 const mcp = fs.readFileSync(new URL("../src/mcp.js", import.meta.url), "utf8");

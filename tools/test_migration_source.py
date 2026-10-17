@@ -56,6 +56,16 @@ class HistoricalMigrationSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pinned Git source"):
             read_migration(self.repo, "0001_first.sql")
 
+    def test_absent_source_checksum_must_match_the_manifest(self):
+        self.baseline()
+        (self.repo / "migrations/0001_first.sql").unlink()
+        manifest = self.repo / "db/migration-baseline.json"
+        document = json.loads(manifest.read_text())
+        document["migrations"][0]["sha256"] = "f" * 64
+        manifest.write_text(json.dumps(document))
+        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+            read_migration(self.repo, "0001_first.sql")
+
     def test_foreign_git_environment_cannot_redirect_source(self):
         self.baseline()
         (self.repo / "migrations/0001_first.sql").unlink()

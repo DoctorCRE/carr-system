@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import importlib.util
 import json
 import tempfile
 from datetime import timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -282,8 +287,7 @@ def main() -> int:
     # statement and on the arguments this tool passes it.
     candidate_call = source[source.index("CANDIDATE_INSERT = "):]
     candidate_call = candidate_call[:candidate_call.index("row = cur.fetchone()")]
-    provenance = (REPO / "migrations" /
-                  "0504_release_maker_session_provenance.sql").read_text(encoding="utf-8")
+    provenance = read_migration(REPO, '0504_release_maker_session_provenance.sql')
     check("8. the CANDIDATE can collect the verifier, which 0169 says it may",
           "args.verifier, args.verifier_evidence" in candidate_call
           and "verifier_actor, verifier_evidence_ref," in candidate_call
@@ -291,8 +295,7 @@ def main() -> int:
           and "generated always as (ops.authority_login_slug(maker_session_user) is not null)"
               in provenance)
 
-    approval_migration = (REPO / "migrations" /
-                          "0205_program5_approval_verifier.sql").read_text(encoding="utf-8")
+    approval_migration = read_migration(REPO, '0205_program5_approval_verifier.sql')
     approval_migration_lower = approval_migration.lower()
     check("9. APPROVE accepts a verifier, for the ordinary case where the "
           "verifying run finishes after the candidate was filed",

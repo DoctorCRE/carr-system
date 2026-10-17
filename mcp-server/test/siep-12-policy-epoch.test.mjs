@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -51,7 +52,7 @@ test("epoch helper exposes a fact only and no mutation executor", async () => {
 });
 
 test("migration defines one append-only typed authority and preserves downstream boundaries", () => {
-  const sql = fs.readFileSync(migrationUrl, "utf8");
+  const sql = readMigration(migrationUrl);
   assert.match(sql, /create table ops\.scac_policy_epoch\b/i);
   assert.doesNotMatch(sql, /create table ops\.scac_policy_epoch_(?:release|command|compatibility)\b/i);
   assert.match(sql, /scac_policy_epoch_status\(bigint,text\)/i);
