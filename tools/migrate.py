@@ -591,6 +591,11 @@ def validate_applied_ledger(
             current = baseline.ledger_with_hashes(current)
         except ValueError as exc:
             raise AppliedMigrationLedgerError(str(exc)) from exc
+    validate_ledger_identities(current, applied)
+
+
+def validate_ledger_identities(current: dict[str, str], applied: dict[str, str]) -> None:
+    """Validate filename/hash history independently of executable SQL."""
     missing = sorted(set(applied) - set(current))
     unknown_missing = [name for name in missing if name not in LEGACY_APPLIED_ALIASES]
     if unknown_missing:

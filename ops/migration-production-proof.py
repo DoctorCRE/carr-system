@@ -41,17 +41,16 @@ def load(name, path):
 
 
 def ledger_proof(repository, applied, baseline=None):
-    migrations = [(name, '', digest) for name, digest in sorted(repository.items())]
     try:
         if not applied:
             raise ValueError('production migration ledger is empty')
         if baseline is not None:
             baseline.validate_coverage(applied)
-        migrate.validate_applied_ledger(migrations, applied)
+        migrate.validate_ledger_identities(repository, applied)
     except ValueError as exc:
         return dict(ok=False, error=str(exc))
     return dict(ok=True, applied=len(applied),
-                pending=[name for name, sql, digest in migrate.pending_migrations(migrations, applied)])
+                pending=sorted(set(repository) - set(applied)))
 
 
 comparison = load('production_proof_comparison', ROOT / 'ops/migration-shadow.py')

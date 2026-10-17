@@ -40,6 +40,10 @@ def dump(body, owner='neondb_owner'):
 
 
 
+def repository_ledger():
+    return proof.repository_ledger(ROOT, proof.MigrationBaseline.load(ROOT))
+
+
 class ProofTests(unittest.TestCase):
     def test_baseline_requires_every_original_row_before_pending_suffix(self):
         baseline = proof.MigrationBaseline.load(ROOT)
@@ -76,7 +80,7 @@ class ProofTests(unittest.TestCase):
             {'0001_a.sql': 'a', '0001_b.sql': 'b'}, {'0001_b.sql': 'b'})['ok'])
 
     def test_partial_strict_atomic_group_refuses(self):
-        repository = {name: digest for name, sql, digest in proof.migrate.load_migrations()}
+        repository = repository_ledger()
         applied = {name: digest for name, digest in repository.items()
                    if name <= '0872_self_closing_records.sql'}
         result = proof.ledger_proof(repository, applied)
@@ -88,8 +92,7 @@ class ProofTests(unittest.TestCase):
 
     def test_snapshot_drift_refuses(self):
         read_text = Path.read_text
-        migrations = proof.migrate.load_migrations()
-        applied = {name: digest for name, sql, digest in migrations}
+        applied = repository_ledger()
         snapshot = (ROOT / 'db/schema.sql').read_text()
         filename = next(iter(applied))
         row = next(line for line in snapshot.splitlines() if line.startswith(filename + '\t'))
@@ -109,7 +112,7 @@ class ProofTests(unittest.TestCase):
 
 
     def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
-        repository = {name: digest for name, sql, digest in proof.migrate.load_migrations()}
+        repository = repository_ledger()
         for failure in ([RuntimeError('reference failed')],
                         [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
             with self.subTest(failure=failure), \
@@ -233,9 +236,9 @@ class ProofTests(unittest.TestCase):
             return read_source(dsn, bins)
         with patch.object(proof, 'read_source', side_effect=capture_source):
             reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
-        self.assertEqual(len(reference['ledger']), len(proof.migrate.load_migrations()))
+        self.assertEqual(len(reference['ledger']), len(repository_ledger()))
         self.assertEqual(proof.ledger_proof(
-            {name: digest for name, sql, digest in proof.migrate.load_migrations()},
+            repository_ledger(),
             reference['ledger'])['pending'], [])
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'schema.sql'
@@ -270,7 +273,7 @@ class ProofTests(unittest.TestCase):
              patch.object(proof, 'read_source', side_effect=production_source):
             result = proof.live_proof(ledger_only=False)
         self.assertTrue(result['ledger']['ok'], result['ledger'])
-        self.assertEqual(result['ledger']['applied'], len(proof.migrate.load_migrations()))
+        self.assertEqual(result['ledger']['applied'], len(repository_ledger()))
         self.assertEqual(result['ledger']['pending'], [])
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
