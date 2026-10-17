@@ -16,6 +16,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from git_env import scrubbed_env  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Any match runs the full lane. fnmatch `*` crosses `/`, so `dir/*` is a tree.
@@ -46,7 +49,7 @@ def changed_paths(event: dict) -> list[str] | None:
     if not pr:
         return None
     base, head = 'origin/' + pr['base']['ref'], pr['head']['sha']
-    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT,
+    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT, env=scrubbed_env(),
                          capture_output=True, text=True, check=True, timeout=120).stdout
     return [line for line in out.splitlines() if line]
 

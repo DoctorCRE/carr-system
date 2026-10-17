@@ -8,6 +8,10 @@ import sys
 import tempfile
 from typing import Any
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from git_env import fixture_env  # noqa: E402
+
+ENV = fixture_env()
 spec = importlib.util.spec_from_file_location('scope', Path(__file__).with_name('db-acceptance-scope.py'))
 assert spec is not None and spec.loader is not None
 scope = importlib.util.module_from_spec(spec)
@@ -53,7 +57,7 @@ for path in ('mcp-server/test/find-rule-supersedes.test.mjs', 'mcp-server/test/c
 # A rename out of a protected tree must list the old path (--no-renames).
 with tempfile.TemporaryDirectory() as tmp:
     def vcs(*args: str) -> str:
-        return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args], cwd=tmp,
+        return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', *args], cwd=tmp, env=ENV,
                               check=True, capture_output=True, text=True).stdout.strip()
     vcs('init', '-q', '-b', 'main')
     Path(tmp, 'migrations').mkdir()
