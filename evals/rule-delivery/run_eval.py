@@ -41,6 +41,8 @@ Usage:
   run_eval.py --compare baseline v1 --split test
   run_eval.py --observe OUT.jsonl [--trace-reads READS.json]
   run_eval.py --freeze-expectations
+  run_eval.py --variant cards --print
+  run_eval.py --card-report OUT.json
 """
 import argparse
 import hashlib
@@ -52,6 +54,7 @@ import random
 import re
 import shlex
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
@@ -321,8 +324,10 @@ def _raise(*_args, **_kwargs):
 
 # ----------------------------------------------------------------- replay
 
-def replay(world, case):
+def replay(world, case, variant="baseline"):
     """[{kind, ids, fresh, tokens, overflow}] for the case's events, in order."""
+    if variant == "cards":
+        return replay_cards(case)
     events = []
     ids = world.prompt_ids(case)
     if case["prompt"].strip():
@@ -338,6 +343,150 @@ def replay(world, case):
         events.append({"kind": "tool", "tool": call["tool_name"], "ids": got, "fresh": fresh,
                        "tokens": chars / CHARS_PER_TOKEN, "overflow": over})
     return events
+
+
+def replay_cards(case):
+    """One independent boot epoch per frozen case, no invented post-tool events."""
+    from lib.rule_cards import CardSelector, load_cards
+    selector = CardSelector(load_cards())
+    payloads = []
+    if case['prompt'].strip():
+        payloads.append(('prompt', {'hook_event_name': 'UserPromptSubmit', 'prompt': case['prompt']}))
+    payloads.extend(('tool', {'hook_event_name': 'PreToolUse', **call}) for call in case['tool_calls'])
+    events = []
+    for kind, payload in payloads:
+        cards = [c for c in selector.select(payload) if c['placement'] != 'CORE']
+        ids = sorted({rid for c in cards for rid in c['source_rule_ids']})
+        receipt = [{key: c[key] for key in ('id', 'wording', 'source_rule_ids', 'acknowledgement')} for c in cards]
+        chars = len(json.dumps(receipt, ensure_ascii=False)) if receipt else 0
+        events.append({'kind': kind, 'tool': payload.get('tool_name'), 'ids': ids, 'fresh': ids,
+                       'card_ids': [c['id'] for c in cards],
+                       'tokens': chars / CHARS_PER_TOKEN, 'overflow': False})
+    return events
+
+
+def score_card_paths(expected, allowed, labelled, paths):
+    """Rule-occurrence micro counts. Acceptable/disputed IDs may be precise, not required."""
+    paths = {key: set(value) for key, value in paths.items()}
+    paths['events'] = paths['prompt'] | paths['tool']
+    paths['available'] = paths['boot'] | paths['events']
+    result = {}
+    for name, delivered in paths.items():
+        hit = delivered & expected
+        true = delivered & allowed
+        false = (delivered - allowed) & labelled
+        graded = len(true) + len(false)
+        result[name] = {'expected': len(expected), 'hits': len(hit),
+                        'true_deliveries': len(true), 'false_deliveries': len(false),
+                        'ungraded_deliveries': len(delivered - allowed - labelled),
+                        'recall': len(hit) / len(expected) if expected else None,
+                        'precision': len(true) / graded if graded else None,
+                        'missed': sorted(expected - delivered)}
+    return result
+
+
+def card_comparison():
+    """Both variants, identical frozen cases and labels, with boot reported separately."""
+    from collections import Counter
+    from lib.rule_cards import load_cards
+    cases = load_cases('all')
+    expectations = load_expectations()
+    with open(os.path.join(HERE, 'split.json'), encoding='utf-8') as handle:
+        split = json.load(handle)['split']
+    if {c['id']: c['split'] for c in cases} != split:
+        raise CohortError('case cohort differs from frozen split')
+    for case in cases:
+        label = expectations['cases'][case['id']]
+        if (case['split'], case['input_sha256']) != (label['split'], label['input_sha256']):
+            raise CohortError(f"case input differs from frozen expectations: {case['id']}")
+    world = World(expectations)
+    cards = load_cards()
+    core = {rid for c in cards if c['placement'] == 'CORE' for rid in c['source_rule_ids']}
+    mapped = {rid for c in cards for rid in c['source_rule_ids']}
+    boots = {'baseline': set(world.ev.boot_always_on_ids(REPO)), 'cards': core}
+    observations = []
+    for case in cases:
+        arms = {}
+        for variant in ('baseline', 'cards'):
+            events = replay(world, case, variant)
+            arms[variant] = {'boot': sorted(boots[variant]),
+                             'prompt': sorted({rid for ev in events if ev['kind'] == 'prompt' for rid in ev['ids']}),
+                             'tool': sorted({rid for ev in events if ev['kind'] == 'tool' for rid in ev['ids']})}
+        observations.append({'case_id': case['id'], 'split': case['split'],
+                             'input_sha256': case['input_sha256'], 'arms': arms})
+    table, misses, rule_metrics = [], {}, []
+    for population in ('frozen_incremental', 'all_gold', 'card_source_gold'):
+        misses[population] = {}
+        for split_name in ('all', 'train', 'test'):
+            cohort = [(c, o) for c, o in zip(cases, observations) if split_name in ('all', c['split'])]
+            for variant in ('baseline', 'cards'):
+                totals = {}
+                missed = Counter()
+                per_rule = {}
+                for case, obs in cohort:
+                    label = world.label(case)
+                    expected = (set(label['expected']) if population == 'frozen_incremental'
+                                else set(case['gold']) - set(case['disputed']))
+                    if population == 'card_source_gold':
+                        expected &= mapped
+                    allowed = set(label['allowed'])
+                    paths = {path: set(ids) for path, ids in obs['arms'][variant].items()}
+                    if population == 'card_source_gold':
+                        paths = {path: ids & mapped for path, ids in paths.items()}
+                    scored = score_card_paths(expected, allowed, world.labelled, paths)
+                    for path, metrics in scored.items():
+                        counts = totals.setdefault(path, Counter())
+                        counts.update({k: metrics[k] for k in ('expected', 'hits', 'true_deliveries',
+                                                            'false_deliveries', 'ungraded_deliveries')})
+                    available = set().union(*paths.values())
+                    missed.update(expected - available)
+                    for rid in expected | available:
+                        counts = per_rule.setdefault(rid, Counter())
+                        counts['expected'] += rid in expected
+                        counts['hits'] += rid in expected & available
+                        counts['true_deliveries'] += rid in available & allowed
+                        counts['false_deliveries'] += rid in (available - allowed) & world.labelled
+                for path, counts in totals.items():
+                    graded = counts['true_deliveries'] + counts['false_deliveries']
+                    table.append({'population': population, 'split': split_name, 'variant': variant,
+                                  'path': path, 'cases': len(cohort), **counts,
+                                  'recall': counts['hits'] / counts['expected'] if counts['expected'] else None,
+                                  'precision': counts['true_deliveries'] / graded if graded else None})
+                for rid, counts in sorted(per_rule.items()):
+                    graded = counts['true_deliveries'] + counts['false_deliveries']
+                    rule_metrics.append({'population': population, 'split': split_name, 'variant': variant,
+                                         'rule_id': rid, **counts,
+                                         'recall': counts['hits'] / counts['expected'] if counts['expected'] else None,
+                                         'precision': counts['true_deliveries'] / graded if graded else None})
+                if variant == 'cards':
+                    misses[population][split_name] = [
+                        {'rule_id': rid, 'missed_cases': count, 'covered_by_card': rid in mapped,
+                         'card_ids': [c['id'] for c in cards if rid in c['source_rule_ids']],
+                         **per_rule[rid]} for rid, count in sorted(missed.items())]
+    dependencies = ['evals/rule-delivery/run_eval.py', 'evals/rule-delivery/split.json',
+                    'evals/rule-delivery/expectations.v4.json', 'evals/rule-delivery/hard_cases.v1.json',
+                    'ops/fixtures/rule-delivery-eval/cases.v2.json', 'lib/rule_cards.py',
+                    'ops/config/rule-cards.v1.json', 'ops/config/rule-routes.v1.json',
+                    'ops/config/rule-triage.v1.json', 'ops/config/rule-classes.v1.json',
+                    'ops/config/rule-selection-corpus.v1.json', 'ops/rule_delivery_eval.py',
+                    'ops/rule_trigger_delivery.py', 'lib/rule_delivery_preuse.py', 'lib/rule_routes.py',
+                    'hooks/rule-pack-preuse-reselection.py', 'ops/config/rule-enforcement-map.json',
+                    'ops/config/rule-jit-triggers.v1.json', 'ops/config/rule-jev-triggers.v1.json']
+    return {'schema': 'rule-card-comparison/v1',
+            'method': {'recall': 'source-rule ID intersections; case-level unions, then micro counts',
+                       'precision': 'allowed delivered IDs / labelled delivered IDs; pending IDs ungraded',
+                       'frozen_incremental': 'unchanged expectations.v4 expected sets, 1278 occurrences',
+                       'all_gold': 'all case gold minus disputed; includes non-judgment rules',
+                       'card_source_gold': 'all_gold and deliveries intersect the 112 approved card source_rule_ids; selection-only comparison, not a current judgment census',
+                       'events': 'prompt plus recorded PreToolUse only; core excluded',
+                       'available': 'boot union events',
+                       'epoch': 'fresh independent session/boot per case; Joe personal scope',
+                       'limitations': 'selected source IDs, not semantic equivalence, full-text receipt success, or adherence; no model calls; no held-out tuning'},
+            'input_sha256': {path: hashlib.sha256(Path(REPO, path).read_bytes()).hexdigest() for path in dependencies},
+            'table': table, 'card_misses': misses, 'per_rule': rule_metrics,
+            'boot_ids': {k: sorted(v) for k, v in boots.items()},
+            'observations': [{**o, 'arms': {variant: {path: ids for path, ids in paths.items() if path != 'boot'}
+                                         for variant, paths in o['arms'].items()}} for o in observations]}
 
 
 def observe(case, events, boot_ids=None):
@@ -363,6 +512,7 @@ def grade_observation(label, obs, labelled):
     return {"expected": sorted(expected), "delivered": sorted(delivered),
             "hit": sorted(hit), "missed": sorted(expected - delivered),
             "false": sorted(false), "prompt_false": sorted(prompt_false),
+            "ungraded": sorted(delivered - allowed - labelled),
             "events": obs["events"], "tokens": obs["tokens"],
             "recall": (len(hit) / len(expected)) if expected else None,
             "over_cap_events": obs["over_cap_events"]}
@@ -376,7 +526,7 @@ def run(split, variant, out_dir=None):
     world = World(load_expectations())
     rows = []
     for case in load_cases(split):
-        events = replay(world, case)
+        events = replay(world, case, variant)
         g = grade(world, case, events)
         rows.append({"prompt_id": case["id"], "rep": 0, "prompt": case["prompt"][:400],
                      "tags": [case["stratum"], case["split"], case["source"],
@@ -472,10 +622,14 @@ def expectation_drift(world, cases, expectations):
     return sorted(c["id"] for c in cases if pinned.get(c["id"]) != world.derive(c))
 
 
-def observe_all():
+def observe_all(variant="baseline"):
     world = World()
     boot_ids = world.ev.boot_always_on_ids(REPO)
-    return [observe(case, replay(world, case), boot_ids) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
+    if variant == "cards":
+        from lib.rule_cards import load_cards
+        boot_ids = {rid for c in load_cards() if c["placement"] == "CORE" for rid in c["source_rule_ids"]}
+    return [observe(case, replay(world, case, variant), boot_ids)
+            for case in sorted(load_cases("all"), key=lambda c: c["id"])]
 
 
 def trace_repo_reads():
@@ -607,6 +761,7 @@ def summarize(rows):
     n_hit = sum(len(x["hit"]) for x in d)
     n_del = sum(len(x["delivered"]) for x in d)
     n_false = sum(len(x["false"]) for x in d)
+    n_ungraded = sum(len(x.get("ungraded", [])) for x in d)
     events = sum(x["events"] for x in d)
     return {
         "cases": len(rows), "owes_cases": len(owes), "should_not_fire_cases": len(quiet),
@@ -614,8 +769,9 @@ def summarize(rows):
         "recall_micro": n_hit / n_exp if n_exp else float("nan"),
         "recall_macro": _mean(x["recall"] for x in owes),
         "expected_rules": n_exp, "hit_rules": n_hit,
-        "delivered_rules": n_del, "false_rules": n_false,
-        "precision": (n_del - n_false) / n_del if n_del else float("nan"),
+        "delivered_rules": n_del, "false_rules": n_false, "ungraded_rules": n_ungraded,
+        "precision": ((n_del - n_false - n_ungraded) / (n_del - n_ungraded)
+                      if n_del > n_ungraded else float("nan")),
         "false_per_event": n_false / events if events else float("nan"),
         "sn_dirty_cases": sum(1 for x in quiet if x["false"]),
         "sn_false_rules": sum(len(x["false"]) for x in quiet),
@@ -709,7 +865,8 @@ def load_run(variant, split=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--variant", default="baseline")
+    parser.add_argument("--variant", default="baseline", help="cards selects the offline card variant; other names retain baseline behavior")
+    parser.add_argument("--card-report", metavar="OUT", help="write baseline/card path counts and missed gold rules as JSON")
     parser.add_argument("--split", default="all", choices=("train", "test", "all"))
     parser.add_argument("--compare", nargs=2, metavar=("BASE", "NEW"))
     parser.add_argument("--print", action="store_true", help="print the summary only; write nothing")
@@ -720,9 +877,14 @@ def main(argv=None):
     parser.add_argument("--freeze-expectations", action="store_true",
                         help=f"write {os.path.basename(EXPECTATIONS)} from the live labels")
     args = parser.parse_args(argv)
+    if args.card_report:
+        with open(args.card_report, "w", encoding="utf-8") as handle:
+            json.dump(card_comparison(), handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        return 0
     if args.observe:
         reads = trace_repo_reads() if args.trace_reads else None
-        rows = observe_all()
+        rows = observe_all(args.variant)
         with open(args.observe, "w", encoding="utf-8") as handle:
             handle.writelines(json.dumps(row, sort_keys=True) + "\n" for row in rows)
         if reads is not None:
