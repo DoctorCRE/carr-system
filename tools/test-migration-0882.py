@@ -170,9 +170,14 @@ class Recovery(unittest.TestCase):
         with self.assertRaisesRegex(psycopg.errors.RaiseException, 'contract is immutable'):
             with self.conn.transaction():
                 self.conn.execute('delete from ops.rule_control_binding where rule_id=%s', (COMPLETION,))
-        with self.assertRaises(psycopg.errors.RestrictViolation):
+        # PostgreSQL 18 gives RESTRICT its own SQLSTATE; 17 uses ForeignKeyViolation.
+        with self.assertRaises((psycopg.errors.RestrictViolation, psycopg.errors.ForeignKeyViolation)) as denied:
             with self.conn.transaction():
                 self.conn.execute("delete from ops.enforcement_control_catalog where control_key='conduct_stop'")
+        self.assertEqual(denied.exception.diag.constraint_name, 'rule_control_binding_control_key_fkey')
+        self.assertEqual(self.conn.execute('select to_jsonb(b) from ops.rule_control_binding b order by control_key').fetchall(), bindings)
+        self.assertEqual(self.conn.execute('select control_key from ops.enforcement_control_catalog order by 1').fetchall(),
+                         [('completion_evidence',),('conduct_stop',),('pack_delivery',)])
         self.conn.commit()
         repeat = self.run_runner()
         self.assertEqual(repeat.returncode,0,repeat.stderr)
