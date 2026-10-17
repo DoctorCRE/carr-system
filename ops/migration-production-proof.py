@@ -10,14 +10,11 @@ Hosted CI exercises migration-production-proof-selftest.py instead.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-import difflib
 import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
-import re
 import runpy
 import subprocess
 import sys
@@ -54,36 +51,8 @@ def ledger_proof(repository, applied):
                 pending=[name for name, sql, digest in migrate.pending_migrations(migrations, applied)])
 
 
-def dump_objects(text):
-    # Only pg_dump's envelope varies independently of the catalog. Preserve
-    # comments, SQL text and function bodies byte for byte. Both inputs must
-    # already be owner-free and ACL-free pg_dump output.
-    literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
-    masked = literals.sub(lambda match: match[0] if match[0].startswith('--') else re.sub(r'[^\n]', ' ', match[0]), text)
-    pieces, current, headers = [], [], 0
-    for line, visible in zip(text.split('\n'), masked.split('\n')):
-        if re.match(r'^\\(?:un)?restrict \S+$', visible) or re.match(r'^-- (?:Dumped (?:from|by) .*|PostgreSQL database dump(?: complete)?)$', visible):
-            continue
-        if visible == '--':
-            continue
-        if visible.startswith('-- Name: '):
-            pieces.append('\n'.join(current).strip())
-            current = []
-            headers += 1
-        current.append(line)
-    pieces.append('\n'.join(current).strip())
-    if not headers:
-        raise ValueError('schema dump has no object headers')
-    return Counter(piece for piece in pieces if piece)
-
-
-def schema_difference(reconstructed, snapshot):
-    left, right = dump_objects(reconstructed), dump_objects(snapshot)
-    if left == right:
-        return []
-    return list(difflib.unified_diff(
-        '\n'.join(sorted(left.elements())).split('\n'), '\n'.join(sorted(right.elements())).split('\n'),
-        fromfile='production plus pending', tofile='committed snapshot', lineterm=''))
+comparison = load('production_proof_comparison', ROOT / 'ops/migration-shadow.py')
+schema_difference = comparison.schema_difference
 
 
 def checked(command, env, label, timeout=1200):
@@ -122,9 +91,9 @@ exec "$2" "$1/tools/migrate-prod-support.py" neon-dsn --project-id steep-field-4
 
 def schema_dump(dsn, bins, env, snapshot=None, include_acl=False):
     from psycopg.pq import Conninfo
-    command = [bins / 'pg_dump', '--schema-only', '--no-owner']
+    command = [bins / 'pg_dump', '--schema-only']
     if not include_acl:
-        command.append('--no-acl')
+        command += ['--no-owner', '--no-acl']
     if snapshot:
         command += ['--snapshot', snapshot]
     dump_env = {key: value for key, value in env.items() if not key.startswith('PG')}
@@ -215,6 +184,9 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 dict(env, PGOPTIONS='--client-min-messages=warning'), 'restore schema into disposable database')
         if production_ledger is not None:
             with psycopg.connect(dsn) as conn:
+                # Only this disposable ledger import lacks the SCAC config rows.
+                # Pending migrations run with normal triggers in a new session.
+                conn.execute("set local session_replication_role = replica")
                 with conn.cursor() as cursor:
                     cursor.executemany('insert into schema_migrations(filename, sha256) values (%s,%s)',
                                        sorted(production_ledger.items()))
@@ -252,8 +224,7 @@ def live_proof(ledger_only=True):
     if problems:
         raise RuntimeError('; '.join(problems))
     repository = {name: digest for name, sql, digest in migrations}
-    shadow = load('production_proof_shadow', ROOT / 'ops/migration-shadow.py')
-    bins = shadow.find_pg18(None) if not ledger_only else None
+    bins = comparison.find_pg18(None) if not ledger_only else None
     if not ledger_only and bins is None:
         raise RuntimeError('PostgreSQL 18 binaries required for schema equivalence')
     applied, production, grants = read_source(production_dsn(), bins, include_acl=True)
@@ -263,16 +234,17 @@ def live_proof(ledger_only=True):
     result['equivalence'] = dict(ok=False,
         snapshot_sha256=hashlib.sha256((ROOT / 'db/schema.sql').read_bytes()).hexdigest(),
         scope='all pg_dump schema objects; internal namespace ACLs, database ACLs and large objects excluded; role passwords and grantor identities excluded',
-        normalization='pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; privileges compared separately by common role, without grantor identity')
+        normalization='owner and ACL preserving reconstruction; pg_dump --no-owner --no-acl for structural comparison; version banners, restrict nonces, separator comments and object order only; privileges compared separately by common role, without grantor identity')
+    result['grants'] = dict(ok=None, status='not_run', stage='production plus pending',
+                            reason='disposable reconstruction did not complete')
     try:
         reference = build_schema(ROOT / 'db/schema.sql', bins)
-        result['grants'] = dict(privilege_difference(grants, reference['grants']), stage='production before pending')
         with tempfile.TemporaryDirectory(prefix='production-schema-proof-') as directory:
             source = Path(directory) / 'production.sql'
             source.write_text(production)
             built = build_schema(source, bins, production_ledger=applied, grants=grants)
         difference = schema_difference(built['dump'], reference['dump'])
-        result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending')
+        result['grants'] = dict(privilege_difference(built['grants'], reference['grants']), stage='production plus pending', status='complete')
         result['equivalence'].update(ok=built['ledger'] == reference['ledger'] == repository and not difference,
             ledger_matches=built['ledger'] == reference['ledger'] == repository, schema_diff=difference)
     except RuntimeError as exc:
@@ -309,9 +281,12 @@ def main():
         for line in item.get('schema_diff', [])[:8]:
             print(line[:1000])
     if 'grants' in result:
-        print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
-              f"stage={result['grants']['stage']} production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])} "
-              f"role_attribute_differences={len(result['grants']['production_only_attributes']) + len(result['grants']['snapshot_only_attributes'])}")
+        if result['grants']['status'] == 'not_run':
+            print('grants: NOT RUN', f"stage={result['grants']['stage']}", result['grants']['reason'])
+        else:
+            print('grants:', 'PASS' if result['grants']['ok'] else 'FAIL',
+                  f"stage={result['grants']['stage']} production_only={len(result['grants']['production_only'])} snapshot_only={len(result['grants']['snapshot_only'])} "
+                  f"role_attribute_differences={len(result['grants']['production_only_attributes']) + len(result['grants']['snapshot_only_attributes'])}")
     if 'detail' in result:
         print(result['detail'])
     print('proof report:', args.report)

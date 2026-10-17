@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline contracts for the local production ledger proof."""
 import importlib.util
+from contextlib import redirect_stdout
+import io
 import hashlib
 import shutil
 import tempfile
@@ -88,6 +90,29 @@ class ProofTests(unittest.TestCase):
                     proof.live_proof()
                 credentials.assert_not_called()
 
+
+    def test_reconstruction_failure_reports_post_pending_grants_not_run(self):
+        repository = {name: digest for name, sql, digest in proof.migrate.load_migrations()}
+        for failure in ([RuntimeError('reference failed')],
+                        [dict(grants={}, ledger={}, dump=''), RuntimeError('replay failed')]):
+            with self.subTest(failure=failure), \
+                 patch.object(proof, 'production_dsn', return_value='fixture'), \
+                 patch.object(proof, 'read_source', return_value=(repository, '', {})), \
+                 patch.object(proof.comparison, 'find_pg18', return_value=Path('/bin')), \
+                 patch.object(proof, 'build_schema', side_effect=failure):
+                result = proof.live_proof(ledger_only=False)
+            self.assertIsNone(result['grants']['ok'])
+            self.assertEqual(result['grants']['status'], 'not_run')
+            self.assertEqual(result['grants']['stage'], 'production plus pending')
+            self.assertFalse(result['equivalence']['ok'])
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(proof, 'live_proof', return_value=result), \
+             patch.object(sys, 'argv', ['proof', '--schema', '--report', str(Path(directory) / 'report.json')]), \
+             patch.dict(os.environ, GITHUB_ACTIONS='false', CARR_CI_PORTABLE_ONLY='0'), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(proof.main(), 1)
+        self.assertIn('grants: NOT RUN stage=production plus pending', output.getvalue())
+        self.assertNotIn('grants: FAIL', output.getvalue())
 
     def test_hosted_refuses_before_credential_resolution(self):
         for flags in ([], ['--schema']):
@@ -181,6 +206,62 @@ class ProofTests(unittest.TestCase):
 
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_committed_snapshot_schema_only_round_trip_with_zero_pending(self):
+        shadow = proof.load('round_trip_shadow', ROOT / 'ops/migration-shadow.py')
+        bins = shadow.find_pg18(None)
+        read_source = proof.read_source
+        sources = []
+        def capture_source(dsn, bins):
+            sources.append(read_source(dsn, bins, include_acl=True))
+            return read_source(dsn, bins)
+        with patch.object(proof, 'read_source', side_effect=capture_source):
+            reference = proof.build_schema(ROOT / 'db/schema.sql', bins)
+        self.assertEqual(len(reference['ledger']), 558)
+        self.assertEqual(proof.ledger_proof(
+            {name: digest for name, sql, digest in proof.migrate.load_migrations()},
+            reference['ledger'])['pending'], [])
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'schema.sql'
+            source.write_text(sources[0][1], newline='')
+            rebuilt = proof.build_schema(source, bins,
+                production_ledger=reference['ledger'], grants=reference['grants'])
+        self.assertEqual(rebuilt['ledger'], reference['ledger'])
+        self.assertEqual(proof.schema_difference(rebuilt['dump'], reference['dump']), [])
+        self.assertTrue(proof.privilege_difference(rebuilt['grants'], reference['grants'])['ok'])
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_owner_acl_survives_reconstruction(self):
+        shadow = proof.load('owner_shadow', ROOT / 'ops/migration-shadow.py')
+        bins = shadow.find_pg18(None)
+        read_source = proof.read_source
+        sources = []
+        def capture_source(dsn, bins):
+            result = read_source(dsn, bins, include_acl=True)
+            sources.append(result)
+            return read_source(dsn, bins)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'schema.sql'
+            source.write_text("""create table public.example (id integer);
+alter table public.example owner to neondb_owner;
+create table public.schema_migrations (filename text primary key, sha256 text);
+""")
+            with patch.object(proof, 'read_source', side_effect=capture_source):
+                reference = proof.build_schema(source, bins)
+                source.write_text(sources[0][1], newline='')
+                rebuilt = proof.build_schema(source, bins, grants=sources[0][2])
+                source.write_text(sources[0][1] + '\nalter table public.example owner to carr_ci;\n', newline='')
+                changed = proof.build_schema(source, bins, grants=sources[0][2])
+        self.assertEqual(proof.schema_difference(reference['dump'], rebuilt['dump']), [])
+        self.assertEqual(proof.schema_difference(reference['dump'], changed['dump']), [])
+        self.assertFalse(proof.privilege_difference(reference['grants'], changed['grants'])['ok'])
+        difference = proof.privilege_difference(reference['grants'], rebuilt['grants'])
+        self.assertTrue(difference['ok'], difference)
+        owner_facts = [row for row in rebuilt['grants']['privileges']
+                       if row[3] == 'neondb_owner' and row[1] == 'public.example']
+        self.assertIn(('table', 'public.example', '', 'neondb_owner', 'select', False), owner_facts)
+        self.assertIn(('type', 'public.example', '', 'neondb_owner', 'usage', False), owner_facts)
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_production_plus_pending_equals_snapshot_and_detects_drift(self):
         shadow = proof.load('fixture_shadow', ROOT / 'ops/migration-shadow.py')
         bins = shadow.find_pg18(None)
@@ -227,6 +308,15 @@ applied_at timestamptz not null default now());
             (root / 'migrations' / '0902_data_guard.sql').write_text(
                 "do $$ begin if not exists (select 1 from public.example) then raise exception 'missing data preimage'; end if; end $$;")
             with self.assertRaisesRegex(RuntimeError, 'missing data preimage'):
+                proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
+            (root / 'migrations' / '0902_data_guard.sql').unlink()
+            production.write_text(base + """
+create function public.ledger_guard() returns trigger language plpgsql as $$
+begin raise exception 'pending ledger trigger active'; end $$;
+create constraint trigger ledger_guard after insert on public.schema_migrations
+ deferrable initially deferred for each row execute function public.ledger_guard();
+""")
+            with self.assertRaisesRegex(RuntimeError, 'pending ledger trigger active'):
                 proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
 
 

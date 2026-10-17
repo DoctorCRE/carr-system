@@ -33,6 +33,7 @@ is not available here (ops/ci.sh reports a SKIP; --strict turns that into a fail
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import difflib
 import importlib.util
 import json
@@ -119,6 +120,42 @@ def _structure(snapshot: str) -> str | None:
         "select pg_catalog.setval('ops.work_request_ref_seq', <current>, true);", text)
 
 
+def dump_objects(text: str) -> Counter[str]:
+    # Only pg_dump's envelope varies independently of the catalog. Preserve
+    # comments, SQL text and function bodies byte for byte. Both inputs must
+    # already be owner-free and ACL-free pg_dump output.
+    literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
+    masked = literals.sub(lambda match: match[0] if match[0].startswith('--') else re.sub(r'[^\n]', ' ', match[0]), text)
+    pieces, current, headers = [], [], 0
+    for line, visible in zip(text.split('\n'), masked.split('\n')):
+        if re.match(r'^\\(?:un)?restrict \S+$', visible) or re.match(r'^-- (?:Dumped (?:from|by) .*|PostgreSQL database dump(?: complete)?)$', visible):
+            continue
+        if visible == '--':
+            continue
+        if visible.startswith('-- Name: '):
+            pieces.append('\n'.join(current).strip())
+            current = []
+            headers += 1
+        current.append(line)
+    pieces.append('\n'.join(current).strip())
+    if not headers:
+        raise ValueError('schema dump has no object headers')
+    return Counter(piece for piece in pieces if piece)
+
+
+def schema_difference(reconstructed: str, snapshot: str, *, schema_only: bool = True,
+                      fromfile: str = 'production plus pending',
+                      tofile: str = 'committed snapshot', context: int = 3) -> list[str]:
+    """Compare schema dumps, or already-normalized full snapshot text."""
+    if schema_only:
+        left, right = dump_objects(reconstructed), dump_objects(snapshot)
+        reconstructed = '\n'.join(sorted(left.elements()))
+        snapshot = '\n'.join(sorted(right.elements()))
+    return list(difflib.unified_diff(
+        reconstructed.split('\n'), snapshot.split('\n'),
+        fromfile=fromfile, tofile=tofile, n=context, lineterm=''))
+
+
 def differences(committed: str, candidate: str, limit: int = 80) -> list[str]:
     """Human-readable differences between the committed snapshot and the shadow
     candidate; empty when they describe the same schema and ledger."""
@@ -137,9 +174,9 @@ def differences(committed: str, candidate: str, limit: int = 80) -> list[str]:
         if rows_c[name] != rows_n[name]:
             out.append(f"ledger: {name} checksum differs")
     if struct_c != struct_n:
-        diff = list(difflib.unified_diff(struct_c.splitlines(), struct_n.splitlines(),
-                                         f"committed {SNAPSHOT}", "shadow candidate",
-                                         n=1, lineterm=""))
+        diff = schema_difference(struct_c, struct_n, schema_only=False,
+                                 fromfile=f"committed {SNAPSHOT}",
+                                 tofile="shadow candidate", context=1)
         out.append(f"structure: {sum(1 for d in diff if d[:1] in '+-') - 2} changed line(s)")
         out.extend(diff[:limit])
     return out
