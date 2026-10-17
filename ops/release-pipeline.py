@@ -1331,6 +1331,36 @@ class Pipeline:
             raise Blocked("bootstrap_unknown", f"{lane_cfg['live_release_url']} names no full SHA")
         return value
 
+    def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
+        url = lane_cfg["live_release_url"]
+        try:
+            live = self.http(url)
+            sha = live["git_sha"]["value"]
+            version = live["worker_version"]["id"]
+            if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
+                    or not isinstance(version, str) or not UUID_RE.fullmatch(version)):
+                raise ValueError("invalid identity")
+        except Exception as exc:
+            raise Blocked("live_identity_unreadable", f"{url} names no readable full Worker identity") from exc
+        lane_state = state["worker"]
+        previous = lane_state.get("last_released_sha")
+        if not previous or previous == sha:
+            return live
+        if lane_state.get("failed_sha") == sha:
+            raise Blocked("live_target_unreceipted", "failed release source identity has no durable shipped checkpoint")
+        self.controller_current(state)
+        if not self._at_or_before(sha, main, self.repo):
+            raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
+        self.out(f"release-pipeline[worker]: recorded {previous[:12]} differs from live {sha[:12]}")
+        if not self.dry_run:
+            self.store.record_durable({"lane": "worker", "status": "live_identity_reconciled",
+                "from_sha": previous, "sha": sha, "provider_version_id": version,
+                "release_endpoint": url, "run_id": self.run_id})
+        lane_state["last_released_sha"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+        return live
+
     def tick(self, lanes: Iterable[str]) -> int:
         why = kill_switch(self.cfg)
         if why:
@@ -1363,7 +1393,7 @@ class Pipeline:
     # These prerequisites depend on live state without a cheap GitHub change
     # signal. An elapsed interval permits a fresh judgment, never a promotion.
     LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown",
-        "credential_missing", "health_baseline_unavailable", "health_baseline_stalled",
+        "live_identity_unreadable", "credential_missing", "health_baseline_unavailable", "health_baseline_stalled",
         "health_baseline_hard_error"})
 
     def rejection_inputs(self, lane: str, base: str, sha: str) -> str:
@@ -1593,7 +1623,8 @@ class Pipeline:
                 if not self.dry_run:
                     self.reconcile_release_proof(state, lane, lane_cfg, sha)
                     lane_state = state.setdefault(lane, {})
-            live = None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"])
+            live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
+                    None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
             if (not self.dry_run and not lane_state.get("last_released_sha")
                     and lane_state.get("failed_sha") == base):
@@ -1645,6 +1676,9 @@ class Pipeline:
                 live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
                 if live_sha == sha:
                     raise Blocked("live_target_unreceipted", "selected release target already serves without a reconciled durable release proof")
+            if lane == "worker" and (sha == base or not self._at_or_before(base, sha, repo_dir)):
+                raise Blocked("history_diverged",
+                              f"selected target {sha[:12]} is not a strict descendant of live Worker {base[:12]}")
             changed = self.changed_paths(base, sha, cwd=repo_dir)
             needed, hits = classify(changed, lane_cfg)
             self.out(f"release-pipeline[{lane}]: batch {base[:12]}..{sha[:12]}: "

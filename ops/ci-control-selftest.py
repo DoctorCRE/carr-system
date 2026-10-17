@@ -19,17 +19,17 @@ def load(name):
     return module
 
 
-def workflow():
+def workflow(filename="ci.yml"):
     return json.loads(subprocess.check_output(['node', '-e',
         "const y=require('js-yaml'),fs=require('fs');console.log(JSON.stringify(y.load(fs.readFileSync(process.argv[1],'utf8'))))",
-        str(ROOT / '.github/workflows/ci.yml')], cwd=ROOT / 'mcp-server', text=True))
+        str(ROOT / '.github/workflows' / filename)], cwd=ROOT / 'mcp-server', text=True))
 
 
 def expression(value, github):
     # Evaluate the workflow's actual expression with GitHub's missing-property
     # semantics; no reimplementation of the intended event predicate.
     source = '''const get=(o,p)=>p.split('.').reduce((v,k)=>v&&v[k],o)||'';
-    const github=JSON.parse(process.argv[1]);const always=()=>true;
+    const github=JSON.parse(process.argv[1]);const always=()=>true;const fromJSON=JSON.parse;
     const e=process.argv[2].replace(/github(?:\\.[a-zA-Z_]+)+/g,p=>JSON.stringify(get({github},p)));
     console.log(JSON.stringify(eval(e)));'''
     import re
@@ -55,30 +55,57 @@ class Controls(unittest.TestCase):
         old = state(event('opened'))
         new = state(event('synchronize',sha='b',run=2))
         self.assertEqual(old[0],new[0]); self.assertTrue(new[1])
-        for action in ('opened', 'synchronize', 'reopened'):
+        for action in ('opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'):
             self.assertEqual(state(event(action))[2:], (True, True))
         changed = state(event('synchronize',base='release',run=4))
-        self.assertNotEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
+        self.assertEqual(changed[0],old[0]); self.assertEqual(changed[1:],(True,True,True))
         for name in ('schedule','workflow_dispatch'):
             a={'workflow':'CI','event_name':name,'event':{},'run_id':10}
             b={**a,'run_id':11}
             self.assertNotEqual(state(a)[0],state(b)[0]); self.assertEqual(state(a)[1:],(False,True,True))
 
-    def test_metadata_events_preserve_the_prior_required_context(self):
-        # Run 38104667722 created a new skipped check suite on a passing head.
-        # Reject metadata at the trigger so it cannot replace that suite.
-        wf = workflow()
-        triggers = wf['on']['pull_request']['types']
-        self.assertEqual(set(triggers), {'opened', 'synchronize', 'reopened'})
-        for action in ('ready_for_review', 'edited', 'labeled'):
-            with self.subTest(action=action):
-                self.assertNotIn(action, triggers)
-        self.assertFalse(set(wf['on']['pull_request']) - {'types'})
+    def test_draft_cost_split_and_lifecycle(self):
+        events = {'opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft'}
+        for filename in ('ci.yml', 'db-acceptance.yml', 'doc-drift.yml'):
+            wf = workflow(filename)
+            self.assertEqual(set(wf['on']['pull_request']['types']), events)
+            previous = None
+            for action in events:
+                e = {'workflow': wf['name'], 'event_name': 'pull_request', 'run_id': 1,
+                     'event': {'action': action, 'pull_request': {'number': 7, 'draft': True}}}
+                group = expression(wf['concurrency']['group'], e)
+                if previous is not None:
+                    self.assertEqual(group, previous)
+                previous = group
+                self.assertTrue(expression(wf['concurrency']['cancel-in-progress'], e))
+            for draft in (True, False):
+                e['event']['pull_request']['draft'] = draft
+                if filename == 'ci.yml':
+                    matrix = wf['jobs']['classes']['strategy']['matrix']
+                    excluded = expression(matrix['exclude'], e)
+                    groups = [g for g in matrix['classes'] if {'classes': g} not in excluded]
+                    self.assertEqual(groups, matrix['classes'][:1] if draft else matrix['classes'])
+                    self.assertTrue(expression(wf['jobs']['checks']['if'], e))
+                    self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
+                elif filename == 'db-acceptance.yml':
+                    self.assertEqual(bool(expression(wf['jobs']['acceptance']['if'], e)), not draft)
+                else:
+                    self.assertNotIn('if', wf['jobs']['check'])
+            for name in ('schedule', 'workflow_dispatch'):
+                e = {'workflow': wf['name'], 'event_name': name, 'event': {}, 'run_id': 10}
+                group = expression(wf['concurrency']['group'], e)
+                self.assertNotEqual(group, expression(wf['concurrency']['group'], {**e, 'run_id': 11}))
+                self.assertFalse(expression(wf['concurrency']['cancel-in-progress'], e))
+                if filename == 'ci.yml':
+                    self.assertEqual(expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], e), [])
+                    self.assertTrue(expression(wf['jobs']['checks']['if'], e))
+                elif filename == 'db-acceptance.yml':
+                    self.assertTrue(expression(wf['jobs']['acceptance']['if'], e))
 
     def test_required_context_reports_even_after_a_failed_class(self):
         wf = workflow()
         self.assertEqual(wf['jobs']['checks']['name'], 'ops/ci.sh --strict')
-        self.assertEqual(wf['jobs']['checks']['if'], '${{ always() }}')
+        self.assertIn('always()', wf['jobs']['checks']['if'])
         self.assertNotIn('if', wf['jobs']['classes'])
         self.assertEqual(wf['jobs']['checks']['needs'], 'classes')
         steps = wf['jobs']['checks']['steps']
@@ -132,6 +159,57 @@ class Controls(unittest.TestCase):
         policy['temporary_controls']['github_actions_pause']['repository_actions_enabled']=False
         with self.assertRaises(Exception): mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         dispatch.assert_not_called()
+
+    def test_draft_reruns_keep_fast_feedback_and_refuse_expensive_jobs(self):
+        mod = load('ci-rerun')
+        head = 'a' * 40
+        run = {'id': 123, 'name': 'CI', 'path': '.github/workflows/ci.yml',
+               'event': 'pull_request', 'status': 'completed', 'conclusion': 'failure',
+               'head_sha': head, 'run_attempt': 1}
+        pr = {'state': 'open', 'draft': True, 'head': {'sha': head}}
+        for group in mod.evidence.class_groups():
+            job = {'id': 456, 'run_id': 123, 'name': 'ops/ci.sh --strict --only ' + group,
+                   'status': 'completed', 'conclusion': 'failure'}
+            with self.subTest(group=group):
+                if group in ('gates', 'migration'):
+                    with self.assertRaises(mod.Refusal):
+                        mod.admit(run, job, pr, head)
+                else:
+                    self.assertEqual(mod.admit(run, job, pr, head), group)
+
+    def test_draft_failure_ready_and_historical_retry(self):
+        mod = load('ci-rerun')
+        wf = workflow()
+        head = 'a' * 40
+        groups = mod.evidence.class_groups()
+        draft = {'workflow': 'CI', 'event_name': 'pull_request', 'run_id': 123,
+                 'event': {'action': 'synchronize', 'pull_request': {
+                     'number': 7, 'draft': True, 'head': {'sha': head}}}}
+        ready = {**draft, 'run_id': 124, 'event': {'action': 'ready_for_review',
+                 'pull_request': {**draft['event']['pull_request'], 'draft': False}}}
+        run = {'id': 123, 'name': 'CI', 'path': '.github/workflows/ci.yml',
+               'event': 'pull_request', 'status': 'completed', 'conclusion': 'failure',
+               'head_sha': head, 'run_attempt': 1}
+        job = {'id': 456, 'run_id': 123, 'name': 'ops/ci.sh --strict --only ' + groups[0],
+               'status': 'completed', 'conclusion': 'failure'}
+        pr = {'state': 'open', 'draft': True, 'head': {'sha': head}}
+        self.assertEqual(mod.admit(run, job, pr, head), groups[0])
+        pr['draft'] = False
+        self.assertEqual(mod.admit(run, job, pr, head), groups[0])
+        retry = {**draft, 'run_attempt': 2}
+        ready_group = expression(wf['concurrency']['group'], ready)
+        for phase, event in (('draft failure', draft), ('ready', ready), ('historical retry', retry)):
+            with self.subTest(phase=phase):
+                self.assertTrue(expression(wf['jobs']['checks']['if'], event))
+                excluded = expression(wf['jobs']['classes']['strategy']['matrix']['exclude'], event)
+                jobs = [{'name': 'ops/ci.sh --strict --only ' + group, 'status': 'completed',
+                         'conclusion': 'failure' if phase == 'draft failure' else 'success'}
+                        for group in groups if {'classes': group} not in excluded]
+                self.assertEqual(mod.evidence.verdict(jobs, groups)[0], 0 if phase == 'ready' else 1)
+                if phase != 'ready':
+                    self.assertNotEqual(expression(wf['concurrency']['group'], event), ready_group)
+        self.assertEqual(expression(wf['concurrency']['group'], retry),
+                         expression(wf['concurrency']['group'], draft))
 
     def test_rerun_repository_selection(self):
         mod = load('ci-rerun')

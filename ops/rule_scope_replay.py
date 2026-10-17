@@ -4,12 +4,42 @@ This adapter tests migration plumbing. It does not calibrate the live moment
 judge or claim that the synthetic catalog is the production scope catalog.
 """
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from lib.rule_delivery_preuse import digest
 from lib.rule_scope_lookup import select_rules
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+class RetiredRules:
+    """Apply confirmed retirements without changing historical replay inputs."""
+
+    def __init__(self, repo=REPO):
+        path = Path(repo)/'ops/config/rule-retirements.v1.json'
+        doc = json.loads(path.read_text())
+        if (doc.get('schema') != 'rule-retirements/v1'
+                or not isinstance(doc.get('rules'), dict)
+                or any(not re.fullmatch(r'[0-9a-f]{8}', rid)
+                       or not isinstance(date, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date)
+                       for rid, date in doc['rules'].items())):
+            raise ValueError(f'{path}: invalid rule-retirements/v1 document')
+        self.ids = frozenset(doc['rules'])
+
+    def active(self, ids):
+        return [rid for rid in ids if rid not in self.ids]
+
+    def label(self, label):
+        expected = self.active(label['expected'])
+        active = dict(label, expected=expected, allowed=self.active(label['allowed']))
+        if expected != label['expected']:
+            active['should_not_fire'] = not expected
+        return active
+
+    def expectations(self, expectations):
+        return dict(expectations, labelled=self.active(expectations['labelled']),
+                    cases={cid: self.label(label) for cid, label in expectations['cases'].items()})
 
 
 def _portable(value, root):
@@ -26,8 +56,10 @@ class FrozenSelection:
     def __init__(self, repo=REPO):
         repo = Path(repo)
         self.repo = repo
+        self.retirements = RetiredRules(repo)
         self.fixture = json.loads((repo/'ops/fixtures/rule-scope-compatibility.v1.json').read_text())
         corpus = json.loads((repo/'ops/config/rule-selection-corpus.v1.json').read_text())['rules']
+        corpus = [rule for rule in corpus if rule['id'] not in self.retirements.ids]
         scopes = json.loads((repo/'ops/fixtures/rule-delivery-eval/scope-backfills.json').read_text())['scopes']
         self.catalog = {'ok': True, 'schema': 'rule-scope-catalog/v1',
                         'corpus_digest': digest(corpus), 'identity': {
@@ -47,7 +79,7 @@ class FrozenSelection:
         key = digest(_portable(event, str(self.repo)))
         if key not in self.fixture['moment_decisions']:
             raise ValueError('no_frozen_moment_decision')
-        selected = set(self.fixture['moment_decisions'][key])
+        selected = set(self.retirements.active(self.fixture['moment_decisions'][key]))
         def judge(state, questions):
             return {'model': 'jev-1.13.0', 'answers': {
                 name: {'type': 'choice', 'confidence': 1.0,

@@ -60,6 +60,9 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "tools"))
+from migration_baseline import MANIFEST, MigrationBaseline, runner_sha256
+from migration_source import migration_names
 
 # The pre-P2 artifact included editable browser source. P2 replaces it with a
 # separately content-addressed DoctorCRE artifact, while historical SHAs must
@@ -328,12 +331,7 @@ def migration_set(sha: str, since: str | None = None) -> tuple[list[str], str]:
     A count whose meaning is ambiguous is the thing rule b01edd26 refuses.
     """
     def at(ref: str) -> list[str]:
-        raw = git("ls-tree", "-r", "--name-only", ref, "--", "migrations")
-        return sorted(
-            Path(p).name.split("_", 1)[0]
-            for p in raw.split("\n")
-            if p.endswith(".sql")
-        )
+        return sorted(name.split("_", 1)[0] for name in migration_names(REPO, ref))
 
     here = at(sha)
     if not since:
@@ -391,25 +389,31 @@ def applied_schema_ledger(sha: str) -> tuple[int, str, str]:
 
 def migration_tree_ledger(sha: str) -> list[tuple[str, str]]:
     """Return the exact migration filename/content ledger at a SHA."""
-    # One archive transfer preserves exact bytes without one subprocess per
-    # migration file.
-    archive = git_bytes("archive", "--format=tar", sha, "--", "migrations")
-    rows = []
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
-        for member in tar.getmembers():
-            prefix = "migrations/"
-            if not member.isfile() or not member.name.startswith(prefix):
-                continue
-            filename = member.name[len(prefix):]
-            if not filename.endswith(".sql"):
-                continue
-            extracted = tar.extractfile(member)
-            if extracted is None:
-                sys.exit("release-manifest: could not read migration from git archive")
-            rows.append((filename, hashlib.sha256(extracted.read()).hexdigest()))
-    rows.sort()
+    revision = resolve_sha(sha)
+    entries = git("ls-tree", "--name-only", revision, "--", "migrations", MANIFEST).splitlines()
+    identities = {}
+    # Preserve the single-transfer read for active SQL. Historical identity
+    # comes from the manifest, without fetching or replaying covered files.
+    if "migrations" in entries:
+        archive = git_bytes("archive", "--format=tar", revision, "--", "migrations")
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
+            for member in tar.getmembers():
+                prefix = "migrations/"
+                if not member.isfile() or not member.name.startswith(prefix):
+                    continue
+                filename = member.name[len(prefix):]
+                if "/" in filename or not filename.endswith(".sql"):
+                    continue
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    sys.exit("release-manifest: could not read migration from git archive")
+                identities[filename] = runner_sha256(extracted.read().decode("utf-8"))
+    if MANIFEST in entries:
+        baseline = MigrationBaseline.from_document(json.loads(git("show", f"{revision}:{MANIFEST}")))
+        identities = baseline.ledger_with_hashes(identities)
+    rows = sorted(identities.items())
     if not rows:
-        sys.exit("release-manifest: target SHA has no migrations/*.sql files")
+        sys.exit("release-manifest: target SHA has no migration identities")
     return rows
 
 

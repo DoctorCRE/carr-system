@@ -72,7 +72,8 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     main, pr = workflow(CANARY), workflow(CI_YML)
     classes = main['jobs']['classes']
     check('main has the identical parallel class set as PR CI',
-          classes['strategy']['matrix'] == pr['jobs']['classes']['strategy']['matrix'])
+          classes['strategy']['matrix']['classes'] == pr['jobs']['classes']['strategy']['matrix']['classes']
+          and 'exclude' not in classes['strategy']['matrix'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']

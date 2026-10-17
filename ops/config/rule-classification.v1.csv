@@ -23,7 +23,6 @@ id,layer,class,moment
 1c42d80c,layer0,a,"hitting unexpected friction (refusal, error, workaround)"
 1d50a3bb,control,d,conduct_stop gate
 1f3a7372,control,d,completion_evidence gate
-1fcaa63a,pack,c,heavy build protocol invoked
 1fddcffb,layer0,a,deciding what belongs in always-read core vs task-loaded files
 204391be,pack,b,discovering a missing record-layer verb while building
 20d106f1,pack,c,"Joe's development: new builds, predictions, confident direction"
@@ -109,6 +108,7 @@ id,layer,class,moment
 7e9739f2,layer0,a,any turn replying to Joe
 80def9d2,pack,c,building a human-facing surface or choice for Joe/Dell
 81709f57,pack,c,convening a red team/review panel
+8400cd3d,pack,b,"starting a new build, plan, queued item, or builder dispatch"
 847f9995,control,d,completion_evidence stop_gate - unattended-path credential verification
 86647daf,pack,b,finishing a substantive build/change/decision (posting to shared files)
 88e9b5eb,control,d,blocker_decider gate

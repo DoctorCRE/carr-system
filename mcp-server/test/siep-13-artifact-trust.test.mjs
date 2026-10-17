@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs";
@@ -10,7 +11,7 @@ import {
   verifyArtifactBundle,
 } from "../src/artifact-trust.js";
 
-const migration = fs.readFileSync(new URL("../../migrations/0456_siep13_artifact_registry.sql", import.meta.url), "utf8");
+const migration = readMigration(new URL("../../migrations/0456_siep13_artifact_registry.sql", import.meta.url));
 const sha = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 
 function fixture() {

@@ -2,9 +2,13 @@
 """Static seeded checks for the typed Guidance Registry migration."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
 import os
 import re
-import sys
 
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,17 +22,17 @@ READER_BOUNDARY_MIGRATION = os.path.join(
 
 
 def main() -> int:
-    if not os.path.exists(MIGRATION):
+    if not Path(MIGRATION).name in migration_names(Path(MIGRATION).parent.parent):
         print("guidance-registry-migration-selftest: FAIL — migration 0168 is missing", file=sys.stderr)
         return 1
-    sql = open(MIGRATION, encoding="utf-8").read().lower()
+    sql = read_migration(Path(REPO), Path(MIGRATION).name).lower()
     compact = re.sub(r"\s+", " ", sql)
-    boundary_sql = open(STANDING_CONTEXT_BOUNDARY_MIGRATION, encoding="utf-8").read().lower()
+    boundary_sql = read_migration(Path(REPO), Path(STANDING_CONTEXT_BOUNDARY_MIGRATION).name).lower()
     boundary_compact = re.sub(r"\s+", " ", boundary_sql)
-    if not os.path.exists(READER_BOUNDARY_MIGRATION):
+    if not Path(READER_BOUNDARY_MIGRATION).name in migration_names(Path(READER_BOUNDARY_MIGRATION).parent.parent):
         print("guidance-registry-migration-selftest: FAIL — migration 0382 is missing", file=sys.stderr)
         return 1
-    reader_sql = open(READER_BOUNDARY_MIGRATION, encoding="utf-8").read().lower()
+    reader_sql = read_migration(Path(REPO), Path(READER_BOUNDARY_MIGRATION).name).lower()
     reader_compact = re.sub(r"\s+", " ", reader_sql)
     checks = {
         "canonical item spine": "create table ops.guidance_item" in compact,

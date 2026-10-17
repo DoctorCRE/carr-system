@@ -1,4 +1,4 @@
-"""Interactive Flash preserves complete task context and refuses lookup failures."""
+"""Interactive Flash preserves complete task context and continues through advisory selection gaps."""
 import importlib.util
 import json
 from pathlib import Path
@@ -20,10 +20,23 @@ class PromptRules(unittest.TestCase):
             out=module.build_output(task)
         self.assertEqual(select.call_args.args[0],task.strip())
         self.assertIn('Full binding text.',out['hookSpecificOutput']['additionalContext'])
-    def test_failed_lookup_blocks_and_slash_recovery_skips(self):
+    def test_known_rules_reach_prompt_despite_selection_gaps(self):
+        flash=module._flash_run()
+        for gap in ('missing_scope','moment_judgment_unavailable'):
+            with self.subTest(gap=gap):
+                selection={'rules':[{'id':'11111111','statement':'Full binding text.'}],
+                           'complete':False,
+                           'data_defects':[{'rule_id':'22222222','reason':gap}] if gap=='missing_scope' else [],
+                           'unresolved':[{'rule_id':'22222222','reason':gap}] if gap!='missing_scope' else []}
+                with patch.object(module,'_flash_run',return_value=flash),patch.object(module,'_log') as log,patch('lib.rule_scope_lookup.lookup',return_value=selection):
+                    out=module.build_output('Read a small local file',judge=lambda *_:None)
+                self.assertNotIn('decision',out)
+                self.assertIn('Full binding text.',out['hookSpecificOutput']['additionalContext'])
+                self.assertIn(gap,log.call_args.args[0]['error'])
+    def test_failed_lookup_is_advisory_and_slash_recovery_skips(self):
         flash=module._flash_run()
         with patch.object(module,'_flash_run',return_value=flash),patch.object(module,'_log'),patch.object(flash,'pick_rules',return_value=([],'catalog unavailable')):
-            self.assertEqual(module.build_output('send it')['decision'],'block')
+            self.assertIsNone(module.build_output('send it'))
             self.assertIsNone(module.build_output('/clear'))
 if __name__=='__main__':
     unittest.main()
