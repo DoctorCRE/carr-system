@@ -935,14 +935,13 @@ class Pipeline:
         src_venv = self.repo / ".venv"
         src_python = src_venv / "bin" / "python"
         if not self.dry_run and not src_python.exists():
-            raise StepFailed("venv-link", 1, "",
+            raise StepFailed("venv-source-missing", 1, "",
                              f"{src_venv} has no bin/python — this pipeline checkout's own venv "
                              f"is missing or incomplete, so linking it into the release worktree "
                              f"would only produce a dangling symlink whose health read then "
                              f"reports psycopg/openpyxl as MISSING, reading like a code bug when "
                              f"it is really this machine's environment. Fix the venv at "
-                             f"{self.repo} (a missing venv never heals itself; retrying the same "
-                             f"SHA will not help).")
+                             f"{self.repo}; the next scheduled run checks for its repair before retrying.")
         self.step("venv-link", ["ln", "-s", str(src_venv), str(wt / ".venv")], self.repo)
         self.step("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], mcp, timeout=1800)
 
@@ -1197,15 +1196,22 @@ class Pipeline:
         except StepFailed as failure:
             if failure.step != "wrangler-auth":
                 raise
-            # Wrangler throws on token verification rejection. Read the step's
-            # output before classifying it; network errors remain step failures.
+            # Only recognized auth or transport failures may recover without
+            # a source change. Unknown process failures need their own diagnosis.
             try:
                 output = Path(failure.log).read_text(encoding="utf-8", errors="replace")
             except OSError:
-                raise failure
+                output = ""
             who = Result(failure.rc, output, failure.log)
             if not self._auth_rejected(who.out):
-                raise
+                if re.search(r"fetch failed|network unavailable|network error|Cloudflare API unavailable|"
+                             r"\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|"
+                             r"UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)\b|socket hang up",
+                             who.out, re.IGNORECASE):
+                    raise
+                raise StepFailed("wrangler-execution", failure.rc, failure.log,
+                                 "wrangler whoami failed without a recognized authentication "
+                                 "or transport error") from failure
         if not self.dry_run and self._auth_rejected(who.out):
             raise StepFailed("credential-missing", who.rc or 1, who.log,
                              f"credential rejected: wrangler whoami does not accept {CLOUDFLARE_TOKEN_NAME}",
@@ -1537,6 +1543,21 @@ class Pipeline:
         self.finish_release_proof(proof, state, lane)
         self.out(f"release-pipeline[{lane}]: reconciled durable release {proof['sha'][:12]}")
 
+    def failed_prerequisite_ready(self, step: str) -> bool:
+        """Probe environment failures without replaying a release or its diagnosis."""
+        if step == "venv-source-missing":
+            return (self.repo / ".venv/bin/python").exists()
+        if step not in {"credential-missing", "wrangler-auth"}:
+            return False
+        try:
+            self.wrangler_auth()
+        except StepFailed as failure:
+            if failure.step not in {"credential-missing", "wrangler-auth"}:
+                raise
+            self.out(f"  prerequisite still unavailable: {failure.step}; log {failure.log or '-'}")
+            return False
+        return True
+
     def run_lane(self, lane: str) -> int:
         self.observations.clear()
         self.dependency_evidence.clear()
@@ -1553,6 +1574,7 @@ class Pipeline:
         lane_state = state.setdefault(lane, {})
         sha = base = ""
         self.observed_main = ""
+        recovered_failure = ""
         try:
             repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
             # Read and fetch an immutable main object without writing any
@@ -1591,9 +1613,11 @@ class Pipeline:
                 self.reconcile_staging_failure(state, lane, base, repo_dir)
                 lane_state = state.setdefault(lane, {})
             if sha == lane_state.get("failed_sha"):
-                self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
-                         f"{lane_state.get('failed_step')}; waiting for a fix-forward merge")
-                return 0
+                if not self.failed_prerequisite_ready(lane_state.get("failed_step", "")):
+                    self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
+                             f"{lane_state.get('failed_step')}; waiting for prerequisite repair or a fix-forward merge")
+                    return 0
+                recovered_failure = sha
             try:
                 self.git("merge-base", "--is-ancestor", base, sha, cwd=repo_dir)
             except StepFailed:
@@ -1610,7 +1634,9 @@ class Pipeline:
                     self.out(f"release-pipeline[{lane}]: main is {head[:12]}; newest green canary "
                              f"target is {sha[:12]}")
                 failed = lane_state.get("failed_sha")
-                if failed and self._at_or_before(sha, failed, repo_dir):
+                recovered = sha == failed and (recovered_failure == sha
+                    or self.failed_prerequisite_ready(lane_state.get("failed_step", "")))
+                if failed and self._at_or_before(sha, failed, repo_dir) and not recovered:
                     self.out(f"release-pipeline[{lane}]: target {sha[:12]} is at or before the failed "
                              f"{failed[:12]} ({lane_state.get('failed_step')}); waiting for a green "
                              "fix-forward")
@@ -1700,14 +1726,12 @@ class Pipeline:
                     entry = next(c for c in inventory["credentials"] if c["name"] == "cloudflare-deploy-token")
                     checked_path = expand(self.cfg.get("credential_dir", "~/.config/carr")) / CLOUDFLARE_TOKEN_FILE
                     remedy = entry["replacement_plan"].replace(entry["probe"]["path"], str(checked_path))
-                recovery = (f"The {lane} lane failed for SHA {failed_sha} and will not retry it. "
-                            "After repairing and verifying the credential, run "
-                            "ops/release-pipeline.py report to read every currently failed lane, "
-                            "its full SHA and its exact clear-failed command. Other lanes may fail "
-                            "on this same credential after this notification. Run the reported "
-                            "command for each lane paused by this credential; the next tick retries "
-                            "those SHAs. "
-                            "A fix-forward merge with a new main SHA also resumes the lane."
+                recovery = (f"The {lane} lane failed for SHA {failed_sha}. "
+                            "The next scheduled run probes the credential and automatically retries "
+                            "once it is accepted. While the probe fails, no release is attempted. "
+                            "Use ops/release-pipeline.py report to read every currently failed lane "
+                            "and its full SHA. Other lanes may fail on this same credential after "
+                            "this notification."
                             if failed_sha else "")
                 pending[capability] = {"lane": lane, "args": blocker_loop(
                     capability, detail, remedy=remedy, recovery=recovery)}
@@ -1786,28 +1810,29 @@ class Pipeline:
             if digest is not None:
                 rejection["staging_ledger_digest"] = digest
             self.store.save(state)
-        self.store.save(state)
         attempt = int((state[lane].get("dispatches") or {}).get(sha, 0)) + 1
         extra: dict[str, Any] = {}
-        if capability:
+        diagnosis_key = capability or (f"wrangler-auth:{lane}:{sha}" if step == "wrangler-auth" else None)
+        if diagnosis_key:
             pending = state.setdefault("pending_diagnoses", {})
-            diagnosed = capability in state.get("diagnosed_capabilities", {})
-            if not diagnosed and capability not in pending and sha:
-                pending[capability] = {"lane": lane, "sha": sha, "args": queue_turn(
+            diagnosed = diagnosis_key in state.get("diagnosed_capabilities", {})
+            if not diagnosed and diagnosis_key not in pending and sha:
+                pending[diagnosis_key] = {"lane": lane, "sha": sha, "args": queue_turn(
                     lane, sha, step, rc, log, str(self.store.records_path),
                     db_ahead_of_worker=self.db_ahead_of_worker, do_migration=self.do_migration,
                     run_id=self.run_id, attempt=attempt)}
             # Save the failed SHA and first turn together, before even filing
             # the loop: a crash after its acknowledgement cannot lose diagnosis.
             self.store.save(state)
-            self.file_blocker(state, lane, capability, detail, extra, failed_sha=sha)
+            if capability:
+                self.file_blocker(state, lane, capability, detail, extra, failed_sha=sha)
             if diagnosed:
-                extra["dispatch_skipped"] = "capability_already_diagnosed"
+                extra["dispatch_skipped"] = "capability_already_diagnosed" if capability else "prerequisite_already_diagnosed"
                 extra["dispatched"] = False
                 self.out(f"release-pipeline[{lane}]: no fix session dispatched; "
-                         "the capability's first diagnosis was already delivered")
-            elif capability in pending:
-                self.deliver_diagnosis(state, capability, extra)
+                         "the prerequisite's first diagnosis was already delivered")
+            elif diagnosis_key in pending:
+                self.deliver_diagnosis(state, diagnosis_key, extra)
             ok = extra.get("dispatched", False)
         else:
             self.store.save(state)
@@ -1823,7 +1848,7 @@ class Pipeline:
                            "run_dir": str(self.run_dir), "executed": list(self.executed),
                            "dispatched": ok, "run_id": self.run_id,
                            **({"post_release": self.post_release} if self.post_release else {}), **extra})
-        if not capability and not ok:
+        if not diagnosis_key and not ok:
             self.out(f"release-pipeline[{lane}]: diagnosis dispatch FAILED: {res}")
         return 1
 
