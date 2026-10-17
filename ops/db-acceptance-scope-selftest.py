@@ -1,13 +1,15 @@
 """Selftest for ops/db-acceptance-scope.py."""
 import importlib.util
+import os
 from pathlib import Path
 import sys
 
 spec = importlib.util.spec_from_file_location('scope', Path(__file__).with_name('db-acceptance-scope.py'))
+assert spec is not None and spec.loader is not None
 scope = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(scope)
 
-failures = []
+failures: list[str] = []
 
 
 def check(name, ok):
@@ -28,7 +30,6 @@ for path in ('hooks/rule-pack-preuse-reselection.py', 'ops/config/gate-baseline.
 check('one DB file among others runs the lane',
       scope.needs_full(['README.md', 'hooks/a.py', 'migrations/0400_y.sql']))
 check('an empty diff skips', not scope.needs_full([]))
-import os
 for event in ('schedule', 'workflow_dispatch', 'push'):
     os.environ['GITHUB_EVENT_NAME'] = event
     check(f'{event} always runs full', scope.decide())
