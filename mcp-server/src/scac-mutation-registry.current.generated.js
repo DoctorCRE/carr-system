@@ -3511,7 +3511,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
     "ingress_key": "mcp-tool:standing-context",
     "source_locator": "mcp-server/src/doctrine.js",
     "source_digest": "7b034306e97f1485ec072fd597770dd3fc3f2069682f51e2040e6d23d60b927f",
-    "schema_digest": "e4842fcf04f5634da352194e688c61c54c45616d5898aed3bb36a5af026b1b57",
+    "schema_digest": "ac9449a992b4fee45470258b972e71532b13a70a75ade702aff6eab70f5f47ca",
     "write": false,
     "human_only": false,
     "authority_only": false,
