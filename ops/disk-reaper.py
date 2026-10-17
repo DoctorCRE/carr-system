@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic disk cleanup. Inspection is the default; --execute authorizes removal.
+"""Deterministic disk cleanup. Inspection is the default; out/ retention stages rather than deletes.
 
 Extend branch_retirement's git, audit, persistence and maintenance primitives.
 Repository/PR evidence is collected outside its maintenance lock; only worktree
@@ -8,6 +8,7 @@ removal takes that shared lock. The session hook calls this same run interface.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import dataclass
 import fcntl
 import glob
@@ -20,6 +21,7 @@ import shutil
 import signal
 import sys
 import time
+import uuid
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE))
@@ -52,7 +54,7 @@ def load_config(file):
     if config["version"] != 1 or not config["repositories"]:
         raise ValueError("invalid disk-reaper config")
     for item in config["locations"]:
-        if item["kind"] not in {"dispatch", "scratch", "worktree", "artifact", "staged"}:
+        if item["kind"] not in {"dispatch", "scratch", "worktree", "artifact", "staged", "output"}:
             raise ValueError("invalid location kind")
         if not Path(item["pattern"].replace("{repo}", "/repo")).expanduser().is_absolute():
             raise ValueError("location must be absolute")
@@ -84,7 +86,12 @@ class Inventory:
 def inventory(root):
     """Walk all writes, including ignored build output, without following links."""
     initial = root.lstat()
-    if not root.is_dir() or root.is_symlink():
+    if root.is_symlink():
+        raise ValueError("not a real directory")
+    if root.is_file():
+        return Inventory((initial.st_dev, initial.st_ino), initial.st_mtime,
+                         initial.st_blocks * 512 if initial.st_nlink <= 1 else 0, [])
+    if not root.is_dir():
         raise ValueError("not a real directory")
     newest, size, repos, seen = initial.st_mtime, 0, [], set()
     stack = [(root, True)]
@@ -271,14 +278,16 @@ class Reaper:
                     return True
         return False
 
-    def candidates(self, registry, kept=None):
+    def candidates(self, registry, kept=None, *, out_only=False):
         found = {}
         for location in self.config["locations"]:
+            if out_only and location["kind"] != "output":
+                continue
             patterns = [location["pattern"].replace("{repo}", str(r)) for r in self.roots]
             for pattern in sorted(set(patterns)):
                 for name in sorted(glob.glob(os.path.expanduser(pattern))):
                     p = Path(name)
-                    if p.is_symlink() or not p.is_dir() or ".git" in p.parts:
+                    if p.is_symlink() or (not p.is_dir() and not (location["kind"] == "output" and p.is_file())) or ".git" in p.parts:
                         continue
                     p = p.resolve()
                     if not self.allowed_location(p):
@@ -286,7 +295,7 @@ class Reaper:
                     # Earlier specific policies win over /private/tmp/*.
                     found.setdefault(p, Candidate(p, "staged" if "_to_delete" in p.parts else location["kind"],
                         location.get("series", "").replace("{parent}", str(p.parent))))
-        for r in self.roots:
+        for r in ([] if out_only else self.roots):
             for item in worktrees.worktree_entries(str(r)):
                 p = path(item["path"])
                 if p != r and p.is_dir():
@@ -296,7 +305,7 @@ class Reaper:
                                          "reason": "outside configured locations"})
                         continue
                     found.setdefault(p, Candidate(p, "staged" if "_to_delete" in p.parts else "worktree"))
-        for name in registry:
+        for name in ([] if out_only else registry):
             p = Path(name)
             if p.is_dir() and not p.is_symlink() and self.scratch_location(p):
                 found.setdefault(p, Candidate(p, "scratch"))
@@ -413,6 +422,38 @@ class Reaper:
             return "canonical or invoking checkout"
         if any(overlaps(p, path(item)) for item in self.config["protected"]):
             return "protected path"
+        for root in self.roots:
+            if overlaps(p, root / 'out/_to_delete'):
+                return "staged outputs require separate disposal review"
+            if overlaps(p, root / 'out/release-pipeline/runs'):
+                return "release pipeline reader evidence"
+        in_out = any(p.is_relative_to(r / 'out') for r in self.roots)
+        if candidate.kind == "output" and not in_out:
+            return "output outside out"
+        if in_out:
+            if info.repos:
+                diagnosis = any(p.is_relative_to(r / 'out/release-pipeline/worktrees-cleared') for r in self.roots)
+                if not diagnosis or any(not (r / '.git').is_file() for r in info.repos):
+                    return "output contains git metadata; preserve diagnosis or work"
+                for root in self.roots:
+                    if any(path(e['path']).is_relative_to(p) for e in worktrees.worktree_entries(str(root))):
+                        return "diagnosis still registered as a worktree"
+            files = p.rglob('*') if p.is_dir() else [p]
+            if any(f.suffix == '.jsonl' or 'ledger' in f.name.lower() for f in files):
+                return "persistent audit or ledger"
+            for root in self.roots:
+                for file in (root / 'out/release-pipeline/state.json', root / 'out/release-pipeline/releases.jsonl'):
+                    if file.exists() and any(value in file.read_text() for value in
+                            (str(p), str(p.relative_to(root)) if p.is_relative_to(root) else str(p))):
+                        return "release state or ledger references output"
+            for parent in (p.parent, *[a for a in p.parents if a.name == 'out']):
+                if any(f.is_symlink() and overlaps(p, f.resolve()) for f in parent.iterdir()):
+                    return "output referenced by symlink"
+        if in_out and any(
+                (r.get("cwd") and path(r["cwd"]).is_relative_to(p))
+                or (p.parent.name == "model-floor-cache" and p.name == r["session_id"])
+                for r in sessions(self.config)):
+            return "live session references output"
         rows = matches_dispatch(p, dispatch)
         if any(dispatch_active(r) for r in rows):
             return "dispatch held or running"
@@ -427,7 +468,9 @@ class Reaper:
             if p.is_relative_to(root) and not any(r == p for r in info.repos):
                 if git(root, "ls-files", "--", str(p.relative_to(root))):
                     return "candidate contains canonical tracked files"
-        for repo in info.repos:
+        if candidate.kind != "output" and any(p.is_relative_to(r / 'out') for r in self.roots) and info.repos:
+            return "out worktree requires explicit retirement"
+        for repo in ([] if candidate.kind == "output" else info.repos):
             reason = self.git_safety(repo, fresh)
             if reason:
                 return reason
@@ -441,7 +484,7 @@ class Reaper:
             for pr in self.pr_rows(repo, fresh):
                 if pr["state"].lower() == "open":
                     return "open PR"
-        if candidate.kind == "artifact" and self.artifact_referenced(candidate, fresh):
+        if candidate.kind in {"artifact", "output"} and self.artifact_referenced(candidate, fresh):
             return "referenced by open PR"
         return None
 
@@ -450,7 +493,9 @@ class Reaper:
             return None
         if candidate.kind == "dispatch":
             return None
-        if candidate.kind == "artifact":
+        if candidate.kind in {"artifact", "output"}:
+            if candidate.kind == "output" and self.clock() - info.newest < self.config["retention_seconds"]["output"]:
+                return "retention: recent write"
             return "newest artifacts in series" if candidate.path in newest else None
         if candidate.kind == "worktree":
             related = [pr for repo in info.repos for pr in self.pr_rows(repo)]
@@ -461,6 +506,8 @@ class Reaper:
         return "retention: recent write" if age < threshold else None
 
     def remove(self, candidate, info):
+        if any(candidate.path.is_relative_to(r / 'out') for r in self.roots):
+            raise RuntimeError("out retention must stage, never delete")
         # Git's own non-force removal remains the final dirty-worktree refusal.
         linked = [r for r in info.repos if (r / ".git").is_file() and not
                   path(git(r, "rev-parse", "--path-format=absolute", "--git-common-dir")).is_relative_to(candidate.path)]
@@ -490,15 +537,18 @@ class Reaper:
                 "low": free / total < self.config["pressure"]["free_fraction"]
                        or free < self.config["pressure"]["free_bytes"]}
 
-    def run(self, *, execute=False, session=None):
+    def run(self, *, execute=False, session=None, out_only=False):
         out = self.root / "out"
-        out.mkdir(parents=True, exist_ok=True)
+        readonly = out_only and not execute
+        if not readonly:
+            out.mkdir(parents=True, exist_ok=True)
         report = {"schema": "disk-reaper/v1", "at": self.clock(), "execute": execute,
-                  "freed_bytes": 0, "would_free_bytes": 0, "kept_by_reason": {},
+                  "freed_bytes": 0, "would_free_bytes": 0, "would_stage_bytes": 0, "staged_bytes": 0, "kept_by_reason": {},
                   "rows": [], "errors": [], "processes": []}
-        with (out / "disk-reaper.lock").open('a') as lock:
+        with (nullcontext() if readonly else (out / "disk-reaper.lock").open('a')) as lock:
             try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if lock is not None:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 report["errors"].append("another disk reaper is running")
                 append(out / "disk-reaper.jsonl", report)
@@ -508,7 +558,7 @@ class Reaper:
                 registry = self.registry()
                 dispatch = dispatches(self.config)
                 live_sessions = sessions(self.config)
-                candidates = self.candidates(registry, report["rows"])
+                candidates = self.candidates(registry, report["rows"], out_only=out_only)
                 if session:
                     selected = []
                     for c in candidates:
@@ -519,6 +569,8 @@ class Reaper:
                                                    "reason": "not this session's scratch"})
                     candidates = selected
                 inventories, newest = {}, set()
+                inspection_census = None
+                inspection_error = None
                 for candidate in candidates:
                     try:
                         inventories[candidate.path] = inventory(candidate.path)
@@ -526,7 +578,7 @@ class Reaper:
                         report["rows"].append({"path": str(candidate.path), "action": "keep", "reason": str(exc)})
                 series = {}
                 for c in candidates:
-                    if c.kind == "artifact" and c.path in inventories:
+                    if c.kind in {"artifact", "output"} and c.path in inventories:
                         series.setdefault(c.series, []).append(c.path)
                 for paths in series.values():
                     newest.update(sorted(paths, key=lambda p: (-inventories[p].newest, str(p)))[:self.config["artifact_keep"]])
@@ -546,14 +598,26 @@ class Reaper:
                         if not prior or prior["identity"] != list(info.identity):
                             registry[str(c.path)] = {"identity": list(info.identity), "session": owner,
                                                      "observed_at": self.clock()}
-                        if session and (registry[str(c.path)].get("session") != session or c.kind in {"artifact", "staged"}):
+                        if session and (registry[str(c.path)].get("session") != session or c.kind in {"artifact", "staged", "output"}):
                             row["reason"] = "not this session's scratch"
                             continue
                         reason = self.safety(c, info, dispatch) or self.retention(c, info, newest, session=bool(session))
                         if reason:
                             row["reason"] = reason
                             continue
-                        census = self.processes.collect()
+                        staging_root = next((r for r in self.roots if c.path.is_relative_to(r / 'out')), None)
+                        if readonly:
+                            if inspection_error is not None:
+                                raise RuntimeError(inspection_error)
+                            if inspection_census is None:
+                                try:
+                                    inspection_census = self.processes.collect()
+                                except Exception as exc:
+                                    inspection_error = str(exc)
+                                    raise
+                            census = inspection_census
+                        else:
+                            census = self.processes.collect()
                         users = self.processes.users(c.path, census)
                         if execute and users:
                             bound = matches_dispatch(c.path, dispatches(self.config))
@@ -565,7 +629,7 @@ class Reaper:
                                  or ownership(self.root, c.path) == "orphaned")
                         if any(r.get("cwd") and path(r["cwd"]).is_relative_to(c.path) for r in live_sessions):
                             ended = False
-                        if execute and users:
+                        if execute and users and staging_root is None:
                             report["processes"].extend(self.processes.stop_orphans(c.path, self.config, ended, census))
                             census = self.processes.collect()
                             users = self.processes.users(c.path, census)
@@ -573,7 +637,8 @@ class Reaper:
                             row["reason"] = "live process cwd/open files or command"
                             row["pids"] = [p.pid for p in users]
                             continue
-                        row.update(action="would_remove", reason="retention elapsed and safety checks passed")
+                        staging = staging_root is not None
+                        row.update(action="would_stage" if staging else "would_remove", reason="retention elapsed and safety checks passed")
                         if execute:
                             # Refresh all mutable evidence at the mutation seam.
                             current = inventory(c.path)
@@ -584,9 +649,22 @@ class Reaper:
                                 raise RuntimeError(reason or "process became live before removal")
                             # Fetch writes Git metadata, excluded from write-age;
                             # user file/index changes still invalidate this scan.
-                            self.remove(c, current)
-                            row["action"] = "removed"
-                            report["freed_bytes"] += current.bytes
+                            if staging:
+                                final = inventory(c.path)
+                                if final.identity != current.identity or final.newest != current.newest:
+                                    raise RuntimeError("output changed before staging")
+                                stage = staging_root / 'out/_to_delete'
+                                if stage.resolve() != stage:
+                                    raise RuntimeError('staging path contains a symlink')
+                                destination = stage / ('output-' + uuid.uuid4().hex) / c.path.relative_to(staging_root / 'out')
+                                destination.parent.mkdir(parents=True)
+                                os.rename(c.path, destination)
+                                row.update(action="staged", destination=str(destination))
+                                report["staged_bytes"] += current.bytes
+                            else:
+                                self.remove(c, current)
+                                row["action"] = "removed"
+                                report["freed_bytes"] += current.bytes
                             registry.pop(str(c.path), None)
                     except Exception as exc:
                         row.update(action="keep", reason=str(exc))
@@ -596,13 +674,16 @@ class Reaper:
                                     *[str(r / 'out/worktree-reap.lock') for r in self.roots]], allowed=(0, 1)).stdout
                             except Exception:
                                 row["lock_holders"] = "unavailable"
-                save(self.registry_path, registry)
+                if not readonly:
+                    save(self.registry_path, registry)
             except Exception as exc:
                 report["errors"].append(str(exc))
             finally:
                 for row in report["rows"]:
                     if row["action"] == "would_remove":
                         report["would_free_bytes"] += row["bytes"]
+                    elif row["action"] == "would_stage":
+                        report["would_stage_bytes"] += row["bytes"]
                     elif row["action"] == "keep":
                         group = report["kept_by_reason"].setdefault(row["reason"],
                             {"bytes": 0, "count": 0, "unmeasured_count": 0})
@@ -626,18 +707,20 @@ class Reaper:
                         save(out / "disk-pressure.flag", health)
                     else:
                         (out / "disk-pressure.flag").unlink(missing_ok=True)
-                append(out / "disk-reaper.jsonl", report)
+                if not readonly:
+                    append(out / "disk-reaper.jsonl", report)
         return report
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--out-only", action="store_true", help="inspect only output retention; without --execute writes nothing")
     parser.add_argument("--config", type=Path, default=SOURCE / "ops/config/disk-reaper.v1.json")
     parser.add_argument("--root", type=Path, default=SOURCE)
     args = parser.parse_args(argv)
     try:
-        report = Reaper(args.root, load_config(args.config)).run(execute=args.execute)
+        report = Reaper(args.root, load_config(args.config)).run(execute=args.execute, out_only=args.out_only)
         print(json.dumps(report, sort_keys=True))
         return int(bool(report["errors"]))
     except Exception as exc:
