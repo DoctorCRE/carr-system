@@ -84,7 +84,10 @@ class DisposablePostgres:
             if main_launch:
                 _main_launches += 1
             try:
-                kwargs.setdefault('env', self.env)
+                # A caller-supplied env (e.g. a scrubbed one with no locale) must
+                # not drop LC_ALL: PostgreSQL 17 on recent macOS refuses to start
+                # ("postmaster became multithreaded") without a valid locale.
+                kwargs['env'] = {**(kwargs.get('env') or self.env), 'LC_ALL': 'C'}
                 return (self.runner or subprocess.run)(args, **kwargs)
             finally:
                 if main_launch:
