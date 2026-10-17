@@ -94,8 +94,7 @@ class UpdateLeadFake {
     if (sql.startsWith("update lead set")) {
       assert.equal(params.at(-1), this.leadId);
       this.updated = { sql, params };
-      // params: [...fieldValues, actor.id, leadId] per the verb's own binding order
-      return { rows: [] };
+      return { rows: [{ version: ++this.row.version }] };
     }
 
     if (sql.startsWith("insert into event")) {
@@ -123,7 +122,8 @@ test("update-lead: moves an existing lead OFF nurture_drip — the exact loop #3
   assert.ok(db.updated, "the update statement must have run");
   const verbs = db.events.map(e => e.verb);
   assert.ok(verbs.includes("update-lead"));
-  assert.deepEqual(db.events[0].new_value, { stage: "active_deal" });
+  assert.deepEqual(db.events[0].new_value, { stage: "active_deal",
+    transition_proof: { before_version: 3, after_version: 4, actor_slug: "joe" } });
   assert.deepEqual(db.events[0].old_value, { stage: "nurture_drip" });
 });
 
