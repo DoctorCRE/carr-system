@@ -74,16 +74,36 @@ class BrainProcess:
         self.session_id: str | None = None
         self.stderr: deque[str] = deque(maxlen=100)
         self.lock = threading.Lock()
+        self._stderr_thread: threading.Thread | None = None
+
+    def _finish(self, process: subprocess.Popen[str]) -> int:
+        """Reap the child and its stderr reader before returning to callers."""
+        try:
+            returncode = process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            returncode = process.wait()
+        reader = self._stderr_thread
+        if reader is not None:
+            reader.join()
+            self._stderr_thread = None
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        return returncode
 
     def _stop(self) -> None:
         process = self.process
         self.process = None
-        if process is None or process.poll() is not None:
+        if process is None:
             return
         try:
             _pipe(process.stdin, "stdin").close()
-            process.wait(timeout=2)
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
+            pass
+        try:
+            self._finish(process)
+        except OSError:
             process.kill()
             process.wait()
 
@@ -119,9 +139,10 @@ class BrainProcess:
         self.process = process
         self.system_prompt = system_prompt
         self.stderr.clear()
-        threading.Thread(
+        self._stderr_thread = threading.Thread(
             target=self._drain_stderr, args=(process,), daemon=True,
-        ).start()
+        )
+        self._stderr_thread.start()
         return process
 
     def _ensure(self, system_prompt: str) -> subprocess.Popen[str]:
@@ -167,11 +188,7 @@ class BrainProcess:
             while True:
                 line = stdout.readline()
                 if not line:
-                    try:
-                        code = process.wait(timeout=1)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        code = process.wait()
+                    code = self._finish(process)
                     self.process = None
                     error = "\n".join(self.stderr) or "brain process ended mid-turn"
                     return subprocess.CompletedProcess([], code or 1, result, error)
@@ -342,11 +359,22 @@ class RouteShadow:
         while True:
             job = self.queue.get()
             try:
+                if job is None:
+                    return
                 self._record(job)
             except Exception:
                 pass
             finally:
                 self.queue.task_done()
+
+    def close(self) -> None:
+        """Finish queued shadow records and stop the worker before interpreter exit."""
+        worker = self._worker
+        if worker is None:
+            return
+        self.queue.put(None)
+        worker.join()
+        self._worker = None
 
     @staticmethod
     def _error_class(message) -> str | None:
@@ -388,8 +416,9 @@ class RouteShadow:
 
 
 _BRAIN = BrainProcess()
-atexit.register(_BRAIN.close)
 _SHADOW = RouteShadow()
+atexit.register(_SHADOW.close)
+atexit.register(_BRAIN.close)
 
 
 def pick_mic() -> str:

@@ -150,6 +150,17 @@ def tier1() -> None:
           "or explicitly reported broken, never silently green",
           "convo_core reported a real failure" in proc.stdout, proc.stdout[-800:])
 
+    shutdown_runs = [run(["--only", "model-provider-unavailable"], timeout=DRILL_TIMEOUT)
+                     for _ in range(12)]
+    shutdown_failures = [
+        f"run {index + 1}: rc={child.returncode}, stdout={child.stdout[-300:]!r}, "
+        f"stderr={child.stderr[-300:]!r}"
+        for index, child in enumerate(shutdown_runs)
+        if child.returncode not in (0, 1, 2) or "Fatal Python error" in child.stderr
+    ]
+    check("12 repeated model-provider child runs shut down without interpreter/thread errors",
+          not shutdown_failures, "\n".join(shutdown_failures[:3]))
+
 
 
 def tier1_recorder_contract() -> None:
