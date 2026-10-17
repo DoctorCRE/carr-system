@@ -230,6 +230,35 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(proof.privilege_difference(rebuilt['grants'], reference['grants'])['ok'])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
+    def test_live_proof_accepts_production_owner_with_zero_pending(self):
+        bins = proof.comparison.find_pg18(None)
+        read_source = proof.read_source
+        captured = []
+
+        def capture_production(dsn, bins):
+            import psycopg
+            with psycopg.connect(dsn) as conn:
+                conn.execute('ALTER ROLE neondb_owner LOGIN')
+                conn.execute('ALTER TABLE public.deal OWNER TO neondb_owner')
+            captured.append(read_source(dsn, bins, include_acl=True))
+            return read_source(dsn, bins)
+
+        with patch.object(proof, 'read_source', side_effect=capture_production):
+            proof.build_schema(ROOT / 'db/schema.sql', bins)
+
+        def production_source(dsn, bins, include_acl=False):
+            return captured[0] if dsn == 'captured-production' else read_source(dsn, bins, include_acl)
+
+        with patch.object(proof, 'production_dsn', return_value='captured-production'), \
+             patch.object(proof, 'read_source', side_effect=production_source):
+            result = proof.live_proof(ledger_only=False)
+        self.assertTrue(result['ledger']['ok'], result['ledger'])
+        self.assertEqual(result['ledger']['applied'], 558)
+        self.assertEqual(result['ledger']['pending'], [])
+        self.assertTrue(result['equivalence']['ok'], result['equivalence'])
+        self.assertTrue(result['grants']['ok'], result['grants'])
+
+    @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_owner_acl_survives_reconstruction(self):
         shadow = proof.load('owner_shadow', ROOT / 'ops/migration-shadow.py')
         bins = shadow.find_pg18(None)
