@@ -421,6 +421,92 @@ class Base(unittest.TestCase):
         self._tmp.cleanup()
 
 
+class WorkerIdentityReconciliation(Base):
+    def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        latest = self.fx.commit({"mcp-server/src/a.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        original = pipe.release_target
+
+        def target(gh, cfg, base, head):
+            self.assertEqual(base, live_sha)
+            self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+            return original(gh, cfg, base, head)
+
+        with mock.patch.object(pipe, "release_target", side_effect=target):
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        row = next(row for row in self.fx.records() if row["status"] == "live_identity_reconciled")
+        self.assertEqual((row["from_sha"], row["sha"]), (self.fx.base, live_sha))
+        self.assertEqual(row["provider_version_id"], PRIOR)
+
+    def test_already_live_main_is_reconciled_without_redeployment_or_slice_mark(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": latest})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                    "failed_sha": "f" * 40, "failed_step": "migrate-apply"}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], "f" * 40)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertEqual([row["status"] for row in self.fx.records()], ["live_identity_reconciled"])
+
+    def test_dry_run_uses_live_base_without_persisting_reconciliation(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        pipe = self.fx.pipeline(FakeRunner(), live={"sha": live_sha}, dry_run=True)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe, "release_target", return_value=live_sha) as target:
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(target.call_args.args[2], live_sha)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records(), [])
+
+    def test_failed_reconciliation_receipt_cannot_advance_checkpoint_or_select_target(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": live_sha})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture receipt failed")), \
+             mock.patch.object(pipe, "release_target") as target:
+            self.assertEqual(pipe.tick(["worker"]), 1)
+        target.assert_not_called()
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(runner.calls, [])
+
+    def test_identity_outside_main_history_is_refused(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": "e" * 40})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records()[-1]["reason"], "history_diverged")
+        self.assertEqual(runner.calls, [])
+
+    def test_unreadable_identity_refuses_even_when_checkpoint_equals_main(self):
+        for response in [OSError("offline"), {}, {"git_sha": {"value": "short"}},
+                         {"git_sha": "malformed"},
+                         {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}}]:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                if isinstance(response, Exception):
+                    pipe.http = mock.Mock(side_effect=response)
+                else:
+                    pipe.http = mock.Mock(return_value=response)
+                pipe.tick(["worker"])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+
+
 class RejectionReconciliation(Base):
     def setUp(self):
         super().setUp()
