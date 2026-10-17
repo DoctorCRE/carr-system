@@ -33,6 +33,8 @@ from typing import NoReturn
 
 import migration_0882
 
+from migration_baseline import MANIFEST, MigrationBaseline
+
 from migration_number_contract import (
     LEGACY_APPLIED_ALIASES,
     MigrationNumberError,
@@ -446,6 +448,11 @@ def fail(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def load_baseline() -> MigrationBaseline | None:
+    repository = MIGRATIONS_DIR.parent
+    return MigrationBaseline.load(repository) if (repository / MANIFEST).exists() else None
+
+
 def load_migrations() -> list[tuple[str, str, str]]:
     """Return [(filename, sql, sha256)] sorted by filename."""
     if not MIGRATIONS_DIR.is_dir():
@@ -474,13 +481,15 @@ def load_migrations() -> list[tuple[str, str, str]]:
                     f"{OUTER_TRANSACTION_MIGRATION} onward must use the runner's single transaction"
                 )
             out.append((p.name, sql, digest))
-    if not out:
-        fail("no .sql files in migrations/")
     try:
-        validate_migration_names(
-            (name for name, _sql, _digest in out), require_frozen=True
-        )
-    except MigrationNumberError as exc:
+        baseline = load_baseline()
+        identities = {name: digest for name, _sql, digest in out}
+        if baseline is not None:
+            identities = baseline.ledger_with_hashes(identities)
+        if not identities:
+            fail("no .sql files in migrations/")
+        validate_migration_names(identities, require_frozen=True)
+    except (MigrationNumberError, ValueError) as exc:
         fail(str(exc))
     return out
 
@@ -496,6 +505,7 @@ def migrations_through(
     migrations: list[tuple[str, str, str]],
     pending: list[tuple[str, str, str]],
     through: str | None,
+    baseline: MigrationBaseline | None = None,
 ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
     """Split pending migrations into the authorized prefix and held-back tail.
 
@@ -507,7 +517,9 @@ def migrations_through(
     """
     if through is None:
         return pending, []
-    names = [name for name, _sql, _digest in migrations]
+    names = {name for name, _sql, _digest in migrations}
+    if baseline is not None:
+        names.update(name for name, _digest in baseline.migrations)
     if through not in names:
         raise ValueError(
             f"--through target is not an exact checked-in migration filename: {through}"
@@ -557,7 +569,8 @@ class AppliedMigrationLedgerError(ValueError):
 
 
 def validate_applied_ledger(
-    migrations: list[tuple[str, str, str]], applied: dict[str, str]
+    migrations: list[tuple[str, str, str]], applied: dict[str, str],
+    baseline: MigrationBaseline | None = None,
 ) -> None:
     """Refuse missing, edited, or reordered ledger state.
 
@@ -567,6 +580,13 @@ def validate_applied_ledger(
     applying the hole now would reorder history and may violate dependencies.
     """
     current = {name: digest for name, _sql, digest in migrations}
+    if baseline is not None:
+        try:
+            if set(dict(baseline.migrations)) - set(current):
+                baseline.validate_coverage(applied)
+            current = baseline.ledger_with_hashes(current)
+        except ValueError as exc:
+            raise AppliedMigrationLedgerError(str(exc)) from exc
     missing = sorted(set(applied) - set(current))
     unknown_missing = [name for name in missing if name not in LEGACY_APPLIED_ALIASES]
     if unknown_missing:
@@ -605,7 +625,7 @@ def validate_applied_ledger(
             )
     first_hole: str | None = None
     later_applied: list[str] = []
-    for name, _sql, _digest in migrations:
+    for name in sorted(current):
         if name not in effective_applied:
             first_hole = first_hole or name
         elif first_hole is not None:
@@ -640,24 +660,27 @@ def main() -> None:
         fail("psycopg not installed: pip install 'psycopg[binary]'")
 
     migrations = load_migrations()
+    baseline = load_baseline()
 
     with psycopg.connect(url) as conn:
         host = conn.info.host
         with conn.cursor() as cur:
-            cur.execute(BOOTSTRAP)
-            conn.commit()
-            cur.execute("select filename, sha256 from schema_migrations")
-            applied: dict[str, str] = dict(cur.fetchall())
+            cur.execute("select to_regclass('schema_migrations')")
+            if cur.fetchone()[0] is None:
+                applied: dict[str, str] = {}
+            else:
+                cur.execute("select filename, sha256 from schema_migrations")
+                applied = dict(cur.fetchall())
 
         try:
-            validate_applied_ledger(migrations, applied)
+            validate_applied_ledger(migrations, applied, baseline)
         except AppliedMigrationLedgerError as exc:
             fail(str(exc))
 
         all_pending = pending_migrations(migrations, applied)
         try:
             pending, held_back = migrations_through(
-                migrations, all_pending, args.through
+                migrations, all_pending, args.through, baseline
             )
         except ValueError as exc:
             fail(str(exc))
@@ -696,6 +719,9 @@ def main() -> None:
             if answer != host:
                 fail("confirmation did not match host; nothing applied")
 
+        with conn.cursor() as cur:
+            cur.execute(BOOTSTRAP)
+        conn.commit()
         print(f"lock_timeout: {LOCK_TIMEOUT}   statement_timeout: {STATEMENT_TIMEOUT}")
         for batch in migration_batches(pending):
             staged: list[tuple[str, str]] = []
