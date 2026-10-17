@@ -234,6 +234,8 @@ def pr_head(n: int) -> str:
 class FakeGitHub:
     """Merged source with green CI and canary results unless overridden."""
 
+    _pr_numbers: dict[str, int] = {}
+
     def __init__(self, canary: dict | None = None,
                  red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None,
                  ci_runs: dict | None = None):
@@ -246,7 +248,7 @@ class FakeGitHub:
         self.merge_commit: dict[str, str] = {}   # commit -> the PR's merge_commit_sha, when not itself
 
     def pr_number(self, sha):
-        return 100 + int(sha[:4], 16) % 800
+        return self._pr_numbers.setdefault(sha, 100 + len(self._pr_numbers))
 
     def pr_for_commit(self, sha):
         if self.raise_on == "pr_for_commit":
@@ -573,6 +575,20 @@ class RejectionReconciliation(Base):
         self.pipe.tick(["worker"])
         raw = (self.pipe.store.state_path.read_bytes() + self.pipe.store.records_path.read_bytes())
         self.assertNotIn(secret.encode(), raw)
+
+
+class FakeGitHubIdentity(unittest.TestCase):
+    def test_red_ci_does_not_leak_to_a_commit_with_a_colliding_short_hash(self):
+        green = "01bec640" + "0" * 32
+        red = "04dec640" + "0" * 32
+        red_pr = FakeGitHub().pr_number(red)
+        gh = FakeGitHub(red_ci_prs={red_pr})
+        green_source = gh.pr_for_commit(green)
+        red_source = gh.pr_for_commit(red)
+        self.assertNotEqual(green_source["number"], red_source["number"])
+        self.assertEqual(gh.runs_for(green_source["head"]["sha"])[0]["conclusion"], "success")
+        self.assertEqual(gh.runs_for(red_source["head"]["sha"])[0]["conclusion"], "failure")
+        self.assertEqual(FakeGitHub().pr_number(green), green_source["number"])
 
 
 class FixtureIsolation(unittest.TestCase):
