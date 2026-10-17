@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "8518e3cdc6ffe59c6d888c2050981c8425e908cef074e5b5534af5ff818b1fb4";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "d1eb8a052f26b0549c913ea8cb50bfc82830939049f663ed700c1f7e3b9a717f";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -70,7 +70,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "acknowledge-board-answer": {
     "ingress_key": "mcp-tool:acknowledge-board-answer",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "dcecaee083001a769a4909cc8266bcd185cc55533e81bd27b85288c9ebe7d076",
     "write": true,
     "human_only": false,
@@ -320,7 +320,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "answer-board-question": {
     "ingress_key": "mcp-tool:answer-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "53f4e8b7367cd9f892f94cbf76ec53dab19e4de30a2e41789d6fd81a58e17a60",
     "write": true,
     "human_only": true,
@@ -500,7 +500,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "ask-board-question": {
     "ingress_key": "mcp-tool:ask-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,
@@ -520,7 +520,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "assign-profile": {
     "ingress_key": "mcp-tool:assign-profile",
     "source_locator": "mcp-server/src/agent-profiles.js",
-    "source_digest": "d16684a50387520fa3dc9117a2688940f97afdcec8e9a838fa29f198d4c3fddc",
+    "source_digest": "4f43cd92adb33b847da48c8383e56599dbaaf93d1bd44d9c29e449eb707ef455",
     "schema_digest": "8e254575d24d8daa072d791f7583ee0588d8e933ed0ea4fa6fcdfb3769fec58b",
     "write": true,
     "human_only": false,
@@ -862,7 +862,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "correct-memory": {
     "ingress_key": "mcp-tool:correct-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "99d8f83fc7595f7321caaa8732e1f6ebb1c15cb93ba2247b76e32e095f45e7ab",
     "write": true,
     "human_only": false,
@@ -1235,7 +1235,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "forget-memory": {
     "ingress_key": "mcp-tool:forget-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "ca893d293fb33bf2f4fdc9f2f46cced8823e3f14f11cf3132dfdc7475836f066",
     "write": true,
     "human_only": false,
@@ -1505,7 +1505,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-progress-boards": {
     "ingress_key": "mcp-tool:list-progress-boards",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
@@ -1740,7 +1740,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "observe-memory": {
     "ingress_key": "mcp-tool:observe-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "6be9df204a37f046812197ce29af94df129a89e86e2f2e3f1e163f499c5c6b3a",
     "write": true,
     "human_only": false,
@@ -1883,7 +1883,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "promote-memory": {
     "ingress_key": "mcp-tool:promote-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "ca893d293fb33bf2f4fdc9f2f46cced8823e3f14f11cf3132dfdc7475836f066",
     "write": true,
     "human_only": false,
@@ -2013,7 +2013,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "publish-board-snapshot": {
     "ingress_key": "mcp-tool:publish-board-snapshot",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "0786bbdf9ad6e7491088190d98b3ae8eec5eefe8658069ce3830eef42f84fc1e",
     "write": true,
     "human_only": false,
@@ -2093,7 +2093,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-board-answers": {
     "ingress_key": "mcp-tool:read-board-answers",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
     "write": false,
     "human_only": false,
@@ -2303,7 +2303,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-profiles": {
     "ingress_key": "mcp-tool:read-profiles",
     "source_locator": "mcp-server/src/agent-profiles.js",
-    "source_digest": "d16684a50387520fa3dc9117a2688940f97afdcec8e9a838fa29f198d4c3fddc",
+    "source_digest": "4f43cd92adb33b847da48c8383e56599dbaaf93d1bd44d9c29e449eb707ef455",
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
@@ -2313,7 +2313,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-progress-board": {
     "ingress_key": "mcp-tool:read-progress-board",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "09ba6375dcf875532b1fdb4424f53890ed66ef3ff23ae0e769a312c15b8a9f85",
     "write": false,
     "human_only": false,
@@ -2513,7 +2513,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "recall-memory": {
     "ingress_key": "mcp-tool:recall-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "84213490479ffbfb80f837c67f8af28b5066459043bff72c81ceb9caa0bd4ce5",
     "write": false,
     "human_only": false,
@@ -2533,7 +2533,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-board-answer-applied": {
     "ingress_key": "mcp-tool:record-board-answer-applied",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "241e3d8252a22c4401747e23539e8fcc8a36f3a080462ab257f1a32810417519",
     "write": true,
     "human_only": false,
@@ -3218,7 +3218,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "review-memory": {
     "ingress_key": "mcp-tool:review-memory",
     "source_locator": "mcp-server/src/memory.js",
-    "source_digest": "725645230b33eea9cce1ed90c34568d7ad7cd7c86b7ed40a13a299bd8608c119",
+    "source_digest": "a697ede468dd2557f693a49994dcaa09b6194fe2a13fddfe5941424950317c6f",
     "schema_digest": "ec38092619c5d4bd2a2d4aa81c3b20c380f97255b02fd4b36fa3792d5805168b",
     "write": false,
     "human_only": false,
@@ -3238,7 +3238,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "revise-board-question": {
     "ingress_key": "mcp-tool:revise-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "51f532f3d30899176c41a4eccebce4197af6525a3d16368729444528cb5b1134",
+    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,
