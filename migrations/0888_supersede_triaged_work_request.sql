@@ -334,10 +334,15 @@ begin
     raise exception 'unknown_actor: unknown actor %', p_actor_slug;
   end if;
 
+  -- Both roles share the same lock order, including overlapping supersessions.
+  -- Read state and census only after any concurrent withdrawal has committed.
+  perform w.id from ops.work_request w
+   where w.ref in (p_work_request, p_superseded_by)
+   order by w.id for update;
+
   select w.id, w.state into v_id, v_state from ops.work_request w
    where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state in ('captured','triaged') and w.version = p_base_version
-   for update;
+     and w.state in ('captured','triaged') and w.version = p_base_version;
   if v_id is null then
     raise exception 'work_request_not_supersedable: no captured or triaged sourced Work Request % at version %',
       p_work_request, p_base_version;
