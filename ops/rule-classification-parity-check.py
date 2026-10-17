@@ -89,7 +89,7 @@ DB_ADVISORY_CLASS = "judgment_advisory"
 # preserved; the map must not claim a gate that does not enforce the duty.
 # Keep the exception exact and fail when either side changes its classification.
 PARTIAL_ADMISSION_RULES = {
-    "1fcaa63a",  # heavy-build phases beyond admission validators
+    "8400cd3d",  # sizing work is judgment; the admission does not mechanically size it
     "204391be",  # decide a missing product verb is required
     "a2e78f48",  # recognize a known repair
     "b7ec8f3b",  # review DoctorCRE surface grammar

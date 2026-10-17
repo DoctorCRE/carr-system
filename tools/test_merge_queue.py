@@ -90,6 +90,14 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class QueueTests(unittest.TestCase):
+    def test_required_checks_must_pass_without_skips(self):
+        queue = object.__new__(module.Queue)
+        for buckets, expected in ((['pass'], True), (['pass', 'skipping'], False),
+                                  (['skipping'], False), ([], False), (['pending'], False)):
+            with self.subTest(buckets=buckets), patch.object(queue, 'gh', return_value=[
+                    {'bucket': b} for b in buckets]):
+                self.assertEqual(queue.green('jbookout/carr-system', 7, 'a' * 40), expected)
+
     def setUp(self):
         patcher = patch.dict(os.environ, fixture_env(), clear=True)
         patcher.start()

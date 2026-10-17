@@ -1,16 +1,16 @@
 {
  "counts": {
-  "jev_compiled_triggers": 119,
+  "jev_compiled_triggers": 118,
   "pack_fallback_triggers": 9,
   "seeded_detector_rule_ids": 49,
   "seeded_detector_triggers": 14,
   "structural_extra_triggers": 2,
-  "triggers": 150
+  "triggers": 149
  },
  "generated_from": {
-  "jev_triggers_sha256": "f26d16ebdf35072ee9eee6eee07c4614a6d7131a379a917dbb40667afe87a62f",
-  "map_sha256": "34660009ba917c15d1ac95abfbae7a2458bd14dea0b447c97203c1f82c6353ab",
-  "triage_sha256": "e96ff4e7ec57ffb37f8b7e55b05b5cf75d28412d5a90581b6a644c411fd1e74b"
+  "jev_triggers_sha256": "f9d9f31c3f713dd62d5c9ea9c31bdbaffd6fe08435ae63b61cb0d706aac70a38",
+  "map_sha256": "eed92f90f880c10c4aeaad4a1220de16d59f38a3eaf4e7a2bee7f14e155546cb",
+  "triage_sha256": "8d16cb0706a1d568fa31df27a08cb1d880863e4456e700b041afb63ae7bde924"
  },
  "generated_note": "Compiled by ops/rule-jit-compile.py from ops/config/rule-triage.v1.json's per-rule `detector` fields and ops/config/rule-enforcement-map.json's rule_packs/rule_load_layers. Never hand-edit this file \u2014 run the compiler again after changing either input, and `--check` verifies the two never drift apart.",
  "max_rules_per_trigger": 5,
@@ -170,18 +170,6 @@
    ],
    "source": "pack_fallback",
    "trigger_id": "963b8f2da763"
-  },
-  {
-   "kind": "content_regex",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\bheavy[-\\s]?build\\b|\\bheavy\\s+build\\s+protocol\\b|\\b(?:write\\-work\\-shape|set\\-work\\-shape\\-disposition|propose\\-ready\\-plan|review\\-heavy\\-build\\-plan|accept\\-ready\\-plan|register\\-engineering\\-slice\\-plan|admit\\-engineering\\-slice|review\\-engineering\\-slice)\\b",
-   "rule_ids": [
-    "1fcaa63a"
-   ],
-   "source": "seeded_detector",
-   "trigger_id": "156b1b159ab5"
   },
   {
    "kind": "content_regex",
@@ -553,18 +541,6 @@
    ],
    "source": "jev_compiled",
    "trigger_id": "f5e23d5442dd"
-  },
-  {
-   "kind": "prompt_regex",
-   "packs": [
-    "governance-rules"
-   ],
-   "pattern": "\\badversarial\\s+cross\\-family\\b|\\bacceptance\\s+adversarial\\b|\\badmission\\s+machinery\\b|\\badmission\\s+typed\\b|\\bbuild\\s+protocol\\b|\\bheavy\\s+build\\b|\\badmission\\b",
-   "rule_ids": [
-    "1fcaa63a"
-   ],
-   "source": "jev_compiled",
-   "trigger_id": "0719db4adb4c"
   },
   {
    "kind": "prompt_regex",
@@ -1782,6 +1758,18 @@
    ],
    "source": "structural_extra",
    "trigger_id": "edbc364a81f9"
+  },
+  {
+   "kind": "verb",
+   "packs": [
+    "engineering-git"
+   ],
+   "pattern": "(?:^EnterPlanMode$|^UpdatePlan$|(?:^|__)propose-ready-plan$|(?:^|__)register-engineering-slice-plan$)",
+   "rule_ids": [
+    "8400cd3d"
+   ],
+   "source": "seeded_detector",
+   "trigger_id": "f0cb85afeadf"
   },
   {
    "kind": "verb",

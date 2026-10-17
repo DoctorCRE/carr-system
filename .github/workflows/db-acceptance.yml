@@ -36,6 +36,7 @@ name: DB acceptance
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     # Only the paths that can actually break the disposable-Postgres lane: the
     # migrations themselves, the committed snapshot they apply onto, the CI
     # entry points, and the libraries/tools the acceptance programs import.
@@ -83,6 +84,7 @@ permissions:
 
 jobs:
   acceptance:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: ${{ matrix.shard == 0 && 'local-db-ci --class migration' || format('DB shadow shard {0}/2', matrix.shard) }}
     strategy:
       fail-fast: false # one red must not cancel the other diagnostic reports

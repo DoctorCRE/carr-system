@@ -49,6 +49,12 @@
         "claude-record-event",
         "codex-record-event"
       ]
+    },
+    {
+      "reference": "CARR rule retirement receipt 09de9da4, Joe ruling 2026-10-17, purge job O",
+      "verbs": [
+        "review-heavy-build-plan"
+      ]
     }
   ]
 }

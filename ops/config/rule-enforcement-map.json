@@ -208,7 +208,6 @@
       "893aeec5",
       "7b4ba3aa",
       "1f750181",
-      "1fcaa63a",
       "737a68d6",
       "a7784a18",
       "204391be",
@@ -224,7 +223,8 @@
       "578fdd91",
       "07dde434",
       "cfe6b5c6",
-      "c363bd8b"
+      "c363bd8b",
+      "8400cd3d"
     ]
   },
   "categories": {
@@ -898,11 +898,6 @@
       "planned_control": "A guest-list check that runs the same pairing predicate as e6e0b0e7 over an invite list, once events and vendor Category are both on the record.",
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. Guest lists are assembled outside any tool call, and the rule hands the exception to Joe explicitly for a given event."
-    },
-    "1fcaa63a": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The admission validators already refuse a heavy proposal lacking shape, manifest, typed master plan and a resolving runbook section. The half THIS rule adds -- the upfront research fleet, cheapest-qualified routing per slice, genuinely fresh review seats, and dispatcher-managed execution -- is the half doctrine heavy-build-protocol marks as binding by law with no mechanical gate behind it."
     },
     "1fddcffb": {
       "category": "judgment_advisory",
@@ -2074,6 +2069,11 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Grouping open PRs by shared files and building one combined branch is an orchestrator's merge-planning act across many PRs. No single merge or push call shows whether an overlapping PR should have joined a batch."
+    },
+    "8400cd3d": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Sizing work and selecting the pstack and Pocock procedure require judgment before building; there is no admission gate."
     }
   },
   "rule_load_layers": {
@@ -2215,13 +2215,6 @@
       "packs": [
         "vendor-intros"
       ]
-    },
-    "1fcaa63a": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "Joe's ruling 554db63d, overruling a layer0 call: \"i would argue its triggered by me calling for a heavy build.\" Nothing task-specific belongs in layer0 (rule 1fddcffb), and the boot cap is 24 of 35 used; this rule fires on an occasion, not at every boot."
     },
     "1fddcffb": {
       "load_layer": "layer0",
@@ -3440,6 +3433,13 @@
       "packs": [
         "engineering-git"
       ]
+    },
+    "8400cd3d": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ],
+      "why": "Deliver the sizing procedure when starting engineering work."
     }
   },
   "rule_packs": {

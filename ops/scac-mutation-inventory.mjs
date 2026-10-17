@@ -521,6 +521,19 @@ export function fullInventory(tools = defaultTools) {
 }
 
 
+export function renderCurrentContracts(tools, source) {
+  const rows = mcpInventory(tools);
+  const operations = Object.fromEntries(rows.map(row => [row.operation,
+    Object.fromEntries(["ingress_key", "source_locator", "source_digest", "schema_digest",
+      "write", "human_only", "authority_only", "delegates_to"].map(key => [key, row[key]])),
+  ]));
+  return source
+    .replace(/export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "[0-9a-f]{64}";/,
+      `export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "${sha256(operations)}";`)
+    .replace(/export const SCAC_MUTATION_OPERATIONS = Object.freeze\(\{[\s\S]*?\n\}\);/,
+      `export const SCAC_MUTATION_OPERATIONS = Object.freeze(${JSON.stringify(operations, null, 2)});`);
+}
+
 export function assertCurrentContracts(tools) {
   const rows = mcpInventory(tools);
   if (rows.length !== Object.keys(SCAC_MUTATION_OPERATIONS).length)
@@ -548,6 +561,12 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     writeFileSync(path, `${current.trimEnd()}\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze(${JSON.stringify(contract, null, 2)});\n`);
   }
   const { TOOLS } = await import("../mcp-server/src/tools.js");
-  assertCurrentContracts(TOOLS);
-  console.log("current MCP contracts: OK");
+  if (process.argv[2] === "--write-current") {
+    const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
+    writeFileSync(path, renderCurrentContracts(TOOLS, readFileSync(path, "utf8")));
+    console.log("current MCP source contracts regenerated; DB registry and grants preserved");
+  } else {
+    assertCurrentContracts(TOOLS);
+    console.log("current MCP contracts: OK");
+  }
 }
