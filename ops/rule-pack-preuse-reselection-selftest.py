@@ -955,18 +955,19 @@ check("rule failure stays visible and redacts provider output",
 
 recorded_ids = ["49533583", "c66dc739", "1fcaa63a", "df55c398", "b42f11a0"]
 recorded_ids, recorded_packs = rail.semantic_delivery(REPO, recorded_ids)
+missing_response_id = recorded_ids[0]
 recorded_advice = [{"id": rid, "probability": 1.0,
                     "binding_model": "compiled-trigger", "source": "compiled_trigger"}
                    for rid in recorded_ids]
 partial_response = gen_selector_result(
-    packs=recorded_packs, ids=[rid for rid in recorded_ids if rid != "1fcaa63a"])
+    packs=recorded_packs, ids=[rid for rid in recorded_ids if rid != missing_response_id])
 partial_output = rail.process(prompt_payload(), runner=Runner(partial_response),
                               adviser=lambda _: recorded_advice)
 partial_text = context(partial_output)
-check("a missing obsolete rule cannot discard authenticated deterministic matches",
+check("a missing store rule cannot discard authenticated deterministic matches",
       all(f"binding jit rule {rid}" in partial_text
-          for rid in recorded_ids if rid != "1fcaa63a")
-      and "1fcaa63a" in partial_text and "RULE DELIVERY FAILED" in partial_text,
+          for rid in recorded_ids if rid != missing_response_id)
+      and missing_response_id in partial_text and "RULE DELIVERY FAILED" in partial_text,
       partial_text[:200])
 
 for label, broken_runner in [
@@ -1016,7 +1017,7 @@ finally:
 check("the hook defers dedupe and acknowledges only full authenticated statements",
       all(options.get("defer_delivery") is True for options in selector_options)
       and [entry for entry in acknowledged_ids if entry[1]] == [
-          ("session-prompt", [rid for rid in recorded_ids if rid != "1fcaa63a"])],
+          ("session-prompt", [rid for rid in recorded_ids if rid != missing_response_id])],
       acknowledged_ids)
 
 healthy_large = gen_selector_result(packs=semantic_packs, ids=[semantic_id])
