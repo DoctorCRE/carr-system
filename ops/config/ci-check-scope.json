@@ -4,7 +4,7 @@
   "local_only": [
     {
       "check": "migration-production-proof.py",
-      "reason": "Production ledger SELECT uses the existing local release status credential. Orchestrator ruling 2026-10-16 forbids production access on hosted CI. Offline ledger fixtures run in gates. Release preflight may call this script directly before an apply.",
+      "reason": "Production ledger SELECT and schema-only catalog dump use the existing local release status credential. Orchestrator ruling 2026-10-16 forbids production access on hosted CI. Offline selftests run in gates; the migration lane also restores and compares a database fixture. Release preflight may call this script directly before an apply.",
       "added": "2026-10-16"
     },
     {
