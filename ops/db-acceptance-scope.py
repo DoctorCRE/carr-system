@@ -31,7 +31,9 @@ FULL_PATTERNS = (
     'ops/*acceptance*', 'ops/*rule-delivery*', 'ops/*canonical-ownership*',
     'ops/config/rule-enforcement-map*', 'ops/config/*migration*',
     'tools/migrat*', 'tools/test_migr*', 'tools/*schema*', 'tools/git_env.py',
-    'tools/renumber-at-merge*',
+    'tools/renumber-at-merge*', 'tools/*f03*', 'ops/*f03*', 'ops/*.sql',
+    'mcp-server/test/*pg*', 'mcp-server/test/*f03*',
+    'mcp-server/test/find-rule-supersedes*', 'mcp-server/test/catch-me-up-writer-route*',
 )
 
 
@@ -44,7 +46,7 @@ def changed_paths(event: dict) -> list[str] | None:
     if not pr:
         return None
     base, head = 'origin/' + pr['base']['ref'], pr['head']['sha']
-    out = subprocess.run(['git', 'diff', '--name-only', f'{base}...{head}'], cwd=ROOT,
+    out = subprocess.run(['git', 'diff', '--name-only', '--no-renames', f'{base}...{head}'], cwd=ROOT,
                          capture_output=True, text=True, check=True, timeout=120).stdout
     return [line for line in out.splitlines() if line]
 
