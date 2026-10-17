@@ -489,6 +489,33 @@ class WorkerIdentityReconciliation(Base):
         self.assertEqual(self.fx.records()[-1]["reason"], "history_diverged")
         self.assertEqual(runner.calls, [])
 
+    def test_target_before_merged_live_side_branch_is_refused(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        (self.fx.repo / "mcp-server/s.js").write_text("already live")
+        git(self.fx.repo, "add", "mcp-server/s.js")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        row = self.fx.records()[-1]
+        self.assertEqual(row["status"], "blocked")
+        self.assertEqual(row["reason"], "history_diverged")
+        self.assertEqual(row["sha"], candidate)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
     def test_unreadable_identity_refuses_even_when_checkpoint_equals_main(self):
         for response in [OSError("offline"), {}, {"git_sha": {"value": "short"}},
                          {"git_sha": "malformed"},
