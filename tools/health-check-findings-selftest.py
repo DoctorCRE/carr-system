@@ -648,6 +648,21 @@ class VerbUsageLines(unittest.TestCase):
 class PaidCapCanonicalHealthTests(unittest.TestCase):
     """Execute the shipped health function and CLI with only external readers stubbed."""
 
+    def test_cloudflare_rows_record_each_failure_and_only_verified_green(self):
+        import contextlib, io
+        ns = self.namespace()
+        rows = [
+            {"subject": "studio:CLOUDFLARE_API_TOKEN", "status": "failed", "line": "WARN Cloudflare studio CLOUDFLARE_API_TOKEN failed"},
+            {"subject": "macbook:CLOUDFLARE_API_TOKEN", "status": "ok", "line": "OK Cloudflare macbook CLOUDFLARE_API_TOKEN ok"},
+            {"subject": "dell:CLOUDFLARE_API_TOKEN", "status": "unreachable", "line": "WARN Cloudflare dell CLOUDFLARE_API_TOKEN unreachable"},
+        ]
+        ns["_cloudflare_rows"] = lambda: rows
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ns["_canonical_health"](), 1)
+        actual = {r["subject"] for r in ns["_FINDINGS"] if r["key"] == "cloudflare_token"}
+        self.assertEqual(actual, {"studio:CLOUDFLARE_API_TOKEN", "dell:CLOUDFLARE_API_TOKEN"})
+        self.assertEqual(ns["_GREEN_EVIDENCE"]["cloudflare_token"], {"macbook:CLOUDFLARE_API_TOKEN"})
+
     def namespace(self):
         import os, re, sys, time, subprocess
         from unittest.mock import Mock
@@ -659,6 +674,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
                   _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
+                  _cloudflare_rows=lambda: [],
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
                   # The breach consumer reaches the record layer; its own
                   # hermetic suite is ops/health-act-selftest.py.
