@@ -101,35 +101,6 @@ test("acceptance requires the exact successor hash and never treats acknowledgem
   assert.equal("authority" in acknowledgement, false);
 });
 
-test("the existing heavy review seam binds the successor admission and refuses its builder session", async () => {
-  const successorHash = `sha256:${"b".repeat(64)}`;
-  const admissionHash = `sha256:${"d".repeat(64)}`;
-  const review = {
-    idempotency_key: "10000000-0000-4000-8000-000000000005", human_ref: "WR-000125",
-    plan_hash: successorHash, admission_hash: admissionHash, verdict: "pass",
-    reviewer_session_ref: "session:reviewer:wr125-successor", review_summary: "Fresh review checked the exact successor heavy-build contract and immutable admission.",
-    evidence_refs: ["safe:wr125:successor-review"], gaps: [],
-  };
-  const db = { calls: [], query: async (sql, params = []) => {
-    db.calls.push({ sql, params });
-    if (sql.includes("sourced_heavy_build_review_target")) return { rows: [{
-      work_request_id: "20000000-0000-4000-8000-000000000001", ref: "WR-000125", builder_session_ref: HEAVY_BUILD.builder_session_ref,
-    }] };
-    if (sql.includes("review_sourced_heavy_build_plan")) return { rows: [{
-      work_request_id: "20000000-0000-4000-8000-000000000001", ref: "WR-000125", review_ref: "HBR-successor", review_hash: `sha256:${"e".repeat(64)}`,
-      admission_ref: "HBA-successor", admission_hash: admissionHash, verdict: params[4], reviewer_session_ref: params[5],
-    }] };
-    throw new Error(`unexpected query: ${sql}`);
-  } };
-  const out = await tools()["review-heavy-build-plan"].handler(db, ACTOR, review);
-  assert.equal(out.status, "ready_for_human_plan_acceptance");
-  assert.deepEqual(db.calls[0].params, ["WR-000125", successorHash, admissionHash]);
-
-  await assert.rejects(() => tools()["review-heavy-build-plan"].handler(db, ACTOR,
-    { ...review, idempotency_key: "10000000-0000-4000-8000-000000000006", reviewer_session_ref: HEAVY_BUILD.builder_session_ref }),
-  error => error.payload?.error === "heavy_build_review_context_not_fresh");
-});
-
 test("effective-plan and actor-owned discovery are bounded readbacks", async () => {
   assert.equal(tools()["effective-ready-plan"].writerConnection, true,
     "tenant-scoped effective-plan reads require the actor-context transaction path");

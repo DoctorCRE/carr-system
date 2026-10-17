@@ -16,11 +16,10 @@ const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version"
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
   "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
   "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
-const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
+const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"]);
 const ACCEPT_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash"]);
 const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
 const ACK_AMENDMENT_FIELDS = new Set(["idempotency_key","notice_id"]);
-const HEAVY_REVIEW_FIELDS = new Set(["idempotency_key","human_ref","plan_hash","admission_hash","verdict","reviewer_session_ref","review_summary","evidence_refs","gaps"]);
 const OUTCOME_PROPOSAL_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash","criterion_results","evidence_refs","blocker_code","result_summary","observed_minutes","interaction_surface","heavy_session_used","manual_context_transfers"]);
 const ACCEPT_OUTCOME_FIELDS = new Set(["idempotency_key","human_ref","base_version","feedback_hash"]);
 const SAFE_REF = /^safe:[a-z0-9][a-z0-9:_./-]*$/;
@@ -36,7 +35,7 @@ const EVIDENCE_CLASS = Object.freeze({ primary_sources: "primary_source", mainta
 
 function text(value) { return typeof value === "string" ? value.trim() : ""; }
 
-async function deliverySourceForPlan(c, actor, row, args, classified, admission) {
+async function deliverySourceForPlan(c, actor, row, args) {
   await c.query("savepoint siep02_rule_delivery_source");
   let registry;
   try {
@@ -88,16 +87,6 @@ async function deliverySourceForPlan(c, actor, row, args, classified, admission)
         observability_ref: args.observability_ref,
         caps: args.caps,
       },
-      heavyClassification: {
-        tier: admission ? "heavy" : classified.tier,
-        reasons: admission?.classifier_reasons || classified.reasons || [],
-      },
-      admittedHeavyContract: admission ? {
-        admission_ref: admission.admission_ref,
-        admission_hash: admission.admission_hash,
-        builder_session_ref: admission.builder_session_ref,
-        master_plan: args.heavy_build.master_plan,
-      } : null,
       packIndex: state.pack_index,
       mapDigest: digest,
     });
@@ -162,17 +151,6 @@ function validateHeavyBuildContract(raw, ToolError) {
       !exactKeys(check, ["artifact", "comparator", "failure_condition"]) || [check.artifact, check.comparator, check.failure_condition].some(value => text(value).length < 5 || text(value).length > 500)))
     fail("master_plan.planned_checks", "each check must name artifact, comparator, and failure condition");
   return raw;
-}
-
-function validateHeavyReview(args, ToolError) {
-  if (Object.keys(args).some(key => !HEAVY_REVIEW_FIELDS.has(key))) throw new ToolError({ error: "invalid_heavy_build_review_fields" });
-  if (!UUID.test(args.idempotency_key || "") || !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !SHA256.test(args.plan_hash || "") ||
-      !SHA256.test(args.admission_hash || "") || !new Set(["pass", "fail"]).has(args.verdict) || !SESSION_REF.test(args.reviewer_session_ref || "") ||
-      text(args.review_summary).length < 20 || text(args.review_summary).length > 1000 ||
-      !Array.isArray(args.evidence_refs) || !args.evidence_refs.length || args.evidence_refs.length > 12 || args.evidence_refs.some(ref => !SAFE_REF.test(ref || "")) ||
-      new Set(args.evidence_refs).size !== args.evidence_refs.length || !boundedStrings(args.gaps, 0, 12, 10, 500) ||
-      (args.verdict === "pass" && args.gaps.length) || (args.verdict === "fail" && !args.gaps.length))
-    throw new ToolError({ error: "invalid_heavy_build_review" });
 }
 
 function validate(args, ToolError) {
@@ -319,7 +297,6 @@ function validatePlan(args, ToolError) {
         return lowerLeft < lowerRight ? -1 : lowerLeft > lowerRight ? 1 : left < right ? -1 : left > right ? 1 : 0;
       }))))
     throw new ToolError({ error: "invalid_source_merge_scope" });
-  if (args.heavy_build !== undefined) validateHeavyBuildContract(args.heavy_build, ToolError);
 }
 function validateAcceptPlan(args, ToolError) {
   if (Object.keys(args).some(k => !ACCEPT_PLAN_FIELDS.has(k))) throw new ToolError({ error: "invalid_accept_plan_fields" });
@@ -332,16 +309,16 @@ function validateAcceptPlan(args, ToolError) {
 function validatePlanAmendment(args, ToolError) {
   if (Object.keys(args).some(k => !AMEND_PLAN_FIELDS.has(k)))
     throw new ToolError({ error: "invalid_ready_plan_amendment_fields" });
-  const { predecessor_plan_hash: predecessorPlanHash, ...plan } = args;
+  const { predecessor_plan_hash: predecessorPlanHash, heavy_build: heavyBuild, ...plan } = args;
   validatePlan(plan, ToolError);
   if (!SHA256.test(predecessorPlanHash || ""))
     throw new ToolError({ error: "invalid_ready_plan_amendment_predecessor" });
   // A successor replaces an already executable contract.  It therefore always
   // carries its own closed heavy-build evidence; the DB records that evidence
   // against the new immutable plan before any review or acceptance can see it.
-  if (!args.heavy_build) throw new ToolError({ error: "heavy_build_admission_required",
+  if (!heavyBuild) throw new ToolError({ error: "heavy_build_admission_required",
     missing: ["research_manifest", "master_plan", "builder_session_ref"] });
-  validateHeavyBuildContract(args.heavy_build, ToolError);
+  validateHeavyBuildContract(heavyBuild, ToolError);
 }
 
 function validateAmendmentAcknowledgement(args, ToolError) {
@@ -1044,7 +1021,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "propose-ready-plan": {
       write: true,
-      description: "Append one immutable, bounded ready-plan proposal to a triaged Work Request. The database derives whether the work is heavy from the request and plan size. Heavy work is refused until a current Work Shape plus a typed research manifest and complete master plan are bound to the proposal. It does not change request state, assign work, dispatch, execute, or approve.",
+      description: "Append one immutable, bounded ready-plan proposal to a triaged Work Request. It does not change request state, assign work, dispatch, execute, or approve.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" }, human_ref: { type: "string" }, base_version: { type: "integer", minimum: 1 },
         scope_summary: { type: "string", minLength: 1, maxLength: 1000 }, runbook_ref: { type: "string" },
@@ -1063,26 +1040,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               },
             },
           } },
-        heavy_build: HEAVY_BUILD_SCHEMA,
       }, required:["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"] },
       handler: async (c, actor, args) => {
         validatePlan(args, ToolError);
         return withEnvelope(c, actor, "propose-ready-plan", { ...args, _server_actor_id: actor.id }, async () => {
-          const classified = (await c.query(
-            `select * from ops.classify_sourced_work_request_build($1::text,$2::integer,$3::text,$4::jsonb,$5::jsonb)
-               /* work-request-intake:classify-ready-plan */`,
-            [args.human_ref, args.base_version, text(args.scope_summary), JSON.stringify(args.dependency_refs), JSON.stringify(args.caps)])).rows[0];
-          if (!classified) throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
-            resolution: "re-read the exact current triaged Work Request before proposing its plan" });
-          const reasons = Array.isArray(classified.reasons) ? classified.reasons : [];
-          const heavy = classified.tier === "heavy" || args.heavy_build !== undefined;
-          if (heavy && !classified.shape_ready) throw new ToolError({ error: "heavy_build_shape_required", human_ref: args.human_ref,
-            classification_reasons: reasons, shape_disposition: classified.shape_disposition || null,
-            resolution: "set Work Shape disposition to required and write the current evidence-backed Work Shape before proposing a heavy plan" });
-          if (heavy && !args.heavy_build) throw new ToolError({ error: "heavy_build_admission_required", human_ref: args.human_ref,
-            classification_reasons: reasons, missing: ["research_manifest", "master_plan", "builder_session_ref"],
-            resolution: "finish the research manifest and complete target-product master plan, then retry the same planning step" });
-
           const result = await c.query(
             `select * from ops.propose_sourced_work_request_plan($1::text,$2::integer,$3::text,$4::text,$5::jsonb,$6::text,$7::text,$8::jsonb,$9::uuid)
                /* work-request-intake:propose-ready-plan */`,
@@ -1090,67 +1051,15 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
              args.recovery_ref, args.observability_ref, JSON.stringify(args.caps), args.idempotency_key]);
           const row = result.rows[0];
           if (!row) throw new ToolError({ error: "version_conflict" });
-          let admission = null;
-          if (heavy) {
-            const effectiveReasons = reasons.length ? reasons : ["caller:explicit-heavy-contract"];
-            admission = (await c.query(
-              `select * from ops.record_sourced_heavy_build_admission($1::uuid,$2::text,$3::integer,$4::jsonb,$5::jsonb,$6::uuid,$7::uuid)
-                 /* work-request-intake:record-heavy-admission */`,
-              [row.plan_id, args.human_ref, args.base_version, JSON.stringify(effectiveReasons), JSON.stringify(args.heavy_build), actor.id, args.idempotency_key])).rows[0];
-            if (!admission) throw new ToolError({ error: "heavy_build_admission_not_recorded" });
-          }
-          const ruleDeliverySource = await deliverySourceForPlan(c, actor, row, args, classified, admission);
+          const ruleDeliverySource = await deliverySourceForPlan(c, actor, row, args);
           await writeEvent(c, actor, "propose-ready-plan", "ops_work_request", row.work_request_id, {
             field: "ready_plan", new: { plan_ref: row.plan_ref, plan_hash: row.plan_hash, runbook_ref: row.runbook_ref,
-              build_tier: heavy ? "heavy" : "standard", admission_hash: admission?.admission_hash || null,
               rule_delivery_contract_digest: ruleDeliverySource.contract_digest || null }, idempotency_key: args.idempotency_key,
           });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), plan_ref: row.plan_ref,
             plan_hash: row.plan_hash, scope_summary: row.scope_summary, runbook_ref: row.runbook_ref,
             runbook_revision_id: row.runbook_revision_id, runbook_content_hash: row.runbook_content_hash,
-            build_admission: heavy ? { tier: "heavy", reasons: admission.classifier_reasons || reasons, required: true,
-              admission_ref: admission.admission_ref, admission_hash: admission.admission_hash,
-              next_required_action: "fresh independent plan review" } : { tier: "standard", reasons, required: false },
             rule_delivery_source: ruleDeliverySource };
-        });
-      },
-    },
-    "review-heavy-build-plan": {
-      write: true,
-      description: "Record a fresh-context independent review of one exact heavy-build admission and immutable plan. A passing receipt is required before human plan acceptance; this verb never accepts, dispatches, executes, or changes Work Request state.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {
-        idempotency_key: { type: "string" }, human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
-        plan_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" }, admission_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
-        verdict: { type: "string", enum: ["pass", "fail"] }, reviewer_session_ref: { type: "string", minLength: 17, maxLength: 207 },
-        review_summary: { type: "string", minLength: 20, maxLength: 1000 },
-        evidence_refs: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 6, maxLength: 300 } },
-        gaps: { type: "array", maxItems: 12, items: { type: "string", minLength: 10, maxLength: 500 } },
-      }, required: ["idempotency_key", "human_ref", "plan_hash", "admission_hash", "verdict", "reviewer_session_ref", "review_summary", "evidence_refs", "gaps"] },
-      handler: async (c, actor, args) => {
-        validateHeavyReview(args, ToolError);
-        return withEnvelope(c, actor, "review-heavy-build-plan", { ...args, _server_actor_id: actor.id }, async () => {
-          const target = (await c.query(
-            `select * from ops.sourced_heavy_build_review_target($1::text,$2::text,$3::text)
-               /* work-request-intake:heavy-review-target */`,
-            [args.human_ref, args.plan_hash, args.admission_hash])).rows[0];
-          if (!target) throw new ToolError({ error: "heavy_build_review_target_not_found" });
-          if (target.builder_session_ref === args.reviewer_session_ref) throw new ToolError({ error: "heavy_build_review_context_not_fresh",
-            builder_session_ref: target.builder_session_ref,
-            resolution: "run the review in a genuinely fresh session and pass that session's distinct stable reference" });
-          const row = (await c.query(
-            `select * from ops.review_sourced_heavy_build_plan($1::text,$2::text,$3::text,$4::uuid,$5::text,$6::text,$7::text,$8::jsonb,$9::jsonb,$10::uuid)
-               /* work-request-intake:review-heavy-plan */`,
-            [args.human_ref, args.plan_hash, args.admission_hash, actor.id, args.verdict, args.reviewer_session_ref,
-             text(args.review_summary), JSON.stringify(args.evidence_refs), JSON.stringify(args.gaps), args.idempotency_key])).rows[0];
-          if (!row) throw new ToolError({ error: "heavy_build_review_not_recorded" });
-          await writeEvent(c, actor, "review-heavy-build-plan", "ops_work_request", row.work_request_id, {
-            field: "heavy_build_plan_review", new: { plan_hash: args.plan_hash, admission_hash: args.admission_hash,
-              review_ref: row.review_ref, review_hash: row.review_hash, verdict: row.verdict }, idempotency_key: args.idempotency_key,
-          });
-          return { ok: true, human_ref: row.ref, plan_hash: args.plan_hash, admission_ref: row.admission_ref,
-            admission_hash: row.admission_hash, review_ref: row.review_ref, review_hash: row.review_hash,
-            verdict: row.verdict, reviewer_session_ref: row.reviewer_session_ref,
-            status: row.verdict === "pass" ? "ready_for_human_plan_acceptance" : "revision_required" };
         });
       },
     },

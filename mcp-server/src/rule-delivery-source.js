@@ -28,30 +28,9 @@ export function literalTriggerMatches(text, trigger) {
   return new RegExp(`${left}${escapeRegex(needle)}${right}`, "iu").test(String(text || ""));
 }
 
-function reasonText(reason) {
-  const value = String(reason || "");
-  const body = value.includes(":") ? value.slice(value.indexOf(":") + 1) : value;
-  return body.replaceAll("_", " ").replaceAll("-", " ");
-}
-
-function textValues(value) {
-  if (Array.isArray(value)) return value.flatMap(textValues);
-  if (value && typeof value === "object") return Object.values(value).flatMap(textValues);
-  return value === null || value === undefined ? [] : [String(value)];
-}
-
 function acceptanceProse(criteria) {
   return (Array.isArray(criteria) ? criteria : []).flatMap(item =>
     item && typeof item === "object" && typeof item.text === "string" ? [item.text] : []);
-}
-
-function masterPlanProse(plan) {
-  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return [];
-  return [
-    "product_goal", "non_goals", "architecture", "authority_boundaries",
-    "planned_checks", "baseline_comparison", "release_strategy", "rollback_strategy",
-    "observability_strategy", "fully_shipped_definition", "prerequisite_policy",
-  ].flatMap(field => textValues(plan[field]));
 }
 
 function normalizeDigest(value) {
@@ -88,17 +67,6 @@ function closedPlan(plan) {
   };
 }
 
-function closedAdmission(admission) {
-  if (!admission) return null;
-  return {
-    admission_ref: String(admission.admission_ref),
-    admission_hash: String(admission.admission_hash),
-    builder_session_ref: String(admission.builder_session_ref),
-    master_plan: admission.master_plan && typeof admission.master_plan === "object"
-      ? canonical(admission.master_plan) : null,
-  };
-}
-
 export async function ruleDeliverySourceDigest(projection) {
   const preimage = { ...projection };
   delete preimage.contract_digest;
@@ -107,8 +75,6 @@ export async function ruleDeliverySourceDigest(projection) {
 
 export async function deriveRuleDeliverySource({
   plan,
-  heavyClassification,
-  admittedHeavyContract,
   packIndex,
   mapDigest,
 }) {
@@ -121,16 +87,6 @@ export async function deriveRuleDeliverySource({
       || !/^sha256:[0-9a-f]{64}$/.test(storedPlan.plan_hash)) {
     throw new TypeError("an exact persisted sourced plan is required");
   }
-  if (!heavyClassification || !["standard", "heavy"].includes(heavyClassification.tier)
-      || !Array.isArray(heavyClassification.reasons)
-      || heavyClassification.reasons.some(reason => typeof reason !== "string" || !reason.trim())) {
-    throw new TypeError("the exact typed heavy-build classifier result is required");
-  }
-  const tier = heavyClassification.tier;
-  const reasons = [...new Set(heavyClassification.reasons)].sort();
-  const admission = closedAdmission(admittedHeavyContract);
-  if (tier === "heavy" && !admission) throw new TypeError("heavy delivery source requires its admitted contract");
-
   if (!Array.isArray(packIndex) || packIndex.length < 1) {
     throw new TypeError("a nonempty typed rule pack index is required");
   }
@@ -151,8 +107,6 @@ export async function deriveRuleDeliverySource({
     storedPlan.desired_outcome,
     ...acceptanceProse(storedPlan.acceptance_criteria),
     storedPlan.scope_summary,
-    ...reasons.map(reasonText),
-    ...masterPlanProse(admission?.master_plan),
   ].join("\n");
   const matched = packIndex
     .map(pack => ({
@@ -171,16 +125,6 @@ export async function deriveRuleDeliverySource({
       plan_ref: storedPlan.plan_ref,
       plan_hash: storedPlan.plan_hash,
     },
-    build_classifier: {
-      function: "ops.heavy_build_classification",
-      tier,
-      reasons,
-    },
-    admission: admission ? {
-      admission_ref: admission.admission_ref,
-      admission_hash: admission.admission_hash,
-      builder_session_ref: admission.builder_session_ref,
-    } : null,
     trigger_map: {
       source: "ops/config/rule-enforcement-map.json",
       map_digest: installedDigest,

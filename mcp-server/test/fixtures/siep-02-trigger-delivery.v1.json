@@ -7,27 +7,27 @@
       "work_request_title": "Perform the schema migration",
       "desired_outcome": "The bounded update is complete.",
       "scope_summary": "Apply the reviewed change.",
-      "tier": "heavy",
-      "reasons": ["signal:structural_change"],
-      "expected_packs": ["engineering-git"]
+      "expected_packs": [
+        "engineering-git"
+      ]
     },
     {
       "case_ref": "multi-domain-plan",
       "work_request_title": "Prepare a client packet",
       "desired_outcome": "Deploy the LOI packet after tests pass.",
       "scope_summary": "Render the document and update the deal artifact.",
-      "tier": "heavy",
-      "reasons": ["signal:structural_change"],
-      "expected_packs": ["client-deal", "engineering-git", "surface-doctrine"]
+      "expected_packs": [
+        "client-deal",
+        "engineering-git",
+        "surface-doctrine"
+      ]
     },
     {
-      "case_ref": "classifier-reason-only",
+      "case_ref": "neutral-prose",
       "work_request_title": "Bounded change",
       "desired_outcome": "The requested behavior exists.",
       "scope_summary": "Apply the reviewed delta.",
-      "tier": "heavy",
-      "reasons": ["signal:new_capability"],
-      "expected_packs": ["source-study"]
+      "expected_packs": []
     }
   ]
 }
