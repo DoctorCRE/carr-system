@@ -1111,6 +1111,26 @@
           "notes": "Monday 06:00 local. Primary only; Grok stdout proposals pass deterministic validation. CLI failure records one defect and exits nonzero. No X writes."
         }
       ]
+    },
+    {
+      "key": "lead-signals-weekly",
+      "name": "Weekly NPPES signal preparation",
+      "purpose": "Classified NPPES proposals pending Joe/Dell verdicts; npi-sweep-weekly retains research, recommendations and ranked Hot output.",
+      "family": "Studio edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "bin/routine-run.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.routine-lead-signals-weekly.plist",
+          "runs_on": "primary",
+          "expected_cadence_seconds": 604800,
+          "cadence_grace_seconds": 172800,
+          "notes": "Monday 07:00 America/Chicago machine timezone. Preparation only. Keep npi-sweep-weekly enabled at 07:30 for judgment and ranked Hot output. Existing run-scheduled wrapper records the actual exit."
+        }
+      ]
     }
   ],
   "dependencies": [
