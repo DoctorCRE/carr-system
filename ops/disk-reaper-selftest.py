@@ -741,6 +741,47 @@ class TestReaper(unittest.TestCase):
         self.assertIn('_to_delete', staged['destination'])
         self.assertEqual(result['freed_bytes'], 0)
 
+    def test_execute_pr_evidence_cost_is_per_run_not_per_output(self):
+        roots = [self.root]
+        for name in ('app', 'factory'):
+            root = self.base / name
+            self.git(self.base, 'clone', '-q', str(self.remote), str(root))
+            roots.append(root)
+        for i, root in enumerate(roots):
+            self.git(root, 'remote', 'set-url', 'origin', f'https://github.com/fixture/repo-{i}.git')
+        self.config['repositories'] = [str(root) for root in roots]
+        self.config['locations'] = [dict(pattern=str(self.root / 'out/cache/*'), kind='output')]
+        self.config['retention_seconds']['output'] = 86400
+        cache = self.root / 'out/cache'
+        cache.mkdir(parents=True)
+        counts = {'lists': 0, 'details': 0}
+        original = reaper.command
+        def github(argv, **kwargs):
+            if argv[:2] == ['gh', 'api']:
+                counts['lists'] += 1
+                return subprocess.CompletedProcess(argv, 0, json.dumps([
+                    [dict(number=n, body='') for n in range(1, 6)]]), '')
+            if argv[:3] == ['gh', 'pr', 'view']:
+                counts['details'] += 1
+                detail = dict(body='Evidence out/cache/0' if argv[3] == '1' else '',
+                              title='', comments=[], reviews=[], files=[])
+                return subprocess.CompletedProcess(argv, 0, json.dumps(detail), '')
+            return original(argv, **kwargs)
+        engine = reaper.Reaper(self.root, self.config, pulls=reaper.Pulls(),
+                               processes=self.processes, usage=lambda _: (10**12, 0, 5*10**11))
+        with patch.object(reaper, 'command', side_effect=github):
+            for batch in range(2):
+                for n in range(batch * 8, (batch + 1) * 8):
+                    (cache / str(n)).write_text('regenerable')
+                for file in cache.iterdir():
+                    stamp = time.time() - 200000 + int(file.name) * 100
+                    os.utime(file, (stamp, stamp))
+                report = engine.run(execute=True, out_only=True)
+                self.assertEqual(report['errors'], [])
+                self.assertTrue((cache / '0').exists(), report)
+                self.assertEqual(sum(r['action'] == 'staged' for r in report['rows']), 5 if batch == 0 else 8)
+                self.assertEqual(counts, {'lists': 3 * (batch + 1), 'details': 15 * (batch + 1)})
+
     def test_output_protects_audits_state_recent_live_and_unknown(self):
         self.config['locations'] = [dict(pattern=str(self.root / 'out/build-runs/*'),
                                           kind='output', series='{parent}')]

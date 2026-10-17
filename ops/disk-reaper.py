@@ -265,6 +265,7 @@ class Reaper:
         self.clock, self.usage = clock, usage
         self.roots = [path(p) for p in config["repositories"] if path(p).is_dir()]
         self.fetched = set()
+        self.open_prs = {}
         self.registry_path = self.root / "out/disk-scratch-registry.json"
 
     def allowed_location(self, p, kinds=None):
@@ -398,10 +399,12 @@ class Reaper:
         rows = self.pulls.get(name, branch, fresh=fresh) if branch else []
         return [r for r in rows if (r.get("head", {}).get("repo") or {}).get("full_name", name) == name]
 
-    def artifact_referenced(self, candidate, fresh=False):
+    def artifact_referenced(self, candidate):
         for root in self.roots:
             name = self.pulls.repository(root)
-            for pr in self.pulls.get(name, fresh=fresh):
+            if name not in self.open_prs:
+                self.open_prs[name] = self.pulls.get(name, fresh=True)
+            for pr in self.open_prs[name]:
                 references = (pr.get("references", "") + " " + (pr.get("body") or "")).replace('\\/', '/')
                 direct = {str(candidate.path)}
                 parents = {str(candidate.path.parent)}
@@ -484,7 +487,7 @@ class Reaper:
             for pr in self.pr_rows(repo, fresh):
                 if pr["state"].lower() == "open":
                     return "open PR"
-        if candidate.kind in {"artifact", "output"} and self.artifact_referenced(candidate, fresh):
+        if candidate.kind in {"artifact", "output"} and self.artifact_referenced(candidate):
             return "referenced by open PR"
         return None
 
@@ -554,6 +557,7 @@ class Reaper:
                 append(out / "disk-reaper.jsonl", report)
                 return report
             try:
+                self.open_prs.clear()
                 report["pressure_before"] = self.pressure()
                 registry = self.registry()
                 dispatch = dispatches(self.config)
@@ -640,7 +644,7 @@ class Reaper:
                         staging = staging_root is not None
                         row.update(action="would_stage" if staging else "would_remove", reason="retention elapsed and safety checks passed")
                         if execute:
-                            # Refresh all mutable evidence at the mutation seam.
+                            # Recheck local mutable evidence before each mutation.
                             current = inventory(c.path)
                             if current.identity != info.identity or current.newest != info.newest:
                                 raise RuntimeError("directory changed before removal")
