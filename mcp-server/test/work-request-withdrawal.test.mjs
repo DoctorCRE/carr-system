@@ -20,7 +20,10 @@ const ID = "20000000-0000-0000-0000-000000000032";
 async function rejected(fn) { try { await fn(); assert.fail("expected refusal"); } catch (e) { assert.ok(e instanceof ToolError); return e.payload; } }
 
 class WithdrawFake {
-  constructor() { this.calls = []; this.toolCalls = new Map(); this.state = "captured"; this.version = 1; }
+  constructor({ from = "captured", refusal = null } = {}) {
+    this.calls = []; this.toolCalls = new Map(); this.state = from; this.version = from === "triaged" ? 2 : 1;
+    this.from = from; this.refusal = refusal;
+  }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push({ sql, params });
     if (sql.startsWith("select pg_advisory_xact_lock")) return { rows: [] };
@@ -34,13 +37,16 @@ class WithdrawFake {
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z" }] };
     }
+    // 0883's supersede function raises a named refusal; it never returns zero rows.
     if (sql.includes("supersede_sourced_work_request")) {
-      if (params[1] !== 1) return { rows: [] };
-      this.state = "superseded"; this.version = 2;
+      if (this.refusal) throw new Error(this.refusal);
+      if (params[1] !== this.version)
+        throw new Error(`work_request_not_supersedable: no captured or triaged sourced Work Request ${params[0]} at version ${params[1]}`);
+      this.state = "superseded"; this.version += 1;
       return { rows: [{ ref: "WR-000032", state: this.state, version: this.version,
         exit_reason: params[2], closed_at: "2026-08-28T00:00:00Z", superseded_by_ref: params[3] }] };
     }
-    if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID }] };
+    if (sql.includes("work-request-intake:withdrawn-subject")) return { rows: [{ id: ID, was_triaged: this.from === "triaged" }] };
     if (sql.startsWith("insert into event")) return { rows: [] };
     if (sql.startsWith("insert into tool_call")) { this.toolCalls.set(params[0], { request_hash: params[3], response: JSON.parse(params[4]),
         actor_id: params[2], organization_tenant_id: params[7] ?? null,
@@ -150,6 +156,31 @@ test("a replayed key returns the stored withdrawal and makes no second transitio
   assert.equal(db.calls.filter(x => x.sql.includes("decline_sourced_work_request")).length, 1);
 });
 
+test("a triaged request superseded through the verb is recorded as leaving triaged", async () => {
+  const db = new WithdrawFake({ from: "triaged" });
+  const out = await executeRegisteredTool(db, JOE, "supersede-work-request", { ...structuredClone(SUPERSEDE), base_version: 2 });
+  assert.deepEqual([out.state, out.version, out.superseded_by_ref], ["superseded", 3, "WR-000034"]);
+  const event = db.calls.find(x => x.sql.startsWith("insert into event"));
+  assert.deepEqual(JSON.parse(event.params[6]), { state: "triaged", version: 2 });
+});
+
+test("every refusal the supersede function names reaches the caller by that name", async () => {
+  const names = ["withdrawal_reason_missing", "unknown_actor", "successor_not_found", "successor_is_self",
+    "successor_withdrawn", "successor_not_sourced", "supersession_cycle", "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"];
+  for (const name of names) {
+    const detail = `${name}: WR-000032 is named by ops.sourced_work_request_plan.work_request_id`;
+    const out = await rejected(() => executeRegisteredTool(new WithdrawFake({ from: "triaged", refusal: detail }),
+      JOE, "supersede-work-request", { ...structuredClone(SUPERSEDE), base_version: 2 }));
+    assert.deepEqual(out, { error: name, human_ref: "WR-000032", superseded_by: "WR-000034", detail });
+  }
+});
+
+test("an unnamed database failure is not dressed up as a refusal", async () => {
+  const db = new WithdrawFake({ refusal: "connection terminated unexpectedly" });
+  await assert.rejects(() => executeRegisteredTool(db, JOE, "supersede-work-request", structuredClone(SUPERSEDE)),
+    error => !(error instanceof ToolError) && /connection terminated/.test(error.message));
+});
+
 // ------------------------------------------------------------------- the card
 // A card fake, separate from the write fake: the read path answers a different
 // set of queries and nothing about it should depend on a write having happened
@@ -182,7 +213,7 @@ test("a superseded request is still readable, projects as declined, and names it
   // And it asks nothing of anybody.
   assert.deepEqual(card.next_human_action, { label: "Superseded", effect: "none" });
   assert.deepEqual(card.actions, []);
-  // Withdrawal is captured-only, so there is no triage, plan or shape to report
+  // Superseded from captured, so there is no triage, plan or shape to report
   // and the card must not invent one.
   assert.equal(card.triage, null);
   assert.equal(card.plan, null);
@@ -190,6 +221,16 @@ test("a superseded request is still readable, projects as declined, and names it
   // A terminal row is never asked for pending outcome feedback: that read is
   // scoped to 'ready', and CardFake would throw if it were attempted.
   assert.equal(card.pending_outcome_feedback, null);
+});
+
+test("a request superseded from triaged still shows who triaged it", async () => {
+  const db = new CardFake({ ...BASE, state: "superseded", version: 3, superseded_by_ref: "WR-000034",
+    triage_classification: "operational", triaged_by_actor_slug: "joe", triaged_at: "2026-10-01T00:00:00Z" });
+  const card = await executeRegisteredTool(db, JOE, "work-request-card", { work_request: "WR-000032" });
+  assert.deepEqual(card.triage, { classification: "operational", human_actor_slug: "joe",
+    triaged_at: "2026-10-01T00:00:00Z" });
+  assert.equal(card.withdrawal.superseded_by_ref, "WR-000034");
+  assert.deepEqual(card.next_human_action, { label: "Superseded", effect: "none" });
 });
 
 test("a declined request reads the same way and carries no successor", async () => {
