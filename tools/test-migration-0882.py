@@ -47,12 +47,13 @@ def ddl(kind, name):
 class Recovery(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        initdb = shutil.which('initdb')
-        paths = [Path(initdb).parent] if initdb else []
-        paths.extend([Path('/opt/homebrew/opt/postgresql@18/bin'),
-                      Path('/usr/lib/postgresql/18/bin'), Path('/usr/lib/postgresql/17/bin')])
-        cls.bindir = next((p for p in paths if (p / 'initdb').is_file()), None)
-        if cls.bindir is None:
+        pg_spec = importlib.util.spec_from_file_location('local_pg_ci', ROOT / 'ops/local-pg-ci.py')
+        local_pg = importlib.util.module_from_spec(pg_spec)
+        sys.modules[pg_spec.name] = local_pg
+        pg_spec.loader.exec_module(local_pg)
+        try:
+            cls.bindir = local_pg.find_postgres_binaries().initdb.parent
+        except local_pg.LocalPGRefusal:
             raise unittest.SkipTest('PostgreSQL server binaries unavailable')
         cls.group = postgres_fixture_group()
         cls.group.__enter__()
