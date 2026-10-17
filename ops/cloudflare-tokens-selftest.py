@@ -18,6 +18,54 @@ sys.path.insert(0, str(ROOT))
 
 
 class TokenTests(unittest.TestCase):
+    def test_nightly_issuer_failed_readback_restores_original(self):
+        self._nightly_issuer_rollback('failed')
+
+    def test_nightly_issuer_interrupt_restores_original(self):
+        self._nightly_issuer_rollback(KeyboardInterrupt())
+
+    def _nightly_issuer_rollback(self, failure):
+        spec = importlib.util.spec_from_file_location('mint_harness', ROOT / 'ops/credential-mint-selftest.py')
+        harness = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = harness
+        spec.loader.exec_module(harness)
+        from lib import cloudflare_tokens as cf, token_store
+        with harness.world(roots=('CLOUDFLARE_TOKEN_ROOT',)) as world:
+            path = token_store.destination(cf.TOKEN_NAMES[0]).path
+            offline = False
+            candidates = []
+            def transport(machine, payload, **kwargs):
+                if machine == 'studio':
+                    candidates.append(payload['value'])
+                    return {payload['name']: cf.install(path, payload['name'], payload['value'])}
+                return {payload['name']: 'unreachable' if offline else 'ok'}
+            with patch.object(cf, 'on_machine', side_effect=transport):
+                with patch.object(cf, 'verify', return_value='ok'):
+                    world.night()
+                original = path.read_bytes()
+                first = world.stored(cf.TOKEN_NAMES[0])
+                offline = True
+                world.clock.now = harness.T0 + harness.timedelta(days=85)
+                with patch.object(cf, 'verify', side_effect=['ok', failure]):
+                    if isinstance(failure, BaseException):
+                        with self.assertRaises(type(failure)):
+                            world.night()
+                    else:
+                        world.night()
+                self.assertEqual(path.read_bytes(), original, 'original_restored')
+                backup = json.loads(Path(str(path) + '.install-backup').read_text())
+                self.assertEqual(backup['original'], original.decode(), 'backup_contains_original')
+                self.assertIn(first, world.http.active['cloudflare'])
+                self.assertTrue(world.saved_state()['credentials']['cloudflare-deploy-token']['install_pending'])
+                candidate = candidates[-1]
+                offline = False
+                with patch.object(cf, 'verify', return_value='ok'):
+                    world.night()
+                self.assertEqual(candidates[-1], candidate)
+                self.assertEqual(world.stored(cf.TOKEN_NAMES[0]), candidate)
+                self.assertEqual(len(world.http.minted), 2)
+                self.assertNotIn(first, world.http.active['cloudflare'])
+
     def test_postwrite_failure_restores_private_backup(self):
         from lib import cloudflare_tokens as cf
         with tempfile.TemporaryDirectory() as directory:
