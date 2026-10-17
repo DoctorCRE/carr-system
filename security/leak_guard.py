@@ -220,15 +220,15 @@ def validate_corpus(corpus):
         or not corpus.get('hashes') or not corpus.get('lengths')
         or any(type(n) is not int or not 1 <= n <= 64 for n in corpus['lengths'])
         or any(not re.fullmatch(r'[0-9a-f]{64}', h) for h in corpus['hashes'])):
-        raise ValueError('invalid corpus')
+        raise Refusal('invalid corpus')
     if 'starts' in corpus and (not isinstance(corpus['starts'], list) or not corpus['starts']
                               or any(not re.fullmatch(r'[0-9a-f]{64}', h) for h in corpus['starts'])):
-        raise ValueError('invalid corpus starts')
+        raise Refusal('invalid corpus starts')
     if 'start_lengths' in corpus and (not isinstance(corpus['start_lengths'], dict)
         or set(corpus['start_lengths']) != set(corpus.get('starts', []))
         or any(not sizes or any(type(n) is not int or n not in corpus['lengths'] for n in sizes)
                for sizes in corpus['start_lengths'].values())):
-        raise ValueError('invalid corpus length index')
+        raise Refusal('invalid corpus length index')
     return corpus
 
 
@@ -239,7 +239,7 @@ def make_corpus(values, salt):
         if not normalized or not client_window(normalized):
             continue
         if len(normalized) > 64:
-            raise ValueError('export value exceeds window')
+            raise Refusal('export value exceeds window')
         lengths.add(len(normalized))
         hashes.add(client_hash(salt, normalized))
         first = client_hash(salt, normalized[:1])
@@ -328,11 +328,11 @@ def gitleaks():
         url = f'https://github.com/gitleaks/gitleaks/releases/download/v{VERSION}/gitleaks_{VERSION}_{target}.tar.gz'
         data = urllib.request.urlopen(url, timeout=60).read()
         if hashlib.sha256(data).hexdigest() != checksum:
-            raise ValueError('release checksum mismatch')
+            raise Refusal('release checksum mismatch')
         archive.write_bytes(data)
     data = archive.read_bytes()
     if hashlib.sha256(data).hexdigest() != checksum:
-        raise ValueError('cached release checksum mismatch')
+        raise Refusal('cached release checksum mismatch')
     with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as bundle:
         binary = bundle.extractfile('gitleaks').read()
     executable = cache / 'gitleaks'
@@ -389,15 +389,15 @@ def raw_records(output):
         if not header:
             continue
         if not header.startswith(b':') or index >= len(fields_and_paths):
-            raise ValueError('invalid raw history')
+            raise Refusal('invalid raw history')
         parents = len(header) - len(header.lstrip(b':'))
         fields = header.lstrip(b':').split()
         if len(fields) != 2 * parents + 3:
-            raise ValueError('invalid raw history')
+            raise Refusal('invalid raw history')
         path = fields_and_paths[index].decode('utf-8', 'surrogateescape')
         index += 1
         if b'U' in fields[-1]:
-            raise ValueError('unmerged index')
+            raise Refusal('unmerged index')
         if fields[parents] == b'000000':
             continue
         if fields[parents] == b'160000':
@@ -437,10 +437,10 @@ def introduced(root, records, whole=False):
             child.stdin.flush()
             header = child.stdout.readline().split()
             if len(header) != 3 or header[0] != oid or header[1] != b'blob':
-                raise ValueError('unreadable blob')
+                raise Refusal('unreadable blob')
             raw = child.stdout.read(int(header[2]))
             if len(raw) != int(header[2]) or child.stdout.read(1) != b'\n':
-                raise ValueError('truncated blob')
+                raise Refusal('truncated blob')
             # Git counts UTF-16 lines by byte, not by character, so its diff lines cannot be trusted.
             whole_blob = whole or raw.startswith((b"\xff\xfe", b"\xfe\xff"))
             for path, changes in sorted(paths.items()):
@@ -452,7 +452,7 @@ def introduced(root, records, whole=False):
         child.stdin.close()
         child.stdout.close()
         if child.wait() != 0:
-            raise ValueError('git object reader failed')
+            raise Refusal('git object reader failed')
 
 
 def staged(root):
@@ -462,7 +462,7 @@ def staged(root):
 
 def history(root, revisions, whole=False):
     if git(root, 'rev-parse', '--is-shallow-repository').strip() != b'false':
-        raise ValueError('shallow history')
+        raise Refusal('shallow history')
     # A merge lists only the paths whose result differs from every parent, and
     # within them only the lines new against every parent count: a line equal to
     # one parent's was introduced by that parent's own commit, judged there or
@@ -504,7 +504,7 @@ def pushed(root, stream, receiver):
     for line in stream.splitlines():
         fields = line.split()
         if len(fields) != 4 or not all(re.fullmatch(r'[0-9a-f]{40}', fields[i]) for i in (1, 3)):
-            raise ValueError('invalid push refs')
+            raise Refusal('invalid push refs')
         _, local, _, remote = fields
         if local == zero:
             continue
@@ -514,8 +514,13 @@ def pushed(root, stream, receiver):
         # is excluded.
         revisions.append(local)
         if remote != zero:
-            git(root, 'rev-parse', '--verify', remote + '^{commit}')
-            revisions.append('^' + remote)
+            present = git(root, 'cat-file', '--batch-check=%(objectname) %(objecttype)',
+                          input=(remote + '\n').encode()).strip()
+            # An unfetched receiver tip cannot bound a local walk. Exclude nothing
+            # for it, just as upstream() does for unknown advertised objects.
+            if present != (remote + ' missing').encode():
+                git(root, 'rev-parse', '--verify', remote + '^{commit}')
+                revisions.append('^' + remote)
     return history(root, revisions + upstream(root, receiver)) if revisions else iter(())
 
 
@@ -524,7 +529,7 @@ def load_allowlist(path):
         return set()
     data = json.loads(path.read_text())
     if data.get('schema') != 'leak-guard-allowlist.v1' or not isinstance(data.get('entries'), list):
-        raise ValueError('invalid allowlist')
+        raise Refusal('invalid allowlist')
     entries = set()
     for entry in data['entries']:
         if (set(entry) not in ({'path', 'sha256', 'rule', 'reason'}, {'path', 'sha256', 'rule', 'reason', 'value_sha256'})
@@ -533,7 +538,7 @@ def load_allowlist(path):
             or (entry['rule'] == 'client-data' and not re.fullmatch(r'[0-9a-f]{64}', entry.get('value_sha256', '')))
             or '*' in entry['path']
             or pathlib.PurePosixPath(entry['path']).is_absolute() or '..' in pathlib.PurePosixPath(entry['path']).parts):
-            raise ValueError('invalid allowlist entry')
+            raise Refusal('invalid allowlist entry')
         entries.add((entry['path'], entry['sha256'], entry['rule'], entry.get('value_sha256', '')))
     return entries
 
@@ -561,13 +566,13 @@ def scan(root, source, corpus, allowed, report_path=None):
         report.write_text('')
         result = subprocess.run(command, input=b''.join(chunks), capture_output=True, cwd=private, env=env)
         if result.returncode not in (0, 1):
-            raise ValueError('gitleaks failed')
+            raise Refusal('gitleaks failed')
         secret_count = 0
         for row in report.read_text().splitlines():
             hit = json.loads(row)
             index = bisect.bisect_right(starts, hit['line']) - 1
             if index < 0 or hit['line'] >= line:
-                raise ValueError('invalid secret location')
+                raise Refusal('invalid secret location')
             offset = hit['line'] - starts[index]
             if offset == 0:
                 sensitive_paths.add(changes[index].path)
@@ -577,7 +582,7 @@ def scan(root, source, corpus, allowed, report_path=None):
             hits.append((index, offset, last, hit['rule'], ''))
             secret_count += 1
         if (result.returncode == 1) != bool(secret_count):
-            raise ValueError('gitleaks verdict/report disagreement')
+            raise Refusal('gitleaks verdict/report disagreement')
         # Line 0 is the filename. The reported line stays the blob's line number.
         findings.update((changes[i].path, max(1, first), rule) for i, first, last, rule, fingerprint in hits
                         if in_scope(changes[i], first, last, rule)
@@ -630,10 +635,10 @@ def scan(root, source, corpus, allowed, report_path=None):
     if report_path:
         relative = report_path.resolve().relative_to(root.resolve() / 'out')
         if not relative.parts:
-            raise ValueError('report must be under ignored out')
+            raise Refusal('report must be under ignored out')
         git(root, 'check-ignore', str(report_path))
         if git(root, 'ls-files', '--', str(report_path)).strip():
-            raise ValueError('tracked report')
+            raise Refusal('tracked report')
         report_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         report_path.write_text(json.dumps({'schema': 'leak-guard-private-report.v1',
                               'counts': dict(Counter(rule for _, _, rule in findings)),
@@ -673,27 +678,39 @@ def main():
         source = history(args.root, ['--all'], whole=True)
     elif args.range:
         if not re.fullmatch(r'[0-9a-f]{40}\.\.[0-9a-f]{40}', args.range):
-            raise ValueError('range must bind full commit hashes')
+            raise Refusal('range must bind full commit hashes')
         source = history(args.root, [args.range, *upstream(args.root, args.remote)])
     elif args.ci:
         if os.environ.get('GITHUB_EVENT_NAME') != 'pull_request':
-            raise ValueError('CI scope requires a pull request event')
+            raise Refusal('CI scope requires a pull request event')
         event = json.loads(pathlib.Path(os.environ['GITHUB_EVENT_PATH']).read_text())
         base, head = (event['pull_request'][k]['sha'] for k in ('base', 'head'))
         if not all(re.fullmatch(r'[0-9a-f]{40}', oid) for oid in (base, head)):
-            raise ValueError('invalid pull request commits')
+            raise Refusal('invalid pull request commits')
         source = history(args.root, [base + '..' + head])
     else:
         source = staged(args.root)
     return scan(args.root, source, corpus, allowed, args.report)
 
 
-if __name__ == '__main__':
+def cli():
     try:
-        sys.exit(main())
-    except Refusal as refusal:
-        print('leak-guard: ' + str(refusal) + '; push/CI refused', file=sys.stderr)
-        sys.exit(2)
-    except Exception:
-        print('leak-guard: scan could not complete; push/CI refused', file=sys.stderr)
-        sys.exit(2)
+        return main()
+    except Exception as error:
+        if isinstance(error, Refusal):
+            message = str(error)
+        elif isinstance(error, subprocess.CalledProcessError):
+            message = f'subprocess exited with status {error.returncode}'
+        elif isinstance(error, OSError) and error.errno is not None:
+            message = os.strerror(error.errno)
+        elif isinstance(error, UnicodeError):
+            message = 'text encoding or decoding failed'
+        else:
+            # Foreign exceptions can embed scanned bytes, paths or credential URLs.
+            message = 'unexpected scanner error; message withheld'
+        print(f'leak-guard: {type(error).__name__}: {message}; push/CI refused', file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(cli())
