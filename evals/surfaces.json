@@ -26,7 +26,6 @@
         "mcp-server/src/judge-provider.js",
         "mcp-server/src/jev-*.js",
         "lib/jev_required_actions.py",
-        "ops/config/rule-jev-triggers.v1.json",
         "ops/config/jev-cost-guard.v1.json",
         "ops/config/jev-call-sites.v1.json",
         "ops/command_precheck.py"
@@ -36,8 +35,6 @@
       "id": "rule-delivery",
       "description": "Rule text carried in the repository and the routing that decides which rules reach a session and when.",
       "globs": [
-        "ops/rule_trigger_delivery.py",
-        "ops/rule_trigger_compile.py",
         "lib/rule_delivery_*.py",
         "lib/rule_routes.py",
         "lib/rule_boot_gate.py",
@@ -48,10 +45,12 @@
         "mcp-server/src/rule-*.js",
         "mcp-server/src/core-rule-ids.js",
         "ops/config/rule-routes.v1.json",
-        "ops/config/rule-jit-triggers.v1.json",
         "ops/config/rule-classes.v1.json",
         "ops/config/rule-triage.v1.json",
-        "tools/flash-prompt-rules.py"
+        "tools/flash-prompt-rules.py",
+        "lib/rule_scope_lookup.py",
+        "lib/rule_operations.py",
+        "ops/rule_scope_replay.py"
       ]
     },
     {

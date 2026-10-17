@@ -41,6 +41,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools" / "room-bridge"))
 import evaluation_kernel as kernel
 
@@ -72,12 +73,12 @@ DIRECT_CALLERS = {"jev_change_tolls", "jev_code_review", "jev_build_advisory", "
 # Independent policy oracle: mechanical callers were disabled by #1529;
 # retained callers were reviewed in #1531, #1543, #1545 and #1576. Do not
 # derive these labels from the registry being tested. The v1 labels stay frozen.
-REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery",
+REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery", "rule_trigger_compile",
            "jev_session_watch", "jev_defect_class", "jev_executor_tier", "jev_code_review"}
 JOB_ATTRIBUTED = {"seat_health", "jev_model_route", "jev_deal_read", "post_call_jev"}
 UNATTENDED_OK = JOB_ATTRIBUTED | {"adhoc:", "jevlint_review"}
 KNOWN = {"jev_fact_boundary", "jev_intake", "jev_scorecard", "jev_best_of", "flash-script",
-         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile",
+         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile", "rule_scope_lookup",
          "timebomb-audit", "jevlint_review"} | JOB_ATTRIBUTED
 
 HARD_CASES = (  # (tag, input), judged during the audit
@@ -210,7 +211,7 @@ class _Response:
     status = 200
 
     def __init__(self):
-        self.body = json.dumps({"model": "jev-eval", "answers": {"q": {"type": "noul", "noul": 0.5}},
+        self.body = json.dumps({"model": "jev-1.13.0", "answers": {"q": {"type": "noul", "noul": 0.5}},
                                 "usage": {"input_tokens": 600, "output_tokens": 10}}).encode()
 
     def read(self, *a):
@@ -225,6 +226,9 @@ class _Response:
 
 
 def observe(client, case, scratch):
+    import ops.jev_semantic as semantic
+    state = "eval state"
+    questions = {"q": client.noul("Eval judgment")}
     sent = []
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CARR_JEV", "CARR_HOOK"))
            and k not in ("XPC_SERVICE_NAME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID",
@@ -241,13 +245,15 @@ def observe(client, case, scratch):
         env["CARR_JEV_JOB"] = case["carr_job"]
     log = scratch / "calls.jsonl"
     refusal = None
-    with mock.patch.dict(os.environ, env, clear=True), \
+    with tempfile.TemporaryDirectory(dir=scratch, prefix="cold-") as cache, \
+            mock.patch.dict(os.environ, env, clear=True), \
             mock.patch.object(client, "JEV_DAILY_CAP_LOG", str(log)), \
             mock.patch.object(client, "_launch_spend_alert_worker", lambda *a: None, create=True), \
             mock.patch.object(client.urllib.request, "urlopen",
                               lambda request, timeout=None: sent.append(1) or _Response()):
         try:
-            client.ask("eval state", {"q": client.noul("Eval judgment")}, api_key="eval-fixture",
+            semantic.ask(state, questions, client=client, api_key="eval-fixture",
+                       version="admission-eval-v1", cache_path=str(Path(cache) / "semantic.json"),
                        calls_log=str(log), cache_ttl_seconds=0, retries=0, caller=case["site"],
                        session_id="eval-session" if case.get("session") else None)
         except Exception as exc:  # a refusal is the observation, not a crash

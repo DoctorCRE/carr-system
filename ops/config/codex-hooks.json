@@ -19,7 +19,7 @@
             "type": "command",
             "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
             "timeout": 20,
-            "additionalContextLimit": 5000
+            "additionalContextLimit": 10000
           }
         ]
       },
@@ -131,11 +131,23 @@
           {
             "type": "command",
             "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
-            "timeout": 20
+            "timeout": 20,
+            "additionalContextLimit": 10000
           }
         ]
       }
     ],
-    "Stop": []
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; /usr/bin/env python3 {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+            "timeout": 20,
+            "additionalContextLimit": 10000
+          }
+        ]
+      }
+    ]
   }
 }
