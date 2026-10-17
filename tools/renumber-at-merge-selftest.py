@@ -76,6 +76,13 @@ class RenumberTests(unittest.TestCase):
         self.assertEqual(json.loads((self.repo / "ops/config/registry.json").read_text())["migration"], "migrations/0011_feature.sql")
         self.assertEqual((self.repo / "migrations/0010_main.sql").read_text(), "select 10;\n")
 
+    def test_earlier_open_pr_collision_skips_all_peer_slots(self):
+        self.write("migrations/0011_feature.sql", "-- Migration 0011\nselect 1;\n")
+        self.commit("feature")
+        result = self.run_tool("--claimed-slot", "11", "--avoid-slot", "12", "--avoid-slot", "13")
+        self.assertEqual(result["renames"], {"0011_feature.sql": "0014_feature.sql"})
+        self.assertEqual(self.run_tool("--claimed-slot", "11", "--avoid-slot", "12", "--avoid-slot", "13")["renames"], {})
+
     def test_sorts_below_main(self):
         self.write("migrations/0009_feature.sql", "select 1;\n")
         self.commit("below main")

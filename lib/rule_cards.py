@@ -89,3 +89,58 @@ class CardSelector:
         }
         self.seen.update(card['id'] for card in fresh)
         return self.core + fresh
+
+
+# ------------------------------------------------------------ live delivery
+# One selection path for the hooks and the offline replay, so the replay
+# measures exactly what the hooks send. Every live caller fails open: an error
+# here delivers no cards and never blocks a tool.
+
+ROUTED_EVENTS = ('PreToolUse', 'UserPromptSubmit')
+CORE_HEADER = ('RULE CARDS (always-on core). Each card carries a one-line yes/no '
+               'acknowledgement; answer it before acting when the card applies.')
+
+
+def covered_rule_ids(cards):
+    """Source rules a card delivers. These reach a context ONLY as cards."""
+    return frozenset(rid for card in cards for rid in card['source_rule_ids'])
+
+
+def card_view(card):
+    return {key: card[key] for key in ('id', 'title', 'wording', 'acknowledgement')}
+
+
+def card_key(card_id):
+    """The dedupe-state key for a card; rule IDs are hex, so these never collide."""
+    return f'card:{card_id}'
+
+
+def personal_scope(identity):
+    human = (identity or {}).get('sponsoring_human_id')
+    return f'{human}-personal' if isinstance(human, str) and human else None
+
+
+def routed_cards(event, inherited_rule_ids, seen_card_ids, *, cards, scope='joe-personal', cap=3):
+    """Fresh non-core cards for one routed event, plus the selector's bookkeeping.
+
+    seen_card_ids are the cards this context already holds (one boot epoch).
+    The replay keeps the seen set across a case's events; the hooks persist it
+    per context. Failure-state matchers watch PostToolUseFailure, which is not
+    routed here, so a per-event selector loses nothing.
+    """
+    selector = CardSelector(cards, personal_scope=scope)
+    selector.seen.update(seen_card_ids)
+    fresh = [c for c in selector.select(event, inherited_rule_ids=inherited_rule_ids, cap=cap)
+             if c['placement'] != 'CORE']
+    return fresh, selector.last_selection
+
+
+def core_text(cards=None):
+    """The always-on core page: boot, post-compaction re-boot and SubagentStart."""
+    cards = load_cards() if cards is None else cards
+    core = sorted((c for c in cards if c['placement'] == 'CORE'), key=lambda c: c['core_rank'])
+    lines = [CORE_HEADER]
+    for card in core:
+        lines.append(f"[{card['id']}] {card['title']}: {card['wording']}")
+        lines.append(f"  {card['acknowledgement']}")
+    return '\n'.join(lines)

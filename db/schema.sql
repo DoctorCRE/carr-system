@@ -90471,7 +90471,11 @@ CREATE VIEW public.v_lead_stage_transition AS
     (cause = ANY (ARRAY['automation_job'::text, 'ingest_email'::text, 'ingest_calendar'::text, 'system'::text])) AS automatic,
     agent_rationale AS reason,
     idempotency_key,
-    (new_value -> 'stage_review'::text) AS stage_review
+    (new_value -> 'stage_review'::text) AS stage_review,
+    actor_id,
+    ((new_value -> 'transition_proof'::text) ->> 'actor_slug'::text) AS actor_slug,
+    (((new_value -> 'transition_proof'::text) ->> 'before_version'::text))::integer AS before_version,
+    (((new_value -> 'transition_proof'::text) ->> 'after_version'::text))::integer AS after_version
    FROM public.event e
   WHERE ((subject_type = 'lead'::text) AND ((new_value ->> 'stage'::text) IS NOT NULL));
 
@@ -90603,7 +90607,11 @@ CREATE VIEW public.v_lead_workspace_detail AS
                     v_lead_stage_transition.automatic,
                     v_lead_stage_transition.reason,
                     v_lead_stage_transition.idempotency_key,
-                    v_lead_stage_transition.stage_review
+                    v_lead_stage_transition.stage_review,
+                    v_lead_stage_transition.actor_id,
+                    v_lead_stage_transition.actor_slug,
+                    v_lead_stage_transition.before_version,
+                    v_lead_stage_transition.after_version
                    FROM public.v_lead_stage_transition
                   WHERE (v_lead_stage_transition.lead_id = b.id)
                   ORDER BY v_lead_stage_transition.mutation_order DESC
@@ -122409,6 +122417,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0886_active_rule_scope_backfill.sql	b4340e8a0c805d47c433136785a9a488ba1babd47e08da78d27b4437ae61ef0f	2026-10-16 22:45:55.340119+00
 0888_supersede_triaged_work_request.sql	66a622cb27fe52b52e78d197dad7a9fbc122626f024b7900ea5a777cf5394c63	2026-10-17 02:37:59.911668+00
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
+0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 \.
 
 

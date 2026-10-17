@@ -5023,7 +5023,7 @@ export const TOOLS = {
       if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
       const s = await resolveSubject(c, args.lead);
       if (s.type !== "lead") throw new ToolError({ error: "not_a_lead", resolved: s });
-      await versionGuard(c, "lead", s.id, args.base_version);
+      const locked = await versionGuard(c, "lead", s.id, args.base_version);
       const allowed = ["stage","lane","segment","source_type","source_detail","suppressed",
                        "est_lease_event","next_action_date","notes_path","notes","event_source",
                        "event_confidence","report_back_due","drip_campaign","drip_added","sf_deal","score","score_reason","owner"];
@@ -5083,11 +5083,13 @@ export const TOOLS = {
       const columns = Object.keys(storage);
       const old = (await c.query(`select ${columns.join(",")}${owner ? ",(select slug from actor where id=lead.owner_id) as owner" : ""} from lead where id=$1`, [s.id])).rows[0];
       const sets = columns.map((k, i) => `${k}=$${i + 2}`).join(", ");
-      await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2}`,
+      const updated = await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2} returning version`,
         [actor.id, ...Object.values(storage), s.id]);
+      const transitionProof = keys.includes("stage") ? { before_version: locked.version,
+        after_version: updated.rows[0].version, actor_slug: actor.slug } : null;
       for (const k of keys)
         await writeEvent(c, actor, "update-lead", "lead", s.id,
-          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
+          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" ? { transition_proof: transitionProof } : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
             ...(k === "stage" && stageReview ? { cause: stageReview.undo_event_id ? "human_correction" : undefined,
               human_quote: stageReview.human_quote, agent_rationale: stageReview.reason } : {}), idempotency_key: args.idempotency_key });
       return { ok: true, updated: keys };

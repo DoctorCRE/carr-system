@@ -518,6 +518,54 @@ class Queue:
                                                        *dict.fromkeys(heads)), 'Git fetch failed')
 
 
+    def prepare(self, repo, p):
+        if repo != 'jbookout/carr-system':
+            return False
+        if p['head'].get('repo', {}).get('full_name', repo) != repo:
+            raise RuntimeError('regeneration refuses a fork branch')
+        head, n = p['head']['sha'], p['number']
+        self.fetch(repo, head)
+        main = self.git(repo, 'rev-parse', 'origin/main').strip()
+        key = f'regen:{repo}:{n}:{head}:{main}'
+        receipt = self.state / 'regen' / f'{n}-{head}-{main}.json'
+        with self.db:
+            self.db.execute('INSERT OR IGNORE INTO actions(key,kind,repo,pr,head,payload,receipt) VALUES(?,?,?,?,?,?,?)',
+                            (key, 'regen', repo, n, head, main, str(receipt)))
+        action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
+        if action['phase'] == 'done':
+            return False
+        if action['phase'] != 'planned':
+            raise ActionUncertain(f'regeneration at {head}; inspect {receipt} and provider head before reconcile-action')
+        if self.stopped or self.held(p):
+            return True
+        remote = self.git(repo, 'remote', 'get-url', 'origin').strip()
+        with self.db:
+            self.db.execute("UPDATE actions SET phase='issued',attempts=attempts+1 WHERE key=?", (key,))
+        with subprocess.Popen([sys.executable, str(self.root / 'tools/prepare_pr.py'),
+                               '--remote', remote, '--branch', p['head']['ref'], '--head', head,
+                               '--main', main, '--pr', str(n), '--receipt', str(receipt)],
+                              cwd=self.root, env=scrubbed_env(), text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True) as process:
+            self.preparation_process = process
+            try:
+                stdout, stderr = process.communicate(timeout=BOUNDS['regeneration']['seconds'])
+            finally:
+                self.preparation_process = None
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+            self.check_cancelled()
+            if process.returncode:
+                raise ActionUncertain('regeneration failed; inspect receipt before retry: ' + redacted_tail(stderr))
+        output = json.loads(stdout)
+        if not SHA.fullmatch(output['head']) or output['changed'] != (output['head'] != head):
+            raise ActionUncertain('invalid regeneration readback; inspect receipt before retry')
+        with self.db:
+            self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (key,))
+        return output['changed']
+
     def green(self, repo, n, head):
         def validate(checks):
             if not isinstance(checks, list) or any(not isinstance(c, dict) or 'bucket' not in c for c in bounded_items('snapshot', checks)):
@@ -949,6 +997,9 @@ class Queue:
                     if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
                         return
                     continue
+                if self.prepare(repo, p):
+                    self.report(e, 'regenerated', f'Prepared {head}; new head must be enqueued and pass hosted CI')
+                    return
                 if not self.green(repo, n, head):
                     since = e['ci_since'] if e['ci_head'] == head and e['ci_since'] is not None else time.time()
                     with self.db:
@@ -1111,10 +1162,10 @@ class Queue:
 
     def _reconcile_action(self, key, retry=False):
         a = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
-        if not a or a['kind'] not in ('update', 'retarget') or a['phase'] != 'issued':
-            raise RuntimeError('reconciliation requires an issued update or retarget intent')
+        if not a or a['kind'] not in ('update', 'retarget', 'regen') or a['phase'] != 'issued':
+            raise RuntimeError('reconciliation requires an issued update, retarget or regen intent')
         p = self.pr(a['repo'], a['pr'])
-        completed = (a['kind'] == 'update' and p['head']['sha'] != a['head']) or (a['kind'] == 'retarget' and p['base']['ref'] == a['payload'])
+        completed = (a['kind'] in ('update', 'regen') and p['head']['sha'] != a['head']) or (a['kind'] == 'retarget' and p['base']['ref'] == a['payload'])
         if completed or p['state'] != 'open':
             with self.db:
                 self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (key,))
@@ -1266,6 +1317,12 @@ class Queue:
             self.stopped = False
             def stop(*_):
                 self.stopped = True
+                process = getattr(self, 'preparation_process', None)
+                if process is not None:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
             signal.signal(signal.SIGTERM, stop)
             signal.signal(signal.SIGINT, stop)
             next_discover = 0.0

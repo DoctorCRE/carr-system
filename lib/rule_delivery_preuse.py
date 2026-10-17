@@ -22,6 +22,8 @@ LOOKUP_RECEIPT_KEYS = frozenset({"schema", "client", "session_id", "turn_id", "t
     "tool_name", "tool_input_sha256", "task_sha256", "event_name", "corpus_digest",
     "source_digest", "identity", "rule_ids", "rules", "overflow", "data_defects",
     "unresolved", "models", "complete", "instruction", "receipt_id"})
+# Optional receipt field: at most three rule cards, each with its acknowledgement.
+CARD_KEYS = frozenset({"id", "title", "wording", "acknowledgement"})
 POSTWRITE_RECEIPT_SCHEMA = "jev-post-write-review/v2"
 POSTWRITE_RECEIPT_KEYS = frozenset({
     "schema", "receipt_id", "client", "session_id", "turn_id", "tool_use_id",
@@ -205,7 +207,11 @@ def _claude_user_text(record: object) -> str | None:
 
 
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
-    if not isinstance(row, dict) or set(row) != LOOKUP_RECEIPT_KEYS:
+    if not isinstance(row, dict) or set(row) - {'cards'} != LOOKUP_RECEIPT_KEYS:
+        return False
+    if 'cards' in row and (not isinstance(row['cards'], list) or not row['cards'] or len(row['cards']) > 3
+                           or any(not isinstance(c, dict) or set(c) != CARD_KEYS
+                                  or not all(_nonempty(c[k]) for k in CARD_KEYS) for c in row['cards'])):
         return False
     if (row['schema'] != LOOKUP_RECEIPT_SCHEMA or row['client'] not in {'claude', 'codex'}
             or row['event_name'] not in {'PreToolUse', 'UserPromptSubmit', 'Stop'}

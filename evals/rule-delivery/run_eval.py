@@ -262,6 +262,8 @@ def replay(world, case, variant="baseline"):
     """[{kind, ids, fresh, tokens, overflow}] for the case's events, in order."""
     if variant in ("cards", "cards-uncapped"):
         return replay_cards(world, case, cap=None if variant == "cards-uncapped" else 3)
+    if variant == "cards-live":
+        return replay_cards_live(world, case)
     events = []
     ids = world.prompt_ids(case)
     if case["prompt"].strip():
@@ -301,6 +303,74 @@ def replay_cards(world, case, *, cap=3):
                        'inherited_rule_ids': inherited, **selector.last_selection,
                        'tokens': chars / CHARS_PER_TOKEN, 'overflow': False})
     return events
+
+
+def _live_hook():
+    spec = importlib.util.spec_from_file_location(
+        'rule_lookup_hook', os.path.join(REPO, 'hooks', 'rule-pack-preuse-reselection.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def replay_cards_live(world, case, *, hook=None):
+    """The same frozen events through the live route hook's delivery_receipt.
+
+    The production matchers' selection (World.prompt_ids / World.tool_ids)
+    stands in for the store lookup, and the hook persists delivered cards in
+    its own per-context dedupe state, isolated in a temporary directory with
+    a fresh session per case. Card IDs come back out of the hook receipt.
+    """
+    import tempfile
+    import uuid
+    from unittest import mock
+    hook = hook or _live_hook()
+    identity = {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                'sponsoring_human_id': 'joe'}
+    payloads = []
+    if case['prompt'].strip():
+        payloads.append(('prompt', {'hook_event_name': 'UserPromptSubmit', 'prompt': case['prompt']},
+                         world.prompt_ids(case)))
+    payloads.extend(('tool', {'hook_event_name': 'PreToolUse', 'tool_use_id': f'call-{index}', **call},
+                     world.tool_ids(case, index, call))
+                    for index, call in enumerate(case['tool_calls']))
+    events = []
+    with tempfile.TemporaryDirectory() as state, mock.patch.dict(
+            os.environ, {'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(state, 'routes'),
+                         'CARR_RULE_BOOT_STATE_DIR': os.path.join(state, 'boot')}):
+        session = f'replay-{uuid.uuid4()}'
+        for kind, payload, inherited in payloads:
+            selection = {'rules': [{'id': rid, 'statement': 'frozen replay rule', 'personal_to': None}
+                                   for rid in sorted(inherited)],
+                         'identity': identity, 'corpus_digest': '0' * 64, 'data_defects': [],
+                         'unresolved': [], 'models': [], 'complete': True}
+            output = hook.delivery_receipt(dict(payload, session_id=session), selection,
+                                           case['prompt'], dedupe=True)
+            row = json.loads(output['hookSpecificOutput']['additionalContext']) if output else {}
+            card_ids = [c['id'] for c in row.get('cards', [])]
+            events.append({'kind': kind, 'tool': payload.get('tool_name'), 'card_ids': card_ids,
+                           'rule_ids': row.get('rule_ids', [])})
+    return events
+
+
+def card_live_parity():
+    """Every frozen event: the live hook delivers exactly the offline capped cards."""
+    cases = load_cases('all')
+    world = World(load_expectations())
+    hook = _live_hook()
+    from lib.rule_cards import covered_rule_ids, load_cards
+    covered = covered_rule_ids(load_cards())
+    events = mismatched = duplicated = over_cap = 0
+    for case in cases:
+        offline = replay_cards(world, case, cap=3)
+        live = replay_cards_live(world, case, hook=hook)
+        for want, got in zip(offline, live, strict=True):
+            events += 1
+            mismatched += want['card_ids'] != got['card_ids']
+            duplicated += bool({rid[:8] for rid in got['rule_ids']} & covered)
+            over_cap += len(got['card_ids']) > 3
+    return {'cases': len(cases), 'events': events, 'mismatched_events': mismatched,
+            'events_resending_card_rules_as_rules': duplicated, 'events_over_cap': over_cap}
 
 
 def score_card_paths(expected, allowed, labelled, paths):
@@ -888,7 +958,15 @@ def main(argv=None):
     parser.add_argument("--trace-reads", metavar="OUT", help="with --observe: write the repository files read")
     parser.add_argument("--freeze-expectations", action="store_true",
                         help=f"write {os.path.basename(EXPECTATIONS)} from the live labels")
+    parser.add_argument("--card-live-parity", action="store_true",
+                        help="replay every frozen event through the live route hook and compare its cards with the offline capped selector")
     args = parser.parse_args(argv)
+    if args.card_live_parity:
+        result = card_live_parity()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        clean = not (result['mismatched_events'] or result['events_resending_card_rules_as_rules']
+                     or result['events_over_cap'])
+        return 0 if clean else 1
     if args.card_report:
         with open(args.card_report, "w", encoding="utf-8") as handle:
             json.dump(card_comparison(), handle, indent=2, sort_keys=True)
