@@ -8,14 +8,14 @@ import { runInNewContext } from "node:vm";
 import test from "node:test";
 
 const yaml = createRequire(import.meta.url)("js-yaml");
-const files = ["ci.yml", "db-acceptance.yml"];
+const files = ["ci.yml", "db-acceptance.yml", "doc-drift.yml"];
 const read = name => yaml.load(readFileSync(new URL("../../.github/workflows/" + name, import.meta.url), "utf8"));
 // Evaluate the workflows' scalar policy expressions, not a synthetic scheduler.
 // Unknown expressions fail closed; these tests make no claims about runner time.
 function expression(value, github, success = true, inputs = { shard_trial: false }) {
   if (value === undefined) return success;
   const raw = String(value).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
-  assert.match(raw, /^(?:github\.(?:workflow|ref|run_id|event_name|event\.action|event\.pull_request\.number|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|always\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
+  assert.match(raw, /^(?:github\.(?:workflow|ref|run_id|event_name|event\.action|event\.pull_request\.number|event\.pull_request\.draft|event\.pull_request\.base\.ref|event\.changes\.base\.ref)|inputs\.shard_trial|always\(\)|'[^']*'|[\s()=!&|]|true|false)+$/, `unsupported expression: ${raw}`);
   const safe = raw.replace(/github(?:\.[a-zA-Z_]+)+/g, path =>
     JSON.stringify(path.split(".").slice(1).reduce((value, key) => value?.[key], github) ?? ""));
   const result = runInNewContext(safe, { inputs, always: () => true }, { timeout: 1000 });
@@ -55,12 +55,24 @@ for (const file of files) {
       assert.deepEqual(current.runnable, current.jobs.filter(name => name !== "shadow-aggregate"));
     }
   });
-  test(`${file}: ready-for-review does not restart identical source`, () => {
-    assert.equal(policy(workflow, context("pull_request", "ready_for_review")).triggers, false);
+  test(`${file}: review transitions start validation and drafts retain cheap jobs`, () => {
+    const ready = policy(workflow, context("pull_request", "ready_for_review"));
+    assert.equal(ready.triggers, true);
+    assert.deepEqual(ready.runnable, ready.jobs.filter(name => name !== "shadow-aggregate"));
+    const event = context("pull_request", "converted_to_draft");
+    event.event.pull_request.draft = true;
+    const draft = policy(workflow, event);
+    assert.equal(draft.triggers, true);
+    assert.deepEqual(draft.runnable, file === "ci.yml" ? ["classes"] : file === "doc-drift.yml" ? ["check"] : []);
   });
   test(`${file}: cancellation is scoped to the workflow and PR`, () => {
     const current = policy(workflow, context());
     assert.equal(current.cancel, true);
+    for (const action of ["opened", "reopened", "ready_for_review", "converted_to_draft"]) {
+      const transition = policy(workflow, context("pull_request", action, 9, 3));
+      assert.equal(transition.cancel, true);
+      assert.equal(transition.group, current.group);
+    }
     assert.equal(policy(workflow, context("pull_request", "synchronize", 9, 2)).group, current.group);
     assert.notEqual(policy(workflow, context("pull_request", "opened", 10)).group, current.group);
     assert.notEqual(policy({ ...workflow, name: "Another workflow" }, context()).group, current.group);
@@ -91,7 +103,7 @@ test("DB shard aggregate is default-off, collects failed-trial diagnostics, and 
   assert.throws(() => expression("inputs.unknown", context()), /unsupported expression/);
 });
 
-test("metadata edits start neither workflow, so no skipped suite replaces the required verdict", () => {
+test("metadata edits start no validation workflow, so no skipped suite replaces the required verdict", () => {
   for (const file of files) {
     const edited = policy(read(file), context("pull_request", "edited"));
     assert.equal(edited.triggers, false, `${file}: an edit must start no workflow`);
