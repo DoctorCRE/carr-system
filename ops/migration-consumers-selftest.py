@@ -96,6 +96,55 @@ class LogicalConsumers(unittest.TestCase):
         self.assertEqual(result.renames, {"0887_pending.sql": "0889_pending.sql"})
         self.assertFalse(set(result.writes) & {"migrations/" + n for n in self.history})
 
+    def retained_main(self):
+        for name, text in self.history.items():
+            (self.repo / "migrations" / name).write_bytes(text.encode())
+        self.base = self.commit()
+        self.git("update-ref", "refs/remotes/origin/main", self.base)
+
+    def snapshot_generator(self, *, delete_retained=False):
+        script = self.repo / "ops/migration-shadow.py"
+        script.parent.mkdir()
+        script.write_text(
+            "from pathlib import Path\n"
+            "p=Path('db/schema.sql')\n"
+            "p.write_text(p.read_text().replace('\\\\.\\n', '0889_pending.sql\\tunused\\t2026-01-01\\n\\\\.\\n'))\n"
+            + ("Path('migrations/0888_history.sql').unlink()\n" if delete_retained else ""))
+
+    def test_renumber_applies_covered_deletion_transition(self):
+        self.retained_main()
+        for name in self.history:
+            (self.repo / "migrations" / name).unlink()
+        (self.repo / "migrations/0887_pending.sql").write_text("select 3;\n")
+        self.snapshot_generator()
+        result = renumber.plan(self.repo, None, {})
+        self.assertEqual(result.renames, {"0887_pending.sql": "0889_pending.sql"})
+        renumber.apply(self.repo, result)
+        self.assertEqual((self.repo / "migrations/0889_pending.sql").read_text(), "select 3;\n")
+        self.assertFalse(any((self.repo / "migrations" / name).exists() for name in self.history))
+
+    def test_renumber_refuses_uncovered_main_deletion(self):
+        self.retained_main()
+        (self.repo / "migrations/0889_uncovered.sql").write_text("select 4;\n")
+        self.base = self.commit()
+        self.git("update-ref", "refs/remotes/origin/main", self.base)
+        (self.repo / "migrations/0889_uncovered.sql").unlink()
+        (self.repo / "migrations/0887_pending.sql").write_text("select 3;\n")
+        with self.assertRaisesRegex(ValueError, "cannot be renamed, deleted or edited"):
+            renumber.plan(self.repo, None, {})
+
+    def test_generator_still_cannot_delete_retained_covered_sql(self):
+        self.retained_main()
+        (self.repo / "migrations/0887_pending.sql").write_text("select 3;\n")
+        self.snapshot_generator(delete_retained=True)
+        result = renumber.plan(self.repo, None, {})
+        with self.assertRaisesRegex(ValueError, "generator changed an applied main migration"):
+            renumber.apply(self.repo, result)
+        self.assertEqual((self.repo / "migrations/0888_history.sql").read_bytes(),
+                         self.history["0888_history.sql"].encode())
+        self.assertTrue((self.repo / "migrations/0887_pending.sql").is_file())
+        self.assertFalse((self.repo / "migrations/0889_pending.sql").exists())
+
     def test_allocator_and_reservation_keep_covered_claims(self):
         with patch.object(allocator, "REPO", str(self.repo)), patch.object(allocator, "worktree_paths", return_value=[str(self.repo)]), patch.object(sys, "argv", ["next-migration", "--quiet"]):
             output = io.StringIO()
