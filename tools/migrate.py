@@ -90,6 +90,14 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "on every database; all 0248 adds here is a binding to the autonomy rule, "
         "which this database does not carry",
     ),
+    "0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql": (
+        "select 1 where exists (select 1 from ops.enforcement_control_catalog "
+        "where control_key='pack_delivery' and installed) "
+        "or exists (select 1 from ops.rule_control_binding b join public.rule r on r.id=b.rule_id "
+        "where b.control_key='pack_delivery' and r.status='active')",
+        "the text-delivery control is no longer installed and backs no active rule; "
+        "the frozen refresh has no live control to update",
+    ),
 }
 
 # ── MIGRATIONS WHOSE INTERMEDIATE CATALOG MUST NEVER COMMIT ────────────────

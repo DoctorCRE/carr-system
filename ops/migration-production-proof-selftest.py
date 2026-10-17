@@ -196,6 +196,19 @@ class ProofTests(unittest.TestCase):
         self.assertEqual(result['snapshot_only'], [right['privileges'][0]])
 
 
+    def test_provisioning_external_roles_does_not_expand_the_original_acl_scope(self):
+        grant = ['table', 'public.example', '', 'external_backup', 'select', False]
+        runtime = ['table', 'public.example', '', 'reader', 'select', False]
+        left = dict(roles=['reader', 'external_backup'], privileges=[grant, runtime])
+        right = dict(roles=['reader', 'external_backup'], privileges=[runtime])
+        result = proof.privilege_difference(left, right, ['reader'])
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['informational_external_acl_counts'], dict(production=1, snapshot=0))
+        right['privileges'] = []
+        result = proof.privilege_difference(left, right, ['reader'])
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['production_only'], [runtime])
+
     def test_common_role_attributes_and_membership_options_must_match(self):
         role = ('reader', False, True, False, False, False, False, -1)
         left = dict(roles=['reader'], role_attributes=[role], privileges=[])
@@ -265,6 +278,11 @@ class ProofTests(unittest.TestCase):
                 repo = Path(directory)
                 (repo / 'db').mkdir()
                 (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
+                (repo / 'migrations').mkdir()
+                baseline = dict(proof.MigrationBaseline.load(ROOT).migrations)
+                for migration in (ROOT / 'migrations').glob('*.sql'):
+                    if migration.name not in baseline:
+                        shutil.copyfile(migration, repo / 'migrations' / migration.name)
                 program = ("import sys; from pathlib import Path; "
                            "sys.path.insert(0, sys.argv[1]); import migrate; "
                            "migrate.MIGRATIONS_DIR=Path(sys.argv[2])/'migrations'; "
@@ -292,6 +310,10 @@ class ProofTests(unittest.TestCase):
             with psycopg.connect(dsn) as conn:
                 conn.execute('ALTER ROLE neondb_owner LOGIN')
                 conn.execute('ALTER TABLE public.deal OWNER TO neondb_owner')
+                conn.execute('CREATE ROLE carr_backup')
+                conn.execute('CREATE POLICY carr_backup_full_read ON ops.work_request FOR SELECT TO carr_backup USING(true)')
+                conn.execute('CREATE POLICY carr_backup_full_read_memory_item ON public.memory_item FOR SELECT TO carr_backup USING(true)')
+                conn.execute('GRANT carr_reader TO neondb_owner WITH ADMIN TRUE, INHERIT FALSE, SET FALSE')
             captured.append(read_source(dsn, bins, include_acl=True))
             return read_source(dsn, bins)
 
@@ -310,7 +332,7 @@ class ProofTests(unittest.TestCase):
         self.assertTrue(result['equivalence']['ok'], result['equivalence'])
         self.assertTrue(result['grants']['ok'], result['grants'])
         self.assertEqual(result['grants']['informational_owner_attributes']['production_only'],
-                         [('neondb_owner', False, True, False, False, True, False, -1, False)])
+                         [])
 
     @unittest.skipUnless(POSTGRES, 'database fixture runs in the migration lane')
     def test_live_proof_rejects_explicit_select_drift(self):
@@ -411,7 +433,7 @@ create table public.schema_migrations (filename text primary key, sha256 text);
                 shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
             scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
             scripts.update({'0900_base.sql': 'create table public.example (id integer);',
-                            '0901_pending.sql': 'alter table public.example add column label text;'})
+                            '0901_pending.sql': "do $$ begin if current_user <> 'fixture_owner' then raise exception 'wrong migration principal'; end if; end $$; alter table public.example add column label text;"})
             hashes = {}
             for name, sql in scripts.items():
                 (root / 'migrations' / name).write_text(sql)
@@ -421,18 +443,42 @@ grant select on public.example to reader;
 create function public.example_read() returns int language sql as 'select 1';
 create table public.schema_migrations (filename text primary key, sha256 text not null,
 applied_at timestamptz not null default now());
+create schema ops;
+create table ops.rule_delivery_policy(singleton boolean primary key, mode text, changed_by text, reason text);
+create function public.empty_policy_guard() returns trigger language plpgsql as $$
+begin
+  if not exists(select 1 from ops.rule_delivery_policy where mode='shadow') then
+    raise exception 'empty policy has no bootstrap configuration';
+  end if;
+  return null;
+end $$;
+create constraint trigger empty_policy_guard after insert on public.schema_migrations
+ deferrable initially deferred for each row execute function public.empty_policy_guard();
+grant usage on schema public to fixture_owner;
+grant usage on schema ops to fixture_owner;
+grant select on ops.rule_delivery_policy to fixture_owner;
+alter table public.example owner to fixture_owner;
+alter table public.schema_migrations owner to fixture_owner;
 """
             production = root / 'production.sql'
             production.write_text(base)
             applied = {name: hashes[name] for name in scripts if name < '0901'}
-            grants = dict(roles=['reader', 'reader_group', 'source_only'], memberships=[('reader_group', 'reader', False, True, False)])
+            grants = dict(roles=['reader', 'reader_group', 'source_only', 'fixture_owner'],
+                          memberships=[('reader_group', 'reader', False, True, False)],
+                          migration_role='fixture_owner', database_owner='fixture_owner',
+                          role_attributes=[('fixture_owner', False, True, False, False, True, False, -1, False)])
             built = proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
             self.assertEqual(built['ledger'], hashes)
+            production.write_text(base + "insert into ops.rule_delivery_policy values(true,'full','fixture','existing policy');")
+            with self.assertRaisesRegex(RuntimeError, 'empty policy has no bootstrap configuration'):
+                proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
+            production.write_text(base)
             expected = root / 'expected.sql'
             ledger = ''.join(f"insert into schema_migrations(filename,sha256) values ('{name}','{digest}');\n"
                              for name, digest in hashes.items())
-            roles = 'create role reader; create role reader_group; grant reader_group to reader with admin false, inherit true, set false;'
-            expected.write_text(roles + base + scripts['0901_pending.sql'] + '\n' + ledger)
+            roles = 'create role reader; create role reader_group; create role fixture_owner login; grant reader_group to reader with admin false, inherit true, set false;'
+            expected.write_text(roles + base + "set role fixture_owner;" + scripts['0901_pending.sql'] + \
+                "reset role; insert into ops.rule_delivery_policy values(true,'shadow','fixture','fresh snapshot');\n" + ledger)
             reference = proof.build_schema(expected, bins, root)
             self.assertEqual(proof.schema_difference(built['dump'], reference['dump']), [])
             self.assertTrue(proof.privilege_difference(built['grants'], reference['grants'])['ok'])

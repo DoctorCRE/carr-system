@@ -523,7 +523,7 @@ class Queue:
             if not isinstance(checks, list) or any(not isinstance(c, dict) or 'bucket' not in c for c in bounded_items('snapshot', checks)):
                 raise ValueError('GitHub did not return required checks')
         checks = self.gh('pr', 'checks', str(n), '-R', repo, '--required', '--json', 'bucket', decode=True, validate=validate)
-        return bool(checks) and all(c['bucket'] in ('pass', 'skipping') for c in bounded_items('snapshot', checks))
+        return bool(checks) and all(c['bucket'] == 'pass' for c in bounded_items('snapshot', checks))
 
     def action(self, kind, repo, n, head, payload, expected_base=None):
         key = f'{kind}:{repo}:{n}:{head}:{payload}'

@@ -207,12 +207,6 @@
       "evidence": "f163962f (ORDER 40, rehearsed)"
     },
     {
-      "path": "tools/staging-heavy-build-parity.py",
-      "class": "one_shot",
-      "reason": "Applied the two heavy-build migrations to the isolated staging project once, matching what production already ran.",
-      "evidence": "7f870537 (merged d59a32fa, #667)"
-    },
-    {
       "path": "tools/staging-ledger-repair-0315.py",
       "class": "one_shot",
       "reason": "Replayed the skipped 0315 migration on staging once and recorded its truthful ledger row.",
