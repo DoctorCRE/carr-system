@@ -211,6 +211,10 @@ def build_schema(schema_path, bins, repo=ROOT, production_ledger=None, grants=No
                 conn.execute(sql.SQL('grant {} to {} with admin {}, inherit {}, set {}').format(
                     sql.Identifier(role), sql.Identifier(member), sql.Literal(admin),
                     sql.Literal(inherit), sql.Literal(set_option)))
+        if grants and grants.get('database_owner'):
+            with psycopg.connect(bootstrap, autocommit=True) as conn:
+                conn.execute(sql.SQL('alter database carr_ci owner to {}').format(
+                    sql.Identifier(grants['database_owner'])))
         checked([bins / 'psql', '-X', '-d', dsn, '-v', 'ON_ERROR_STOP=1', '-q', '-f', schema_path],
                 dict(env, PGOPTIONS='--client-min-messages=warning'), 'restore schema into disposable database')
         if production_ledger is not None:
@@ -255,6 +259,8 @@ def read_source(dsn, bins=None, include_acl=False):
         production = schema_dump(dsn, bins, os.environ, exported, include_acl=include_acl)
         grants = privilege_catalog(conn)
         grants['migration_role'] = conn.execute('select session_user').fetchone()[0]
+        grants['database_owner'] = conn.execute(
+            'select pg_get_userbyid(datdba) from pg_database where datname=current_database()').fetchone()[0]
         conn.rollback()
     return applied, production, grants
 

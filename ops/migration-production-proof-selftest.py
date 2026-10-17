@@ -384,7 +384,7 @@ begin
 end $$;
 create constraint trigger empty_policy_guard after insert on public.schema_migrations
  deferrable initially deferred for each row execute function public.empty_policy_guard();
-grant usage,create on schema public to fixture_owner;
+grant usage on schema public to fixture_owner;
 grant usage on schema ops to fixture_owner;
 grant select on ops.rule_delivery_policy to fixture_owner;
 alter table public.example owner to fixture_owner;
@@ -395,7 +395,7 @@ alter table public.schema_migrations owner to fixture_owner;
             applied = {name: hashes[name] for name in scripts if name < '0901'}
             grants = dict(roles=['reader', 'reader_group', 'source_only', 'fixture_owner'],
                           memberships=[('reader_group', 'reader', False, True, False)],
-                          migration_role='fixture_owner',
+                          migration_role='fixture_owner', database_owner='fixture_owner',
                           role_attributes=[('fixture_owner', False, True, False, False, True, False, -1, False)])
             built = proof.build_schema(production, bins, root, production_ledger=applied, grants=grants)
             self.assertEqual(built['ledger'], hashes)
