@@ -1,0 +1,40 @@
+{
+  "schema": "g2-scope-lookup-evidence/v1",
+  "baseline_revision": "dcb73c026",
+  "scope": "First independently mergeable part of G slice 2. Current hook selection is retained.",
+  "replay": {
+    "before_variant": "g2-before",
+    "after_variant": "g2-after",
+    "cases": 339,
+    "train_cases": 212,
+    "test_cases": 127,
+    "identical_result_rows": 339,
+    "before_results_sha256": "1db1f31b17b20db6bd004745d8ab86a3dbe0bc56cc6014c82c91b6ffc9876351",
+    "after_results_sha256": "1db1f31b17b20db6bd004745d8ab86a3dbe0bc56cc6014c82c91b6ffc9876351",
+    "differences": [],
+    "improvement_verdict": "REVERT: delta is zero; this part claims behavior preservation, not a recall improvement"
+  },
+  "structural_scope_comparison": {
+    "fixture": "ops/fixtures/rule-delivery-eval/cases.v2.json",
+    "tool_calls": 418,
+    "difference_count": 0,
+    "test": "LookupTests.test_structural_scopes_preserve_routes_on_frozen_tool_calls"
+  },
+  "scope_fixtures": {
+    "file": "ops/fixtures/rule-delivery-eval/scope-backfills.json",
+    "proposals": 212,
+    "store_writes": false
+  },
+  "limits": [
+    "Moment selection uses injected offline judgments in these tests. Live adapter admission, semantic calibration, hook migration and delivery context fitting remain.",
+    "boot_lifecycle.py imports removed boot_delivery on baseline main and fails before argument parsing. Maintained boot gate and server boot tests are run separately."
+  ],
+  "commands": [
+    "python3 ops/rule-scope-lookup-selftest.py",
+    "python3 evals/rule-delivery/selftest.py",
+    "python3 evals/rule-delivery/run_eval.py --variant g2-after --split all",
+    "python3 evals/rule-delivery/run_eval.py --compare g2-before g2-after",
+    "python3 evals/rule-delivery/run_eval.py --verdict g2-before g2-after recall",
+    "./ops/ci.sh --strict"
+  ]
+}
