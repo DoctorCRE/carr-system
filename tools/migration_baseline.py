@@ -79,11 +79,15 @@ class MigrationBaseline:
         return cls.from_document(document)
 
     def repository_ledger(self, files: Mapping[str, str]) -> dict[str, str]:
+        return self.ledger_with_hashes({name: runner_sha256(text) for name, text in files.items()})
+
+    def ledger_with_hashes(self, identities: Mapping[str, str]) -> dict[str, str]:
         ledger = dict(self.migrations)
-        for name, text in files.items():
+        for name, digest in identities.items():
             if not SLOT_RE.fullmatch(name):
                 raise ValueError(f'migration baseline ledger: invalid filename {name}')
-            digest = runner_sha256(text)
+            if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+                raise ValueError(f'migration baseline ledger: invalid checksum for {name}')
             if name in ledger:
                 if ledger[name] != digest:
                     raise ValueError(f'migration baseline ledger: retained {name} checksum differs')
