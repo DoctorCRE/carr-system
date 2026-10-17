@@ -273,16 +273,23 @@ def test_jev_adapters(ev, meta):
         def __init__(self):
             self.sinks = []
             self.caches = []
+            self.selected = None
         def ask(self, state, questions, **kwargs):
             self.sinks.append(kwargs.get('calls_log'))
             self.caches.append(kwargs.get('cache_path'))
-            return {'model':'jev-1.13.0', 'answers':{k:{'type':'choice','choice':'applies' if k=='bind_113b3833' else 'not_applicable','confidence':.99} for k in questions}}
+            if self.selected is None:
+                self.selected = next(iter(state['rules'].values()))
+            return {'model':'jev-1.13.0', 'answers':{k:{'type':'choice','choice':'applies' if k=='bind_'+self.selected['id'] else 'not_applicable','confidence':.99} for k in questions}}
     fake=Fake()
     before=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])
     adapters=ev.build_adapters(REPO,jev='live',client_factory=lambda sink:ev.JevProxy(fake,sink))
     adapter=next(a for a in adapters if a['name']=='prompt_full')
     result=adapter['select']({'prompt':'Read doctrine before code work','tool_calls':[]})
-    check('typed moment delivery preserves the admitted full rule',result['rules']=={'113b3833'},result)
+    corpus = json.loads((REPO/'ops/config/rule-selection-corpus.v1.json').read_text())['rules']
+    check('typed moment delivery preserves the admitted full rule',
+          fake.selected is not None and result['complete']
+          and result['rules'] == {fake.selected['id']}
+          and fake.selected['statement'] == next(r['statement'] for r in corpus if r['id'] == fake.selected['id']), result)
     check('every evaluation request uses the no-log sink',bool(fake.sinks) and all(s==os.devnull for s in fake.sinks))
     check('transport cache is isolated from production', bool(fake.caches) and all('carr-rule-eval-' in path for path in fake.caches))
     after=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])

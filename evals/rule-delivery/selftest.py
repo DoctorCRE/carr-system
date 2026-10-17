@@ -61,6 +61,41 @@ def main():
             saved = [json.loads(line) for line in handle]
         check("final test run preserves frozen train results", saved == [test_row, train_row])
     expectations = R.load_expectations()
+    retired_case = {"id": "retirement-regression", "prompt": "", "tool_calls": [],
+                    "required": ["1fcaa63a", "11111111", "22222222"],
+                    "gold": ["1fcaa63a", "11111111", "22222222"],
+                    "disputed": []}
+    historical_label = {"expected": retired_case["required"], "allowed": retired_case["gold"],
+                        "should_not_fire": False}
+    historical = {"cases": {retired_case["id"]: historical_label,
+                            "retired-only": {"expected": ["1fcaa63a"], "allowed": ["1fcaa63a"],
+                                             "should_not_fire": False}},
+                  "labelled": list(retired_case["gold"])}
+    historical_bytes = json.dumps(historical, sort_keys=True)
+    retirement_world = R.World(historical)
+    check("retirement reconciles frozen grading without hiding active rules",
+          retirement_world.expected(retired_case) == ["11111111", "22222222"]
+          and retirement_world.label(retired_case)["allowed"] == ["11111111", "22222222"]
+          and retirement_world.owed == {"11111111", "22222222"}
+          and retirement_world.labelled == {"11111111", "22222222"}
+          and retirement_world.derive(retired_case)["expected"] == ["11111111", "22222222"]
+          and retirement_world.label({"id": "retired-only"}) == {
+              "expected": [], "allowed": [], "should_not_fire": True}
+          and json.dumps(historical, sort_keys=True) == historical_bytes)
+    missing = R.grade(retirement_world, retired_case, [])
+    check("unregistered missing-active rule remains a replay failure", "22222222" in missing["missed"])
+    with tempfile.TemporaryDirectory() as scratch:
+        path = os.path.join(scratch, "pending-gold.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"schema": "rule-delivery-pending-gold/v1",
+                       "rules": {"1fcaa63a": {}, "11111111": {}}}, handle)
+        check("retired pending-gold rules do not become missing-active errors",
+              R.pending_gold_ids({"11111111": "Synthetic active rule"}, path) == {"11111111"})
+        try:
+            R.pending_gold_ids({}, path)
+            check("pending-gold still refuses unknown active rules", False)
+        except ValueError:
+            check("pending-gold still refuses unknown active rules", True)
     try:
         R.paired_bootstrap([{"prompt_id": "a"}, {"prompt_id": "b"}], [{"prompt_id": "a"}], lambda rs: len(rs))
         check("paired bootstrap refuses unequal cohorts", False)
@@ -69,25 +104,54 @@ def main():
     before = snapshot()
     cases = R.load_cases("all")
     world = R.World(expectations)
+    retirements = world.selection.retirements
+    active_expectations = retirements.expectations(expectations)
+    denominators = []
+    for field in ("expected", "allowed"):
+        frozen_count = sum(len(label[field]) for label in expectations["cases"].values())
+        active_count = sum(len(label[field]) for label in active_expectations["cases"].values())
+        denominators.append(f"{field}_rules={frozen_count}->{active_count} (-{frozen_count-active_count})")
+    frozen_labelled, active_labelled = len(expectations["labelled"]), len(active_expectations["labelled"])
+    denominators.append(f"labelled_rules={frozen_labelled}->{active_labelled} (-{frozen_labelled-active_labelled})")
+    frozen_owes = sum(bool(label["expected"]) for label in expectations["cases"].values())
+    active_owes = sum(bool(label["expected"]) for label in active_expectations["cases"].values())
+    denominators.append(f"owes_cases={frozen_owes}->{active_owes} (-{frozen_owes-active_owes})")
+    print(f"INFO retirement denominator adjustment ({len(retirements.ids)} retired rules): "
+          + "; ".join(denominators))
+    for split in ("train", "test"):
+        frozen_count = sum(len(label["expected"]) for label in expectations["cases"].values()
+                           if label["split"] == split)
+        active_count = sum(len(label["expected"]) for label in active_expectations["cases"].values()
+                           if label["split"] == split)
+        print(f"INFO {split} expected denominator: {frozen_count}->{active_count} (-{frozen_count-active_count})")
+    availability_cases = [case for case in cases if case["source"] == "v2" and case["split"] == "test"]
+    frozen_availability = sum(len(case["gold"]) for case in availability_cases)
+    active_availability = sum(len(retirements.active(case["gold"])) for case in availability_cases)
+    print(f"INFO test full-text availability denominator: {frozen_availability}->{active_availability} "
+          f"(-{frozen_availability-active_availability})")
     check("frozen expectations match the live labels", not R.expectation_drift(world, cases, expectations))
     fresh = [R.observe(c, R.replay(world, c)) for c in sorted(cases, key=lambda c: c["id"])]
     pairs = []
     for case in cases:
         old = world.selection.fixture['cases'][case['id']]
         current = [world.prompt_ids(case)] + [world.tool_ids(case, i, call) for i, call in enumerate(case['tool_calls'])]
-        if current != old['events'] or case['input_sha256'] != old['input_sha256']:
+        if current != [retirements.active(ids) for ids in old['events']] or case['input_sha256'] != old['input_sha256']:
             pairs.append(case['id'])
-    check('paired routing preserves all 339 cases and event order', len(cases) == 339 and not pairs, pairs)
+    frozen_deliveries = sum(len(ids) for row in world.selection.fixture['cases'].values() for ids in row['events'])
+    active_deliveries = sum(len(retirements.active(ids))
+                            for row in world.selection.fixture['cases'].values() for ids in row['events'])
+    check('paired routing preserves all 339 cases, input hashes and event order', len(cases) == 339 and not pairs,
+          f"deliveries={frozen_deliveries}->{active_deliveries} (-{frozen_deliveries-active_deliveries}); mismatches={pairs}")
     from unittest.mock import patch
     structural_calls={json.dumps(entry['call'],sort_keys=True)
-                      for entry in world.selection.fixture['structural_calls'] if entry['ids']}
+                      for entry in world.selection.fixture['structural_calls'] if retirements.active(entry['ids'])}
     probe = next((case, i, call) for case in cases for i, call in enumerate(case['tool_calls'])
                  if json.dumps(call,sort_keys=True) in structural_calls)
     with patch('lib.rule_scope_lookup.structural_matches', return_value=False):
         mutant = R.World(expectations)
         damaged = mutant.tool_ids(*probe)
     check('paired replay detects disabled structural selection',
-          damaged != world.selection.fixture['cases'][probe[0]['id']]['events'][probe[1]+1])
+          damaged != retirements.active(world.selection.fixture['cases'][probe[0]['id']]['events'][probe[1]+1]))
     import shutil
     from pathlib import Path
     portable = next((case, i, call) for case in cases for i, call in enumerate(case['tool_calls'])
@@ -96,6 +160,7 @@ def main():
         root = Path(scratch)
         for relative in ('ops/fixtures/rule-scope-compatibility.v1.json',
                          'ops/config/rule-selection-corpus.v1.json',
+                         'ops/config/rule-retirements.v1.json',
                          'ops/fixtures/rule-delivery-eval/scope-backfills.json'):
             target=root/relative
             target.parent.mkdir(parents=True,exist_ok=True)
@@ -115,7 +180,18 @@ def main():
     from lib.rule_scope_lookup import select_rules
     fixture = world.selection.fixture
     catalog = dict(world.selection.catalog, rules=[dict(id=rid, statement='Synthetic scope contract',
-                    personal_to=None, scope=scope) for rid, scope in fixture['structural_scopes'].items()])
+                    personal_to=None, scope=scope) for rid, scope in fixture['structural_scopes'].items()
+                    if rid not in retirements.ids])
+    structural_mismatches = []
+    for index, entry in enumerate(fixture['structural_calls']):
+        result = select_rules(catalog, dict(hook_event_name='PreToolUse', **entry['call']))
+        if not result['complete'] or [rule['id'] for rule in result['rules']] != retirements.active(entry['ids']):
+            structural_mismatches.append(index)
+    frozen_structural = sum(len(entry['ids']) for entry in fixture['structural_calls'])
+    active_structural = sum(len(retirements.active(entry['ids'])) for entry in fixture['structural_calls'])
+    check('paired structural routing preserves all 418 calls',
+          len(fixture['structural_calls']) == 418 and not structural_mismatches,
+          f"deliveries={frozen_structural}->{active_structural} (-{frozen_structural-active_structural}); mismatches={structural_mismatches}")
     result = select_rules(catalog, dict(tool_name='Read',tool_input=review_case['tool_calls'][0]['tool_input']))
     check('stored structural contract delivers page-review rules',
           set(review_case['required']) <= {r['id'] for r in result['rules']})
@@ -140,8 +216,9 @@ def main():
         hard = json.load(handle)["cases"]
     live = set(world.statements)
     for row in hard:
+        active_hard_ids = retirements.active(set(row["required"]) | set(row["acceptable"]))
         check(f"hard {row['id']}: ids are live rules",
-              set(row["required"]) | set(row["acceptable"]) <= live)
+              set(active_hard_ids) <= live)
         check(f"hard {row['id']}: has a one-sentence reason", row["why"].strip().endswith(".")
               and row["why"].count(". ") == 0)
         if row["kind"] in ("should_not_fire", "near_miss"):
@@ -180,9 +257,9 @@ def main():
     flood = R.summarize(grade_with(lambda c: sorted(world.owed)))
     check("flood: recall 1.0 but false deliveries and dirty should-not-fire cases",
           flood["recall_micro"] == 1.0 and flood["false_rules"] > 0 and flood["sn_dirty_cases"] > 0)
-    disputed_case = next((c for c in cases if c["disputed"]), None)
+    disputed_case = next((c for c in cases if retirements.active(c["disputed"])), None)
     if disputed_case is not None:
-        d = disputed_case["disputed"][0]
+        d = retirements.active(disputed_case["disputed"])[0]
         g = R.grade(world, disputed_case, [{"kind": "prompt", "tool": None, "ids": [d],
                                             "fresh": [d], "tokens": 0.0, "overflow": False}])
         check("disputed rule is neither hit nor false", d not in g["false"] and d not in g["hit"])

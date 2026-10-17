@@ -178,12 +178,11 @@ class World:
         self.ev = ev
         from ops.rule_scope_replay import FrozenSelection
         self.selection = FrozenSelection(REPO)
+        if expectations:
+            expectations = self.selection.retirements.expectations(expectations)
         self.hook = _load(os.path.join(REPO, "hooks", "rule-pack-preuse-reselection.py"),
                           "preuse_hook_world")
-        with open(os.path.join(REPO, "ops", "config", "rule-selection-corpus.v1.json"),
-                  "r", encoding="utf-8") as handle:
-            self.statements = {r["id"]: r.get("statement") or ""
-                               for r in json.load(handle)["rules"]}
+        self.statements = {r["id"]: r.get("statement") or "" for r in self.selection.catalog["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
         with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
@@ -197,7 +196,7 @@ class World:
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = owed - self.frozen_jit_boot_ids
+        self.owed = set(self.selection.retirements.active(owed - self.frozen_jit_boot_ids))
         if expectations:
             self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
@@ -212,11 +211,12 @@ class World:
             expected = sorted(case["required"])
         else:
             expected = sorted((set(case["gold"]) - set(case["disputed"])) & self.owed)
-        return {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
+        label = {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
                 "cohort": "envelope" if self.envelope(case["prompt"]) else "human",
                 "expected": expected,
                 "allowed": sorted(set(case["gold"]) | set(case["disputed"])),
                 "should_not_fire": not expected}
+        return self.selection.retirements.label(label)
 
     def label(self, case):
         return self.pinned.get(case["id"]) or self.derive(case)
@@ -380,7 +380,8 @@ def pending_gold_ids(statements, path=PENDING_GOLD):
         doc = json.load(handle)
     if doc.get("schema") != "rule-delivery-pending-gold/v1" or not isinstance(doc.get("rules"), dict):
         raise ValueError(f"{path}: not a rule-delivery-pending-gold/v1 document")
-    pending = set(doc["rules"])
+    from ops.rule_scope_replay import RetiredRules
+    pending = set(RetiredRules(REPO).active(doc["rules"]))
     unknown = sorted(pending - set(statements))
     if unknown:
         raise ValueError(f"{path}: pending-gold rule(s) not in the selection corpus: {unknown}")
@@ -409,7 +410,7 @@ def load_expectations(path=EXPECTATIONS):
 
 def expectation_drift(world, cases, expectations):
     """Case ids whose live labels no longer match the frozen ones."""
-    pinned = expectations["cases"]
+    pinned = world.selection.retirements.expectations(expectations)["cases"]
     return sorted(c["id"] for c in cases if pinned.get(c["id"]) != world.derive(c))
 
 
@@ -488,6 +489,9 @@ def score_receipt(expectations, baseline_rows, candidate_rows):
     estimate, a case-bootstrap interval per arm, and the paired-bootstrap delta.
     The controls push an oracle (deliver exactly the expected rules) and a null
     (deliver nothing) through the same grader."""
+    from ops.rule_scope_replay import RetiredRules
+    retirements = RetiredRules(REPO)
+    expectations = retirements.expectations(expectations)
     base, cand = paired_cohorts(expectations, baseline_rows, candidate_rows)
     cases, labelled = expectations["cases"], set(expectations["labelled"])
 
@@ -498,7 +502,8 @@ def score_receipt(expectations, baseline_rows, candidate_rows):
     dims = {}
     with open(V2_CASES, encoding="utf-8") as handle:
         fixture = json.load(handle)
-    availability_ids = {c["id"]: set(c["gold"]) for c in fixture["cases"] if c["split"] == "test"}
+    availability_ids = {c["id"]: set(retirements.active(c["gold"]))
+                        for c in fixture["cases"] if c["split"] == "test"}
     def availability_row(observed, cid):
         gold = availability_ids[cid]
         return dict(observed, prompt_id=cid, availability_hits=len(set(observed["available"]) & gold),
