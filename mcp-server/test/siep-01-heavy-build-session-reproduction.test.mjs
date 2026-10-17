@@ -1,3 +1,4 @@
+import { migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -16,7 +17,7 @@ const gate = fs.readFileSync(
   new URL("../../ops/siep-01-heavy-build-session-reproduction-local-pg-gate.py", import.meta.url),
   "utf8",
 );
-const migrationNames = fs.readdirSync(new URL("../../migrations/", import.meta.url));
+const migrationNames = listMigrationNames();
 
 class CapturedToolError extends Error {
   constructor(payload) { super(payload.error); Object.assign(this, payload); }

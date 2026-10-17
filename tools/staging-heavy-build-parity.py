@@ -31,10 +31,14 @@ Usage (through the documented staging door):
         tools/staging-heavy-build-parity.py --apply
 """
 
-import hashlib
-import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import hashlib
+import os
 from typing import Any, NoReturn
 
 import psycopg
@@ -78,7 +82,7 @@ def main() -> None:
 
     texts: dict[str, str] = {}
     for name, expected_sha in PRODUCTION_APPLIED:
-        text = (MIGRATIONS / name).read_text()
+        text = read_migration(MIGRATIONS.parent, name)
         got = hashlib.sha256(text.encode()).hexdigest()
         if got != expected_sha:
             fail(f"{name} no longer hashes to what production ran "

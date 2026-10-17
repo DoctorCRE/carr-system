@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
 import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
@@ -25,7 +26,7 @@ if (!bin || !existsSync(path.join(bin,'postgres'))) bin = null;
 const uuid = n => `aa000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 
 test('SQL catchup store binds identity, time, coverage and late commits', { skip: !bin && 'local PostgreSQL binaries unavailable' }, async () => {
-  const migration = readFileSync(path.join(root, 'migrations/0765_doc_whats_new.sql'), 'utf8');
+  const migration = readMigration(path.join(root, 'migrations/0765_doc_whats_new.sql'));
   let postgresFixture, dir;
   const clients = [];
   const releaseBudget = await acquirePostgresFixtureGroup();
@@ -70,7 +71,7 @@ test('SQL catchup store binds identity, time, coverage and late commits', { skip
     await c.query("create view public.v_ref_index as select 'client'::text subject_type,id subject_id from public.client; grant select on public.v_ref_index to carr_writer; grant select,update on public.next_action to carr_writer; grant insert on public.event to carr_writer;");
     await c.query('create function ops.doc_suggestion_visible(uuid,uuid) returns boolean language sql as $$ select exists(select 1 from ops.doc_conversation c where c.id=$1 and c.created_by_actor=$2) $$;');
     await c.query(migration);
-    await c.query(readFileSync(path.join(root,'migrations/0766_doc_whats_new_repair.sql'),'utf8'));
+    await c.query(readMigration(path.join(root,'migrations/0766_doc_whats_new_repair.sql')));
     await c.query("insert into actor(id,slug,display_name,kind,active) values ($1,'joe','Partner A','human',true),($2,'dell','Partner B','human',true)",[uuid(1),uuid(2)]);
     const identity = async slug => {
       await c.query('reset role');

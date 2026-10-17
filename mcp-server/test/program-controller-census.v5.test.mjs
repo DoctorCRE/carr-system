@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // WR-000110 — the program-controller census reader, one test per acceptance
 // criterion it owns, plus the supporting proofs the frozen spec names.
 //
@@ -369,7 +370,7 @@ test("T-AUTO-RELEASE (b): zero and five receipts both refuse and return no reque
 });
 
 test("T-AUTO-RELEASE (d): no column named auto_release_requested exists in 0517", () => {
-  const migration = readFileSync(MIGRATION_0517, "utf8");
+  const migration = readMigration(MIGRATION_0517);
   assert.equal(migration.includes("auto_release_requested"), false,
     "a column of that name would imply someone may set it");
 });
@@ -414,7 +415,7 @@ test("T-ERROR-CLASS: an unadmitted actor is an authorization refusal, which is a
 // T-CONST — every DDL list equals the exported constant, in BOTH directions
 // ---------------------------------------------------------------------------
 
-const migrationText = () => readFileSync(MIGRATION_0517, "utf8");
+const migrationText = () => readMigration(MIGRATION_0517);
 
 /** The quoted members of the first `in (...)` list following a column name. */
 function ddlEnum(column) {

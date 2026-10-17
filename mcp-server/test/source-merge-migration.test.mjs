@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,8 +6,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const migration = fs.readFileSync(path.join(ROOT,
-  "migrations/0470_source_merge_authority_projection.sql"), "utf8");
+const migration = readMigration(path.join(ROOT,
+  "migrations/0470_source_merge_authority_projection.sql"));
 const workflow = fs.readFileSync(path.join(ROOT,
   ".github/workflows/source-merge-controller.yml"), "utf8");
 
