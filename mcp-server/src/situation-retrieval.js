@@ -5,6 +5,7 @@
 // inspection; it never rewrites a query or generates answer text.
 
 import { personalScopeForActor } from "./identity.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
 import { ToolError } from "./tool-error.js";
 
 const POLICIES = new Set(["lexical-dominant-v1", "coequal-normalized-v1"]);
@@ -158,8 +159,11 @@ export async function searchDoctrineSituations(c, actor, args) {
   const result = await c.query(
     `select * from search_doctrine_situations($1, $2::uuid, $3::text[], $4, $5, $6)`,
     [args.q, actorId, args.content_classes || null, args.limit || 20, policy, true]);
-  const policyId = result.rows[0]?.provenance?.policy_id || policy || "default";
-  const fallbackUsed = result.rows.length > 0 && result.rows.every(r => r.provenance?.fallback === true);
+  const hits = result.rows.map(row => ({ ...row,
+    provenance: integerFields(row.provenance, ["policy_version"], "retrieval_version_invalid"),
+  }));
+  const policyId = hits[0]?.provenance?.policy_id || policy || "default";
+  const fallbackUsed = hits.length > 0 && hits.every(r => r.provenance?.fallback === true);
 
   // The query log is written HERE, on the write credential, and never awaited.
   // It used to ride inside search_doctrine_situations as a data-modifying CTE,
@@ -169,7 +173,7 @@ export async function searchDoctrineSituations(c, actor, args) {
   // failure to log must never reach the caller.
   if (c.sideWrite) {
     const bands = { high: 0, medium: 0, low: 0 };
-    for (const row of result.rows) {
+    for (const row of hits) {
       const score = Number(row.final_score);
       if (score >= 0.75) bands.high += 1;
       else if (score >= 0.25) bands.medium += 1;
@@ -180,10 +184,10 @@ export async function searchDoctrineSituations(c, actor, args) {
     // exactly the queries the phrase-proposal loop exists to learn from.
     c.sideWrite(
       "select log_retrieval_query($1, $2, $3::uuid[], $4::jsonb, $5, $6, $7)",
-      [args.q, result.rows.length, result.rows.map(r => r.section_id),
+      [args.q, hits.length, hits.map(r => r.section_id),
        JSON.stringify(bands), policyId,
-       result.rows[0]?.provenance?.policy_version ?? null,
-       result.rows.length > 0 && !fallbackUsed]);
+       hits[0]?.provenance?.policy_version ?? null,
+       hits.length > 0 && !fallbackUsed]);
   }
 
   return {
@@ -191,14 +195,18 @@ export async function searchDoctrineSituations(c, actor, args) {
     query: args.q,
     policy_id: policyId,
     fallback: fallbackUsed,
-    hits: result.rows,
-    total: result.rows.length,
+    hits,
+    total: hits.length,
     generated_text: false,
   };
 }
 
 
-export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError }) {
+export function situationRetrievalTools({ withEnvelope: envelope, writeEvent, ToolError }) {
+  const withEnvelope = normalizedEnvelope(envelope, result => ({ ...result,
+    proposal: integerFields(result.proposal, ["version"], "retrieval_version_invalid"),
+    retired: integerFields(result.retired, ["version"], "retrieval_version_invalid"),
+  }));
   const proposalBase = {
     write: true,
     inputSchema: { type: "object", properties: {
@@ -275,10 +283,13 @@ export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError })
         target_type: { type: "string", enum: ["concept", "phrase", "mapping"] },
         target_id: { type: "string" }, base_version: { type: "integer" },
       }, required: ["idempotency_key", "reason", "target_type", "target_id", "base_version"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "propose-retrieval-retirement", args, async () =>
-        insertProposal(c, actor, args, "retire", {
-          target_type: args.target_type, target_id: args.target_id, base_version: args.base_version,
-        })),
+      handler: async (c, actor, args) => {
+        safeInteger(args.base_version, "retrieval_base_version_invalid", { allowString: false });
+        return withEnvelope(c, actor, "propose-retrieval-retirement", args, async () =>
+          insertProposal(c, actor, args, "retire", {
+            target_type: args.target_type, target_id: args.target_id, base_version: args.base_version,
+          }));
+      },
     },
     "approve-retrieval-proposals": {
       write: true,
@@ -288,29 +299,34 @@ export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError })
         proposal_ids: { type: "array", items: { type: "string" }, maxItems: 50 },
         base_versions: { type: "object" }, golden_suite_digest: { type: "string" },
       }, required: ["idempotency_key", "proposal_ids", "base_versions", "golden_suite_digest"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "approve-retrieval-proposals", args, async () => {
-        const selected = await c.query(
-          `select * from retrieval_proposal where id = any($1::uuid[])
-            order by case proposal_type when 'concept' then 1 when 'phrase' then 2
-                         when 'mapping' then 3 else 4 end, created_at, id
-            for update`, [args.proposal_ids]);
-        if (selected.rows.length !== args.proposal_ids.length)
-          throw new ToolError({ error: "retrieval_proposal_not_found" });
-        for (const proposal of selected.rows) {
-          if (proposal.status !== "pending" || Number(args.base_versions[proposal.id]) !== Number(proposal.version))
-            throw new ToolError({ error: "version_conflict", proposal_id: proposal.id,
-              current_version: Number(proposal.version) });
-          await c.query(`select promote_retrieval_proposal($1::uuid, $2::uuid)`, [proposal.id, actor.id]);
-        }
-        const gate = await c.query(`select * from assert_situation_retrieval_golden($1)`, [args.golden_suite_digest]);
-        const failed = gate.rows.filter(row => row.status !== "pass");
-        if (failed.length) throw new ToolError({ error: "retrieval_golden_regression", failed });
-        await writeEvent(c, actor, "approve-retrieval-proposals", "retrieval_proposal", args.proposal_ids[0], {
-          proposal_ids: args.proposal_ids, golden_suite_digest: args.golden_suite_digest,
-          idempotency_key: args.idempotency_key,
+      handler: async (c, actor, args) => {
+        for (const id of args.proposal_ids)
+          safeInteger(args.base_versions?.[id], "retrieval_base_version_invalid", { allowString: false });
+        return withEnvelope(c, actor, "approve-retrieval-proposals", args, async () => {
+          const selected = await c.query(
+            `select * from retrieval_proposal where id = any($1::uuid[])
+              order by case proposal_type when 'concept' then 1 when 'phrase' then 2
+                           when 'mapping' then 3 else 4 end, created_at, id
+              for update`, [args.proposal_ids]);
+          if (selected.rows.length !== args.proposal_ids.length)
+            throw new ToolError({ error: "retrieval_proposal_not_found" });
+          const proposals = selected.rows.map(row => integerFields(row, ["version"], "retrieval_version_invalid"));
+          for (const proposal of proposals)
+            if (proposal.status !== "pending" || args.base_versions[proposal.id] !== proposal.version)
+              throw new ToolError({ error: "version_conflict", proposal_id: proposal.id,
+                current_version: proposal.version });
+          for (const proposal of proposals)
+            await c.query(`select promote_retrieval_proposal($1::uuid, $2::uuid)`, [proposal.id, actor.id]);
+          const gate = await c.query(`select * from assert_situation_retrieval_golden($1)`, [args.golden_suite_digest]);
+          const failed = gate.rows.filter(row => row.status !== "pass");
+          if (failed.length) throw new ToolError({ error: "retrieval_golden_regression", failed });
+          await writeEvent(c, actor, "approve-retrieval-proposals", "retrieval_proposal", args.proposal_ids[0], {
+            proposal_ids: args.proposal_ids, golden_suite_digest: args.golden_suite_digest,
+            idempotency_key: args.idempotency_key,
+          });
+          return { ok: true, approved: args.proposal_ids, golden_cases: gate.rows.length };
         });
-        return { ok: true, approved: args.proposal_ids, golden_cases: gate.rows.length };
-      }),
+      },
     },
     "retire-retrieval-curation": {
       write: true,
@@ -320,16 +336,19 @@ export function situationRetrievalTools({ withEnvelope, writeEvent, ToolError })
         target_id: { type: "string" }, base_version: { type: "integer" }, reason: { type: "string" },
         golden_suite_digest: { type: "string" },
       }, required: ["idempotency_key", "target_type", "target_id", "base_version", "reason", "golden_suite_digest"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "retire-retrieval-curation", args, async () => {
-        if (!nonEmpty(args.reason)) throw new ToolError({ error: "retirement_reason_required" });
-        const result = await c.query(`select * from retire_retrieval_curation($1, $2::uuid, $3, $4::uuid, $5)`,
-          [args.target_type, args.target_id, args.base_version, actor.id, args.reason.trim()]);
-        if (!result.rows.length) throw new ToolError({ error: "version_conflict" });
-        const gate = await c.query(`select * from assert_situation_retrieval_golden($1)`, [args.golden_suite_digest]);
-        const failed = gate.rows.filter(row => row.status !== "pass");
-        if (failed.length) throw new ToolError({ error: "retrieval_golden_regression", failed });
-        return { ok: true, retired: result.rows[0] };
-      }),
+      handler: async (c, actor, args) => {
+        safeInteger(args.base_version, "retrieval_base_version_invalid", { allowString: false });
+        return withEnvelope(c, actor, "retire-retrieval-curation", args, async () => {
+          if (!nonEmpty(args.reason)) throw new ToolError({ error: "retirement_reason_required" });
+          const result = await c.query(`select * from retire_retrieval_curation($1, $2::uuid, $3, $4::uuid, $5)`,
+            [args.target_type, args.target_id, args.base_version, actor.id, args.reason.trim()]);
+          if (!result.rows.length) throw new ToolError({ error: "version_conflict" });
+          const gate = await c.query(`select * from assert_situation_retrieval_golden($1)`, [args.golden_suite_digest]);
+          const failed = gate.rows.filter(row => row.status !== "pass");
+          if (failed.length) throw new ToolError({ error: "retrieval_golden_regression", failed });
+          return { ok: true, retired: result.rows[0] };
+        });
+      },
     },
   };
 }

@@ -17,6 +17,7 @@ import { organizationTenantForActor, personalScopeForActor } from "./identity.js
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { CORE_RULE_IDS, CORE_RULE_COUNT, CORE_RULE_TRIAGE_SOURCE } from "./core-rule-ids.js";
 import { ruleBootPage } from "./rule-boot.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
 
 const CORE_RULE_ID_SET = new Set(CORE_RULE_IDS);
 
@@ -40,7 +41,15 @@ export function generatedRuleCount(rendered) {
 //     Ranking polish and telemetry are P3 acceptance items.
 
 
-export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
+export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError }) {
+  const version = value => safeInteger(value, "doctrine_version_invalid", { minimum: 0 });
+  const baseVersion = value => safeInteger(value, "doctrine_base_version_invalid", { allowString: false, minimum: 0 });
+  const sectionVersions = section => integerFields(section, ["version", "current_version"], "doctrine_version_invalid", { minimum: 0 });
+  const normalizeResponse = response => ({
+    ...integerFields(response, ["version"], "doctrine_version_invalid"),
+    ...(response.sections && { sections: response.sections.map(sectionVersions) }),
+  });
+  const withEnvelope = normalizedEnvelope(envelope, normalizeResponse);
 
   // ---------------------------------------------------------------- helpers
 
@@ -92,8 +101,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
     ).then(last => new ToolError({
       error: "version_conflict",
       section_id: section.id, section_key: section.section_key,
-      current_version: Number(section.current_version),
-      last_writer: last.rows[0] || null,
+      current_version: version(section.current_version),
+      last_writer: sectionVersions(last.rows[0]) || null,
       resolution: "re-read the section (read-doctrine), re-plan against the current body, retry with base_version=current_version. Never overwrite blind.",
     }));
   }
@@ -399,7 +408,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         let sec = (await c.query(
           `select * from doctrine_section where document_id=$1 and section_key=$2 for update`,
           [doc.id, args.section_key])).rows[0];
-        if (sec && Number(sec.current_version) !== args.base_version)
+        baseVersion(args.base_version);
+        if (sec && version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
         if (!sec && args.base_version !== 0)
           throw new ToolError({ error: "section_not_found_base_nonzero",
@@ -426,7 +436,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
            values ($1,$2,$3,'committed',now()) returning id`,
           [actor.id, actor.client_id || null, args.idempotency_key]);
         const hash = await sha256hex(args.body_text);
-        const newVersion = Number(sec.current_version) + 1;
+        const newVersion = safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
         const rev = await c.query(
           `insert into doctrine_revision (section_id, version, parent_revision_id, change_set_id,
              actor_id, session_key, body, plain_text, content_hash, commit_message)
@@ -469,7 +479,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         required: ["idempotency_key", "section_id", "base_version"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "set-doctrine-refs", args, async () => {
         const sec = await lockSection(c, args.section_id);
-        if (Number(sec.current_version) !== args.base_version)
+        baseVersion(args.base_version);
+        if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
         await runGates(c, actor, "refs_set", { section_id: sec.id,
           content_class: sec.content_class,
@@ -511,9 +522,11 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         required: ["idempotency_key", "section_id", "base_version", "reason"] },
       handler: async (c, actor, args) => withEnvelope(c, actor, "retire-doctrine-section", args, async () => {
         const sec = await lockSection(c, args.section_id);
-        if (Number(sec.current_version) !== args.base_version)
+        baseVersion(args.base_version);
+        if (version(sec.current_version) !== args.base_version)
           throw await versionConflict(c, sec);
         await runGates(c, actor, "retire", { section_id: sec.id, content_class: sec.content_class });
+        safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
         await c.query(
           `update doctrine_section set status='retired', updated_at=now(),
                   current_version = current_version + 1 where id=$1`, [sec.id]);
@@ -548,7 +561,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         if (snap.rows.length)
           return { ok: true, generation: Number(snap.rows[0].generation),
                    store_generation: Number(gen.generation),
-                   built_at: snap.rows[0].built_at, ...snap.rows[0].snapshot_json };
+                   built_at: snap.rows[0].built_at, ...normalizeResponse(snap.rows[0].snapshot_json) };
         // no snapshot yet (doc with no sections): serve live
         return { ok: true, generation: Number(gen.generation),
                  document: { id: doc.id, slug: doc.slug, title: doc.title,
@@ -628,7 +641,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
               document: doc,
               section_key: section,
               title: row.title,
-              version: Number(row.version),
+              version: safeInteger(row.version, "doctrine_version_invalid"),
               body_text: row.body && row.body.text ? row.body.text : "",
             };
           }),
@@ -655,7 +668,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             left join actor o on o.id = d.owner_actor_id
             where s.id = any($1::uuid[])`, [args.section_ids]);
         // Both partners may read personal sections; owner_slug says whose.
-        const visible = r.rows;
+        const visible = r.rows.map(sectionVersions);
         const found = new Set(visible.map(x => x.id));
         return { ok: true, sections: visible.map(({ owner_actor_id, ...x }) => x),
                  missing: args.section_ids.filter(id => !found.has(id)) };
@@ -797,7 +810,8 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
           let sec = (await c.query(
             `select * from doctrine_section where document_id=$1 and section_key=$2 for update`,
             [doc.id, it.section_key])).rows[0];
-          if (sec && Number(sec.current_version) !== it.base_version)
+          baseVersion(it.base_version);
+          if (sec && version(sec.current_version) !== it.base_version)
             throw await versionConflict(c, sec);
           if (!sec && it.base_version !== 0)
             throw new ToolError({ error: "section_not_found_base_nonzero",
@@ -819,7 +833,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
             await c.query(`update doctrine_section set title=$2 where id=$1`, [sec.id, it.title]);
           }
           const hash = await sha256hex(it.body_text);
-          const newVersion = Number(sec.current_version) + 1;
+          const newVersion = safeInteger(version(sec.current_version) + 1, "doctrine_version_invalid");
           await c.query(
             `insert into doctrine_change_item (change_set_id, section_id, op, expected_version, proposed_body)
              values ($1,$2,'write',$3,$4)`,
@@ -870,7 +884,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
               and (d.visibility <> 'personal' or d.owner_actor_id = $1)
               and ($2::text[] is null or d.content_class = any($2))
               and ($3::uuid[] is null or s.id = any($3))`,
-          [actor.id, args.content_classes || null, args.seed_section_ids || null])).rows;
+          [actor.id, args.content_classes || null, args.seed_section_ids || null])).rows.map(sectionVersions);
         const ids = cands.map(x => x.id);
         if (!ids.length) return { ok: true, operative: [], suppressed: [], exceptions: [] };
         const edges = (await c.query(
