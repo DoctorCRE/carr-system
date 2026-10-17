@@ -1,4 +1,6 @@
 import json
+import contextlib
+import io
 import base64
 import hashlib
 import importlib.util
@@ -57,6 +59,27 @@ class LeakGuardTest(unittest.TestCase):
                         'user.email=64207374+jbookout@users.noreply.github.com', 'commit', '-qm', 'test'],
                        check=True)
         return subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD']).decode().strip()
+
+    def test_scan_failure_diagnostics_never_echo_exception_payloads(self):
+        value = self.secret()
+        errors = [
+            (guard.Refusal('invalid raw history'), 'Refusal: invalid raw history'),
+            (subprocess.CalledProcessError(128, ['git', value], output=value, stderr=value),
+             'CalledProcessError: subprocess exited with status 128'),
+            (FileNotFoundError(2, 'No such file or directory', value),
+             'FileNotFoundError: No such file or directory'),
+            (UnicodeDecodeError('utf-8', value.encode(), 0, 1, value),
+             'UnicodeDecodeError: text encoding or decoding failed'),
+            (ValueError(value), 'ValueError: unexpected scanner error; message withheld'),
+        ]
+        for error, expected in errors:
+            with self.subTest(error=type(error).__name__):
+                stderr = io.StringIO()
+                with patch.object(guard, 'main', side_effect=error), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(guard.cli(), 2)
+                self.assertIn(expected, stderr.getvalue())
+                self.assertIn('push/CI refused', stderr.getvalue())
+                self.assertNotIn(value, stderr.getvalue())
 
     def test_secret_blocks_without_echoing_value(self):
         value = 'ghp_' + base64.b64encode(bytes(range(27))).decode()
