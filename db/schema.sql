@@ -66569,10 +66569,15 @@ begin
     raise exception 'unknown_actor: unknown actor %', p_actor_slug;
   end if;
 
+  -- Both roles share the same lock order, including overlapping supersessions.
+  -- Read state and census only after any concurrent withdrawal has committed.
+  perform w.id from ops.work_request w
+   where w.ref in (p_work_request, p_superseded_by)
+   order by w.id for update;
+
   select w.id, w.state into v_id, v_state from ops.work_request w
    where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state in ('captured','triaged') and w.version = p_base_version
-   for update;
+     and w.state in ('captured','triaged') and w.version = p_base_version;
   if v_id is null then
     raise exception 'work_request_not_supersedable: no captured or triaged sourced Work Request % at version %',
       p_work_request, p_base_version;
@@ -123163,7 +123168,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql	f894c45f77bbfbf74c97ba3debc39ee9c273ae8bc272a66461b6e44bd3223625	2026-10-16 13:48:30.306057+00
 0885_retire_context_rail_control.sql	3f8350f093d958a1d36c8285877a232f6900c0464167eb5ac975dc39e4897d72	2026-10-16 14:38:13.202604+00
 0886_active_rule_scope_backfill.sql	b4340e8a0c805d47c433136785a9a488ba1babd47e08da78d27b4437ae61ef0f	2026-10-16 22:45:55.340119+00
-0888_supersede_triaged_work_request.sql	ce9133dba21513c6d721f17200cdbdd461882fcd0b52dd9ff594a80e15c4ee57	2026-10-17 01:55:49.670954+00
+0888_supersede_triaged_work_request.sql	66a622cb27fe52b52e78d197dad7a9fbc122626f024b7900ea5a777cf5394c63	2026-10-17 02:37:59.911668+00
 \.
 
 
