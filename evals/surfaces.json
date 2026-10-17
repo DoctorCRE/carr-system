@@ -49,7 +49,8 @@
         "ops/config/rule-triage.v1.json",
         "tools/flash-prompt-rules.py",
         "lib/rule_scope_lookup.py",
-        "lib/rule_operations.py"
+        "lib/rule_operations.py",
+        "ops/rule_scope_replay.py"
       ]
     },
     {

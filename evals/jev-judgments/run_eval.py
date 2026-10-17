@@ -72,12 +72,12 @@ DIRECT_CALLERS = {"jev_change_tolls", "jev_code_review", "jev_build_advisory", "
 # Independent policy oracle: mechanical callers were disabled by #1529;
 # retained callers were reviewed in #1531, #1543, #1545 and #1576. Do not
 # derive these labels from the registry being tested. The v1 labels stay frozen.
-REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery",
+REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery", "rule_trigger_compile",
            "jev_session_watch", "jev_defect_class", "jev_executor_tier", "jev_code_review"}
 JOB_ATTRIBUTED = {"seat_health", "jev_model_route", "jev_deal_read", "post_call_jev"}
 UNATTENDED_OK = JOB_ATTRIBUTED | {"adhoc:", "jevlint_review"}
 KNOWN = {"jev_fact_boundary", "jev_intake", "jev_scorecard", "jev_best_of", "flash-script",
-         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile",
+         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile", "rule_scope_lookup",
          "timebomb-audit", "jevlint_review"} | JOB_ATTRIBUTED
 
 HARD_CASES = (  # (tag, input), judged during the audit

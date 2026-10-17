@@ -20,14 +20,14 @@ class AdmissionEvalTests(unittest.TestCase):
         self.assertFalse(train & test)
 
     def test_retired_mechanical_sites_are_not_owed_paid_calls(self):
-        for site in ('rule_trigger_delivery', 'jev_session_watch', 'jev_defect_class',
+        for site in ('rule_trigger_delivery', 'rule_trigger_compile', 'jev_session_watch', 'jev_defect_class',
                      'jev_executor_tier', 'jev_code_review', 'jev_requirements'):
             with self.subTest(site=site):
                 self.assertTrue(evaluation.label({'site': site, 'session': True}))
 
     def test_live_sites_remain_paid_and_transport_is_recorded(self):
         client = evaluation._load(ROOT)
-        for site in ('jev_deal_read', 'jev_model_route', 'jevlint_review'):
+        for site in ('jev_deal_read', 'jev_model_route', 'jevlint_review', 'rule_scope_lookup'):
             case = {'site': site, 'session': True}
             with self.subTest(site=site), tempfile.TemporaryDirectory() as scratch:
                 self.assertFalse(evaluation.label(case))

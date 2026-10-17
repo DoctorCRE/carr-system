@@ -79,15 +79,34 @@ def main():
             pairs.append(case['id'])
     check('paired routing preserves all 339 cases and event order', len(cases) == 339 and not pairs, pairs)
     from unittest.mock import patch
-    from lib.rule_delivery_preuse import digest
+    structural_calls={json.dumps(entry['call'],sort_keys=True)
+                      for entry in world.selection.fixture['structural_calls'] if entry['ids']}
     probe = next((case, i, call) for case in cases for i, call in enumerate(case['tool_calls'])
-                 if world.selection.fixture['structural_events'].get(digest(dict(
-                     hook_event_name='PreToolUse', task=case['prompt'], **call))))
+                 if json.dumps(call,sort_keys=True) in structural_calls)
     with patch('lib.rule_scope_lookup.structural_matches', return_value=False):
         mutant = R.World(expectations)
         damaged = mutant.tool_ids(*probe)
     check('paired replay detects disabled structural selection',
           damaged != world.selection.fixture['cases'][probe[0]['id']]['events'][probe[1]+1])
+    import shutil
+    from pathlib import Path
+    portable = next((case, i, call) for case in cases for i, call in enumerate(case['tool_calls'])
+                    if REPO in json.dumps(call))
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+        for relative in ('ops/fixtures/rule-scope-compatibility.v1.json',
+                         'ops/config/rule-selection-corpus.v1.json',
+                         'ops/fixtures/rule-delivery-eval/scope-backfills.json'):
+            target=root/relative
+            target.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copyfile(Path(REPO)/relative,target)
+        from ops.rule_scope_replay import FrozenSelection
+        relocated=FrozenSelection(root)
+        event=dict(hook_event_name='PreToolUse',task=portable[0]['prompt'],**portable[2])
+        event=json.loads(json.dumps(event).replace(REPO,str(root)))
+        result=relocated.select(event)
+        check('paired replay survives a relocated checkout',result['complete']
+              and [r['id'] for r in result['rules']]==world.tool_ids(*portable))
     review_case = {"id": "surface-review-read", "prompt": "",
                    "tool_calls": [{"tool_name": "Read", "tool_input": {
                        "file_path": os.path.join(REPO, "dealroom", "public", "index.html")}}],
