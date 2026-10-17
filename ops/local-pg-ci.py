@@ -582,6 +582,7 @@ def run_local_ci(
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
             acceptance_env["CARR_OWNERSHIP_PRE_0450_FINGERPRINT"] = ownership_baseline
             for program in programs:
+                print(f"local-db-ci: {program.id} acceptance starting", flush=True)
                 env = dict(acceptance_env)
                 if program.kind == "f03":
                     env = dict(ci_env)
@@ -622,7 +623,7 @@ def run_local_ci(
                         print(f"local-db-ci: {program.id} failed (exit {result.returncode}); no raw output in shadow reports", file=sys.stderr)
                     exit_code = result.returncode
                     break
-                print(f"local-db-ci: {program.id} acceptance passed")
+                print(f"local-db-ci: {program.id} acceptance passed ({time.monotonic() - before:.1f}s)", flush=True)
             if exit_code == 0 and integration_base is not None:
                 if validate_candidate(repo, integration_base) != integration_source:
                     raise LocalPGRefusal("integration source changed during canonical candidate proof")
