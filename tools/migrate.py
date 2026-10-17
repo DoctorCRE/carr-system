@@ -455,10 +455,15 @@ def load_baseline() -> MigrationBaseline | None:
 
 def load_migrations() -> list[tuple[str, str, str]]:
     """Return [(filename, sql, sha256)] sorted by filename."""
-    if not MIGRATIONS_DIR.is_dir():
+    try:
+        baseline = load_baseline()
+    except ValueError as exc:
+        fail(str(exc))
+    if not MIGRATIONS_DIR.is_dir() and (MIGRATIONS_DIR.exists() or baseline is None):
         fail(f"no migrations directory at {MIGRATIONS_DIR}")
     out: list[tuple[str, str, str]] = []
-    for p in sorted(MIGRATIONS_DIR.iterdir()):
+    paths = sorted(MIGRATIONS_DIR.iterdir()) if MIGRATIONS_DIR.is_dir() else []
+    for p in paths:
         if p.suffix == ".sql":
             if p.name in FORBIDDEN_MIGRATION_FILENAMES:
                 fail(f"stale WR122 migration filename is permanently refused: {p.name}")
@@ -482,7 +487,6 @@ def load_migrations() -> list[tuple[str, str, str]]:
                 )
             out.append((p.name, sql, digest))
     try:
-        baseline = load_baseline()
         identities = {name: digest for name, _sql, digest in out}
         if baseline is not None:
             identities = baseline.ledger_with_hashes(identities)

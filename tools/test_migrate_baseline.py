@@ -56,6 +56,9 @@ class RunnerBaselineTests(unittest.TestCase):
             (repo / 'db/migration-baseline.json').write_bytes((ROOT / 'db/migration-baseline.json').read_bytes())
             with patch.object(migrate, 'MIGRATIONS_DIR', repo / 'migrations'):
                 self.assertEqual(migrate.load_migrations(), [])
+                (repo / 'migrations').rmdir()
+                self.assertEqual(migrate.load_migrations(), [])
+                (repo / 'migrations').mkdir()
                 (repo / 'migrations' / self.suffix[0]).write_text(self.suffix[1])
                 self.assertEqual(migrate.load_migrations(), [self.suffix])
                 (repo / 'migrations' / self.baseline.cutoff).write_text('select 0;')

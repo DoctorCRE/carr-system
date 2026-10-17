@@ -107,8 +107,8 @@ class MigrationBaseline:
 
 def repository_ledger(repository: Path, baseline: MigrationBaseline) -> dict[str, str]:
     directory = repository / 'migrations'
-    if not directory.is_dir():
-        raise ValueError('migration baseline ledger: migrations directory is missing')
+    if directory.exists() and not directory.is_dir():
+        raise ValueError('migration baseline ledger: migrations path is not a directory')
     files = {path.name: path.read_text() for path in directory.glob('*.sql')}
     ledger = baseline.repository_ledger(files)
     validate_migration_names(ledger, require_frozen=True)
