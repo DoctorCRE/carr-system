@@ -136,7 +136,9 @@ test("standing-context distinguishes scoped retired rules from truly missing req
     if (!/standing-context:retired-requested-rules/.test(sql)) return baselineQuery(sql, params);
     lookups.push(params);
     assert.match(sql, /status = 'retired'/);
-    assert.match(sql, /personal_to is null or \(\$1::text is not null and personal_to =\s*retrieval_visibility_actor_id\(\$1\)\)/);
+    assert.match(sql, /from v_rule_lookup\b/);
+    assert.doesNotMatch(sql, /from rule\b/);
+    assert.match(sql, /personal_to is null or \(\$1::text is not null and personal_to = \$1\)/);
     return { rows: [{ short_id: "0f38532e" }] };
   };
 

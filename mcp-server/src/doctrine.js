@@ -1276,16 +1276,14 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         };
         const absent = [...wanted].filter(
           w => !allRules.some(r => String(r.id).slice(0, 8).toLowerCase() === w));
-        // Boot readers need no base-table grant. Only an explicit unresolved
-        // lookup needs authoritative retirement status, and a denied read must
-        // not turn an unknown rule into permission to skip it.
+        // The reader view preserves the normal read-only credential boundary.
+        // An unresolved lookup needs authoritative status before it can be skipped.
         const retired = absent.length ? (await c.query(
           `select left(id::text,8) as short_id
-             from rule
+             from v_rule_lookup
             where status = 'retired'
               and left(id::text,8) = any($2::text[])
-              and (personal_to is null or ($1::text is not null and personal_to =
-                    retrieval_visibility_actor_id($1)))
+              and (personal_to is null or ($1::text is not null and personal_to = $1))
               and coalesce(scope->>'kind','') <> 'intro_politics'
             order by short_id
             /* standing-context:retired-requested-rules */`, [who, absent])).rows

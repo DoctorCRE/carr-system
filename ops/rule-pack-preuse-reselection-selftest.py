@@ -1259,7 +1259,7 @@ for non_dispatch_command in NON_DISPATCH_COMMANDS:
     check(f"non-dispatch command excludes sizing: {non_dispatch_command}",
           "8400cd3d" not in hits, hits)
 
-DELEGATION_RULE_IDS = {"2b66211d", "5e89c211", "6cfb67f5", "d7f74c93", "fb110a39"}
+DELEGATION_RULE_IDS = {"2b66211d", "5e89c211", "6cfb67f5", "d7f74c93"}
 for command in DISPATCH_COMMANDS:
     if "dispatch.py" not in command:
         continue
