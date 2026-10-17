@@ -31,6 +31,17 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
+    def test_lookup_outage_is_advisory_not_a_denial(self):
+        def broken(command, **kwargs):
+            raise OSError('store unreachable')
+        payload = {'hook_event_name': 'PreToolUse', 'session_id': 's', 'tool_use_id': 't',
+                   'tool_name': 'Write', 'tool_input': {'file_path': '/tmp/x', 'content': 'y'}, 'cwd': str(hook.REPO)}
+        out = hook.process(payload, runner=broken, dedupe=False)
+        specific = out['hookSpecificOutput']
+        self.assertNotIn('permissionDecision', specific)
+        self.assertIn('RULE LOOKUP UNAVAILABLE', specific['additionalContext'])
+        self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False))
+
     def test_sponsor_mismatch_still_refuses_the_action(self):
         out = self.invoke([dict(id='11111111', statement='Binding text',
                                scope={'tools': ['Bash']}, personal_to='dell')])
@@ -200,20 +211,21 @@ class DeliveryTests(unittest.TestCase):
             self.assertTrue(row['complete'])
         self.assertTrue(all(json.loads(c[-1]) == {'detail': 'scopes'} for c in calls))
 
-    def test_unsupported_catalog_fails_closed_and_recovery_remains_reachable(self):
+    def test_unavailable_catalog_is_advisory_and_recovery_remains_reachable(self):
         def unavailable(command, **kwargs):
             return subprocess.CompletedProcess(command, 1, '', 'secret provider detail')
         event = {'hook_event_name': 'PreToolUse', 'session_id': 'fixture',
                  'tool_use_id': 'call', 'tool_name': 'Bash', 'tool_input': {'command': 'git push'}}
         output = hook.process(event, runner=unavailable)
-        self.assertEqual(output['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertNotIn('permissionDecision', output['hookSpecificOutput'])
+        self.assertIn('RULE LOOKUP UNAVAILABLE', output['hookSpecificOutput']['additionalContext'])
         self.assertNotIn('secret', json.dumps(output))
         event['tool_input'] = {'command': './run.sh call standing-context \'{}\''}
         self.assertIsNone(hook.process(event, runner=unavailable))
         event['tool_input'] = {'command': './run.sh call read-doctrine \'{"document":"engineering-workflow-sop"}\''}
         self.assertIsNone(hook.process(event, runner=unavailable))
         event['tool_input']['command'] += ' && touch forbidden'
-        self.assertEqual(hook.process(event, runner=unavailable)['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertNotIn('permissionDecision', hook.process(event, runner=unavailable)['hookSpecificOutput'])
 
 
 if __name__ == '__main__':
