@@ -745,15 +745,10 @@ check("process() returns None (no injection, no selector call) for a non-match",
 
 # Verb match injects: the Agent tool exactly matches the council trigger.
 agent_call = gen_payload(tool="Agent", tool_input={"description": "spawn helper", "prompt": "zzz"})
-# Rules ede4b241 (cloud model choice) and 8400cd3d (new-work sizing) are
-# still PROPOSED, and a proposed rule binds nobody (rule a3da3d39). Since
-# 2026-10-13 (loop 1304) they are in neither the map nor rule-triage.v1.json,
-# so the compiled table carries no trigger for either and an Agent call hits
-# the council trigger alone. Their detector patterns stay tested in
-# ops/rule-jit-compile-selftest.py; on approval their triage rows return and
-# these checks flip back.
-PROPOSED_IDS = {"ede4b241", "8400cd3d"}
-check("the compiled table delivers neither proposed rule (ede4b241, 8400cd3d)",
+# The cloud-model rule remains proposed. Sizing rule 8400cd3d is active
+# and now has its current triage row and deterministic planning detector.
+PROPOSED_IDS = {"ede4b241"}
+check("the compiled table excludes proposed cloud-model rule ede4b241",
       not any(PROPOSED_IDS & set(row["rule_ids"]) for row in TRIGGER_ROWS.values()))
 check("matched_triggers finds exactly the council verb trigger for an Agent call",
       [r["trigger_id"] for r in rail.matched_triggers(agent_call)] == [council_row["trigger_id"]])
@@ -797,8 +792,7 @@ write_output = rail.process(
 write_row = json.loads(context(write_output))
 check("path_pattern match delivers exactly the structural extra rule",
       write_row["rule_ids"] == path_row["rule_ids"] and write_row["packs"] == path_row["packs"])
-# While ede4b241 and 8400cd3d are proposed, no dispatch, planning or intake
-# shape delivers either through the compiled table (see above).
+# No dispatch, planning or intake shape delivers the proposed cloud-model rule.
 for proposed_tool, proposed_input in (
         ("mcp__Claude_Code_Remote__create_session", {"prompt": "fix the bug", "model": "sonnet"}),
         ("mcp__Claude_Code_Remote__create_trigger", {"prompt": "fix the bug", "model": "sonnet"}),
@@ -817,6 +811,11 @@ for proposed_tool, proposed_input in (
         gen_payload(tool=proposed_tool, tool_input=proposed_input)) for rid in row["rule_ids"]})
     check(f"{proposed_tool} delivers no proposed rule through the compiled table",
           not PROPOSED_IDS & set(proposed_hits), proposed_hits)
+
+for active_tool in ("EnterPlanMode", "mcp__CARR_Record_Layer__propose-ready-plan"):
+    active_ids = {rid for row in rail.matched_triggers(
+        gen_payload(tool=active_tool, tool_input={})) for rid in row["rule_ids"]}
+    check(f"{active_tool} delivers the active sizing procedure", "8400cd3d" in active_ids)
 
 silent_runner = Runner()
 check("a routine Read delivers nothing and makes no selector call",

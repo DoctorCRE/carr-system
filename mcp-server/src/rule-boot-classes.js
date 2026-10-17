@@ -9,7 +9,7 @@
 // at request time. A Worker has no filesystem, so this is a checked-in module.
 
 export const RULE_BOOT_CLASSES_SOURCE = "ops/config/rule-classes.v1.json";
-export const RULE_BOOT_CLASSES_DIGEST = "sha256:a0b361089b7cf13f6dc32165bb49f012bc67250d1e35617010129262ea02a4b3";
+export const RULE_BOOT_CLASSES_DIGEST = "sha256:17bc336ce36ad44ea650fa554eed10d6356715fc7a63b0ebde3452b1a2c81301";
 export const RULE_BOOT_BUDGET_TOKENS = 48000;
 export const RULE_BOOT_CHARS_PER_TOKEN = 3.6;
 
@@ -38,7 +38,6 @@ export const RULE_BOOT_CLASSES = Object.freeze({
   "1c42d80c": Object.freeze({"cls": "a", "on": true, "summary": "When friction (refusal, error, workaround) hits, fix the root cause in-session; never route around it silently.", "when": "unexpected friction"}),
   "1d50a3bb": Object.freeze({"cls": "d", "on": false, "summary": "When a Stop gate reopens a turn, resend only the missing delta, never the whole message", "when": "conduct_stop gate"}),
   "1f3a7372": Object.freeze({"cls": "d", "on": false, "summary": "When a scheduled run ends, write its findings, decisions, and rulings to the record before it ends.", "when": "completion_evidence gate"}),
-  "1fcaa63a": Object.freeze({"cls": "c", "on": false, "summary": "When heavy build protocol is invoked, run all its research/plan/review/admission/dispatch phases unprompted.", "when": "heavy build protocol invoked"}),
   "1fddcffb": Object.freeze({"cls": "a", "on": true, "summary": "When deciding what's always-loaded, keep the core to universal needs and push task-specific content to loaded files.", "when": "choosing core versus task-loaded context"}),
   "204391be": Object.freeze({"cls": "b", "on": true, "summary": "When a needed record-layer verb is missing, build it via the heavy path, don't just ask", "when": "discovering a missing record-layer verb while building"}),
   "20d106f1": Object.freeze({"cls": "c", "on": true, "personal_to": "joe", "summary": "When Joe opens a build, predicts confidently, or rules on structure, surface open items and calibrate.", "when": "new builds, predictions or confident direction"}),
@@ -124,6 +123,7 @@ export const RULE_BOOT_CLASSES = Object.freeze({
   "7e9739f2": Object.freeze({"cls": "a", "on": true, "personal_to": "joe", "summary": "Every reply to Joe must be clear, concise, scannable, and matched in shape to his question", "when": "any turn replying to Joe"}),
   "80def9d2": Object.freeze({"cls": "c", "on": true, "summary": "When building any human-facing surface or choice, follow ux-doctrine: one action, say what changed.", "when": "building a human-facing surface or choice for Joe/Dell"}),
   "81709f57": Object.freeze({"cls": "c", "on": false, "summary": "When convening a red team, assign distinct lenses and one seat that re-runs the evidence, never redundant votes.", "when": "convening a red team/review panel"}),
+  "8400cd3d": Object.freeze({"cls": "b", "on": false, "summary": "Size each new build before starting; use the bounded pstack and Pocock workflow for its rung.", "when": "starting a new build, plan, queued item, or builder dispatch"}),
   "847f9995": Object.freeze({"cls": "d", "on": false, "summary": "When building or reviewing any unattended/scheduled job, never let it depend on an expiring interactive credential.", "when": "unattended-path credential verification"}),
   "86647daf": Object.freeze({"cls": "b", "on": true, "summary": "When a build or decision changes the shared system, post it to shared files immediately", "when": "finishing a substantive build, change or decision"}),
   "88e9b5eb": Object.freeze({"cls": "d", "on": false, "summary": "When reporting a blocker, name whether it's a refusal or true impossibility; never conflate the two.", "when": "blocker_decider gate"}),

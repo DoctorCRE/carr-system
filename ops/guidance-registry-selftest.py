@@ -506,12 +506,6 @@ def main():
         # same change (3 of the 11 retired ids -- 006a7eaa, 8117b414,
         # d367188d -- were judgment_ambient rows in the TSV; the other 8
         # were built classes with no manifest row to begin with).
-        # 90 -> 91 and 208 -> 209 on 2026-09-03 (WR-000048 activation unblock):
-        # rule 1fcaa63a, the heavy-build-protocol rule taught 2026-09-01, was
-        # added to the enforcement map as judgment_ambient, so it owes a
-        # manifest row (procedure) and compiles to one more guidance item.
-        # procedure 73 -> 74. Nothing was reclassified; this is one whole rule
-        # ENTERING the active set, the mirror of the 2026-08-27 retirement batch.
         # Current map tracks the live active rule set; retired rows leave the manifest.
         # Historical 209 -> 211 on 2026-09-05: the isolated-delivery and create-missing-
         # verbs rules are both session rails, so each compiles as one procedure.
