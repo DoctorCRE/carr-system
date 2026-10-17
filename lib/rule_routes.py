@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import csv
 import fcntl
-import fnmatch
 import hashlib
 import json
 import os
@@ -34,7 +33,7 @@ import re
 import time
 from pathlib import Path
 
-from lib.rule_operations import BASH_TOOLS, READ_ONLY_TOOLS, call_paths, call_verbs
+from lib.rule_operations import BASH_TOOLS, READ_ONLY_TOOLS, call_paths, call_verbs, structural_matches
 
 ROUTES_RELATIVE = "ops/config/rule-routes.v1.json"
 ROUTES_SCHEMA = "rule-routes/v1"
@@ -245,34 +244,14 @@ def route_matches(route: dict, tool_name: str, tool_input: object,
         read_only = route.get("read_only", False)
         if not isinstance(read_only, bool):
             raise RouteShapeError("read_only")
-        if tool_name in READ_ONLY_TOOLS and not read_only:
-            return False
-        paths = call_paths(tool_input)
-        return any(fnmatch.fnmatch(path, pattern) for pattern in globs for path in paths)
+        return structural_matches({"path_globs": globs, "read_only": read_only}, tool_name, tool_input, verbs)
     if kind != "trigger":
         return False
-    tools = _strings(route, "tools")
-    route_verbs = _strings(route, "verbs")
-    patterns = _strings(route, "bash_patterns")
-    names = {tool_name}
-    if tool_name == "apply_patch":
-        names.update(("Write", "Edit", "MultiEdit"))
-    for tool in tools:
-        if any(fnmatch.fnmatchcase(name, tool) for name in names):
-            return True
-    verbs = call_verbs(tool_name, tool_input) if verbs is None else verbs
-    if verbs & set(route_verbs):
-        return True
-    if tool_name in BASH_TOOLS and isinstance(tool_input, dict):
-        command = tool_input.get("command")
-        if isinstance(command, str):
-            for pattern in patterns:
-                try:
-                    if re.search(pattern, command, re.I):
-                        return True
-                except re.error:
-                    raise RouteShapeError("bash_patterns") from None
-    return False
+    condition = {key: _strings(route, key) for key in TRIGGER_KEYS}
+    try:
+        return structural_matches(condition, tool_name, tool_input, verbs)
+    except re.error:
+        raise RouteShapeError("bash_patterns") from None
 
 
 def matched_rule_ids(doc: dict, tool_name: str, tool_input: object) -> list[str]:

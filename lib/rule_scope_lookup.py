@@ -5,7 +5,6 @@ callers must handle incomplete results before claiming delivery coverage.
 """
 from __future__ import annotations
 
-import fnmatch
 import json
 import math
 import os
@@ -14,7 +13,7 @@ import re
 import subprocess
 from typing import Callable
 
-from lib.rule_operations import BASH_TOOLS, READ_ONLY_TOOLS, call_paths, call_verbs
+from lib.rule_operations import structural_matches
 
 REPO = Path(__file__).resolve().parent.parent
 MATCH_KEYS = ("tools", "verbs", "bash_patterns", "path_globs")
@@ -45,26 +44,6 @@ def _scope_condition(scope: object) -> dict:
         raise ValueError("invalid_read_only")
     condition["read_only"] = scope.get("read_only", False)
     return condition
-
-
-def _matches(condition: dict, event: dict) -> bool:
-    tool = event.get("tool_name", "")
-    tool_input = event.get("tool_input", {})
-    names = {tool}
-    if tool == "apply_patch":
-        names.update(("Write", "Edit", "MultiEdit"))
-    if any(fnmatch.fnmatchcase(name, pattern) for name in names for pattern in condition["tools"]):
-        return True
-    if call_verbs(tool, tool_input) & set(condition["verbs"]):
-        return True
-    command = tool_input.get("command") if isinstance(tool_input, dict) else None
-    if tool in BASH_TOOLS and isinstance(command, str):
-        if any(re.search(pattern, command, re.I) for pattern in condition["bash_patterns"]):
-            return True
-    if tool in READ_ONLY_TOOLS and not condition["read_only"]:
-        return False
-    return any(fnmatch.fnmatch(path, pattern) for path in call_paths(tool_input)
-               for pattern in condition["path_globs"])
 
 
 def _moment_questions(rows: list[dict]) -> dict:
@@ -124,7 +103,7 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
         except ValueError as exc:
             defects.append({"rule_id": row["id"], "reason": str(exc)})
             continue
-        if _matches(condition, event):
+        if structural_matches(condition, event.get("tool_name", ""), event.get("tool_input", {})):
             selected.append(row)
         elif condition["moment"]:
             moments.append(row)
@@ -161,6 +140,7 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
             if (not isinstance(value, dict) or value.get("type") != "choice"
                     or isinstance(confidence, bool) or not isinstance(confidence, (int, float))
                     or not math.isfinite(confidence) or not 0.8 <= confidence <= 1
+                    or not isinstance(choice, str)
                     or choice not in {"applies", "not_applicable", "scope_defect"}):
                 unresolved.append({"rule_id": row["id"], "reason": "moment_judgment_uncertain"})
             elif choice == "scope_defect":

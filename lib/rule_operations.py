@@ -1,6 +1,7 @@
 """Pending-operation facts shared by rule selection consumers."""
 from __future__ import annotations
 
+import fnmatch
 import re
 import unicodedata
 
@@ -67,3 +68,29 @@ def call_paths(tool_input: object) -> list[str]:
         paths.extend(match.group(1).strip() for match in re.finditer(
             r"^\*\*\* Move to: (.+)$", command, re.M))
     return paths
+
+
+def structural_matches(condition: dict, tool_name: str, tool_input: object,
+                       verbs: set[str] | None = None) -> bool:
+    """Match validated tool, verb, command and path alternatives for one call.
+
+    Invalid command regular expressions propagate to the caller's error policy.
+    Read-only suppression applies only to paths, never to explicit tools/verbs.
+    """
+    names = {tool_name}
+    if tool_name == "apply_patch":
+        names.update(("Write", "Edit", "MultiEdit"))
+    if any(fnmatch.fnmatchcase(name, pattern) for name in names
+           for pattern in condition.get("tools", [])):
+        return True
+    verbs = call_verbs(tool_name, tool_input) if verbs is None else verbs
+    if verbs & set(condition.get("verbs", [])):
+        return True
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    if tool_name in BASH_TOOLS and isinstance(command, str):
+        if any(re.search(pattern, command, re.I) for pattern in condition.get("bash_patterns", [])):
+            return True
+    if tool_name in READ_ONLY_TOOLS and not condition.get("read_only", False):
+        return False
+    return any(fnmatch.fnmatch(path, pattern) for pattern in condition.get("path_globs", [])
+               for path in call_paths(tool_input))
