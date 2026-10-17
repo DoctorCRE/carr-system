@@ -956,6 +956,8 @@ def main(argv=None):
 
     try:
         credentials = load_inventory(args.inventory)
+        # Fleet health owns verification and record-layer dedup for shared Cloudflare copies.
+        credentials = [c for c in credentials if c.get("health_owner") != "cloudflare-fleet"]
     except (OSError, json.JSONDecodeError) as exc:
         # Rule 6: an unreadable inventory is a check that could not run, and
         # must be reported as exactly that — never as a clean sweep because
