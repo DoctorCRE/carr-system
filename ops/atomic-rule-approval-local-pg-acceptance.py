@@ -755,16 +755,12 @@ def main() -> int:
                         or legacy_replay[0].get("legacy_admission") != legacy_note:
                     refuse("legacy retirement exact replay failed")
 
-                # A receiptless ACTIVE rule that does NOT predate the receipt
-                # cutover is a real defect, not history -- it must keep being
-                # refused exactly as before 0351. Activated "now", well after
-                # the earliest receipt already written above.
                 cur.execute("reset session authorization")
                 broken_rule_id = uuid.uuid4()
                 cur.execute(
                     """insert into rule(id,statement,human_quote,taught_by,status)
                        values (%s,'local receiptless-but-not-legacy fixture',
-                               'this one should still be refused',%s,'proposed')""",
+                               'remove authority despite its missing approval',%s,'proposed')""",
                     (broken_rule_id, actor[0]),
                 )
                 install_pre_trigger_rule_shape(
@@ -773,19 +769,23 @@ def main() -> int:
                     (actor[0], broken_rule_id),
                 )
                 cur.execute("set session authorization carr_authority_joe")
-                cur.execute("savepoint non_legacy_receiptless_still_refused")
-                try:
-                    cur.execute(
-                        "select ops.retire_rule(%s,%s,null,%s)",
-                        (broken_rule_id, "should still be refused",
-                         f"local-broken-retire-{uuid.uuid4()}"),
-                    )
-                    refuse("retire_rule accepted a receiptless active rule that postdates the cutover")
-                except psycopg.Error as exc:
-                    cur.execute("rollback to savepoint non_legacy_receiptless_still_refused")
-                    if "lacks its exact approval receipt" not in str(exc).lower():
-                        refuse(f"non-legacy receiptless refusal was for the wrong reason: {exc}")
-                cur.execute("release savepoint non_legacy_receiptless_still_refused")
+                cur.execute(
+                    "select ops.retire_rule(%s,%s,null,%s)",
+                    (broken_rule_id, "remove authority despite missing approval",
+                     f"local-broken-retire-{uuid.uuid4()}"),
+                )
+                missing_retired = scalar(cur)
+                missing_note = missing_retired.get("missing_approval_receipt")
+                assert missing_retired.get("status") == "retired"
+                assert missing_retired.get("legacy_admission") is None
+                assert missing_note and missing_note.startswith("missing_approval_receipt: ")
+                cur.execute(
+                    """select approval_receipt_id is null and legacy_admission is null
+                              and missing_approval_receipt=%s
+                         from ops.rule_retirement_receipt where rule_id=%s""",
+                    (missing_note, broken_rule_id),
+                )
+                assert scalar(cur) is True, "receipt must preserve the missing approval evidence"
                 cur.execute("reset session authorization")
 
                 # A still-PROPOSED rule has no receipt either, but that is the
