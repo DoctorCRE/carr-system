@@ -575,6 +575,20 @@ class RejectionReconciliation(Base):
         self.assertNotIn(secret.encode(), raw)
 
 
+class FakeGitHubIdentity(unittest.TestCase):
+    def test_red_ci_does_not_leak_to_a_commit_with_a_colliding_short_hash(self):
+        green = "01bec640" + "0" * 32
+        red = "04dec640" + "0" * 32
+        red_pr = FakeGitHub().pr_number(red)
+        gh = FakeGitHub(red_ci_prs={red_pr})
+        green_source = gh.pr_for_commit(green)
+        red_source = gh.pr_for_commit(red)
+        self.assertNotEqual(green_source["number"], red_source["number"])
+        self.assertEqual(gh.runs_for(green_source["head"]["sha"])[0]["conclusion"], "success")
+        self.assertEqual(gh.runs_for(red_source["head"]["sha"])[0]["conclusion"], "failure")
+        self.assertEqual(FakeGitHub().pr_number(green), green_source["number"])
+
+
 class FixtureIsolation(unittest.TestCase):
     def test_fixtures_share_an_immutable_baseline_but_not_mutable_history(self):
         with tempfile.TemporaryDirectory() as directory:
