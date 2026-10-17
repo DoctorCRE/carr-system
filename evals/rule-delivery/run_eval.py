@@ -186,18 +186,13 @@ class World:
         self.statements = {r["id"]: r.get("statement") or "" for r in self.selection.catalog["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
-        with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
-            classes = json.load(handle)["rules"]
-        self.frozen_jit_boot_ids = {rid for rid, row in classes.items() if row["always_on"]
-                     and row.get("personal_to") in (None, "joe")} | {
-            rid for rid, row in meta.items() if row["layer"] == "layer0"}
         routes = self.rule_routes.load_routes(__import__("pathlib").Path(REPO))["rules"]
         owed = set()
         for rid, entry in routes.items():
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = set(self.selection.retirements.active(owed - self.frozen_jit_boot_ids))
+        self.owed = set(self.selection.retirements.active(owed))
         if expectations:
             self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
@@ -416,7 +411,7 @@ def card_comparison():
     cards = load_cards()
     core = {rid for c in cards if c['placement'] == 'CORE' for rid in c['source_rule_ids']}
     mapped = {rid for c in cards for rid in c['source_rule_ids']}
-    boots = {'baseline': set(world.ev.boot_always_on_ids(REPO)), 'cards': core, 'cards-uncapped': core}
+    boots = {'baseline': set(), 'cards': core, 'cards-uncapped': core}
     observations = []
     for case in cases:
         arms, details = {}, {}
@@ -492,7 +487,7 @@ def card_comparison():
                     'evals/rule-delivery/expectations.v4.json', 'evals/rule-delivery/hard_cases.v1.json',
                     'ops/fixtures/rule-delivery-eval/cases.v2.json', 'lib/rule_cards.py',
                     'ops/config/rule-cards.v1.json', 'ops/config/rule-routes.v1.json',
-                    'ops/config/rule-triage.v1.json', 'ops/config/rule-classes.v1.json',
+                    'ops/config/rule-triage.v1.json',
                     'ops/config/rule-selection-corpus.v1.json', 'ops/rule_delivery_eval.py',
                     'lib/rule_delivery_preuse.py', 'lib/rule_routes.py',
                     'hooks/rule-pack-preuse-reselection.py', 'ops/config/rule-enforcement-map.json']
@@ -575,10 +570,8 @@ def card_cap_impact(observations, table, core, mapped, labels):
 
 def observe(case, events, boot_ids=None):
     """The raw observation of one case: what was delivered, never how it grades."""
-    if boot_ids is None:
-        boot_ids = _load(os.path.join(REPO, "ops/rule_delivery_eval.py"), "rde_boot").boot_always_on_ids(REPO)
     return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
-            "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
+            "available": sorted(set(boot_ids or ()) | {rid for ev in events for rid in ev["ids"]}),
             "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
             "prompt_delivered": sorted({rid for ev in events if ev["kind"] == "prompt" for rid in ev["ids"]}),
             "events": len(events), "tokens": sum(ev["tokens"] for ev in events),
@@ -709,7 +702,7 @@ def expectation_drift(world, cases, expectations):
 
 def observe_all(variant="baseline"):
     world = World()
-    boot_ids = world.ev.boot_always_on_ids(REPO)
+    boot_ids = set()
     if variant in ("cards", "cards-uncapped"):
         from lib.rule_cards import load_cards
         boot_ids = {rid for c in load_cards() if c["placement"] == "CORE" for rid in c["source_rule_ids"]}

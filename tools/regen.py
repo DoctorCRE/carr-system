@@ -22,8 +22,6 @@ ROOT = Path(__file__).resolve().parents[1]
 GENERATORS = (
     ('core rules', ('mcp-server/src/core-rule-ids.js',),
      (sys.executable, 'ops/sync-core-rule-ids.py')),
-    ('boot classes and route gaps', ('mcp-server/src/rule-boot-classes.js', 'evals/rule-delivery/evidence/route-gaps.json'),
-     (sys.executable, 'ops/sync-rule-boot-classes.py')),
     ('mutation registry source contracts', ('mcp-server/src/scac-mutation-registry.current.generated.js',),
      ('node', 'ops/scac-mutation-inventory.mjs', '--write-current')),
     ('SQL contract corpus', ('mcp-server/test/f03-design-contract-corpus-plan-postgres.generated.sql',

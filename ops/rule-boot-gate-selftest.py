@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1465,7 +1466,45 @@ def case_fetch_instructions_leads_with_digest_only(c):
     assert parsed is not None and parsed[1] is True and lib._page_of(parsed[0]) == 1, plain
 
 
-CASES = [case_parallel_child_filtered_boot_after_corpus_change, case_filtered_drift_requires_current_store_metadata, case_child_filtered_boot_after_corpus_change, case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
+def case_live_digest_boot_lifecycle(c):
+    module = Path(REPO, "mcp-server/src/rule-boot.js").as_uri()
+    result = subprocess.run(["node", "--input-type=module", "-e",
+                             f"import {{ruleBootPage}} from {json.dumps(module)}; "
+                             "console.log(JSON.stringify({ok:true,rule_boot:await ruleBootPage([],null)}));"],
+                            capture_output=True, text=True, check=True, timeout=10)
+    answer = json.loads(result.stdout)
+    boot = answer["rule_boot"]
+    assert boot["pages_total"] == 1
+    c.stub("a", pages=1)
+    stub = c.env["CARR_RULE_BOOT_FETCH_STUB"]
+    Path(stub).write_text(json.dumps(answer))
+    c.arm()
+    assert denied(c.call(*READ)), "cold boot holds effects"
+    c.fetch_cmd(abs_cmd(1), 1, boot=boot)
+    assert c.call(*READ) is None, "one real digest page completes cold boot"
+    assert denied(c.call(*READ, agent="fresh-child")), "a child needs its own receipt"
+    c.fetch_cmd(abs_cmd(1), 1, boot=boot, agent="fresh-child")
+    assert c.call(*READ, agent="fresh-child") is None
+    c.arm("compact")
+    assert denied(c.call(*READ)), "compaction requires a fresh receipt"
+    command = abs_cmd(1) + " | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'"
+    filtered = subprocess.run(["jq", "-c", "{ok: .ok, rule_boot: {digest: .rule_boot.digest}}"],
+                              input=result.stdout, capture_output=True, text=True, check=True)
+    c.fetch_cmd(command, 1, boot=boot, stdout=lambda _: filtered.stdout)
+    assert c.call(*READ) is None, "CLAUDE.md's compact form completes re-boot"
+    c.stub(None)
+    c.arm("compact")
+    assert denied(c.call(*READ)), "outage holds ordinary effects"
+    for verb in ("standing-context", "read-doctrine", "applicable-rules"):
+        assert not denied(c.call("mcp__carr__" + verb, {})), verb
+    assert not denied(c.call("ToolSearch", {"query": "standing-context"}))
+    c.env["CARR_RULE_BOOT_FETCH_STUB"] = stub
+    c.arm("resume")
+    c.fetch_cmd(abs_cmd(1), 1, boot=boot)
+    assert c.call(*READ) is None, "successful fetch clears the outage hold"
+
+
+CASES = [case_live_digest_boot_lifecycle, case_parallel_child_filtered_boot_after_corpus_change, case_filtered_drift_requires_current_store_metadata, case_child_filtered_boot_after_corpus_change, case_fetch_instructions_leads_with_digest_only, case_error_echo_filter_cannot_confirm, case_failed_upstream_filter_cannot_confirm, case_interrupted_result_cannot_confirm,
          case_child_start_keeps_parent_boot, case_child_compaction_rearms_only_that_child,
          case_child_rearm_digest_change_regates_all, case_child_rearm_outage_keeps_parent,
          case_unflagged_child_compaction_keeps_parent, case_unflagged_child_compactions_chain,

@@ -45,7 +45,6 @@
         "mcp-server/src/rule-*.js",
         "mcp-server/src/core-rule-ids.js",
         "ops/config/rule-routes.v1.json",
-        "ops/config/rule-classes.v1.json",
         "ops/config/rule-triage.v1.json",
         "tools/flash-prompt-rules.py",
         "lib/rule_scope_lookup.py",
