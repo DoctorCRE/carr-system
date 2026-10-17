@@ -675,7 +675,10 @@ def main() -> None:
         host = conn.info.host
         with conn.cursor() as cur:
             cur.execute("select to_regclass('schema_migrations')")
-            if cur.fetchone()[0] is None:
+            ledger_table = cur.fetchone()
+            if ledger_table is None:
+                fail("cannot determine whether the migration ledger exists")
+            if ledger_table[0] is None:
                 applied: dict[str, str] = {}
             else:
                 cur.execute("select filename, sha256 from schema_migrations")
