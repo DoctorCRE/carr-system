@@ -99,6 +99,10 @@ def build(tmp):
     ops.mkdir()
     (ops / "ci.sh").write_text(STUB)
     os.chmod(ops / "ci.sh", 0o755)
+    # The hook's leak guard is stubbed like ci.sh: it needs a corpus and a
+    # gitleaks download, neither of which this floor proof is about.
+    (repo / "security").mkdir()
+    (repo / "security" / "leak_guard.py").write_text("import sys\nsys.stdin.read()\n")
     (repo / "seed.txt").write_text("seed\n")
     git(repo, "add", "-A", check_rc=True)
     git(repo, "commit", "-qm", "seed", check_rc=True)

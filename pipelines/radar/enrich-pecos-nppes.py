@@ -14,7 +14,7 @@ class), so its geography never changes an outcome. That keeps this to a few
 thousand polite API calls, not 32k. Pass --all to enrich the whole pool anyway.
 
 For each NPI: pull the LOCATION address (fallback practiceLocations, then
-MAILING). Writes city/county-blank/state/zip back into out/routines/radar/upstream/pecos.json and
+MAILING). Writes city/county-blank/state/zip back into upstream/pecos.json and
 appends a provenance note. NPPES gives no county, so territory matching in
 corroborate.py keys on city (TERRITORY_CITIES is comprehensive). Idempotent:
 rows already carrying an [nppes ...] detail tag are skipped unless --refresh.
@@ -24,8 +24,7 @@ Usage: python3 enrich-pecos-nppes.py [--all] [--refresh]
 import json, os, re, sys, time, urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from pool_paths import UPSTREAM, DATA as POOL_DATA
-UP = str(UPSTREAM)
+UP = os.path.join(HERE, "upstream")
 OTHER_POOLS = ("licenses-pool.json", "nppes-moves.json", "tips.json", "deeds.json",
                "jobs.json", "domains.json")
 TITLE = {"DR","MD","DO","DC","OD","DDS","DMD","PA","NP","ARNP","APRN","RN","LPC",

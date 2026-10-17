@@ -64,7 +64,7 @@ def code_owned_tasks(repo: Path) -> set[str]:
     if not path.exists():
         return set()
     manifest = json.loads(path.read_text())
-    return set(manifest['retired']) | {name for job in manifest['jobs'] for name in job['replaces']}
+    return {name for job in manifest['jobs'] for name in job['replaces']}
 
 
 def stamp(instant: datetime) -> str:
@@ -515,7 +515,7 @@ def record_failure(repo: Path, task_id: str, code: int, reason: str, log_path: P
                     f'repair the failure, run bin/headless-task {task_id}, '
                     'and verify a successful ledger row plus run.sh health.',
             'source_note': f'headless-task:{task_id}', 'marker': 'none',
-            'blocker': 'capability',
+            'blocker': 'other_lane',
             'blocker_detail': f'The unattended {task_id} executor failed; an attended session must inspect its local ledger and repair the named tool, runtime or login dependency.'}
     # A stable task key makes repeated failures one record-layer write. A
     # failed record write remains visible in the log and never becomes success.
@@ -772,7 +772,7 @@ def install_main(argv=None) -> int:
     settings = config(repo)
     selected = args.task_ids or sorted(settings['tasks'])
     if args.action == 'install' and set(selected) & code_owned_tasks(repo):
-        parser.error('code-owned routines cannot install Claude headless jobs; use bin/install-routines.sh')
+        parser.error('code-owned routines cannot install Claude headless jobs; use the launchd installer')
     if set(selected)-set(settings['tasks']):
         parser.error('unknown task id')
     from lib.claude_scheduler_native import system_timezone

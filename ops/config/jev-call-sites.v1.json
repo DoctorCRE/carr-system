@@ -2,6 +2,8 @@
   "schema": "carr-jev-call-sites/v1",
   "about": "The only call sites allowed to make a paid Jev call, read by ops/typesafe_client.py before any transport. An unregistered caller, a call without the site's attribution, or a site marked unattended=off inside a CARR_JEV_WORKER=off worker is refused and logged, never paid. Budgets are per UTC hour and per UTC day per site, under hourly_paid_call_cap and jev-cost-guard's daily_paid_call_cap. `caller` is the module that called ask()/judge() (file name without .py) or an explicit caller= string. A new paid call path fails ops/jev-call-sites-selftest.py until it has an entry here. Audit and per-site decisions: the 2026-10-04 PR 'Jev: system-wide call audit, call-site registry and budgets'. `transport_sources` names every tracked file that dispatches a paid Jev transport (the vendor endpoint, or ask-jev through callTool, run.sh or local-verb) and the control its source implements: shared_admission (this registry plus the shared reservation before dispatch), worker_reservation_proof (the Worker verifies and consumes a signed admission), worker_runtime_class (an in-Worker caller under the app_runtime class, which ingress cannot select). The selftest fails on an unlisted transport and on a label whose control is absent from its source. A caller outside this repository that reaches the Worker is refused without an admission; one that calls the vendor directly is outside what this registry can see.",
   "hourly_paid_call_cap": 200,
+  "worker_daily_paid_call_cap": 300,
+  "worker_daily_paid_call_cap_note": "The Worker's own ceiling on paid attempts per UTC day across every caller and purpose (WR-000292). The budgets in this file are enforced by ops/typesafe_client.py on the calling machine; the Worker counts its attempt ledger (ask-jev-attempt rows) and refuses jev_worker_daily_cap past this number even for a validly admitted call. It binds before the site daily budgets do collectively. mcp-server/wrangler.toml's JEV_WORKER_DAILY_CAP and the Worker's default must equal it.",
   "transport_sources": {
     "ops/typesafe_client.py": "shared_admission",
     "mcp-server/src/jev-call-receipt.js": "worker_reservation_proof",
@@ -18,31 +20,37 @@
       "daily_budget": 0,
       "owner": "orchestrator",
       "value": "judged rules reached the session beyond the compiled match on 9% of human prompts (234 of ~2,560, 2026-09-27..10-04); worker briefs are machine-written and fall back to the deterministic overlap pick",
-      "sources": ["ops/rule_trigger_delivery.py"]
+      "sources": [
+        "ops/rule_trigger_delivery.py"
+      ]
     },
     {
       "caller": "jev_session_watch",
       "trigger": "Explicit uncertain bug-location diagnosis only; progress, repairs and test mapping are deterministic; the injection screen was retired in #1528.",
-      "runs_in": "interactive Claude sessions via hooks/jev-supervisor.py",
+      "runs_in": "Explicit bounded calls to ops/jev_session_watch.py",
       "attribution": "session",
       "unattended": "off",
       "hourly_budget": 0,
       "daily_budget": 0,
       "owner": "orchestrator",
       "value": "Bounded uncertain diagnosis retained; caller-level improvement remains unmeasured.",
-      "sources": ["ops/jev_session_watch.py"]
+      "sources": [
+        "ops/jev_session_watch.py"
+      ]
     },
     {
       "caller": "jev_defect_class",
       "trigger": "PreToolUse record-defect / add-loop: rank the defect class",
-      "runs_in": "interactive Claude sessions via hooks/blocker-decider-gate.py",
+      "runs_in": "Explicit bounded calls to ops/jev_defect_class.py",
       "attribution": "session",
       "unattended": "off",
       "hourly_budget": 0,
       "daily_budget": 0,
       "owner": "orchestrator",
       "value": "advisory class at a real filing boundary (rare); its selftest was the largest single fixture burner (a 'pick' prompt repeated 91 times on 2026-10-04)",
-      "sources": ["ops/jev_defect_class.py"]
+      "sources": [
+        "ops/jev_defect_class.py"
+      ]
     },
     {
       "caller": "jev_executor_tier",
@@ -54,19 +62,23 @@
       "daily_budget": 0,
       "owner": "orchestrator",
       "value": "verdict consumed by code (rewrites or denies the subagent model); ~4 calls a day",
-      "sources": ["ops/jev_executor_tier.py"]
+      "sources": [
+        "ops/jev_executor_tier.py"
+      ]
     },
     {
       "caller": "jev_code_review",
-      "trigger": "PostToolUse Write/Edit/apply_patch with <=400 added lines and a signature match; weekly timebomb-audit regions",
-      "runs_in": "interactive sessions via hooks/lint-gate.py; launchd com.carr.timebomb-audit",
+      "trigger": "PostToolUse Write/Edit/apply_patch with <=400 added lines and a signature match",
+      "runs_in": "interactive sessions via hooks/lint-gate.py",
       "attribution": "session_or_job",
       "unattended": "off",
       "hourly_budget": 0,
       "daily_budget": 0,
       "owner": "orchestrator",
       "value": "task-fit at >=0.85 becomes must-address; 92% of its 7-day calls were selftest fixtures, now refused",
-      "sources": ["ops/jev_code_review.py"]
+      "sources": [
+        "ops/jev_code_review.py"
+      ]
     },
     {
       "caller": "jev_model_route",
@@ -78,7 +90,9 @@
       "daily_budget": 40,
       "owner": "orchestrator",
       "value": "verdict consumed by code (chooses the desk)",
-      "sources": ["ops/jev_model_route.py"]
+      "sources": [
+        "ops/jev_model_route.py"
+      ]
     },
     {
       "caller": "jev_deal_read",
@@ -90,7 +104,9 @@
       "daily_budget": 60,
       "owner": "orchestrator",
       "value": "rendered on the partner-facing deal cards; ~6 calls a day",
-      "sources": ["ops/jev_deal_read.py"]
+      "sources": [
+        "ops/jev_deal_read.py"
+      ]
     },
     {
       "caller": "post_call_jev",
@@ -102,7 +118,9 @@
       "daily_budget": 60,
       "owner": "orchestrator",
       "value": "annotates the post-call review pack Joe reads",
-      "sources": ["tools/dictation-rig/bin/post_call_jev.py"]
+      "sources": [
+        "tools/dictation-rig/bin/post_call_jev.py"
+      ]
     },
     {
       "caller": "jev_fact_boundary",
@@ -114,7 +132,9 @@
       "daily_budget": 20,
       "owner": "orchestrator",
       "value": "off by default; budget bounds an opt-in",
-      "sources": ["ops/jev_fact_boundary.py"]
+      "sources": [
+        "ops/jev_fact_boundary.py"
+      ]
     },
     {
       "caller": "jev_intake",
@@ -126,7 +146,9 @@
       "daily_budget": 20,
       "owner": "orchestrator",
       "value": "flash desk only; no hook wires it",
-      "sources": ["ops/jev_intake.py"]
+      "sources": [
+        "ops/jev_intake.py"
+      ]
     },
     {
       "caller": "jev_scorecard",
@@ -138,7 +160,9 @@
       "daily_budget": 20,
       "owner": "orchestrator",
       "value": "flash desk only; no hook wires it",
-      "sources": ["ops/jev_scorecard.py"]
+      "sources": [
+        "ops/jev_scorecard.py"
+      ]
     },
     {
       "caller": "jev_best_of",
@@ -150,7 +174,9 @@
       "daily_budget": 20,
       "owner": "orchestrator",
       "value": "flash desk only; no hook wires it",
-      "sources": ["ops/jev_best_of.py"]
+      "sources": [
+        "ops/jev_best_of.py"
+      ]
     },
     {
       "caller": "flash-script",
@@ -162,7 +188,9 @@
       "daily_budget": 20,
       "owner": "orchestrator",
       "value": "flash desk only",
-      "sources": ["tools/flash-script.py"]
+      "sources": [
+        "tools/flash-script.py"
+      ]
     },
     {
       "caller": "rule_gold_label",
@@ -174,7 +202,9 @@
       "daily_budget": 60,
       "owner": "orchestrator",
       "value": "eval labels; on demand only",
-      "sources": ["ops/rule_gold_label.py"]
+      "sources": [
+        "ops/rule_gold_label.py"
+      ]
     },
     {
       "caller": "rule_delivery_eval",
@@ -186,7 +216,9 @@
       "daily_budget": 60,
       "owner": "orchestrator",
       "value": "eval measurement; on demand only",
-      "sources": ["ops/rule_delivery_eval.py"]
+      "sources": [
+        "ops/rule_delivery_eval.py"
+      ]
     },
     {
       "caller": "judge_paired_eval",
@@ -198,7 +230,9 @@
       "daily_budget": 60,
       "owner": "orchestrator",
       "value": "eval measurement; on demand only",
-      "sources": ["tools/judge/paired_eval.py"]
+      "sources": [
+        "tools/judge/paired_eval.py"
+      ]
     },
     {
       "caller": "adhoc:*",
@@ -210,10 +244,24 @@
       "daily_budget": 40,
       "owner": "orchestrator",
       "value": "64 explicit review/diagnosis judgments in 7 days under ad-hoc caller names; they now share one prefix and one budget",
-      "sources": ["ops/typesafe_client.py"]
+      "sources": [
+        "ops/typesafe_client.py"
+      ]
     },
-    {"caller": "rule_trigger_compile", "trigger": "manual: bounded semantic evaluation", "runs_in": "explicit evaluation session", "attribution": "session", "unattended": "off", "hourly_budget": 5, "daily_budget": 10, "owner": "orchestrator", "value": "bounded advisory/eval only; no automatic promotion", "sources": ["ops/rule_trigger_compile.py"]},
-    {"caller": "timebomb-audit", "trigger": "manual: bounded semantic evaluation", "runs_in": "explicit evaluation session", "attribution": "session", "unattended": "off", "hourly_budget": 5, "daily_budget": 10, "owner": "orchestrator", "value": "bounded advisory/eval only; no automatic promotion", "sources": ["ops/timebomb-audit.py"]},
+    {
+      "caller": "rule_trigger_compile",
+      "trigger": "manual: bounded semantic evaluation",
+      "runs_in": "explicit evaluation session",
+      "attribution": "session",
+      "unattended": "off",
+      "hourly_budget": 5,
+      "daily_budget": 20,
+      "owner": "orchestrator",
+      "value": "bounded advisory/eval only; no automatic promotion; daily 20 so one approval batch (14 rules, 2026-10-14) compiles inside a day while hourly 5 still bounds a runaway",
+      "sources": [
+        "ops/rule_trigger_compile.py"
+      ]
+    },
     {
       "caller": "jevlint_review",
       "trigger": "Explicit advisory PR diff check or bounded rule calibration; never a scheduled full-repo run",
@@ -226,6 +274,20 @@
       "value": "Code taste findings for the reviewer, measured against real deletion fixtures",
       "sources": [
         "ops/jevlint_review.py"
+      ]
+    },
+    {
+      "caller": "brief_check",
+      "trigger": "ops/brief-check.py --jev: one batched request per PR check, a noul per brief requirement the deterministic probes left as needs judgment; opt-in per run, never the default",
+      "runs_in": "bin/brief-check, the tracked opt-in command for the orchestrator's pre-review step",
+      "attribution": "session_or_job",
+      "unattended": "allowed",
+      "hourly_budget": 10,
+      "daily_budget": 40,
+      "owner": "orchestrator",
+      "value": "Advisory read on the brief requirements code cannot decide; never moves a verdict",
+      "sources": [
+        "ops/brief-check.py"
       ]
     }
   ]

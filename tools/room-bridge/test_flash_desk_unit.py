@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -174,6 +176,27 @@ def test_auto_judgment_task_goes_to_opus():
 def test_auto_flash_route_falls_back_when_flash_is_down():
     svc, adapter, _ = service("direct", flash_up=False, overflow=True)
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
+    accepted = out["receipt"]["queue_accepted"]
+    assert accepted["target"] == "claude-desktop", accepted
+    assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
+
+
+def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
+    with tempfile.TemporaryDirectory() as root:
+        state = Path(root) / "state"
+        home = Path(root) / "home"
+        state.mkdir()
+        plist = home / "Library/LaunchAgents/local.ds4-flash-next.plist"
+        plist.parent.mkdir(parents=True)
+        plist.touch()
+        (state / "flash.off").touch()
+        router = FakeRouter("direct", overflow=True)
+        adapter = FakeAdapter()
+        service = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router)
+        with patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(state)}), \
+             patch.object(kanban_adapter.Path, "home", return_value=home), \
+             patch.object(flash_wire, "is_up", return_value=True):
+            out = service.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
     accepted = out["receipt"]["queue_accepted"]
     assert accepted["target"] == "claude-desktop", accepted
     assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted

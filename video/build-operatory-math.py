@@ -4,8 +4,8 @@ justify a relocation + buildout once TI money and free rent are priced in?
 Mixed beats: private-practice footage + animated stat cards (counters, cost stack).
 Numbers are a conservative illustrative model from cited industry benchmarks
 (production/op $300-600K; buildout $150-350/sqft; TI $50-100/sqft dental)."""
-import json, pathlib, subprocess, sys, time
-from typing import Any
+import pathlib, subprocess, sys, time
+from operatory_math import make_operatory_plan
 from asset_boundary import recovery_video_assets
 
 ASSETS = recovery_video_assets(sys.argv[1:], "versioned b-roll and audio library")
@@ -18,7 +18,6 @@ FF = "/opt/homebrew/bin/ffmpeg"
 RAW = PIPE / "03_Output/opmath_raw.mov"
 FINAL = PIPE / "03_Output/carr_operatory_math_1080sq.mp4"
 
-W = H = 1080
 MUSIC = AUD / "music/placeit-world-01.mp3"       # rotate: not used on prior pieces
 SWEEP = AUD / "sfx/fast-small-sweep-transition.mp3"  # softest transition in library
 CLICK = AUD / "sfx/camera-shutter-click.mp3"
@@ -28,44 +27,10 @@ IMPACT = AUD / "sfx/cinematic-whoosh-deep-impact.mp3"
 OPER = f"{BROLL}/dental-operatory-pan_AS493460578.mov"
 RECEP = f"{BROLL}/clinic-reception-waiting_AS515592805.mov"
 
-# ANNOTATED because the shots are deliberately heterogeneous — a stat card and a
-# footage beat carry different keys — so mypy infers dict[str, object] from the
-# literal and every s["dur"] becomes an object it refuses to add. The annotation
-# states the shape the file already relies on rather than casting at each use.
-SHOTS: list[dict[str, Any]] = [
-    {"src": OPER, "dur": 5.0, "pushIn": 1.06, "line": "Out of operatories? Run this math."},
-    {"type": "stat", "kind": "counter", "dur": 5.0,
-     "title": "One general operatory can produce",
-     "counter": {"target": 350, "prefix": "$", "suffix": "K/yr", "delay": 0.7, "dur": 1.6},
-     "sub": "industry benchmarks run $300K to $600K"},
-    {"type": "stat", "kind": "counter", "dur": 4.5,
-     "title": "Add two operatories",
-     "counter": {"target": 700, "prefix": "+$", "suffix": "K/yr", "delay": 0.6, "dur": 1.4, "orange": True},
-     "sub": "in added yearly production capacity"},
-    {"src": RECEP, "dur": 5.0, "pushIn": 1.07, "line": "Relocation sounds expensive. Price the offsets first."},
-    {"type": "stat", "kind": "stack", "dur": 9.0,
-     "title": "The real cost, after concessions",
-     "rows": [
-        {"label": "Buildout for the new space", "value": "$500K", "delay": 0.7},
-        {"label": "Landlord TI allowance", "value": "-$180K", "delay": 2.4, "orange": True},
-        {"label": "Free rent during buildout", "value": "-$60K", "delay": 4.0, "orange": True}],
-     "net": {"label": "Net cost", "target": 260, "prefix": "$", "suffix": "K", "delay": 5.9}},
-    {"type": "stat", "kind": "counter", "dur": 6.0,
-     "title": "At a 35 percent margin, two ops add",
-     "counter": {"target": 245, "prefix": "$", "suffix": "K/yr", "delay": 0.7, "dur": 1.6},
-     "sub": "net cost paid back in about 13 months"},
-    {"src": OPER, "dur": 5.0, "pushIn": 1.08, "line": "The right space can pay for itself. Run your numbers first."},
-]
-ENDCARD: dict[str, Any] = {"dur": 4.5, "name": "Joe Bookout", "title": "HEALTHCARE REAL ESTATE | CARR",
-           "tagline": "Tenant and buyer representation only"}
-
-total = sum(s["dur"] for s in SHOTS) + ENDCARD["dur"]
-endcard_at = sum(s["dur"] for s in SHOTS)
-
-# ---------- job + AE ----------
-job = {"compName": "CARR_OperatoryMath", "width": W, "height": H, "fps": 29.97,
-       "shots": SHOTS, "endCard": ENDCARD, "outPath": str(RAW)}
-(PIPE / "Scripts/stockclip-job.json").write_text(json.dumps(job, indent=2))
+plan = make_operatory_plan(operatory=OPER, reception=RECEP, raw_output=str(RAW))
+total = plan.audio.total
+endcard_at = plan.audio.endcard_at
+(PIPE / "Scripts/stockclip-job.json").write_text(plan.job_json)
 (PIPE / "Scripts/stockclip-log.txt").write_text("")
 
 def ae_running():
@@ -90,21 +55,8 @@ print(log)
 if "DONE" not in log:
     sys.exit("AE build failed; see log above")
 
-# ---------- audio: schedule computed FROM the beat structure ----------
-sweeps, clicks = [], []
-t = 0.0
-for s in SHOTS:
-    if t > 0:
-        sweeps.append(t - 0.12)                      # sound leads picture
-    if s.get("type") == "stat":
-        if s["kind"] == "counter":
-            clicks.append(t + s["counter"]["delay"])
-        else:
-            clicks += [t + r["delay"] for r in s["rows"]]
-            clicks.append(t + s["net"]["delay"])
-    t += s["dur"]
-sweeps.append(endcard_at - 0.12)  # into the end card the riser+impact take over; keep sweep out
-sweeps = sweeps[:-1]
+sweeps = plan.audio.sweeps
+clicks = plan.audio.clicks
 
 inputs = [FF, "-y", "-nostdin", "-i", str(RAW), "-i", str(MUSIC)]
 filters = [f"[1:a]atrim=0:{total},loudnorm=I=-23:TP=-3:LRA=7,"

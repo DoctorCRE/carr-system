@@ -4,6 +4,12 @@
 Production is never contacted: the HTTP reader, the probe-token MCP door and
 the browser-journey runner are in-memory fakes. What is pinned:
   pass         every journey green against a healthy production
+  lanes        each lane runs only the journeys its release can break: the
+               Worker lane the MCP reads and the registry, the app lane the
+               sign-in gate and the browser proof
+  identity     only the releasing lane's identity endpoint can fail the lane
+  browser      a failed browser proof names each failed test, so the pipeline
+               attributes per test
   sign-in gate an app page that answers 5xx, or redirects anywhere but its own
                /auth/login?return_to=<page>, fails that journey
   verbs        after a release every verb the released SHA carries is served;
@@ -79,7 +85,6 @@ class FakeProduction:
             "deal-board": {"deals": [row]},
             "lead-board": {"leads": [], "stages": [], "metrics": {}, "generated_at": "2026-10-05T00:00:00Z"},
             "read-invoice-tracker": {"schema_version": "invoice-tracker.v1", "actor": "synthetic", "entries": [], "observed_at": "2026-10-05T00:00:00Z"},
-            "list-progress-boards": {"ok": True, "schema": "progress-board-directory.v1", "boards": []},
             "list-doc-conversations": {"ok": True, "conversations": []},
         }
         return True, answers[verb]
@@ -101,30 +106,61 @@ class Pass(unittest.TestCase):
         summary = smoke(FakeProduction())
         self.assertTrue(summary["ok"], summary["failed"])
         self.assertEqual(summary["failed"], [])
-        self.assertEqual([p["id"] for p in summary["probes"]], [*rs.JOURNEYS, "browser-journeys"])
+        self.assertEqual([p["id"] for p in summary["probes"]], list(rs.LANE_JOURNEYS["worker"]))
         for p in summary["probes"]:
             self.assertIsInstance(p["ms"], int)
-        self.assertEqual(len(rs.JOURNEYS), 8)
-        # No app checkout given: the browser journeys are skipped and say why, not passed.
-        self.assertEqual(probe(summary, "browser-journeys")["status"], "skip")
-        self.assertIn("--app-dir", probe(summary, "browser-journeys")["detail"])
+
+
+class Lanes(unittest.TestCase):
+    """A rollback can only repair the lane that released, so each lane runs
+    only the journeys that lane's release can break."""
+
+    def test_the_worker_lane_runs_identity_the_mcp_reads_and_the_registry(self):
+        self.assertEqual(rs.LANE_JOURNEYS["worker"],
+                         ("release-identity", "deal-board", "leads-workspace", "invoices-list",
+                          "dr-cre-chat", "verb-registry"))
+
+    def test_the_app_lane_runs_identity_the_sign_in_gate_and_the_browser_proof(self):
+        self.assertEqual(rs.LANE_JOURNEYS["app"], ("release-identity", "sign-in-gate", rs.BROWSER))
+        browser = {"exit": 0, "required": ["t1"], "tests": [{"id": "t1", "status": "passed"}]}
+        prod = FakeProduction()
+        summary = smoke(prod, lane="app", browser=lambda: browser)
+        self.assertTrue(summary["ok"], summary["failed"])
+        self.assertEqual([p["id"] for p in summary["probes"]], list(rs.LANE_JOURNEYS["app"]))
+        self.assertEqual(prod.calls, [])          # the app lane never reads Worker verbs
+
+    def test_a_worker_side_read_failure_never_reaches_the_app_lane(self):
+        prod = FakeProduction(verb_errors={"deal-board": "unknown_tool"})
+        browser = {"exit": 0, "required": ["t1"], "tests": [{"id": "t1", "status": "passed"}]}
+        self.assertTrue(smoke(prod, lane="app", browser=lambda: browser)["ok"])
+
+    def test_an_app_gate_regression_never_reaches_the_worker_lane(self):
+        prod = FakeProduction(gate_override={"/deals": rs.Reply(500, {}, b"")})
+        self.assertTrue(smoke(prod)["ok"])
+
+    def test_the_progress_board_is_not_exercised_because_the_probe_has_no_sponsor(self):
+        # list-progress-boards needs a partner sponsor (board-answers.js sponsor());
+        # smoke-probe has none, so the read could only ever fail and be excused.
+        self.assertFalse(any("progress-board" in journeys for journeys in rs.LANE_JOURNEYS.values()))
+        self.assertNotIn("list-progress-boards", rs.READ_VERBS.values())
+        self.assertTrue(any("progress board" in line and "sponsor" in line for line in rs.NOT_EXERCISED))
 
 
 class SignInGate(unittest.TestCase):
     def test_a_page_answering_5xx_fails_the_gate_journey_only(self):
         prod = FakeProduction(gate_override={"/invoices": rs.Reply(503, {}, b"DoctorCRE unavailable")})
-        summary = smoke(prod)
+        summary = smoke(prod, lane="app", only=["sign-in-gate"])
         self.assertEqual(summary["failed"], ["sign-in-gate"])
         self.assertIn("/invoices answered HTTP 503", probe(summary, "sign-in-gate")["detail"])
 
     def test_a_redirect_that_loses_the_page_fails(self):
         prod = FakeProduction(gate_override={"/leads": rs.Reply(302, {"Location": f"{APP}/auth/login"}, b"")})
-        self.assertIn("/leads redirected", probe(smoke(prod), "sign-in-gate")["detail"])
+        self.assertIn("/leads redirected", probe(smoke(prod, lane="app", only=["sign-in-gate"]), "sign-in-gate")["detail"])
 
     def test_a_redirect_off_origin_fails(self):
         prod = FakeProduction(gate_override={
             "/deals": rs.Reply(302, {"Location": "https://evil.example/auth/login?return_to=/deals"}, b"")})
-        self.assertEqual(smoke(prod)["failed"], ["sign-in-gate"])
+        self.assertEqual(smoke(prod, lane="app", only=["sign-in-gate"])["failed"], ["sign-in-gate"])
 
 
 class Verbs(unittest.TestCase):
@@ -160,9 +196,33 @@ class Identity(unittest.TestCase):
         self.assertTrue(smoke(FakeProduction(worker_sha=OLD), lane="app", only=["release-identity"])["ok"])
         self.assertEqual(smoke(FakeProduction(app_sha=OLD), lane="app", only=["release-identity"])["failed"], ["release-identity"])
 
+    def test_an_outage_of_the_other_lane_never_fails_this_lane(self):
+        prod = FakeProduction()
+        for lane, other in (("worker", f"{APP}/app-release"), ("app", f"{API}/release")):
+            def http(url, other=other):
+                return rs.Reply(503, {}, b"<html>down</html>") if url == other else prod.http(url)
+            summary = smoke(prod, lane=lane, http=http, only=["release-identity"])
+            self.assertTrue(summary["ok"], (lane, summary["failed"]))
+            self.assertEqual(probe(summary, "release-identity")["evidence"]["other_lane"], "unavailable")
+
+    def test_this_lanes_own_outage_still_fails(self):
+        prod = FakeProduction()
+        for lane, own in (("worker", f"{API}/release"), ("app", f"{APP}/app-release")):
+            def http(url, own=own):
+                return rs.Reply(503, {}, b"<html>down</html>") if url == own else prod.http(url)
+            self.assertEqual(smoke(prod, lane=lane, http=http, only=["release-identity"])["failed"],
+                             ["release-identity"])
+
+    def test_served_version_is_the_one_reader_of_each_lanes_version(self):
+        self.assertEqual(rs.served_version("worker", {"worker_version": {"id": "w"}}), "w")
+        self.assertEqual(rs.served_version("app", {"provider_version_id": "a"}), "a")
+        for lane in ("worker", "app"):
+            self.assertIsNone(rs.served_version(lane, None))
+            self.assertIsNone(rs.served_version(lane, {}))
+
     def test_the_identity_journey_records_the_versions_a_rollback_needs(self):
         evidence = probe(smoke(FakeProduction()), "release-identity")["evidence"]
-        self.assertEqual(evidence["worker_version_id"], "12345678-1234-1234-1234-123456789abc")
+        self.assertEqual(evidence["served_version_id"], "12345678-1234-1234-1234-123456789abc")
 
 
 class ReadOnly(unittest.TestCase):
@@ -171,6 +231,7 @@ class ReadOnly(unittest.TestCase):
         summary = smoke(prod, expected_verbs=["deal-board"])
         self.assertEqual({v for v, _ in prod.calls},
                          set(rs.READ_VERBS.values()) | {"list-verbs"})
+        self.assertNotIn("list-progress-boards", {v for v, _ in prod.calls})
         text = json.dumps(summary)
         self.assertNotIn("Synthetic Orchard Clinic", text)
         self.assertEqual(probe(summary, "deal-board")["evidence"]["shape"],
@@ -179,28 +240,46 @@ class ReadOnly(unittest.TestCase):
     def test_the_read_verbs_are_reads_in_the_registry(self):
         # Pinned by name here; the CLI refuses a write verb at import (see Cli).
         self.assertEqual(sorted(rs.READ_VERBS.values()), sorted([
-            "deal-board", "lead-board", "read-invoice-tracker", "list-progress-boards",
-            "list-doc-conversations"]))
+            "deal-board", "lead-board", "read-invoice-tracker", "list-doc-conversations"]))
 
 
 class Only(unittest.TestCase):
     def test_a_retry_runs_exactly_the_named_journeys(self):
         prod = FakeProduction()
-        summary = smoke(prod, only=["invoices-list", "sign-in-gate"])
-        self.assertEqual([p["id"] for p in summary["probes"]], ["sign-in-gate", "invoices-list"])
-        self.assertEqual([v for v, _ in prod.calls], ["read-invoice-tracker"])
+        summary = smoke(prod, only=["invoices-list", "verb-registry"])
+        self.assertEqual([p["id"] for p in summary["probes"]], ["invoices-list", "verb-registry"])
+        self.assertEqual([v for v, _ in prod.calls], ["read-invoice-tracker", "list-verbs"])
 
 
 class Browser(unittest.TestCase):
     def test_a_failed_browser_journey_fails_with_its_title(self):
         outcome = {"tests": [{"title": "deal board gate", "status": "passed"},
                              {"title": "status page renders", "status": "failed"}]}
-        summary = smoke(FakeProduction(), browser=lambda: outcome)
+        summary = smoke(FakeProduction(), lane="app", browser=lambda: outcome)
         self.assertEqual(summary["failed"], ["browser-journeys"])
         self.assertEqual(probe(summary, "browser-journeys")["detail"], "browser_proof_failed_or_incomplete")
 
     def test_an_empty_browser_run_is_not_a_pass(self):
-        self.assertEqual(smoke(FakeProduction(), browser=lambda: {"tests": []})["failed"], ["browser-journeys"])
+        self.assertEqual(smoke(FakeProduction(), lane="app", browser=lambda: {"tests": []})["failed"],
+                         ["browser-journeys"])
+
+    def test_a_complete_run_names_each_failed_test_for_per_test_attribution(self):
+        outcome = {"exit": 1, "required": ["a.e2e.ts::one", "b.e2e.ts::two"],
+                   "tests": [{"id": "a.e2e.ts::one", "status": "passed"},
+                             {"id": "b.e2e.ts::two", "status": "failed"}]}
+        evidence = probe(smoke(FakeProduction(), lane="app", browser=lambda: outcome), "browser-journeys")["evidence"]
+        self.assertEqual(evidence["failed_tests"], ["b.e2e.ts::two"])
+
+    def test_an_incomplete_run_names_no_test_so_the_whole_proof_is_attributed(self):
+        outcome = {"exit": 1, "required": ["a.e2e.ts::one", "b.e2e.ts::two"],
+                   "tests": [{"id": "a.e2e.ts::one", "status": "failed"}]}
+        evidence = probe(smoke(FakeProduction(), lane="app", browser=lambda: outcome), "browser-journeys")["evidence"]
+        self.assertNotIn("failed_tests", evidence)
+
+    def test_the_worker_lane_never_runs_the_browser_proof(self):
+        def browser():
+            raise AssertionError("the worker lane ran the browser proof")
+        self.assertNotIn(rs.BROWSER, [p["id"] for p in smoke(FakeProduction(), browser=browser)["probes"]])
 
 
 class FakeResponse:
@@ -275,7 +354,7 @@ class Cli(unittest.TestCase):
         summary = json.loads((out / "summary.json").read_text())
         self.assertTrue(summary["ok"])
         lines = (out / "probes.jsonl").read_text().splitlines()
-        self.assertEqual([json.loads(line)["id"] for line in lines], [*rs.JOURNEYS, "browser-journeys"])
+        self.assertEqual([json.loads(line)["id"] for line in lines], list(rs.LANE_JOURNEYS["worker"]))
         self.assertNotIn(TOKEN, (out / "summary.json").read_text())
 
     def test_a_failure_exits_1(self):
@@ -344,7 +423,7 @@ class BlockingRegressions(unittest.TestCase):
     def test_browser_exit_and_missing_required_journeys_fail(self):
         for outcome in ({'exit': 1, 'tests': [{'title': 'synthetic', 'status': 'passed'}]},
                         {'exit': 0, 'required': ['missing'], 'tests': [{'title': 'synthetic', 'status': 'passed'}]}):
-            self.assertEqual(smoke(FakeProduction(), browser=lambda: outcome)['failed'], ['browser-journeys'])
+            self.assertEqual(smoke(FakeProduction(), lane='app', browser=lambda: outcome)['failed'], ['browser-journeys'])
 
     def test_failure_paths_keep_no_response_values(self):
         canary = 'synthetic-sensitive-canary'
@@ -353,9 +432,10 @@ class BlockingRegressions(unittest.TestCase):
             self.assertNotIn(canary, json.dumps(summary))
         def crashed(*a):
             raise RuntimeError(canary)
-        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), mcp=crashed, browser=crashed)))
-        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), browser=lambda: {'exit': 1, 'tests': [{'title': canary, 'status': 'failed'}], 'error': canary})))
-        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), browser=lambda: {'exit': canary, 'tests': []})))
+        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), mcp=crashed)))
+        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), lane='app', browser=crashed)))
+        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), lane='app', browser=lambda: {'exit': 1, 'tests': [{'title': canary, 'status': 'failed'}], 'error': canary})))
+        self.assertNotIn(canary, json.dumps(smoke(FakeProduction(), lane='app', browser=lambda: {'exit': canary, 'tests': []})))
 
     def test_app_lane_requires_browser_proof(self):
         self.assertIn('browser-journeys', smoke(FakeProduction(), lane='app')['failed'])
@@ -364,7 +444,7 @@ class BlockingRegressions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             runner = rs.browser_runner(Path(directory), Path(directory) / 'out')
             self.assertIsNotNone(runner)
-            self.assertFalse(smoke(FakeProduction(), browser=runner)['ok'])
+            self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
 
     def test_fixture_is_wholly_synthetic(self):
         answer = FakeProduction().mcp('deal-board', {})[1]
@@ -399,17 +479,54 @@ class InstalledBrowserContract(unittest.TestCase):
             runner = rs.browser_runner(app, app / 'out', expected_sha=SHA)
             with patch.object(rs.subprocess, 'check_output', return_value=SHA):
                 with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce()):
-                    summary = smoke(FakeProduction(), browser=runner)
+                    summary = smoke(FakeProduction(), lane='app', browser=runner)
                     self.assertTrue(summary['ok'])
                     self.assertEqual(probe(summary, 'browser-journeys')['evidence']['source_commit'], SHA)
                 with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce(rc=1)):
-                    self.assertFalse(smoke(FakeProduction(), browser=runner)['ok'])
+                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
                 with patch.object(rs.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '', '')):
-                    self.assertFalse(smoke(FakeProduction(), browser=runner)['ok'])
+                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
                 with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: produce(tests=False)):
-                    self.assertFalse(smoke(FakeProduction(), browser=runner)['ok'])
+                    self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
             with patch.object(rs.subprocess, 'check_output', return_value=OLD):
-                self.assertFalse(smoke(FakeProduction(), browser=runner)['ok'])
+                self.assertFalse(smoke(FakeProduction(), lane='app', browser=runner)['ok'])
+
+    def test_a_failing_test_is_named_from_this_runs_native_report(self):
+        from unittest.mock import patch
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory)
+            for name in ('scripts/browser-product-proof.mjs', 'e2e.config.ts', 'node_modules/e2e/dist/cli/bin.js'):
+                path = app / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            manifest = app / 'tests/journeys/required-coverage.json'
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({'tests': [{'file': 'a.e2e.ts', 'title': 'one'},
+                                                      {'file': 'b.e2e.ts', 'title': 'two'}]}))
+            native = app / '.e2e/report.json'
+            native.parent.mkdir()
+            def report(commit=SHA):
+                return {'run': {'id': 'r', 'vcs': {'commit': commit, 'dirty': False}, 'exitCode': 1, 'status': 'failed',
+                        'results': [{'testId': 'a.e2e.ts::one', 'selected': True, 'status': 'passed', 'attempts': [{}]},
+                                    {'testId': 'b.e2e.ts::two', 'selected': True, 'status': 'failed', 'attempts': [{}]}]}}
+            def refused(commit=SHA):
+                native.write_text(json.dumps(report(commit)))   # the e2e runner wrote it, then the producer refused
+                return subprocess.CompletedProcess([], 1, '', '')
+            runner = rs.browser_runner(app, app / 'out', expected_sha=SHA)
+            with patch.object(rs.subprocess, 'check_output', return_value=SHA):
+                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: refused()):
+                    summary = smoke(FakeProduction(), lane='app', browser=runner)
+                self.assertEqual(probe(summary, 'browser-journeys')['evidence']['failed_tests'], ['b.e2e.ts::two'])
+                # A report from another source revision names nothing.
+                with patch.object(rs.subprocess, 'run', side_effect=lambda *a, **k: refused(OLD)):
+                    self.assertNotIn('failed_tests', probe(smoke(FakeProduction(), lane='app', browser=runner),
+                                                           'browser-journeys')['evidence'])
+                # A report left by an EARLIER run is deleted first and never read.
+                native.write_text(json.dumps(report()))
+                with patch.object(rs.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', '')):
+                    self.assertNotIn('failed_tests', probe(smoke(FakeProduction(), lane='app', browser=runner),
+                                                           'browser-journeys')['evidence'])
 
 
 if __name__ == "__main__":

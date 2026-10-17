@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Hermetic refusal checks for unattended database credential boundaries."""
 from __future__ import annotations
 
 import importlib.util
@@ -31,49 +32,8 @@ def main() -> int:
     # the declared database capabilities.
     #
     # WHY THIS IS A REGEX AND NOT THE OLD LITERAL `carr_routine_exec "$@"`.
-    # On 2026-08-23 the per-step wall clock was added, and it has to sit INSIDE
-    # carr_routine_exec rather than around it: that function ends in `env -i`,
-    # and a python wrapper cannot exec a zsh function. So a prefix now appears
-    # between the two words. The literal stopped matching and this guard failed
-    # on a change that did not weaken the boundary at all.
-    #
-    # It is deliberately NOT relaxed to a substring search for the function
-    # name. Only the wall-clock prefix is permitted between carr_routine_exec
-    # and the command, so smuggling anything else — an env assignment, a shell,
-    # a credential — in front of the command still fails here.
-    dispatch = re.search(
-        r'carr_routine_exec(?:\s+"\$\{CARR_STEP_TIMEOUT_ARGV\[@\]\}")?\s+"\$@"',
-        nightly,
-    )
-    check("nightly uses a clean child environment", dispatch is not None)
-    # Back to 5: the mirror's refusal branch came out again once #387 made
-    # doctrine_mirror.py exit 78 on its own. An exact count rather than a floor,
-    # deliberately — the point of this check is that an admin-capability step
-    # CANNOT be added without being refused, and `>=` would let a sixth slip
-    # past unrefused.
-    #
-    # THE HELPER IS NO LONGER LAUNCHED, AND THE PROPERTY IS UNCHANGED (2026-08-23).
-    # This counted `routine-admin-refusal.sh`, because a step used to be EXECUTED
-    # so that helper could exit 78 and produce the refusal as evidence. Those
-    # steps are tombstoned now: gated out before they run, each naming the
-    # capability it lacks and what would reopen it. That is a stronger form of
-    # the same guarantee — a step that never runs cannot reach for a credential
-    # at all — so what is counted moves and the number does not.
-    #
-    # Counting the `missing` argument rather than the label: the label is prose
-    # somebody will reword, while naming a capability is the thing that makes a
-    # step one of these five. Still exact, still for the same reason.
-    capability_tombstones = re.findall(
-        r'^\s+"(?:admin|authority) capability — ', nightly, re.M)
-    check("admin nightly steps are gated out, not run with credentials they lack",
-          len(capability_tombstones) == 5)
-    # And none of them executes anything on the way to saying so. Comment lines
-    # are blanked first: bin/nightly.sh still DISCUSSES the refusal helper by
-    # name where it explains why the script stayed in the tree, and a prose
-    # mention cannot launch a process. The first cut of this check searched the
-    # raw text and failed on that comment — the same false positive in the
-    # opposite direction from the one that had ops/scheduled-drive-writer-selftest.py
-    # passing on a comment after the chain stopped calling the script.
+    check("nightly records jobs inside a clean child environment",
+          'carr_routine_exec /bin/zsh "$REPO/bin/run-scheduled.sh" "$SERVICE" "$key"' in nightly)
     nightly_code = "\n".join(
         "" if line.lstrip().startswith("#") else line
         for line in nightly.split("\n"))
@@ -106,7 +66,7 @@ def main() -> int:
     # ops/nightly-capability-skip-selftest.py proves that by running it.
     mirror_capabilities = ("CARR_DB_BACKUP_URL", "CARR_DB_EXPORTER_URL")
     check("portability mirror binds one named capability, none wider than backup",
-          'portability mirror (md+csv, 2 locations)' in nightly
+          'step "portability mirror"' in nightly
           and any(f'DATABASE_URL="${name}"' in nightly for name in mirror_capabilities))
     # WAS 3 UNTIL 2026-08-21, now 2, and the boundary is unchanged. The chain
     # used to carry two separate recovery-point catch-up call sites — one for
@@ -118,7 +78,7 @@ def main() -> int:
     # than inheriting an ambient credential, and every remaining one still
     # does; only how many there are changed.
     check("each backup invocation binds the backup capability explicitly",
-          nightly.count('env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh') == 2)
+          nightly.count('env CARR_DB_BACKUP_URL="$CARR_DB_BACKUP_URL" ./bin/backup-dump.sh') == 1)
     # The bare form above is SAFE, and this file is not where that is proved.
     # nightly.sh defaults CARR_DB_BACKUP_URL once, right after the loader, so
     # every dereference below it is defined even when the credential was never

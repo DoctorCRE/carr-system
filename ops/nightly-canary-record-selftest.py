@@ -77,14 +77,14 @@ sql=(ROOT/'migrations/0227_nightly_availability_canary_record_layer.sql').read_t
 manifest=json.loads((ROOT/'ops/config/control-plane-workflows.v1.json').read_text())
 workflow=next(w for w in manifest['workflows'] if w['key']=='nightly-record-layer')
 check('Nightly canary is an explicit standalone argument before normal setup',
-      'run_canary()' in nightly and '[ "$#" -eq 1 ] && [ "$1" = "--canary" ]' in nightly
+      'run_canary()' in nightly and '--canary) run_canary; exit $? ;;' in nightly
       and nightly.index('run_canary()') < nightly.index('LOG="$REPO/out/nightly.log"'))
 check('canary refuses ambient Drive, database, provider and secret capability before mkdir or lock',
       all(key in nightly for key in ('PG*','CARR_ONEDRIVE_DEALS','CARR_INGEST_URL','CARR_AI_ROUTE_PRIMARY_URL','CARR_GMAIL_APP_PASSWORD','CARR_AGE_IDENTITY','CARR_DB_*','*TOKEN*|*SECRET*|*PASSWORD*|*API_KEY*|*PROVIDER_URL*'))
       and nightly.index('nightly canary refused ambient live capability') < nightly.index('mkdir -p "$REPO/out"'))
 check('canary runs only availability matcher from protected stdin',
       'pipelines/availability_matcher.py" --canary' in nightly and 'snapshot="$(cat)"' in nightly
-      and 'nightly canary result:' in nightly and 'carr_take_lock nightly' not in nightly[:nightly.index('if [ "${1:-}" = "--preflight" ]')])
+      and 'nightly canary result:' in nightly and 'carr_take_lock nightly' not in nightly[:nightly.index('case "${1:-}" in')])
 check('child rejects database capability and constrains output to one direct non-symlinked canary run directory',
       'CARR_DB_' in matcher and '_safe_canary_root' in matcher and 'root.parent != base' in matcher and 'root.is_symlink()' in matcher and 'source is vacuous' in matcher and 'os.replace(temp_name, path)' in matcher and 'os.unlink(temp_name)' in matcher)
 check('manifest enables exact v3 isolated canary and code registers its guard',
@@ -101,7 +101,7 @@ check('source is database-owned canonical availability/search joins and direct D
       'distinct on (av.space_id)' in sql and 'order by av.space_id,av.observed_at desc,av.id desc' in sql and 'from space_search s join client' in sql
       and 'revoke all on ops.nightly_availability_canary_source_snapshot,ops.nightly_availability_canary_receipt' in sql)
 check('disposable local PostgreSQL CI discovers the mandatory lease, ACL, drift, and race gate',
-      'ops/nightly-canary-local-pg-acceptance.py' in (ROOT/'ops/local-pg-ci.py').read_text()
+      any(p.path == 'ops/nightly-canary-local-pg-acceptance.py' for p in __import__('db_acceptance_shards').select_programs(0))
       and 'source replay conflicts with canonical snapshot' in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text()
       and "race(['d'*64,'d'*64])" in (ROOT/'ops/nightly-canary-local-pg-acceptance.py').read_text())
 

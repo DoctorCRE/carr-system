@@ -3,8 +3,8 @@
 from ops/config/rule-classes.v1.json, and guard the rule boot budget.
 
 WHY A GENERATED MODULE. standing-context's `detail: "boot"` mode (the gated
-rule boot, see mcp-server/src/rule-boot.js) renders an index of every active
-rule plus the full text of the always-on set. The class, the <=20-word
+rule boot, see mcp-server/src/rule-boot.js) renders the full text of the
+always-on set plus an index line for every other active rule. The class, the <=20-word
 summary and the "when it applies" line for each rule are committed data in
 ops/config/rule-classes.v1.json; rule STATEMENTS never enter class metadata and
 are read from the store at request time. Validation reads the existing committed
@@ -16,6 +16,11 @@ module, the same pattern as ops/sync-core-rule-ids.py.
 THIS SCRIPT IS THE ONLY WAY THE MODULE IS MEANT TO BE PRODUCED, and --check is
 the same code path, so the write and the parity check cannot drift apart
 (rule a8c55a47).
+
+CLASS A IS ALWAYS ON (Joe, 2026-10-06). The module's `on` flag also retains
+B/C rules listed in keep_full_text, with a reason per id, until their just-in-time route is fixed (Joe, 2026-10-10).
+Removing an entry is sufficient to stop retaining that rule after regeneration.
+D rules are held by gates; E rules are stale.
 
 THE BUDGET GUARD. The boot text is delivered to every session and every
 subagent before its first ordinary tool call, so its size is paid on every
@@ -34,8 +39,8 @@ The one exclusion is the rule_surface "intro_politics" rules, which the verb's
 query leaves out of the boot.
 
 Usage:
-    ./.venv/bin/python ops/sync-rule-boot-classes.py            # regenerate
-    ./.venv/bin/python ops/sync-rule-boot-classes.py --check    # parity + budget; exit 1 on either
+    ./.venv/bin/python ops/sync-rule-boot-classes.py            # regenerate module + route-gap audit
+    ./.venv/bin/python ops/sync-rule-boot-classes.py --check    # parity + budget + gold retention
 """
 import argparse
 import hashlib
@@ -43,6 +48,8 @@ import json
 import os
 import re
 import sys
+from collections import Counter
+from pathlib import Path
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLASSES_PATH = os.path.join(REPO, "ops", "config", "rule-classes.v1.json")
@@ -50,6 +57,7 @@ MAP_PATH = os.path.join(REPO, "ops", "config", "rule-enforcement-map.json")
 CORPUS_PATH = os.path.join(REPO, "ops", "config", "rule-selection-corpus.v1.json")
 EXCLUDED_SURFACES = {"intro_politics"}
 OUT_PATH = os.path.join(REPO, "mcp-server", "src", "rule-boot-classes.js")
+GAPS_PATH = Path(REPO) / "evals/rule-delivery/evidence/route-gaps.json"
 CLASSES = {"a", "b", "c", "d", "e"}
 MAX_SUMMARY_WORDS = 20
 # Must match mcp-server/src/rule-boot.js's layout: one always-on entry is
@@ -127,6 +135,15 @@ def validate(doc, statements=None):
     rules = doc.get("rules")
     if not isinstance(rules, dict) or not rules:
         return ["rules must be a non-empty object"]
+    keep = doc.get("keep_full_text", {})
+    if not isinstance(keep, dict):
+        problems.append("keep_full_text must map rule ids to reasons")
+    else:
+        for rid, reason in sorted(keep.items()):
+            if rid not in rules or rules[rid].get("class") not in {"b", "c"}:
+                problems.append(f"{rid}: keep_full_text requires a classified B/C rule")
+            if not isinstance(reason, str) or not reason.strip():
+                problems.append(f"{rid}: keep_full_text requires a non-empty reason")
     if statements is None:
         try:
             statements = corpus_statements()
@@ -148,6 +165,9 @@ def validate(doc, statements=None):
             problems.append(f"{rid}: always_on must be a boolean")
         if row.get("class") == "a" and not row.get("always_on"):
             problems.append(f"{rid}: class a is always on by definition")
+        if row.get("class") != "a" and row.get("always_on"):
+            problems.append(f"{rid}: only class a is always on; class {row.get('class')} is delivered at its "
+                            "action or topic (b, c), by its gate (d), or not at all (e)")
         if not isinstance(row.get("chars"), int) or row["chars"] <= 0:
             problems.append(f"{rid}: chars must be a positive integer")
         if "statement" in row or "human_quote" in row:
@@ -163,7 +183,7 @@ def validate(doc, statements=None):
 
 
 def classes_digest(doc):
-    body = json.dumps(doc.get("rules"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    body = json.dumps({"rules": doc.get("rules"), "keep_full_text": doc.get("keep_full_text", {})}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
@@ -172,7 +192,7 @@ def render(doc):
     entries = []
     for rid in sorted(rules):
         row = rules[rid]
-        value = {"cls": row["class"], "on": bool(row["always_on"]),
+        value = {"cls": row["class"], "on": bool(row["always_on"] or rid in doc.get("keep_full_text", {})),
                  "summary": row["summary"], "when": row["when"]}
         if row.get("personal_to"):
             value["personal_to"] = row["personal_to"]
@@ -211,11 +231,12 @@ def estimate(doc, sponsor=None):
         owner = row.get("personal_to")
         if owner and owner != sponsor:
             continue
-        total += len(f"{rid} | {row['class'].upper()} | {row['summary']} | {row['when']}\n")
-        if row["always_on"]:
+        if row["always_on"] or rid in doc.get("keep_full_text", {}):
             header = f"### {rid}{' (personal)' if owner else ''}\n"
             total += len(header) + row["chars"] + 2
             big.append((row["chars"], rid))
+        else:
+            total += len(f"{rid} | {row['class'].upper()} | {row['summary']} | {row['when']}\n")
     big.sort(reverse=True)
     per_token = float(doc.get("chars_per_token", 3.6))
     return total, total / per_token, big
@@ -267,6 +288,71 @@ def coverage_findings(doc, map_path=MAP_PATH):
     return findings
 
 
+def gap_cases(v2, hard, expectations):
+    """Normalize frozen v2 gold and hard-case required gold; acceptable is not required."""
+    cases = [dict(id=c["id"], gold=c["gold"], split=c["split"], source="v2")
+             for c in v2["cases"]]
+    cases.extend(dict(id=c["id"], gold=c["required"],
+                      split=expectations["cases"][c["id"]]["split"], source="hard")
+                 for c in hard["cases"])
+    return cases
+
+
+def route_gaps(doc, cases, observations):
+    """Count required B/C occurrences missed by routes, excluding boot availability."""
+    delivered = {row["case_id"]: set(row["delivered"]) for row in observations}
+    if len(delivered) != len(observations):
+        raise ValueError("duplicate route observations")
+    if len({case["id"] for case in cases}) != len(cases):
+        raise ValueError("duplicate gold cases")
+    counts = {scope: {cls: Counter() for cls in ("b", "c")}
+              for scope in ("all", "test", "v2", "hard")}
+    for case in cases:
+        if case["id"] not in delivered:
+            raise ValueError(f"missing route observation: {case['id']}")
+        for rid in set(case["gold"]) - delivered[case["id"]]:
+            cls = doc["rules"].get(rid, {}).get("class")
+            if cls not in ("b", "c"):
+                continue
+            for scope in ("all", case["source"]):
+                counts[scope][cls][rid] += 1
+            if case["split"] == "test":
+                counts["test"][cls][rid] += 1
+    return {scope: {cls: dict(sorted(rows.items())) for cls, rows in classes.items()}
+            for scope, classes in counts.items()}
+
+
+def gap_evidence(doc, classes_path=CLASSES_PATH):
+    root = Path(REPO)
+    paths = [root / "ops/fixtures/rule-delivery-eval/cases.v2.json",
+             root / "evals/rule-delivery/hard_cases.v1.json",
+             root / "evals/rule-delivery/expectations.v3.json",
+             root / "evals/rule-delivery/evidence/candidate.jsonl"]
+    v2, hard, expectations = [json.loads(path.read_text()) for path in paths[:3]]
+    observations = [json.loads(line) for line in paths[3].read_text().splitlines() if line.strip()]
+    for row in observations:
+        frozen = expectations["cases"][row["case_id"]]
+        if row["input_sha256"] != frozen["input_sha256"]:
+            raise ValueError(f"route input changed: {row['case_id']}")
+    paths.append(Path(classes_path))
+    return {
+        "schema": "rule-boot-route-gap-evidence/v1",
+        "method": "Subtract candidate.delivered from every frozen v2 gold and hard-case required set, "
+                  "then keep class B/C. Count train + test for retention; acceptable-only hard labels "
+                  "are excluded. Boot availability is excluded from gap derivation.",
+        "inputs": {os.path.relpath(path, root): hashlib.sha256(path.read_bytes()).hexdigest()
+                   for path in paths},
+        "missing_route_occurrences": route_gaps(doc, gap_cases(v2, hard, expectations), observations),
+    }
+
+
+def retention_findings(doc, evidence):
+    return [f"RULE BOOT RETENTION: {rid} ({cls.upper()}) has {count} missed gold route occurrences; "
+            "add keep_full_text with a reason until its route is fixed"
+            for cls, rows in evidence["missing_route_occurrences"]["all"].items()
+            for rid, count in rows.items() if rid not in doc.get("keep_full_text", {})]
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -279,11 +365,23 @@ def main(argv=None):
     if problems:
         print("rule-classes.v1.json INVALID:\n  " + "\n  ".join(problems))
         return 1
+    try:
+        evidence = gap_evidence(doc, args.classes)
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"RULE BOOT RETENTION: cannot derive gold route gaps: {exc}")
+        return 1
+    problems = retention_findings(doc, evidence)
+    if problems:
+        print("\n".join(problems))
+        return 1
+    audit = json.dumps(evidence, indent=2, sort_keys=True) + "\n"
     rendered = render(doc)
     if not args.check:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(rendered)
         print(f"wrote {os.path.relpath(args.out, REPO)} ({len(doc['rules'])} rules)")
+        GAPS_PATH.write_text(audit)
+        print(f"wrote {GAPS_PATH.relative_to(REPO)}")
         return 0
     rc = 0
     try:
@@ -295,6 +393,9 @@ def main(argv=None):
         print(f"STALE: {os.path.relpath(args.out, REPO)} does not match "
               "ops/config/rule-classes.v1.json. Regenerate: "
               "./.venv/bin/python ops/sync-rule-boot-classes.py")
+        rc = 1
+    if not GAPS_PATH.exists() or GAPS_PATH.read_text() != audit:
+        print("STALE: route-gaps.json; regenerate with ops/sync-rule-boot-classes.py")
         rc = 1
     for line in budget_findings(doc) + coverage_findings(doc):
         print(line)

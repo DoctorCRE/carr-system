@@ -21,7 +21,8 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from gate_runtime_role import rollback_only_connection, set_local_role
-from lib.rule_delivery_activation import EXPECTED_IDS
+EXPECTED_IDS = {"25fcddee", "3fa17fa0", "72e06bdf", "113b3833",
+                "57d13061", "c66dc739", "49533583", "557838a5"}
 
 
 def load_program6_gate() -> Any:

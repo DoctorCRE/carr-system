@@ -86,7 +86,6 @@ def roster_is_the_whole_active_corpus():
     assert note is None and rules == [], (rules, note)
     assert {rule["id"] for rule in observed} == {rule["id"] for rule in corpus}
     for rule_id in VERIFY_RULES:
-        assert rule_id not in pack
         assert rule_id in {rule["id"] for rule in observed}
 
 

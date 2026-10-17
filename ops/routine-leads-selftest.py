@@ -3,12 +3,9 @@ import copy
 import csv
 import io
 import json
-import importlib.util
 import sys
-import tempfile
 import unittest
 import zipfile
-from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,7 +13,6 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.routines import lead_signals as leads
-from tools.routines import radar_inputs as radar
 
 FIXTURE = json.loads((ROOT / "ops/fixtures/routines/leads.json").read_text())
 NOW = datetime.fromisoformat(FIXTURE["as_of"])
@@ -36,45 +32,6 @@ def context(fixture=None, dry_run=True):
 
 
 class LeadTests(unittest.TestCase):
-    def test_overlapping_public_pulls_combine_signals_and_sources(self):
-        row = {'name': 'Fixture Provider', 'npi': '1000000005', 'city': 'Milton', 'state': 'FL', 'signal': 'nppes-org', 'source': 'https://download.cms.gov/nppes/fixture', 'date': '2026-10-01'}
-        ctx = context({'pecos': {}}, dry_run=True)
-        plan = {'work': True, 'refresh_pecos': True, 'pecos_state': {}, 'candidates': leads.candidates([row]), 'lane_health': [], 'consumed_keys': []}
-        fresh = [{**row, 'source_url': 'https://data.cms.gov/fixture', 'date': '2026-10-02'}]
-        with patch.object(radar, 'pull_pecos', return_value=(fresh, {}, {'pool': 'pecos.json'})):
-            result = leads.execute(ctx, plan)
-        self.assertEqual(result['estimated_scores'], [7])
-        self.assertEqual(plan['candidates'][0]['signals'], ['nppes-org', 'pecos-enroll'])
-        self.assertEqual(plan['candidates'][0]['sources'], ['https://data.cms.gov/fixture', 'https://download.cms.gov/nppes/fixture'])
-
-    def test_pecos_quarter_gate_catches_missed_quarters(self):
-        self.assertFalse(radar.refresh_due(NOW, {"quarter": "2026Q4"}))
-        self.assertTrue(radar.refresh_due(NOW, {"quarter": "2026Q2"}))
-        self.assertTrue(radar.refresh_due(NOW.replace(month=11), {"quarter": "2026Q3"}))
-
-    def test_pecos_catalog_and_enrollment_parsers(self):
-        public = FIXTURE["pecos_fixture"]
-        self.assertTrue(radar.dataset_api(public["catalog"])[0].endswith("/data"))
-        parsed = radar.enrollment_rows(public["rows"])
-        self.assertEqual(parsed["1000000005|I2026093000001"]["date"], "2026-09-30")
-        with self.assertRaises(ValueError):
-            radar.dataset_api({})
-        with self.assertRaises(ValueError):
-            radar.enrollment_rows([{"STATE_CD": "FL", "NPI": "bad"}])
-
-    def test_pecos_baseline_bootstrap_and_new_enrollment_diff(self):
-        public = FIXTURE["pecos_fixture"]
-        fetch = lambda _: (_ for _ in ()).throw(AssertionError("fixture attempted network"))
-        rows, state, health = radar.pull_pecos(fetch, NOW, {}, fixture=public)
-        self.assertEqual(rows, [])
-        self.assertTrue(health["bootstrap"])
-        self.assertEqual(state["baseline_count"], 1)
-        rows, _, health = radar.pull_pecos(fetch, NOW, {"baseline_initialized": True, "keys": []}, fixture=public)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["city"], "Milton")
-        self.assertEqual(health["new_enrollments"], 1)
-        rows, _, _ = radar.pull_pecos(fetch, NOW, state, fixture=public)
-        self.assertEqual(rows, [])
 
     def test_consumed_candidates_exit_without_repeat_effects(self):
         fixture = copy.deepcopy(FIXTURE)
@@ -85,55 +42,6 @@ class LeadTests(unittest.TestCase):
         self.assertFalse(repeated["work"])
         self.assertEqual(repeated["candidates"], [])
         self.assertEqual(ctx.calls, [])
-
-    def test_quarterly_refresh_dry_run_performs_no_writes(self):
-        fixture = copy.deepcopy(FIXTURE)
-        fixture["pecos"] = fixture["pecos_fixture"]
-        fixture["pecos_state"] = {"baseline_initialized": True, "keys": [], "quarter": "2026Q3"}
-        ctx = context(fixture)
-        plan = leads.prepare(ctx)
-        result = leads.execute(ctx, plan)
-        self.assertEqual(result["candidate_count"], 5)
-        self.assertEqual(ctx.calls, [])
-        health = next(h for h in result["lane_health"] if h["pool"] == "pecos.json")
-        self.assertEqual(health["territory_candidates"], 1)
-    def test_pool_writer_paths_are_bound_to_repository(self):
-        sys.path.insert(0, str(ROOT / "pipelines/radar"))
-        try:
-            import pool_paths
-            self.assertEqual(pool_paths.UPSTREAM, ROOT / "out/routines/radar/upstream")
-            self.assertTrue(pool_paths.DATA.is_relative_to(ROOT))
-            self.assertNotIn("GoogleDrive", str(pool_paths.UPSTREAM))
-        finally:
-            sys.path.pop(0)
-
-    def test_license_writer_preserves_rows_and_adds_source_provenance(self):
-        sys.path.insert(0, str(ROOT / "pipelines/radar"))
-        try:
-            spec = importlib.util.spec_from_file_location("license_builder", ROOT / "pipelines/radar/build-license-pool.py")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            with tempfile.TemporaryDirectory() as temporary:
-                folder = Path(temporary)
-                source = folder / "transport.tsv"
-                source.write_text("Last\tFirst\tProCode\tOriginalDate\tState\tCounty\tCity\nPerson\tExample\t701\t10/01/2026\tFL\tSanta Rosa\tMilton\n")
-                module.UP = str(folder / "derived")
-                argv = sys.argv
-                sys.argv = ["build-license-pool.py", str(source)]
-                try:
-                    import contextlib
-                    with contextlib.redirect_stdout(io.StringIO()):
-                        module.main()
-                finally:
-                    sys.argv = argv
-                rows = json.loads((folder / "derived/licenses-pool.json").read_text())
-                self.assertEqual(rows[0]["name"], "Example Person")
-                self.assertEqual(rows[0]["profession"], "Dental")
-                self.assertEqual(rows[0]["date"], "10/01/2026")
-                self.assertEqual(rows[0]["source_url"], "https://mqa-internet.doh.state.fl.us/MQASearchServices/")
-                self.assertTrue(source.exists())
-        finally:
-            sys.path.pop(0)
 
     def test_territory_does_not_take_wrong_state_or_missing_geography(self):
         self.assertTrue(leads.in_territory({"city": "Pensacola", "state": "FL"}))
@@ -190,21 +98,13 @@ class LeadTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["score"], 1)
 
-    def test_pool_parser_and_no_name_only_join(self):
-        with self.assertRaises(ValueError):
-            leads.parse_pool({}, "new-license", "test")
-        rows = leads.parse_pool([{"name": "Same Name", "city": "Mobile", "state": "AL", "date": None}, {"name": "Same Name", "city": "Pensacola", "state": "FL", "date": None}], "new-license", "test")
-        self.assertEqual(len(leads.candidates(rows)), 2)
-        rows[1]["npi"] = rows[0]["npi"] = "1000000001"
-        self.assertEqual(len(leads.candidates(rows)), 1)
-
     def test_empty_predicate_and_dry_run_no_reads_or_writes(self):
         empty = context({"nppes_rows": [], "pools": {}, "claims": []})
         self.assertFalse(leads.prepare(empty)["work"])
         ctx = context(FIXTURE)
         plan = leads.prepare(ctx)
         result = leads.execute(ctx, plan)
-        self.assertEqual(result["candidate_count"], 4)
+        self.assertEqual(result["candidate_count"], 2)
         self.assertEqual(result["model_calls"], 0)
         self.assertEqual(ctx.calls, [])
 
@@ -213,7 +113,7 @@ class LeadTests(unittest.TestCase):
         plan = leads.prepare(ctx)
         leads.execute(ctx, plan)
         writes = [c for c in ctx.calls if c[0] == "new-lead"]
-        self.assertEqual(len(writes), 4)
+        self.assertEqual(len(writes), 2)
         self.assertTrue(all(c[1]["stage"] == "new" for c in writes))
         self.assertTrue(all(1 <= c[1]["score"] <= 10 for c in writes))
         keys = [c[2] for c in writes]
@@ -221,15 +121,13 @@ class LeadTests(unittest.TestCase):
         leads.execute(ctx, plan)
         self.assertEqual(keys, [c[2] for c in ctx.calls if c[0] == "new-lead"])
 
-    def test_ambiguous_identity_and_unverified_pool_go_to_app(self):
+    def test_ambiguous_identity_goes_to_app(self):
         ctx = context(FIXTURE, dry_run=False)
         ctx.write = lambda *_: {"needs_confirm": True, "candidates": [{"name": "Possible match"}]}
         result = leads.execute(ctx, leads.prepare(ctx))
         self.assertEqual(len(result["created"]), 0)
-        self.assertEqual(len(result["reviews"]), 4)
-        row = leads.parse_pool([{"name": "No source", "city": "Mobile", "state": "AL"}], "new-license", "repo:retained")
-        result = leads.execute(ctx, {"candidates": leads.candidates(row), "lane_health": []})
-        self.assertEqual(len(result["reviews"]), 1)
+        self.assertEqual(len(result["reviews"]), 2)
+
 
 
 if __name__ == "__main__":

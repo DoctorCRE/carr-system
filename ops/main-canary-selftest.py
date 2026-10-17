@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import tempfile
 import os
 import pathlib
 import re
@@ -12,7 +13,6 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CANARY = REPO / ".github" / "workflows" / "main-canary.yml"
-PILOT = REPO / ".github" / "workflows" / "automerge-pilot.yml"
 CI_YML = REPO / ".github" / "workflows" / "ci.yml"
 
 failures: list[str] = []
@@ -74,7 +74,7 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     check('main has the identical parallel class set as PR CI',
           classes['strategy']['matrix'] == pr['jobs']['classes']['strategy']['matrix'])
     check('all classes run unless exact-tree proof succeeded',
-          classes.get('if') == "${{ needs.evidence.outputs.reused != 'true' }}")
+          classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
     pr_steps = pr['jobs']['classes']['steps']
     check('class execution and environment match PR CI',
@@ -89,6 +89,62 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
           'ops/ci-evidence.py resolve' in CANARY.read_text()
           and 'ci-tree-evidence' in CI_YML.read_text())
     check('the obsolete debounce no longer delays reuse', 'sleep 90' not in CANARY.read_text())
+
+
+def test_evidence_failure_runs_checks_and_uses_their_verdict():
+    import json
+    import subprocess
+    result = subprocess.run(['node', '-e',
+        "const fs=require('fs'),y=require('js-yaml');console.log(JSON.stringify(y.load(fs.readFileSync(process.argv[1],'utf8'))))",
+        str(CANARY)], cwd=REPO / 'mcp-server', capture_output=True, text=True, check=True)
+    workflow = json.loads(result.stdout)
+    check('unavailable optional evidence cannot fail the workflow verdict',
+          workflow['jobs']['evidence'].get('continue-on-error') is True)
+    check('class checks and the aggregate cannot tolerate a failure',
+          all(not workflow['jobs'][job].get('continue-on-error', False)
+              and all(not step.get('continue-on-error', False)
+                      for step in workflow['jobs'][job]['steps'])
+              for job in ('classes', 'canary')))
+    script = workflow['jobs']['canary']['steps'][0]['run']
+    cases = [
+        ('success', 'true', 'skipped', 0),
+        ('success', 'false', 'success', 0),
+        ('failure', '', 'success', 0),
+        ('failure', 'true', 'success', 0),
+        ('cancelled', '', 'success', 0),
+        ('skipped', '', 'success', 0),
+        ('failure', 'true', 'skipped', 1),
+        ('success', 'false', 'skipped', 1),
+        ('success', 'true', 'failure', 1),
+        ('failure', '', 'failure', 1),
+        ('success', 'false', 'cancelled', 1),
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        for evidence, reused, classes, code in cases:
+            env = dict(os.environ, EVIDENCE=evidence, REUSED=reused,
+                       CLASSES=classes, GITHUB_STEP_SUMMARY=str(pathlib.Path(tmp) / 'summary'))
+            actual = subprocess.run(['bash', '-e', '-c', script], env=env,
+                                    capture_output=True, text=True)
+            check(f'aggregate evidence={evidence} reused={reused!r} classes={classes}',
+                  actual.returncode == code, actual.stdout + actual.stderr)
+
+
+def test_main_retains_migration_shadow_coverage():
+    y = CANARY.read_text()
+    check('main installs PG18 for the migration shadow',
+          'Install PostgreSQL 18 server for the migration shadow' in y)
+    check('main collects migration shadow artifacts',
+          'CARR_SHADOW_ARTIFACT_DIR:' in y and 'shadow-schema' in y)
+
+
+def test_recorded_timings_survive_retirement_of_the_unused_collector():
+    import json
+    report = json.loads((REPO / 'audits/fast-ship/timings.json').read_text())
+    check('recorded timing evidence retains both measured lanes',
+          set(report['lanes']) == {'main', 'pr'}
+          and all(lane['samples'] for lane in report['lanes'].values()))
+    check('the one-off timing collector is retired',
+          not (REPO / 'ops/ci-run-timings.py').exists())
 
 
 def test_role_migration_fixtures_have_postgresql_17_server_binaries():
@@ -216,30 +272,21 @@ def test_the_manual_lever_can_freeze_but_never_force_green():
           "green is only ever derived from a successful canary run")
 
 
-def test_the_pilot_asks_before_it_plans():
-    y = PILOT.read_text(encoding="utf-8")
-    check("the automerge pilot consults the freeze",
-          "ops/main-canary-state.py --require-green" in y)
-    check("it asks BEFORE planning, not after a 20-minute verify job",
-          y.find("main-canary-state.py") < y.find("id: plan"),
-          "the cheap refusal has to come first or it saves nothing")
-    check("the plan job can read the canary's runs",
-          "actions: read" in y)
-    check("the manual lever reaches the pilot",
-          "CARR_MAIN_FREEZE: ${{ vars.CARR_MAIN_FREEZE }}" in y)
 
 
 def main():
     for fn in (test_the_canary_is_event_driven_and_never_always_on,
                test_a_running_canary_finishes_before_the_newest_pending_run,
                test_parallel_classes_match_pr_ci_and_reuse_is_explicit,
+               test_evidence_failure_runs_checks_and_uses_their_verdict,
+               test_main_retains_migration_shadow_coverage,
+               test_recorded_timings_survive_retirement_of_the_unused_collector,
                test_role_migration_fixtures_have_postgresql_17_server_binaries,
                test_a_red_canary_stays_red_and_names_main,
                test_freeze_reads_a_verdict_not_a_cancellation,
                test_every_not_knowing_refuses,
                test_red_freezes_and_green_releases,
-               test_the_manual_lever_can_freeze_but_never_force_green,
-               test_the_pilot_asks_before_it_plans):
+               test_the_manual_lever_can_freeze_but_never_force_green,):
         print(f"\n{fn.__name__}")
         try:
             fn()

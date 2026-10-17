@@ -42,7 +42,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from types import ModuleType
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -151,6 +150,22 @@ def newly_applied(before: str, after: str) -> list[str]:
     return sorted(set(rows_a) - set(rows_b))
 
 
+# ── snapshot IO ────────────────────────────────────────────────────────────
+# A snapshot is read and written byte for byte. Some CHECK constraints hold a
+# literal carriage return (the SCAC ingress_key checks reject '[\n\r\t]'), and
+# universal-newline text IO turns it into a line feed: the base then loads a
+# different constraint and --write commits it to db/schema.sql.
+
+def read_snapshot(path: pathlib.Path) -> str:
+    with open(path, encoding="utf-8", newline="") as fh:
+        return fh.read()
+
+
+def write_snapshot(path: pathlib.Path, text: str) -> None:
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
 # ── the run ────────────────────────────────────────────────────────────────
 
 class StepFailed(RuntimeError):
@@ -179,7 +194,12 @@ def find_pg18(explicit: str | None) -> pathlib.Path | None:
 def default_base() -> str:
     ref = (os.environ.get("GITHUB_BASE_REF") or "").strip()
     target = f"origin/{ref}" if ref else "origin/main"
-    return subprocess.run(["git", "merge-base", "HEAD", target], cwd=REPO, capture_output=True,
+    parents = ["HEAD"]
+    pending = subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                             cwd=REPO, capture_output=True, text=True)
+    if pending.returncode == 0:
+        parents.append(pending.stdout.strip())
+    return subprocess.run(["git", "merge-base", target, *parents], cwd=REPO, capture_output=True,
                           text=True, check=True).stdout.strip()
 
 
@@ -209,18 +229,20 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
     env["LC_ALL"] = "C"
     env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '')}"
     base_snapshot = subprocess.run(["git", "show", f"{base}:{SNAPSHOT}"], cwd=REPO,
-                                   capture_output=True, text=True, check=True).stdout
-    (work / "base.sql").write_text(base_snapshot)
-    data, port = work / "data", free_port()
+                                   capture_output=True, check=True).stdout.decode("utf-8")
+    write_snapshot(work / "base.sql", base_snapshot)
+    fixture = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl", env)
+    data, port = fixture.root / "data", free_port()
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
     python = REPO / ".venv/bin/python"
     python = python if python.is_file() else pathlib.Path(sys.executable)
 
-    run([bindir / "initdb", "-D", data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8",
-         "--no-locale"], env, "initdb", log)
     try:
-        run([bindir / "pg_ctl", "-D", data, "-l", work / "postgres.log",
-             "-o", f"-h 127.0.0.1 -p {port} -k {work}", "-w", "start"], env, "pg_ctl start", log)
+        fixture.run([bindir / "initdb", "-D", data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8",
+                     "--no-locale"], check=True, capture_output=True, text=True, timeout=120)
+        fixture.run([bindir / "pg_ctl", "-D", data, "-l", fixture.root / "postgres.log",
+                     "-o", f"-h 127.0.0.1 -p {port} -k {fixture.root}", "-w", "start"],
+                    check=True, capture_output=True, text=True, timeout=120)
         run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "carr_ci"],
             env, "createdb", log)
         run([bindir / "psql", dsn, "-v", "ON_ERROR_STOP=1", "-qc", "create role neondb_owner;"],
@@ -234,15 +256,10 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
              "--output-candidate", candidate], env, "bin/schema-snapshot.sh", log)
     finally:
         try:
-            stopped = subprocess.run([bindir / "pg_ctl", "-D", data, "-m", "fast", "-w", "stop"],
-                                     env=env, capture_output=True, timeout=60)
-            status = subprocess.run([bindir / "pg_ctl", "-D", data, "status"],
-                                    env=env, capture_output=True, timeout=30)
-        except (subprocess.TimeoutExpired, OSError):
-            raise ShutdownFailed(f"shutdown unavailable or timed out; cluster retained at {work}") from None
-        if stopped.returncode or status.returncode != 3:
-            raise ShutdownFailed(f"shutdown not verified; cluster retained at {work}")
-    text = candidate.read_text()
+            fixture.close()
+        except RuntimeError as exc:
+            raise ShutdownFailed(str(exc)) from exc
+    text = read_snapshot(candidate)
     return base_snapshot, text, newly_applied(base_snapshot, text)
 
 
@@ -267,13 +284,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"migration-shadow: cannot resolve the base: {exc.stderr.strip()}", file=sys.stderr)
         return 2
 
-    work = pathlib.Path(tempfile.mkdtemp(prefix="carr-migration-shadow."))
-    retain = False
+    artifacts = local_pg.DisposablePostgres("carr-migration-shadow.", bindir / "pg_ctl")
+    work = artifacts.root
     try:
         try:
             _, candidate, applied = shadow(base, bindir, work)
         except (StepFailed, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            retain = isinstance(exc, ShutdownFailed)
             print(f"migration-shadow: FAILED against {base[:12]}'s production structure — {exc}",
                   file=sys.stderr)
             return 2
@@ -285,13 +301,12 @@ def main(argv: list[str] | None = None) -> int:
             dest.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(work / "candidate.sql", dest / "schema.sql")
         if args.write:
-            (REPO / SNAPSHOT).write_text(candidate)
+            write_snapshot(REPO / SNAPSHOT, candidate)
             print(f"migration-shadow: wrote {SNAPSHOT} from the shadow candidate")
             return 0
-        diffs = differences((REPO / SNAPSHOT).read_text(), candidate)
+        diffs = differences(read_snapshot(REPO / SNAPSHOT), candidate)
     finally:
-        if not retain:
-            shutil.rmtree(work)
+        artifacts.close()
     if not diffs:
         print(f"migration-shadow: OK — committed {SNAPSHOT} is exactly what the migrations produce")
         return 0

@@ -1,0 +1,734 @@
+{
+ "_about": "Fake `gh api graphql` responses for ops/pr-board-selftest.py, two pages. Board time is 'now'. Every PR number is a case the selftest names.",
+ "now": "2026-10-12T16:00:00Z",
+ "pages": [
+  {
+   "data": {
+    "repository": {
+     "defaultBranchRef": {
+      "name": "main",
+      "target": {
+       "oid": "ffffffffffffffffffffffffffffffffffffffff"
+      }
+     },
+     "pullRequests": {
+      "pageInfo": {
+       "hasNextPage": true,
+       "endCursor": "CURSOR-1"
+      },
+      "nodes": [
+       {
+        "number": 101,
+        "title": "green, clean, fresh",
+        "url": "https://github.com/jbookout/carr-system/pull/101",
+        "isDraft": false,
+        "createdAt": "2026-10-10T10:00:00Z",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "claude/ready",
+        "headRefOid": "0000000000000000000000000000000000000065",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000065",
+            "committedDate": "2026-10-11T10:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ops/ci.sh --strict",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-11T10:48:00Z",
+                "completedAt": "2026-10-11T11:00:00Z"
+               },
+               {
+                "__typename": "CheckRun",
+                "name": "lint",
+                "conclusion": "SKIPPED",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-11T10:59:00Z",
+                "completedAt": "2026-10-11T11:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 102,
+        "title": "red but pushed three hours ago",
+        "url": "https://github.com/jbookout/carr-system/pull/102",
+        "isDraft": false,
+        "createdAt": "2026-10-11T13:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "codex/busy",
+        "headRefOid": "0000000000000000000000000000000000000066",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000066",
+            "committedDate": "2026-10-12T13:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ops/ci.sh --strict",
+                "conclusion": "FAILURE",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-12T13:50:00Z",
+                "completedAt": "2026-10-12T14:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 103,
+        "title": "red, conflicting, ten days quiet",
+        "url": "https://github.com/jbookout/carr-system/pull/103",
+        "isDraft": false,
+        "createdAt": "2026-10-01T16:00:00Z",
+        "mergeable": "CONFLICTING",
+        "mergeStateStatus": "DIRTY",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "codex/abandoned",
+        "headRefOid": "0000000000000000000000000000000000000067",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000067",
+            "committedDate": "2026-10-02T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ops/ci.sh --strict",
+                "conclusion": "FAILURE",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-02T16:40:00Z",
+                "completedAt": "2026-10-02T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 104,
+        "title": "draft, green, eight days quiet",
+        "url": "https://github.com/jbookout/carr-system/pull/104",
+        "isDraft": true,
+        "createdAt": "2026-10-03T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "worktree-agent-x",
+        "headRefOid": "0000000000000000000000000000000000000068",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000068",
+            "committedDate": "2026-10-04T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ops/ci.sh --strict",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-04T16:53:00Z",
+                "completedAt": "2026-10-04T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 105,
+        "title": "red, clean, twenty-five days quiet",
+        "url": "https://github.com/jbookout/carr-system/pull/105",
+        "isDraft": false,
+        "createdAt": "2026-09-16T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "fix/old-thing",
+        "headRefOid": "0000000000000000000000000000000000000069",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000069",
+            "committedDate": "2026-09-17T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "FAILURE",
+                "status": "COMPLETED",
+                "startedAt": "2026-09-17T16:50:00Z",
+                "completedAt": "2026-09-17T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 106,
+        "title": "conflicting, three days old",
+        "url": "https://github.com/jbookout/carr-system/pull/106",
+        "isDraft": false,
+        "createdAt": "2026-10-08T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "claude/conflict",
+        "headRefOid": "000000000000000000000000000000000000006a",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006a",
+            "committedDate": "2026-10-09T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-09T16:50:00Z",
+                "completedAt": "2026-10-09T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "data": {
+    "repository": {
+     "defaultBranchRef": {
+      "name": "main",
+      "target": {
+       "oid": "ffffffffffffffffffffffffffffffffffffffff"
+      }
+     },
+     "pullRequests": {
+      "pageInfo": {
+       "hasNextPage": false,
+       "endCursor": null
+      },
+      "nodes": [
+       {
+        "number": 107,
+        "title": "cancelled, two days old",
+        "url": "https://github.com/jbookout/carr-system/pull/107",
+        "isDraft": false,
+        "createdAt": "2026-10-09T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "codex/cancelled",
+        "headRefOid": "000000000000000000000000000000000000006b",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006b",
+            "committedDate": "2026-10-10T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "CANCELLED",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-10T16:50:00Z",
+                "completedAt": "2026-10-10T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 108,
+        "title": "green but the verdict is nine days old",
+        "url": "https://github.com/jbookout/carr-system/pull/108",
+        "isDraft": false,
+        "createdAt": "2026-10-02T16:00:00Z",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "claude/old-green",
+        "headRefOid": "000000000000000000000000000000000000006c",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006c",
+            "committedDate": "2026-10-03T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-03T16:50:00Z",
+                "completedAt": "2026-10-03T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 109,
+        "title": "red on its own code",
+        "url": "https://github.com/jbookout/carr-system/pull/109",
+        "isDraft": false,
+        "createdAt": "2026-10-08T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "codex/red",
+        "headRefOid": "000000000000000000000000000000000000006d",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006d",
+            "committedDate": "2026-10-09T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ops/ci.sh --strict",
+                "conclusion": "FAILURE",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-09T16:30:00Z",
+                "completedAt": "2026-10-09T17:00:00Z"
+               },
+               {
+                "__typename": "CheckRun",
+                "name": "lint",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-09T16:50:00Z",
+                "completedAt": "2026-10-09T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 110,
+        "title": "draft, green, clean, three days",
+        "url": "https://github.com/jbookout/carr-system/pull/110",
+        "isDraft": true,
+        "createdAt": "2026-10-08T16:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "claude/draft",
+        "headRefOid": "000000000000000000000000000000000000006e",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006e",
+            "committedDate": "2026-10-09T16:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-09T16:50:00Z",
+                "completedAt": "2026-10-09T17:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 111,
+        "title": "a person's branch",
+        "url": "https://github.com/jbookout/carr-system/pull/111",
+        "isDraft": false,
+        "createdAt": "2026-10-10T00:00:00Z",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "dell-portability",
+        "headRefOid": "000000000000000000000000000000000000006f",
+        "baseRefName": "main",
+        "author": {
+         "login": "dellmccraneycarrus-gif"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "000000000000000000000000000000000000006f",
+            "committedDate": "2026-10-11T00:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-11T00:50:00Z",
+                "completedAt": "2026-10-11T01:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 112,
+        "title": "probe silent, GitHub says conflicting",
+        "url": "https://github.com/jbookout/carr-system/pull/112",
+        "isDraft": false,
+        "createdAt": "2026-10-09T04:00:00Z",
+        "mergeable": "CONFLICTING",
+        "mergeStateStatus": "DIRTY",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "practice-thing",
+        "headRefOid": "0000000000000000000000000000000000000070",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000070",
+            "committedDate": "2026-10-10T04:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-10T04:50:00Z",
+                "completedAt": "2026-10-10T05:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 113,
+        "title": "no checks on head",
+        "url": "https://github.com/jbookout/carr-system/pull/113",
+        "isDraft": false,
+        "createdAt": "2026-10-09T14:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": null,
+        "changedFiles": 1,
+        "headRefName": "codex/unchecked",
+        "headRefOid": "0000000000000000000000000000000000000071",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000071",
+            "committedDate": "2026-10-10T14:00:00Z",
+            "statusCheckRollup": null
+           }
+          }
+         ]
+        }
+       },
+       {
+        "number": 114,
+        "title": "green, clean, changes requested",
+        "url": "https://github.com/jbookout/carr-system/pull/114",
+        "isDraft": false,
+        "createdAt": "2026-10-09T14:00:00Z",
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "reviewDecision": "CHANGES_REQUESTED",
+        "changedFiles": 1,
+        "headRefName": "claude/changes",
+        "headRefOid": "0000000000000000000000000000000000000072",
+        "baseRefName": "main",
+        "author": {
+         "login": "jbookout"
+        },
+        "files": {
+         "nodes": [
+          {
+           "path": "lib/x.py"
+          }
+         ]
+        },
+        "commits": {
+         "nodes": [
+          {
+           "commit": {
+            "oid": "0000000000000000000000000000000000000072",
+            "committedDate": "2026-10-10T14:00:00Z",
+            "statusCheckRollup": {
+             "state": "X",
+             "contexts": {
+              "nodes": [
+               {
+                "__typename": "CheckRun",
+                "name": "ci",
+                "conclusion": "SUCCESS",
+                "status": "COMPLETED",
+                "startedAt": "2026-10-10T14:50:00Z",
+                "completedAt": "2026-10-10T15:00:00Z"
+               }
+              ]
+             }
+            }
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

@@ -26,6 +26,11 @@ import { authorizationClassForActor } from "./identity.js";
 // server-side, one slug per partner deliberately so a shared credential can
 // never make Dell's automation write as Joe. Adding a slug here carries the
 // same design weight as adding to LOCAL_SPONSOR or DISPLAY — never routine.
+//
+// The unattended runner (Joe's 2026-10-12 ruling, decision cbe91287) needs no
+// slug here: identity.js resolves its UNATTENDED_TOKENS bearer to joe-local
+// itself, sponsor joe, so it derives Joe's authority exactly as the attended
+// local door does. Only provenance differs (via unattended-token).
 const PARTNER_AUTHORITY_AGENTS = new Set(["codex", "claude", "joe-local", "dell-local"]);
 const PARTNER_SLUGS = new Set(["joe", "dell"]);
 

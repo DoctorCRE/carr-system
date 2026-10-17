@@ -13,26 +13,25 @@ sub-file is pulled. The enrollment date is decoded from ENRLMT_ID
 (I|O + YYYYMMDD + seq).
 
 Writes:
-  out/routines/radar/upstream/pecos.json — FL/AL INDIVIDUAL practitioners whose enrollment was
+  upstream/pecos.json — FL/AL INDIVIDUAL practitioners whose enrollment was
     filed in the last 24 months (matches the pool age-out horizon). Row shape
     matches corroborate.py: {"name","profession","city","county","state",
     "date","detail"} — city/county empty here; practice geography is filled in
     the next step by enrich-pecos-nppes.py (NPPES join on NPI). The PPEF file
     itself has NO street/city/zip and NO address sub-file (CMS catalog, Jul 22).
-  out/routines/radar/data/pecos-baseline-<Q>.json — compact NPI|ENRLMT_ID set of ALL FL/AL rows
+  _data/pecos-baseline-<Q>.json — compact NPI|ENRLMT_ID set of ALL FL/AL rows
     (individuals + orgs, no names) so next quarter's run can diff true
     newly-appearing enrollments instead of relying on the date decode.
 
 Usage: python3 build-pecos-pool.py <PPEF_Enrollment_Extract.csv>
-Then move the raw CSV and zip into _to_delete.
+Then DELETE the raw CSV and the zip it came from.
 """
 import sys, os, json, csv, re
 from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-from pool_paths import UPSTREAM, DATA as POOL_DATA
-UP = str(UPSTREAM)
-DATA = str(POOL_DATA)
+UP = os.path.join(HERE, "upstream")
+DATA = os.path.join(HERE, "_data")
 STATES = {"FL", "AL"}
 WINDOW_MONTHS = 24
 
@@ -76,8 +75,7 @@ def main():
             if k in recent and recent[k]["_d"] >= d: continue
             prof = tc(r.get("PROVIDER_TYPE_DESC", "").replace("PRACTITIONER - ", ""))
             recent[k] = {"_d": d,
-                "name": f"{tc(first)} {tc(last)}", "npi": r["NPI"],
-                "source_url": "https://data.cms.gov/provider-characteristics/medicare-provider-supplier-enrollment/medicare-fee-for-service-public-provider-enrollment",
+                "name": f"{tc(first)} {tc(last)}",
                 "profession": prof, "city": "", "county": "",
                 "state": r["STATE_CD"], "date": d.strftime("%m/%d/%Y"),
                 "detail": f"new Medicare enrollment ({prof}) filed {d.isoformat()}, "
@@ -86,8 +84,6 @@ def main():
 
     rows = [{k: v for k, v in r.items() if k != "_d"}
             for r in sorted(recent.values(), key=lambda r: r["_d"], reverse=True)]
-    os.makedirs(UP, exist_ok=True)
-    os.makedirs(DATA, exist_ok=True)
     out = os.path.join(UP, "pecos.json")
     json.dump(rows, open(out, "w"), indent=1)
     bl = os.path.join(DATA, f"pecos-baseline-{quarter}.json")
@@ -95,7 +91,7 @@ def main():
     print(f"[in] {n_total} rows scanned, {n_state} FL/AL")
     print(f"[out] {len(rows)} recent-enrollment practitioner rows (since {cutoff}) -> {out}")
     print(f"[out] {len(baseline)} NPI|enrollment baseline ids -> {bl}")
-    print("Move the raw CSV and zip into _to_delete (discard rule).")
+    print("NOW DELETE the raw CSV and zip (discard rule).")
 
 if __name__ == "__main__":
     main()

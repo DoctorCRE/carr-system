@@ -6,7 +6,7 @@ See Automation/radar/corevent-earnout-sop.md for the WHY. READ THAT FIRST.
 Stage 0 (always): extract the 409 post-sale founders from the lead router and resolve
                   them against the current owner index. Reports the ~1% naive-join gap.
 Stage 1-5 (when corevent.zip + cordata.zip are in the scratch): schema-probe, then run
-                  the confirmed join and write out/routines/radar/corevent-earnout-<date>.json.
+                  the confirmed join and write corevent-earnout-<date>.json.
 
 CONFIRMED SCHEMA (2026-07-16, first real run against the Jul 2026 quarterly files):
   Both files are FIXED-WIDTH text, not CSV.
@@ -66,10 +66,9 @@ else:
               file=sys.stderr)
 
 ROOT = _rest[0] if len(_rest) > 0 else os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-from pool_paths import RADAR as POOL_RADAR, DATA as POOL_DATA
-SCRATCH = _rest[1] if len(_rest) > 1 else str(POOL_DATA)
+SCRATCH = _rest[1] if len(_rest) > 1 else os.path.join(ROOT, "Automation", "radar", "_data")
 LEADS_DIR = os.path.join(ROOT, "DNA", "Leads")
-RADAR = str(POOL_RADAR)
+RADAR = os.path.join(ROOT, "Automation", "radar")
 
 if MODE == MODE_RECORDS:
     _ok, _why, _, _ = pool_reach((ROUTER_SOURCE,))

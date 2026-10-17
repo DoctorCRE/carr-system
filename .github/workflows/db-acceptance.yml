@@ -59,6 +59,17 @@ on:
     # here lands next to that run rather than racing it.
     - cron: "45 6 * * *"
   workflow_dispatch:
+    inputs:
+      shard_trial:
+        description: "Shadow one-versus-two DB trial; retains the serial gate"
+        type: boolean
+        required: true
+        default: false
+      max_work_ratio:
+        description: "Declared total-work limit (1.0 means no increase; bounded 1 to 2)"
+        type: string
+        required: true
+        default: "1.0"
 
 concurrency:
   # PR validation supersedes by workflow + PR. Non-PR verdicts are independent:
@@ -68,10 +79,15 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read # queue timestamp REST read for the opt-in trial
 
 jobs:
   acceptance:
-    name: local-db-ci --class migration
+    name: ${{ matrix.shard == 0 && 'local-db-ci --class migration' || format('DB shadow shard {0}/2', matrix.shard) }}
+    strategy:
+      fail-fast: false # one red must not cancel the other diagnostic reports
+      matrix:
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard_trial && '[0,1,2]' || '[0]') }}
     runs-on: ubuntu-latest
     # The canonical migration class plus this lane's own acceptance programs
     # routinely took 22-24 minutes by 2026-10-04, and a slow runner pushed six
@@ -80,6 +96,10 @@ jobs:
     timeout-minutes: 35
 
     steps:
+      - name: Record runner setup start
+        id: timing
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       # Actions are pinned to commit SHAs, not tags, for the supply-chain reason
       # ci.yml states: a tag is mutable by whoever controls the action repo.
       # These are the same two pins ci.yml uses; keep them in step.
@@ -94,6 +114,15 @@ jobs:
           # clone.
           fetch-depth: 0
 
+      - name: Read trial queue timestamp through GitHub REST
+        id: queue
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          queued=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .created_at)
+          echo "queued=$(date --date="$queued" +%s)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
@@ -106,12 +135,6 @@ jobs:
         run: npm --prefix mcp-server ci
 
       - name: Install zsh
-        # ops/gate-zero-scheduler-canary-gate.py runs the Gate Zero canary
-        # LaunchAgent's own ProgramArguments, and both the wrapper
-        # (bin/run-scheduled.sh) and the canary carry a #!/bin/zsh shebang. A
-        # runner without zsh would fail that gate for the environment rather
-        # than for the code — the same three seconds of apt ci.yml already
-        # spends for bin/review-council-runner.sh.
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
 
       - name: Install Python dependencies from the lock
@@ -158,8 +181,9 @@ jobs:
           sudo apt-get install -y -qq postgresql-client-18
           /usr/lib/postgresql/18/bin/pg_dump --version
           # THE SOCKET DIRECTORY IS THE ONE REAL PLATFORM DIFFERENCE.
-          # ops/local-pg-ci.py starts the server with only -h/-p and leaves
-          # unix_socket_directories at the build default. Homebrew compiles that
+          # Snapshot export retains the build's default socket directory.
+          # The serial and shard acceptance runners now supply a private -k.
+          # Homebrew compiles the default socket directory
           # default to /tmp, which any user can write, so the lane has always
           # worked on a developer Mac. Debian's PGDG build compiles it to
           # /var/run/postgresql, which exists only for the `postgres` user — so
@@ -169,7 +193,15 @@ jobs:
           # which would put a platform quirk in the code path a developer runs.
           sudo install -d -m 0775 -o "$USER" -g "$(id -gn)" /var/run/postgresql
 
+      - name: Prove private cluster isolation before a shadow trial
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+        env:
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+        run: python ops/db-acceptance-shards-selftest.py --postgres
+
       - name: Run the disposable-Postgres migration lane
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.shard_trial }}
         env:
           # ops/local-pg-ci.py refuses hosted runners by DEFAULT and still does.
           # This is the declared opt-in — the module additionally requires the
@@ -189,3 +221,47 @@ jobs:
         # the same arguments. The default port 55432 is contended on a developer
         # Mac and free on a fresh runner.
         run: python ops/local-pg-ci.py --class migration
+
+      - name: Run exact-source serial or isolated shadow partition
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+        env:
+          CARR_LOCAL_PG_ALLOW_HOSTED: "1"
+          CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
+          LC_ALL: C
+          SHARD: ${{ matrix.shard }}
+          QUEUED: ${{ steps.queue.outputs.queued }}
+          STARTED: ${{ steps.timing.outputs.started }}
+        run: |
+          python ops/local-pg-ci.py --class migration --shard "$SHARD" --port "$((55432 + SHARD))" \
+            --report "$RUNNER_TEMP/shard-$SHARD.json" --queued-at "$QUEUED" --job-started-at "$STARTED"
+
+      - name: Retain each shadow report even on failure
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: db-shadow-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  shadow-aggregate:
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
+    needs: acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: db-shadow-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/db-shadow
+          merge-multiple: false
+      - name: Fail closed on inventory, verdict, isolation or economics
+        env:
+          EXPECTED_HEAD: ${{ github.sha }}
+          MAX_WORK_RATIO: ${{ inputs.max_work_ratio }}
+        run: |
+          python ops/db_acceptance_shards.py "$RUNNER_TEMP/db-shadow" \
+            --expected-head "$EXPECTED_HEAD" --max-work-ratio "$MAX_WORK_RATIO"

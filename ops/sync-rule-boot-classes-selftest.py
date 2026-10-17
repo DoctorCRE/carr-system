@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded semantic regression for the rule boot class generator."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -17,7 +18,9 @@ SPEC.loader.exec_module(boot)
 CORPUS = {row["id"]: row["statement"] for row in
           json.loads((REPO / "ops/config/rule-selection-corpus.v1.json").read_text())["rules"]}
 # Regression fixtures only; production recognition must depend on statements, not these ids.
-STANDING_IDS = ("3d185f2b", "424ba0cc", "51d9f05f", "5697071b", "614c1209",
+# 5697071b (licensure per partner) left the corpus when it was retired on 2026-10-13
+# (loop 1304); the licence shape stays covered by the neutral positives below.
+STANDING_IDS = ("3d185f2b", "424ba0cc", "51d9f05f", "614c1209",
                 "67580c28", "725dff46", "9293d609", "a8f159ad", "b7ec8f3b",
                 "c8ebeb5b", "ce12c11e", "d3774a28", "f0f9156e", "f2d58a30", "f5bac101")
 
@@ -141,6 +144,76 @@ class StandingFactsTests(unittest.TestCase):
         changed["rules"]["725dff46"]["summary"] += " amended"
         self.assertNotEqual(boot.classes_digest(doc), boot.classes_digest(changed))
         self.assertIn(boot.classes_digest(doc), boot.render(doc))
+
+
+class RetainedTextTests(unittest.TestCase):
+    def test_committed_route_gap_evidence_binds_current_candidate_replay(self):
+        evidence = json.loads(boot.GAPS_PATH.read_text())
+        candidate = "evals/rule-delivery/evidence/candidate.jsonl"
+        self.assertEqual(evidence["inputs"][candidate],
+                         hashlib.sha256((REPO / candidate).read_bytes()).hexdigest(),
+                         "regenerate route-gap evidence after the final candidate replay")
+        self.assertEqual(evidence, boot.gap_evidence(boot.load()))
+
+    def test_gaps_include_hard_required_but_not_acceptable_gold(self):
+        cases = [
+            {"id": "v2", "gold": ["0e22e34a"], "split": "test", "source": "v2"},
+            {"id": "hard", "gold": ["412d37d3"], "split": "train", "source": "hard"},
+        ]
+        observations = [{"case_id": "v2", "delivered": []},
+                        {"case_id": "hard", "delivered": []}]
+        gaps = boot.route_gaps(boot.load(), cases, observations)
+        self.assertEqual(gaps["all"]["b"], {"0e22e34a": 1})
+        self.assertEqual(gaps["all"]["c"], {"412d37d3": 1})
+        self.assertEqual(gaps["test"]["c"], {})
+        observations[1]["delivered"] = ["412d37d3"]
+        self.assertEqual(boot.route_gaps(boot.load(), cases, observations)["all"]["c"], {})
+        with self.assertRaises(ValueError):
+            boot.route_gaps(boot.load(), cases, observations[:1])
+
+    def test_live_hard_required_hipaa_is_retained_and_cannot_be_removed(self):
+        doc = boot.load()
+        evidence = boot.gap_evidence(doc)
+        self.assertEqual(evidence["missing_route_occurrences"]["hard"]["c"]["412d37d3"], 1)
+        self.assertEqual(boot.retention_findings(doc, evidence), [])
+        removed = copy.deepcopy(doc)
+        removed["keep_full_text"].pop("412d37d3", None)
+        self.assertTrue(any("412d37d3" in p for p in boot.retention_findings(removed, evidence)))
+        with tempfile.TemporaryDirectory() as tmp:
+            classes = Path(tmp) / "classes.json"
+            classes.write_text(json.dumps(removed))
+            result = subprocess.run([sys.executable, str(REPO / "ops/sync-rule-boot-classes.py"),
+                "--check", "--classes", str(classes)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("RULE BOOT RETENTION: 412d37d3", result.stdout)
+
+    def test_hard_labels_use_required_only_and_frozen_split(self):
+        cases = boot.gap_cases(
+            {"cases": []},
+            {"cases": [{"id": "hard", "required": ["412d37d3"], "acceptable": ["0e22e34a"]}]},
+            {"cases": {"hard": {"split": "train"}}})
+        self.assertEqual(cases, [{"id": "hard", "gold": ["412d37d3"],
+                                  "split": "train", "source": "hard"}])
+
+    def test_retention_is_validated_rendered_measured_and_removable(self):
+        doc = copy.deepcopy(boot.load())
+        rid = "0e22e34a"
+        doc["keep_full_text"] = {rid: "Gold route miss; retain until its route is fixed."}
+        self.assertEqual(boot.validate(doc), [])
+        self.assertIn('"on": true', next(line for line in boot.render(doc).splitlines() if f'"{rid}"' in line))
+        removed = copy.deepcopy(doc)
+        removed["keep_full_text"].pop(rid)
+        self.assertNotEqual(boot.classes_digest(doc), boot.classes_digest(removed))
+        self.assertGreater(boot.estimate(doc, "joe")[0], boot.estimate(removed, "joe")[0])
+        self.assertIn('"on": false', next(line for line in boot.render(removed).splitlines() if f'"{rid}"' in line))
+
+    def test_retention_rejects_unknown_ids_missing_reasons_and_wrong_classes(self):
+        for keep in ([], {"ffffffff": "missing"}, {"0e22e34a": ""},
+                     {"0e22e34a": 3}, {"725dff46": "already A"}, {"14181e60": "gate"}):
+            with self.subTest(keep=keep):
+                doc = copy.deepcopy(boot.load())
+                doc["keep_full_text"] = keep
+                self.assertTrue(boot.validate(doc))
 
 
 if __name__ == "__main__":

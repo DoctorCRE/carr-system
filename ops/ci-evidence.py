@@ -22,6 +22,38 @@ def class_groups(root=ROOT):
     return re.findall(r'^          - "([^"]+)"', block, re.M)
 
 
+def verdict(jobs, groups):
+    """Report job conclusions for every class, failing closed on missing jobs."""
+    lines, passed = [], True
+    labels = {'success': 'PASSED', 'failure': 'FAILED', 'cancelled': 'CANCELLED',
+              'skipped': 'SKIPPED', 'timed_out': 'TIMED OUT'}
+    for group in groups:
+        matches = [j for j in jobs if j.get('name') == 'ops/ci.sh --strict --only ' + group]
+        if len(matches) != 1:
+            label = 'MISSING' if not matches else 'AMBIGUOUS'
+        elif matches[0].get('status') != 'completed':
+            label = 'INCOMPLETE'
+        else:
+            label = labels.get(matches[0].get('conclusion'), 'UNKNOWN')
+        passed = passed and label == 'PASSED'
+        lines.extend(c + ': ' + label for c in group.split())
+    return (0 if passed else 1), lines
+
+
+def hosted_verdict():
+    repo, run_id = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID']
+    # latest retains successful jobs when only one failed job is rerun.
+    raw = subprocess.run(['gh', 'api', '--paginate', '--slurp',
+        f'repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100'],
+        capture_output=True, text=True, timeout=60, check=True)
+    jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
+    rc, lines = verdict(jobs, class_groups())
+    print('\n'.join(lines))
+    with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+        summary.write('Class job conclusions:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
+    return rc
+
+
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
     for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'requirements.lock',
@@ -98,9 +130,17 @@ def git(value):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['record', 'resolve'])
-    parser.add_argument('--output', required=True)
+    parser.add_argument('action', choices=['record', 'resolve', 'verdict'])
+    parser.add_argument('--output')
     args = parser.parse_args()
+    if args.action == 'verdict':
+        try:
+            return hosted_verdict()
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            print('CI verdict: job conclusions unavailable; refusing success')
+            return 1
+    if not args.output:
+        parser.error('--output is required for record/resolve')
     groups, contract = class_groups(), contract_digest()
     sha, tree = git('HEAD'), git('HEAD^{tree}')
     if args.action == 'record':

@@ -3199,8 +3199,7 @@ def census_route_invariance_checks() -> None:
           "\n".join(section_lines))
     check("none of the caller's strings reached the surface, with the snapshot, the "
           "render and the frozen census answer all rebound before the run",
-          not any(re.search(r"(?<![\w-])" + re.escape(token) + r"(?![\w-])", out)
-                  for token in ("caller-operational", "caller-owner",
+          not any(token in out for token in ("caller-operational", "caller-owner",
                                              "caller_reason", "caller_seam",
                                              "verified")),
           "\n".join(section_lines))

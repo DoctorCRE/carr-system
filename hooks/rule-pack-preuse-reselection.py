@@ -15,15 +15,14 @@ file now also drives a SECOND, more general rail off the declarative
 compiled trigger table, ops/config/rule-jit-triggers.v1.json
 (ops/rule-jit-compile.py is its only writer): an MCP verb call, a Bash
 command family, a file-path write, or a general content fallback, each
-mapped to up to ~5 rules. On any PreToolUse call the ORIGINAL rail's exact
-shape does not match, this file checks the compiled table instead, and on a
+mapped to up to ~5 rules. On a PreToolUse call without a route match or the
+ORIGINAL rail's exact shape, this file checks the compiled table instead, and on a
 match calls the same standing-context door with the union of every matched
 trigger's packs and rule ids, validates the response, and injects a second,
 differently-schemad receipt (GENERALIZED_RECEIPT_SCHEMA in
-lib/rule_delivery_preuse.py) as additionalContext. The two rails are mutually
-exclusive per call (the original shape, when it matches, is handled by the
-original code path alone) so the proven rail's behavior cannot be disturbed
-by the new one.
+lib/rule_delivery_preuse.py) as additionalContext. An unrouted background call
+keeps the original receipt. A routed background call includes the scheduled
+rules in the route receipt's single selector request.
 
 MESSAGE SEMANTICS (loop 620). The same module is also wired once at
 UserPromptSubmit, the earliest seam that carries the partner's actual message.
@@ -49,7 +48,8 @@ pattern, or a path glob. On a PreToolUse call that hits any route, the rules
 it hits are UNIONED with the compiled table's rows, fetched through the same
 standing-context door in ONE call, and injected as a third receipt
 (ROUTE_RECEIPT_SCHEMA). A call no route hits takes the generalized rail above
-unchanged, and the scheduled rail retains its exact-match precedence.
+unchanged. Routes are evaluated before the scheduled rail so background
+calls receive both their routed and scheduled rules.
 Two properties the route rail adds. It dedupes PER RULE PER SESSION: a rule
 delivered in full is not re-injected for the same tool within 30 minutes, and
 a different tool delivers it again. And it FITS THE CAP: Claude Code persists
@@ -71,13 +71,6 @@ delivered and what to do before acting, instead of exit 1 with empty
 stdout. A malformed single route counts as matched, so it over-delivers its
 rule rather than dropping it; ops/rule-route-coverage.py refuses it in CI.
 
-NOT DONE HERE, ON PURPOSE: hooks/rule-pack-drift-gate.py's Stop-side keyword
-telemetry still only recognizes the original schema's receipt as "loaded"
-evidence for scheduled-automation; it does not yet credit a generalized-rail
-receipt for the packs it delivers. Wiring that up is a comparison this slice
-chose to leave rather than force through the drift gate's byte-pinned
-observation fixtures under scope pressure — see the note beside
-`load_packs()` in that file.
 """
 
 # doctrine: rule-delivery-load-layers
@@ -103,12 +96,23 @@ from lib.rule_delivery_preuse import (  # noqa:E402
     SEMANTIC_RECEIPT_SCHEMA, TRIGGER_TABLE_RELATIVE, canonical, digest,
     load_trigger_table, merge_trigger_delivery, receipt_id, semantic_delivery,
     semantic_selector_digest, scheduled_rule_ids as _scheduled_rule_ids, valid_local_identity,
-    validate_generalized_receipt,
+    validate_generalized_receipt, file_sha256, source_sha256, DELIVERY_SOURCE_PATHS,
 )
-from lib.rule_delivery_shadow import (  # noqa:E402
-    WINDOW_SOURCE_PATHS, file_sha256, source_sha256,
-)
-from lib.claude_rule_delivery_dedupe import should_deliver, transcript_path_digest  # noqa:E402
+
+
+# Imported on first use: only a delivery reaches the dedupe store, and its
+# import chain (tempfile, dataclasses, the continuity config) was about a
+# quarter of this hook's CPU on every call that delivers nothing (2026-10-12).
+def should_deliver(*args, **kwargs):
+    from lib.claude_rule_delivery_dedupe import should_deliver as _should_deliver
+    return _should_deliver(*args, **kwargs)
+
+
+def transcript_path_digest(*args, **kwargs):
+    from lib.claude_rule_delivery_dedupe import transcript_path_digest as _digest
+    return _digest(*args, **kwargs)
+
+
 from lib import rule_routes  # noqa:E402
 
 
@@ -384,19 +388,6 @@ def _deduped_context(payload: dict, receipt: dict) -> dict | None:
                                    digest(rule_set), len(text.encode("utf-8")))):
         return None
     return _context(text)
-
-
-def _scheduled_oversize_notice(ids: list[str]) -> str:
-    # The original receipt contract credits the pack only when every rule is
-    # present in full. Claude hides oversized additionalContext behind a file
-    # preview, so a partial receipt would falsely certify delivery.
-    return (
-        "RULE PACK PREUSE DELIVERY TOO LARGE: scheduled-automation rules were "
-        "NOT delivered. The full receipt exceeds the visible hook context cap. "
-        "The tool call was not blocked or changed. Before acting, fetch these "
-        "rules with standing-context rule_ids in batches and read their full "
-        "text: " + ", ".join(ids) + "."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -681,13 +672,22 @@ def _route_statements(response: dict, packs: list[str], ids: list[str]):
     return identity, delivery, found, not_found
 
 
+def _agent_id(payload: dict) -> str | None:
+    """The subagent this call runs in, or None for the main conversation; the
+    same field the boot gate keys its per-child epoch on."""
+    value = payload.get("agent_id") or payload.get("agentId")
+    return str(value) if value else None
+
+
 def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
                     runner: Callable) -> dict | None:
     tool_name = payload["tool_name"]
     trigger_ids, _table_packs, table_ids = (merge_trigger_delivery(rows) if rows
                                             else ([], [], []))
-    candidates = sorted(set(routed) | set(table_ids))
-    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates)
+    candidates = sorted(set(routed) | set(table_ids)
+                        | (set(scheduled_rule_ids()) if _matches(payload) else set()))
+    ids = rule_routes.fresh_ids(payload["session_id"], tool_name, candidates,
+                                agent_id=_agent_id(payload))
     if not ids:
         return None
     try:
@@ -737,7 +737,8 @@ def _route_delivery(payload: dict, rows: list[dict], routed: list[str],
         # receipt at all. Then nothing is claimed as delivered: the compact
         # notice names every id and records nothing for dedupe.
         return _context(rule_routes.notice_too_large(ids))
-    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full])
+    rule_routes.record_delivered(payload["session_id"], tool_name, [r["id"] for r in full],
+                                 agent_id=_agent_id(payload))
     return _context(text)
 
 
@@ -745,27 +746,8 @@ def process(payload: dict, *, runner: Callable = subprocess.run,
             adviser: Callable[[str], list[dict]] | None = None) -> dict | None:
     if payload.get("hook_event_name") == "UserPromptSubmit":
         return _process_prompt(payload, runner, adviser)
-    if _matches(payload):
-        # Keep the original receipt when it is visible in full. An oversized
-        # receipt is not delivery: Claude persists it and shows a preview.
-        try:
-            ids = scheduled_rule_ids()
-            response = _run_selector(ids, runner)
-            row = _receipt(payload, response, ids)
-            if not rule_routes.within_cap(canonical(row).decode("utf-8")):
-                notice = _scheduled_oversize_notice(ids)
-                return _context(notice if rule_routes.within_cap(notice)
-                                else rule_routes.notice_too_large(ids))
-            return _deduped_context(payload, row)
-        except Exception as exc:
-            # Known selector failures retain their safe cause; arbitrary
-            # provider/auth/network exception text never reaches the transcript.
-            return _failed(FAILURE_CONTEXT, exc)
-
-    # THE ROUTE AND GENERALIZED RAILS (WR-000019 slice S9). Only reached when
-    # the original exact shape did not match, so a background
-    # Bash/functions.exec call keeps getting exactly the original behavior
-    # above and nothing from these rails layers onto it.
+    # Route matching must precede the scheduled fallback: background calls
+    # can also dispatch work whose rules are absent from the scheduled pack.
     if not (_nonempty(payload.get("session_id")) and _nonempty(payload.get("tool_use_id"))):
         return None
     rows = matched_triggers(payload)
@@ -785,6 +767,26 @@ def process(payload: dict, *, runner: Callable = subprocess.run,
         except Exception:
             table = merge_trigger_delivery(rows)[2] if rows else []
             return _context(rule_routes.notice_error(sorted(set(routed) | set(table))))
+    if _matches(payload):
+        # Keep the original receipt when it is visible in full. An oversized
+        # receipt is not delivery: Claude persists it and shows a preview.
+        try:
+            ids = scheduled_rule_ids()
+            response = _run_selector(ids, runner)
+            row = _receipt(payload, response, ids)
+            if not rule_routes.within_cap(canonical(row).decode("utf-8")):
+                # 2026-10-12: an oversized pack used to yield only a notice
+                # telling the model to fetch every rule again (75 times in one
+                # 37-hour session: two context spends per call for the same
+                # rules). The route rail already knows how to FIT: full text
+                # for what the budget carries, one-line entries for the rest.
+                return _route_delivery(payload, rows, [], runner)
+            return _deduped_context(payload, row)
+        except Exception as exc:
+            # Known selector failures retain their safe cause; arbitrary
+            # provider/auth/network exception text never reaches the transcript.
+            return _failed(FAILURE_CONTEXT, exc)
+
     return _table_delivery(payload, rows, runner)
 
 
@@ -829,11 +831,12 @@ HOOK_ERROR_CONTEXT = (
 )
 
 
-def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return 0
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+@decision(failure="raise")
+def decide(payload):
     if not isinstance(payload, dict):
         return 0
     try:
@@ -847,6 +850,13 @@ def main() -> int:
     if output is not None:
         print(json.dumps(output, sort_keys=True, separators=(",", ":")))
     return 0
+
+
+def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
+    return run(decide)
 
 
 if __name__ == "__main__":

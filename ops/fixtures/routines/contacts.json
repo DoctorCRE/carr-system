@@ -1,9 +1,0 @@
-{
-  "queue": [{"ref": "V-CPA-001", "subject_type": "vendor", "subject_id": "fixture-vendor", "party_id": "fixture-person", "name": "Alex Example", "company": "Example CPA", "city": "Pensacola", "priority": 1, "contact_state": "active", "party_version": 4, "vendor_version": 2}],
-  "categories": [{"slug": "cpa", "label": "CPA"}],
-  "model_response": {"records": [{"ref": "V-CPA-001", "ambiguous": false,
-    "identity_evidence": [{"field": "name", "value": "Alex Example", "citations": ["https://example.com/team"]}, {"field": "company", "value": "Example CPA", "citations": ["https://example.com/team"]}, {"field": "city", "value": "Pensacola", "citations": ["https://example.com/contact"]}],
-    "facts": [{"field": "email", "value": "alex@example.com", "citations": ["https://example.com/contact"]}],
-    "corrections": [{"field": "company", "proposed": "Example Accounting", "citations": ["https://example.com/team"]}],
-    "searched_sources": ["https://example.com/team", "https://example.com/contact"]}]}
-}

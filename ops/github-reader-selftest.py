@@ -63,22 +63,23 @@ CONNECT = (1, "", "error connecting to api.github.com\n")
 
 gh = Gh((0, '{"id": 1}', ""))
 check("api returns the parsed reply", reader(gh).api("repos/o/r/pulls/1") == {"id": 1})
-check("api shells to `gh api <path>`", gh.calls[0][0] == ["gh", "api", "repos/o/r/pulls/1"], gh.calls)
+check("api shells to `gh api <path>`", gh.calls[0][0] == ["gh", "api", "repos/o/r/pulls/1", "--include"], gh.calls)
 check("stdin is closed and the read is bounded",
       gh.calls[0][1].get("stdin") == subprocess.DEVNULL and gh.calls[0][1].get("timeout") == 30,
       gh.calls[0][1])
 
-gh = Gh((0, json.dumps([[{"id": 1}], [{"id": 2}, {"id": 3}]]), ""))
+gh = Gh((0, 'HTTP/2.0 200\nLink: <https://api.github.com/x?page=2>; rel="next"\n\n[{"id":1}]', ""),
+        (0, 'HTTP/2.0 200\nX-RateLimit-Remaining: 10\n\n[{"id":2},{"id":3}]', ""))
 rows = reader(gh).api(PATH, paginate=True)
 check("a paginated read flattens every page", [r["id"] for r in rows] == [1, 2, 3], rows)
-check("pagination asks gh to slurp pages", gh.calls[0][0][:4] == ["gh", "api", "--paginate", "--slurp"],
-      gh.calls[0][0])
+check("pagination reads and budgets individual pages", len(gh.calls) == 2 and
+      all("--paginate" not in call[0] and "--include" in call[0] for call in gh.calls), gh.calls)
 
 gh = Gh((0, "{}", ""))
 reader(gh).api("repos/o/r/actions/runs", fields={"branch": "main", "per_page": 5})
 check("query fields are sent as GET parameters",
       gh.calls[0][0] == ["gh", "api", "repos/o/r/actions/runs", "--method", "GET",
-                         "-f", "branch=main", "-f", "per_page=5"], gh.calls[0][0])
+                         "-f", "branch=main", "-f", "per_page=5", "--include"], gh.calls[0][0])
 
 gh = Gh((0, '[{"number": 7}]', ""))
 check("json runs any gh subcommand and parses it",
@@ -122,10 +123,20 @@ gh = Gh(subprocess.TimeoutExpired("gh", 30), (0, "[]", ""))
 check("a timeout is retried", reader(gh, sleeps).api("x") == [] and sleeps == [5], sleeps)
 
 gh = Gh((1, "", "HTTP 429: rate limit exceeded\n"), (0, "{}", ""))
-check("a 429 is retried", reader(gh).api("x") == {} and len(gh.calls) == 2)
+sleeps = []
+exc = raised(lambda: reader(gh, sleeps).api("x"))
+check("a 429 is classified as rate limited without a quick retry",
+      exc is not None and exc.kind == "rate_limit" and exc.transient is True
+      and exc.attempts == 1 and len(gh.calls) == 1 and sleeps == [],
+      (exc, len(gh.calls), sleeps))
 
 gh = Gh((1, "", "HTTP 403: API rate limit exceeded for user ID 1.\n"), (0, "{}", ""))
-check("a 403 rate limit is retried", reader(gh).api("x") == {} and len(gh.calls) == 2)
+sleeps = []
+exc = raised(lambda: reader(gh, sleeps).api("x"))
+check("a 403 rate limit is classified without a quick retry",
+      exc is not None and exc.kind == "rate_limit" and exc.transient is True
+      and exc.attempts == 1 and len(gh.calls) == 1 and sleeps == [],
+      (exc, len(gh.calls), sleeps))
 
 sleeps = []
 gh = Gh(CONNECT, CONNECT, CONNECT, CONNECT, (0, "{}", ""), CONNECT, CONNECT, (0, "[]", ""))
@@ -163,6 +174,36 @@ check("a missing gh is unreadable at once, not retried",
 gh = Gh((0, "<html>", ""))
 exc = raised(lambda: reader(gh).api("x"))
 check("a reply that is not JSON is unreadable", exc is not None and "not JSON" in str(exc), exc)
+
+for method in ("api", "json"):
+    sleeps = []
+    gh = Gh(CONNECT, (0, "<html>", ""))
+    r = reader(gh, sleeps, env={})
+    exc = raised(lambda: r.api("x") if method == "api" else r.json(["pr", "list"]))
+    check(f"{method} non-JSON reports the actual recovered read attempts",
+          exc is not None and exc.attempts == 2 and not exc.transient
+          and len(gh.calls) == 2 and sleeps == [5], (exc, len(gh.calls), sleeps))
+
+for marker, expected_kind, transient in (
+        ("HTTP 401: Bad credentials", "authentication", False),
+        ("Please run gh auth login", "authentication", False),
+        ("HTTP 404: Not Found", "github_unreadable", False),
+        ("HTTP 403: API rate limit exceeded", "rate_limit", True),
+        ("HTTP 429: Too Many Requests", "rate_limit", True)):
+    sleeps = []
+    synthetic_secret = "synthetic-secret-canary-123456789"
+    error = marker + "\nAuthorization: token " + synthetic_secret + "\n" + "wrapper diagnostic " * 30
+    gh = Gh(*[(1, "", error)] * 3)
+    exc = raised(lambda: reader(gh, sleeps, env={"GH_TOKEN": synthetic_secret}).api("x"))
+    check(f"{marker} is classified before the diagnostic tail is cut",
+          exc is not None and exc.kind == expected_kind and exc.transient == transient
+          and exc.attempts == 1
+          and len(gh.calls) == 1
+          and sleeps == [],
+          (exc, len(gh.calls), sleeps))
+    check(f"{marker} retains only a bounded redacted diagnostic",
+          exc is not None and len(exc.detail) <= 200 and len(str(exc)) < 400
+          and "\n" not in str(exc) and synthetic_secret not in str(exc), str(exc))
 
 # ── redaction ─────────────────────────────────────────────────────────────
 

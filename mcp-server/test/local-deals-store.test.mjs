@@ -1,10 +1,10 @@
 import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -25,10 +25,9 @@ const actor = { id: id(1), slug: 'joe', human: true, via: 'dealroom-cookie', cli
 
 test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !process.env.CARR_CI_DATABASE_URL && 'PostgreSQL unavailable' }, async t => {
   const ciDsn = process.env.CARR_CI_DATABASE_URL;
-  const dir = ciDsn ? null : mkdtempSync('/tmp/local-deals-');
+  let postgresFixture, dir;
   let admin;
   let database;
-  let running = false;
   let c;
   // A provided CI cluster is owned and budgeted by its caller.
   const releaseBudget = ciDsn ? async () => {} : await acquirePostgresFixtureGroup();
@@ -46,9 +45,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       url.pathname = `/${database}`;
       connection = { connectionString: url.href };
     } else {
-      execFileSync(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale'], { stdio: 'pipe' });
-      execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start'], { stdio: 'pipe' });
-      running = true;
+      postgresFixture = await acquireDisposablePostgres({ prefix: 'local-deals-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+      dir = postgresFixture.root;
+      await postgresFixture.run(path.join(bin, 'initdb'), ['-D', dir, '-U', 'fixture', '--auth=trust', '--no-locale']);
+      await postgresFixture.run(path.join(bin, 'pg_ctl'), ['-D', dir, '-l', path.join(dir, 'server.log'), '-o', `-k ${dir} -h ''`, '-w', 'start']);
       connection = { host: dir, user: 'fixture', database: 'postgres' };
     }
     c = new pg.Client({ ...connection,
@@ -269,6 +269,44 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(evidence.automatic, false);
     }));
 
+    await t.test('a patch based on the latest field event is not a conflict with itself', async () => transaction(async () => {
+      await fixture(false);
+      // This file reads timestamptz as text; the Worker's Neon driver returns a
+      // millisecond Date, which is the precision this case must survive.
+      const worker = { query: async (...args) => {
+        const result = await c.query(...args);
+        const dated = (result.fields || []).filter(field => field.dataTypeID === 1184).map(field => field.name);
+        for (const row of result.rows) for (const name of dated) if (row[name] !== null) row[name] = new Date(row[name]);
+        return result;
+      } };
+      const written = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(20), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: null,
+      });
+      assert.equal(written.ok, true);
+      // A base with sub-millisecond digits, fixed rather than left to clock_timestamp().
+      const columns = (await c.query(`select column_name from information_schema.columns
+        where table_schema='public' and table_name='event' and is_generated='NEVER'
+          and coalesce(identity_generation, '') <> 'ALWAYS'
+          and column_name not in ('id', 'idempotency_key', 'recorded_at')`)).rows.map(row => `"${row.column_name}"`).join(', ');
+      const first = { event_id: (await c.query(`insert into event (id, idempotency_key, recorded_at, ${columns})
+          select gen_random_uuid(), $2::text,
+            case when date_trunc('milliseconds', recorded_at) + interval '749 microseconds' > recorded_at
+              then date_trunc('milliseconds', recorded_at) + interval '749 microseconds'
+              else date_trunc('milliseconds', recorded_at) + interval '1749 microseconds' end, ${columns}
+          from event where id=$1 returning id`, [written.event_id, id(23)])).rows[0].id };
+      assert.equal((await c.query(`select extract(microseconds from recorded_at)::bigint % 1000 as sub_ms
+        from event where id=$1`, [first.event_id])).rows[0].sub_ms, '749');
+      const second = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(21), deal: id(4), field: 'phase', value: 'legal', base_event_id: first.event_id,
+      });
+      assert.equal(second.ok, true, 'sub-millisecond digits must not make the base newer than itself');
+      const stale = await TOOLS['patch-deal-field'].handler(worker, actor, {
+        idempotency_key: id(22), deal: id(4), field: 'phase', value: 'research', base_event_id: written.event_id,
+      });
+      assert.equal(stale.ok, false);
+      assert.notEqual(stale.conflict.event_a, written.event_id);
+    }));
+
     await t.test('account counters agree with the invoice-eligible board across outcome and parking states', async () => transaction(async () => {
       await fixture(true);
       for (const outcome of [null, 'won', 'lost', 'paused']) {
@@ -342,9 +380,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         try { if (database) await admin.query(`drop database "${database}"`); }
         finally { await admin.end(); }
       }
-      if (running) execFileSync(path.join(bin, 'pg_ctl'), ['-D', dir, '-m', 'immediate', '-w', 'stop'], { stdio: 'pipe' });
     } finally {
-      await releaseBudget();
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
     }
   }
 });

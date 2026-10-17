@@ -122,6 +122,7 @@ test("add-loop: a legal kind still reaches a genuine ok:true (the validation doe
     kind: "open_loop", owner: "claude", domain: "system",
     body: "kind-validation self-test, close immediately",
     blocker: "capability", blocker_detail: "coverage only, not a real block",
+    residue_kind: "provider_login", residue_host: "github.com",
   });
   assert.equal(result.ok, true);
   assert.equal(result.kind, "open_loop");

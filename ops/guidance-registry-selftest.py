@@ -415,9 +415,26 @@ def main():
     # procedure 77 -> 78 on 2026-09-29: rule ede4b241 (cloud model choice) is a
     # judgment_ambient rule and owes a manifest row (procedure); one whole rule
     # ENTERING the active set, nothing reclassified.
+    # procedure 78 -> 79 on 2026-10-08: rule 8400cd3d (new-work sizing) is a
+    # judgment_ambient rule and owes one procedure row. Nothing was reclassified.
+    # constraint 70 -> 71 on 2026-10-12, when the unfiled_bug Stop gate was
+    # installed: rule 19ebbeb3 (a detected bug is recorded and addressed in the
+    # same session) ENTERED the map as a stop_gate rule, so it compiles as a
+    # constraint and needs no manifest row. Nothing was reclassified.
+    # constraint 71 -> 70, procedure 79 -> 85, rubric 35 -> 37, preference
+    # 12 -> 15 on 2026-10-13 (loop 1304, WR-000284), when the map and manifest
+    # were brought back to the live active set: 9b081605 (deny_gate) and
+    # 5697071b (precedent) were retired, ede4b241 and 8400cd3d (procedure) are
+    # still proposed, and fourteen rules approved after the 2026-08-23 review
+    # entered as judgment_ambient rows -- eight procedure, two rubric, three
+    # preference, and 08c4eda2 as the precedent replacing 5697071b. Nothing
+    # was reclassified.
+    # PR #1801 removed 19 automated gates; their 42 rules became judgment_ambient
+    # manifest rows typed from each statement (17 procedure, 16 rubric,
+    # 9 preference). Active rule IDs and split types stay fixed.
     reviewed_counts = {
-        "constraint": 70, "procedure": 78, "doctrine": 12, "rubric": 35,
-        "preference": 12, "precedent": 3, "example": 0,
+        "constraint": 38, "procedure": 92, "doctrine": 12, "rubric": 53,
+        "preference": 24, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
         not reviewed_errors and not reviewed_compile_errors
@@ -454,7 +471,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 94,
+            "source_classification": "judgment_ambient", "entry_count": 148,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,

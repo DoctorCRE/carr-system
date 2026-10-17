@@ -25,6 +25,22 @@ spec.loader.exec_module(runner)
 
 
 class GrokRunTests(unittest.TestCase):
+    def test_full_report_survives_a_later_empty_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "stream.ndjson"
+            fixture.write_text('\n'.join(map(json.dumps, [
+                {"type": "text", "data": "First report."},
+                {"type": "usage", "messageId": "one"},
+                {"type": "text", "data": "Second report."},
+                {"type": "usage", "messageId": "two"},
+                {"type": "usage", "messageId": "empty"},
+                {"type": "end", "stopReason": "end_turn", "modelUsage": {
+                    "grok-4.7-build": {"modelCalls": 3}}}])) + '\n')
+            proc = subprocess.run(["bash", str(RUNNER), "--prompt", "test"],
+                env={**os.environ, "GROK_RUN_FAKE_NDJSON": str(fixture)},
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout, "First report.\n\nSecond report.\n")
     def test_default_runner_refuses_unsafe_urls_before_preflight_or_invocation(self):
         for writable in (False, True):
             for url in ("https://fixture-user:fixture-secret@example.com/post",
@@ -174,6 +190,15 @@ class GrokRunTests(unittest.TestCase):
             alert.assert_called_once_with()
             self.assertEqual(stderr.getvalue().strip(), "Grok needs sign-in: run grok login")
 
+    def test_health_probe_owns_the_sign_in_alert(self):
+        with mock.patch.object(sys, "argv", ["grok-run", "--prompt", "test", "--no-sign-in-alert"]), \
+                mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(runner, "preflight", side_effect=runner.PreflightError("Grok needs sign-in", 3)), \
+                mock.patch.object(runner, "sign_in_alert") as alert, \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(runner.main(), 3)
+            alert.assert_not_called()
+
     def test_alert_failure_preserves_sign_in_exit_and_reports_failure(self):
         with mock.patch.object(sys, "argv", ["grok-run", "--prompt", "test"]), \
                 mock.patch.dict(os.environ, {}, clear=True), \
@@ -184,19 +209,15 @@ class GrokRunTests(unittest.TestCase):
             self.assertIn("alert FAILED", stderr.getvalue())
             self.assertNotIn("private diagnostic", stderr.getvalue())
 
-    def test_unattributed_hook_turns_cannot_nominate_an_earlier_answer(self):
-        # Minimized from the private 2026-10-02 Grok hook-turn capture. Retain
-        # response/usage boundaries; replace source prose and omit rule text.
+    def test_wrapper_report_and_desk_last_message_have_distinct_contracts(self):
         raw = (FIXTURES / "hook-turns.ndjson").read_text()
-        parsed = grok_wire.parse_result(raw, 0)
+        parsed = grok_wire.parse_result(raw, 0, require_identity=False)
         text, code = parsed["result"], parsed["code"]
         self.assertEqual(code, 0)
-        # This historical capture has no task/response provenance. Its prose
-        # cannot authorize replacing the final response with an earlier one.
-        self.assertEqual(text, "Noted. Standing by.")
-        desk = grok_wire.parse_result(raw, 0)
-        self.assertEqual(desk["status"], "completed")
-        self.assertEqual(desk["result"], text)
+        self.assertIn("Fetched post: the announced skill is example-pro.", text)
+        self.assertTrue(text.startswith("I will fetch the post.\n\n"))
+        self.assertEqual(text.count("Noted. Standing by."), 5)
+        self.assertEqual(grok_wire.parse_result(raw, 0)["result"], "Noted. Standing by.")
 
     def test_short_literal_answers_are_preserved(self):
         end = json.loads((FIXTURES / "hook-turns.ndjson").read_text().splitlines()[-1])
@@ -226,7 +247,7 @@ class GrokRunTests(unittest.TestCase):
                                 mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(sys, 'stdout', io.StringIO()) as stdout, \
                                 mock.patch.object(sys, 'stderr', io.StringIO()):
                             self.assertEqual(runner.main(), 0)
-                            self.assertEqual(stdout.getvalue().strip(), answer)
+                            self.assertEqual(stdout.getvalue().strip(), ("The boot stopped after page 1.\n\n" if earlier else "") + answer)
 
     def test_latest_short_substantive_answer_wins(self):
         events = [json.loads(line) for line in (FIXTURES / "hook-turns.ndjson").read_text().splitlines()]
@@ -322,7 +343,7 @@ class GrokRunTests(unittest.TestCase):
     def test_recorded_live_cli_cost_and_text(self):
         run, receipt = self.run_fixture("live-ok.ndjson")
         self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout, "OK\n")
+        self.assertEqual(run.stdout, "\n\n".join(["OK"] * 9) + "\n")
         self.assertEqual(receipt["actual_models"], ["grok-4.7-build"])
         self.assertEqual(receipt["num_turns"], 9)
         self.assertEqual(receipt["cost_usd"], 0.04628488)

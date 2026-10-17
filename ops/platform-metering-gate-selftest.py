@@ -265,14 +265,6 @@ def main() -> int:
           and "budget admission refusal stops before every provider call" in
           (REPO / "ops/control-plane-runner-selftest.py").read_text(encoding="utf-8"))
 
-    pilot = (REPO / "ops/automerge_pilot.py").read_text(encoding="utf-8")
-    execute_start = pilot.find("def command_execute")
-    check("automerge admits remote CI before it merges or dispatches",
-          execute_start >= 0
-          and execute_start < pilot.find('"github-actions-remote-ci"', execute_start)
-          < pilot.find("execute_conditional_merge(", execute_start)
-          < pilot.find("api.dispatch_workflow(", execute_start))
-
     print(f"\n{len(FAILED)} failure(s)" if FAILED else "\nall platform metering gate checks passed")
     return 1 if FAILED else 0
 

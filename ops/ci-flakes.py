@@ -35,6 +35,51 @@ def node_outcomes(text):
     return outcomes
 
 
+def canonical_test(name):
+    return (isinstance(name, str) and not name.startswith('/')
+        and bool(re.fullmatch(r'[A-Za-z0-9_./-]+\.(py|sh|mjs|js|tsx|ts)', name))
+        and all(part not in ('', '.', '..') for part in name.split('/')))
+
+
+def log_receipts(text):
+    for line in text.splitlines():
+        if 'CARR_FLAKE_RESULT ' not in line:
+            continue
+        try:
+            row = json.loads(line.split('CARR_FLAKE_RESULT ', 1)[1])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict) or not {'version', 'test', 'candidate', 'sha', 'tree',
+            'fingerprint', 'first_exit', 'rerun_exit', 'status'}.issubset(row):
+            continue
+        if (type(row.get('version')) is not int or row['version'] != 1
+            or not canonical_test(row.get('test')) or type(row.get('candidate')) is not bool
+            or type(row.get('first_exit')) is not int
+            or not -128 <= row['first_exit'] <= 255
+            or (row.get('rerun_exit') is not None and
+                (type(row['rerun_exit']) is not int or not -128 <= row['rerun_exit'] <= 255))
+            or row.get('status') not in ('passed', 'failed', 'flake-candidate', 'quarantined-failure')
+            or any(not isinstance(row.get(key), str) or not re.fullmatch(pattern, row[key])
+                for key, pattern in (('sha', r'[a-f0-9]{40}'), ('tree', r'[a-f0-9]{40}'),
+                                     ('fingerprint', r'[a-f0-9]{64}')))):
+            continue
+        yield row, line
+
+
+def suite_outcomes(text):
+    outcomes = {}
+    for row, line in log_receipts(text):
+        first = row['first_exit']
+        if first == 0 and row['status'] == 'passed' and row['rerun_exit'] is None and not row['candidate']:
+            result = 'pass'
+        elif 0 < first < 124 and first != 78:
+            result = 'fail'
+        else:
+            result = 'unavailable'
+        outcomes[row['test']] = (result, line, row)
+    return outcomes
+
+
 def observations_from_logs(repo, run, attempt, logs, tests):
     observations = []
     for filename, text in logs.items():
@@ -45,28 +90,30 @@ def observations_from_logs(repo, run, attempt, logs, tests):
         if not match:
             continue
         sha = match[1]
+        receipts = suite_outcomes(text)
+        nodes = node_outcomes(text)
         for test in tests:
-            base = Path(test).name
-            if test.startswith(('ops/', 'tools/')):
-                failed = any('FAIL' in line and re.search(r'(?<![A-Za-z0-9_-])' + re.escape(base) + r'(?![A-Za-z0-9_-])', line)
-                             for line in text.splitlines())
-                passed = bool(re.search(r'\bOK\s+gates\s', text))
-                if re.search(r'not run[^\n]*' + re.escape(base), text, re.I) or re.search(r'NOT RUN:[^\n]*' + re.escape(base), text):
-                    passed = False
+            outcome = receipts.get(test)
+            if outcome:
+                result, line, receipt = outcome
+                if receipt['sha'] != sha or result == 'unavailable':
+                    continue
+            elif test.startswith(('ops/', 'tools/')):
+                line = next((line for line in text.splitlines() if 'FAIL' in line and
+                    re.search(r'(?<![A-Za-z0-9_-])' + re.escape(Path(test).name) + r'(?![A-Za-z0-9_-])', line)), None)
+                if line is None:
+                    continue
+                result = 'fail'
             else:
-                outcome = node_outcomes(text).get(base)
-                failed = outcome is not None and outcome[0] == 'fail'
-                passed = (outcome is not None and outcome[0] == 'pass') or bool(re.search(r'\bOK\s+unit\s', text))
-            if failed or passed:
-                event_lines = [line for line in text.splitlines()
-                    if (failed and 'FAIL' in line and base in line)
-                    or (not failed and re.search(r'\bOK\s+(gates|unit)\s', line))]
-                timestamp = re.match(r'(\d{4}-\d{2}-\d{2}T\S+)', event_lines[-1]) if event_lines else None
-                at = timestamp[1] if timestamp else run['created_at'] + f':{attempt:04d}'
-                observations.append({'repo': repo, 'test': test, 'source_sha': sha, 'tree': sha,
-                    'workflow': run['name'], 'result': 'fail' if failed else 'pass',
-                    'at': at,
-                    'url': f'https://github.com/{repo}/actions/runs/{run["id"]}/attempts/{attempt}'})
+                outcome = nodes.get(Path(test).name)
+                if outcome is None:
+                    continue
+                result, line = outcome
+            timestamp = re.match(r'(\d{4}-\d{2}-\d{2}T\S+)', line)
+            at = timestamp[1] if timestamp else run['created_at'] + f':{attempt:04d}'
+            observations.append({'repo': repo, 'test': test, 'source_sha': sha, 'tree': sha,
+                'workflow': run['name'], 'result': result, 'at': at,
+                'url': f'https://github.com/{repo}/actions/runs/{run["id"]}/attempts/{attempt}'})
     return observations
 
 
@@ -91,12 +138,23 @@ def paged(endpoint):
     raise RuntimeError('pagination did not finish')
 
 
-def list_runs(repo, start, end, cache):
+def list_runs(repo, start, end, cache, activity=False):
     cache.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha256(f'v2:{repo}:{start}:{end}'.encode()).hexdigest()[:20]
+    key = hashlib.sha256(f'v3:{repo}:{start}:{end}:{activity}'.encode()).hexdigest()[:20]
     target = cache / f'runs-{key}.json'
     if target.exists():
         return json.loads(target.read_text())
+    if activity:
+        # The run list has no updated filter. Scan all pages so retries of old
+        # runs remain visible; creation order cannot bound completion activity.
+        runs = []
+        for page in range(1, 1000):
+            batch = gh_api(f'repos/{repo}/actions/runs?per_page=100&page={page}')['workflow_runs']
+            runs.extend(run for run in batch if start <= parse_time(run['updated_at']) <= end)
+            if len(batch) < 100:
+                target.write_text(json.dumps(runs))
+                return runs
+        raise RuntimeError('activity scan incomplete: run pagination did not finish')
     endpoint = f"repos/{repo}/actions/runs?created={quote(start.isoformat(timespec='seconds'))}..{quote(end.isoformat(timespec='seconds'))}&per_page=100"
     first = gh_api(endpoint)
     if first['total_count'] > 1000:
@@ -131,6 +189,9 @@ def failed_tests(logs, inventory):
             if re.search(r'\b(FAIL|TIMEOUT)\b', line):
                 for base in re.findall(r'([A-Za-z0-9_-]+(?:-selftest\.py|test[-_][A-Za-z0-9_-]+\.py|test[-_][A-Za-z0-9_-]+\.sh))', line):
                     tests.add(by_base.get(base, 'ops/' + base))
+        for name, (outcome, _, _) in suite_outcomes(clean).items():
+            if outcome == 'fail' and name in inventory:
+                tests.add(name)
         for base, (outcome, _) in node_outcomes(clean).items():
             if outcome == 'fail':
                 tests.add(by_base.get(base, 'mcp-server/test/' + base))
@@ -157,7 +218,7 @@ def history(repo, since, until, cache):
         run, attempt = task
         try:
             return run, attempt, read_logs(repo, run['id'], attempt, cache), None
-        except (RuntimeError, zipfile.BadZipFile) as exc:
+        except (RuntimeError, zipfile.BadZipFile, subprocess.TimeoutExpired, OSError) as exc:
             return run, attempt, {}, str(exc)
     with ThreadPoolExecutor(max_workers=4) as pool:
         for run, attempt, logs, error in pool.map(fetch, tasks):
@@ -182,7 +243,7 @@ def propose(repo, rows):
     loops = []
     for row in rows:
         name = row['test']
-        if not re.fullmatch(r'[A-Za-z0-9_./-]+\.(py|sh|mjs|js|tsx|ts)', name) or '..' in Path(name).parts:
+        if not canonical_test(name):
             raise ValueError('invalid test path')
         key = hashlib.sha256(f'{repo}:{name}'.encode()).hexdigest()
         marker = f'<!-- ci-flake:{key} -->'
@@ -206,32 +267,50 @@ def propose(repo, rows):
     return loops
 
 
+def collected_suite(name):
+    return bool(re.fullmatch(r'(ops/[^/]+-selftest\.py|tools/test[-_][^/]+\.(py|sh)|'
+        r'tools/[^/]+-selftest\.py|tools/room-bridge/test_(?:[^/]+_unit|activation_reliability)\.py|'
+        r'mcp-server/test/[^/]+\.test\.(mjs|js))', name))
+
+
+def source_inventory(repo, sha):
+    commit = gh_api(f'repos/{repo}/git/commits/{sha}')
+    tree = commit['tree']['sha']
+    if commit['sha'] != sha or not re.fullmatch(r'[a-f0-9]{40}', tree):
+        raise ValueError('checkout commit provenance mismatch')
+    inventory = gh_api(f'repos/{repo}/git/trees/{tree}?recursive=1')
+    if inventory.get('truncated') is not False:
+        raise ValueError('source inventory incomplete')
+    return tree, {row['path'] for row in inventory['tree'] if row['type'] == 'blob'
+        and row.get('mode') != '120000' and canonical_test(row['path']) and collected_suite(row['path'])}
+
+
 def candidate_rows(repo, run, attempt, logs):
     if (run.get('head_repository') or {}).get('full_name') != repo or run['name'] not in ('CI', 'main canary'):
         return []
     rows = {}
+    sources = {}
     for filename, text in logs.items():
         if '/' in filename:
             continue
         checkout = re.search(r'git log -1 --format=%H[^\n]*\n[^\n]*?\b([a-f0-9]{40})\b', text)
         if not checkout:
             continue
-        for line in text.splitlines():
-            if 'CARR_FLAKE_RESULT ' not in line:
+        for receipt, _ in log_receipts(text):
+            if (receipt['candidate'] is not True or receipt['sha'] != checkout[1]
+                or receipt['rerun_exit'] != 0 or receipt['first_exit'] == 78
+                or not 0 < receipt['first_exit'] < 124
+                or receipt['status'] not in ('flake-candidate', 'quarantined-failure')
+                or receipt['fingerprint'] != hashlib.sha256(b'').hexdigest()):
                 continue
-            try:
-                receipt = json.loads(line.split('CARR_FLAKE_RESULT ', 1)[1])
-            except json.JSONDecodeError:
-                continue
-            if (receipt.get('version') != 1 or receipt.get('candidate') is not True
-                or receipt.get('sha') != checkout[1] or receipt.get('rerun_exit') != 0
-                or not isinstance(receipt.get('first_exit'), int)
-                or receipt['first_exit'] in (0, 78) or not 0 < receipt['first_exit'] < 124
-                or receipt.get('fingerprint') != hashlib.sha256(b'').hexdigest()
-                or not re.fullmatch(r'[a-f0-9]{40}', receipt.get('tree', ''))):
+            sha = checkout[1]
+            if sha not in sources:
+                sources[sha] = source_inventory(repo, sha)
+            tree, suites = sources[sha]
+            if receipt['tree'] != tree or receipt['test'] not in suites:
                 continue
             url = f'https://github.com/{repo}/actions/runs/{run["id"]}/attempts/{attempt}'
-            rows[receipt['test']] = {'repo': repo, 'test': receipt['test'], 'tree': receipt['tree'],
+            rows[receipt['test']] = {'repo': repo, 'test': receipt['test'], 'tree': tree,
                 'workflow': run['name'], 'fail_url': url, 'pass_url': url}
     if len(rows) > 20:
         raise ValueError('more than 20 candidates; inspect the CI runner before proposing')
@@ -243,6 +322,12 @@ def consume(repo, run_id, attempt, cache):
     logs = read_logs(repo, run_id, attempt, cache)
     rows = candidate_rows(repo, run, attempt, logs)
     return propose(repo, rows) if rows else []
+
+
+def parse_time(value):
+    instant = datetime.fromisoformat(value)
+    return (instant.replace(tzinfo=timezone.utc) if instant.tzinfo is None
+        else instant.astimezone(timezone.utc))
 
 
 def main():
@@ -272,19 +357,25 @@ def main():
         end = datetime.now(timezone.utc)
         cache = Path(args.cache)
         cache.mkdir(parents=True, exist_ok=True)
-        runs = list_runs(args.repo, end - timedelta(days=2), end, cache)
+        runs = list_runs(args.repo, end - timedelta(days=2), end, cache, activity=True)
+        gaps = []
         for run in runs:
             if run['name'] in ('CI', 'main canary') and run['status'] == 'completed':
-                print(json.dumps(consume(args.repo, run['id'], run['run_attempt'], cache)))
-        return 0
+                for attempt in range(1, run['run_attempt'] + 1):
+                    try:
+                        print(json.dumps(consume(args.repo, run['id'], attempt, cache)))
+                    except (RuntimeError, zipfile.BadZipFile, subprocess.TimeoutExpired, OSError, ValueError) as exc:
+                        gaps.append({'run': run['id'], 'attempt': attempt, 'error': str(exc)})
+        print(json.dumps({'coverage': 'incomplete' if gaps else 'complete', 'log_gaps': gaps}))
+        return 1 if gaps else 0
     if args.command == 'consume':
         cache = Path(args.cache)
         cache.mkdir(parents=True, exist_ok=True)
         print(json.dumps(consume(args.repo, args.run_id, args.attempt, cache), indent=2))
         return 0
     if args.command == 'history':
-        start = datetime.fromisoformat(args.since).replace(tzinfo=timezone.utc)
-        end = datetime.fromisoformat(args.until).replace(tzinfo=timezone.utc)
+        start = parse_time(args.since)
+        end = parse_time(args.until)
         report = history(args.repo, start, end, Path(args.cache))
         Path(args.output).write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps({k: v for k, v in report.items() if k not in ('observations', 'rows', 'log_gaps')}))

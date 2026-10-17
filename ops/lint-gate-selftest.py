@@ -23,13 +23,10 @@ What it holds:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import stat
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -38,6 +35,7 @@ HOOK = REPO / "hooks" / "lint-gate.py"
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "ops"))
 from git_env import fixture_env  # noqa:E402
+from lib.selftest_harness import HookSandbox, load_hook  # noqa:E402
 from lib.rule_delivery_preuse import (  # noqa:E402
     POSTWRITE_RECEIPT_KEYS, POSTWRITE_RECEIPT_SCHEMA, validate_postwrite_receipt,
 )
@@ -45,15 +43,7 @@ from lib.rule_delivery_preuse import (  # noqa:E402
 RETIRED_EFFECTS = {"advisory_only", "shadow_would_block_advisory_only"}
 
 
-def load_hook():
-    spec = importlib.util.spec_from_file_location("lint_gate_selftest", HOOK)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-lint = load_hook()
+lint = load_hook("lint-gate")
 VAULT_TAIL = Path(lint.VAULT).relative_to(Path.home()).parts
 
 # Swapped in for ops/typesafe_client.py at the one seam the reviewer loads it
@@ -78,10 +68,7 @@ def _redirect(name, location, *args, **kwargs):
     return _real(name, location, *args, **kwargs)
 importlib.util.spec_from_file_location = _redirect
 '''
-FAKE_RUN_SH = '''#!/bin/sh
-echo "$@" >> "$CARR_ROOT/calls"
-cat "$CARR_ROOT/reply"
-'''
+
 
 
 class SurfaceScopingTests(unittest.TestCase):
@@ -143,23 +130,19 @@ class HookFixture(unittest.TestCase):
     """The real hook, spawned with HOME, CARR_ROOT and the Jev client stubbed."""
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
-        self.home = self.root / "home"
+        self.sandbox = self.enterContext(HookSandbox())
+        self.root = self.sandbox.root
+        self.home = self.sandbox.home
         self.vault = self.home.joinpath(*VAULT_TAIL)
         self.vault.mkdir(parents=True)
-        self.carr = self.root / "carr"
-        self.carr.mkdir()
-        self.run_sh = self.carr / "run.sh"
-        self.run_sh.write_text(FAKE_RUN_SH)
-        self.run_sh.chmod(self.run_sh.stat().st_mode | stat.S_IXUSR)
-        self.reply("")
-        self.guard_log = self.root / "hook-guard.log"
+        self.carr = self.sandbox.carr
+        self.run_sh = self.sandbox.run_sh
+        self.guard_log = self.sandbox.guard_log
         stub = self.root / "stub"
         stub.mkdir()
         (stub / "sitecustomize.py").write_text(SITECUSTOMIZE)
         (stub / "typesafe_client.py").write_text(FAKE_CLIENT)
-        self.env = fixture_env()
+        self.env = self.sandbox.env
         # Attended fake reviews run regardless of the parent worker mode.
         # Individual worker fixtures explicitly override this child setting.
         self.env.pop("CARR_JEV_WORKER", None)
@@ -172,25 +155,11 @@ class HookFixture(unittest.TestCase):
             "LINT_GATE_FAKE_JEV": json.dumps({"value": 0.1}),
         })
 
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def reply(self, text):
-        (self.carr / "reply").write_text(text)
-
-    def calls(self):
-        path = self.carr / "calls"
-        return path.read_text().splitlines() if path.exists() else []
-
     def spawn(self, payload, **env):
-        stdin = payload if isinstance(payload, str) else json.dumps(payload)
-        res = subprocess.run([sys.executable, str(HOOK)], input=stdin,
-                             capture_output=True, text=True, timeout=60,
-                             env={**self.env, **env})
-        self.assertEqual(res.returncode, 0, res.stderr)
+        res = self.sandbox.fire("lint-gate", payload, env=env, timeout=60)
+        self.assertEqual(res.code, 0, res.stderr)
         self.assertEqual(res.stderr, "", "the hook must never speak on stderr")
-        return [json.loads(line)["hookSpecificOutput"]
-                for line in res.stdout.splitlines() if line.strip()]
+        return [envelope["hookSpecificOutput"] for envelope in res.envelopes]
 
     @staticmethod
     def write_payload(path, **extra):
@@ -224,9 +193,9 @@ class LintPathTests(HookFixture):
 
     def test_surface_write_runs_the_linter_and_reports_a_hard_ban(self):
         path = self.vault_file("Marketing/Social Media/post.md")
-        self.reply("FAIL hard-ban: em dash\n")
+        self.sandbox.reply("FAIL hard-ban: em dash\n")
         msgs = self.lint_messages(self.spawn(self.write_payload(path)))
-        self.assertEqual(self.calls(), [f"lint {path} --surface social"])
+        self.assertEqual(self.sandbox.calls(), [f"lint {path} --surface social"])
         self.assertEqual(len(msgs), 1)
         self.assertIn("HARD BAN HIT on Marketing/Social Media/post.md", msgs[0])
         self.assertIn("(surface: social)", msgs[0])
@@ -234,39 +203,39 @@ class LintPathTests(HookFixture):
 
     def test_worker_mode_skips_judgment_and_preserves_writing_lint(self):
         path = self.vault_file("Outreach/intro.md")
-        self.reply("FAIL hard-ban: em dash\n")
+        self.sandbox.reply("FAIL hard-ban: em dash\n")
         out = self.spawn(self.write_payload(path), CARR_JEV_WORKER="off")
         self.assertEqual(self.receipts(out), [])
         self.assertEqual(len(self.lint_messages(out)), 1)
-        self.assertEqual(self.calls(), [f"lint {path} --surface email"])
+        self.assertEqual(self.sandbox.calls(), [f"lint {path} --surface email"])
 
     def test_review_items_get_the_review_message(self):
         path = self.vault_file("Outreach/intro.md")
-        self.reply("REVIEW: hedge word\n")
+        self.sandbox.reply("REVIEW: hedge word\n")
         [msg] = self.lint_messages(self.spawn(self.write_payload(path)))
         self.assertIn("REVIEW items on Outreach/intro.md (surface: email)", msg)
 
     def test_clean_lint_is_silent(self):
         path = self.vault_file("Outreach/intro.md")
-        self.reply("ok 0 findings\n")
+        self.sandbox.reply("ok 0 findings\n")
         self.assertEqual(self.lint_messages(self.spawn(self.write_payload(path))), [])
-        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(len(self.sandbox.calls()), 1)
 
     def test_internal_and_generated_never_reach_run_sh(self):
-        self.reply("FAIL hard-ban\n")
+        self.sandbox.reply("FAIL hard-ban\n")
         for rel in ("DNA/Deal Management/record-layer/spec.md",
                     "Outreach/open-loops.md"):
             path = self.vault_file(rel)
             self.assertEqual(self.lint_messages(self.spawn(self.write_payload(path))), [], rel)
-        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.sandbox.calls(), [])
 
     def test_non_write_tools_are_ignored(self):
         path = self.vault_file("Outreach/intro.md")
-        self.reply("FAIL hard-ban\n")
+        self.sandbox.reply("FAIL hard-ban\n")
         payload = {"tool_name": "Read", "session_id": "s", "tool_use_id": "t",
                    "tool_input": {"file_path": str(path)}}
         self.assertEqual(self.spawn(payload), [])
-        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.sandbox.calls(), [])
 
 
 class FailOpenTests(HookFixture):
@@ -279,7 +248,7 @@ class FailOpenTests(HookFixture):
         path.parent.mkdir(parents=True)
         path.write_text("draft\n")
         self.run_sh.chmod(0o644)                       # PermissionError on exec
-        self.reply("FAIL hard-ban\n")
+        self.sandbox.reply("FAIL hard-ban\n")
         self.assertEqual(self.lint_messages(self.spawn(self.write_payload(path))), [])
         self.assertIn("lint-gate ALLOW(internal-error)", self.guard_log.read_text())
 
@@ -289,7 +258,7 @@ class FailOpenTests(HookFixture):
         path = self.vault / "Outreach" / "intro.md"
         path.parent.mkdir(parents=True)
         path.write_text("draft\n")
-        self.reply("FAIL hard-ban\n")
+        self.sandbox.reply("FAIL hard-ban\n")
         out = self.spawn({"tool_name": "Write",
                           "tool_input": {"file_path": str(path)}})
         self.assertEqual(self.receipts(out), [])

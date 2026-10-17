@@ -15,13 +15,13 @@ WHAT IS PROVEN:
   3. Notification cases are scored apart from the pooled human numbers (their
      own delivered-on-empty and false-positive counts), so noise on machine
      turns cannot hide inside a human precision figure.
-  4. Pack-level scoring for the pack-granular drift observer.
+  4. Pack-level scoring.
   5. A PLANTED MIS-SCORED CASE: an expectation block whose numbers are wrong
      on purpose must be reported as a mismatch by check_expectations(), and a
      deliberately broken scorer (false positives and misses swapped) must fail
      the correct expectations. A checker that passes both would be vacuous.
   6. The real deterministic adapters (compiled prompt triggers, JIT PreToolUse
-     rows, the drift observer, boot layer zero) run on the committed fixture
+     rows and boot layer zero) run on the committed fixture
      against this checkout's real config and return only known rule ids.
   7. The Jev-backed adapters (the UserPromptSubmit judgment in
      ops/rule_trigger_delivery.py) run
@@ -209,16 +209,13 @@ def test_deterministic_adapters(ev, cases, meta):
     adapters = ev.build_adapters(REPO, jev="off")
     names = {adapter["name"] for adapter in adapters}
     check("deterministic adapters are all present",
-          names >= {"prompt_compiled", "jit_pretooluse", "drift_shadow",
-                    "drift_if_acting", "boot_layer0"}, names)
+          names >= {"prompt_compiled", "jit_pretooluse", "boot_layer0"}, names)
     deliveries, errors = ev.run_adapters(cases, adapters)
     check("no deterministic adapter raised", not any(errors.values()), errors)
     for name, per_case in deliveries.items():
         unknown = sorted({rid for out in per_case.values() for rid in out["rules"]
                           if rid not in meta})
         check(f"{name} delivers only known rule ids", not unknown, unknown)
-    check("drift observer in shadow delivers nothing",
-          all(not out["rules"] for out in deliveries["drift_shadow"].values()))
     tooled = [case for case in cases if case["tool_calls"]]
     check("fixture has tool-call cases for the JIT path", len(tooled) >= 3, len(tooled))
     fired = [cid for cid, out in deliveries["jit_pretooluse"].items() if out["rules"]]
@@ -255,9 +252,9 @@ def test_deterministic_adapters(ev, cases, meta):
     # older enforcement-map layer0 is only a historical comparison path.
     classes = json.loads((REPO / "ops" / "config" / "rule-classes.v1.json").read_text())
     joe_boot = {rid for rid, row in classes["rules"].items()
-                if row["always_on"] and row.get("personal_to") in (None, "joe")}
+                if (row.get("always_on") or rid in classes.get("keep_full_text", {})) and row.get("personal_to") in (None, "joe")}
     dell_boot = {rid for rid, row in classes["rules"].items()
-                 if row["always_on"] and row.get("personal_to") in (None, "dell")}
+                 if (row.get("always_on") or rid in classes.get("keep_full_text", {})) and row.get("personal_to") in (None, "dell")}
     check("live boot contract carries a nonempty always-on set", bool(joe_boot),
           len(joe_boot))
     check("boot adapter respects the sponsor's personal boundary",
@@ -267,10 +264,11 @@ def test_deterministic_adapters(ev, cases, meta):
     check("actual boot adapter is separate from legacy layer zero",
           "boot_always_on" in deliveries, sorted(deliveries))
     if "boot_always_on" in deliveries:
-        check("actual boot adapter delivers exactly Joe's always-on ids",
-              all(out["rules"] == joe_boot for out in deliveries["boot_always_on"].values()))
-        check("actual boot includes rules legacy layer zero omits",
-              {"5be2f462", "fa217e48"} <= joe_boot - layer0)
+        check("actual boot carries exactly the Joe-scoped A and retained B/C rules",
+              all(out["rules"] == joe_boot for out in deliveries["boot_always_on"].values())
+              and all(classes["rules"][rid]["class"] == "a" or rid in classes.get("keep_full_text", {}) for rid in joe_boot))
+        check("actual boot leaves D and unretained B/C rules indexed",
+              not ({"5be2f462", "fa217e48", "fb2b263d"} & joe_boot))
         check("actual boot universe charges only its own rule set",
               ev.universes(meta, ["boot_always_on"], boot_ids=joe_boot)["boot_always_on"]
               == joe_boot)
@@ -367,7 +365,7 @@ def test_cli():
         if report.exists():
             data = json.loads(report.read_text(encoding="utf-8"))
             check("report names the system rows",
-                  {"system_moment", "system_moment_plus_drift",
+                  {"system_moment",
                    "system_scoped_boot", "boot_always_on", "boot_layer0"}
                   <= set(data["paths"]),
                   sorted(data["paths"]))

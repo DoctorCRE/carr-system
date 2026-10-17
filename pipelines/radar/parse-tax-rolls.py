@@ -10,7 +10,7 @@ delete the raws the same session (the discard rule). Read the WHY in
 Automation/radar/tax-roll-sop.md.
 
 WHAT IT PRODUCES (three payoffs of open-loop #75):
-  (a) relocating-owner candidates  -> out/routines/radar/relocating-owner-candidates-<date>.json
+  (a) relocating-owner candidates  -> Automation/radar/relocating-owner-candidates-<date>.json
         A doctor licensed in FL in the last 12 months, whose license mailing
         address is OUT OF STATE, who ALSO owns a parcel in a territory county,
         is very likely moving here — knowable months before any entity filing.
@@ -191,9 +191,8 @@ def main():
     ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.abspath(os.path.join(here, "..", ".."))
     SCRATCH = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/Claude/Projects/CARR/_taxroll-scratch")
     today = datetime.date.today().isoformat()
-    from pool_paths import RADAR as POOL_RADAR
-    RADAR = str(POOL_RADAR)
-    DEALS = str(POOL_RADAR / "properties")
+    RADAR = os.path.join(ROOT, "Automation", "radar")
+    DEALS = os.path.join(ROOT, "DNA", "Deal Management")
 
     print(f"CARR_ROOT = {ROOT}")
     print(f"SCRATCH   = {SCRATCH}  (raw NAL/SDF live here, OFF Drive — never copied into the repo)")
@@ -353,7 +352,7 @@ def main():
     print(f"(c) medical properties (refresh): {len(medical_props):>6}  -> {props_path}")
     print("\nNEXT: eyeball the candidates JSON (these are the leads). Diff the properties refresh")
     print("against the curated DNA/Deal Management/territory-medical-properties.xlsx before merging.")
-    print("Move the raw NAL/SDF files into scratch/_to_delete (discard rule).")
+    print("Then DELETE the raw NAL/SDF files from the scratch folder (discard rule).")
 
 if __name__ == "__main__":
     main()

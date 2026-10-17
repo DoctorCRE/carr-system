@@ -20,7 +20,7 @@ nothing to production logs or caches (log_path=os.devnull, no session id).
 GRADER (programmatic, expected rule ids per case):
   expected  = gold - disputed - boot-delivered rules, restricted to rules the
               trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v1.json (--freeze-expectations)
+              Frozen per case in expectations.v4.json (--freeze-expectations)
               and graded from there, so a change to the routes cannot move its
               own denominator; a drift from the live derivation needs a new
               expectations version.
@@ -33,7 +33,7 @@ GRADER (programmatic, expected rule ids per case):
 RECEIPT EVIDENCE: --observe writes one raw observation per case (what was
 delivered, no grades); score_receipt() grades a baseline and a candidate
 observation cohort against the frozen expectations and is the scorer
-ops/check-eval-receipt.py re-runs. make_report.py produces both.
+compares current observations.
 
 Usage:
   run_eval.py --variant baseline --split train
@@ -50,6 +50,7 @@ import math
 import os
 import random
 import re
+import shlex
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -58,8 +59,9 @@ sys.path.insert(0, REPO)
 
 V2_CASES = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
 HARD_CASES = os.path.join(HERE, "hard_cases.v1.json")
-EXPECTATIONS = os.path.join(HERE, "expectations.v1.json")
-EXPECTATIONS_VERSION = "rule-delivery-expectations/v1"
+EXPECTATIONS = os.path.join(HERE, "expectations.v4.json")
+EXPECTATIONS_VERSION = "rule-delivery-expectations/v4"
+PENDING_GOLD = os.path.join(HERE, "pending_gold.v1.json")
 RUNS = os.path.join(HERE, "runs")
 CHARS_PER_TOKEN = 4.0
 METRIC_IDS = ("recall", "false_deliveries", "tokens")
@@ -119,14 +121,45 @@ READ_ONLY_HEAD = re.compile(
     r"^(?:ls|cat|head|tail|wc|grep|rg|pwd|date|which|stat|file|echo|cd|"
     r"sed -n|git (?:status|log|diff|show|rev-parse|--version|branch --show-current|"
     r"branch --list)|find(?!.*(?:-delete|-exec)))\b")
-MUTATING = re.compile(r"[>]|\b(?:rm|mv|cp|push|merge|commit|checkout|reset|curl|tee|kill|"
-                      r"install|mkdir|touch|chmod)\b|git branch -[dD]")
+MUTATING_COMMANDS = {"rm", "mv", "cp", "push", "merge", "commit", "checkout", "reset",
+                     "curl", "tee", "kill", "install", "mkdir", "touch", "chmod"}
+GIT_MUTATING_SUBCOMMANDS = {"push", "merge", "commit", "checkout", "reset"}
+GIT_OPTIONS_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"}
+
+
+def _mutating_segment(segment):
+    """Inspect command words while ignoring paths and other argument text."""
+    if ">" in segment:
+        return True
+    try:
+        words = shlex.split(segment)
+    except ValueError:
+        return True
+    if not words:
+        return False
+    executable = os.path.basename(words[0])
+    if executable in MUTATING_COMMANDS:
+        return True
+    if executable != "git":
+        return False
+    args = words[1:]
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option in GIT_OPTIONS_WITH_VALUE:
+            index += 2
+        elif option.startswith("-"):
+            index += 1
+        else:
+            return (option in GIT_MUTATING_SUBCOMMANDS
+                    or option == "branch" and any(arg in ("-d", "-D") for arg in args[index + 1:]))
+    return False
 
 
 def read_only_command(command):
     """True when every &&/;/| segment of a recorded Bash command is a plain read."""
     segments = [s.strip() for s in re.split(r"&&|;|\|\|?|\n", command) if s.strip()]
-    return bool(segments) and not MUTATING.search(command) and all(
+    return bool(segments) and not any(_mutating_segment(s) for s in segments) and all(
         READ_ONLY_HEAD.match(s) for s in segments)
 
 
@@ -189,7 +222,10 @@ class World:
                                for r in json.load(handle)["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
-        self.boot = ev.boot_always_on_ids(REPO) | {
+        with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
+            classes = json.load(handle)["rules"]
+        self.frozen_jit_boot_ids = {rid for rid, row in classes.items() if row["always_on"]
+                     and row.get("personal_to") in (None, "joe")} | {
             rid for rid, row in meta.items() if row["layer"] == "layer0"}
         routes = self.rule_routes.load_routes(__import__("pathlib").Path(REPO))["rules"]
         owed = set()
@@ -197,12 +233,14 @@ class World:
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = owed - self.boot
+        self.owed = owed - self.frozen_jit_boot_ids
+        if expectations:
+            self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
                               "rde_envelope").is_machine_envelope
         self.pinned = (expectations or {}).get("cases", {})
         self.labelled = (set(expectations["labelled"]) if expectations
-                         else set(self.statements))
+                         else set(self.statements) - pending_gold_ids(self.statements))
 
     def derive(self, case):
         """The live labels for a case: what the trigger layer owes it, from this tree."""
@@ -302,9 +340,12 @@ def replay(world, case):
     return events
 
 
-def observe(case, events):
+def observe(case, events, boot_ids=None):
     """The raw observation of one case: what was delivered, never how it grades."""
+    if boot_ids is None:
+        boot_ids = _load(os.path.join(REPO, "ops/rule_delivery_eval.py"), "rde_boot").boot_always_on_ids(REPO)
     return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
+            "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
             "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
             "prompt_delivered": sorted({rid for ev in events if ev["kind"] == "prompt" for rid in ev["ids"]}),
             "events": len(events), "tokens": sum(ev["tokens"] for ev in events),
@@ -385,13 +426,34 @@ def write_run(out_dir, variant, rows):
 
 # ----------------------------------------------------------------- expectations
 
+def pending_gold_ids(statements, path=PENDING_GOLD):
+    """Corpus rules admitted after the gold was labelled. No case was judged
+    for them, so their deliveries are ungraded (neither hit nor false) until
+    the gold is extended and the id leaves the file. Absent file: nothing is
+    pending (checked before any open, so a baseline tree without the file is
+    not traced as a read dependency). An id outside the corpus is an error,
+    never silently ignored."""
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r", encoding="utf-8") as handle:
+        doc = json.load(handle)
+    if doc.get("schema") != "rule-delivery-pending-gold/v1" or not isinstance(doc.get("rules"), dict):
+        raise ValueError(f"{path}: not a rule-delivery-pending-gold/v1 document")
+    pending = set(doc["rules"])
+    unknown = sorted(pending - set(statements))
+    if unknown:
+        raise ValueError(f"{path}: pending-gold rule(s) not in the selection corpus: {unknown}")
+    return pending
+
+
 def freeze_expectations(world, cases):
     """The grading labels for every case, as the live tree derives them now."""
     return {"schema": "rule-delivery-expectations", "version": EXPECTATIONS_VERSION,
             "rule": ("expected = gold - disputed - boot-delivered, restricted to rules the trigger layer "
                      "owes; hand cases use their required list. allowed = gold + disputed. cohort = "
                      "envelope when ops/machine_envelope classifies the prompt, else human. labelled = "
-                     "every rule in the selection corpus; only those count as false deliveries."),
+                     "every rule in the selection corpus except those in pending_gold.v1.json (admitted after "
+                     "the gold was labelled); only labelled rules count as false deliveries."),
             "labelled": sorted(world.labelled),
             "cases": {c["id"]: world.derive(c) for c in sorted(cases, key=lambda c: c["id"])}}
 
@@ -412,7 +474,8 @@ def expectation_drift(world, cases, expectations):
 
 def observe_all():
     world = World()
-    return [observe(case, replay(world, case)) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
+    boot_ids = world.ev.boot_always_on_ids(REPO)
+    return [observe(case, replay(world, case), boot_ids) for case in sorted(load_cases("all"), key=lambda c: c["id"])]
 
 
 def trace_repo_reads():
@@ -492,6 +555,23 @@ def score_receipt(expectations, baseline_rows, candidate_rows):
                       "detail": grade_observation(cases[cid], row, labelled)} for cid, row in rows.items()}
     gb, gc = graded(base), graded(cand)
     dims = {}
+    with open(V2_CASES, encoding="utf-8") as handle:
+        fixture = json.load(handle)
+    availability_ids = {c["id"]: set(c["gold"]) for c in fixture["cases"] if c["split"] == "test"}
+    def availability_row(observed, cid):
+        gold = availability_ids[cid]
+        return dict(observed, prompt_id=cid, availability_hits=len(set(observed["available"]) & gold),
+                    availability_required=len(gold))
+    def availability(rows):
+        return sum(r["availability_hits"] for r in rows) / sum(r["availability_required"] for r in rows)
+    ab = [availability_row(base[cid], cid) for cid in sorted(availability_ids)]
+    ac = [availability_row(cand[cid], cid) for cid in sorted(availability_ids)]
+    b_lo, b_hi = boot_ci(ab, availability)
+    c_lo, c_hi = boot_ci(ac, availability)
+    delta, low, high = paired_bootstrap(ab, ac, availability)
+    dims["full-text-availability"] = {"baseline": {"score": availability(ab), "ci_low": b_lo, "ci_high": b_hi},
+        "candidate": {"score": availability(ac), "ci_low": c_lo, "ci_high": c_hi},
+        "delta": {"value": delta, "ci_low": low, "ci_high": high}}
     for dim_id, cohort, stat in RECEIPT_DIMENSIONS:
         ids = sorted(cid for cid, c in cases.items() if c["split"] == "test" and c["cohort"] == cohort)
         b, n = [gb[i] for i in ids], [gc[i] for i in ids]

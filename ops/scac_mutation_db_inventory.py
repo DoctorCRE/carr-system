@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+from pathlib import Path
 from typing import Any
 
 
@@ -210,50 +212,6 @@ def digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def manifest_job_definition_catalog(manifest: dict[str, Any]) -> dict[str, Any]:
-    """Expected JOB_DEFINITIONS_SQL census after fresh manifest synchronization.
-
-    Historical SCAC seals describe their original pre-sync database. The local
-    gates also verify today's synchronized definitions against source, with the
-    same canonical serializer used for the observed database projection. The
-    manifest's disabled bootstrap defaults stay binding here; this is not a
-    production authority-managed activation comparison.
-    """
-    rows = []
-    identities = set()
-    for workflow in manifest["workflows"]:
-        identity = (workflow["key"], workflow["version"])
-        if identity in identities:
-            raise ValueError(f"duplicate manifest job definition: {identity}")
-        identities.add(identity)
-        execution = {key: value for key, value in workflow["execution"].items() if key != "kind"}
-        inventory = workflow.get("inventory", {})
-        entrypoint = execution.get("entrypoint")
-        if entrypoint is None:
-            entrypoint = execution.get("cognition_job")
-        row = {
-            "ingress_key": f"job-definition:{identity[0]}:{identity[1]}",
-            "ingress_kind": "job_definition",
-            "key": identity[0], "version": identity[1],
-            "enabled": workflow["enabled"], "risk": workflow["risk"],
-            "owner_actor": inventory.get("owner", "system"),
-            "execution_kind": workflow["execution"]["kind"],
-            "entrypoint": entrypoint,
-            "execution_contract": execution, "inventory_contract": inventory,
-        }
-        for column, field in (
-            ("recurrence", "recurrence"), ("state_contract", "state"),
-            ("routing_contract", "routing"), ("filtering_contract", "filtering"),
-            ("validation_contract", "validation"), ("retry_policy", "retry"),
-            ("deduplication", "deduplication"), ("completion_contract", "completion"),
-            ("legacy_schedule", "legacy_schedule"),
-        ):
-            row[column] = workflow[field]
-        rows.append(row)
-    rows.sort(key=lambda row: (row["key"], row["version"]))
-    return summarize({"job_definitions": rows})["categories"]["job_definitions"]
-
-
 def project(cur: Any) -> dict[str, list[dict[str, Any]]]:
     return {name: [row[0] for row in cur.execute(query)] for name, query in QUERIES.items()}
 
@@ -266,6 +224,37 @@ def summarize(projection: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
         key=lambda row: row["ingress_key"],
     )
     return {"categories": categories, "combined": {"count": len(combined_rows), "digest": digest(combined_rows)}}
+
+
+def validate_registered_grants(projection, baseline, contract):
+    remaining = {name: list(projection[name]) for name in
+                 ("secdef_execute", "relation_dml", "column_dml")}
+    for grant in contract["secdef_execute"]:
+        if remaining["secdef_execute"].count(grant) != 1:
+            raise RuntimeError(f"registered grant missing or altered: {grant['ingress_key']}")
+        remaining["secdef_execute"].remove(grant)
+    for name, rows in remaining.items():
+        if {"count": len(rows), "digest": digest(rows)} != baseline[name]:
+            raise RuntimeError(f"current DB catalog drift: {name}")
+
+
+def validate_current_catalog(cur):
+    repo = Path(__file__).resolve().parents[1]
+    contract = json.loads(subprocess.check_output(
+        ["node", "--input-type=module", "-e",
+         "import {SCAC_MUTATION_CURRENT_DB_GRANTS as grants} from './mcp-server/src/scac-mutation-registry.current.generated.js'; console.log(JSON.stringify(grants));"],
+        cwd=repo, text=True))
+    installed = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0]
+    if installed != contract:
+        raise RuntimeError("current generated registry differs from the installed grant contract")
+    row = cur.execute(
+        "select registry_digest,catalog_projection from ops.scac_mutation_registry_version where registry_version=%s",
+        (contract["registry_version"],)).fetchone()
+    if row is None or row[0] != contract["registry_digest"]:
+        raise RuntimeError("current grant contract database registry digest mismatch")
+    projection = project(cur)
+    validate_registered_grants(projection, row[1], contract)
+    return summarize(projection)
 
 
 def project_role_authority(cur: Any) -> dict[str, Any]:

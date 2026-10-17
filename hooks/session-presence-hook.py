@@ -22,6 +22,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools", "room-bridge"))
 
 try:
+    from grok_invocation import grok_session
+    if grok_session():
+        raise SystemExit(0)
     import session_presence
 except Exception:  # noqa: BLE001 — a broken import must never block a session start
     raise SystemExit(0)

@@ -62,14 +62,22 @@ from urllib.error import HTTPError, URLError
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from lib.credential_file import read_env_file  # noqa: E402
+from lib.credential_shape import valid_claude_token  # noqa: E402
+from lib import token_store  # noqa: E402
 from lib.record_call import call_verb  # noqa: E402
 
 INVENTORY_PATH = REPO_ROOT / "ops" / "config" / "credential-inventory.v1.json"
 OUT_JSONL = REPO_ROOT / "out" / "credential-health.jsonl"
 DEDUP_PATH = REPO_ROOT / "out" / "credential-health-loop-dedup.json"
 MINT_STATE_PATH = REPO_ROOT / "out" / "credential-health-mint-state.json"
+# The nightly credential-mint lane's own state (lib/credential_mint.py): per
+# minted credential the child's nominal expiry. Read for `expiry.from_mint_state`
+# rows only; it holds ids and dates, never a value. Injectable like MINT_STATE.
+MINT_LANE_STATE_PATH = REPO_ROOT / "out" / "credential-mint-state.json"
 
 BUCKETS = ("ok", "expiring_soon", "failed", "unknown")
+# The org tools/db-tap.py and tools/rotate-credential.py pin; see _probe_neon.
+NEON_PROBE_URL = "https://console.neon.tech/api/v2/projects?org_id=org-dry-dew-75906281&limit=1"
 DEFAULT_TIMEOUT_S = 10
 DEFAULT_EXPIRING_SOON_DAYS = 3
 JSONL_ALLOWED_KEYS = {"name", "status", "checked_at", "expires_at"}
@@ -292,10 +300,6 @@ def _probe_cloudflare_token_file(cred, timeout_s):
     return ProbeResult("ok", "active", expires_at)
 
 
-CLAUDE_TOKEN_PREFIX = "sk-ant-oat"
-CLAUDE_TOKEN_LENGTH = 108
-
-
 def _sha256_hex(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -314,21 +318,107 @@ def _record_mint_date_if_new(cred_name, token_sha256, state, today_iso):
     return today_iso
 
 
+_CLAUDE_RETRY_ERRORS = {
+    "authentication_failed", "oauth_org_not_allowed", "account_on_hold",
+    "billing_error", "rate_limit", "overloaded", "invalid_request",
+    "model_not_found", "server_error", "max_output_tokens",
+    "cloud_credential_error", "unknown",
+}
+
+
+def _classify_claude_cli_stream(stdout, returncode):
+    """Classify a Claude stream using only its documented typed fields.
+
+    Claude Code documents NDJSON `system/api_retry` events; the Agent SDK
+    documents `rate_limit_event` and `ResultMessage.is_error`. These external
+    event contracts determine which outcomes this probe can classify.
+    """
+    result_messages = []
+    retry_events = []
+    rejected_rate_limit = False
+    last_event_type = None
+    lines = (stdout or "").splitlines()
+    if not lines:
+        return ProbeResult("failed", "readback_failed")
+
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            return ProbeResult("failed", "readback_failed")
+        if not isinstance(event, dict):
+            return ProbeResult("failed", "readback_failed")
+        last_event_type = event.get("type")
+        if event.get("type") == "system" and event.get("subtype") == "api_retry":
+            status = event.get("error_status")
+            error = event.get("error")
+            if ("error_status" not in event or "error" not in event
+                    or (status is not None
+                        and (not isinstance(status, int) or isinstance(status, bool)))
+                    or not isinstance(error, str) or error not in _CLAUDE_RETRY_ERRORS):
+                return ProbeResult("failed", "readback_failed")
+            retry_events.append((status, error))
+        elif event.get("type") == "rate_limit_event":
+            info = event.get("rate_limit_info")
+            if not isinstance(info, dict) or info.get("status") not in {
+                    "allowed", "allowed_warning", "rejected"}:
+                return ProbeResult("failed", "readback_failed")
+            limit_type = info.get("rateLimitType")
+            if limit_type is not None and limit_type not in {
+                    "five_hour", "seven_day", "seven_day_opus",
+                    "seven_day_sonnet", "overage"}:
+                return ProbeResult("failed", "readback_failed")
+            overage_status = info.get("overageStatus")
+            if overage_status is not None and overage_status not in {
+                    "allowed", "allowed_warning", "rejected"}:
+                return ProbeResult("failed", "readback_failed")
+            rejected_rate_limit = rejected_rate_limit or info["status"] == "rejected"
+        elif event.get("type") == "result":
+            result_text = event.get("result")
+            is_error = event.get("is_error")
+            if not isinstance(result_text, str) or not isinstance(is_error, bool):
+                return ProbeResult("failed", "readback_failed")
+            result_messages.append((result_text, is_error))
+
+    if (returncode == 0 and last_event_type == "result" and result_messages
+            and result_messages[-1] == ("PONG", False)):
+        return ProbeResult("ok", "active")
+
+    if any(error == "authentication_failed" or status == 401
+           for status, error in retry_events):
+        return ProbeResult("failed", "authentication_failed")
+    if any(error == "oauth_org_not_allowed" or status == 403
+           for status, error in retry_events):
+        return ProbeResult("failed", "credential_access_denied")
+    if any(error == "cloud_credential_error" for _status, error in retry_events):
+        return ProbeResult("failed", "credential_error")
+    if rejected_rate_limit:
+        return ProbeResult("unknown", "rate_limited")
+    last_status, last_error = retry_events[-1] if retry_events else (0, None)
+    if last_status is None:
+        return ProbeResult("unknown", "probe_network_error")
+    if last_status == 429 or last_error == "rate_limit":
+        return ProbeResult("unknown", "rate_limited")
+    if ((last_status is not None and last_status >= 500)
+            or last_error in {"overloaded", "server_error"}):
+        return ProbeResult("unknown", "probe_service_error")
+    return ProbeResult("failed", "readback_failed")
+
+
 def _probe_claude_cli_token_age(cred, timeout_s):
     """CLAUDE_CODE_OAUTH_TOKEN, the long-lived token `claude setup-token`
     mints to replace an interactive Claude Code CLI login. Three checks, per
     Joe's spec:
 
     1. PRESENT AND CORRECTLY SHAPED — read from its dotenv file (never
-       printed), checked only for length and prefix, never inspected further.
+       printed), checked against the complete inventory-owned token syntax.
     2. A CHEAP AUTH READBACK — `claude -p "Reply with exactly: PONG"
-       --max-turns 1`, run from a throwaway temp cwd with ONLY
+       --max-turns 1 --output-format stream-json --verbose`, run from a throwaway temp cwd with ONLY
        CLAUDE_CODE_OAUTH_TOKEN in its environment (no ambient PATH, no
-       inherited keychain login) so a PONG reply proves the TOKEN authenticated,
-       not some other credential already sitting on the machine. Only the
-       three-letter word PONG is ever looked for in the reply; the rest of
-       whatever the CLI printed is discarded exactly like every other probe's
-       stdout in this file.
+       inherited keychain login) so a PONG result proves the TOKEN authenticated,
+       not some other credential already sitting on the machine. The final
+       result event must equal PONG; documented API retry status and category
+       distinguish authentication failure from throttling or no response.
     3. AN EXPIRY WARNING FROM A RECORDED MINT DATE — this token carries no
        expiry Cloudflare-style; `claude setup-token` documents roughly a
        year of validity from when it was minted, and nothing this lane can
@@ -345,9 +435,7 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     if err:
         return ProbeResult("unknown" if err == "token_file_missing" else "failed", err)
 
-    expected_prefix = spec.get("expected_prefix", CLAUDE_TOKEN_PREFIX)
-    expected_length = spec.get("expected_length", CLAUDE_TOKEN_LENGTH)
-    if len(token) != expected_length or not token.startswith(expected_prefix):
+    if not valid_claude_token(token):
         token = None
         return ProbeResult("failed", "token_malformed")
 
@@ -359,7 +447,8 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     tmpdir = tempfile.mkdtemp(prefix="credential-health-claude-probe-")
     try:
         p = SUBPROCESS_RUN(
-            [claude_bin, "-p", "Reply with exactly: PONG", "--max-turns", "1"],
+            [claude_bin, "-p", "Reply with exactly: PONG", "--max-turns", "1",
+             "--output-format", "stream-json", "--verbose"],
             cwd=tmpdir, env={"CLAUDE_CODE_OAUTH_TOKEN": token},
             capture_output=True, text=True, timeout=timeout_s)
     except subprocess.TimeoutExpired:
@@ -373,10 +462,9 @@ def _probe_claude_cli_token_age(cred, timeout_s):
 
     token_sha256 = _sha256_hex(token)
     token = None
-    # Scanned only for the fixed word this probe itself asked for — never
-    # stored, never printed beyond this boolean.
-    if "PONG" not in (p.stdout or ""):
-        return ProbeResult("failed", "readback_failed")
+    outcome = _classify_claude_cli_stream(p.stdout, p.returncode)
+    if outcome.bucket != "ok":
+        return outcome
 
     minted_at = _record_mint_date_if_new(
         cred["name"], token_sha256, MINT_STATE,
@@ -387,6 +475,73 @@ def _probe_claude_cli_token_age(cred, timeout_s):
     except ValueError:
         expires_at = None
     return ProbeResult("ok", "active", expires_at)
+
+
+def _probe_root_grant(cred, timeout_s):
+    """A ROOT GRANT (ops/config/credential-root-grants.v1.json): the one
+    credential per provider Joe places and the mint lane mints every child
+    from. Nothing rotates it, so this row is what keeps a leaked or forgotten
+    root from living silently forever (PR #1725 review, finding 3).
+
+    Verify-only: the grant's own read-only call, Bearer the root, HTTP status
+    plus Cloudflare's result.status/expires_on and nothing else. Aged like the
+    Claude token: the first date this lane saw the root's FINGERPRINT (never
+    the value) starts its clock, and expires_at is that date + max_age_days, or
+    the provider's own expires_on when sooner. The bucket then comes from
+    `_apply_expiry_window` with the row's expiring_soon_days.
+
+    The value is read through lib/token_store (the one NAME -> file map the
+    mint lane and tools/store-token.py share), so this probe has no `path`
+    key: an absent root is a quiet `unknown`, never a nightly loop, because
+    the mint lane already files the one loop that asks for it."""
+    spec = cred["probe"]
+    dest = token_store.destination(spec["store_name"])
+    token, mode, err = _read_token_from_env_file(str(dest.path), dest.key)
+    if mode is not None and (mode & 0o077):
+        token = None
+        return ProbeResult("failed", "insecure_file_permissions")
+    if err == "token_file_unreadable":
+        return ProbeResult("failed", err)
+    if err:
+        return ProbeResult("unknown", "root_grant_not_placed")
+    status, body = HTTP_GET(spec["url"], {"Authorization": f"Bearer {token}",
+                                          "Accept": "application/json"}, timeout_s)
+    token_sha256 = _sha256_hex(token)
+    token = None  # the only local name that ever held it; done with it now
+    if status is None:
+        return ProbeResult("unknown", "timeout")
+    if status in (401, 403):
+        return ProbeResult("failed", "root_grant_unauthorized")
+    if not 200 <= status < 300:
+        return ProbeResult("unknown", f"http_status_{status}")
+    result = (body or {}).get("result") if isinstance(body, dict) else None
+    provider_expiry = (result or {}).get("expires_on") if isinstance(result, dict) else None
+    if isinstance(result, dict) and "status" in result and result.get("status") != "active":
+        return ProbeResult("failed", "token_status_not_active", provider_expiry)
+    first_seen = _record_mint_date_if_new(
+        cred["name"], token_sha256, MINT_STATE, datetime.now(timezone.utc).date().isoformat())
+    expires_at = None
+    try:
+        aged = datetime.strptime(first_seen, "%Y-%m-%d") + timedelta(days=int(spec["max_age_days"]))
+        expires_at = aged.date().isoformat()
+    except (KeyError, TypeError, ValueError):
+        return ProbeResult("unknown", "config_incomplete")
+    if provider_expiry and str(provider_expiry)[:10] < expires_at:
+        expires_at = str(provider_expiry)[:10]
+    return ProbeResult("ok", "root_grant_active", expires_at)
+
+
+def _mint_lane_expiry(cred_name):
+    """The child's nominal expiry from the mint lane's state, or None. Lets a
+    child with no provider-side expiry (Neon, OpenAI) go amber, then red, when
+    the lane that should rotate it has stopped (PR #1725 review, low finding)."""
+    try:
+        with open(MINT_LANE_STATE_PATH) as fh:
+            entry = (json.load(fh).get("credentials") or {}).get(cred_name) or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    value = entry.get("expires_at") if isinstance(entry, dict) else None
+    return str(value)[:10] if value else None
 
 
 def _read_token_file_first(spec, default_token_key):
@@ -427,13 +582,15 @@ def _read_token_file_first(spec, default_token_key):
 def _probe_neon(cred, timeout_s):
     """NEON_API_KEY against Neon's own control-plane API.
 
-    GET /api_keys — the exact path tools/rotate-credential.py's neon()
-    helper already calls to verify a freshly-rotated key before writing it
-    (see that file's `neon()`/`_rotate_api_key_locked` around line 730) —
-    rather than /projects, which this probe used to call and which needs an
-    organisation scope this key may not carry: it returned a bare 400 for a
-    perfectly good key (PR #1218 review, round 2), a probe bug, not a
-    finding about the credential.
+    GET /projects?org_id=<the CARR org> — the question an ORGANIZATION API
+    key answers, and the one tools/rotate-credential.py asks to verify a
+    freshly rotated key. Since 2026-10-12 NEON_API_KEY is minted by the
+    nightly credential-mint lane as an organization key of the CARR org
+    (lib/credential_mint.py), and /api_keys lists PERSONAL keys, which an
+    organization key is not entitled to. The org scope is the part that
+    matters: /projects without org_id answers a bare 400 for a perfectly
+    good key on this account (PR #1218 review, round 2), a probe bug, not
+    a finding about the credential.
 
     401/403 is treated as the only unambiguous "this key does not
     authenticate" shape Neon uses. Anything else non-2xx is reported as
@@ -445,7 +602,7 @@ def _probe_neon(cred, timeout_s):
         return ProbeResult("failed", hard_fail)
     if not key:
         return ProbeResult("unknown", "env_var_missing")
-    url = spec.get("url", "https://console.neon.tech/api/v2/api_keys")
+    url = spec.get("url", NEON_PROBE_URL)
     status, _body = HTTP_GET(
         url, {"Authorization": f"Bearer {key}", "Accept": "application/json"},
         timeout_s)
@@ -534,6 +691,7 @@ PROBE_HANDLERS = {
     "worker_bearer_health": _probe_worker_bearer,
     "file_presence_age": _probe_file_presence_age,
     "config_only": _probe_config_only,
+    "root_grant": _probe_root_grant,
 }
 
 
@@ -572,6 +730,8 @@ def _apply_expiry_window(cred, result, now):
         return ProbeResult("unknown", "not_configured")
     elif expiry_cfg.get("configured_rotation_date"):
         expires_at = expires_at or expiry_cfg["configured_rotation_date"]
+    elif expiry_cfg.get("from_mint_state"):
+        expires_at = expires_at or _mint_lane_expiry(cred.get("name"))
 
     if not expires_at:
         return result
@@ -758,6 +918,8 @@ def file_loop_if_needed(cred, bucket, dedup_state, dry_run=False, timeout_s=30):
         "domain": "system",
         "blocker": "capability",
         "blocker_detail": f"{name} credential-health probe",
+        "residue_kind": "provider_login",
+        "residue_host": name,
         "body": _loop_body(cred, bucket),
     }
     filed_ok = call_verb("add-loop", payload, timeout=timeout_s, runner=SUBPROCESS_RUN).ok
@@ -794,6 +956,8 @@ def main(argv=None):
 
     try:
         credentials = load_inventory(args.inventory)
+        # Fleet health owns verification and record-layer dedup for shared Cloudflare copies.
+        credentials = [c for c in credentials if c.get("health_owner") != "cloudflare-fleet"]
     except (OSError, json.JSONDecodeError) as exc:
         # Rule 6: an unreadable inventory is a check that could not run, and
         # must be reported as exactly that — never as a clean sweep because

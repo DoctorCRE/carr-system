@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 import re
 import urllib.parse
 import urllib.request
 import zipfile
-from datetime import date, timedelta
+from datetime import timedelta
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -17,17 +16,7 @@ INDEX_URL = "https://download.cms.gov/nppes/NPI_Files.html"
 PREFIXES = {"323", "324", "325", "363", "364", "365", "366"}
 COUNTIES = {"ESCAMBIA", "SANTA ROSA", "OKALOOSA", "WALTON", "BAY", "LEON", "MOBILE", "BALDWIN", "HOUSTON"}
 CITIES = {"PENSACOLA", "MILTON", "PACE", "GULF BREEZE", "CANTONMENT", "NAVARRE", "JAY", "CENTURY", "TALLAHASSEE", "PANAMA CITY", "LYNN HAVEN", "DESTIN", "FORT WALTON BEACH", "CRESTVIEW", "NICEVILLE", "SANTA ROSA BEACH", "MARY ESTHER", "SHALIMAR", "FREEPORT", "DEFUNIAK SPRINGS", "MOBILE", "DAPHNE", "FAIRHOPE", "SPANISH FORT", "GULF SHORES", "FOLEY", "BONIFAY", "CHIPLEY", "PANAMA CITY BEACH", "DOTHAN", "ENTERPRISE"}
-POOLS = {"tips.json": "human-tip", "deeds.json": "deed", "pecos.json": "pecos-enroll", "nppes-moves.json": "nppes-move", "jobs.json": "job-post", "licenses-pool.json": "new-license", "domains.json": "domain"}
-WEIGHTS = {"nppes-org": 4, "nppes-person": 1, "human-tip": 4, "deed": 3, "pecos-enroll": 3, "nppes-move": 2, "job-post": 2, "new-license": 1, "domain": 1, "record-pool": 1}
-MISSING_INPUT = {
-    "tips.json": "Human tips are captured from the relationship channel; no public pull exists.",
-    "deeds.json": "County deed portals require a verified source-specific reader; the tax-roll parser only accepts downloaded NAL/SDF files.",
-    "pecos.json": "The public quarterly PECOS pull has not bootstrapped its enrollment baseline yet.",
-    "nppes-moves.json": "Address movement requires a previous exact-NPI address baseline; the new-enumeration weekly file alone cannot establish a move.",
-    "jobs.json": "Indeed/LinkedIn source browsing has no implemented public feed or deterministic reader in the existing radar scripts.",
-    "licenses-pool.json": "Existing FL DOH converters need a downloaded licensure/transport file; the current source path requires the approved portal session.",
-    "domains.json": "ICANN CZDS requires the approved account and TLD access; no credential-free domain feed is configured.",
-}
+WEIGHTS = {"nppes-org": 4, "nppes-person": 1}
 
 
 def _text(value):
@@ -151,37 +140,11 @@ def parse_weekly_zip(payload, *, as_of, source):
             return parse_nppes(reader, as_of=as_of, source=source, practice_locations=locations)
 
 
-def parse_pool(rows, signal, source):
-    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
-        raise ValueError("radar pool must be a list of objects")
-    result = []
-    for raw in rows:
-        name = _text(raw.get("name") or raw.get("n") or raw.get("display_name") or raw.get("grantee") or raw.get("contact"))
-        if not name or not in_territory(raw):
-            continue
-        npi = _text(raw.get("npi"))
-        if not npi:
-            match = re.search(r"\bNPI\s+(\d{10})\b", _text(raw.get("detail")))
-            npi = match[1] if match else ""
-        if npi and not re.fullmatch(r"\d{10}", npi):
-            raise ValueError("radar NPI malformed")
-        result.append({**raw, "name": name, "npi": npi, "kind": raw.get("kind", "person"),
-                       "specialty": raw.get("profession") or raw.get("vertical") or raw.get("specialty") or "",
-                       "signal": signal, "source": raw.get("source_url") or source,
-                       "date": _date(raw.get("date")).isoformat() if raw.get("date") else None})
-    return result
-
-
 def candidates(rows):
-    """Join only identifiers or exact name+practice+city, never lone names."""
+    """Combine overlapping publications by exact NPI."""
     grouped = {}
     for row in rows:
-        if row.get("npi"):
-            identity = "npi:" + row["npi"]
-        elif row.get("name") and row.get("city") and (row.get("org_name") or row.get("kind") == "org"):
-            identity = "org:" + "|".join(_text(row.get(k)).casefold() for k in ("name", "org_name", "city"))
-        else:
-            identity = "source:" + hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
+        identity = "npi:" + row["npi"]
         grouped.setdefault(identity, []).append(row)
     result = []
     for identity, evidence in sorted(grouped.items()):
@@ -204,38 +167,22 @@ def _fetch(url):
 
 
 def prepare(ctx):
-    from . import radar_inputs
     fixture = ctx.fixture
-    as_of = ctx.now.date()
     if fixture is not None:
-        rows = parse_nppes(fixture.get("nppes_rows", []), as_of=as_of, source=INDEX_URL)
-        pools = fixture.get("pools", {})
+        rows = parse_nppes(fixture.get("nppes_rows", []), as_of=ctx.now.date(), source=INDEX_URL)
         claims = fixture.get("claims", [])
     else:
-        urls = weekly_files(_fetch(INDEX_URL).decode("utf-8"), as_of)
+        urls = weekly_files(_fetch(INDEX_URL).decode("utf-8"), ctx.now.date())
         rows = []
         for url in urls:
-            rows.extend(parse_weekly_zip(_fetch(url), as_of=as_of, source=url))
-        pools = {}
-        for filename in POOLS:
-            path = ROOT / "out/routines/radar/upstream" / filename
-            if path.exists():
-                pools[filename] = json.loads(path.read_text())
+            rows.extend(parse_weekly_zip(_fetch(url), as_of=ctx.now.date(), source=url))
         reservoir = ctx.read("claim-card", {"include_needs_contact": True, "limit": 100000})
         claims = reservoir.get("candidates", [])
         if len(claims) < reservoir.get("claimable", len(claims)):
-            raise ValueError("claim-card truncated the radar reservoir")
-    lane_health = []
-    for filename, signal in POOLS.items():
-        if filename in pools:
-            rows.extend(parse_pool(pools[filename], signal, f"repo:radar/upstream/{filename}"))
-            lane_health.append({"pool": filename, "state": "retained_input", "rows": len(pools[filename]),
-                                "freshness": "Not a new pull; previously delivered candidate keys are skipped."})
-        else:
-            lane_health.append({"pool": filename, "state": "unavailable", "reason": MISSING_INPUT[filename]})
-    consumed_path = ROOT / "out/routines/radar/consumed-candidates.json"
+            raise ValueError("claim-card truncated the lead reservoir")
+    consumed_path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
     consumed = set(fixture.get("consumed_keys", [])) if fixture is not None else set(json.loads(consumed_path.read_text()) if consumed_path.exists() else [])
-    proposed = [r for r in candidates(rows) if r["source_key"] not in consumed]
+    proposed = [row for row in candidates(rows) if row["source_key"] not in consumed]
     for row in proposed:
         row["existing_candidates"] = [
             {"pool_id": c.get("pool_id"), "name": c.get("display_name"), "org_name": c.get("org_name"), "city": c.get("city")}
@@ -243,43 +190,15 @@ def prepare(ctx):
             if _text(c.get("display_name")).casefold() == row["name"].casefold()
             and _text(c.get("city")).casefold() == _text(row.get("city")).casefold()
         ]
-    refresh_state = fixture.get("pecos_state", {}) if fixture is not None else radar_inputs.load_state()
-    refresh_pecos = radar_inputs.refresh_due(ctx.now, refresh_state) and (fixture is None or "pecos" in fixture)
-    return {"work": bool(proposed) or refresh_pecos, "candidates": proposed, "lane_health": lane_health,
-            "refresh_pecos": refresh_pecos, "pecos_state": refresh_state, "consumed_keys": sorted(consumed),
-            "model_calls": 0, "judgment_steps": ["Pre-space/address classification", "Corporate ownership and license interpretation", "Network path and outreach hook"]}
+    return {"work": bool(proposed), "candidates": proposed, "consumed_keys": sorted(consumed)}
 
 
 def execute(ctx, plan):
-    from . import radar_inputs
-    if plan.get("refresh_pecos"):
-        public_fixture = ctx.fixture.get("pecos") if ctx.fixture is not None else None
-        refreshed, state, health = radar_inputs.pull_pecos(_fetch, ctx.now, plan["pecos_state"], fixture=public_fixture)
-        fresh = candidates(parse_pool(refreshed, "pecos-enroll", radar_inputs.PUBLICATION))
-        combined = {r["source_key"]: r for r in plan["candidates"]}
-        for row in fresh:
-            if row["source_key"] not in plan.get("consumed_keys", []):
-                previous = combined.get(row["source_key"])
-                if previous:
-                    evidence = [{**candidate, "signal": signal, "source": source}
-                                for candidate in (previous, row)
-                                for signal in candidate["signals"] for source in candidate["sources"]]
-                    row = candidates(evidence)[0]
-                    row["existing_candidates"] = previous.get("existing_candidates", [])
-                combined[row["source_key"]] = row
-        plan["candidates"] = list(combined.values())
-        plan["lane_health"] = [h for h in plan["lane_health"] if h["pool"] != "pecos.json"] + [health]
-        if not ctx.dry_run:
-            radar_inputs.save_refresh(refreshed, state)
-            plan["refresh_pecos"] = False
-            plan["pecos_state"] = {}
-            if hasattr(ctx, "save"):
-                ctx.save()
     if ctx.dry_run:
         return {"routine": "lead-signals-weekly", "dry_run": True, "work": plan["work"],
                 "candidate_count": len(plan["candidates"]),
                 "estimated_scores": [r["score"] for r in plan["candidates"]],
-                "lane_health": plan["lane_health"], "model_calls": 0,
+                "model_calls": 0,
                 "record_writes": 0, "local_writes": 0}
     created, reviews = [], []
     consumed = set(plan.get("consumed_keys", []))
@@ -287,7 +206,7 @@ def execute(ctx, plan):
         consumed.add(key)
         if ctx.fixture is not None:
             return
-        path = ROOT / "out/routines/radar/consumed-candidates.json"
+        path = ROOT / "out/routines/lead-signals-weekly/consumed-candidates.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(sorted(consumed)))
@@ -305,7 +224,7 @@ def execute(ctx, plan):
         if not sources:
             reviews.append(ctx.review_item("Verify a new lead's source: " + row["name"],
                 json.dumps({"candidate": row["name"], "source_key": key, "sources": row["sources"],
-                            "estimated_score": row["score"], "fix": "Resolve this retained radar signal to primary-source evidence before identity intake."})[:2000],
+                            "estimated_score": row["score"], "fix": "Resolve this NPPES signal to primary-source evidence before identity intake."})[:2000],
                 "lead-signals:source-review:" + key))
             remember(key)
             continue
@@ -321,4 +240,4 @@ def execute(ctx, plan):
         lead = ctx.write("new-lead", {"party_id": party["party_id"], "stage": "new", "source_type": "lead-signals-weekly", "source_detail": json.dumps({"source_key": key, "npi": row.get("npi"), "sources": row["sources"], "estimated": True}), "score": row["score"], "score_basis": row["score_basis"]}, "lead-signals:lead:" + key)
         created.append(lead)
         remember(key)
-    return {"created": created, "reviews": reviews, "candidate_count": len(plan["candidates"]), "lane_health": plan["lane_health"], "model_calls": 0}
+    return {"created": created, "reviews": reviews, "candidate_count": len(plan["candidates"]), "model_calls": 0}

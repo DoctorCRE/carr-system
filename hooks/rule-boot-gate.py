@@ -4,10 +4,15 @@
 
 Joe asked for 100% recall on relevant rules; Jev chose this design (p=1.00).
 Every session and every subagent must fetch every page of the gated rule boot
-(standing-context `detail: "boot"`: the full text of the always-on rules plus
-a one-line index of every active rule, served live from the store) before any
+(standing-context `detail: "boot"`, served live from the store) before any
 other tool call. hooks/gate-integrity.py arms the gate at SessionStart
 (startup, resume, clear, compact) and tells the model which calls to make.
+
+The server's pages_total determines the required set. Compaction re-arms that
+set for the new context. Confirmed pages remain counted within their context,
+including when a later re-read fails. A successful filtered fetch counts when
+its output preserves upstream ok:true and the armed digest. Whole-page JSON
+also retains the length check.
 
 Registered on PreToolUse with matcher ".*" so it sees every tool, which is why
 it is deliberately tiny: no network, no model, one small state read. Also
@@ -16,26 +21,25 @@ MCP standing-context), where it reads what the fetch returned: a real page
 (recorded; a new digest or page count re-arms the session), a rejection of
 detail=boot (the Worker is not deployed yet) or an error (store unreachable).
 See lib/rule_boot_gate.py for the state layout, the fetch-call grammar and
-why it can never lock a context out.
+the recovery paths that remain available while effects are held.
 
   · a boot page fetch (CARR MCP standing-context, or a Bash command that runs
     this repo's run.sh `call standing-context '<json>'` by any path, after an
     absolute `cd ... &&`, and through harmless output filters — the grammar is
     in lib/rule_boot_gate.py)                 -> allow, and record the attempt;
     a page counts as READ only when PostToolUse finds that page's rule_boot
-    (matching page, digest and text) in the result, and the page lengths add
-    up to the boot's total_chars
+    (matching page, digest and text) in the result, with lengths checked against
+    total_chars, or a canonical filtered result retains upstream ok:true and
+    the armed digest
   · other standing-context calls, the read-only rule verbs, ToolSearch -> allow
   · every page of the armed digest confirmed in this context          -> allow
-  · a fetch in this context failed, or the store was unreachable at arming
-    and the context has attempted once          -> allow + RULES UNAVAILABLE
-  · the Worker does not serve detail=boot yet   -> allow + NOT DEPLOYED (once)
-  · the hold could not be recorded (state unwritable) -> allow + notice
-  · held DENY_CAP times without progress        -> allow + RULES UNREAD
+  · incomplete boot, outage, absent deployment, unwritable state or repeated
+    holds                                     -> DENY with the recovery calls
   · otherwise                                   -> DENY, naming the exact calls
 
-FAILS OPEN on any internal error, like every other hook here: a gate that
-crashes must never be able to stop work. Logged to out/hook-guard.log.
+An internal error cannot establish delivery. PreToolUse therefore denies the
+effect; PostToolUse reports the error without confirming a page. Errors are
+logged to out/hook-guard.log.
 
 Fixtures: ops/rule-boot-gate-selftest.py
 """
@@ -70,15 +74,28 @@ def emit(decision, text, event="PreToolUse"):
     print(json.dumps({"hookSpecificOutput": out}))
 
 
-def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
-        return 0
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"DENY(parse-error) {type(exc).__name__}")
+    emit("deny", "RULE BOOT UNVERIFIED: invalid hook input; repair the adapter before an ordinary effect.")
+    return 0
+
+
+@decision(failure="raise")
+def decide(payload):
     if not isinstance(payload, dict):
+        emit("deny", "RULE BOOT UNVERIFIED: hook input must be an object; repair the adapter.")
         return 0
     event = payload.get("hook_event_name") or "PreToolUse"
+    if event == "SessionStart":
+        from lib.rule_boot_gate import arm_session
+        print(arm_session(payload.get("session_id") or payload.get("sessionId"),
+                          payload.get("source"),
+                          agent_id=payload.get("agent_id") or payload.get("agentId")))
+        return 0
     try:
         if event in ("PostToolUse", "PostToolUseFailure"):
             from lib.rule_boot_gate import observe
@@ -90,8 +107,17 @@ def main():
             log(f"DENY tool={payload.get('tool_name')} agent={payload.get('agent_id') or 'main'}")
         emit(decision, text)
     except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
+        log(f"UNVERIFIED(internal-error) {type(exc).__name__}")
+        emit("allow" if event in ("PostToolUse", "PostToolUseFailure") else "deny",
+             "RULE BOOT UNVERIFIED: the delivery check failed; repair it and fetch the missing pages.", event)
     return 0
+
+
+def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
+    return run(decide, parse_error=_parse_error)
 
 
 if __name__ == "__main__":

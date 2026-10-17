@@ -1,40 +1,13 @@
 #!/usr/bin/env python3
-"""flash-run.py — run one coding task on the local Flash-Next model, supervised by Jev.
+"""Run one coding task through the supervised Flash path.
 
-WHY THIS EXISTS. The 2026-09-23 stress test made Qwen3.8-Flash-Next the everyday
-coding workhorse (decision ab0dc622) and the Jev experiment that followed found
-what makes it reliable (decision cb56f652): several low-effort attempts, the
-tests run against each, and ONE Jev choice over the candidates with that
-evidence in named state fields. With evidence the raw best-of-3 went 16/16.
-The generic 0.6 confidence gate was wrong for it: it fell back to attempt 1 and
-lost. This file is that finding turned into the command Joe actually runs.
+When Flash is enabled, the command checks ambiguity, runs isolated attempts,
+tests each candidate, applies the selected patch, and tests the result again.
+Failures follow the configured Model Room escalation mode. When Flash is
+switched off, the command skips every local-model step and starts with that
+same escalation path. Every run appends one row to out/flash-runs.jsonl.
 
-THE FLOW for `flash-run "<task>" --test "<command>"`:
-  1. intake (ops/jev_intake.py): the ambiguity stop (#3), the escalation router
-     (#5), the effort picker (#2), the context picker (#1), the worked-example
-     picker (#23), and the mistake notebook's recall (#15).
-  2. up to N attempts (default 3 with a test command, else 1), each in its own
-     copy of the working tree, by the `flash` launcher. The in-session checks ride
-     along through hooks/jev-supervisor.py in advise mode (~/.claude-local
-     settings). SPEED TUNING (2026-09-24, measured on the 16-task scorecard):
-     the first attempt of low-effort work runs without model thinking; the run
-     stops at the first attempt whose tests pass (--all-attempts for full
-     best-of-N); each retry gets the previous attempt's failing test output;
-     and an attempt is cut off at ten minutes.
-  3. the tests run in every copy; ops/jev_best_of.py picks one candidate or
-     "none". A single passing candidate is taken without asking Jev.
-  4. the chosen patch is applied to the real tree and the tests run again there.
-     Review triage (#17) scores the risk of the change.
-  5. on failure: the mistake is written to the notebook and a handoff pack (#10)
-     is written; --escalate auto sends it through the Model Room (2026-09-24,
-     Flash replaces Sonnet for scoped coding): a failed task to the Sol fixer desk,
-     whose change is applied only if the test passes; a task routed away as a
-     design/judgment call to the Opus desk. Never a direct model call.
-
-Every run appends one row to out/flash-runs.jsonl, the real-use record the week
-of tracking reads (`flash-run stats`).
-
-OTHER SUBCOMMANDS
+Other subcommands:
   flash-run plan <file>        route each step of a plan local/escalate (#18)
   flash-run scorecard          the standing model scorecard (#25)
   flash-run stats              summarize out/flash-runs.jsonl
@@ -759,6 +732,14 @@ def cmd_run(a):
     task = a.task
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     row = {"run_id": run_id, "at": _now(), "cwd": cwd, "task": task[:2000], "test": a.test}
+    if flashlib.is_switched_off():
+        _say(flashlib.OFF_REASON)
+        row["outcome"] = "routed_escalate"
+        row["escalation"] = escalate(task, cwd, run_id, None, [], a.escalate,
+                                     test_cmd=a.test, kind="code")
+        row["handoff"] = row["escalation"]["handoff"]
+        _append(RUNS_LOG, row)
+        return 0 if row["escalation"]["outcome"] == "fixed_by_desk" else 4
     intake = _lib("jev_intake")
     notebook = _lib("jev_notebook")
 
@@ -955,6 +936,9 @@ def cmd_plan(a):
 
 
 def cmd_scorecard(a):
+    if flashlib.is_switched_off():
+        _say(flashlib.OFF_REASON)
+        return 4
     sc = _lib("jev_scorecard")
     suite = sc.load_suite(a.suite)
     results = []
@@ -1038,7 +1022,7 @@ def main(argv):
     if not a.cmd:
         p.print_help()
         return 2
-    if a.cmd == "run" and not os.path.exists(FLASH):
+    if a.cmd == "run" and not flashlib.is_switched_off() and not os.path.exists(FLASH):
         _say(f"the flash launcher is missing ({FLASH})")
         return 2
     return {"run": cmd_run, "plan": cmd_plan, "scorecard": cmd_scorecard,

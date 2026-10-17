@@ -12,8 +12,7 @@ Usage: python3 build-license-pool-from-raw.py <scratch_dir> [as_of_date YYYY-MM-
 import sys, os, json, gzip, glob, io
 from datetime import date, timedelta
 HERE = os.path.dirname(os.path.abspath(__file__))
-from pool_paths import UPSTREAM, DATA as POOL_DATA
-UP = str(UPSTREAM)
+UP = os.path.join(HERE, "upstream")
 PROF = {"501":"Chiropractic Physician","701":"Dental","1512":"Physician Assistant",
         "1711":"Advanced Practice Registered Nurse","1801":"Optometrist",
         "1901":"Osteopathic Physician","2101":"Podiatric Physician",
@@ -59,7 +58,7 @@ def main():
             if k in seen: continue
             seen.add(k); kept+=1
             prof=PROF.get(code,code)
-            rows.append({"name":(tc(first)+" "+tc(last)).strip(),"profession":prof, "source_url": "https://mqa-internet.doh.state.fl.us/MQASearchServices/",
+            rows.append({"name":(tc(first)+" "+tc(last)).strip(),"profession":prof,
                 "city":tc(f[cCi]) if cCi is not None and len(f)>cCi else "",
                 "county":tc(f[cCo]) if cCo is not None and len(f)>cCo else "",
                 "state":(f[cS].strip().upper() if cS is not None and len(f)>cS else ""),

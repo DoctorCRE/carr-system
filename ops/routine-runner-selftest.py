@@ -1,115 +1,127 @@
 #!/usr/bin/env python3
 from datetime import datetime
-import importlib.util
 import io
+import fcntl
 import json
 from pathlib import Path
-import sys
-import unittest
 import subprocess
+import sys
+import tempfile
+import unittest
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-spec = importlib.util.spec_from_file_location('routine_runtime', ROOT / 'tools/routines/runtime.py')
-assert spec and spec.loader
-runtime = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(runtime)
+from lib.record_call import VerbResult, OK, TRANSIENT
+from tools.routines import runtime
+
+NOW = datetime.fromisoformat('2026-10-05T07:30:00-05:00')
 
 
 class RunnerTests(unittest.TestCase):
-    def test_week_gate(self):
-        now = datetime(2026, 10, 8, 9, tzinfo=ZoneInfo('America/Chicago'))
-        self.assertTrue(runtime.due('contact-enrichment-weekly', now, False))
-        self.assertFalse(runtime.due('contact-enrichment-weekly', now, True))
-        self.assertFalse(runtime.due('lead-signals-weekly', now, False))
+    def test_due_respects_chicago_schedule_and_completion(self):
+        self.assertFalse(runtime.due('lead-signals-weekly', NOW.replace(hour=7, minute=29), False))
+        self.assertTrue(runtime.due('lead-signals-weekly', NOW, False))
+        self.assertFalse(runtime.due('lead-signals-weekly', NOW, True))
+        self.assertEqual(runtime.period(datetime.fromisoformat('2026-10-05T00:30:00+00:00')), '2026-09-28')
 
-    def test_jsonl_parser(self):
-        data = '{"type":"thread.started"}\n{"type":"item.completed","item":{"type":"agent_message","text":"{\\"facts\\":[]}"}}\n'
-        self.assertEqual(runtime.parse_model_output(data), {'facts': []})
-        for bad in ('', '{}', '{"type":"item.completed","item":{"type":"agent_message","text":"not JSON"}}'):
-            with self.assertRaises(ValueError):
-                runtime.parse_model_output(bad)
+    def test_catch_up_runs_after_missed_monday(self):
+        self.assertTrue(runtime.due('lead-signals-weekly', NOW.replace(day=6), False))
 
-    def test_dry_run_has_no_effects(self):
-        ctx = runtime.Context('contact-enrichment-weekly', dry_run=True, fixture={})
-        with patch.object(runtime, 'call_verb', side_effect=AssertionError('production write')):
-            self.assertEqual(ctx.write('record-finding', {'kind': 'email'}, 'finding:1')['dry_run'], True)
-            ctx.review_item('Review a correction', 'Evidence body', 'review:1')
-        self.assertEqual(len(ctx.effects), 2)
-        with self.assertRaises(RuntimeError):
-            ctx.model('ops/routines/prompts/contact-enrichment.txt', {})
+    def test_failure_reporting_holds_the_execution_lock(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            held = []
+            def failure(ctx, detail):
+                with (root / 'out/routines/lead-signals-weekly/run.lock').open('a') as other:
+                    with self.assertRaises(BlockingIOError):
+                        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(True)
+            with patch.object(runtime, 'ROOT', root), patch.object(sys, 'argv', ['routine', 'lead-signals-weekly']), \
+                 patch.object(runtime, 'execute', side_effect=RuntimeError('fixture failure')), \
+                 patch.object(runtime.Context, 'failure', failure), patch('sys.stderr', new_callable=io.StringIO):
+                self.assertEqual(runtime.main(), 1)
+            self.assertEqual(held, [True])
 
-    def test_no_work_does_not_model_or_stamp(self):
+    def test_previous_period_resumes_before_new_period(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            directory = root / 'out/routines/lead-signals-weekly'
+            directory.mkdir(parents=True)
+            (directory / '2026-01-05.json').write_text(json.dumps({'started_at': '2026-01-05T07:30:00-06:00', 'plan': {'work': True}}))
+            periods = []
+            def execute(ctx):
+                periods.append(runtime.period(ctx.now))
+                ctx.state['completed'] = True
+                ctx.save()
+                return 0
+            with patch.object(runtime, 'ROOT', root), patch.object(sys, 'argv', ['routine', 'lead-signals-weekly']), \
+                 patch.object(runtime, 'execute', execute), patch.object(runtime.Context, 'failure', side_effect=AssertionError('failed recovery')):
+                self.assertEqual(runtime.main(), 0)
+            self.assertEqual(periods[0], '2026-01-05')
+            self.assertEqual(len(periods), 2)
+
+    def test_confirmed_effect_is_reused_after_restarting_context(self):
+        with tempfile.TemporaryDirectory() as folder:
+            journal = Path(folder) / 'state.json'
+            ctx = runtime.Context('lead-signals-weekly', journal=journal, now=NOW)
+            with patch.object(runtime, 'call_verb', return_value=VerbResult('add-party', OK, {'party_id': 'fixture'})) as calls:
+                self.assertEqual(ctx.write('add-party', {'name': 'Fixture'}, 'provider:1'), {'party_id': 'fixture'})
+                ctx = runtime.Context('lead-signals-weekly', journal=journal, now=NOW)
+                self.assertEqual(ctx.write('add-party', {'name': 'Fixture'}, 'provider:1'), {'party_id': 'fixture'})
+                self.assertEqual(calls.call_count, 1)
+                with self.assertRaisesRegex(RuntimeError, 'changed'):
+                    ctx.write('add-party', {'name': 'Other'}, 'provider:1')
+
+    def test_uncertain_effect_stops_without_replaying(self):
+        with tempfile.TemporaryDirectory() as folder:
+            journal = Path(folder) / 'state.json'
+            ctx = runtime.Context('lead-signals-weekly', journal=journal, now=NOW)
+            with patch.object(runtime, 'call_verb', return_value=VerbResult('add-party', TRANSIENT, detail='timeout')) as calls:
+                with self.assertRaises(RuntimeError):
+                    ctx.write('add-party', {'name': 'Fixture'}, 'provider:1')
+                ctx = runtime.Context('lead-signals-weekly', journal=journal, now=NOW)
+                with self.assertRaisesRegex(RuntimeError, 'readback'):
+                    ctx.write('add-party', {'name': 'Fixture'}, 'provider:1')
+                self.assertEqual(calls.call_count, 1)
+            self.assertEqual(journal.stat().st_mode & 0o777, 0o600)
+
+    def test_no_work_completes_period_without_record_effect(self):
         class Module:
             @staticmethod
             def prepare(ctx): return {'work': False}
             @staticmethod
             def execute(ctx, plan): raise AssertionError('no-work execution')
-        ctx = runtime.Context('contact-enrichment-weekly', dry_run=True, fixture={})
-        with patch.object(ctx, 'stamp', side_effect=AssertionError('no-work stamp')):
-            with patch('sys.stdout', new_callable=io.StringIO) as out:
+        with tempfile.TemporaryDirectory() as folder:
+            ctx = runtime.Context('lead-signals-weekly', journal=Path(folder) / 'state.json', now=NOW)
+            with patch.object(runtime, 'call_verb', side_effect=AssertionError('record effect')):
                 self.assertEqual(runtime.run_module(ctx, Module), 0)
-                self.assertEqual(out.getvalue(), '')
+            self.assertTrue(json.loads(ctx.journal.read_text())['completed'])
 
-    def test_blocked_run_cannot_stamp(self):
-        class Module:
-            @staticmethod
-            def prepare(ctx): return {'work': True}
-            @staticmethod
-            def execute(ctx, plan): return {'blocked': True, 'reason': 'missing draft transport'}
-        ctx = runtime.Context('social-weekly', dry_run=True, fixture={})
-        with patch.object(ctx, 'stamp', side_effect=AssertionError('blocked stamp')):
-            with patch('sys.stdout', new_callable=io.StringIO):
-                self.assertEqual(runtime.run_module(ctx, Module), 78)
+    def test_completed_period_does_not_execute_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            ctx = runtime.Context('lead-signals-weekly', journal=Path(folder) / 'state.json', now=NOW)
+            ctx.state['completed'] = True
+            ctx.save()
+            with patch.object(runtime.importlib, 'import_module', side_effect=AssertionError('completed rerun')):
+                self.assertEqual(runtime.execute(ctx), 0)
 
-    def test_blocked_plan_rechecks_preflight_after_repair(self):
-        from tools.routines import social_weekly
-        ctx = runtime.Context('social-weekly', dry_run=True, fixture={}, now=datetime.fromisoformat('2026-10-09T08:00:00-05:00'))
-        ctx.state['plan'] = {'work': True, 'reason': 'missing_blotato_key', 'week': '2026-10-12'}
-        ctx.state['blocked'] = 'missing_blotato_key'
-        with patch.object(ctx, 'secret', return_value=True), patch('sys.stdout', new_callable=io.StringIO) as out:
-            ctx.dry_run = False
-            with patch.object(ctx, 'save'), patch.object(ctx, 'review_item'):
-                self.assertEqual(runtime.run_module(ctx, social_weekly), 78)
-            self.assertEqual(json.loads(out.getvalue())['blocked'], 'draft_transport_unavailable')
+    def test_fixture_cli_never_creates_live_journal(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/routines/runtime.py'), 'lead-signals-weekly',
+            '--dry-run', '--fixture', str(ROOT / 'ops/fixtures/routines/leads.json'), '--now', NOW.isoformat()],
+            capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value['candidate_count'], 2)
+        self.assertEqual(value['record_writes'], 0)
+        self.assertEqual(value['local_writes'], 0)
+        self.assertEqual(value['model_calls'], 0)
 
-    def test_subscription_cli_no_paid_credentials(self):
-        argv, env = runtime.model_command(ROOT, {'OPENAI_API_KEY': 'forbidden', 'CARR_DB_JOBS_URL': 'forbidden', 'PATH': '/bin'})
-        self.assertIn('gpt-6.1-sol', argv)
-        self.assertIn('forced_login_method="chatgpt"', argv)
-        self.assertIn('model_reasoning_effort="medium"', argv)
-        self.assertNotIn('OPENAI_API_KEY', env)
-        self.assertNotIn('CARR_DB_JOBS_URL', env)
-
-    def test_subscription_auth_failure_reaches_app_before_model_spend(self):
-        ctx = runtime.Context('contact-enrichment-weekly')
-        status = subprocess.CompletedProcess(['codex', 'login', 'status'], 1, stdout='', stderr='Not logged in')
-        with patch.object(runtime.subprocess, 'run', return_value=status) as calls, patch.object(ctx, 'review_item') as review:
-            with self.assertRaises(RuntimeError):
-                ctx.model('ops/routines/prompts/contact-enrichment.txt', {})
-            self.assertEqual(calls.call_count, 1)
-            review.assert_called_once()
-
-    def test_replaced_claude_entrypoints_are_code_owned(self):
-        from lib.headless_tasks import code_owned_tasks
-        owned = code_owned_tasks(ROOT)
-        self.assertIn('radar-weekly', owned)
-        self.assertIn('health-audit-monthly', owned)
-        self.assertNotIn('deal-history-research-weekly', owned)
-
-    def test_dedicated_launchd_jobs_are_primary_only(self):
-        import importlib.util
-        from lib.launchd_scope import allowed_on_machine
-        spec = importlib.util.spec_from_file_location('routine_config', ROOT / 'ops/config-as-code.py')
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        for job in runtime.JOBS.values():
-            name = job['label'] + '.plist'
-            self.assertIn(name, config.DEDICATED_INSTALL)
-            self.assertNotIn(name, config.DEFINITION_ONLY)
-            self.assertFalse(allowed_on_machine(name, False))
+    def test_only_replaced_claude_entrypoint_is_code_owned(self):
+        from lib.headless_tasks import code_owned_tasks, main
+        self.assertEqual(code_owned_tasks(ROOT), {'npi-sweep-weekly'})
+        with patch('sys.stderr', new_callable=io.StringIO):
+            self.assertEqual(main(['npi-sweep-weekly', '--repo', str(ROOT)]), 78)
 
 
 if __name__ == '__main__':

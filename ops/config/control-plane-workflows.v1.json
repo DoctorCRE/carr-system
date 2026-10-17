@@ -183,28 +183,28 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "contact-enrichment-weekly", "version": 2, "enabled": false, "risk": "green",
+      "key": "contact-enrichment-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 * * 4", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.entity-enrichment", "input_builder": "entity-enrichment.next-40"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Thursday cron 0 9 * * 4 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["verified enrichment queue", "prioritization policy"], "canonical_reads": ["enrichment queue", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["approved research sources"], "authority": "typed enrichment proposal only", "current_completion_signal": "enrichment slice receipt", "replacement_program": "ops/routines/jobs.v1.json; bin/routine-run.sh", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "Thursday cron 0 9 * * 4 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["verified enrichment queue", "prioritization policy"], "canonical_reads": ["enrichment queue", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["approved research sources"], "authority": "typed enrichment proposal only", "current_completion_signal": "enrichment slice receipt", "replacement_program": "ops.job_definition:contact-enrichment-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["enrichment.reverification_due_nonempty"]}, "description": "canonical re-verification queue is non-empty; queued facts are explicitly not current"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["enrichment.exactly_40_prioritized", "enrichment.reverification_priority_ordered"]}, "description": "1 to 40 due subjects, in the canonical priority order, a short week is a valid slice"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "enrichment.every_finding_has_source_observed_at_status"]}, "description": "nonempty findings reconcile to typed subjects and carry source, observed_at, epistemic status"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 2400},
       "deduplication": {"key_template": "contact-enrichment-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "enrichment_slice"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "content-fuel-harvest-weekly", "version": 2, "enabled": false, "risk": "green",
+      "key": "content-fuel-harvest-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "30 9 * * 1", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.content-fuel", "input_builder": "content-fuel.next-rotation"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Monday cron 30 9 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["lane rotation", "last harvest receipt"], "canonical_reads": ["content-fuel lanes", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["primary market sources"], "authority": "typed market-fuel proposal only", "current_completion_signal": "content-fuel receipt", "replacement_program": "ops/routines/jobs.v1.json; bin/routine-run.sh", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "Monday cron 30 9 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["lane rotation", "last harvest receipt"], "canonical_reads": ["content-fuel lanes", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["primary market sources"], "authority": "typed market-fuel proposal only", "current_completion_signal": "content-fuel receipt", "replacement_program": "ops.job_definition:content-fuel-harvest-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["content_fuel.weekly_receipt_absent"]}, "description": "weekly harvest receipt absent"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["content_fuel.local_and_next_cold_lane"]}, "description": "exactly one local lane plus the next cold rotating lane"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["content_fuel.post_provider_contract"]}, "description": "retained candidates are current, primary-source, cited, deduplicated and proposal-only; explicit cuts are safe"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 1800},
       "deduplication": {"key_template": "content-fuel-harvest-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "content_fuel"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "deal-history-research-weekly", "version": 1, "enabled": true, "risk": "green",
@@ -233,28 +233,28 @@
       "legacy_schedule": {"provider": "none", "status": "disabled", "disable_requires": "no scheduler exists; on-demand MCP admission only"}
     },
     {
-      "key": "health-audit-monthly", "version": 2, "enabled": false, "risk": "green",
+      "key": "health-audit-monthly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 6-10 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "system-health.monthly-evidence"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 6-10 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["health evidence", "monthly receipt ledger"], "canonical_reads": ["live health", "registry", "artifact evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["health adapters"], "authority": "typed audit proposal only", "current_completion_signal": "health audit receipt", "replacement_program": "retired by Joe 2026-10-05", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "monthly window cron 0 9 6-10 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["health evidence", "monthly receipt ledger"], "canonical_reads": ["live health", "registry", "artifact evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["health adapters"], "authority": "typed audit proposal only", "current_completion_signal": "health audit receipt", "replacement_program": "ops.job_definition:health-audit-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["health.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["health.one_run_in_monthly_window"]}, "description": "one run per month inside window"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "health.live_evidence", "health.registry_evidence", "health.artifact_evidence"]}, "description": "nonempty claims reconcile to typed live health, registry and artifact evidence"},
       "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 1800},
       "deduplication": {"key_template": "health-audit-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "health_audit"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "idea-resurface-monthly", "version": 2, "enabled": false, "risk": "green",
+      "key": "idea-resurface-monthly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "0 9 5-11 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
       "execution": {"kind": "cognition", "cognition_job": "idea.resurface-proposal", "input_builder": "idea-bank.oldest-unsurfaced"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 5-11 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["idea rows", "last-surfaced ledger"], "canonical_reads": ["canonical idea rows", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["provider adapter"], "authority": "typed idea proposal only", "current_completion_signal": "idea resurface receipt", "replacement_program": "retired by Joe 2026-10-05", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "monthly window cron 0 9 5-11 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["idea rows", "last-surfaced ledger"], "canonical_reads": ["canonical idea rows", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["provider adapter"], "authority": "typed idea proposal only", "current_completion_signal": "idea resurface receipt", "replacement_program": "ops.job_definition:idea-resurface-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["idea.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["idea.oldest_or_least_recently_surfaced"]}, "description": "oldest never/least-recently surfaced ideas"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "idea.shortlist_references_canonical_rows"]}, "description": "nonempty shortlist reconciles to canonical idea rows"},
       "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 900},
       "deduplication": {"key_template": "idea-resurface-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "idea_resurface"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "linkedin-engagement-daily", "version": 1, "enabled": true, "risk": "yellow",
@@ -269,16 +269,16 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled-unreconciled", "disable_requires": "accepted shadow and canary receipts plus exact cron read-back"}
     },
     {
-      "key": "loop-drain-weekdays", "version": 2, "enabled": false, "risk": "yellow",
+      "key": "loop-drain-weekdays", "version": 1, "enabled": true, "risk": "yellow",
       "recurrence": {"cron": "0 11 * * 1-5", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "loops.next-actionable"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "weekday cron 0 11 * * 1-5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["actionable loops", "data-class grant"], "canonical_reads": ["loop ledger", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["none"], "authority": "proposal-only inside data-class grant", "current_completion_signal": "loop drain receipt", "replacement_program": "retired by Joe 2026-10-05", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "weekday cron 0 11 * * 1-5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["actionable loops", "data-class grant"], "canonical_reads": ["loop ledger", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["none"], "authority": "proposal-only inside data-class grant", "current_completion_signal": "loop drain receipt", "replacement_program": "ops.job_definition:loop-drain-weekdays:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["loops.system_owned_actionable_exist"]}, "description": "actionable system-owned loops exist"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["loops.no_human_counterparty_or_event_blocker"]}, "description": "no human-only, counterparty or external-event blocker"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "loops.proposal_has_evidence", "loops.inside_data_class_grant"]}, "description": "nonempty proposal reconciles to typed evidence and stays inside granted data class"},
       "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 1800},
       "deduplication": {"key_template": "loop-drain-weekdays:{date}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "loop_drain"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "nightly-record-layer", "version": 3, "enabled": true, "risk": "green",
@@ -305,40 +305,40 @@
       "legacy_schedule": {"provider": "duplicate:claude-code+launchd", "status": "enabled", "disable_requires": "accepted shadow and canary receipts; retire only the proven duplicate"}
     },
     {
-      "key": "npi-sweep-weekly", "version": 2, "enabled": false, "risk": "green",
+      "key": "npi-sweep-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "30 7 * * 1", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.market-fuel", "input_builder": "npi.weekly-delta"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Monday cron 30 7 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["NPI source delta", "territory policy"], "canonical_reads": ["NPI source", "candidate policy", "ops.job_definition"], "canonical_writes": ["candidate proposal queue", "ops.job_receipt"], "external_dependencies": ["NPI source"], "authority": "typed candidate proposal only", "current_completion_signal": "NPI delta receipt", "replacement_program": "ops/routines/jobs.v1.json; bin/routine-run.sh", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "Monday cron 30 7 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["NPI source delta", "territory policy"], "canonical_reads": ["NPI source", "candidate policy", "ops.job_definition"], "canonical_writes": ["candidate proposal queue", "ops.job_receipt"], "external_dependencies": ["NPI source"], "authority": "typed candidate proposal only", "current_completion_signal": "NPI delta receipt", "replacement_program": "ops.job_definition:npi-sweep-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["npi.weekly_delta_unprocessed"]}, "description": "weekly source delta has not been processed"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["npi.territory_predicate", "npi.healthcare_provider_predicate"]}, "description": "territory and healthcare provider predicates in code"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["npi.source_rows", "npi.input_reconciliation", "npi.proposal_dedup"]}, "description": "nonempty proposal-only candidates reconcile exactly to deterministic receipt-filtered NPI inputs; dedup is code-checked"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 2400},
       "deduplication": {"key_template": "npi-sweep-weekly:{source_release}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "npi_delta"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "playbook-review-monthly", "version": 2, "enabled": false, "risk": "yellow",
+      "key": "playbook-review-monthly", "version": 1, "enabled": true, "risk": "yellow",
       "recurrence": {"cron": "0 9 15-21 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "doctrine.review-due"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 0 9 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["review ledger", "sweep receipt"], "canonical_reads": ["policy-bearing doctrine sections", "failure evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["record-layer adapter"], "authority": "doctrine proposal only", "current_completion_signal": "playbook review receipt", "replacement_program": "retired by Joe 2026-10-05", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "monthly window cron 0 9 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["review ledger", "sweep receipt"], "canonical_reads": ["policy-bearing doctrine sections", "failure evidence"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["record-layer adapter"], "authority": "doctrine proposal only", "current_completion_signal": "playbook review receipt", "replacement_program": "ops.job_definition:playbook-review-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["playbook.monthly_receipt_absent", "playbook.sweep_receipt_present"]}, "description": "monthly accepted receipt absent and sweep receipt present"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["playbook.due_policy_sections", "playbook.measured_failure_evidence"]}, "description": "due policy-bearing sections and measured failure evidence"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "playbook.changes_proposal_only_until_gated"]}, "description": "nonempty doctrine changes reconcile to evidence and remain proposals until deterministic gates pass"},
       "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 2400},
       "deduplication": {"key_template": "playbook-review-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "playbook_review"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "radar-weekly", "version": 2, "enabled": false, "risk": "green",
+      "key": "radar-weekly", "version": 1, "enabled": true, "risk": "green",
       "recurrence": {"cron": "15 8 * * 1", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "research.market-fuel", "input_builder": "radar.weekly-candidates"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Monday cron 15 8 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["radar lane candidates", "receipt ledger"], "canonical_reads": ["scored lanes", "freshness policy", "ops.job_definition"], "canonical_writes": ["candidate proposal queue", "ops.job_receipt"], "external_dependencies": ["market source adapters"], "authority": "typed candidate proposal only", "current_completion_signal": "radar digest receipt", "replacement_program": "ops/routines/jobs.v1.json; bin/routine-run.sh", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "Monday cron 15 8 * * 1 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["radar lane candidates", "receipt ledger"], "canonical_reads": ["scored lanes", "freshness policy", "ops.job_definition"], "canonical_writes": ["candidate proposal queue", "ops.job_receipt"], "external_dependencies": ["market source adapters"], "authority": "typed candidate proposal only", "current_completion_signal": "radar digest receipt", "replacement_program": "ops.job_definition:radar-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["radar.weekly_receipt_absent"]}, "description": "weekly radar receipt absent"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["radar.lanes_code_scored", "radar.freshness_guard", "radar.overdue_pool"]}, "description": "code-scored lanes, freshness guards and overdue pools"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "radar.lane_health_explicit", "radar.candidates_proposal_only"]}, "description": "nonempty candidates reconcile to typed lanes, lane health is complete, and candidates remain proposals"},
       "retry": {"max_attempts": 2, "backoff": "exponential", "base_seconds": 300, "cap_seconds": 1800, "timeout_seconds": 2400},
       "deduplication": {"key_template": "radar-weekly:{week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "radar_digest"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "restore-rehearse-weekly", "version": 2, "enabled": true, "risk": "green",
@@ -353,16 +353,16 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "social-batch-weekly", "version": 2, "enabled": false, "risk": "yellow",
+      "key": "social-batch-weekly", "version": 1, "enabled": true, "risk": "yellow",
       "recurrence": {"cron": "0 8 * * 5", "timezone": "America/Chicago", "source": "services registry"},
       "execution": {"kind": "cognition", "cognition_job": "social.batch-proposal", "input_builder": "social.next-week-brief"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "Friday cron 0 8 * * 5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["next-week brief", "voice version", "source refs"], "canonical_reads": ["content cadence", "topic rotation", "ops.job_definition"], "canonical_writes": ["draft proposal queue", "ops.job_receipt"], "external_dependencies": ["source collection adapters"], "authority": "draft proposal only; never publish", "current_completion_signal": "social draft batch receipt", "replacement_program": "ops/routines/jobs.v1.json; bin/routine-run.sh", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "Friday cron 0 8 * * 5 America/Chicago", "owner": "ops.job dispatcher", "inputs": ["next-week brief", "voice version", "source refs"], "canonical_reads": ["content cadence", "topic rotation", "ops.job_definition"], "canonical_writes": ["draft proposal queue", "ops.job_receipt"], "external_dependencies": ["source collection adapters"], "authority": "draft proposal only; never publish", "current_completion_signal": "social draft batch receipt", "replacement_program": "ops.job_definition:social-batch-weekly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["social.next_week_uncovered"]}, "description": "next week is not already covered"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["social.cadence", "social.topic_rotation", "social.no_replies"]}, "description": "cadence and topic rotation predicates; no replies"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "social.schema", "social.writing_lint", "social.source_verification", "social.format", "social.publication_firewall"]}, "description": "nonempty drafts reconcile to typed sources and pass schema, writing lint, format and publication firewall"},
       "retry": {"max_attempts": 1, "backoff": "constant", "base_seconds": 0, "cap_seconds": 0, "timeout_seconds": 3600},
       "deduplication": {"key_template": "social-batch-weekly:{target_week}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "social_draft_batch"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "social-metrics-pull-weekly", "version": 1, "enabled": true, "risk": "green",
@@ -377,16 +377,16 @@
       "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
-      "key": "system-sweep-monthly", "version": 2, "enabled": false, "risk": "yellow",
+      "key": "system-sweep-monthly", "version": 1, "enabled": true, "risk": "yellow",
       "recurrence": {"cron": "30 8 15-21 * *", "timezone": "America/Chicago", "source": "services registry; ledger gate collapses window"},
       "execution": {"kind": "cognition", "cognition_job": "audit.proposal", "input_builder": "system.prune-candidates"},
       "state": {"owner": "ops.job", "initial": "queued"},
-      "inventory": {"trigger": "monthly window cron 30 8 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["prune candidates", "monthly receipt ledger"], "canonical_reads": ["artifact measurements", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["artifact inventory adapters"], "authority": "recoverable human-gated proposal only", "current_completion_signal": "system sweep receipt", "replacement_program": "retired by Joe 2026-10-05", "acceptance": "Fixture predicates/parsers, dry-run evidence, green hosted CI and watched code first run.", "retirement_approval": "Joe authorized final replacement/retirement scope 2026-10-05."},
+      "inventory": {"trigger": "monthly window cron 30 8 15-21 * * America/Chicago", "owner": "ops.job dispatcher", "inputs": ["prune candidates", "monthly receipt ledger"], "canonical_reads": ["artifact measurements", "ops.job_definition"], "canonical_writes": ["proposal queue", "ops.job_receipt"], "external_dependencies": ["artifact inventory adapters"], "authority": "recoverable human-gated proposal only", "current_completion_signal": "system sweep receipt", "replacement_program": "ops.job_definition:system-sweep-monthly:v1", "acceptance": "accepted shadow and canary receipts", "retirement_approval": "Joe approval after accepted evidence"},
       "routing": {"key": "facts.all_true", "spec": {"all_of": ["system_sweep.monthly_receipt_absent"]}, "description": "monthly accepted receipt absent"},
       "filtering": {"key": "facts.all_true", "spec": {"all_of": ["system_sweep.measured_stale_duplicate_or_oversized"]}, "description": "measured stale, duplicate or oversized candidates only"}, "validation": {"key": "facts.all_true", "spec": {"all_of": ["proposal.input_reconciled_contract", "system_sweep.every_destructive_proposal_recoverable", "system_sweep.every_destructive_proposal_human_gated"]}, "description": "nonempty proposal reconciles to measurements; every destructive action is recoverable and human-gated"},
       "retry": {"max_attempts": 2, "backoff": "linear", "base_seconds": 600, "cap_seconds": 3600, "timeout_seconds": 2400},
       "deduplication": {"key_template": "system-sweep-monthly:{month}"}, "completion": {"key": "facts.all_true", "spec": {"all_of": ["proposal.receipt_persisted", "proposal.no_canonical_write_authority"]}, "description": "typed proposal receipt persisted; no canonical write authority", "receipt_kind": "system_sweep"},
-      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "Orchestrator verifies code replacement live and native enabled=false readback; retired tasks require disabled readback only."}
+      "legacy_schedule": {"provider": "claude-code", "status": "enabled", "disable_requires": "accepted shadow and canary receipts"}
     },
     {
       "key": "renewal-radar-source-daily", "version": 1, "enabled": false, "risk": "yellow",

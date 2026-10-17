@@ -3,11 +3,17 @@
 <!-- doctrine: npi-sweep-sop -->
 <plist version="1.0">
 <dict>
+	<key>Umask</key>
+	<integer>63</integer>
 	<key>Label</key>
 	<string>com.carr.routine-lead-signals-weekly</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/bin/bash</string>
+		<string>/bin/zsh</string>
+		<string>{{REPO}}/bin/run-scheduled.sh</string>
+		<string>lead-signals-weekly</string>
+		<string>routine.weekly</string>
+		<string>/bin/sh</string>
 		<string>{{REPO}}/bin/routine-run.sh</string>
 		<string>lead-signals-weekly</string>
 	</array>
@@ -32,8 +38,8 @@
 		<string>America/Chicago</string>
 	</dict>
 	<key>StandardOutPath</key>
-	<string>{{REPO}}/out/routines/lead-signals-weekly.log</string>
+	<string>{{REPO}}/out/lead-signals-weekly.log</string>
 	<key>StandardErrorPath</key>
-	<string>{{REPO}}/out/routines/lead-signals-weekly.error.log</string>
+	<string>{{REPO}}/out/lead-signals-weekly.error.log</string>
 </dict>
 </plist>

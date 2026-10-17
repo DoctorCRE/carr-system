@@ -1,0 +1,65 @@
+{
+  "schema": "merge-queue-wait-registry/v1",
+  "bounds": {
+    "snapshot": {
+      "attempts": 20000
+    },
+    "pages": {
+      "attempts": 160
+    },
+    "retry": {
+      "attempts": 4
+    },
+    "command": {
+      "seconds": 120
+    },
+    "sqlite": {
+      "seconds": 30
+    },
+    "runner_lock": {
+      "attempts": 1
+    },
+    "budget_lock": {
+      "seconds": 5
+    },
+    "spacing": {
+      "seconds": 30
+    },
+    "entry": {
+      "seconds": 4500
+    },
+    "mergeability": {
+      "seconds": 600
+    },
+    "provider_merge": {
+      "seconds": 900
+    },
+    "ci": {
+      "seconds": 4500
+    },
+    "dispatch_desk": {
+      "seconds": 300
+    },
+    "dispatch_process": {
+      "seconds": 900
+    },
+    "child_reap": {
+      "seconds": 5
+    },
+    "poll": {
+      "seconds": 30
+    },
+    "discovery": {
+      "seconds": 300
+    },
+    "service": {
+      "until": "cancelled"
+    },
+    "installer": {
+      "seconds": 15
+    },
+    "pacing_lock": {
+      "seconds": 155
+    }
+  }
+}

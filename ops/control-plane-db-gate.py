@@ -622,8 +622,6 @@ def main() -> int:
     try:
         registry = json.loads(SCHEDULER_REGISTRY_PATH.read_text(encoding="utf-8"))
         manifest = json.loads(WORKFLOW_MANIFEST_PATH.read_text(encoding="utf-8"))
-        enrichment_version = next(workflow["version"] for workflow in manifest["workflows"]
-                                  if workflow["key"] == "contact-enrichment-weekly")
         expected_surfaces = sorted(
             (str(surface["workflow_key"]), int(surface["workflow_version"]), str(surface["surface_id"]),
              str(surface["locator"]), str(surface["scheduler_kind"]), surface.get("duplicate_group"))
@@ -955,11 +953,11 @@ def main() -> int:
                 cur.execute("""insert into ops.job
                                   (id,definition_key,definition_version,idempotency_key,scheduled_for,mode,state,
                                    attempt,max_attempts,next_attempt_at,timeout_seconds)
-                               values (%s,'contact-enrichment-weekly',%s,%s,
+                               values (%s,'contact-enrichment-weekly',1,%s,
                                        (date_trunc('week', now() at time zone 'America/Chicago')
                                         + interval '3 days 10 hours') at time zone 'America/Chicago',
                                        'shadow','queued',0,1,now(),60)""",
-                            (fixture_job, enrichment_version, str(fixture_job)))
+                            (fixture_job, str(fixture_job)))
                 cur.execute("""insert into ops.job_receipt(job_id,attempt,kind,receipt_ref,evidence)
                                values (%s,0,'completion','fixture:deal-history-receipt',
                                        '{"subjects_processed":30}'::jsonb)""", (fixture_job,))

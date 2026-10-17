@@ -1,8 +1,11 @@
 {
- "_note": "Committed classification for the gated rule boot (standing-context detail=boot, mcp-server/src/rule-boot.js). Holds ids, class, a <=20-word trigger summary and a length per rule; NEVER a rule statement. Statements are read live from the store when a context fetches its boot. `chars` is the statement length at classification, read only by the CI budget guard, which has no store to call. Class a includes standing person, team and business facts independent of task, including factual premises in mixed rules. ops/sync-rule-boot-classes.py validates supported fact shapes against the existing rule-selection corpus; unrecognized shapes require full-statement review. always_on = class a, plus rules whose only enforcement is a Stop gate (chat_lint, conduct_stop, completion_evidence: the gate fires after the reply is written), plus class-b rules with a conversational moment that Jev confirmed against the rule text. sponsors lists every partner whose scope the budget check measures.",
- "budget_tokens": 40000,
+ "_note": "Class A is always on. keep_full_text retains measured B/C route gaps with a reason per id. Unclassified active store rules render in full. D/E stay indexed under Joe decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01. Statements come from the store; chars only estimates budget.",
+ "budget_tokens": 48000,
  "chars_per_token": 3.6,
- "sponsors": ["dell", "joe"],
+ "sponsors": [
+  "dell",
+  "joe"
+ ],
  "class_legend": {
   "a": "always-on conduct and standing facts: full text loaded",
   "b": "action point",
@@ -39,6 +42,23 @@
    "personal_to": "joe",
    "summary": "When proposing structural changes to Joe, frame them as cost-now-vs-later window math for fast decisions.",
    "when": "presenting a structural change to Joe"
+  },
+  "07dde434": {
+   "always_on": false,
+   "chars": 917,
+   "class": "c",
+   "moment": "designing or reviewing anything a prospect or client will use",
+   "summary": "Prospect- or client-facing AI must send people to Joe or Dell, never answer in their place.",
+   "when": "designing or reviewing anything a prospect or client will use"
+  },
+  "08c4eda2": {
+   "always_on": true,
+   "always_on_reason": "class-a; standing-fact:partner_license_territory",
+   "chars": 950,
+   "class": "a",
+   "moment": "every turn: standing person, team or business context",
+   "summary": "Either partner works Alabama leads; Dell stays party of record on Alabama representation until Joe's licence issues.",
+   "when": "every turn"
   },
   "0c1bac27": {
    "always_on": false,
@@ -152,6 +172,14 @@
    "summary": "During decision reviews, invite Joe's framing first and log timing calls and overrides",
    "when": "Joe's decision/timing reviews and order-writing ramp"
   },
+  "19ebbeb3": {
+   "always_on": false,
+   "chars": 1217,
+   "class": "d",
+   "moment": "unfiled_bug stop_gate - turn end, when the turn's own prose reports a defect the session observed",
+   "summary": "A detected bug is recorded and fixed or given a Work Request in the same turn, never stepped over.",
+   "when": "unfiled_bug stop_gate"
+  },
   "1b8e7f43": {
    "always_on": false,
    "chars": 2078,
@@ -179,8 +207,7 @@
    "when": "unexpected friction"
   },
   "1d50a3bb": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:conduct_stop",
+   "always_on": false,
    "chars": 1393,
    "class": "d",
    "moment": "conduct_stop gate",
@@ -188,8 +215,7 @@
    "when": "conduct_stop gate"
   },
   "1f3a7372": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 1516,
    "class": "d",
    "moment": "completion_evidence gate",
@@ -231,8 +257,7 @@
    "when": "new builds, predictions or confident direction"
   },
   "2271e684": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 159,
    "class": "d",
    "moment": "completion_evidence gate, terminal technical claim",
@@ -348,13 +373,14 @@
    "when": "before a change reaches main"
   },
   "30a189fb": {
-   "always_on": false,
+   "always_on": true,
    "chars": 138,
-   "class": "c",
+   "class": "a",
    "moment": "non-CARR task detected",
    "personal_to": "joe",
    "summary": "When a task isn't CARR-related, stop and ask if it belongs in Life AI instead",
-   "when": "non-CARR task detected"
+   "when": "non-CARR task detected",
+   "always_on_reason": "Only delivered through the boot; preserve the existing slim-boot classification."
   },
   "347a9ca6": {
    "always_on": true,
@@ -384,8 +410,7 @@
    "when": "candidate duplicate classification"
   },
   "38b15dc6": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:chat_lint",
+   "always_on": false,
    "chars": 1648,
    "class": "d",
    "moment": "chat_lint gate",
@@ -393,8 +418,7 @@
    "when": "chat_lint gate"
   },
   "3a9dbafd": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:conduct_stop",
+   "always_on": false,
    "chars": 2598,
    "class": "d",
    "moment": "conduct_stop (conduct-stop-gate.py Stop)",
@@ -452,8 +476,7 @@
    "when": "working with LOI template terms"
   },
   "43e2ef76": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 1272,
    "class": "d",
    "moment": "completion_evidence gate",
@@ -485,6 +508,15 @@
    "summary": "In every client/prospect meeting, run discovery questions and reflect them back before recommending anything.",
    "when": "client or prospect meeting, before recommending"
   },
+  "486584d6": {
+   "always_on": false,
+   "chars": 904,
+   "class": "b",
+   "moment": "work needs a web console Joe is signed into on the MacBook",
+   "personal_to": "joe",
+   "summary": "Do console steps in Joe's signed-in Chrome yourself unless only he can supply something.",
+   "when": "work needs a web console Joe is signed into on the MacBook"
+  },
   "49533583": {
    "always_on": false,
    "chars": 2139,
@@ -511,6 +543,14 @@
    "summary": "Before any first edit to tracked repo files, take an isolated worktree; never edit the canonical tree.",
    "when": "first tracked repository edit"
   },
+  "4a77c35d": {
+   "always_on": false,
+   "chars": 712,
+   "class": "b",
+   "moment": "filling or ordering the Dot's work queue",
+   "summary": "Fill the Dot's queue with token-saving research and build-support first; PR reviews only where useful.",
+   "when": "filling or ordering the Dot's work queue"
+  },
   "4a9188f3": {
    "always_on": false,
    "chars": 1773,
@@ -536,8 +576,7 @@
    "when": "update-document-status verb (outbound_format split)"
   },
   "4e104d4c": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2282,
    "class": "d",
    "moment": "completion_evidence gate, new-verb deployment claim",
@@ -596,14 +635,13 @@
    "summary": "When Joe shares an x.com link, read the quoted post and its linked article fully",
    "when": "Joe posts an x.com link"
   },
-  "5697071b": {
-   "always_on": true,
-   "chars": 2787,
-   "class": "a",
-   "moment": "every turn: standing person, team or business context",
-   "summary": "Joe holds Florida licensure only; Dell carries Alabama representation.",
-   "when": "every turn",
-   "always_on_reason": "class-a; standing-fact:partner_license_territory"
+  "578fdd91": {
+   "always_on": false,
+   "chars": 1607,
+   "class": "b",
+   "moment": "contact enrichment finds a wrong or blank field",
+   "summary": "Enrichment applies confirmed corrections through the owning verb in the same run instead of parking proposals.",
+   "when": "contact enrichment finds a wrong or blank field"
   },
   "57d13061": {
    "always_on": false,
@@ -641,8 +679,7 @@
    "when": "correcting one of Joe's mislabeled statements"
   },
   "590b11e1": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 1385,
    "class": "d",
    "moment": "completion_evidence gate, metric completion claim",
@@ -659,8 +696,7 @@
    "when": "a tool error blames a subsystem"
   },
   "5be2f462": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:chat_lint",
+   "always_on": false,
    "chars": 2532,
    "class": "d",
    "moment": "chat_lint gate",
@@ -753,6 +789,14 @@
    "summary": "Before opening a loop, name a real external blocker from the closed list; otherwise just do the work.",
    "when": "add-loop / opening an open_loop"
   },
+  "661d7757": {
+   "always_on": false,
+   "chars": 505,
+   "class": "c",
+   "moment": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record",
+   "summary": "Call Jev for any bounded review judgment without separate approval; its result is evidence, never a gate.",
+   "when": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record"
+  },
   "67580c28": {
    "always_on": true,
    "chars": 1839,
@@ -761,6 +805,15 @@
    "summary": "Joe defines calm positively; CARR surfaces use the dark cinematic register.",
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:partner_preference"
+  },
+  "67e48aaf": {
+   "always_on": false,
+   "chars": 343,
+   "class": "b",
+   "moment": "Joe pastes a token or credential into chat or a screenshot",
+   "personal_to": "joe",
+   "summary": "Never warn Joe about exposure of a credential he chose to paste; use it as directed.",
+   "when": "Joe pastes a token or credential into chat or a screenshot"
   },
   "6901cc3b": {
    "always_on": false,
@@ -771,8 +824,7 @@
    "when": "building or evaluating Dr. CRE (Doc) features"
   },
   "6a4e6283": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 262,
    "class": "d",
    "moment": "completion_evidence gate (shipping claim)",
@@ -821,8 +873,7 @@
    "when": "lead board presentation"
   },
   "73381d78": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 1503,
    "class": "d",
    "moment": "completion_evidence stop_gate - config-file change completion",
@@ -846,8 +897,7 @@
    "when": "projecting a long-running job's completion time"
   },
   "767f9b41": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 156,
    "class": "d",
    "moment": "completion_evidence gate, confirmation response",
@@ -861,6 +911,15 @@
    "moment": "record_home deny_gate - blocked markdown write workaround",
    "summary": "When a markdown write is blocked, route content through record verbs, never redirect it to an unwatched file.",
    "when": "a markdown write is blocked"
+  },
+  "76fcbed6": {
+   "always_on": false,
+   "chars": 1181,
+   "class": "c",
+   "moment": "Joe sends a link, article, repo, video or other source",
+   "personal_to": "joe",
+   "summary": "Give every source Joe sends its own study job on arrival; apply each concept or name the failed test.",
+   "when": "Joe sends a link, article, repo, video or other source"
   },
   "7e9739f2": {
    "always_on": true,
@@ -889,8 +948,7 @@
    "when": "convening a red team/review panel"
   },
   "847f9995": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2730,
    "class": "d",
    "moment": "completion_evidence stop_gate - unattended-path credential verification",
@@ -922,8 +980,7 @@
    "when": "choosing Copilot vs Claude for a task"
   },
   "8c1e6057": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:chat_lint",
+   "always_on": false,
    "chars": 197,
    "class": "d",
    "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
@@ -1001,8 +1058,7 @@
    "when": "any turn asserting a date or time"
   },
   "97326357": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 371,
    "class": "d",
    "moment": "completion_evidence gate",
@@ -1033,15 +1089,6 @@
    "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
    "summary": "When adding content under an indexed multi-folder category, update its INDEX.md in the same session.",
    "when": "adding content under an indexed category"
-  },
-  "9b081605": {
-   "always_on": false,
-   "chars": 208,
-   "class": "d",
-   "moment": "no_send_worker check (outbound send)",
-   "personal_to": "joe",
-   "summary": "Auto-send drafts only to Joe's own CARR address; everything else stays a pending draft",
-   "when": "no_send_worker check (outbound send)"
   },
   "9d80fd2d": {
    "always_on": false,
@@ -1083,6 +1130,15 @@
    "summary": "When a known issue with a known fix is found, repair it immediately and brief; heavy-path still gates.",
    "when": "detecting a known broken thing with a known fix"
   },
+  "a3da3d39": {
+   "always_on": false,
+   "chars": 744,
+   "class": "b",
+   "moment": "leaving a rule, decision or retirement waiting on Joe's approval",
+   "personal_to": "joe",
+   "summary": "Put every item waiting on Joe's approval to him in the same turn with an AskUserQuestion box.",
+   "when": "leaving a rule, decision or retirement waiting on Joe's approval"
+  },
   "a3f6c7f9": {
    "always_on": true,
    "always_on_reason": "class-a",
@@ -1093,8 +1149,7 @@
    "when": "proposing a restructuring"
   },
   "a6e6ab4e": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 1111,
    "class": "d",
    "moment": "completion_evidence stop_gate - changed-system completion",
@@ -1127,13 +1182,20 @@
    "always_on_reason": "class-a; standing-fact:partner_persona"
   },
   "a9ecd5b4": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2381,
    "class": "d",
    "moment": "completion_evidence stop_gate - check-result reporting",
    "summary": "A check compares the artifact to its known-good shape; a success signal must read the artifact, never exit code alone.",
    "when": "building guards or wiring work signals"
+  },
+  "a9fc3f0e": {
+   "always_on": false,
+   "chars": 753,
+   "class": "c",
+   "moment": "running research or a fact-check",
+   "summary": "Read the research-site index first, also search the open internet, and add new useful sources yourself.",
+   "when": "running research or a fact-check"
   },
   "ab814a26": {
    "always_on": false,
@@ -1142,6 +1204,14 @@
    "moment": "rule_shape gate (approve-rule)",
    "summary": "Every taught rule must ship classified as machine-enforceable with a gate, or judgment with a reason",
    "when": "rule_shape gate (approve-rule)"
+  },
+  "ac0a6579": {
+   "always_on": false,
+   "chars": 502,
+   "class": "c",
+   "moment": "building or reviewing access for a client share-site page",
+   "summary": "Client share-site passwords stay the client name; never propose stronger access, never show another client's data.",
+   "when": "building or reviewing access for a client share-site page"
   },
   "af7de070": {
    "always_on": false,
@@ -1279,13 +1349,20 @@
    "when": "handing up or acting on a subagent finding"
   },
   "c315befa": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:chat_lint",
+   "always_on": false,
    "chars": 522,
    "class": "d",
    "moment": "chat_lint gate",
    "summary": "When asking a question or presenting a draft, name the specific deal in the question text itself.",
    "when": "chat_lint gate"
+  },
+  "c363bd8b": {
+   "always_on": false,
+   "chars": 997,
+   "class": "b",
+   "moment": "preparing to merge open PRs",
+   "summary": "Batch open PRs that share files into one combined PR; never remerge them one at a time.",
+   "when": "preparing to merge open PRs"
   },
   "c4a284b2": {
    "always_on": false,
@@ -1366,6 +1443,14 @@
    "when": "every turn",
    "always_on_reason": "class-a; standing-fact:organization_service_model"
   },
+  "cfe6b5c6": {
+   "always_on": false,
+   "chars": 972,
+   "class": "b",
+   "moment": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only",
+   "summary": "Ship an obvious improvement live with kill switch; shadow only for irreversible untested runs, with a dated end.",
+   "when": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only"
+  },
   "cff429f5": {
    "always_on": false,
    "chars": 2587,
@@ -1418,8 +1503,7 @@
    "when": "deal_guard schema (deal value write)"
   },
   "d7f74c93": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:chat_lint",
+   "always_on": false,
    "chars": 1930,
    "class": "d",
    "moment": "chat_lint gate",
@@ -1456,8 +1540,7 @@
    "when": "before reporting work as blocked or parked"
   },
   "dcf98880": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 106,
    "class": "d",
    "moment": "completion_evidence gate (human verification instruction)",
@@ -1491,8 +1574,7 @@
    "when": "answering an opinion request from Joe"
   },
   "e313a3ca": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:conduct_stop",
+   "always_on": false,
    "chars": 2295,
    "class": "d",
    "moment": "conduct_stop gate (before command handoff)",
@@ -1517,8 +1599,7 @@
    "when": "building any gate, hook, linter, or CI validator"
   },
   "e8868cbe": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2852,
    "class": "d",
    "moment": "completion_evidence gate",
@@ -1526,21 +1607,12 @@
    "when": "shipping, parking work on Joe, or weekend-spanning runs"
   },
   "eaa31ac5": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2177,
    "class": "d",
    "moment": "completion_evidence gate (delivery claim)",
    "summary": "Never claim something was handed off, sent, or delivered without naming the specific recipient.",
    "when": "completion_evidence gate (delivery claim)"
-  },
-  "ede4b241": {
-   "always_on": false,
-   "chars": 485,
-   "class": "b",
-   "moment": "dispatching work to another model or launching a cloud session (model choice)",
-   "summary": "When launching a cloud session, pick Sonnet 5.5 for well-scoped checkable work and Opus 5.5 for design, gates and reviews.",
-   "when": "model dispatch or cloud-session launch"
   },
   "ede4c735": {
    "always_on": false,
@@ -1568,8 +1640,7 @@
    "when": "after a non-trivial build works, before shipping"
   },
   "f04a05aa": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 446,
    "class": "d",
    "moment": "completion_evidence gate (autonomous-run completion)",
@@ -1595,8 +1666,7 @@
    "always_on_reason": "class-a; standing-fact:organization_service_model"
   },
   "f47a8fe9": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 2045,
    "class": "d",
    "moment": "completion_evidence gate",
@@ -1629,6 +1699,14 @@
    "summary": "Drive CoStar only in the desktop app's own Browser pane, never Chrome or its extension.",
    "when": "Chrome-extension calls targeting CoStar"
   },
+  "f673326b": {
+   "always_on": false,
+   "chars": 384,
+   "class": "b",
+   "moment": "granting or briefing an agent's access to CARR knowledge, records or tools",
+   "summary": "When granting an agent access, add no fences Joe did not ask for; raise credential custody once.",
+   "when": "granting or briefing an agent's access to CARR knowledge, records or tools"
+  },
   "f92dfab2": {
    "always_on": false,
    "chars": 503,
@@ -1638,8 +1716,7 @@
    "when": "client_asset_packet render (search-packet)"
   },
   "fa217e48": {
-   "always_on": true,
-   "always_on_reason": "stop-gate:completion_evidence",
+   "always_on": false,
    "chars": 193,
    "class": "d",
    "moment": "completion_evidence gate (completion/file claims)",
@@ -1699,5 +1776,37 @@
    "when": "any turn - evaluating whether to add structure or ideas"
   }
  },
- "schema": "carr-rule-classes/v1"
+ "schema": "carr-rule-classes/v1",
+ "keep_full_text": {
+  "0e22e34a": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "113b3833": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 11 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "185013c6": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "1b8e7f43": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "204391be": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "20d106f1": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "24e10ee8": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 23 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "25fcddee": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "2b66211d": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 18 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "2e362970": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 6 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "412d37d3": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "4a9188f3": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 44 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "57d13061": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "5cd8d0f6": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "5e89c211": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 8 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "6cfb67f5": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 3 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "80def9d2": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 9 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "86647daf": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 11 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "a7784a18": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 24 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "a8c55a47": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 2 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "b42f11a0": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "bbffc139": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 38 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "c1547ed1": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 4 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "c20dc3d5": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 55 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "c66dc739": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "d26d63b0": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "e65efc68": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 21 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "ede4c735": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "eeb3d106": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 1 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01.",
+  "fb110a39": "Gold route miss in rule-delivery replay (v2 gold plus hard-case required; 17 occurrences, train + test); retain until its route is fixed. Joe 2026-10-10, decision 1616f64c-5935-4a31-a5cc-ffa4e6721c01."
+ }
 }

@@ -2,9 +2,17 @@
   "schema": "carr-code-routines.v1",
   "timezone": "America/Chicago",
   "jobs": [
-    {"id": "lead-signals-weekly", "module": "lead_signals", "label": "com.carr.routine-lead-signals-weekly", "weekday": 1, "hour": 7, "minute": 30, "replaces": ["npi-sweep-weekly", "radar-weekly"], "model": null},
-    {"id": "contact-enrichment-weekly", "module": "contact_enrichment", "label": "com.carr.routine-contact-enrichment-weekly", "weekday": 4, "hour": 9, "minute": 0, "replaces": ["contact-enrichment-weekly"], "model": "gpt-6.1-sol", "effort": "medium"},
-    {"id": "social-weekly", "module": "social_weekly", "label": "com.carr.routine-social-weekly", "weekday": 5, "hour": 8, "minute": 0, "replaces": ["content-fuel-harvest-weekly", "social-batch-weekly"], "model": "gpt-6.1-sol", "effort": "medium"}
-  ],
-  "retired": ["health-audit-monthly", "playbook-review-monthly", "loop-drain-weekdays", "idea-resurface-monthly", "system-sweep-monthly"]
+    {
+      "id": "lead-signals-weekly",
+      "module": "lead_signals",
+      "label": "com.carr.routine-lead-signals-weekly",
+      "weekday": 1,
+      "hour": 7,
+      "minute": 30,
+      "replaces": [
+        "npi-sweep-weekly"
+      ],
+      "model": null
+    }
+  ]
 }
