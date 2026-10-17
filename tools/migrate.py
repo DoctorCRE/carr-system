@@ -31,6 +31,8 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+import migration_0882
+
 from migration_number_contract import (
     LEGACY_APPLIED_ALIASES,
     MigrationNumberError,
@@ -723,7 +725,15 @@ def main() -> None:
                     cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
                     cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
                     try:
-                        cur.execute(sql)
+                        execution_sql = sql
+                        if name == migration_0882.FILENAME:
+                            execution_sql = migration_0882.retirement_sql(cur, sql, digest)
+                            if execution_sql != sql:
+                                print('retained retired-v3 historical controls; '
+                                      f'source sha256={digest}; execution sha256='
+                                      + hashlib.sha256(execution_sql.encode()).hexdigest(),
+                                      end=' ... ', flush=True)
+                        cur.execute(execution_sql)
                     except psycopg.errors.LockNotAvailable:
                         conn.rollback()
                         fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "
