@@ -352,20 +352,9 @@ SYSTEM_ROWS = ("system_moment", "system_moment_packlayer")
 
 
 def add_system_rows(deliveries):
-    """The system rows, built from the per-path deliveries.
+    """Union prompt and tool deliveries, scored over all or pack-layer rules.
 
-    WHY "MOMENT" AND NOT "EVERYTHING IN CONTEXT". While ops.rule_delivery_policy
-    is 'shadow', standing-context recites EVERY active rule at boot as a gist
-    line (mcp-server/src/doctrine.js, the `enforcing` branch), so availability
-    is total by construction and says nothing. What varies is whether the
-    binding rule's full text is put in front of the session at the moment it
-    binds, which is what the prompt and JIT paths do. So:
-
-      system_moment            prompt path (the Jev judgment when run, else
-                               the compiled rows) plus JIT, charged for gold
-                               of every layer;
-      system_moment_packlayer  the same deliveries, charged only for
-                               pack-layer gold (the layer those paths serve);
+    The boot is a digest receipt and contributes no binding rule text.
     """
     prompt = deliveries.get("prompt_full") or deliveries.get("prompt_compiled") or {}
     jit = deliveries.get("jit_pretooluse") or {}

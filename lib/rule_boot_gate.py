@@ -1,14 +1,10 @@
 """rule_boot_gate.py — state and classification for the gated rule boot.
 
-WHAT THE GATE IS. Joe asked for 100% recall on relevant rules. Nothing put the
-rules in front of a context before it acted, so the design Jev chose (p=1.00)
-is a gate: every session and every subagent must fetch every page of
-standing-context `detail: "boot"` (mcp-server/src/rule-boot.js: the full text
-of the always-on rules plus a one-line index of every active rule) before any
-other tool call runs. hooks/rule-boot-gate.py enforces it on PreToolUse and
-reads each fetch's answer on PostToolUse; hooks/gate-integrity.py arms (and
-re-arms) it at SessionStart. They all import this module so the state layout,
-the fetch-call grammar and the notices live in one place.
+Every session and subagent must fetch the current sponsor-scoped corpus digest
+through standing-context detail="boot" before ordinary tools run. The server
+returns one page without rule text. The scoped lookup delivers binding text
+at the relevant action. hooks/rule-boot-gate.py enforces the receipt on
+PreToolUse and confirms it on PostToolUse. Older paged responses remain valid.
 
 DATABASE AND CODE ONLY. The state here holds the digest, the page count and
 which pages a context has fetched. It never holds rule text.

@@ -954,7 +954,7 @@ export function doctrineTools({ withEnvelope, writeEvent, ToolError }) {
         // because every session and subagent fetches every page of it.
         if (args.detail === "boot") {
           const bootRows = (await c.query(
-            `select id, statement, personal_to
+            `select id, statement, scope, personal_to
                from v_compiled_rules
               where (personal_to is null or ($1::text is not null and personal_to = $1))
                 and coalesce(scope->>'kind','') <> 'intro_politics'

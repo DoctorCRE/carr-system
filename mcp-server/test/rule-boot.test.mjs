@@ -43,11 +43,20 @@ test("empty corpus still has a valid one-page boot", async () => {
   assert.match(boot.next, /^complete/);
 });
 
+test("scope edits invalidate the digest while object key order does not", async () => {
+  const boot = await ruleBootPage([{ ...rows[0], scope: { tools: ["Bash"], moment: "Before writing" } }], "joe");
+  const reordered = await ruleBootPage([{ ...rows[0], scope: { moment: "Before writing", tools: ["Bash"] } }], "joe");
+  assert.equal(boot.digest, reordered.digest);
+  const amended = await ruleBootPage([{ ...rows[0], scope: { tools: ["Read"], moment: "Before reading" } }], "joe");
+  assert.notEqual(boot.digest, amended.digest);
+});
+
 test("registered boot uses authenticated sponsor and retains the old client envelope", async () => {
   const client = { query: async (sql, params) => {
     if (/standing-context:rule-boot/.test(sql)) {
       assert.deepEqual(params, ["joe"]);
       assert.match(sql, /personal_to is null/);
+      assert.match(sql, /select id, statement, scope, personal_to/);
       return { rows };
     }
     return { rows: [] };

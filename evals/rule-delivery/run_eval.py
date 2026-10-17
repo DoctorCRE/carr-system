@@ -276,12 +276,10 @@ def replay(world, case):
     return events
 
 
-def observe(case, events, boot_ids=None):
+def observe(case, events):
     """The raw observation of one case: what was delivered, never how it grades."""
-    if boot_ids is None:
-        boot_ids = set()
     return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
-            "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
+            "available": sorted({rid for ev in events for rid in ev["ids"]}),
             "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
             "prompt_delivered": sorted({rid for ev in events if ev["kind"] == "prompt" for rid in ev["ids"]}),
             "events": len(events), "tokens": sum(ev["tokens"] for ev in events),

@@ -1,3 +1,5 @@
+import { canonicalSha256 } from "./jev-call-receipt.js";
+
 export const RULE_BOOT_SCHEMA = "carr-rule-boot/v1";
 
 // Hash the complete sponsor-visible corpus, without delivering its text at boot.
@@ -5,11 +7,9 @@ export const RULE_BOOT_SCHEMA = "carr-rule-boot/v1";
 export async function ruleBootPage(rows, sponsor, page = 1) {
   const rules = (rows || [])
     .filter(r => !r.personal_to || r.personal_to === sponsor)
-    .map(r => ({ id: r.id, statement: r.statement, personal_to: r.personal_to || null }))
+    .map(r => ({ id: r.id, statement: r.statement, scope: r.scope || null, personal_to: r.personal_to || null }))
     .sort((a, b) => a.id.localeCompare(b.id));
-  const material = JSON.stringify({ sponsor: sponsor || null, rules });
-  const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
-  const digest = `sha256:${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("")}`;
+  const digest = `sha256:${await canonicalSha256({ sponsor: sponsor || null, rules })}`;
   if (page !== 1) return { error: "page_out_of_range", page, pages_total: 1, digest };
   const personal = rules.filter(r => r.personal_to).length;
   const text = "CARR rule corpus digest. Before acting, use the standing-context scoped lookup for applicable binding text. "
