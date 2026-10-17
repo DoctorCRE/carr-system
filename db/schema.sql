@@ -38681,6 +38681,7 @@ declare
   v_receipt ops.rule_retirement_receipt%rowtype;
   v_approval_id uuid;
   v_legacy_note text;
+  v_missing_note text;
   v_contract jsonb;
   v_contract_hash text;
   v_retired_at timestamptz;
@@ -38720,7 +38721,8 @@ begin
     end if;
     return jsonb_build_object('ok',true,'replayed',true,'rule_id',p_rule_id,
       'previous_status',v_prior.previous_status,'status','retired',
-      'retirement_receipt_id',v_prior.id,'legacy_admission',v_prior.legacy_admission);
+      'retirement_receipt_id',v_prior.id,'legacy_admission',v_prior.legacy_admission,
+      'missing_approval_receipt',v_prior.missing_approval_receipt);
   end if;
 
   select * into v_rule from public.rule where id=p_rule_id for update;
@@ -38742,12 +38744,10 @@ begin
        and statement_hash=encode(public.digest(v_rule.statement,'sha256'),'hex')
      order by created_at desc limit 1;
     if v_approval_id is null then
-      -- (0351) Not every receiptless active rule is a defect: 217 of 219
-      -- were activated before the receipt system existed at all. Fall
-      -- through to the shared legacy predicate before refusing outright.
       v_legacy_note := ops.legacy_rule_admission_note(v_rule.id,v_rule.status,v_rule.activated_at);
       if v_legacy_note is null then
-        raise exception 'active rule % lacks its exact approval receipt',v_rule.id;
+        v_missing_note := 'missing_approval_receipt: active rule '||v_rule.id||
+          ' at version '||v_rule.version||' has no exact approval receipt; retirement removes authority';
       end if;
     end if;
   end if;
@@ -38760,14 +38760,14 @@ begin
     'statement_hash',encode(public.digest(v_rule.statement,'sha256'),'hex'),
     'previous_status',v_rule.status,'actor_id',v_actor_id,
     'reason',btrim(p_reason),'superseded_by',p_superseded_by,
-    'approval_receipt_id',v_approval_id,'legacy_admission',v_legacy_note,'retired_at',v_retired_at);
+    'approval_receipt_id',v_approval_id,'legacy_admission',v_legacy_note,'missing_approval_receipt',v_missing_note,'retired_at',v_retired_at);
   v_contract_hash := encode(public.digest(v_contract::text,'sha256'),'hex');
   insert into ops.rule_retirement_receipt
     (idempotency_key,rule_id,rule_version_before,rule_version_after,statement_hash,previous_status,
-     actor_id,reason,superseded_by,approval_receipt_id,legacy_admission,contract_hash,retired_at)
+     actor_id,reason,superseded_by,approval_receipt_id,legacy_admission,missing_approval_receipt,contract_hash,retired_at)
   values (p_idempotency_key,v_rule.id,v_rule.version,v_rule.version+1,
           encode(public.digest(v_rule.statement,'sha256'),'hex'),v_rule.status,
-          v_actor_id,btrim(p_reason),p_superseded_by,v_approval_id,v_legacy_note,v_contract_hash,v_retired_at)
+          v_actor_id,btrim(p_reason),p_superseded_by,v_approval_id,v_legacy_note,v_missing_note,v_contract_hash,v_retired_at)
   returning * into v_receipt;
   insert into ops.authority_receipt
     (idempotency_key,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs)
@@ -38780,7 +38780,8 @@ begin
   if not found then raise exception 'rule % retirement raced',v_rule.id; end if;
   return jsonb_build_object('ok',true,'replayed',false,'rule_id',v_rule.id,
     'previous_status',v_rule.status,'status','retired',
-    'retirement_receipt_id',v_receipt.id,'legacy_admission',v_receipt.legacy_admission);
+    'retirement_receipt_id',v_receipt.id,'legacy_admission',v_receipt.legacy_admission,
+    'missing_approval_receipt',v_receipt.missing_approval_receipt);
 end $$;
 
 
@@ -77699,12 +77700,15 @@ CREATE TABLE ops.rule_retirement_receipt (
     retired_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     legacy_admission text,
-    CONSTRAINT active_retirement_has_approval CHECK (((previous_status <> 'active'::text) OR (approval_receipt_id IS NOT NULL) OR (legacy_admission IS NOT NULL))),
+    missing_approval_receipt text,
+    CONSTRAINT active_retirement_has_approval CHECK (((previous_status <> 'active'::text) OR (approval_receipt_id IS NOT NULL) OR (legacy_admission IS NOT NULL) OR (missing_approval_receipt IS NOT NULL))),
     CONSTRAINT retirement_legacy_excludes_receipt CHECK (((legacy_admission IS NULL) OR (approval_receipt_id IS NULL))),
+    CONSTRAINT retirement_missing_approval_exclusive CHECK (((missing_approval_receipt IS NULL) OR ((previous_status = 'active'::text) AND (approval_receipt_id IS NULL) AND (legacy_admission IS NULL)))),
     CONSTRAINT rule_retirement_receipt_check CHECK ((rule_version_after = (rule_version_before + 1))),
     CONSTRAINT rule_retirement_receipt_contract_hash_check CHECK ((contract_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT rule_retirement_receipt_idempotency_key_check CHECK ((btrim(idempotency_key) <> ''::text)),
     CONSTRAINT rule_retirement_receipt_legacy_admission_check CHECK (((legacy_admission IS NULL) OR (btrim(legacy_admission) <> ''::text))),
+    CONSTRAINT rule_retirement_receipt_missing_approval_receipt_check CHECK (((missing_approval_receipt IS NULL) OR (btrim(missing_approval_receipt) <> ''::text))),
     CONSTRAINT rule_retirement_receipt_previous_status_check CHECK ((previous_status = ANY (ARRAY['proposed'::text, 'active'::text]))),
     CONSTRAINT rule_retirement_receipt_reason_check CHECK ((btrim(reason) <> ''::text)),
     CONSTRAINT rule_retirement_receipt_rule_version_before_check CHECK ((rule_version_before > 0)),
@@ -77717,6 +77721,13 @@ CREATE TABLE ops.rule_retirement_receipt (
 --
 
 COMMENT ON COLUMN ops.rule_retirement_receipt.legacy_admission IS 'Null for the ordinary receipted retirement path. Populated only when ops.retire_rule accepted an ACTIVE rule that has no ops.rule_approval_receipt row because it predates the receipt system entirely (see ops.legacy_rule_admission_note) -- records the rule''s activation time and the receipt-system cutover it predates, so the tamper-evident chain shows what actually happened rather than implying a receipt that never existed.';
+
+
+--
+-- Name: COLUMN rule_retirement_receipt.missing_approval_receipt; Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON COLUMN ops.rule_retirement_receipt.missing_approval_receipt IS 'Explicit missing-approval-receipt marker for retirement of an active rule without an exact grant or legacy admission. Included in the retirement contract hash; never grants authority.';
 
 
 --
@@ -122418,6 +122429,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0888_supersede_triaged_work_request.sql	66a622cb27fe52b52e78d197dad7a9fbc122626f024b7900ea5a777cf5394c63	2026-10-17 02:37:59.911668+00
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
+0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
 \.
 
 

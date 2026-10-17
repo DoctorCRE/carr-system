@@ -367,3 +367,19 @@ test("scope key order alone is a no-op", async () => {
   }), e => e instanceof ToolError && e.payload.error === "no_change");
   assert.equal(c.calls.some(x => /select ops\.amend_rule_|update rule|insert into event/i.test(x.sql)), false);
 });
+
+
+test("retire-rule returns a typed refusal for a database lifecycle refusal", async () => {
+  const c = fakeClient(sql => {
+    if (/select status, statement, personal_to from rule/i.test(sql))
+      return { rows: [{ status: "active", statement: "fixture", personal_to: null }] };
+    if (/select ops\.retire_rule/i.test(sql))
+      throw Object.assign(new Error("system rule retirement requires Joe authority"), { code: "P0001" });
+    return { rows: [] };
+  });
+  await assert.rejects(() => executeRegisteredTool(c, ACTOR, "retire-rule", {
+    idempotency_key: "retire-refusal", rule_id: RULE, reason: "withdraw fixture",
+  }), e => e instanceof ToolError && e.payload.error === "rule_retirement_refused"
+    && e.payload.message === "system rule retirement requires Joe authority");
+  assert.equal(c.calls.some(x => /insert into event/i.test(x.sql)), false);
+});

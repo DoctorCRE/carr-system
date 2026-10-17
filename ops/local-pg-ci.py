@@ -582,6 +582,7 @@ def run_local_ci(
             acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
             acceptance_env["CARR_OWNERSHIP_PRE_0450_FINGERPRINT"] = ownership_baseline
             for program in programs:
+                print(f"local-db-ci: {program.id} acceptance starting")
                 env = dict(acceptance_env)
                 if program.kind == "f03":
                     env = dict(ci_env)
