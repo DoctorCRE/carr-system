@@ -36,6 +36,8 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
+from git_env import fixture_env
+
 # INSERT provenance belongs to one live database's transactions. A rebuild
 # carries schema, never old xid8 values that could collide with its own xids.
 coverage = json.loads((REPO / "ops/config/snapshot-seed-coverage.json").read_text())
@@ -127,8 +129,7 @@ def main():
         root = pathlib.Path(build_repo(tmp, {
             "0001_seed.sql": "insert into ops.widget values ('seed');\n",
         }, {"excluded": {"ops.widget": "fixture runtime data"}}))
-        git_env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-                       GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+        git_env = dict(fixture_env(), GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
                        GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
         def git(*args):
             return subprocess.check_output(["git", "-C", str(root), *args], env=git_env, text=True)
