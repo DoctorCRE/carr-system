@@ -520,7 +520,8 @@ class RejectionReconciliation(Base):
     def wire_live(self):
         live = {"sha": self.fx.base}
         self.runner.live = live
-        self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]}}
+        self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
 
 
     def test_health_recheck_is_bounded_and_recovery_runs_all_release_guards(self):
@@ -2730,10 +2731,13 @@ class ReleaseTarget(Base):
 
     GREEN, RED = ("completed", "success"), ("completed", "failure")
 
+    def setUp(self):
+        super().setUp()
+        self.live = {"sha": self.fx.base}
+
     def ship(self, gh):
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        rc = self.fx.pipeline(runner, github=gh, live=live).tick(["worker"])
+        runner = FakeRunner(live=self.live)
+        rc = self.fx.pipeline(runner, github=gh, live=self.live).tick(["worker"])
         return rc, runner
 
     def released(self, runner):
@@ -4000,7 +4004,8 @@ class DeployCredential(unittest.TestCase):
                 runner = FakeRunner(live=live)
                 pipe = self.pipeline(runner, app=lane == "app")
                 if lane == "worker":
-                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]}}
+                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
                 else:
                     pipe.http = lambda _u: {"source_commit": live["sha"], "environment": "production"}
                     original_run = runner.run
@@ -4022,7 +4027,7 @@ class DeployCredential(unittest.TestCase):
 
         def pipeline(runner):
             pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
-            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}}
+            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}, "worker_version": {"id": PRIOR}}
                                      if url == cfg["worker"]["live_release_url"] else
                                      {"source_commit": live["app"], "environment": "production"})
             return pipe
