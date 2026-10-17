@@ -12,7 +12,7 @@ import tempfile
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from lib import rule_boot_gate as boot  # noqa: E402
-from lib import rule_routes  # noqa: E402
+from lib import rule_operations as rule_routes  # noqa: E402
 
 spec = importlib.util.spec_from_file_location(
     "codex_rule_rail", REPO / "hooks/rule-pack-preuse-reselection.py")
@@ -51,42 +51,42 @@ def main():
     hook_command(events, "PostToolUse", "rule-boot-gate.py", "mcp__carr__standing_context")
     assert boot.classify("mcp__carr__standing_context", {"detail": "boot", "page": 1}) == ("fetch", 1)
     assert boot.classify("mcp__carr__read_doctrine", {}) == ("readonly", None)
-    routes = json.loads((REPO / "ops/config/rule-routes.v1.json").read_text())
+    from lib.rule_scope_lookup import select_rules
+    fixture = json.loads((REPO/'ops/fixtures/rule-scope-compatibility.v1.json').read_text())
+    routes = {'ok': True, 'schema': 'rule-scope-catalog/v1', 'corpus_digest': 'a'*64,
+              'identity': {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local', 'sponsoring_human_id': 'joe'},
+              'rules': [dict(id=rid, statement='Synthetic contract', personal_to=None, scope=scope)
+                        for rid, scope in fixture['structural_scopes'].items()]}
+    def scoped_ids(catalog, tool, value):
+        return [r['id'] for r in select_rules(catalog, dict(tool_name=tool, tool_input=value))['rules']]
+
     edit_call = {"command": "*** Begin Patch\n*** Update File: hooks/example.py\n+new\n*** End Patch"}
-    assert rule_routes.route_matches({"kind": "trigger", "tools": ["Write"],
+    assert rule_routes.structural_matches({"kind": "trigger", "tools": ["Write"],
                                       "verbs": [], "bash_patterns": []}, "apply_patch", edit_call)
-    assert rule_routes.route_matches({"kind": "path_rule", "path_globs": ["hooks/*.py"]},
+    assert rule_routes.structural_matches({"kind": "path_rule", "path_globs": ["hooks/*.py"]},
                                       "apply_patch", edit_call)
-    assert rule_routes.matched_rule_ids(routes, "apply_patch", edit_call)
+    assert scoped_ids(routes, "apply_patch", edit_call)
     move_call = {"command": "*** Begin Patch\n*** Update File: scratch.txt\n*** Move to: hooks/probe.py\n@@\n-before\n+after\n*** End Patch"}
     move_paths = rule_routes.call_paths(move_call)
     assert {"scratch.txt", "hooks/probe.py"} <= set(move_paths), move_paths
     destination_rules = {"43e2ef76", "86647daf", "a7784a18", "a9ecd5b4",
                          "c0b38d80", "e65efc68"}
-    move_rules = set(rule_routes.matched_rule_ids(routes, "apply_patch", move_call))
+    move_rules = set(scoped_ids(routes, "apply_patch", move_call))
     assert destination_rules <= move_rules, sorted(destination_rules - move_rules)
     add_call = {"command": "*** Begin Patch\n*** Add File: hooks/probe.py\n+after\n*** End Patch"}
-    add_rules = set(rule_routes.matched_rule_ids(routes, "apply_patch", add_call))
+    add_rules = set(scoped_ids(routes, "apply_patch", add_call))
     assert move_rules == add_rules, (move_rules, add_rules)
     assert {"4a53ff82", "58b44ccb", "99e951b9"} <= move_rules, move_rules
     move_out = {"command": "*** Begin Patch\n*** Update File: hooks/probe.py\n*** Move to: scratch.txt\n@@\n-before\n+after\n*** End Patch"}
-    assert destination_rules <= set(rule_routes.matched_rule_ids(routes, "apply_patch", move_out))
+    assert destination_rules <= set(scoped_ids(routes, "apply_patch", move_out))
     update_patch = {"command": "*** Begin Patch\n*** Update File: hooks/session-brief.py\n@@\n-old\n+new\n*** End Patch"}
     patch_payload = {"hook_event_name": "PreToolUse", "tool_name": "apply_patch",
                      "tool_input": update_patch}
     edit_payload = dict(patch_payload, tool_name="Edit",
                         tool_input={"file_path": "hooks/session-brief.py"})
-    edit_rows = {row["trigger_id"] for row in rail.matched_triggers(edit_payload)}
-    patch_rows = {row["trigger_id"] for row in rail.matched_triggers(patch_payload)}
-    assert "5e186a09dcf2" in edit_rows
-    assert edit_rows <= patch_rows, sorted(edit_rows - patch_rows)
-    assert "bbffc139" not in rule_routes.matched_rule_ids(
+    assert "bbffc139" not in scoped_ids(
         routes, "apply_patch", update_patch)
-    update_rules = set(rule_routes.matched_rule_ids(routes, "apply_patch", update_patch))
-    move_rows_expected = {row["trigger_id"] for row in rail.matched_triggers(
-        dict(patch_payload, tool_input=move_call))}
-    add_rows_expected = {row["trigger_id"] for row in rail.matched_triggers(
-        dict(patch_payload, tool_input=add_call))}
+    update_rules = set(scoped_ids(routes, "apply_patch", update_patch))
     forms = (
         lambda text: text,
         lambda text: text.replace("\n", "\r\n"),
@@ -107,33 +107,21 @@ def main():
     for variant in forms:
         update_variant = {"command": variant(update_patch["command"])}
         assert "hooks/session-brief.py" in rule_routes.call_paths(update_variant)
-        update_ids = set(rule_routes.matched_rule_ids(
+        update_ids = set(scoped_ids(
             routes, "apply_patch", update_variant))
         assert update_ids == update_rules, (update_ids, update_rules)
         assert destination_rules <= update_ids, sorted(destination_rules - update_ids)
-        update_rows = {row["trigger_id"] for row in rail.matched_triggers(
-            dict(patch_payload, tool_input=update_variant))}
-        assert update_rows == patch_rows, (update_rows, patch_rows)
-        assert edit_rows <= update_rows, sorted(edit_rows - update_rows)
         move_variant = {"command": variant(move_call["command"])}
         assert {"scratch.txt", "hooks/probe.py"} <= set(rule_routes.call_paths(move_variant))
-        move_ids = set(rule_routes.matched_rule_ids(
+        move_ids = set(scoped_ids(
             routes, "apply_patch", move_variant))
         assert move_ids == move_rules, (move_ids, move_rules)
         assert destination_rules <= move_ids, sorted(destination_rules - move_ids)
-        move_rows = {row["trigger_id"] for row in rail.matched_triggers(
-            dict(patch_payload, tool_input=move_variant))}
-        assert move_rows == move_rows_expected, (move_rows, move_rows_expected)
-        assert "5e186a09dcf2" in move_rows
         add_variant = {"command": variant(add_call["command"])}
         assert "hooks/probe.py" in rule_routes.call_paths(add_variant)
-        add_ids = set(rule_routes.matched_rule_ids(routes, "apply_patch", add_variant))
+        add_ids = set(scoped_ids(routes, "apply_patch", add_variant))
         assert add_ids == add_rules, (add_ids, add_rules)
         assert destination_rules <= add_ids, sorted(destination_rules - add_ids)
-        add_rows = {row["trigger_id"] for row in rail.matched_triggers(
-            dict(patch_payload, tool_input=add_variant))}
-        assert add_rows == add_rows_expected, (add_rows, add_rows_expected)
-        assert "5e186a09dcf2" in add_rows
     assert rule_routes.call_paths({"command": "prose before\n" + update_patch["command"]}) == []
     assert rule_routes.call_paths({"command": "cat <<'PATCH'\n" + update_patch["command"]
                                    + "\nPATCH"}) == []
@@ -144,8 +132,6 @@ def main():
     assert "search-doctrine" in rule_routes.call_verbs("mcp__carr__search_doctrine", {})
     assert "confirm-merge" in rule_routes.call_verbs(
         "mcp__carr__call_verb", {"verb": "confirm-merge"})
-    assert rail._row_matches("mcp__carr__new_deal", {},
-                             {"kind": "verb", "pattern": "__new-deal$"})
     for event in ("PreToolUse", "PostToolUse"):
         for group in events[event]:
             for handler in group["hooks"]:

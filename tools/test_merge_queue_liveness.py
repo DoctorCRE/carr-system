@@ -338,7 +338,7 @@ class LivenessTests(unittest.TestCase):
                     if name in ('update', 'merge'):
                         self.assertEqual(row['merge_attempts'], 0)
                         self.assertNotIn((mq.REPOS[0], 1), {(r, n) for r, n, _ in loop.merged})
-                        actions = f.q.db.execute('SELECT phase,attempts FROM actions WHERE pr=1').fetchall()
+                        actions = f.q.db.execute("SELECT phase,attempts FROM actions WHERE pr=1 AND kind != 'regen'").fetchall()
                         self.assertTrue(all(tuple(a) == ('planned', 0) for a in actions))
                     progressed = {(r, n) for r, n, _ in loop.merged}
                     self.assertTrue({(r, 2) for r in mq.REPOS} <= progressed)

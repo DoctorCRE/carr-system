@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -143,11 +144,13 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(summary['ungraded_rules'], 1)
 
     def test_card_replay_isolates_epochs_between_cases(self):
-        case = {'id': 'fixture', 'prompt': 'heres the token use it for the cf deploy', 'tool_calls': []}
+        case = next(case for case in self.eval.load_cases('all') if case['id'] == 'v2-disp-007')
         world = self.eval.World(self.eval.load_expectations())
         first = self.eval.replay(world, case, variant='cards')
         self.assertEqual(first, self.eval.replay(world, case, variant='cards'))
-        self.assertIn('67e48aaf', first[0]['ids'])
+        self.assertIn('b1521526', first[0]['ids'])
+        self.assertEqual(first[0]['inherited_rule_ids'],
+                         world.selection.fixture['cases'][case['id']]['events'][0])
 
     def test_uncapped_inheritance_preserves_covered_baseline_availability(self):
         world = self.eval.World(self.eval.load_expectations())
@@ -165,6 +168,61 @@ class ReplayTests(unittest.TestCase):
                 self.assertTrue(all(len(ev['card_ids']) <= 3 for ev in capped))
                 for ev in capped:
                     self.assertLessEqual(set(ev['inherited_deferred_card_ids']), set(ev['deferred_card_ids']))
+
+    def test_live_route_hook_delivers_exactly_the_offline_capped_cards(self):
+        result = self.eval.card_live_parity()
+        self.assertEqual(result['cases'], 339)
+        self.assertEqual((result['mismatched_events'], result['events_resending_card_rules_as_rules'],
+                          result['events_over_cap']), (0, 0, 0))
+        world = self.eval.World(self.eval.load_expectations())
+        delivered = sum(len(ev['card_ids']) for case in self.eval.load_cases('all')
+                        for ev in self.eval.replay_cards_live(world, case))
+        self.assertGreater(delivered, 0)
+
+
+class CorePlacementTests(unittest.TestCase):
+    """CORE cards ride the boot arm (startup, resume, clear, compact) and SubagentStart."""
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location('boot_gate_hook', REPO / 'hooks/rule-boot-gate.py')
+        cls.hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.hook)
+        cls.core = [c for c in load_cards() if c['placement'] == 'CORE']
+
+    def run_hook(self, payload, arm='RULE BOOT: arm text'):
+        with mock.patch('lib.rule_boot_gate.arm_session', return_value=arm):
+            return self.hook.decide(payload).stdout
+
+    def assert_core(self, text):
+        for card in self.core:
+            self.assertIn(f"[{card['id']}] {card['title']}: {card['wording']}\n  {card['acknowledgement']}", text)
+
+    def test_session_start_and_post_compaction_reboot_carry_core_cards(self):
+        for source in ('startup', 'resume', 'clear', 'compact'):
+            with self.subTest(source=source):
+                out = self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's', 'source': source})
+                self.assertTrue(out.startswith('RULE BOOT: arm text\n\nRULE CARDS (always-on core)'))
+                self.assert_core(out)
+
+    def test_core_page_fits_session_start_cap_beside_the_boot_instructions(self):
+        from lib.rule_boot_gate import fetch_instructions
+        out = self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's', 'source': 'startup'},
+                            arm=fetch_instructions(list(range(1, 16)), 'sha256:' + 'a' * 64, 15))
+        self.assertLess(len(out), 10000)
+
+    def test_subagent_start_carries_core_cards(self):
+        out = json.loads(self.run_hook({'hook_event_name': 'SubagentStart', 'session_id': 's',
+                                        'agent_id': 'a1', 'agent_type': 'Explore'}))
+        specific = out['hookSpecificOutput']
+        self.assertEqual(specific['hookEventName'], 'SubagentStart')
+        self.assertNotIn('permissionDecision', specific)
+        self.assert_core(specific['additionalContext'])
+
+    def test_core_card_failure_fails_open(self):
+        with mock.patch('lib.rule_cards.core_text', side_effect=ValueError('broken cards')):
+            self.assertEqual(self.run_hook({'hook_event_name': 'SessionStart', 'session_id': 's',
+                                            'source': 'compact'}), 'RULE BOOT: arm text\n')
+            self.assertEqual(self.run_hook({'hook_event_name': 'SubagentStart', 'session_id': 's'}), '')
 
 
 

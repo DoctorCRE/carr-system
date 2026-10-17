@@ -197,7 +197,7 @@ def validate_migration_names(
 
 
 def allocate_integration_successors(
-    main_names: Iterable[str], pending_names: Iterable[str],
+    main_names: Iterable[str], pending_names: Iterable[str], *, occupied_slots: Iterable[int] = (),
 ) -> dict[str, str]:
     """Allocate a lexical pending batch only after its integration base is pinned.
 
@@ -215,10 +215,11 @@ def allocate_integration_successors(
     if set(pending).intersection(main):
         raise MigrationNumberError("applied main migration cannot be reallocated")
     highest = max((int(match.group(1)) for n in main if (match := SLOT_RE.fullmatch(n))), default=0)
+    occupied = set(occupied_slots)
     result = {}
     for name in sorted(pending):
         highest += 1
-        while highest in PERMANENTLY_BURNED_MIGRATION_SLOTS:
+        while highest in PERMANENTLY_BURNED_MIGRATION_SLOTS or highest in occupied:
             highest += 1
         if highest > 9999:
             raise MigrationNumberError("migration slot namespace exhausted")
