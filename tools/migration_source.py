@@ -12,9 +12,12 @@ import sys
 from migration_baseline import MANIFEST, MigrationBaseline, runner_sha256
 from migration_number_contract import SLOT_RE
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
+from git_env import scrubbed_env
+
 
 def _git(repo: Path, *args: str) -> bytes:
-    result = subprocess.run(['git', '-C', str(repo), *args], capture_output=True)
+    result = subprocess.run(['git', '-C', str(repo), *args], capture_output=True, env=scrubbed_env())
     if result.returncode:
         raise ValueError(f'migration source: Git read failed ({" ".join(args)}): '
                          + result.stderr.decode(errors='replace').strip())
@@ -55,8 +58,15 @@ def _ref_baseline(repo: Path, ref: str) -> MigrationBaseline | None:
         raise ValueError(f'migration source: invalid baseline at {ref}: {exc}') from exc
 
 
+def _pin_ref(repo: Path, ref: str | None) -> str | None:
+    if ref is None:
+        return None
+    return _git(repo, "rev-parse", "--verify", f"{ref}^{{commit}}").decode().strip()
+
+
 def migration_names(repo: Path, ref: str | None = None) -> set[str]:
     """Return active and explicitly covered filenames at the requested source."""
+    ref = _pin_ref(repo, ref)
     baseline = _baseline(repo, ref)
     return _names(repo, ref) | (set(dict(baseline.migrations)) if baseline else set())
 
@@ -65,6 +75,7 @@ def read_migration(repo: Path, name: str, ref: str | None = None) -> str:
     """Return runner-normalized SQL, checking any baseline-covered source."""
     if not SLOT_RE.fullmatch(name):
         raise ValueError(f'migration source: invalid filename {name!r}')
+    ref = _pin_ref(repo, ref)
     baseline = _baseline(repo, ref)
     covered = dict(baseline.migrations) if baseline else {}
     try:
