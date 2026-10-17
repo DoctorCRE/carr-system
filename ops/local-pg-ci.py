@@ -622,7 +622,7 @@ def run_local_ci(
                         print(f"local-db-ci: {program.id} failed (exit {result.returncode}); no raw output in shadow reports", file=sys.stderr)
                     exit_code = result.returncode
                     break
-                print(f"local-db-ci: {program.id} acceptance passed")
+                print(f"local-db-ci: {program.id} acceptance passed ({time.monotonic() - before:.0f}s)")
             if exit_code == 0 and integration_base is not None:
                 if validate_candidate(repo, integration_base) != integration_source:
                     raise LocalPGRefusal("integration source changed during canonical candidate proof")
@@ -712,6 +712,10 @@ def main() -> int:
         parser.error("shadow shards require --class migration and --report")
     if args.report is None and (args.queued_at is not None or args.job_started_at is not None):
         parser.error("timing bindings require --report")
+    # Piped to a CI log, stdout is block-buffered, so every "acceptance passed"
+    # line below stayed invisible until exit: a slow acceptance loop looked
+    # like a finished-but-hung step (run 39058940694 on PR #1865).
+    sys.stdout = open(sys.stdout.fileno(), "w", buffering=1, closefd=False)
     def cancelled(signum, frame):
         raise KeyboardInterrupt
     # Replace the fixture module's handlers: cancellation must reach the
