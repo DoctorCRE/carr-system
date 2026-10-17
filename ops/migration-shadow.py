@@ -126,7 +126,9 @@ def dump_objects(text: str) -> Counter[str]:
     # already be owner-free and ACL-free pg_dump output.
     literals = re.compile(r'''(?P<tag>\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$).*?(?P=tag)|E'(?:\\.|''|[^'])*'|'(?:''|[^'])*'|"(?:""|[^"])*"|--[^\n]*|/\*.*?\*/''', re.S)
     masked = literals.sub(lambda match: match[0] if match[0].startswith('--') else re.sub(r'[^\n]', ' ', match[0]), text)
-    pieces, current, headers = [], [], 0
+    pieces: list[str] = []
+    current: list[str] = []
+    headers = 0
     for line, visible in zip(text.split('\n'), masked.split('\n')):
         if re.match(r'^\\(?:un)?restrict \S+$', visible) or re.match(r'^-- (?:Dumped (?:from|by) .*|PostgreSQL database dump(?: complete)?)$', visible):
             continue
