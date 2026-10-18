@@ -146,7 +146,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.tailscale-up.plist",
           "runs_on": "primary",
-          "notes": "Primary-only RunAtLoad and 120-second StartInterval, no KeepAlive. ops/tailscale_health.py verifies Running and the kernel route; repair outcomes are timestamped in out/tailscale-up.log."
+          "notes": "Primary-only RunAtLoad and a 120-second cadence as StartCalendarInterval (StartInterval never fires on macOS 27), no KeepAlive. ops/tailscale_health.py verifies Running and the kernel route; repair outcomes are timestamped in out/tailscale-up.log."
         }
       ]
     },

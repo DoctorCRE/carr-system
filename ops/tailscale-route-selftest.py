@@ -139,7 +139,9 @@ sys.exit(1 if os.environ.get("FAKE_ROUTE") == "error" else 0)
         definition = plistlib.loads((REPO / "ops/launchd/com.carr.tailscale-up.plist").read_bytes())
         self.assertEqual(definition["Label"], "com.carr.tailscale-up")
         self.assertTrue(definition["RunAtLoad"])
-        self.assertEqual(definition.get("StartInterval"), 120)
+        self.assertNotIn("StartInterval", definition)
+        minutes = sorted(entry["Minute"] for entry in definition["StartCalendarInterval"])
+        self.assertEqual(minutes, list(range(0, 60, 2)))
         self.assertFalse(definition.get("KeepAlive", False))
 
 
