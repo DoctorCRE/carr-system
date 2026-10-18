@@ -27,6 +27,23 @@ test('all 19 source kinds appear with fixture counts and honest defect coverage'
  assert.equal(result.census_complete,false);assert.equal(result.coverage.find(c=>c.kind==='defect').reason,'fix_status_not_recorded');
  assert.equal(client.seen.some(q=>/\b(insert|update|delete)\b/i.test(q.sql)),false);
 });
+test('progress tasks return safe numeric board versions and withhold invalid versions',async()=>{
+ const result=await read(fixture(),{kinds:'progress_task'});
+ assert.equal(result.items[0].version,3);
+ for(const version of ['9007199254740993',9007199254740992,'invalid',null]){
+  const client=fixture(),query=client.query;
+  client.query=async(sql,params)=>{
+   const result=await query(sql,params);
+   if(sql.includes('public.board_snapshot b,jsonb_each')&&!sql.includes('count(*) as count'))
+    result.rows=result.rows.map(item=>({...item,version}));
+   return result;
+  };
+  const invalid=await read(client,{kinds:'progress_task'});
+  assert.deepEqual(invalid.items,[]);
+  assert.equal(invalid.census_complete,false);
+  assert.equal(invalid.coverage[0].state,'unavailable');
+ }
+});
 test('equal timestamp keyset pages exhaust every leg without duplicates',async()=>{
  let cursor=null,ids=[];
  do{const p=await read(fixture({many:true}),{limit:3,cursor});ids.push(...p.items.map(r=>r.kind+':'+r.id));cursor=p.next_cursor;}while(cursor);
@@ -114,13 +131,25 @@ test('paged external history is searchable beyond the first snapshot and gaps st
  const pages=[{board_id:'carr-v5-external-synthetic-0',version:1,count:1},{board_id:'carr-v5-external-synthetic-1',version:1,count:1}];
  const client=externalFixture([], {schema:'system-work-external.v2',pages,item_count:2});
  const query=client.query;
- client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:pages.map((p,i)=>({board_id:p.board_id,version:1,snapshot_json:{items:[{...row('pull_request',i),title:i?'Ancient merged feature':'Recent merged feature',kind:'pull_request',completed:true}]}}))}:query(sql,params);
+ client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:pages.map((p,i)=>({board_id:p.board_id,version:'1',snapshot_json:{items:[{...row('pull_request',i),title:i?'Ancient merged feature':'Recent merged feature',kind:'pull_request',completed:true}]}}))}:query(sql,params);
  const result=await read(client,{live_library:true,kinds:'pull_request',text:'Ancient'});
  assert.equal(result.items.length,1);assert.equal(result.items[0].id,'pull_request-1');assert.equal(result.census_complete,true);
  const completeQuery=client.query;
  client.query=async(sql,params)=>{const r=await completeQuery(sql,params);return sql.includes('board_id=any')?{rows:r.rows.slice(0,1)}:r;};
  const gap=await read(client,{live_library:true,kinds:'pull_request'});
  assert.equal(gap.census_complete,false);assert.equal(gap.items.length,1);assert.equal(gap.coverage[0].state,'partial');
+});
+test('invalid stored external page versions leave coverage partial and preserve healthy sources',async()=>{
+ const page={board_id:'carr-v5-external-synthetic-0',version:1,count:1};
+ for(const version of ['1e0','01',true,'9007199254740993',9007199254740992,null]){
+  const client=externalFixture([], {schema:'system-work-external.v2',pages:[page],item_count:1});
+  const query=client.query;
+  client.query=async(sql,params)=>sql.includes('board_id=any')?{rows:[{board_id:page.board_id,version,snapshot_json:{items:[{...row('pull_request'),kind:'pull_request'}]}}]}:query(sql,params);
+  const result=await read(client,{kinds:'loop,pull_request'});
+  assert.deepEqual(result.items.map(item=>item.kind),['loop']);
+  assert.equal(result.census_complete,false);
+  assert.equal(result.coverage.find(item=>item.kind==='pull_request').state,'partial');
+ }
 });
 test('actions obey owning workflow states rather than advertising illegal writes',()=>{
  for(const state of ['triaged','ready','in_progress','blocked','declined','superseded','confirmed_closed'])
