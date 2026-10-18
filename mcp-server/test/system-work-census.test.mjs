@@ -194,3 +194,31 @@ test('non-actionable workflow states expose their canonical reader route',async(
  assert.deepEqual(result.items.find(i=>i.kind==='work_request').source_workflow.read.args,{work_request:'WR-000001'});
  for(const item of result.items)assert.deepEqual(item.available_triage_actions,[]);
 });
+
+test('a listed in_progress Work Request opens through work-request-card', async () => {
+ const { executeRegisteredTool } = await import('../src/tools.js');
+ const client=fixture(),query=client.query;
+ const request={ref:'WR-000100',title:'Active work',state:'in_progress',version:3,
+  desired_outcome:'Finish active work',acceptance_criteria:[{id:'AC-1',text:'Work is verified'}]};
+ client.query=async(sql,params)=>{
+  if(sql.includes('work-request-intake:card')) return {rows:[]};
+  if(sql.includes('work-request-intake:readable-card')) return {rows:[request]};
+  if(sql.includes('work-request-intake:acting-identity')) return {rows:[]};
+  const result=await query(sql,params);
+  if(sql.includes('ops.work_request w')&&!sql.includes('count(*) as count'))
+   result.rows=result.rows.map(item=>({...item,id:request.ref,title:request.title,state:request.state,
+    identity:{human_ref:request.ref}}));
+  return result;
+ };
+ const census=await read(client,{kinds:'work_request'});
+ assert.equal(census.items.length,1);
+ assert.equal(census.items[0].state,'in_progress');
+ const card=await executeRegisteredTool(client,{...actor},'work-request-card',{
+  work_request:census.items[0].identity.human_ref});
+ assert.equal(card.ok,true);
+ assert.equal(card.human_ref,request.ref);
+ assert.equal(card.state,'in_progress');
+ assert.equal(card.projection_state,'in_progress');
+ assert.deepEqual(card.acceptance_criteria,request.acceptance_criteria);
+ assert.deepEqual(card.actions,[]);
+});
