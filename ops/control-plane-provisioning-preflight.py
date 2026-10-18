@@ -115,10 +115,10 @@ def validate(config: dict[str, Any]) -> list[str]:
 
     canaries = mapping(config.get("deterministic_canaries"), "deterministic_canaries", errors,
                        {"file", "required_names", "scope"})
-    equals(canaries.get("file"), "~/.config/carr/{calendar,notes}-canary.env", "deterministic_canaries.file", errors)
+    equals(canaries.get("file"), "~/.config/carr/calendar-canary.env", "deterministic_canaries.file", errors)
     if canaries.get("required_names") != ["CARR_CANARY_INGEST_URL", "CARR_CANARY_DESTINATION_ID"]:
-        errors.append("deterministic_canaries.required_names must declare only the isolated calendar/Notes names")
-    equals(canaries.get("scope"), "isolated calendar and Notes canary destinations only; no live URL or local state root", "deterministic_canaries.scope", errors)
+        errors.append("deterministic_canaries.required_names must declare only the isolated calendar names")
+    equals(canaries.get("scope"), "isolated calendar canary destination only; no live URL or local state root", "deterministic_canaries.scope", errors)
 
     mcp = text("mcp-server/src/mcp.js")
     authority_runtime_probe = text("ops/control-plane-authority-runtime-preflight.py")
@@ -192,8 +192,10 @@ def validate(config: dict[str, Any]) -> list[str]:
         or "pipelines/doctrine_mirror.py" not in nightly
     ):
         errors.append("portability mirror step is not scoped to a named read-only capability")
-    if not all(token in calendar and token in notes for token in ("CARR_CANARY_DESTINATION_ID", "CARR_CONTROL_PLANE_MODE")) or "CARR_CALENDAR_CANARY_ENV" not in calendar or "CARR_NOTES_CANARY_ENV" not in notes:
-        errors.append("isolated deterministic canary declarations are not bound by both entrypoints")
+    if not all(token in calendar for token in ("CARR_CANARY_DESTINATION_ID", "CARR_CONTROL_PLANE_MODE")) or "CARR_CALENDAR_CANARY_ENV" not in calendar:
+        errors.append("isolated deterministic canary declarations are not bound by the calendar entrypoint")
+    if "CARR_NOTES_CANARY" in notes or "CARR_CANARY_INGEST" in notes:
+        errors.append("the retired Notes canary sender must not be reintroduced in bin/notes-sweep-post.sh")
     return errors
 
 

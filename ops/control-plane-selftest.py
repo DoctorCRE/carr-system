@@ -516,6 +516,7 @@ def health_truth_checks(live) -> None:
 def main() -> int:
     try:
         from lib.control_plane import (
+            CANARY_ISOLATION_GUARDS,
             cache_key,
             can_disable_legacy,
             evaluate_predicate,
@@ -565,13 +566,21 @@ def main() -> int:
           any("canary isolation guard is not registered" in error
               for error in forged_errors))
 
-    notes_canary = next(workflow for workflow in manifest["workflows"]
-                        if workflow["key"] == "notes-sweep-hourly")
-    check("Notes canary manifest names the lease-bound isolated aggregate as its completion evidence",
-          notes_canary["execution"]["canary"] == {
-              "enabled": True, "isolation_guard": "notes-sweep-hourly.canary.v1", "args": ["--canary"]}
-          and "lease-bound" in notes_canary["inventory"]["current_completion_signal"]
-          and "source snapshot" in notes_canary["completion"]["description"])
+    notes_sweep = next(workflow for workflow in manifest["workflows"]
+                       if workflow["key"] == "notes-sweep-hourly")
+    notes_canary = notes_sweep["execution"]["canary"]
+    check("Notes canary tier is retired: disabled, no guard or arguments, pinned off automatic live promotion",
+          notes_canary["enabled"] is False and notes_canary["auto_promote_live"] is False
+          and notes_canary["args"] == [] and "isolation_guard" not in notes_canary
+          and notes_canary["reason"].strip())
+    check("Notes canary guard is no longer registered, the Calendar and Nightly guards still are",
+          "notes-sweep-hourly.canary.v1" not in CANARY_ISOLATION_GUARDS
+          and {"calendar-fetch-daily.canary.v1",
+               "nightly-record-layer.availability-matcher.canary.v1"} <= CANARY_ISOLATION_GUARDS)
+    check("Notes manifest no longer promises a lease-bound canary aggregate",
+          "canary aggregate" not in notes_sweep["inventory"]["current_completion_signal"]
+          and "canary" not in notes_sweep["completion"]["description"]
+          and notes_sweep["version"] >= 4)
 
     tracked = {p.stem.replace(".SKILL", "") for p in
                (REPO / "ops" / "scheduled-tasks").glob("*.SKILL.md")}

@@ -65,7 +65,7 @@ def observation(surface_id: str, state: str, at: str) -> dict[str, Any]:
         "kind": "scheduler_observation",
         "surface_id": surface_id,
         "workflow_key": "notes-sweep-hourly",
-        "workflow_version": 3,
+        "workflow_version": 4,
         "scheduler_kind": surface["scheduler_kind"],
         "locator": surface["locator"],
         "scheduler_state": state,
@@ -81,7 +81,7 @@ def acceptance(ref: str) -> dict[str, Any]:
         "kind": "workflow_acceptance_receipt",
         "receipt_ref": ref,
         "workflow_key": "notes-sweep-hourly",
-        "workflow_version": 3,
+        "workflow_version": 4,
         "mode": ref.rsplit(":", 1)[-1],
         "status": "accepted",
         "immutable": True,
@@ -91,7 +91,7 @@ def acceptance(ref: str) -> dict[str, Any]:
 def replacement() -> dict[str, Any]:
     return {
         "workflow_key": "notes-sweep-hourly",
-        "workflow_version": 3,
+        "workflow_version": 4,
         "healthy": True,
         "accepted_receipt_refs": ["accept:notes:shadow", "accept:notes:canary"],
     }
@@ -106,7 +106,7 @@ def approval(pre: dict[str, Any], post: dict[str, Any], sibling_pre: dict[str, A
         "action": "disable-legacy-schedule",
         "subject": {
             "workflow_key": "notes-sweep-hourly",
-            "workflow_version": 3,
+            "workflow_version": 4,
             "surface_id": pre["surface_id"],
             "locator": pre["locator"],
             "sibling_surface_id": sibling_pre["surface_id"],

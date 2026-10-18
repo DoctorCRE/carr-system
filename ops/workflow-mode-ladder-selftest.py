@@ -8,7 +8,9 @@ the wrapper pinning the ladder-aware auto mode instead of a fixed one.
 """
 from __future__ import annotations
 
+import json
 import sys
+from copy import deepcopy
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from migration_source import migration_names, read_migration
@@ -18,10 +20,11 @@ from migration_source import migration_names, read_migration
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from lib.control_plane import resolve_auto_mode  # noqa: E402
+from lib.control_plane import resolve_auto_mode, validate_manifest  # noqa: E402
 
 MIGRATION = REPO / "migrations" / "0334_workflow_mode_ladder.sql"
 WRAPPER = REPO / "bin" / "control-plane-tick.sh"
+MANIFEST = REPO / "ops" / "config" / "control-plane-workflows.v1.json"
 
 FAILED: list[str] = []
 
@@ -86,6 +89,52 @@ def check_resolver() -> None:
           resolve_auto_mode(disabled, accepted_canary) == "live")
 
 
+def check_notes_sweep_is_pinned_at_shadow() -> None:
+    """notes-sweep-hourly lost its canary tier; that must not make it live.
+
+    A contract with canary disabled lets accepted SHADOW alone satisfy live,
+    and the production tick resolves tiers with ``--mode auto``.  So retiring
+    the Notes canary would silently turn one routine shadow acceptance (Dell
+    may record those) into automatic live ingestion.  The manifest must pin the
+    workflow at shadow for the automatic tick; going live stays an explicit
+    person-made ``schedule --mode live``.
+    """
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    workflow = next(w for w in manifest["workflows"] if w["key"] == "notes-sweep-hourly")
+    canary = workflow["execution"]["canary"]
+    accepted_shadow = [{"mode": "shadow", "status": "accepted"}]
+    accepted_all = accepted_shadow + [{"mode": "canary", "status": "accepted"}]
+
+    check("notes-sweep-hourly has no canary tier", canary.get("enabled") is False, str(canary))
+    check("notes-sweep-hourly sender has no canary guard registered",
+          "isolation_guard" not in canary and "args" not in canary or canary.get("args") == [], str(canary))
+    check("notes-sweep-hourly with accepted shadow never auto-resolves to live",
+          resolve_auto_mode(canary, accepted_shadow) == "shadow", str(canary))
+    check("notes-sweep-hourly with every acceptance row never auto-resolves to live",
+          resolve_auto_mode(canary, accepted_all) == "shadow")
+    check("notes-sweep-hourly with no evidence stays at shadow",
+          resolve_auto_mode(canary, []) == "shadow")
+    check("the shipped manifest still validates", validate_manifest(manifest, repo=REPO) == [],
+          str(validate_manifest(manifest, repo=REPO)))
+
+    unpinned = deepcopy(manifest)
+    target = next(w for w in unpinned["workflows"] if w["key"] == "notes-sweep-hourly")
+    target["execution"]["canary"].pop("auto_promote_live", None)
+    check("removing the pin is what would open the live path (control)",
+          resolve_auto_mode(target["execution"]["canary"], accepted_shadow) == "live")
+
+    sloppy = deepcopy(manifest)
+    next(w for w in sloppy["workflows"] if w["key"] == "notes-sweep-hourly")["execution"]["canary"]["auto_promote_live"] = "no"
+    check("a non-boolean auto_promote_live pin is a manifest error",
+          any("auto_promote_live" in e for e in validate_manifest(sloppy, repo=REPO)))
+
+    others = [w["key"] for w in manifest["workflows"]
+              if w["key"] != "notes-sweep-hourly"
+              and isinstance(w.get("execution", {}).get("canary"), dict)
+              and w["execution"]["canary"].get("auto_promote_live") is False]
+    check("the pin is not smeared onto other workflows", others == [], str(others))
+
+
 def check_wrapper() -> None:
     check("wrapper exists", WRAPPER.is_file(), str(WRAPPER))
     if not WRAPPER.is_file():
@@ -99,6 +148,7 @@ def main() -> int:
     print("workflow-mode-ladder-selftest — acceptance ladder for shadow/canary/live\n")
     check_migration()
     check_resolver()
+    check_notes_sweep_is_pinned_at_shadow()
     check_wrapper()
     print()
     if FAILED:
