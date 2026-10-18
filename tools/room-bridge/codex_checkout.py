@@ -15,8 +15,12 @@ CANONICAL_REPO = Path.home() / 'carr-system'
 CHECKOUT_ROOT = Path('/private/tmp')
 
 
-def prepare(target: str, source: str, env: dict | None = None) -> dict[str, str]:
+def prepare(target: str, env: dict | None = None) -> dict[str, str]:
     """Return a retained parent workspace and nested clone; clean failed clones.
+
+    The clone always comes from the canonical carr-system origin, never from the
+    desk's cwd: a desk may sit in another repository, a plain folder or a
+    removed worktree, and each of those refused the job (WR-000356).
 
     A workspace-root .git is protected by Codex. The parent contains no Git
     metadata, so its nested standalone checkout remains sandbox-writable.
@@ -41,9 +45,9 @@ def prepare(target: str, source: str, env: dict | None = None) -> dict[str, str]
     branch = target[4:] if new_branch else target
     if not branch or branch.startswith('-'):
         raise DeskError('bad_checkout', 'checkout requires a branch or new:<branch>')
-    git(['check-ref-format', '--branch', branch], source, 'branch validation')
-    origin = git(['remote', 'get-url', 'origin'], source, 'origin lookup')
     canonical = str(CANONICAL_REPO)
+    git(['check-ref-format', '--branch', branch], canonical, 'branch validation')
+    origin = git(['remote', 'get-url', 'origin'], canonical, 'origin lookup')
     author = git(['config', '--get', 'user.name'], canonical, 'canonical author lookup')
     email = git(['config', '--get', 'user.email'], canonical, 'canonical author lookup')
     if not author or not email.endswith('@users.noreply.github.com'):
@@ -57,7 +61,7 @@ def prepare(target: str, source: str, env: dict | None = None) -> dict[str, str]
         args = ['clone', '--no-local']
         if not new_branch:
             args += ['--branch', branch]
-        git([*args, '--', origin, str(repo)], source, 'origin clone', timeout=180)
+        git([*args, '--', origin, str(repo)], canonical, 'origin clone', timeout=180)
         if new_branch:
             git(['switch', '-c', branch], str(repo), 'new branch creation')
         git(['config', '--local', 'user.name', author], str(repo), 'author configuration')
