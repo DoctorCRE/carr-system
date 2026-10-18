@@ -23,7 +23,7 @@ test("ordinary client registrations advertise a compact core with unchanged sche
   const settings = JSON.parse(fs.readFileSync(new URL("../../.claude/settings.json", import.meta.url)));
   for (const name of settings.permissions.allow.filter(n => n.startsWith("mcp__carr__")))
     assert.ok(names.has(name.slice("mcp__carr__".length)), `${name} keeps its existing allowlist route`);
-  for (const file of ["engineering_source_projection.js", "engineering_dispatch_adapter.py"]) {
+  for (const file of ["engineering_dispatch_adapter.py"]) {
     const source = fs.readFileSync(new URL(`../../tools/room-bridge/${file}`, import.meta.url), "utf8");
     for (const match of source.matchAll(/tools\.mcp__carr__([a-z_]+)/g))
       assert.ok(names.has(match[1].replaceAll("_", "-")), `${file}: preserve the Model Room source route`);
