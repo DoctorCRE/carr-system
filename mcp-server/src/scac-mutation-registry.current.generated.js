@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "251be3b2d88ea571cfe6856750de69171b8b7d8a0690186d88ae13ad272ef2e3";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "301e628a232de19bc7c223504b5812100f2358a68b6c773c7c1908709e59c814";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -480,7 +480,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "approve-retrieval-proposals": {
     "ingress_key": "mcp-tool:approve-retrieval-proposals",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "87ecbaa9c95b2c975e799942c5885f84c4c11856e3e87a022d6fad90742ec923",
     "write": true,
     "human_only": false,
@@ -570,7 +570,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "bot-brief": {
     "ingress_key": "mcp-tool:bot-brief",
     "source_locator": "mcp-server/src/bot-brief.js",
-    "source_digest": "0db816afa8bd0ab7ec95668cb1fb6938df7f13f71724b1ea1d4679080c2c4e47",
+    "source_digest": "9a60eea0fd4a97bda42a0b01b4c72926aa25a3f13534ce78e61f601a5646789f",
     "schema_digest": "f28adec69fe75d06c8f3a28f2ff20e33ca9420ffc67f34669786e2b24e180d00",
     "write": false,
     "human_only": false,
@@ -662,7 +662,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "change-doctrine-sections": {
     "ingress_key": "mcp-tool:change-doctrine-sections",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "f92c6f281e770e96ed5dead23553ddc90083e0ae62a972bd967f5b0e8f3203c8",
     "write": true,
     "human_only": false,
@@ -682,7 +682,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "claim-doctrine-sections": {
     "ingress_key": "mcp-tool:claim-doctrine-sections",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "6a33e3711b471eab5594c1f353c75311ac7acd74e1457c893f0a93eb229dacb1",
     "write": true,
     "human_only": false,
@@ -1072,7 +1072,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "doctrine-index": {
     "ingress_key": "mcp-tool:doctrine-index",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "c75ff26cacc2d8a7393b77d59008049dfc0803a2a29696943e88023b27c53bbc",
     "write": false,
     "human_only": false,
@@ -1082,7 +1082,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "doctrine-sections": {
     "ingress_key": "mcp-tool:doctrine-sections",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "3349ced71bfc99614bd4556faba56a6e647a94e7d27140c21eda8427a50072a7",
     "write": false,
     "human_only": false,
@@ -1092,7 +1092,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "dry-run-doctrine-gates": {
     "ingress_key": "mcp-tool:dry-run-doctrine-gates",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "b28351739140bb7b2f367ef0765a89a16e2146a6495e9c5136cd3ee9b2fa6c40",
     "write": true,
     "human_only": false,
@@ -1605,7 +1605,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "map-architecture": {
     "ingress_key": "mcp-tool:map-architecture",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49",
     "write": false,
     "human_only": false,
@@ -1690,7 +1690,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "new-doctrine-doc": {
     "ingress_key": "mcp-tool:new-doctrine-doc",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "7becbb5e40fd46e54e14fc13ae5019171ae1b3999926c1cf53024c0d74d71077",
     "write": true,
     "human_only": false,
@@ -1963,7 +1963,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-concept": {
     "ingress_key": "mcp-tool:propose-retrieval-concept",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "0cce99de34e57b5ca5a898696a622951b708d90dbc1dc854b588712937493bab",
     "write": true,
     "human_only": false,
@@ -1973,7 +1973,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-mapping": {
     "ingress_key": "mcp-tool:propose-retrieval-mapping",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "a481203d49233d5c52c879d00c0a5733fe5fc437dcfc613ae0e7515c72eac00f",
     "write": true,
     "human_only": false,
@@ -1983,7 +1983,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-phrase": {
     "ingress_key": "mcp-tool:propose-retrieval-phrase",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "5e10256c48824dd0d7e191f2ecae0885dd1fc24e39d8112ffbe9e25b2c9ad526",
     "write": true,
     "human_only": false,
@@ -1993,7 +1993,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-retrieval-retirement": {
     "ingress_key": "mcp-tool:propose-retrieval-retirement",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "efbf95037c3a4b1ea73a10140b6cf48e6e3553888e2e3ab7a243d020661ee91d",
     "write": true,
     "human_only": false,
@@ -2183,7 +2183,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-doctrine": {
     "ingress_key": "mcp-tool:read-doctrine",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "92ae529a7e47be0d8ac99fdef3b3b79c8588128418c5b5606f3f2ad1563f2757",
     "write": false,
     "human_only": false,
@@ -3023,7 +3023,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "release-doctrine-claims": {
     "ingress_key": "mcp-tool:release-doctrine-claims",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "89c5446e7b07cac8842cd04d36fb530694fbf308577e8ea2e9a013e0694af9fe",
     "write": true,
     "human_only": false,
@@ -3108,7 +3108,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "resolve-doctrine-rules": {
     "ingress_key": "mcp-tool:resolve-doctrine-rules",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "ef5027b786a7f59b13b9abaf0da32b1ad4796dafd60c7590d57f70eb51df096e",
     "write": false,
     "human_only": false,
@@ -3138,7 +3138,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "retire-doctrine-section": {
     "ingress_key": "mcp-tool:retire-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "ef0499be31ea9da23a23c8c3138536ba8a131b79ce8619458b14fcd43eec6c34",
     "write": true,
     "human_only": false,
@@ -3148,7 +3148,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "retire-retrieval-curation": {
     "ingress_key": "mcp-tool:retire-retrieval-curation",
     "source_locator": "mcp-server/src/situation-retrieval.js",
-    "source_digest": "d5154e8485beef3cc443c02b5ab1625a2b57a717118e9b0087c6bf09b9cc60ff",
+    "source_digest": "806ee1230e8870794f5b697505a7930c80f6b02def9a749cbc32c97e5bfdee4b",
     "schema_digest": "9013091b73c6eaaccd10e5fb6eff9f9debd6b582e549fad7acf75ed48d70416e",
     "write": true,
     "human_only": false,
@@ -3338,7 +3338,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "search-doctrine": {
     "ingress_key": "mcp-tool:search-doctrine",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "a7eeef5debe516a7ece6d07869b189cca7e2c0cc2feb4812941af8bdc3de253c",
     "write": false,
     "human_only": false,
@@ -3358,7 +3358,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-doctrine-refs": {
     "ingress_key": "mcp-tool:set-doctrine-refs",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "fe2da3aa52b6ae0980c2f7da2a8efae02cd0bb92ed0ffaa9e3adacefbdad7208",
     "write": true,
     "human_only": false,
@@ -3500,7 +3500,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "standing-context": {
     "ingress_key": "mcp-tool:standing-context",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "dd5bbb6af7846216c05b6df0b6b559309b0f67178d29fc5bf33b95c93df9354e",
     "write": false,
     "human_only": false,
@@ -3620,7 +3620,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "unfinished-work": {
     "ingress_key": "mcp-tool:unfinished-work",
     "source_locator": "mcp-server/src/system-work-census.v5.js",
-    "source_digest": "de94f861371294d68e475d9798779619358dabc3822a35ded4df3b4d84fc9b2a",
+    "source_digest": "df8abbe337df1f0f385311e5296a1804abda446bddbbf7213ca4f891cb680c9a",
     "schema_digest": "126ebd4723150468d305a554501dcf6d3f15023849350468d33e1bb0d9154fb6",
     "write": false,
     "human_only": false,
@@ -3750,7 +3750,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "write-doctrine-section": {
     "ingress_key": "mcp-tool:write-doctrine-section",
     "source_locator": "mcp-server/src/doctrine.js",
-    "source_digest": "9bdcaa4c42b3cf607bab71967a04852add003584b43fd085974a799e825cecee",
+    "source_digest": "3cea60980032003a08a95acaee6b58723f5a37a6d07fa5338bea87ccae6e88ac",
     "schema_digest": "4998bec3cb4dd152089e253d970dfa603eae3682b212573e45e5c7c79442ac44",
     "write": true,
     "human_only": false,
