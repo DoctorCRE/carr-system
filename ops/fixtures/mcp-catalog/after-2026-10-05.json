@@ -1,0 +1,166 @@
+{
+  "schema": "carr-tool-advertisement-measurement/v1",
+  "baseline_source": "b4dc32fde6c07be4b19497ba0a14e1fcf64c7237",
+  "method": "Compact JSON characters / 4, rounded up per registration. Names and schemas are alternatives, not additive. Instructions are separate. These are transport estimates, not billed tokens or measured native startup context.",
+  "topology_evidence": "Local Claude and Codex registrations read on 2026-10-05; Claude account connector supplied by the task and the prior staged duplication finding. Account connector inheritance is assumed for desktop and CLI; native clients were not launched by this harness.",
+  "runs": 1,
+  "failures": 0,
+  "before": {
+    "tools": 407,
+    "estimated_name_tokens": 2482,
+    "estimated_schema_tokens": 106372,
+    "estimated_instruction_tokens": 476
+  },
+  "after": {
+    "tools": 29,
+    "estimated_name_tokens": 115,
+    "estimated_schema_tokens": 8873,
+    "estimated_instruction_tokens": 529
+  },
+  "rows": [
+    {
+      "client": "Claude desktop",
+      "server": "carr",
+      "before": {
+        "tools": 407,
+        "estimated_name_tokens": 2482,
+        "estimated_schema_tokens": 106372,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Claude desktop",
+      "server": "CARR Record Layer",
+      "before": {
+        "tools": 407,
+        "estimated_name_tokens": 2482,
+        "estimated_schema_tokens": 106372,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Claude desktop",
+      "server": "carr-continuity",
+      "before": {
+        "tools": 3,
+        "estimated_name_tokens": 17,
+        "estimated_schema_tokens": 1595,
+        "estimated_instruction_tokens": 58
+      },
+      "after": {
+        "tools": 3,
+        "estimated_name_tokens": 17,
+        "estimated_schema_tokens": 1595,
+        "estimated_instruction_tokens": 58
+      }
+    },
+    {
+      "client": "Claude CLI",
+      "server": "carr",
+      "before": {
+        "tools": 407,
+        "estimated_name_tokens": 2482,
+        "estimated_schema_tokens": 106372,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Claude CLI",
+      "server": "CARR Record Layer",
+      "before": {
+        "tools": 407,
+        "estimated_name_tokens": 2482,
+        "estimated_schema_tokens": 106372,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Claude CLI",
+      "server": "carr-continuity",
+      "before": {
+        "tools": 3,
+        "estimated_name_tokens": 17,
+        "estimated_schema_tokens": 1595,
+        "estimated_instruction_tokens": 58
+      },
+      "after": {
+        "tools": 3,
+        "estimated_name_tokens": 17,
+        "estimated_schema_tokens": 1595,
+        "estimated_instruction_tokens": 58
+      }
+    },
+    {
+      "client": "Codex",
+      "server": "carr",
+      "before": {
+        "tools": 405,
+        "estimated_name_tokens": 2472,
+        "estimated_schema_tokens": 105321,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Codex",
+      "server": "carr-records",
+      "before": {
+        "tools": 405,
+        "estimated_name_tokens": 2472,
+        "estimated_schema_tokens": 105321,
+        "estimated_instruction_tokens": 476
+      },
+      "after": {
+        "tools": 29,
+        "estimated_name_tokens": 115,
+        "estimated_schema_tokens": 8873,
+        "estimated_instruction_tokens": 529
+      }
+    },
+    {
+      "client": "Codex",
+      "server": "carr-codex-continuity",
+      "before": {
+        "tools": 2,
+        "estimated_name_tokens": 11,
+        "estimated_schema_tokens": 1051,
+        "estimated_instruction_tokens": 57
+      },
+      "after": {
+        "tools": 2,
+        "estimated_name_tokens": 11,
+        "estimated_schema_tokens": 1051,
+        "estimated_instruction_tokens": 57
+      }
+    }
+  ]
+}

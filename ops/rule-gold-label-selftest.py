@@ -684,7 +684,7 @@ def test_cli_train():
             data = json.loads(report.read_text())
             check("report is train-only", data.get("split") == "train")
             check("report has per-class rows",
-                  data["paths"]["system_scoped_boot"].get("by_class") is not None)
+                  data["paths"]["system_moment"].get("by_class") is not None)
         result = subprocess.run(
             [sys.executable, str(EVAL_CLI), "--cases", str(FIXTURE), "--jev", "off",
              "--out-dir", tmp],

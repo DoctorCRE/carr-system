@@ -48,6 +48,7 @@ import ipaddress
 import os
 import re
 import shlex
+import subprocess
 import sys
 import tempfile
 from urllib.parse import urlsplit
@@ -2040,10 +2041,104 @@ def broad_add_reason(cmd, cwd=None):
     return None
 
 
+def source_restore_reason(cmd, cwd=None):
+    """Compare whole-tree checkout/restore effects with HEAD before execution."""
+    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+    try:
+        tokens, _ = shell_operands(shell_tokens(strip_inert_text(cmd)))
+    except ValueError:
+        return None
+    base = cwd or os.getcwd()
+    segments, words = [], []
+    for token in tokens + [';']:
+        if token in SHELL_BOUNDARIES:
+            if words:
+                segments.append(words)
+            words = []
+        else:
+            words.append(token)
+    for words in segments:
+        if words[0] == 'cd' and len(words) == 2:
+            base = _resolve_dir(words[1], base)
+            continue
+        if os.path.basename(words[0]) != 'git':
+            continue
+        directory = base
+        i = 1
+        while i < len(words):
+            if words[i] == '-C' and i + 1 < len(words):
+                directory = _resolve_dir(words[i + 1], directory)
+                i += 2
+            elif words[i].startswith('-C') and len(words[i]) > 2:
+                directory = _resolve_dir(words[i][2:], directory)
+                i += 1
+            else:
+                break
+        if i >= len(words) or words[i] not in {'checkout', 'restore'}:
+            continue
+        operation, args = words[i], words[i + 1:]
+        revision, paths = None, []
+        if operation == 'checkout':
+            if '--' not in args:
+                continue
+            split = args.index('--')
+            before = args[:split]
+            if any(arg in {'-b', '-B', '--orphan'} for arg in before):
+                continue
+            revisions = [arg for arg in before if not arg.startswith('-')]
+            if len(revisions) != 1:
+                continue
+            revision, paths = revisions[0], args[split + 1:]
+        else:
+            j = 0
+            while j < len(args):
+                arg = args[j]
+                if arg == '--':
+                    paths.extend(args[j + 1:])
+                    break
+                if arg in {'-s', '--source'} and j + 1 < len(args):
+                    revision = args[j + 1]
+                    j += 2
+                    continue
+                if arg.startswith('--source='):
+                    revision = arg.split('=', 1)[1]
+                elif not arg.startswith('-'):
+                    paths.append(arg)
+                j += 1
+        if not revision or any('$' in value or '`' in value for value in [directory, revision, *paths]):
+            continue
+        def git_read(*arguments):
+            return subprocess.check_output(
+                ['git', '-C', directory, *arguments], stderr=subprocess.DEVNULL,
+                timeout=2)
+        try:
+            root = git_read('rev-parse', '--show-toplevel').decode().strip()
+            whole_tree = any(path in {':/', ':(top)', ':(top).', '*'} or
+                             os.path.realpath(_resolve_dir(path, directory)) == os.path.realpath(root)
+                             for path in paths)
+            if not whole_tree:
+                continue
+            tree = git_read('rev-parse', '--verify', '--end-of-options', revision + '^{tree}').decode().strip()
+            changed = git_read('diff', '--no-ext-diff', '--name-only', '-z', 'HEAD', tree, '--', *paths)
+        except (OSError, subprocess.SubprocessError):
+            continue  # invalid Git requests fail in Git; preserve this guard's fail-open policy
+        if changed:
+            names = [path.decode('utf-8', errors='replace') for path in changed.split(b'\0') if path]
+            return ('whole-tree source replacement from ' + revision + ' changes tracked paths: '
+                    + json.dumps(names, ensure_ascii=False) + '. Use an explicit owned-path restore: '
+                    'git checkout <revision> -- <owned-path> [<owned-path>...]. '
+                    'Intentional destructive restores keep the existing destructive-action route.')
+    return None
+
+
 def check(cmd, cwd=None):
     """Return a reason string to block, or None to allow."""
     if cmd.strip() in ALLOW_EXACT:
         return None
+
+    reason = source_restore_reason(cmd, cwd)
+    if reason:
+        return reason
 
     reason = broad_add_reason(cmd, cwd)
     if reason:
@@ -2185,6 +2280,11 @@ def decide(payload):
                    ((ti.get("cmd") or ti.get("code") or "")
                     if isinstance(ti, dict) else ""))
             if REPO not in raw and not raw_targets_carr(raw):
+                reason = source_restore_reason(raw, cwd)
+                if reason:
+                    log(f"DENY {reason} :: {raw[:300]}")
+                    print(reason, file=sys.stderr)
+                    sys.exit(2)
                 sys.exit(0)
         tool = "Bash"
     if tool != "Bash":

@@ -155,6 +155,38 @@ def _run_cli(map_data, export_data, *, expect_rc, expect_stdout_contains=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def case_offline_retirement_prune():
+    """Exercise the sanctioned writer with no database or credential dependency."""
+    with tempfile.TemporaryDirectory(prefix="admission-prune-selftest-") as tmp:
+        snapshot = os.path.join(tmp, "snapshot.json")
+        reviewed = os.path.join(tmp, "map.json")
+        original = {"schema_version": 1, "exported_at": "2026-01-01T00:00:00Z",
+                    "source": "frozen-store-read", "rule_count": 2,
+                    "rules": {"aaaaaaaa": {"state": "admitted"}, "bbbbbbbb": {"state": "admitted"}}}
+        with open(snapshot, "w") as fh:
+            json.dump(original, fh)
+        with open(reviewed, "w") as fh:
+            json.dump({"active_rule_ids": {"shared": ["aaaaaaaa"]}}, fh)
+        command = [sys.executable, os.path.join(REPO, "tools/export-rule-admission.py"),
+                   "--out", snapshot, "--prune-to-map", reviewed]
+        env = {key: value for key, value in os.environ.items() if key != "DATABASE_URL"}
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            actual = json.load(fh)
+        expected = dict(original, rules={"aaaaaaaa": original["rules"]["aaaaaaaa"]}, rule_count=1)
+        ok = result.returncode == 0 and actual == expected
+        repeated = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            ok = ok and repeated.returncode == 0 and json.load(fh) == expected
+        with open(reviewed, "w") as fh:
+            json.dump({"active_rule_ids": {}}, fh)
+        refused = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            ok = ok and refused.returncode != 0 and json.load(fh) == expected
+        print(f"{'PASS' if ok else 'FAIL'}  offline retirement prune preserves provenance, is idempotent, and refuses an empty map")
+        return ok
+
+
 def main() -> int:
     partial_map = copy.deepcopy(MAP_BASE)
     partial_controls = partial_map["rule_controls"]
@@ -216,6 +248,7 @@ def main() -> int:
         case_cli_divergent_fails(),
         case_cli_unmapped_export_rule_fails(),
         case_cli_empty_export_passes(),
+        case_offline_retirement_prune(),
     ]
     print(f"rule-classification-parity-check-selftest: {sum(cases)}/{len(cases)} passed")
     return 0 if all(cases) else 1

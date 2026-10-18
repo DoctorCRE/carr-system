@@ -919,10 +919,10 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
     },
 
     "standing-context": {
-      description: "THE SESSION BRIEFING VERB (the #219 design, P6 of the doctrine-store build): everything a session must load before working, served from the store — the taught rules (shared + this partner's personal set, with the counts to recite), pending action-required items, and the doctrine catalog pointer. This replaces file-based rule loading: a session that calls this needs no compiled-rules file, no vault read, no Drive. Call it FIRST in any session; recite the counts back to the partner. DEFAULT detail is `gist` — one line per rule, which is what a boot call can actually hold. Pull full text for the handful you need with rule_ids, or everything with detail=full (large; see the payload note in the handler).",
+      description: "THE SESSION BRIEFING VERB (the #219 design, P6 of the doctrine-store build): everything a session must load before working, served from the store — the taught rules (shared + this partner's personal set, with the counts to recite), pending action-required items, and the doctrine catalog pointer. This replaces file-based rule loading: a session that calls this needs no compiled-rules file, no vault read, no Drive. Call it FIRST in any session; recite the counts back to the partner. detail=boot returns one corpus digest page without rule text. Use the scoped lookup or explicit rule_ids for binding text. DEFAULT detail is `gist` — one line per rule, which is what a boot call can actually hold. Pull full text for the handful you need with rule_ids, or everything with detail=full (large; see the payload note in the handler).",
       inputSchema: { type: "object", properties: {
-        detail: { type: "string", enum: ["gist", "full", "boot", "scopes"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: the full text of every always-on rule plus a one-line index of every active rule, paged (see `page`); hooks/rule-boot-gate.py denies other tools in a context until it has fetched every page of the current digest. scopes = machine lookup input: all sponsor-visible active rules, including introduction rules, with original scope and complete binding text. This catalog is not a delivery receipt or a boot replacement." },
-        page: { type: "integer", minimum: 1, description: "detail=boot only: which page of the rule boot to return (1-based, DEFAULT 1). Each response carries pages_total and the exact next call; read every page." },
+        detail: { type: "string", enum: ["gist", "full", "boot", "scopes"], description: "gist (DEFAULT) = one line per rule, no human_quote. full = every rule's complete text; ~180KB at 147 rules, which overflows a tool result on most clients. Prefer gist + rule_ids. boot = the gated RULE BOOT: a single digest page with no rule text, carrying the digest that hooks/rule-boot-gate.py requires a context to have fetched before it allows other tools. Fetch rule text with rule_ids or the per-call rule lookup. scopes = machine lookup input: all sponsor-visible active rules, including introduction rules, with original scope and complete binding text. This catalog is not a delivery receipt or a boot replacement." },
+        page: { type: "integer", minimum: 1, description: "detail=boot only: the boot is a single digest page, so the only valid value is 1 (DEFAULT 1)." },
         rule_ids: { type: "array", items: { type: "string" }, description: "Short ids (the 8-char form the gist prints, e.g. '4e104d4c'). These rules come back in FULL regardless of detail — the lookup path for 'read the binding text before acting on a gist'." },
         workflow: { type: "string", description: "Optional current workflow key used to select applicable typed constraints after registry activation. It is ALSO read as a rule pack name: pass the pack the observed work belongs to and its rules compile into the payload. `rule_delivery.pack_index` lists the names and what triggers each." },
         packs: { type: "array", items: { type: "string" }, description: "Rule packs to compile, when the work spans more than one (git AND a deal, say). Loading is MONOTONIC by design — a pack adds rules and never removes Layer 0. Unknown names come back in rule_delivery.packs_not_found rather than silently loading nothing." },
@@ -965,10 +965,10 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
         // THE GATED RULE BOOT (mcp-server/src/rule-boot.js). Its own branch,
         // ahead of every other read: it needs only the sponsor-scoped rule
         // rows (same filter as the recitation below) and must stay cheap,
-        // because every session and subagent fetches every page of it.
+        // because every session and subagent fetches its single digest page.
         if (args.detail === "boot") {
           const bootRows = (await c.query(
-            `select id, statement, personal_to
+            `select id, statement, scope, personal_to
                from v_compiled_rules
               where (personal_to is null or ($1::text is not null and personal_to = $1))
                 and coalesce(scope->>'kind','') <> 'intro_politics'
@@ -1288,8 +1288,22 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
           }
           return { id, gist: gist(r.statement) };
         };
-        const missing = [...wanted].filter(
+        const absent = [...wanted].filter(
           w => !allRules.some(r => String(r.id).slice(0, 8).toLowerCase() === w));
+        // The reader view preserves the normal read-only credential boundary.
+        // An unresolved lookup needs authoritative status before it can be skipped.
+        const retired = absent.length ? (await c.query(
+          `select left(id::text,8) as short_id
+             from v_rule_lookup
+            where status = 'retired'
+              and left(id::text,8) = any($2::text[])
+              and (personal_to is null or ($1::text is not null and personal_to = $1))
+              and coalesce(scope->>'kind','') <> 'intro_politics'
+            order by short_id
+            /* standing-context:retired-requested-rules */`, [who, absent])).rows
+          .map(r => r.short_id) : [];
+        const retiredIds = new Set(retired);
+        const missing = absent.filter(id => !retiredIds.has(id));
         const constitutionLoaded = standingRules.filter(r => r.is_constitution).length;
         const constraintLoaded = standingRules.filter(
           r => r.guidance_type === "constraint" && !r.is_constitution).length;
@@ -1340,6 +1354,7 @@ export function doctrineTools({ withEnvelope: envelope, writeEvent, ToolError })
             human_only_authority: actor.human === true,
           },
           detail,
+          ...(retired.length ? { rule_ids_retired: retired } : {}),
           ...(missing.length ? { rule_ids_not_found: missing } : {}),
           ...(detail === "gist" ? { hint_full_text:
             "One line per rule. NEVER quote a gist as the rule — call standing-context again with rule_ids:['<id>',…] for the binding text before acting on one." } : {}),

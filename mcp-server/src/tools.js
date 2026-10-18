@@ -5023,7 +5023,7 @@ export const TOOLS = {
       if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
       const s = await resolveSubject(c, args.lead);
       if (s.type !== "lead") throw new ToolError({ error: "not_a_lead", resolved: s });
-      await versionGuard(c, "lead", s.id, args.base_version);
+      const locked = await versionGuard(c, "lead", s.id, args.base_version);
       const allowed = ["stage","lane","segment","source_type","source_detail","suppressed",
                        "est_lease_event","next_action_date","notes_path","notes","event_source",
                        "event_confidence","report_back_due","drip_campaign","drip_added","sf_deal","score","score_reason","owner"];
@@ -5083,11 +5083,13 @@ export const TOOLS = {
       const columns = Object.keys(storage);
       const old = (await c.query(`select ${columns.join(",")}${owner ? ",(select slug from actor where id=lead.owner_id) as owner" : ""} from lead where id=$1`, [s.id])).rows[0];
       const sets = columns.map((k, i) => `${k}=$${i + 2}`).join(", ");
-      await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2}`,
+      const updated = await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2} returning version`,
         [actor.id, ...Object.values(storage), s.id]);
+      const transitionProof = keys.includes("stage") ? { before_version: locked.version,
+        after_version: updated.rows[0].version, actor_slug: actor.slug } : null;
       for (const k of keys)
         await writeEvent(c, actor, "update-lead", "lead", s.id,
-          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
+          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" ? { transition_proof: transitionProof } : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
             ...(k === "stage" && stageReview ? { cause: stageReview.undo_event_id ? "human_correction" : undefined,
               human_quote: stageReview.human_quote, agent_rationale: stageReview.reason } : {}), idempotency_key: args.idempotency_key });
       return { ok: true, updated: keys };
@@ -6565,7 +6567,7 @@ export const TOOLS = {
 
   "retire-rule": {
     write: true, authorityOnly: true,
-    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
+    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval or explicit missing-approval marker, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Accepts either the full 36-character uuid or the 8-character SHORT FORM the gist index and standing-context print (e.g. '179be4b8'); an ambiguous prefix returns the candidates rather than guessing." },
@@ -6593,9 +6595,16 @@ export const TOOLS = {
       }
 
       const was = cur.rows[0].status;
-      const retired = await c.query(
-        "select ops.retire_rule($1,$2,$3,$4) as result",
-        [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      let retired;
+      try {
+        retired = await c.query(
+          "select ops.retire_rule($1,$2,$3,$4) as result",
+          [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      } catch (error) {
+        if (error.code !== "P0001") throw error;
+        throw new ToolError({ error: "rule_retirement_refused", rule_id: args.rule_id,
+          message: redact(error.message) });
+      }
       const result = retired.rows[0].result;
       await writeEvent(c, actor, "retire-rule", "rule", args.rule_id, {
         field: "status", old: { status: was }, new: { status: "retired" },
@@ -9571,7 +9580,7 @@ registerTools({
 // cached tool list predates a deploy asks the live registry what exists now.
 registerTools({
   "list-verbs": {
-    description: "The LIVE verb registry — names, descriptions, write flags, input schemas — straight from the deployed Worker, bypassing the connector's cached tool list. Use when a verb you expect is missing from your tool list (a deploy since this session connected): find it here, then invoke it through call-verb without any reconnect.",
+    description: "Discover the LIVE verb registry — names, descriptions, write flags and input schemas — beyond the compact startup core or a connector's cached tool list. Use filter to fetch only matching verbs, reuse their schemas in this session, then invoke them through call-verb without reconnecting.",
     inputSchema: { type: "object", properties: {
       filter: { type: "string", description: "case-insensitive substring match over verb name AND description" },
       names_only: { type: "boolean", description: "names plus first-sentence descriptions, no schemas. Composes with filter." } } },
@@ -9842,7 +9851,7 @@ registerTools({
     // call-verb wrapping a read verb lands on the READER connection and fails
     // exactly as the direct call would; it did, on the doctrine-search outage.
     write: true,
-    description: "Invoke ANY live verb by name — the deploy-gap passthrough. A freshly deployed verb is callable here the moment the Worker ships, no connector reconnect needed; its first-class tool appears at your next session start. Takes {verb, args} where args is the inner verb's own argument object (including its idempotency_key for writes). All profile and permission checks apply to the inner verb exactly as a direct call.",
+    description: "Invoke ANY live verb by name, including verbs outside the compact startup core. Discover its schema with list-verbs and reuse it in this session. Takes {verb, args} where args is the inner verb's own argument object (including its idempotency_key for writes). All profile and permission checks apply to the inner verb exactly as a direct call. Newly deployed verbs need no connector reconnect.",
     inputSchema: { type: "object", properties: {
       verb: { type: "string" },
       args: { type: "object" } },

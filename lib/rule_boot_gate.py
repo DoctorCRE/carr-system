@@ -1,14 +1,10 @@
 """rule_boot_gate.py — state and classification for the gated rule boot.
 
-WHAT THE GATE IS. Joe asked for 100% recall on relevant rules. Nothing put the
-rules in front of a context before it acted, so the design Jev chose (p=1.00)
-is a gate: every session and every subagent must fetch every page of
-standing-context `detail: "boot"` (mcp-server/src/rule-boot.js: the full text
-of the always-on rules plus a one-line index of every active rule) before any
-other tool call runs. hooks/rule-boot-gate.py enforces it on PreToolUse and
-reads each fetch's answer on PostToolUse; hooks/gate-integrity.py arms (and
-re-arms) it at SessionStart. They all import this module so the state layout,
-the fetch-call grammar and the notices live in one place.
+Every session and subagent must fetch the current sponsor-scoped corpus digest
+through standing-context detail="boot" before ordinary tools run. The server
+returns one page without rule text. The scoped lookup delivers binding text
+at the relevant action. hooks/rule-boot-gate.py enforces the receipt on
+PreToolUse and confirms it on PostToolUse. Older paged responses remain valid.
 
 DATABASE AND CODE ONLY. The state here holds the digest, the page count and
 which pages a context has fetched. It never holds rule text.
@@ -611,9 +607,10 @@ def _py_preserves_root(code):
     return printed and preserves_root
 
 
-def parse_bash_fetch(command, cwd):
+def parse_bash_fetch(command, cwd, *, verbs=("standing-context",)):
     """(args, direct) when `command` is a standing-context fetch in the grammar
-    above (`direct` False when output passes through a filter), else None."""
+    above (`direct` False when output passes through a filter), else None.
+    The lookup adapter may name the read-only rule verbs; boot uses only standing-context."""
     tokens = _lex(str(command or "").strip())
     if not tokens:
         return None
@@ -641,7 +638,7 @@ def parse_bash_fetch(command, cwd):
     words = [t for t in head if t[0] == "word"]
     if not all(t[0] in ("word", "redir") for t in head) or [t[0] for t in head[:len(words)]] != ["word"] * len(words):
         return None  # a redirect only after the arguments
-    if len(words) not in (3, 4) or [w[1] for w in words[1:3]] != ["call", "standing-context"]:
+    if len(words) not in (3, 4) or words[1][1] != "call" or words[2][1] not in verbs:
         return None
     prog = words[0]
     if "/" not in prog[1]:

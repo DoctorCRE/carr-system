@@ -1,49 +1,9 @@
 #!/usr/bin/env python3
-"""run_eval.py — replay events through CARR's deterministic rule-delivery layer.
+"""Replay current lookup consumers with frozen pre-cutover moment decisions.
 
-The system under test is the trigger/pack layer with the Jev judgment OFF:
-
-  prompt event  ops/rule_trigger_delivery.advise (compiled prompt_regex rows
-                plus always-on; rank/ask stubbed to raise, so no Jev call),
-                then the UserPromptSubmit hook's own pack-layer filter
-                (lib/rule_delivery_preuse.semantic_delivery);
-  tool event    hooks/rule-pack-preuse-reselection.py's own decision code:
-                the scheduled rail (_matches), the route rail
-                (routed_rule_ids over ops/config/rule-routes.v1.json) and the
-                compiled-table rail (matched_triggers), unioned as process()
-                unions them, deduped per (rule, tool) inside one case as
-                lib/rule_routes.fresh_ids dedupes per session.
-
-It calls the production functions; it does not re-implement them. It writes
-nothing to production logs or caches (log_path=os.devnull, no session id).
-
-GRADER (programmatic, expected rule ids per case):
-  expected  = gold - disputed - boot-delivered rules, restricted to rules the
-              trigger layer owes (a trigger/path route, or pack-layer member).
-              Frozen per case in expectations.v4.json (--freeze-expectations)
-              and graded from there, so a change to the routes cannot move its
-              own denominator; a drift from the live derivation needs a new
-              expectations version.
-  recall    = |delivered & expected| / |expected|, per case and micro.
-  false     = delivered rules outside the case's full gold set (and not
-              disputed). A should-not-fire case has no expected rule.
-  tokens    = estimated context tokens of the receipts the events would inject
-              (render replicated offline; chars / 4, no offline tokenizer).
-
-RECEIPT EVIDENCE: --observe writes one raw observation per case (what was
-delivered, no grades); score_receipt() grades a baseline and a candidate
-observation cohort against the frozen expectations and is the scorer
-compares current observations.
-
-Usage:
-  run_eval.py --variant baseline --split train
-  run_eval.py --variant v1 --split all
-  run_eval.py --compare baseline v1 --split test
-  run_eval.py --observe OUT.jsonl [--trace-reads READS.json]
-  run_eval.py --freeze-expectations
-  run_eval.py --variant cards --print
-  run_eval.py --variant cards-uncapped --print
-  run_eval.py --card-report OUT.json
+Labels, cohorts, source inputs and grading remain independent. Receipt sizing
+uses the replacement contract. Offline judgments establish plumbing parity,
+not live model accuracy. Run --variant NAME --split all to write observations.
 """
 import argparse
 import hashlib
@@ -217,27 +177,22 @@ class World:
         self.preuse, self.rule_routes = preuse, rule_routes
         ev = _load(os.path.join(REPO, "ops", "rule_delivery_eval.py"), "rde_world")
         self.ev = ev
-        self.rtd = ev._quiet_rule_trigger_delivery(REPO, "eval")
+        from ops.rule_scope_replay import FrozenSelection
+        self.selection = FrozenSelection(REPO)
+        if expectations:
+            expectations = self.selection.retirements.expectations(expectations)
         self.hook = _load(os.path.join(REPO, "hooks", "rule-pack-preuse-reselection.py"),
                           "preuse_hook_world")
-        with open(os.path.join(REPO, "ops", "config", "rule-selection-corpus.v1.json"),
-                  "r", encoding="utf-8") as handle:
-            self.statements = {r["id"]: r.get("statement") or ""
-                               for r in json.load(handle)["rules"]}
+        self.statements = {r["id"]: r.get("statement") or "" for r in self.selection.catalog["rules"]}
         meta = ev.rule_meta(REPO)
         self.layer = {rid: row["layer"] for rid, row in meta.items()}
-        with open(os.path.join(REPO, "ops/config/rule-classes.v1.json"), encoding="utf-8") as handle:
-            classes = json.load(handle)["rules"]
-        self.frozen_jit_boot_ids = {rid for rid, row in classes.items() if row["always_on"]
-                     and row.get("personal_to") in (None, "joe")} | {
-            rid for rid, row in meta.items() if row["layer"] == "layer0"}
         routes = self.rule_routes.load_routes(__import__("pathlib").Path(REPO))["rules"]
         owed = set()
         for rid, entry in routes.items():
             if any(route.get("kind") in ("trigger", "path_rule") for route in entry["routes"]):
                 owed.add(rid)
         owed |= {rid for rid, layer in self.layer.items() if layer == "pack"}
-        self.owed = owed - self.frozen_jit_boot_ids
+        self.owed = set(self.selection.retirements.active(owed))
         if expectations:
             self.owed = {rid for row in expectations["cases"].values() for rid in row["expected"]}
         self.envelope = _load(os.path.join(REPO, "ops", "machine_envelope.py"),
@@ -252,11 +207,12 @@ class World:
             expected = sorted(case["required"])
         else:
             expected = sorted((set(case["gold"]) - set(case["disputed"])) & self.owed)
-        return {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
+        label = {"split": case.get("split"), "input_sha256": case.get("input_sha256"),
                 "cohort": "envelope" if self.envelope(case["prompt"]) else "human",
                 "expected": expected,
                 "allowed": sorted(set(case["gold"]) | set(case["disputed"])),
                 "should_not_fire": not expected}
+        return self.selection.retirements.label(label)
 
     def label(self, case):
         return self.pinned.get(case["id"]) or self.derive(case)
@@ -267,56 +223,33 @@ class World:
     # ---- delivery
 
     def prompt_ids(self, case):
-        if not case["prompt"].strip():
-            return []
-        rows = self.rtd.advise(case["prompt"], session_id=None, log_path=os.devnull,
-                               rank=_raise, ask=_raise)
-        kept, _packs = self.preuse.semantic_delivery(__import__("pathlib").Path(REPO),
-                                                     [row["id"] for row in rows])
-        return sorted(kept)
+        result = self.selection.select({'hook_event_name': 'UserPromptSubmit', 'task': case['prompt']})
+        if not result['complete']:
+            raise ValueError('incomplete_replay_selection')
+        return [r['id'] for r in result['rules']]
 
     def tool_ids(self, case, index, call):
-        payload = {"hook_event_name": "PreToolUse", "tool_name": call["tool_name"],
-                   "tool_input": call.get("tool_input"), "session_id": "rule-delivery-eval",
-                   "tool_use_id": f"eval-{case['id']}-{index}"}
-        if self.hook._matches(payload):
-            return sorted(self.hook.scheduled_rule_ids())
-        rows = self.hook.matched_triggers(payload)
-        routed = self.hook.routed_rule_ids(payload)
-        table = self.preuse.merge_trigger_delivery(rows)[2] if rows else []
-        return sorted(set(routed) | set(table))
-
-    # ---- token cost
+        result = self.selection.select({'hook_event_name': 'PreToolUse', 'task': case['prompt'],
+                                       'tool_name': call['tool_name'], 'tool_input': call.get('tool_input')})
+        if not result['complete']:
+            raise ValueError('incomplete_replay_selection')
+        return [r['id'] for r in result['rules']]
 
     def receipt_chars(self, ids, *, prompt):
-        """Characters of the receipt an event with these fresh ids injects.
-
-        Replicates hooks/rule-pack-preuse-reselection._route_delivery's render
-        (same keys, the real ROUTE_INSTRUCTION, the real fit_rules under the
-        real cap) with fixed-width stand-ins for digests and identities. The
-        prompt receipt has the same skeleton plus probabilities."""
-        rr = self.rule_routes
-        pad = "0" * 64
-        base = {"schema": rr.ROUTE_RECEIPT_SCHEMA, "client": "claude",
-                "session_id": "0" * 36, "turn_id": None, "tool_use_id": "toolu_" + "0" * 22,
-                "tool_name": "Bash", "tool_input_sha256": pad, "routes_digest": pad,
-                "triggers_digest": pad, "map_digest": pad, "source_digest": pad,
-                "trigger_ids": [], "route_rule_ids": [], "packs": [],
-                "identity": {"agent_principal_id": "0" * 36,
-                             "runtime_principal": "joe-local", "sponsoring_human_id": "0" * 36},
-                "rule_ids": list(ids), "not_found": [], "instruction": rr.ROUTE_INSTRUCTION,
-                "rule_delivery": {"mode": "shadow", "declared_packs": [], "packs_not_found": []},
-                "receipt_id": pad}
-
+        from lib.rule_delivery_preuse import LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION
+        pad = '0'*64
+        base = dict(schema=LOOKUP_RECEIPT_SCHEMA, client='claude', session_id='0'*36,
+                    turn_id=None, tool_use_id='toolu_'+'0'*22, tool_name='Bash',
+                    tool_input_sha256=pad, task_sha256=pad, corpus_digest=pad, source_digest=pad,
+                    event_name='UserPromptSubmit' if prompt else 'PreToolUse',
+                    identity=self.selection.catalog['identity'], rule_ids=list(ids),
+                    data_defects=[], unresolved=[], models=['jev-1.13.0'], complete=True,
+                    instruction=LOOKUP_INSTRUCTION, receipt_id=pad)
         def render(full, overflow):
-            row = dict(base, rules=[{"id": r["id"], "statement": r["statement"]} for r in full],
-                       overflow=overflow)
-            if prompt:
-                row["probabilities"] = {r["id"]: 1.0 for r in full}
-            return self.preuse.canonical(row).decode("utf-8")
-        rules = [{"id": rid, "statement": self.statements.get(rid, "")} for rid in sorted(ids)]
-        full, overflow = rr.fit_rules(rules, render, always_on=set())
-        return rr.context_chars(render(full, overflow)), bool(overflow)
+            return self.preuse.canonical(dict(base, rules=full, overflow=overflow)).decode()
+        rules = [r for r in self.selection.catalog['rules'] if r['id'] in ids]
+        full, overflow = self.rule_routes.fit_rules(rules, render, always_on=set())
+        return self.rule_routes.context_chars(render(full, overflow)), bool(overflow)
 
 
 def _raise(*_args, **_kwargs):
@@ -329,6 +262,8 @@ def replay(world, case, variant="baseline"):
     """[{kind, ids, fresh, tokens, overflow}] for the case's events, in order."""
     if variant in ("cards", "cards-uncapped"):
         return replay_cards(world, case, cap=None if variant == "cards-uncapped" else 3)
+    if variant == "cards-live":
+        return replay_cards_live(world, case)
     events = []
     ids = world.prompt_ids(case)
     if case["prompt"].strip():
@@ -370,6 +305,74 @@ def replay_cards(world, case, *, cap=3):
     return events
 
 
+def _live_hook():
+    spec = importlib.util.spec_from_file_location(
+        'rule_lookup_hook', os.path.join(REPO, 'hooks', 'rule-pack-preuse-reselection.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def replay_cards_live(world, case, *, hook=None):
+    """The same frozen events through the live route hook's delivery_receipt.
+
+    The production matchers' selection (World.prompt_ids / World.tool_ids)
+    stands in for the store lookup, and the hook persists delivered cards in
+    its own per-context dedupe state, isolated in a temporary directory with
+    a fresh session per case. Card IDs come back out of the hook receipt.
+    """
+    import tempfile
+    import uuid
+    from unittest import mock
+    hook = hook or _live_hook()
+    identity = {'agent_principal_id': 'joe-local', 'runtime_principal': 'joe-local',
+                'sponsoring_human_id': 'joe'}
+    payloads = []
+    if case['prompt'].strip():
+        payloads.append(('prompt', {'hook_event_name': 'UserPromptSubmit', 'prompt': case['prompt']},
+                         world.prompt_ids(case)))
+    payloads.extend(('tool', {'hook_event_name': 'PreToolUse', 'tool_use_id': f'call-{index}', **call},
+                     world.tool_ids(case, index, call))
+                    for index, call in enumerate(case['tool_calls']))
+    events = []
+    with tempfile.TemporaryDirectory() as state, mock.patch.dict(
+            os.environ, {'CARR_RULE_ROUTE_DEDUPE_DIR': os.path.join(state, 'routes'),
+                         'CARR_RULE_BOOT_STATE_DIR': os.path.join(state, 'boot')}):
+        session = f'replay-{uuid.uuid4()}'
+        for kind, payload, inherited in payloads:
+            selection = {'rules': [{'id': rid, 'statement': 'frozen replay rule', 'personal_to': None}
+                                   for rid in sorted(inherited)],
+                         'identity': identity, 'corpus_digest': '0' * 64, 'data_defects': [],
+                         'unresolved': [], 'models': [], 'complete': True}
+            output = hook.delivery_receipt(dict(payload, session_id=session), selection,
+                                           case['prompt'], dedupe=True)
+            row = json.loads(output['hookSpecificOutput']['additionalContext']) if output else {}
+            card_ids = [c['id'] for c in row.get('cards', [])]
+            events.append({'kind': kind, 'tool': payload.get('tool_name'), 'card_ids': card_ids,
+                           'rule_ids': row.get('rule_ids', [])})
+    return events
+
+
+def card_live_parity():
+    """Every frozen event: the live hook delivers exactly the offline capped cards."""
+    cases = load_cases('all')
+    world = World(load_expectations())
+    hook = _live_hook()
+    from lib.rule_cards import covered_rule_ids, load_cards
+    covered = covered_rule_ids(load_cards())
+    events = mismatched = duplicated = over_cap = 0
+    for case in cases:
+        offline = replay_cards(world, case, cap=3)
+        live = replay_cards_live(world, case, hook=hook)
+        for want, got in zip(offline, live, strict=True):
+            events += 1
+            mismatched += want['card_ids'] != got['card_ids']
+            duplicated += bool({rid[:8] for rid in got['rule_ids']} & covered)
+            over_cap += len(got['card_ids']) > 3
+    return {'cases': len(cases), 'events': events, 'mismatched_events': mismatched,
+            'events_resending_card_rules_as_rules': duplicated, 'events_over_cap': over_cap}
+
+
 def score_card_paths(expected, allowed, labelled, paths):
     """Rule-occurrence micro counts. Acceptable/disputed IDs may be precise, not required."""
     paths = {key: set(value) for key, value in paths.items()}
@@ -408,7 +411,7 @@ def card_comparison():
     cards = load_cards()
     core = {rid for c in cards if c['placement'] == 'CORE' for rid in c['source_rule_ids']}
     mapped = {rid for c in cards for rid in c['source_rule_ids']}
-    boots = {'baseline': set(world.ev.boot_always_on_ids(REPO)), 'cards': core, 'cards-uncapped': core}
+    boots = {'baseline': set(), 'cards': core, 'cards-uncapped': core}
     observations = []
     for case in cases:
         arms, details = {}, {}
@@ -484,11 +487,10 @@ def card_comparison():
                     'evals/rule-delivery/expectations.v4.json', 'evals/rule-delivery/hard_cases.v1.json',
                     'ops/fixtures/rule-delivery-eval/cases.v2.json', 'lib/rule_cards.py',
                     'ops/config/rule-cards.v1.json', 'ops/config/rule-routes.v1.json',
-                    'ops/config/rule-triage.v1.json', 'ops/config/rule-classes.v1.json',
+                    'ops/config/rule-triage.v1.json',
                     'ops/config/rule-selection-corpus.v1.json', 'ops/rule_delivery_eval.py',
-                    'ops/rule_trigger_delivery.py', 'lib/rule_delivery_preuse.py', 'lib/rule_routes.py',
-                    'hooks/rule-pack-preuse-reselection.py', 'ops/config/rule-enforcement-map.json',
-                    'ops/config/rule-jit-triggers.v1.json', 'ops/config/rule-jev-triggers.v1.json']
+                    'lib/rule_delivery_preuse.py', 'lib/rule_routes.py',
+                    'hooks/rule-pack-preuse-reselection.py', 'ops/config/rule-enforcement-map.json']
     return {'schema': 'rule-card-comparison/v2',
             'method': {'recall': 'source-rule ID intersections; case-level unions, then micro counts',
                        'precision': 'allowed delivered IDs / labelled delivered IDs; pending IDs ungraded',
@@ -568,10 +570,8 @@ def card_cap_impact(observations, table, core, mapped, labels):
 
 def observe(case, events, boot_ids=None):
     """The raw observation of one case: what was delivered, never how it grades."""
-    if boot_ids is None:
-        boot_ids = _load(os.path.join(REPO, "ops/rule_delivery_eval.py"), "rde_boot").boot_always_on_ids(REPO)
     return {"case_id": case["id"], "split": case.get("split"), "input_sha256": case.get("input_sha256"),
-            "available": sorted(set(boot_ids) | {rid for ev in events for rid in ev["ids"]}),
+            "available": sorted(set(boot_ids or ()) | {rid for ev in events for rid in ev["ids"]}),
             "delivered": sorted({rid for ev in events for rid in ev["ids"]}),
             "prompt_delivered": sorted({rid for ev in events if ev["kind"] == "prompt" for rid in ev["ids"]}),
             "events": len(events), "tokens": sum(ev["tokens"] for ev in events),
@@ -666,7 +666,8 @@ def pending_gold_ids(statements, path=PENDING_GOLD):
         doc = json.load(handle)
     if doc.get("schema") != "rule-delivery-pending-gold/v1" or not isinstance(doc.get("rules"), dict):
         raise ValueError(f"{path}: not a rule-delivery-pending-gold/v1 document")
-    pending = set(doc["rules"])
+    from ops.rule_scope_replay import RetiredRules
+    pending = set(RetiredRules(REPO).active(doc["rules"]))
     unknown = sorted(pending - set(statements))
     if unknown:
         raise ValueError(f"{path}: pending-gold rule(s) not in the selection corpus: {unknown}")
@@ -695,13 +696,13 @@ def load_expectations(path=EXPECTATIONS):
 
 def expectation_drift(world, cases, expectations):
     """Case ids whose live labels no longer match the frozen ones."""
-    pinned = expectations["cases"]
+    pinned = world.selection.retirements.expectations(expectations)["cases"]
     return sorted(c["id"] for c in cases if pinned.get(c["id"]) != world.derive(c))
 
 
 def observe_all(variant="baseline"):
     world = World()
-    boot_ids = world.ev.boot_always_on_ids(REPO)
+    boot_ids = set()
     if variant in ("cards", "cards-uncapped"):
         from lib.rule_cards import load_cards
         boot_ids = {rid for c in load_cards() if c["placement"] == "CORE" for rid in c["source_rule_ids"]}
@@ -778,6 +779,9 @@ def score_receipt(expectations, baseline_rows, candidate_rows):
     estimate, a case-bootstrap interval per arm, and the paired-bootstrap delta.
     The controls push an oracle (deliver exactly the expected rules) and a null
     (deliver nothing) through the same grader."""
+    from ops.rule_scope_replay import RetiredRules
+    retirements = RetiredRules(REPO)
+    expectations = retirements.expectations(expectations)
     base, cand = paired_cohorts(expectations, baseline_rows, candidate_rows)
     cases, labelled = expectations["cases"], set(expectations["labelled"])
 
@@ -788,7 +792,8 @@ def score_receipt(expectations, baseline_rows, candidate_rows):
     dims = {}
     with open(V2_CASES, encoding="utf-8") as handle:
         fixture = json.load(handle)
-    availability_ids = {c["id"]: set(c["gold"]) for c in fixture["cases"] if c["split"] == "test"}
+    availability_ids = {c["id"]: set(retirements.active(c["gold"]))
+                        for c in fixture["cases"] if c["split"] == "test"}
     def availability_row(observed, cid):
         gold = availability_ids[cid]
         return dict(observed, prompt_id=cid, availability_hits=len(set(observed["available"]) & gold),
@@ -953,7 +958,15 @@ def main(argv=None):
     parser.add_argument("--trace-reads", metavar="OUT", help="with --observe: write the repository files read")
     parser.add_argument("--freeze-expectations", action="store_true",
                         help=f"write {os.path.basename(EXPECTATIONS)} from the live labels")
+    parser.add_argument("--card-live-parity", action="store_true",
+                        help="replay every frozen event through the live route hook and compare its cards with the offline capped selector")
     args = parser.parse_args(argv)
+    if args.card_live_parity:
+        result = card_live_parity()
+        print(json.dumps(result, indent=2, sort_keys=True))
+        clean = not (result['mismatched_events'] or result['events_resending_card_rules_as_rules']
+                     or result['events_over_cap'])
+        return 0 if clean else 1
     if args.card_report:
         with open(args.card_report, "w", encoding="utf-8") as handle:
             json.dump(card_comparison(), handle, indent=2, sort_keys=True)

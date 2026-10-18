@@ -16,7 +16,8 @@
         {
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-preuse-reselection.py",
-          "timeout": 20
+          "timeout": 20,
+          "additionalContextLimit": 10000
         }
       ]
     },
@@ -180,6 +181,16 @@
       "hooks": [
         {
           "type": "command",
+          "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-preuse-reselection.py",
+          "timeout": 20,
+          "additionalContextLimit": 10000
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/scheduled-run-record.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/scheduled-run-record.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/scheduled-run-record.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/scheduled-run-record.py",
           "timeout": 20
         }
@@ -206,6 +217,17 @@
         {
           "type": "command",
           "command": "if [ ! -e \"{{REPO}}/hooks/session-presence-hook.py\" ] && [ ! -L \"{{REPO}}/hooks/session-presence-hook.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/session-presence-hook.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/session-presence-hook.py claude",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "SubagentStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "if [ ! -f \"{{REPO}}/hooks/rule-boot-gate.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-boot-gate.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-boot-gate.py",
           "timeout": 5
         }
       ]
@@ -246,7 +268,8 @@
         {
           "type": "command",
           "command": "if [ ! -f \"{{REPO}}/hooks/rule-pack-preuse-reselection.py\" ]; then printf '%s\\n' \"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\" >&2; printf '%s\\n' '{\"continue\":false,\"stopReason\":\"CARR_SAFETY_HOOK_MISSING: missing or invalid safety script {{REPO}}/hooks/rule-pack-preuse-reselection.py\"}'; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-pack-preuse-reselection.py",
-          "timeout": 20
+          "timeout": 20,
+          "additionalContextLimit": 10000
         }
       ]
     }

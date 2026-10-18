@@ -112,6 +112,9 @@ case "${1:-}" in
   # green, receipts in out/health-act.jsonl. Plain `health` stays read-only
   # and prints the audit of red rows that have no open loop.
   health)       shift; "$PY" "$REPO/tools/health-check.py" "$@" ;;
+  # Cloudflare has no native hard spend cap; this is ours. Not scheduled:
+  # run|fast|restore|check-e2e|health|map-services|loop-watch. See tools/cloudflare_spend_guard.py.
+  cloudflare-spend-guard) shift; "$PY" "$REPO/tools/cloudflare_spend_guard.py" "$@" ;;
   costs)        shift; PYTHONPATH="$REPO/tools${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import system_costs,sys; sys.exit(system_costs.main(sys.argv[1:]))' "$@" ;;
   config)       shift; python3 "$REPO/ops/config-as-code.py" "$@" ;;
   lint)         shift; python3 "$REPO/tools/writing-lint.py" "$@" ;;
@@ -147,6 +150,7 @@ case "${1:-}" in
   # deny message already prescribes the fix — this makes it one step instead of
   # three, two of which (the .venv and out/ symlinks) are invisible until
   # something breaks on a path that is simply not there.
+  regen)        shift; "$PY" "$REPO/tools/regen.py" "$@" ;;
   worktree)     shift; "$REPO/bin/worktree.sh" "$@" ;;
   local-db-ci)  shift; "$PY" "$REPO/ops/local-pg-ci.py" "$@" ;;
   # `pr-board` (2026-10-12): every open pull request with exactly one next
@@ -162,5 +166,5 @@ case "${1:-}" in
   # runs approve-rule for the ready rows through `./run.sh call` and appends
   # each receipt or verbatim refusal to out/rule-approvals.jsonl.
   rule-approvals) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -c 'import sys; from lib import rule_approval_worklist as w; sys.exit(w.main(sys.argv[1:]))' "$@" ;;
-  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|verify-emails [--source registry|vendors|roster] [--segment X] [--out f.csv]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|check [--recovery --reason WHY [--vault PATH]]|smoke [--recovery --reason WHY [--vault PATH]]|next [--all] [--domain X]|report-card [--validate|--run] [--skip-evidence] [--recovery --reason WHY [--vault PATH]]|local-db-ci [--class migration|strict] [--port N]|pr-board [--json] [--file-loops] [--no-write] [--no-probe]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
+  *) echo "usage: run.sh deal-room|lead-board|lead-promote [--count N] [--county X] [--segment X]|renewal-feed|all|corroborate|graph|graph-system|graph-health [--verbose]|section-index [each supports --recovery --reason WHY [--vault PATH]]|space-search <folder>|salesforce-diff [--apply]|registry-audit [--verbose] [--recovery --reason WHY [--vault PATH]]|review-queue [--fixture f.json]|brief-pack [--section all|one-thing|prebriefs|capacity|monday-agenda|renewal-shortlist] [--quiet] [--recovery [--vault PATH]]|verify-emails [--source registry|vendors|roster] [--segment X] [--out f.csv]|retrieve [--recovery [--vault PATH]] <question>|health [--act] [--recovery --reason WHY [--vault PATH]]|cloudflare-spend-guard run/fast/restore/check-e2e/health/map-services/loop-watch|config [check|pull|install] [--apply]|lint <file> [--surface email|social|proposal|web]|restore-rehearse [--preflight] [--verify-only] [--date YYYYMMDD] [--identity PATH] [--keep-branch]|key-recovery-test|migrate [--apply] [--yes]|export [--only <target>] [--bootstrap]|call [--branch <name>] <verb> '<json args>'|call-mode [serve|state|start|stop]|check [--recovery --reason WHY [--vault PATH]]|smoke [--recovery --reason WHY [--vault PATH]]|next [--all] [--domain X]|report-card [--validate|--run] [--skip-evidence] [--recovery --reason WHY [--vault PATH]]|local-db-ci [--class migration|strict] [--port N]|pr-board [--json] [--file-loops] [--no-write] [--no-probe]|rule-approvals [--json] [--apply [--limit N]] [--runtime-root PATH]|regen [--pr N] [--list]|worktree <name> [--from B]|--list|--remove <name|path>"; exit 2 ;;
 esac

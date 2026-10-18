@@ -18,12 +18,10 @@
       "5e896ed6",
       "98e74e7c",
       "466a545a",
-      "113b3833",
       "faae6748",
       "30a189fb",
       "25fab860",
       "57d13061",
-      "bbffc139",
       "c66dc739",
       "0156e9fa",
       "49533583",
@@ -52,7 +50,6 @@
       "6901cc3b",
       "c6f69dee",
       "e313a3ca",
-      "fb110a39",
       "8c1e6057",
       "5be2f462",
       "c315befa",
@@ -70,7 +67,6 @@
       "97326357",
       "5d44d3f3",
       "d26d63b0",
-      "d5dcfe26",
       "2b889e80",
       "81709f57",
       "c20dc3d5",
@@ -101,23 +97,18 @@
       "17ffd587",
       "6a4e6283",
       "b1521526",
-      "c1547ed1",
       "f04a05aa",
       "b587f6c2",
       "590b11e1",
       "f0f9156e",
       "0e22e34a",
-      "1fddcffb",
-      "99e951b9",
       "a3f6c7f9",
       "b01edd26",
-      "fb2b263d",
       "fc4d7753",
       "14181e60",
       "b42f11a0",
       "f5d97b4a",
       "8aefcdce",
-      "4f7c348f",
       "4a9188f3",
       "f47a8fe9",
       "73381d78",
@@ -126,7 +117,6 @@
       "015183f5",
       "4e104d4c",
       "2a3ff869",
-      "0f38532e",
       "61c64d91",
       "def3e84e",
       "388cc81e",
@@ -142,7 +132,6 @@
       "a9ecd5b4",
       "23ea0607",
       "76a53dfe",
-      "308ef1de",
       "179be4b8",
       "43e2ef76",
       "fc21a431",
@@ -153,7 +142,6 @@
       "1f3a7372",
       "af7de070",
       "647f843d",
-      "e8868cbe",
       "d9874334",
       "740bb505",
       "9530fb1c",
@@ -170,15 +158,12 @@
       "c0b38d80",
       "38b15dc6",
       "5e89c211",
-      "4402973a",
       "24e10ee8",
       "cd84d22a",
       "614c1209",
-      "58b44ccb",
       "152ceb65",
       "e65efc68",
       "1c21263c",
-      "1d50a3bb",
       "67580c28",
       "a8f159ad",
       "9293d609",
@@ -210,14 +195,11 @@
       "1f750181",
       "737a68d6",
       "a7784a18",
-      "204391be",
-      "a2e78f48",
       "b7ec8f3b",
       "19ebbeb3",
       "661d7757",
       "f673326b",
       "08c4eda2",
-      "4a77c35d",
       "a9fc3f0e",
       "ac0a6579",
       "578fdd91",
@@ -297,20 +279,17 @@
       "4dd44fd7",
       "f92dfab2",
       "0e22e34a",
-      "99e951b9",
       "14181e60",
       "f5d97b4a",
       "2a3ff869",
       "9ff56260",
       "2e8b4840",
       "76a53dfe",
-      "308ef1de",
       "647f843d",
       "6cfb67f5",
       "cff429f5",
       "d7c69aa6",
       "5e89c211",
-      "58b44ccb",
       "4a53ff82",
       "faae6748",
       "25fab860"
@@ -318,11 +297,9 @@
     "post_action_verification": [
       "17ffd587",
       "b01edd26",
-      "8cddc6ad",
-      "4402973a"
+      "8cddc6ad"
     ],
     "session_task_rail": [
-      "113b3833",
       "173119a8",
       "185013c6",
       "25fcddee",
@@ -330,7 +307,6 @@
       "30a189fb",
       "3fa17fa0",
       "49533583",
-      "4f7c348f",
       "557838a5",
       "57d13061",
       "5d44d3f3",
@@ -342,8 +318,7 @@
       "c6f69dee",
       "d9874334",
       "df55c398",
-      "faf1b643",
-      "fb110a39"
+      "faf1b643"
     ],
     "transactional_schema": [
       "b42e217e",
@@ -794,22 +769,10 @@
       "enforcement_class": "deny_gate",
       "exceptions": "existing legacy paths are not retroactively renamed"
     },
-    "0f38532e": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Architecture judgment (what counts as 'the one home')."
-    },
     "1021fa84": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Interpretive/historical-framing judgment."
-    },
-    "113b3833": {
-      "binding_moment": "file lookup",
-      "category": "session_task_rail",
-      "control": "session_boot",
-      "enforcement_class": "surfacing",
-      "exceptions": "connector/cloud fallback"
     },
     "11b2b73b": {
       "category": "judgment_advisory",
@@ -882,11 +845,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Requires judging whether a given move fixes the cause or routes around it, which no predicate can decide: reshaping a command to get through a false refusal and writing a different correct command are the same keystrokes. The rule works by being recited at the moment friction appears, and its own text names the tell \u2014 the system still does the wrong thing and only this session knows the trick."
     },
-    "1d50a3bb": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
-    },
     "1f3a7372": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -898,11 +856,6 @@
       "planned_control": "A guest-list check that runs the same pairing predicate as e6e0b0e7 over an invite list, once events and vendor Category are both on the record.",
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. Guest lists are assembled outside any tool call, and the rule hands the exception to Joe explicitly for a given event."
-    },
-    "1fddcffb": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Judgment on what counts as 'needed regardless of task'."
     },
     "20d106f1": {
       "category": "judgment_advisory",
@@ -990,14 +943,6 @@
       "exceptions": "the Petersen shape \u2014 two party rows for one human \u2014 passes `same_person_because` with what establishes it; two leads, two clients, a party already holding both roles, and anything touching a vendor row are all out of scope",
       "note": "Built 2026-08-15 after the Ramsey false positive showed the same confusion from the other direction. Joe's ruling: everyone starts as a lead, so an L- and a C- ref for one person is the system working. The gate refuses a merge whose only basis is a name match, is symmetric so swapping the arguments does not slip past, writes nothing when it refuses, and records the stated basis on the event because a merge is permanent and a retired ref is never reissued."
     },
-    "308ef1de": {
-      "binding_moment": "before a change reaches main",
-      "category": "hard_pre_action",
-      "control": "pr_only_main_ruleset",
-      "enforcement_class": "deny_gate",
-      "exceptions": "named writer/claimed work",
-      "note": "Reassigned 2026-08-27 (WR-000019 slice S3): hooks/git-writer-gate.py retired, the edit-time catch of a shared-tree git write is gone, and what remains BUILT is the server-side backstop -- a change swept or mis-committed locally still cannot reach main without a reviewed PR under the PR-only ruleset with required CI. That is a later, coarser binding moment than the retired gate's (after the fact, at merge, rather than at the git command itself), which is a real reduction in how early the mistake is caught; recovery of any locally-lost work also still depends on git's own reflog/object retention rather than a gate-issued warning. The retired gate's finer-grained, earlier catch has no replacement as of this slice."
-    },
     "30a189fb": {
       "binding_moment": "non-CARR task",
       "category": "session_task_rail",
@@ -1078,13 +1023,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
-    "4402973a": {
-      "binding_moment": "after drift detection and before any regeneration or overwrite",
-      "category": "post_action_verification",
-      "control": "vault_salvage",
-      "enforcement_class": "stop_gate",
-      "exceptions": "none \u2014 the evidence is created even when healing continues"
-    },
     "466a545a": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1140,13 +1078,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
-    "4f7c348f": {
-      "binding_moment": "session start",
-      "category": "session_task_rail",
-      "control": "session_boot",
-      "enforcement_class": "surfacing",
-      "exceptions": "store unavailable stop rail"
-    },
     "4fae20f4": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1191,13 +1122,6 @@
       "control": "record_research",
       "enforcement_class": "deny_gate",
       "exceptions": "none \u2014 sourced evidence is recorded before the client row"
-    },
-    "58b44ccb": {
-      "binding_moment": "creating a code file outside the repo",
-      "category": "hard_pre_action",
-      "control": "one_repo",
-      "enforcement_class": "deny_gate",
-      "exceptions": "editing a file that already exists; non-code extensions; anything outside a git working tree"
     },
     "58cef3a1": {
       "category": "judgment_advisory",
@@ -1539,13 +1463,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Creative cross-domain judgment; not mechanically testable."
     },
-    "99e951b9": {
-      "binding_moment": "pre-commit when content is added under an indexed multi-folder category",
-      "category": "hard_pre_action",
-      "control": "index_upkeep",
-      "enforcement_class": "deny_gate",
-      "exceptions": "categories without an existing INDEX.md"
-    },
     "9d80fd2d": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1654,11 +1571,6 @@
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. The rule is explicitly conditional \u2014 'good sometimes, not by default' \u2014 and the conditions (live or likely shared project, complementary territory, no existing loyalty) are situational judgments."
     },
-    "bbffc139": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Automated gate ledger_capture removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
-    },
     "bc4145f6": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1684,11 +1596,6 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Automated gate staged_gate_bless removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
-    },
-    "c1547ed1": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Architecture judgment for every new workflow/system/asset."
     },
     "c1db316c": {
       "category": "judgment_advisory",
@@ -1781,11 +1688,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Judgment on when the conceptual model and file reality actually diverge."
     },
-    "d5dcfe26": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Automated gate drift_claim removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
-    },
     "d7c69aa6": {
       "binding_moment": "live calendar capture completion for an unmatched attendee",
       "category": "hard_pre_action",
@@ -1873,11 +1775,6 @@
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. Judging whether two vendors are 'the same category' at the relationship level is the rule's whole content."
     },
-    "e8868cbe": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
-    },
     "eaa31ac5": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1962,19 +1859,6 @@
       "exceptions": "the level stays a HUMAN JUDGMENT and is stored, not computed \u2014 the rule says so itself, because a relationship can matter for reasons no event count can see. The check reports and never writes.",
       "note": "CORRECTED 2026-08-15. This rule was mapped transactional_schema/versioned_record with the claim 'countable evidence required by verb'. That claim was false: `relationship_level` appears exactly once in the whole MCP server, inside merge-vendor-rows' survivorship field list. No verb exposes it as an editable field, so no verb could have been requiring evidence for it. What actually exists is the mechanism the rule names itself, v_vendor_level_suggestion \u2014 present since migration 0052, refined 0053/0065, rebuilt 0069 to exclude merged rows, and read by NOTHING outside the migrations until now. It is read nightly and reports only the view's own `disagrees` rows, which require both sides known: 16 of 301 active vendors on the first live run, where a crude recorded<>suggested comparison returns 239. Twelve of the sixteen sit at Established or Core with no introduction or referral recorded in either direction, which usually means the edges were never written down rather than the level being wrong."
     },
-    "fb110a39": {
-      "binding_moment": "fan-out brief",
-      "category": "session_task_rail",
-      "control": "delegation_tripwire",
-      "enforcement_class": "surfacing",
-      "exceptions": "one initial lookup; qualified peer allowed",
-      "note": "Reassigned 2026-08-27 (WR-000019 slice S4): hooks/delegation-gate.py stopped denying anything -- it now only records a per-session ledger and speaks an ANNOUNCE at Stop when a session materially under-delegated, never a block. Unlike slice S3's reassignment (which moved two rules to a DIFFERENT installed deny_gate control that already carried the same property server-side), no replacement deny mechanism exists here for THIS rule's property (reclaiming a delegated sweep is no longer refused by anything); the honest move is the same one the map's other five delegation_tripwire rules (2b66211d, c6f69dee, 2dbb0ad8, 185013c6, df55c398) already made before this slice -- category session_task_rail, enforcement_class surfacing, matching BUILT_CLASS_BY_CATEGORY's own mapping. hooks/executor-tier-gate.py (control executor_tier, unchanged by this slice) still denies a subagent spawn naming no model or reasoning effort, but that is a different rule's property, not this one's."
-    },
-    "fb2b263d": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Requires knowing what other files reference the changed content."
-    },
     "fc21a431": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1984,16 +1868,6 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Structural-design judgment."
-    },
-    "204391be": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
-    },
-    "a2e78f48": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
     },
     "b7ec8f3b": {
       "category": "judgment_advisory",
@@ -2024,11 +1898,6 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Legal and business-fact judgment with a stated amendment condition: whether Joe's Alabama licence has actually issued, and whether a given act is representation or only prospecting, research and outreach, cannot be read off any write the record layer receives."
-    },
-    "4a77c35d": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Ordering the Dot queue needs a judgment about which jobs would otherwise spend paid Claude or Codex tokens, and whether a PR's own review loop genuinely ended unresolved, stalled or ran out of budget. No dispatch predicate can decide that a review would be busy work."
     },
     "67e48aaf": {
       "category": "judgment_advisory",
@@ -2107,22 +1976,10 @@
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "0f38532e": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git"
-      ]
-    },
     "1021fa84": {
       "load_layer": "layer0",
       "packs": [],
       "why": "Corrects a standing misreading of Joe that every session inherits from its context."
-    },
-    "113b3833": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ]
     },
     "11b2b73b": {
       "load_layer": "pack",
@@ -2196,13 +2053,6 @@
       "packs": [],
       "why": "Fires on unexpected friction, which is by definition unpredicted."
     },
-    "1d50a3bb": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
-    },
     "1f3a7372": {
       "load_layer": "pack",
       "packs": [
@@ -2215,11 +2065,6 @@
       "packs": [
         "vendor-intros"
       ]
-    },
-    "1fddcffb": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The core-routing law this whole scoping change enforces; it must survive an undeclared boot."
     },
     "20d106f1": {
       "load_layer": "pack",
@@ -2308,13 +2153,6 @@
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "308ef1de": {
-      "load_layer": "control",
-      "packs": [
-        "engineering-git"
-      ],
-      "why": "An installed deny gate delivered this at its binding moment; WR-000019 S3 (2026-08-27) reassigned the control from the retired hooks/git-writer-gate.py to the server-side PR-only main ruleset (control pr_only_main_ruleset), which is still an installed control that delivers this rule at ITS binding moment (merge, not the git command itself)."
-    },
     "30a189fb": {
       "load_layer": "layer0",
       "packs": [],
@@ -2402,13 +2240,6 @@
       ],
       "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
-    "4402973a": {
-      "load_layer": "control",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
     "466a545a": {
       "load_layer": "pack",
       "packs": [
@@ -2466,11 +2297,6 @@
       ],
       "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
-    "4f7c348f": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The boot recitation contract itself. Layer 0 until the amendment batch replaces its wording."
-    },
     "4fae20f4": {
       "load_layer": "layer0",
       "packs": [],
@@ -2512,13 +2338,6 @@
       "load_layer": "control",
       "packs": [
         "records-intake"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
-    "58b44ccb": {
-      "load_layer": "control",
-      "packs": [
-        "engineering-git"
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
@@ -2844,13 +2663,6 @@
         "source-study"
       ]
     },
-    "99e951b9": {
-      "load_layer": "control",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
     "9d80fd2d": {
       "load_layer": "pack",
       "packs": [
@@ -2965,12 +2777,6 @@
         "vendor-intros"
       ]
     },
-    "bbffc139": {
-      "load_layer": "pack",
-      "packs": [
-        "joe-development"
-      ]
-    },
     "bc4145f6": {
       "load_layer": "pack",
       "packs": [
@@ -3002,12 +2808,6 @@
         "engineering-git"
       ],
       "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
-    },
-    "c1547ed1": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git"
-      ]
     },
     "c1db316c": {
       "load_layer": "pack",
@@ -3105,11 +2905,6 @@
         "joe-development"
       ]
     },
-    "d5dcfe26": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The most frequent failure class on record (standing-context returns the live ledger); fires on any present-tense claim."
-    },
     "d7c69aa6": {
       "load_layer": "control",
       "packs": [
@@ -3200,13 +2995,6 @@
       "packs": [
         "vendor-intros"
       ]
-    },
-    "e8868cbe": {
-      "load_layer": "pack",
-      "packs": [
-        "scheduled-automation"
-      ],
-      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "eaa31ac5": {
       "load_layer": "pack",
@@ -3303,18 +3091,6 @@
         "records-intake"
       ]
     },
-    "fb110a39": {
-      "load_layer": "pack",
-      "packs": [
-        "delegation-council"
-      ]
-    },
-    "fb2b263d": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ]
-    },
     "fc21a431": {
       "load_layer": "pack",
       "packs": [
@@ -3325,19 +3101,6 @@
       "load_layer": "pack",
       "packs": [
         "governance-rules"
-      ]
-    },
-    "204391be": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git",
-        "governance-rules"
-      ]
-    },
-    "a2e78f48": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git"
       ]
     },
     "b7ec8f3b": {
@@ -3374,12 +3137,6 @@
       "load_layer": "pack",
       "packs": [
         "client-deal"
-      ]
-    },
-    "4a77c35d": {
-      "load_layer": "pack",
-      "packs": [
-        "delegation-council"
       ]
     },
     "67e48aaf": {

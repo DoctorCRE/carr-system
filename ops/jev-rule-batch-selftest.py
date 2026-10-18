@@ -6,11 +6,10 @@ import json
 import unittest
 from pathlib import Path
 
-path = Path(__file__).with_name("rule_trigger_delivery.py")
-spec = importlib.util.spec_from_file_location("rule_trigger_delivery_batch_test", path)
-assert spec and spec.loader
-delivery = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(delivery)
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from lib.rule_scope_lookup import select_rules
+path = Path(__file__)
 
 
 class Client:
@@ -30,7 +29,7 @@ class SemanticTestCase(unittest.TestCase):
 class BatchContract(SemanticTestCase):
     def test_heldout_serial_labels_match_control_receipts(self):
         fixture = json.loads(path.with_name("fixtures").joinpath("rule-batch-parity.v1.json").read_text())
-        client = delivery._sibling("typesafe_client")
+        client = __import__('ops.typesafe_client', fromlist=['state_sha256'])
         receipts = {receipt["state_sha256"]: receipt for receipt in fixture["serial_control_receipts"]}
         cases = {case["id"]: case for case in fixture["cases"]}
         for row in fixture["fresh_replays"][-1]["heldout"]:
@@ -67,60 +66,27 @@ class BatchContract(SemanticTestCase):
                     self.assertEqual({key: actual[key] for key in grid if key != "floor"},
                                      {key: value for key, value in grid.items() if key != "floor"})
 
-    def test_pinned_high_scores_are_advisory_with_one_shared_request(self):
-        rules=[{"id":"r1","statement":"send email"},{"id":"r2","statement":"review code"}]
+    def test_shared_request_preserves_typed_moment_decisions_and_never_retries(self):
+        source = dict(ok=True, schema='rule-scope-catalog/v1', corpus_digest='a'*64,
+                      identity=dict(agent_principal_id='joe-local', runtime_principal='joe-local', sponsoring_human_id='joe'),
+                      rules=[dict(id=rid, statement=text, personal_to=None, scope={'moment': text})
+                             for rid,text in [('11111111','Before sending email'),('22222222','Before reviewing code')]])
         calls=[]
-        def fake(state,questions,**kwargs):
-            calls.append((state,questions))
-            return {"model":"jev-1.13.0","answers":{k:{"type":"noul","noul":.99} for k in questions}}
-        selected,report=delivery.judge_budgeted("send email review code",rules,[],ask=fake,client=Client,titles={})
-        self.assertEqual(selected,{})
-        self.assertEqual(set(report["advisory_candidates"]),{"r1","r2"})
-        self.assertTrue(report["review_required"])
+        def judge(state, questions):
+            calls.append(state)
+            return {'model':'jev-1.13.0','answers':{k:{'type':'choice','choice':'applies' if k=='bind_11111111' else 'not_applicable','confidence':.99} for k in questions}}
+        result=select_rules(source, {'task':'send email'}, judge=judge)
+        self.assertEqual([r['id'] for r in result['rules']], ['11111111'])
+        self.assertEqual(len(calls),1)
+        calls.clear()
+        def unavailable(state, questions):
+            calls.append(state)
+            raise RuntimeError('offline')
+        result=select_rules(source, {'task':'send email'}, judge=unavailable)
+        self.assertFalse(result['complete'])
+        self.assertEqual(len(result['unresolved']),2)
         self.assertEqual(len(calls),1)
 
-    def test_shortlist_uses_one_request_with_scoped_questions(self):
-        rules = [
-            {"id": "rule0001", "statement": "Before send email, verify recipient."},
-            {"id": "rule0002", "statement": "When reviewing code, check tests."},
-        ]
-        calls = []
 
-        def ask(state, questions, **kwargs):
-            calls.append((state, questions, kwargs))
-            return {"model": "jev-1.13.0", "answers": {
-                "bind_rule0001": {"noul": 0.91},
-                "bind_rule0002": {"noul": 0.14},
-            }}
-
-        selected, report = delivery.judge_budgeted(
-            "send email review code", rules, [], ask=ask, client=Client,
-            titles={"rule0001": ("send rule", "outbound"),
-                    "rule0002": ("review rule", "code")},
-            deadline=10**12)
-        self.assertEqual(report["calls"], 1)
-        self.assertEqual(selected,{})
-        self.assertEqual(set(report["advisory_candidates"]), {"rule0001"})
-        self.assertEqual(len(calls), 1)
-        state, questions, _ = calls[0]
-        self.assertEqual(state["situation"], "send email review code")
-        self.assertEqual(set(questions), {"bind_rule0001", "bind_rule0002"})
-        for rule_id in ("rule0001", "rule0002"):
-            self.assertIn(f"rules.{rule_id}", questions[f"bind_{rule_id}"]["instructions"])
-        self.assertIn("rule0001", state["rules"])
-
-    def test_batch_failure_never_retries_serially(self):
-        calls = []
-        def ask(state, questions, **kwargs):
-            calls.append(questions)
-            raise RuntimeError("offline")
-        selected, report = delivery.judge_budgeted(
-            "send", [{"id": "rule0001", "statement": "send"}], [],
-            ask=ask, client=Client, deadline=10**12)
-        self.assertEqual(selected, {})
-        self.assertEqual(report["bind_status"], "unavailable")
-        self.assertEqual(len(calls), 1)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

@@ -46,7 +46,7 @@ def fixture_budget(fixture):
 # each call returns; tests rewrite it between runs.
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 fixture_path = Path(os.environ["BOARD_GH_FIXTURE"])
@@ -88,7 +88,7 @@ def raw(pr, merged=False):
     return {"number": pr.get("number", 42 if "view" in fixture else None), "state": "open" if state == "OPEN" else "closed",
             "draft": pr.get("isDraft", False), "head": {"sha": pr.get("headRefOid"), "ref": pr.get("headRefName", "")},
             "user": pr.get("author"), "merge_commit_sha": sha,
-            "merged_at": pr.get("mergedAt", "2026-10-04T00:00:00Z") if state == "MERGED" else None,
+            "merged_at": pr.get("mergedAt", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()) if state == "MERGED" else None,
             "title": pr.get("title", "PR"), "body": pr.get("body", ""), "html_url": pr.get("url", ""),
             "created_at": pr.get("createdAt", "2026-09-28T00:00:00Z"),
             "updated_at": pr.get("updatedAt") or datetime.fromtimestamp(fixture_path.stat().st_mtime, timezone.utc).isoformat(),
@@ -378,7 +378,8 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.assertEqual(snapshot["kind"], "project")
         self.assertEqual(set(snapshot), {"schema", "kind", "project", "title", "tasks", "deliverables",
                                          "notes", "decisions", "ledger", "repos", "history", "updated_at",
-                                         "github_sync", "omitted", "costs"})
+                                         "github_sync", "omitted", "task_counts", "milestones", "stale_policy",
+                                         "costs"})
         self.assertIn(snapshot["costs"]["state"], ("ready", "partial", "unavailable"))
         self.assertIn("action", snapshot["costs"])
         self.assertEqual(snapshot["tasks"]["a"]["provider"], "Codex")
@@ -493,20 +494,17 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         for task_id in [f"old{n}" for n in range(5)] + ["merged"]:
             self.assertNotIn("health", after[task_id], task_id)
 
-    def test_stale_flag_after_six_hours_without_update(self):
-        at = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
-        running = {"status": "running", "updated_at": "2026-09-29T05:30:00+00:00"}
-        self.assertTrue(BOARD.is_stale(running, at))
-        self.assertEqual(BOARD.age_text(running["updated_at"], at), "6h 30m")
-        self.assertFalse(BOARD.is_stale({**running, "updated_at": "2026-09-29T06:00:01+00:00"}, at))
-        self.assertTrue(BOARD.is_stale({**running, "updated_at": "2026-09-29T06:00:00+00:00"}, at))
-        self.assertTrue(BOARD.is_stale({"status": "review", "updated_at": "2026-09-28T12:00:00Z"}, at))
-        self.assertEqual(BOARD.age_text("2026-09-28T10:00:00Z", at), "1d 2h")
-        for status in ("done", "queued", "failed"):
-            self.assertFalse(BOARD.is_stale({"status": status, "updated_at": "2026-09-20T00:00:00Z"}, at), status)
+    def test_stale_flag_after_fourteen_days_without_update(self):
+        at = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
+        for status in ("queued", "running", "review"):
+            task = {"status": status, "updated_at": "2026-09-21T12:00:00Z"}
+            self.assertTrue(BOARD.is_stale(task, at))
+            self.assertFalse(BOARD.is_stale({**task, "updated_at": "2026-09-21T12:00:01Z"}, at))
+        for status in ("done", "blocked", "failed", "superseded"):
+            self.assertFalse(BOARD.is_stale({"status": status, "updated_at": "2026-09-01T00:00:00Z"}, at))
         self.assertFalse(BOARD.is_stale({"status": "running", "stage": "live", "evidence": "x",
-                                         "updated_at": "2026-09-20T00:00:00Z"}, at))
-        self.assertEqual(BOARD.STALE_AFTER, timedelta(hours=6))
+                                         "updated_at": "2026-09-01T00:00:00Z"}, at))
+        self.assertEqual(BOARD.STALE_AFTER, timedelta(days=14))
 
     def test_ledger_flags_claude_plan_executor(self):
         self.run_board("init", "demo", "--title", "Demo")
@@ -1138,7 +1136,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertTrue(app["created_at"])
         self.assertEqual(tasks["carr-system-1"]["executor"], "Codex")
         self.assertEqual(tasks["carr-system-2"]["summary"], "Does thing 2.")
-        self.assertTrue(BOARD.is_stale(tasks["carr-system-6"]))
+        self.assertFalse(BOARD.is_stale(tasks["carr-system-6"]))
         self.assertFalse(BOARD.is_stale(tasks["carr-system-5"]))
         self.assertIn(SHA_M[:12], tasks["carr-system-7"]["evidence"])
         counts = {row["repo"]: (row["open"], row["merged"]) for row in state["repos"]}
@@ -1207,7 +1205,7 @@ class AllRepositoriesBoard(BoardCase):
         events = []
         args = type("Args", (), {"project": "all-repos", "publish": True})()
         with patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
-             patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+             patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))):
             BOARD.command_render(args)
         self.assertEqual(events, [("build", "all-repos"), ("publish", "all-repos")])
@@ -1370,14 +1368,29 @@ class PublishAndAnswers(BoardCase):
     def test_existing_launchd_render_runs_publish_poll_and_system_board_without_a_model(self):
         events = []
         args = type("Args", (), {"project": "carr-v5", "publish": False})()
-        with patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+        with patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
              patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
              patch.object(BOARD, "publish_needs_joe_local", lambda: events.append(("local", "needs-joe"))):
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"), ("local", "needs-joe"),
+        self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
+                                  ("local", "needs-joe"),
                                   ("build", "all-repos"), ("publish", "all-repos")])
+
+    def test_scheduled_render_reads_github_in_one_pass(self):
+        passes = []
+        args = type("Args", (), {"project": "carr-v5", "publish": False})()
+        with patch.object(BOARD, "GitHubReadPass", object), \
+             patch.object(BOARD, "render", lambda project, *, discover: passes.append(BOARD.GITHUB_PASS)), \
+             patch.object(BOARD, "build_all_repos", lambda: passes.append(BOARD.GITHUB_PASS)), \
+             patch.object(BOARD, "publish_board", lambda project: None), \
+             patch.object(BOARD, "poll_board_answers", lambda project: None), \
+             patch.object(BOARD, "publish_needs_joe_local", lambda: None):
+            BOARD.command_render(args)
+        self.assertEqual(len(passes), 2)
+        self.assertIsNotNone(passes[0])
+        self.assertIs(passes[0], passes[1])
 
     def test_system_board_failure_is_logged_and_last_known_state_published(self):
         events = []
@@ -1388,14 +1401,14 @@ class PublishAndAnswers(BoardCase):
         (self.root / "boards").mkdir(parents=True, exist_ok=True)
         (self.root / "boards" / "all-repos.json").write_text(json.dumps({"project": "all-repos", "tasks": {}}))
         with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), \
-             patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+             patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
              patch.object(BOARD, "build_all_repos", broken), \
              patch.object(BOARD, "publish_needs_joe_local"), \
              patch("sys.stderr", new_callable=io.StringIO) as err:
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+        self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
                                   ("publish", "all-repos")])
         self.assertIn("gh unavailable", err.getvalue())
 
@@ -1476,7 +1489,7 @@ class NeedsJoePublication(unittest.TestCase):
                     events = []
                     read_effect = failure if location == "read_source" else None
                     call_effect = failure if location == "call_verb" else None
-                    with patch.object(BOARD, "render", lambda p: events.append(("render", p))), \
+                    with patch.object(BOARD, "render", lambda p, **_: events.append(("render", p))), \
                          patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
                          patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
                          patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
@@ -1502,7 +1515,7 @@ class NeedsJoePublication(unittest.TestCase):
             self.assertEqual(args["base_version"], 7)
             remote["snapshot_json"] = args["snapshot"]
             return {"ok": True}
-        with patch.object(BOARD, "render", lambda p: events.append(("render", p))), \
+        with patch.object(BOARD, "render", lambda p, **_: events.append(("render", p))), \
              patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
              patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
              patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \

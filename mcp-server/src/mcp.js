@@ -634,9 +634,24 @@ export function hermesCosPremisesRefusal(profile, name, args) {
     Array.isArray(args?.ownership) && args.ownership.some((row) => row && row.new_party);
 }
 
+// Discovery is smaller than authority. Keep established direct permission and
+// dispatcher routes; everything else is discovered through list-verbs.
+const CORE_TOOL_NAMES = new Set([
+  "standing-context", "list-verbs", "call-verb",
+  "report-problem", "record-defect", "add-loop",
+  "teach", "activate-rule",
+  "capability-program", "catch-me-up", "find", "loop-board",
+  "read-doctrine", "read-loop", "read-room", "search-doctrine",
+  "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
+  "engineering-passport-source", "doctrine-sections",
+  "ask-jev", "add-room-turn", "map-architecture",
+  "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
+]);
+
 function toolList(profile = "full") {
   return Object.entries(TOOLS)
     .filter(([name, t]) => allowedIn(profile, name, t))
+    .filter(([name]) => profile !== "full" || CORE_TOOL_NAMES.has(name))
     .map(([name, t]) => ({
       name,
       description: t.description + (profile === "full" ? "" : (PROFILE_NOTICE[profile] || "")),
@@ -1132,7 +1147,10 @@ export async function dispatch(request, env, ctx, actor) {
             "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
             "with the counts to recite in your first response, open action-required items, and the " +
             "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
-            "read-doctrine; state via catch-me-up / today-triage. WRITE LAW (rule 14181e60): database " +
+            "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
+            "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
+            "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
+            "WRITE LAW (rule 14181e60): database " +
             "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
             "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
             "version_conflict and needs_confirm are questions for the human, never auto-retried. There " +

@@ -128,8 +128,9 @@ jobs:
     # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while
     # their separate database acceptance passed. Preserve measured headroom
     # and cover that lane's declared budget without extending other groups.
-    # zsh setup retains its own bounded deadline below.
-    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
+    # zsh setup retains its own bounded deadline below. 35 -> 45 on 2026-10-17:
+    # the db lane sat at 33-34 min and 10 of 25 runs were cancelled at the cap.
+    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
       # The migration class needs a database to apply 130 forward migrations to.
@@ -298,6 +299,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           # The migration shadow drops its regenerated db/schema.sql here; the
           # next step uploads it when the class fails, so a stale snapshot is

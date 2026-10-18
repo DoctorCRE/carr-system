@@ -1,26 +1,7 @@
-"""Deterministic rule delivery routes: which rule text a tool call must carry.
+"""Historical route-map audits plus context dedupe and full-text fitting.
 
-THE DESIGN (Joe demands 100% recall; Jev chose it at p=1.00). Every active
-rule has at least one DELIVERY ROUTE, recorded in ops/config/rule-routes.v1.json:
-
-  boot       always-on text or an index line, composed at session start;
-  trigger    full text injected by the existing PreToolUse rail
-             (hooks/rule-pack-preuse-reselection.py) when the pending call
-             matches: an exact tool name (or an mcp__*__name connector glob),
-             a record verb name, a bash command pattern;
-  path_rule  the same injection when a file path in the call matches a glob.
-             Kept apart from `trigger` so the purely path-scoped rules can
-             also be emitted as native path-scoped rule files later;
-  gate       an installed code gate enforces it;
-  duplicate  the rule's surviving duplicate carries the delivery.
-
-NO SIMILARITY AND NO THRESHOLD ON THIS PATH. Every match is exact: a tool name
-equality (or fnmatch over the connector's server segment), a verb name
-equality, a regular expression over a Bash command, or an fnmatch over a path.
-Semantic judgement stays where it already lives (the UserPromptSubmit rail).
-
-A LIBRARY, not a script: no shebang and no entry-point guard, for the sealed
-source inventory reason ops/typesafe_client.py documents.
+Production selection lives in rule_scope_lookup. Map and class audits remain
+until their separate map-removal slice migrates the remaining readers.
 """
 from __future__ import annotations
 
@@ -33,12 +14,9 @@ import re
 import time
 from pathlib import Path
 
-from lib.rule_operations import BASH_TOOLS, READ_ONLY_TOOLS, call_paths, call_verbs, structural_matches
 
 ROUTES_RELATIVE = "ops/config/rule-routes.v1.json"
 ROUTES_SCHEMA = "rule-routes/v1"
-# THE ONE LINE TO CHANGE when Builder A's ops/config/rule-classes.v1.json lands:
-# rule_classes() reads this file and nothing else reads the classes.
 CLASSES_RELATIVE = "ops/config/rule-classification.v1.csv"
 CORPUS_RELATIVE = "ops/config/rule-selection-corpus.v1.json"
 HOOKS_RELATIVE = "ops/config/hooks.json"
@@ -81,18 +59,14 @@ DEDUPE_SECONDS = 30 * 60
 # the receipt is fitted under the cap with headroom for the JSON envelope.
 CONTEXT_CAP_CHARS = 10_000
 CONTEXT_BUDGET_CHARS = 9_600
-ALWAYS_ON_DEFAULT = "~/.claude/rules/carr-rules-always-on.md"
 SUMMARY_CHARS = 100
-
 
 # ------------------------------------------------------------------ inputs
 
 def rule_classes(repo: Path, relative: str = CLASSES_RELATIVE) -> dict[str, dict]:
     """{id: {"class", "layer", "moment"}} — the reviewed classification.
 
-    Reads the committed CSV today. A JSON file keyed by id (bare, or under a
-    "rules" key) with the same fields is read the same way, so pointing
-    CLASSES_RELATIVE at Builder A's rule-classes.v1.json is the whole switch."""
+    Reads the committed CSV, or a JSON file with the same fields."""
     path = Path(repo) / relative
     if path.suffix == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -112,11 +86,9 @@ def rule_classes(repo: Path, relative: str = CLASSES_RELATIVE) -> dict[str, dict
                     "moment": (row.get("moment") or "").strip()}
     return out
 
-
 def corpus_ids(repo: Path) -> list[str]:
     data = json.loads((Path(repo) / CORPUS_RELATIVE).read_text(encoding="utf-8"))
     return sorted(row["id"] for row in data["rules"])
-
 
 class RouteFileError(ValueError):
     """The route file cannot be used. `reason` is a fixed category (never the
@@ -126,7 +98,6 @@ class RouteFileError(ValueError):
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
-
 
 def load_routes(repo: Path) -> dict:
     """The committed route file, structurally checked. Raises RouteFileError."""
@@ -152,10 +123,6 @@ def load_routes(repo: Path) -> dict:
     return data
 
 
-def routes_digest(repo: Path) -> str:
-    return hashlib.sha256((Path(repo) / ROUTES_RELATIVE).read_bytes()).hexdigest()
-
-
 def known_verbs(repo: Path) -> set[str]:
     """Every verb the server serves, from the registry the server itself checks.
 
@@ -177,7 +144,6 @@ def known_verbs(repo: Path) -> set[str]:
         raise ValueError(f"{names[0]} declares no mcp-tool ingress")
     return found
 
-
 def hook_matcher(repo: Path) -> str | None:
     """The PreToolUse matcher the delivering hook is registered under."""
     data = json.loads((Path(repo) / HOOKS_RELATIVE).read_text(encoding="utf-8"))
@@ -186,7 +152,6 @@ def hook_matcher(repo: Path) -> str | None:
             if DELIVERING_HOOK in hook.get("command", ""):
                 return group.get("matcher")
     return None
-
 
 def stop_hooks(repo: Path) -> set[str]:
     """Basenames of every hook registered on Stop."""
@@ -198,7 +163,6 @@ def stop_hooks(repo: Path) -> set[str]:
     names.discard("hook-meter-run.py")
     return names
 
-
 def tool_admitted(tool: str, matcher: str | None) -> bool:
     """Would the delivering hook be invoked at all for this tool (pattern)?"""
     if not matcher:
@@ -206,74 +170,13 @@ def tool_admitted(tool: str, matcher: str | None) -> bool:
     probe = tool.replace("*", "server") if tool.startswith("mcp__") else tool
     return re.fullmatch(f"(?:{matcher})", probe) is not None
 
-
 def tool_known(tool: str) -> bool:
     if tool in KNOWN_BUILTIN_TOOLS:
         return True
     match = CONNECTOR_GLOB.match(tool)
     return bool(match and match.group(2) in KNOWN_CONNECTOR_TOOLS)
 
-
 # ------------------------------------------------------------------ matching
-
-class RouteShapeError(ValueError):
-    """One route cannot be evaluated (a non-string tool, verb, pattern or glob,
-    or an empty glob). The coverage gate refuses these in CI; at run time the
-    matcher treats the rule as matched, so a broken route over-delivers rather
-    than silently dropping its rule."""
-
-
-def _strings(route: dict, key: str) -> list[str]:
-    values = route.get(key)
-    if values is None:
-        return []
-    if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
-        raise RouteShapeError(key)
-    return values
-
-
-def route_matches(route: dict, tool_name: str, tool_input: object,
-                  verbs: set[str] | None = None) -> bool:
-    """True when this route fires for the call. Raises RouteShapeError when the
-    route itself is malformed."""
-    kind = route.get("kind")
-    if kind == "path_rule":
-        globs = _strings(route, "path_globs")
-        if not globs:
-            raise RouteShapeError("path_globs")
-        read_only = route.get("read_only", False)
-        if not isinstance(read_only, bool):
-            raise RouteShapeError("read_only")
-        return structural_matches({"path_globs": globs, "read_only": read_only}, tool_name, tool_input, verbs)
-    if kind != "trigger":
-        return False
-    condition = {key: _strings(route, key) for key in TRIGGER_KEYS}
-    try:
-        return structural_matches(condition, tool_name, tool_input, verbs)
-    except re.error:
-        raise RouteShapeError("bash_patterns") from None
-
-
-def matched_rule_ids(doc: dict, tool_name: str, tool_input: object) -> list[str]:
-    """Every rule whose trigger or path route this exact call hits. A rule with
-    a malformed route counts as hit: fail open means deliver, never drop."""
-    verbs = call_verbs(tool_name, tool_input)
-    hits = []
-    for rid, entry in (doc.get("rules") or {}).items():
-        routes = entry.get("routes") if isinstance(entry, dict) else None
-        for route in routes or ():
-            if not isinstance(route, dict):
-                hits.append(rid)
-                break
-            try:
-                hit = route_matches(route, tool_name, tool_input, verbs)
-            except RouteShapeError:
-                hit = True
-            if hit:
-                hits.append(rid)
-                break
-    return sorted(hits)
-
 
 # ------------------------------------------------------------------ dedupe
 
@@ -281,7 +184,6 @@ def _dedupe_root() -> Path:
     return Path(os.environ.get(
         "CARR_RULE_ROUTE_DEDUPE_DIR",
         Path.home() / ".config/carr/claude-rule-delivery/routes"))
-
 
 def _dedupe_path(session_id: str, agent_id: str | None = None) -> Path:
     """One state file per CONTEXT: the main conversation keeps its historical
@@ -291,14 +193,12 @@ def _dedupe_path(session_id: str, agent_id: str | None = None) -> Path:
     token = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return _dedupe_root() / f"{token}.json"
 
-
 def _read_state(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
-
 
 def _context_epoch(session_id: str, agent_id: str | None = None) -> str | None:
     """The rule-boot gate's epoch for this CONTEXT, or None when unknown.
@@ -321,7 +221,6 @@ def _context_epoch(session_id: str, agent_id: str | None = None) -> str | None:
     except Exception:
         return None
 
-
 def _seen_in_context(state: dict, rid: str, epoch: str | None, now: float) -> bool:
     """Whether rid's full text already reached this context.
 
@@ -340,9 +239,8 @@ def _seen_in_context(state: dict, rid: str, epoch: str | None, now: float) -> bo
     return any(isinstance(ts, (int, float)) and now - ts < DEDUPE_SECONDS
                for ts in tools.values())
 
-
 def fresh_ids(session_id: str, tool_name: str, ids: list[str],
-              now: float | None = None, *, agent_id: str | None = None) -> list[str]:
+              now: float | None = None, *, agent_id: str | None = None, corpus_digest: str | None = None) -> list[str]:
     """The ids whose full text this context has not already been given.
 
     2026-10-12: scoped to the context (the boot gate's arm epoch) and across
@@ -359,14 +257,15 @@ def fresh_ids(session_id: str, tool_name: str, ids: list[str],
     now = time.time() if now is None else now
     try:
         state = _read_state(_dedupe_path(session_id, agent_id))
+        if corpus_digest is not None and state.get("_corpus_digest") != corpus_digest:
+            return sorted(ids)
         epoch = _context_epoch(session_id, agent_id)
     except Exception:
         return sorted(ids)
     return sorted(rid for rid in ids if not _seen_in_context(state, rid, epoch, now))
 
-
 def record_delivered(session_id: str, tool_name: str, ids: list[str],
-                     now: float | None = None, *, agent_id: str | None = None) -> None:
+                     now: float | None = None, *, agent_id: str | None = None, corpus_digest: str | None = None) -> None:
     """Remember full-text deliveries for one context. Best effort; never raises."""
     now = time.time() if now is None else now
     try:
@@ -377,14 +276,17 @@ def record_delivered(session_id: str, tool_name: str, ids: list[str],
             fcntl.flock(handle, fcntl.LOCK_EX)
             state = _read_state(path)
             epoch = _context_epoch(session_id, agent_id)
-            if epoch is not None and state.get("_epoch") != epoch:
+            if ((epoch is not None and state.get("_epoch") != epoch)
+                    or (corpus_digest is not None and state.get("_corpus_digest") != corpus_digest)):
                 state = {"_epoch": epoch}  # a new context holds none of the old deliveries
+            if corpus_digest is not None:
+                state["_corpus_digest"] = corpus_digest
             for rid in ids:
                 state.setdefault(rid, {})[tool_name] = now
             # Forget anything older than the window so the file stays small
             # (an epoch-scoped context keeps everything it was given).
             for rid in list(state):
-                if rid == "_epoch":
+                if rid in {"_epoch", "_corpus_digest"}:
                     continue
                 if not isinstance(state[rid], dict):
                     del state[rid]
@@ -403,19 +305,7 @@ def record_delivered(session_id: str, tool_name: str, ids: list[str],
     except Exception:
         return
 
-
 # ------------------------------------------------------------------ fitting
-
-def always_on_ids(path: str | None = None) -> set[str]:
-    """Rule ids already carried by Builder A's always-on file, when present."""
-    target = Path(os.path.expanduser(
-        path or os.environ.get("CARR_RULES_ALWAYS_ON_FILE", ALWAYS_ON_DEFAULT)))
-    try:
-        return set(SHORT_ID.findall(target.read_text(encoding="utf-8")))
-    except (OSError, ValueError):
-        # Unreadable or not UTF-8: ordering falls back to id order, and every
-        # rule is still delivered. Never a crash after the door call is paid.
-        return set()
 
 
 def one_line(statement: str, limit: int = SUMMARY_CHARS) -> str:
@@ -423,11 +313,9 @@ def one_line(statement: str, limit: int = SUMMARY_CHARS) -> str:
     first = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0]
     return first if len(first) <= limit else first[:limit - 1].rstrip() + "…"
 
-
 def context_chars(text: str) -> int:
     """Length as the harness measures it (a JavaScript string, UTF-16 units)."""
     return len(text.encode("utf-16-le")) // 2
-
 
 def fit_rules(rules: list[dict], render, *, always_on: set[str],
               budget: int = CONTEXT_BUDGET_CHARS) -> tuple[list[dict], list[dict]]:
@@ -449,139 +337,7 @@ def fit_rules(rules: list[dict], render, *, always_on: set[str],
             full, overflow = trial_full, trial_over
     return full, overflow
 
-
-# ------------------------------------------------------------------ notices
-#
-# Every way the route rail can fail to deliver ends in one of these fixed
-# notices, never in silence and never in an exception's own text (which may
-# carry a path or a credential). Each says, in this order: rules were NOT
-# delivered, the call itself went ahead, what to do before acting, and the ids.
-# Jev reviewed the wording (semantic_creation, 2026-09-26): every notice scored
-# 0.94-0.95 on "the session knows the rules were NOT delivered" and 0.76-0.93
-# on "the session knows what to do next".
-
-CALL_WENT_AHEAD = "The tool call itself was not blocked or changed."
-
-
-def _ids(ids) -> str:
-    return ", ".join(sorted(set(ids))) + "."
-
-
-def notice_door_failure(ids) -> str:
-    return ("RULE ROUTE DELIVERY FAILED (selector_unavailable): the rules below bind this "
-            "tool call and were NOT delivered; you have not seen them. " + CALL_WENT_AHEAD +
-            " Before you act, fetch each one with the standing-context verb (rule_ids: the "
-            "ids below) and follow it; if that also fails, say so and do not act as if the "
-            "rules were read. Undelivered rule ids: " + _ids(ids))
-
-
-def notice_file_unreadable(reason: str, ids) -> str:
-    head = ("RULE ROUTE FILE UNREADABLE (" + reason + "): rules were NOT delivered. "
-            + ROUTES_RELATIVE + ", which decides which rules bind each tool call, could not "
-            "be read, so no routed rule was checked or shown for this call; you have not "
-            "seen any of them. " + CALL_WENT_AHEAD + " ")
-    if not ids:
-        return head + ("Before you act, call the standing-context verb with no arguments, "
-                       "read each rule whose subject covers this tool call and follow it, and "
-                       "report the broken route file.")
-    return head + ("Before you act, fetch the rules below that could apply to this action "
-                   "with the standing-context verb (rule_ids), and report the broken route "
-                   "file. Rules that may bind this call and were NOT delivered: " + _ids(ids))
-
-
-def notice_error(ids=None) -> str:
-    if ids:
-        return ("RULE ROUTE DELIVERY ERROR (internal_error): the rule-delivery hook failed, "
-                "and rules were NOT delivered for this call; you have not seen them. "
-                + CALL_WENT_AHEAD + " Before you act, fetch these rules with the "
-                "standing-context verb (rule_ids) and follow them: " + _ids(ids))
-    return ("RULE ROUTE DELIVERY ERROR (internal_error): the rule-delivery hook failed "
-            "before it could tell which rules bind this call, so NO rule was delivered; you "
-            "have not seen them. " + CALL_WENT_AHEAD + " Before you act: (1) call the "
-            "standing-context verb with no arguments, which returns every rule in scope; "
-            "(2) read each rule whose subject covers this tool call and follow it; (3) if "
-            "standing-context also fails, stop and tell the user the rules could not be read "
-            "instead of acting from memory.")
-
-
-def notice_too_large(ids) -> str:
-    return ("RULE ROUTE DELIVERY TOO LARGE: " + str(len(set(ids))) + " rules bind this call, "
-            "more than the hook's " + f"{CONTEXT_CAP_CHARS:,}" + "-character context cap can "
-            "carry even as one-line summaries, so NONE was delivered; you have not seen them. "
-            + CALL_WENT_AHEAD + " Before you act, fetch these rules with the standing-context "
-            "verb (rule_ids) in batches and follow them: " + _ids(ids))
-
-
 def within_cap(text: str, budget: int = CONTEXT_BUDGET_CHARS) -> bool:
     return context_chars(text) <= budget
 
-
 # ------------------------------------------------------------------ receipt
-
-ROUTE_RECEIPT_SCHEMA = "rule-route-trigger-delivery/v1"
-ROUTE_RECEIPT_KEYS = frozenset({
-    "schema", "receipt_id", "client", "session_id", "turn_id", "tool_use_id",
-    "tool_name", "tool_input_sha256", "routes_digest", "triggers_digest",
-    "map_digest", "source_digest", "trigger_ids", "route_rule_ids", "packs",
-    "identity", "rule_ids", "rules", "overflow", "not_found", "instruction",
-    "rule_delivery",
-})
-ROUTE_INSTRUCTION = (
-    "Each rule in `rules` binds this tool call; read it before acting. A rule in "
-    "`overflow` also binds but did not fit this hook's context cap: fetch its full "
-    "text with standing-context rule_ids before acting on it. A rule in `not_found` "
-    "was routed here but the rule store did not return it."
-)
-
-
-def validate_route_receipt(row: object, *, repo: Path) -> bool:
-    """Shape, partition and digest checks for one route delivery receipt."""
-    from lib.rule_delivery_preuse import (  # local: keeps this module import-light
-        DELIVERY_KEYS, IDENTITY_KEYS, RULE_KEYS, TRIGGER_TABLE_RELATIVE, receipt_id,
-        valid_local_identity)
-    from lib.rule_delivery_preuse import file_sha256, source_sha256
-    if not isinstance(row, dict) or set(row) != ROUTE_RECEIPT_KEYS:
-        return False
-    if row.get("schema") != ROUTE_RECEIPT_SCHEMA or row.get("client") not in {"claude", "codex"}:
-        return False
-    turn_id = row.get("turn_id")
-    if (row["client"] == "codex") != (isinstance(turn_id, str) and bool(turn_id.strip())):
-        return False
-    identity = row.get("identity")
-    if (not isinstance(identity, dict) or set(identity) != IDENTITY_KEYS
-            or not valid_local_identity(identity)):
-        return False
-    ids = row.get("rule_ids")
-    if not isinstance(ids, list) or not ids or ids != sorted(set(ids)):
-        return False
-    rules, overflow, not_found = row.get("rules"), row.get("overflow"), row.get("not_found")
-    if (not isinstance(rules, list) or not isinstance(overflow, list)
-            or not isinstance(not_found, list)):
-        return False
-    if any(not isinstance(r, dict) or set(r) != RULE_KEYS
-           or not isinstance(r.get("statement"), str) or not r["statement"].strip()
-           for r in rules):
-        return False
-    if any(not isinstance(o, dict) or set(o) != {"id", "summary"} for o in overflow):
-        return False
-    parts = [r["id"] for r in rules] + [o["id"] for o in overflow] + list(not_found)
-    if sorted(parts) != ids or len(parts) != len(set(parts)):
-        return False
-    if not set(row.get("route_rule_ids") or []) <= set(ids):
-        return False
-    delivery = row.get("rule_delivery")
-    if (not isinstance(delivery, dict) or set(delivery) != DELIVERY_KEYS
-            or delivery.get("mode") not in {"shadow", "enforced"}
-            or sorted(delivery.get("declared_packs") or []) != row.get("packs")
-            or delivery.get("packs_not_found") != []):
-        return False
-    if row.get("instruction") != ROUTE_INSTRUCTION:
-        return False
-    repo = Path(repo)
-    if (row.get("routes_digest") != routes_digest(repo)
-            or row.get("triggers_digest") != file_sha256(repo / TRIGGER_TABLE_RELATIVE)
-            or row.get("map_digest") != file_sha256(
-                repo / "ops/config/rule-enforcement-map.json")
-            or row.get("source_digest") != source_sha256(repo)):
-        return False
-    return row.get("receipt_id") == receipt_id(row)

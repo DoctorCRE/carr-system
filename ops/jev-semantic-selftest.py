@@ -79,19 +79,19 @@ class JudgmentTests(unittest.TestCase):
 
     def test_hook_receipts_bind_the_shared_judgment_implementation(self):
         from lib.rule_delivery_preuse import (
-            SELECTOR_SOURCE_PATHS, postwrite_reviewer_digest, semantic_selector_digest)
+            DELIVERY_SOURCE_PATHS, postwrite_reviewer_digest, source_sha256)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            for relative in (*SELECTOR_SOURCE_PATHS, 'hooks/lint-gate.py',
+            for relative in (*DELIVERY_SOURCE_PATHS, 'hooks/lint-gate.py',
                              'ops/jev_code_review.py', 'ops/jev_semantic.py'):
                 target = root/relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text('fixture implementation')
             implementation = root/'ops/jev_semantic.py'
             implementation.write_text('original implementation')
-            before = (postwrite_reviewer_digest(root), semantic_selector_digest(root))
+            before = (postwrite_reviewer_digest(root), source_sha256(root))
             implementation.write_text('changed implementation')
-            after = (postwrite_reviewer_digest(root), semantic_selector_digest(root))
+            after = (postwrite_reviewer_digest(root), source_sha256(root))
         self.assertNotEqual(before[0], after[0])
         self.assertNotEqual(before[1], after[1])
 
