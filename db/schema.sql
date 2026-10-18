@@ -1253,7 +1253,7 @@ end $$;
 
 CREATE FUNCTION ops.add_meeting_note(p_meeting uuid, p_body text, p_revises_note_number integer, p_base_revision integer, p_client_instance text, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_who record; v_row ops.meeting%rowtype; v_prior ops.meeting_note%rowtype;
         v_number integer; v_revision integer; v_current integer;
@@ -10675,7 +10675,7 @@ end $_$;
 
 CREATE FUNCTION ops.decide_doc_suggestion(p_id uuid, p_base integer, p_choice text, p_until date, p_work_ref text, p_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_actor uuid; v_row ops.doc_suggestion%rowtype; v_prior ops.doc_suggestion_decision%rowtype;
         v_request jsonb; v_result jsonb; v_work uuid; v_count integer;
@@ -10818,7 +10818,7 @@ end $_$;
 
 CREATE FUNCTION ops.decide_meeting_action(p_meeting uuid, p_action_number integer, p_decision text, p_base_revision integer, p_disposition text, p_assignee_slug text, p_client_instance text, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_who record; v_row ops.meeting%rowtype; v_head ops.meeting_action%rowtype;
         v_latest ops.meeting_action_revision%rowtype; v_assignee uuid; v_disposition text;
@@ -37981,7 +37981,7 @@ $$;
 
 CREATE FUNCTION ops.rename_doc_conversation(p_conversation uuid, p_base_version integer, p_title text, p_pinned boolean, p_archived boolean, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_actor uuid; v_row ops.doc_conversation%rowtype; v_version integer;
 begin
@@ -65792,7 +65792,7 @@ end $$;
 
 CREATE FUNCTION ops.suggest_doc_work(p_conversation uuid, p_sequence integer, p_obligation_key text, p_polished text, p_uncertainty text, p_material jsonb, p_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_turn ops.doc_conversation_turn%rowtype; v_row ops.doc_suggestion%rowtype;
         v_existing ops.doc_suggestion_contribution%rowtype; v_changed boolean;
@@ -68183,7 +68183,7 @@ CREATE FUNCTION ops.v5_a03_tenant() RETURNS text
 
 CREATE FUNCTION ops.v5_a05_assurance_cadence_batch(p_recipient_slug text) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public'
+    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
     AS $$
 declare v_result jsonb; v_recipient uuid;
 begin
