@@ -45,7 +45,7 @@ class PostgresLeaderTests(unittest.TestCase):
             authority = (ROOT / 'migrations/0161_control_plane_authority_boundary.sql').read_text()
             c.execute(authority[authority.index('create or replace function ops.authority_actor_slug()'):
                                 authority.index('create or replace function ops.record_workflow_acceptance(')])
-            c.execute((ROOT / 'migrations/0895_studio_failover_leader.sql').read_text())
+            c.execute((ROOT / 'migrations/0900_studio_failover_leader.sql').read_text())
             c.execute('create role carr_authority_joe login; grant carr_authority to carr_authority_joe')
 
     def connect(self): return self.psycopg.connect(**self.dsn)
