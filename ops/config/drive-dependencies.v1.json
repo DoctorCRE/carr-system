@@ -37,34 +37,6 @@
     {
       "path": "tools/doc-voice/reference/*.wav",
       "reason": "versioned voice reference audio"
-    },
-    {
-      "path": "plugins/pstack/assets/logo.png",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/design.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/overnight.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/recipes.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/router.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/understanding.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
-    },
-    {
-      "path": "plugins/pstack/docs/guide/images/verification.jpg",
-      "reason": "MIT pstack upstream raster asset preserved at cursor/plugins e43c7ee2"
     }
   ],
   "entries": [
