@@ -1,6 +1,6 @@
 #!/bin/zsh
 # watch-encode.sh — CARR video pipeline watch-folder processor
-# Triggered by launchd (com.carr.videopipeline) whenever a file lands in
+# Hand-run on the MacBook (no launchd job; retired 2026-10-18) to process files in
 # 01_Drop_Horizontal or 02_Drop_Vertical. Encodes platform-ready H.264,
 # writes to 03_Output, moves the source to 04_Archive.
 # Log: Scripts/watch-encode-log.txt

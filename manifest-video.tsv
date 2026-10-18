@@ -14,8 +14,8 @@
 # animstatic-plan.env, choreography-log.tsv,
 # example-layers/*.png, example-static-flat.png, fontcheck.txt, writetest.txt),
 # media folders (01_Drop_*, 03_Output, 04_Archive, AE_Templates), and
-# ~/Library/LaunchAgents/com.carr.videopipeline.plist (launchd plists are an
-# existing documented exclusion).
+# the watch-folder launchd job (retired 2026-10-18: the pipeline is MacBook-only
+# and hand-run, nothing schedules it).
 #
 # NO OUTPUT BASELINES for this lane. The generator baselines in baselines/ work
 # because their outputs are small text/HTML. Video outputs are large binaries and
