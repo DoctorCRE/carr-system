@@ -85054,32 +85054,6 @@ COMMENT ON COLUMN public.export_run.file_sha IS 'sha256 of the WRITTEN FILE''s b
 
 
 --
--- Name: feature_switch; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.feature_switch (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    organization_tenant_id text NOT NULL,
-    name text NOT NULL,
-    description text NOT NULL,
-    default_enabled boolean NOT NULL,
-    enabled boolean,
-    audience text NOT NULL,
-    owner text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    expected_removal_on date NOT NULL,
-    retired_at timestamp with time zone,
-    retirement_loop_id uuid,
-    version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT feature_switch_audience_check CHECK ((audience = ANY (ARRAY['joe'::text, 'team'::text, 'everyone'::text]))),
-    CONSTRAINT feature_switch_description_check CHECK (((length(btrim(description)) >= 1) AND (length(btrim(description)) <= 1000))),
-    CONSTRAINT feature_switch_name_check CHECK ((name ~ '^[a-z][a-z0-9-]{0,62}$'::text)),
-    CONSTRAINT feature_switch_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text, 'claude'::text]))),
-    CONSTRAINT feature_switch_version_check CHECK ((version > 0))
-);
-
-
---
 -- Name: growth_snapshot; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -99829,22 +99803,6 @@ ALTER TABLE ONLY public.export_run
 
 
 --
--- Name: feature_switch feature_switch_organization_tenant_id_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.feature_switch
-    ADD CONSTRAINT feature_switch_organization_tenant_id_name_key UNIQUE (organization_tenant_id, name);
-
-
---
--- Name: feature_switch feature_switch_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.feature_switch
-    ADD CONSTRAINT feature_switch_pkey PRIMARY KEY (id);
-
-
---
 -- Name: growth_snapshot growth_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -108132,13 +108090,6 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
--- Name: feature_switch scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.feature_switch FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
 -- Name: growth_snapshot scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -109039,13 +108990,6 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.e
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.export_run FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
--- Name: feature_switch scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.feature_switch FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -119721,9 +119665,6 @@ grant select on table public.experiment to dot_reader;
 grant insert, select on table public.export_run to carr_exporter;
 grant insert, select, update on table public.export_run to carr_writer;
 grant select on table public.export_run to dot_reader;
-grant select on table public.feature_switch to carr_reader;
-grant insert, select, update on table public.feature_switch to carr_writer;
-grant select on table public.feature_switch to dot_reader;
 grant insert, select on table public.growth_snapshot to carr_jobs;
 grant select on table public.growth_snapshot to carr_reader;
 grant select on table public.growth_snapshot to dot_reader;
@@ -122489,7 +122430,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
-0898_feature_switches.sql	302282a305057f1dfde777eacc094a0fb816c7fad2e401907271dfc315ca0af3	2026-10-18 07:11:59.074939+00
+0897_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 07:03:58.910517+00
 \.
 
 
