@@ -597,6 +597,32 @@ def run_job(root, config, card, executor, minutes, argv):
     return code
 
 
+def resolve_failed_action(root, config, key, evidence):
+    """Record an operator-verified absent effect without replaying or claiming success.
+
+    Inspect the external destination and any owned processes first. This command
+    records that evidence; it does not establish that an effect was absent.
+    Ambiguous intents must remain pending until their outcome is established.
+    """
+    if not evidence.strip():
+        raise ValueError("resolution requires evidence from the inspected effect")
+    with locked(path_at(root, config["paths"]["scan_lock"]), blocking=False):
+        actions_path = path_at(root, config["paths"]["actions"])
+        prior = read_latest(actions_path).get(key)
+        if not prior:
+            raise ValueError("action key is not recorded")
+        if prior["status"] == "resolved_no_effect":
+            if prior["resolution"]["evidence"] != evidence:
+                raise ValueError("action already resolved with different evidence")
+            return prior
+        if prior["status"] != "failed":
+            raise ValueError("only a recorded failed action can be resolved as not executed")
+        row = {**prior, "status": "resolved_no_effect",
+               "resolution": {"outcome": "not_executed", "at": stamp(), "evidence": evidence}}
+        append(actions_path, row)
+        return row
+
+
 def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=None):
     """Called under the scan lock. Persist intent before each non-repeatable effect."""
     findings_path = path_at(root, config["paths"]["findings"])
@@ -645,7 +671,7 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
                 continue
         existing = actions.get(action_key)
         if existing:
-            if existing["status"] != "done":
+            if existing["status"] not in {"done", "resolved_no_effect"}:
                 extras.append(finding("action_error", action_key, "prior action intent is unresolved; inspect before retry", config))
             continue
         # A cached finding is only a candidate. A refused fresh predicate has
