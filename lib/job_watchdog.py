@@ -1150,7 +1150,8 @@ class Effects:
             os.fsync(handle.fileno())
         return {"queued": True}
 
-    def fix(self, f):
+    def checkout_fixer(self, f):
+        """Create a head-verified checkout without registering or launching a job."""
         c = self.config
         repository = Path(c["repository_roots"][f["repo"]]).expanduser().resolve()
         if not repository.is_dir():
@@ -1158,13 +1159,20 @@ class Effects:
         actual = command(["git", "remote", "get-url", "origin"], c, repository).strip().removesuffix(".git")
         if not actual.endswith("/" + f["repo"]) and not actual.endswith(":" + f["repo"]):
             raise RuntimeError("authorized repository origin mismatch")
-        name = "watchdog-fix-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16]
+        # Git can retain the new branch when a failed file write rolls back the
+        # worktree. Preserve that evidence; a new attempt owns a distinct ref.
+        name = "watchdog-fix-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16] + "-" + uuid.uuid4().hex
         tree = repository / ".claude/worktrees" / name
         command(["git", "fetch", "origin", f"pull/{f['pr']}/head"], c, repository)
         observed = command(["git", "rev-parse", "FETCH_HEAD"], c, repository).strip()
         if observed != f["head"]:
             raise RuntimeError("PR head changed before fixer launch")
         command(["git", "worktree", "add", "-b", name, str(tree), observed], c, repository)
+        return tree
+
+    def fix(self, f):
+        tree = self.checkout_fixer(f)
+        name, c = tree.name, self.config
         route = self.root / "out/watchdog" / (name + ".desk.json")
         route.parent.mkdir(parents=True, exist_ok=True)
         dispatch = SOURCE / "tools/room-bridge/dispatch.py"
