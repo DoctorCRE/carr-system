@@ -67181,7 +67181,7 @@ end $$;
 
 CREATE FUNCTION ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb) RETURNS bigint
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops'
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
     AS $_$
 declare
     current_host text;
@@ -122518,7 +122518,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
-0895_studio_failover_leader.sql	54afc78ed2c68a4dc16c0985d93c7eb87ba9270a97875fed8f584cad59c9478e	2026-10-18 05:03:44.058329+00
+0895_studio_failover_leader.sql	8b9df07660c719e437054c14ee32bc5391e6a276669d240fa32a20a59f7eb395	2026-10-18 06:06:22.882539+00
 \.
 
 
