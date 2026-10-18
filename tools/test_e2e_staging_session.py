@@ -20,6 +20,17 @@ TOKEN = "synthetic-provider-token"
 SECRET = "synthetic-e2e-session-secret-for-tests-only"
 
 
+def fake_checkout(root: Path, *, wrangler: bool = True) -> Path:
+    (root / "mcp-server").mkdir(parents=True)
+    (root / "mcp-server/wrangler.toml").write_text((REPO / "mcp-server/wrangler.toml").read_text())
+    if wrangler:
+        binary = root / "mcp-server/node_modules/.bin/wrangler"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\n")
+        binary.chmod(0o755)
+    return root
+
+
 class StagingSessionTests(unittest.TestCase):
     def test_timeout_stops_children_before_refusal_and_suppresses_output(self):
         for detached in (False, True):
@@ -119,8 +130,8 @@ class StagingSessionTests(unittest.TestCase):
         self.assertEqual(child_env["CLOUDFLARE_API_TOKEN"], TOKEN)
         self.assertNotIn("DATABASE_URL_WRITER", child_env)
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            MODULE.provision_and_deploy(REPO, SHA, SECRET, child_env, run=run)
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(output):
+            MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET, child_env, run=run)
         self.assertNotIn(TOKEN, output.getvalue())
         self.assertNotIn(SECRET, output.getvalue())
         wrangler = [call for call in calls if "wrangler" in Path(call[0][0]).name]
@@ -137,10 +148,27 @@ class StagingSessionTests(unittest.TestCase):
     def test_failed_provider_output_is_suppressed(self):
         def run(args, **kwargs):
             return subprocess.CompletedProcess(args, 1, SECRET, TOKEN)
-        with self.assertRaises(MODULE.StagingRefusal) as caught:
-            MODULE.provision_and_deploy(REPO, SHA, SECRET, MODULE.provider_environment({}, TOKEN), run=run)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaises(MODULE.StagingRefusal) as caught:
+            MODULE.provision_and_deploy(fake_checkout(Path(directory) / "repo"), SHA, SECRET,
+                                        MODULE.provider_environment({}, TOKEN), run=run)
         self.assertNotIn(TOKEN, str(caught.exception))
         self.assertNotIn(SECRET, str(caught.exception))
+
+    def test_missing_wrangler_is_refused_with_a_specific_message_before_any_command(self):
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        with tempfile.TemporaryDirectory() as directory:
+            repo = fake_checkout(Path(directory) / "repo", wrangler=False)
+            with self.assertRaises(MODULE.StagingRefusal) as caught:
+                MODULE.provision_and_deploy(repo, SHA, SECRET, MODULE.provider_environment({}, TOKEN), run=run)
+            message = str(caught.exception)
+            self.assertIn(str(repo / "mcp-server/node_modules/.bin/wrangler"), message)
+            self.assertIn("run `npm ci` in " + str(repo / "mcp-server"), message)
+            self.assertNotIn(TOKEN, message)
+            self.assertNotIn(SECRET, message)
+        self.assertEqual(calls, [])
 
     def test_source_requires_a_clean_exact_committed_candidate(self):
         def run(args, **kwargs):
