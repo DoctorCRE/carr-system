@@ -39,7 +39,6 @@ Usage:
   ./run.sh next-migration --quiet    # just the number, for scripting
 """
 
-import json
 import os
 import re
 import subprocess
@@ -48,6 +47,8 @@ from pathlib import Path
 
 from migration_baseline import MANIFEST
 from migration_source import migration_names, read_migration
+
+from migration_reservations import read_reservation_rows, reservation_paths
 
 from migration_number_contract import (
     APPROVED_INTERSTITIAL_COLLISIONS,
@@ -95,7 +96,9 @@ def worktree_paths():
     for line in run(["git", "worktree", "list", "--porcelain"]).splitlines():
         if line.startswith("worktree "):
             paths.append(line.split(" ", 1)[1].strip())
-    return paths or [REPO]
+    if not paths:
+        raise MigrationNumberError("cannot identify the shared checkout; no migration number allocated")
+    return paths
 
 
 TRANSIENT_ORIGIN_COLLISION = {
@@ -233,7 +236,8 @@ def main():
 
     # 2 & 3. every worktree's migrations/ directory, on disk, committed or not
     here = os.path.realpath(REPO)
-    for wt in worktree_paths():
+    trees = worktree_paths()
+    for wt in trees:
         mdir = os.path.join(wt, "migrations")
         if not os.path.isdir(mdir) and not (Path(wt) / MANIFEST).is_file():
             continue
@@ -284,22 +288,11 @@ def main():
     # 4. THE RESERVATION LEDGER (2026-08-24, council cluster B). A number
     # another session has RESERVED at mint time is claimed whether or not any
     # file exists yet — the whole point of reserving. The ledger lives in the
-    # canonical checkout's out/, which every worktree on this machine shares.
-    # A torn or missing ledger line is skipped by read_reservations(), and a
-    # ledger this tool cannot read degrades to today's behaviour (warn, don't
-    # refuse) rather than blocking allocation.
-    ledger = os.path.join(REPO, "out", "migration-reservations.jsonl")
-    try:
-        with open(ledger, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("number"), int):
-                    merge(claims, {row["number"]: {"reserved"}}, "reservation")
-    except OSError:
-        pass  # no ledger yet — nothing reserved on this machine
+    # canonical checkout's out/. Worktrees need not symlink their out dirs.
+    # Existing worktree-local ledgers still claim their numbers; never reuse
+    # them merely because the writer now uses the canonical ledger.
+    for row in read_reservation_rows(reservation_paths(trees)):
+        merge(claims, {row["number"]: {"reserved"}}, "reservation")
 
     merge(claims, {
         number: {f"burned:{reason}"}
