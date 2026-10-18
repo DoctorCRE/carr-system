@@ -2643,7 +2643,7 @@ end $$;
 
 CREATE FUNCTION ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
     AS $$
 declare
   v_policy_kind text := p_policy_kind;
@@ -40456,6 +40456,21 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     },
     {
       "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
+    {
+      "config": [
         "search_path=pg_catalog, ops, public, pg_temp"
       ],
       "grantee": "carr_writer",
@@ -40501,6 +40516,21 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
     }
   ],
   "retired_secdef_execute": [
+    {
+      "config": [
+        "search_path=ops, public, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_keys text[], p_idempotency_key text, p_reason text):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
+    },
     {
       "config": [
         "search_path=pg_catalog, ops, pg_temp"
@@ -122831,6 +122861,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0902_feature_switches.sql	22a66e95e02aef1e0ea8871ea4d5148a2eb946e3f7444fdd75738fc1897fe72c	2026-10-18 09:03:05.153122+00
 0904_one_step_gate_rule_approval.sql	905efb2e63c9c78be92f524634c1f829c3c71b8bc720f473d13d1bf2fe6dfc19	2026-10-18 09:49:15.78479+00
 0906_dot_database_design.sql	d7844153bf7d6da0d33cc358d9c3c5e0b4dc73b752da991c8a8026435ab2a128	2026-10-18 06:47:49.612561+00
+0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 \.
 
 
