@@ -17,5 +17,10 @@
 	<string>{{HOME}}/Library/Logs/flash-desk.log</string>
 	<key>StandardOutPath</key>
 	<string>{{HOME}}/Library/Logs/flash-desk.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+	</dict>
 </dict>
 </plist>

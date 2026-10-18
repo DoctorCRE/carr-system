@@ -20,5 +20,10 @@
 	<string>{{REPO}}/out/orch/fix-train/launchd.out</string>
 	<key>WorkingDirectory</key>
 	<string>{{REPO}}/out/orch</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+	</dict>
 </dict>
 </plist>

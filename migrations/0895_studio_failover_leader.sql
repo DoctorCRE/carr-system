@@ -14,7 +14,7 @@ grant select on ops.studio_leader to carr_jobs,carr_authority;
 create function ops.transfer_studio_leader(
     p_source text, p_target text, p_epoch bigint, p_evidence jsonb
 ) returns bigint
-language plpgsql security definer set search_path=pg_catalog,ops as $$
+language plpgsql security definer set search_path=pg_catalog,ops,pg_temp as $$
 declare
     current_host text;
     current_epoch bigint;
