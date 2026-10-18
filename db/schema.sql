@@ -122735,7 +122735,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0900_studio_failover_leader.sql	a6dfdd933aeb33abb9ab449939a63041605c4c38b636d057198d8e625bf05629	2026-10-18 08:27:43.727306+00
 0902_feature_switches.sql	22a66e95e02aef1e0ea8871ea4d5148a2eb946e3f7444fdd75738fc1897fe72c	2026-10-18 09:03:05.153122+00
 0904_one_step_gate_rule_approval.sql	905efb2e63c9c78be92f524634c1f829c3c71b8bc720f473d13d1bf2fe6dfc19	2026-10-18 09:49:15.78479+00
-0905_approve_rule_trusted_search_path.sql	71b894301039790a9cb5cc46bc63d52ead36cf6d6b1902feba682b63958cc265	2026-10-18 10:30:31.947739+00
+0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 \.
 
 

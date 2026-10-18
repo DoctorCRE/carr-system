@@ -1,4 +1,4 @@
--- 0905_approve_rule_trusted_search_path.sql
+-- 0907_approve_rule_trusted_search_path.sql
 -- rollback: alter function ops.approve_rule(uuid,text,text[],text,text) set search_path=ops,public,pg_temp and reinstall the 0902 ops.scac_current_grant_contract()
 -- lock-review: metadata-only ALTER FUNCTION of one SECURITY DEFINER function plus CREATE OR REPLACE of one immutable contract function; no table is touched and no row is rewritten.
 --
