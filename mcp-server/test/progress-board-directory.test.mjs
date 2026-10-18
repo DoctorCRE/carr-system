@@ -31,7 +31,7 @@ test("published directory is a read-only typed, tenant and sponsor scoped projec
     return { rows: params[1] === "joe" ? [{ board_id: "carr-v5", updated_at: "2026-10-01T12:00:00Z",
       snapshot_json: { title: "System progress", project: "carr-v5", tasks: {
         a: { status: "running", title: "Synthetic build" }, b: { status: "done" }, c: { status: "running" },
-      }, deliverables: ["Private detail excluded"] } }] : [] };
+      }, task_counts: { done: 1, running: 2 }, deliverables: ["Private detail excluded"] } }] : [] };
   } };
   assert.deepEqual(await tool.handler(client, actor, {}), {
     ok: true, schema: "progress-board-directory.v1", boards: [{ board_id: "carr-v5",
@@ -51,16 +51,23 @@ test("directory refuses an unverified sponsor before any query", async () => {
   e => e instanceof ToolError && e.payload.error === "board_sponsor_unavailable");
 });
 
-test("summary counts status values without exposing task data and tolerates legacy snapshot shapes", () => {
+test("summary relays the snapshot's own counts and tolerates legacy snapshot shapes", () => {
   const base = { board_id: "demo-project", updated_at: "2026-09-01T00:00:00Z" };
   assert.deepEqual(progressBoardSummary(base), { ...base, title: "demo-project", project: "demo-project", task_counts: {} });
-  for (const tasks of [null, [], "invalid"]) assert.deepEqual(progressBoardSummary({ ...base, snapshot_json: { tasks } }).task_counts, {});
-  assert.deepEqual(progressBoardSummary({ ...base, snapshot_json: { tasks: {
-    empty: {}, missing: null, invalid: "bad", array: [], whitespace: { status: " " },
-    blocked: { status: "blocked" }, unknown: { status: "custom" }, prototype: { status: "__proto__" },
-  } } }).task_counts, JSON.parse('{"__proto__":1,"blocked":1,"custom":1,"queued":2}'));
+  for (const task_counts of [null, [], "invalid", undefined]) {
+    assert.deepEqual(progressBoardSummary({ ...base, snapshot_json: { task_counts, tasks: { a: { status: "running" } } } }).task_counts, {});
+  }
+  assert.deepEqual(progressBoardSummary({ ...base, snapshot_json: { task_counts: JSON.parse(
+    '{"running":2,"done":1,"stale":3,"__proto__":1,"bad":-1,"half":0.5,"text":"2"," ":4}') } }).task_counts,
+  JSON.parse('{"__proto__":1,"done":1,"running":2,"stale":3}'));
 });
 
+test("the directory count is the published count, not a recount of trimmed cards", () => {
+  const row = { board_id: "demo", snapshot_json: {
+    tasks: { b: { status: "running", activity_status: "running" } },
+    task_counts: { done: 1, running: 1 }, omitted: { live: 1, merged: 0, history: 0 } } };
+  assert.deepEqual(progressBoardSummary(row).task_counts, { done: 1, running: 1 });
+});
 
 test("the needs-Joe source snapshot is readable but absent from the board directory", async () => {
   const snapshots = [
