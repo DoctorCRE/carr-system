@@ -40376,6 +40376,21 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_authority",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb):carr_authority:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
   "retired_secdef_execute": [
@@ -67176,6 +67191,58 @@ end $$;
 
 
 --
+-- Name: transfer_studio_leader(text, text, bigint, jsonb); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
+    AS $_$
+declare
+    current_host text;
+    current_epoch bigint;
+    verified_at timestamptz;
+begin
+    perform ops.authority_actor_slug();
+    if p_source is null or p_target is null or p_source = p_target
+       or p_source not in ('studio','macbook') or p_target not in ('studio','macbook') then
+        raise exception 'invalid_transfer_hosts';
+    end if;
+    begin
+        verified_at := (p_evidence->>'verified_at')::timestamptz;
+    exception when others then
+        raise exception 'invalid_fence_evidence';
+    end;
+    if p_evidence is null or jsonb_typeof(p_evidence) <> 'object'
+       or (p_evidence->>'source') is distinct from p_source
+       or (p_evidence->>'target') is distinct from p_target
+       or coalesce(p_evidence->>'target_sha','') !~ '^[0-9a-f]{40}$'
+       or verified_at is null or verified_at > clock_timestamp()
+       or verified_at < clock_timestamp() - interval '1 hour'
+       or not coalesce(
+           (p_evidence->>'kind' = 'powered-off' and p_evidence->'keep_off_until_failback' = 'true'::jsonb)
+           or (p_evidence->>'kind' = 'demoted' and p_evidence->'armed' = 'false'::jsonb
+               and jsonb_typeof(p_evidence->'unregistered') = 'array'), false) then
+        raise exception 'invalid_fence_evidence';
+    end if;
+    if not pg_try_advisory_xact_lock(638148226000001) then
+        raise exception 'running_jobs_hold_transfer_lock';
+    end if;
+    select host,epoch into strict current_host,current_epoch
+      from ops.studio_leader where singleton for update;
+    if p_epoch is distinct from current_epoch then
+        raise exception 'leader_epoch_conflict';
+    end if;
+    if current_host = p_target then return current_epoch; end if;
+    if current_host <> p_source then raise exception 'leader_owner_conflict'; end if;
+    update ops.studio_leader set host=p_target,epoch=epoch+1,
+        fence_evidence=p_evidence,changed_at=clock_timestamp()
+      where singleton and host=p_source and epoch=p_epoch returning epoch into current_epoch;
+    return current_epoch;
+end $_$;
+
+
+--
 -- Name: transition_execution_environment_provider(text, text, text, jsonb, uuid); Type: FUNCTION; Schema: ops; Owner: -
 --
 
@@ -79978,6 +80045,29 @@ CREATE TABLE ops.staging_restore_only_result (
 
 
 --
+-- Name: studio_leader; Type: TABLE; Schema: ops; Owner: -
+--
+
+CREATE TABLE ops.studio_leader (
+    singleton boolean DEFAULT true NOT NULL,
+    host text NOT NULL,
+    epoch bigint DEFAULT 1 NOT NULL,
+    fence_evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    changed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT studio_leader_epoch_check CHECK ((epoch > 0)),
+    CONSTRAINT studio_leader_host_check CHECK ((host = ANY (ARRAY['studio'::text, 'macbook'::text]))),
+    CONSTRAINT studio_leader_singleton_check CHECK (singleton)
+);
+
+
+--
+-- Name: TABLE studio_leader; Type: COMMENT; Schema: ops; Owner: -
+--
+
+COMMENT ON TABLE ops.studio_leader IS 'Durable Studio/MacBook owner. Never expires. Manual transfer requires source fencing and exclusive advisory lock 638148226000001; guarded jobs hold its shared form.';
+
+
+--
 -- Name: system_work_actor_scope; Type: VIEW; Schema: ops; Owner: -
 --
 
@@ -85051,32 +85141,6 @@ CREATE TABLE public.export_run (
 --
 
 COMMENT ON COLUMN public.export_run.file_sha IS 'sha256 of the WRITTEN FILE''s bytes at export (0073). The data checksum proves what the DB said; this proves what the file was. A live file whose bytes no longer match was edited by something other than the exporter — the V-BNK-050 clobber class, now machine-detectable.';
-
-
---
--- Name: feature_switch; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.feature_switch (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    organization_tenant_id text NOT NULL,
-    name text NOT NULL,
-    description text NOT NULL,
-    default_enabled boolean NOT NULL,
-    enabled boolean,
-    audience text NOT NULL,
-    owner text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    expected_removal_on date NOT NULL,
-    retired_at timestamp with time zone,
-    retirement_loop_id uuid,
-    version integer DEFAULT 1 NOT NULL,
-    CONSTRAINT feature_switch_audience_check CHECK ((audience = ANY (ARRAY['joe'::text, 'team'::text, 'everyone'::text]))),
-    CONSTRAINT feature_switch_description_check CHECK (((length(btrim(description)) >= 1) AND (length(btrim(description)) <= 1000))),
-    CONSTRAINT feature_switch_name_check CHECK ((name ~ '^[a-z][a-z0-9-]{0,62}$'::text)),
-    CONSTRAINT feature_switch_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text, 'claude'::text]))),
-    CONSTRAINT feature_switch_version_check CHECK ((version > 0))
-);
 
 
 --
@@ -97493,6 +97557,14 @@ ALTER TABLE ONLY ops.staging_restore_only_result
 
 
 --
+-- Name: studio_leader studio_leader_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.studio_leader
+    ADD CONSTRAINT studio_leader_pkey PRIMARY KEY (singleton);
+
+
+--
 -- Name: tour_audit_event tour_audit_event_organization_tenant_id_event_digest_key; Type: CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -99826,22 +99898,6 @@ ALTER TABLE ONLY public.experiment
 
 ALTER TABLE ONLY public.export_run
     ADD CONSTRAINT export_run_pkey PRIMARY KEY (id);
-
-
---
--- Name: feature_switch feature_switch_organization_tenant_id_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.feature_switch
-    ADD CONSTRAINT feature_switch_organization_tenant_id_name_key UNIQUE (organization_tenant_id, name);
-
-
---
--- Name: feature_switch feature_switch_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.feature_switch
-    ADD CONSTRAINT feature_switch_pkey PRIMARY KEY (id);
 
 
 --
@@ -108132,13 +108188,6 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
--- Name: feature_switch scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.feature_switch FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
 -- Name: growth_snapshot scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -109039,13 +109088,6 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.e
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.export_run FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
-
-
---
--- Name: feature_switch scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.feature_switch FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -118396,6 +118438,7 @@ revoke all on function ops.tour_slice3_provider_projection_guard() from public;
 revoke all on function ops.tour_slice3_reject_mutation() from public;
 revoke all on function ops.tour_slice3_rights_guard(p_tenant text, p_evidence_id uuid, p_rights_id uuid, p_at timestamp with time zone, p_use_class text) from public;
 revoke all on function ops.tour_source_rights_guard() from public;
+revoke all on function ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb) from public;
 revoke all on function ops.transition_execution_environment_provider(p_provider_ref text, p_expected_state text, p_target_state text, p_evidence_refs jsonb, p_idempotency_key uuid) from public;
 revoke all on function ops.transition_proposed_eval_candidate(p_work_request text, p_candidate_ref text, p_next_state text, p_decision_basis jsonb, p_idempotency_key uuid) from public;
 revoke all on function ops.triage_sourced_work_request(p_work_request text, p_base_version integer, p_classification text, p_idempotency_key uuid) from public;
@@ -119263,6 +119306,9 @@ grant select on table ops.staging_restore_only_result to carr_jobs;
 grant select on table ops.staging_restore_only_result to carr_reader;
 grant select on table ops.staging_restore_only_result to carr_writer;
 grant select on table ops.staging_restore_only_result to dot_reader;
+grant select on table ops.studio_leader to carr_authority;
+grant select on table ops.studio_leader to carr_jobs;
+grant select on table ops.studio_leader to dot_reader;
 grant select on table ops.system_work_actor_scope to carr_reader;
 grant select on table ops.system_work_actor_scope to dot_reader;
 grant select on table ops.system_work_plan_scope to carr_reader;
@@ -119721,9 +119767,6 @@ grant select on table public.experiment to dot_reader;
 grant insert, select on table public.export_run to carr_exporter;
 grant insert, select, update on table public.export_run to carr_writer;
 grant select on table public.export_run to dot_reader;
-grant select on table public.feature_switch to carr_reader;
-grant insert, select, update on table public.feature_switch to carr_writer;
-grant select on table public.feature_switch to dot_reader;
 grant insert, select on table public.growth_snapshot to carr_jobs;
 grant select on table public.growth_snapshot to carr_reader;
 grant select on table public.growth_snapshot to dot_reader;
@@ -121826,6 +121869,7 @@ grant execute on function ops.suggest_doc_work(p_conversation uuid, p_sequence i
 grant execute on function ops.supersede_sourced_work_request(p_work_request text, p_base_version integer, p_exit_reason text, p_superseded_by text, p_actor_slug text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.timeout_job(p_job_id uuid, p_lease_token uuid, p_detail text) to carr_jobs;
 grant execute on function ops.tour_share_feedback_target(p_session_digest text, p_scope text, p_projection_ref text, p_property_ref text) to carr_writer;
+grant execute on function ops.transfer_studio_leader(p_source text, p_target text, p_epoch bigint, p_evidence jsonb) to carr_authority;
 grant execute on function ops.transition_execution_environment_provider(p_provider_ref text, p_expected_state text, p_target_state text, p_evidence_refs jsonb, p_idempotency_key uuid) to carr_authority;
 grant execute on function ops.transition_proposed_eval_candidate(p_work_request text, p_candidate_ref text, p_next_state text, p_decision_basis jsonb, p_idempotency_key uuid) to carr_authority;
 grant execute on function ops.transition_proposed_eval_candidate(p_work_request text, p_candidate_ref text, p_next_state text, p_decision_basis jsonb, p_idempotency_key uuid) to carr_writer;
@@ -122490,7 +122534,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
 0897_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 07:03:58.910517+00
-0898_feature_switches.sql	302282a305057f1dfde777eacc094a0fb816c7fad2e401907271dfc315ca0af3	2026-10-18 07:33:03.301997+00
+0900_studio_failover_leader.sql	a6dfdd933aeb33abb9ab449939a63041605c4c38b636d057198d8e625bf05629	2026-10-18 08:27:43.727306+00
 \.
 
 

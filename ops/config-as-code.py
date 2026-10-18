@@ -64,6 +64,7 @@ import tempfile
 import time
 import hashlib
 import secrets
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.machine_prerequisites import machine_prerequisites, prerequisite_failure_report
@@ -230,7 +231,7 @@ CODEX_PERMISSIONS_END = "# <<< CARR managed permissions <<<"
 TOKENS = [(tok, real) for tok, real in
           (("{{VAULT}}", VAULT), ("{{REPO}}", REPO), ("{{HOME}}", HOME)) if real]
 
-from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY
+from lib.launchd_scope import PRIMARY_ONLY, SECONDARY_ONLY, HOST_ONLY, allowed_on_machine
 
 
 
@@ -434,6 +435,9 @@ def portable(text):
 def concrete(text):
     for tok, real in TOKENS:
         text = text.replace(tok, real)
+    if '<plist' in text:
+        from lib.studio_failover import managed_body
+        text = managed_body(text, Path(REPO))
     return text
 
 
@@ -447,7 +451,8 @@ def read(path):
 
 def launchd_texts_match(live_text, repo_text):
     """Compare launchd plist bodies with token portability normalized on both sides."""
-    return portable(live_text or "") == portable(repo_text or "")
+    desired = concrete(repo_text) if repo_text and '<plist' in repo_text else repo_text
+    return portable(live_text or "") == portable(desired or "")
 
 
 def tracked_text_match(label, live, repo_text):
@@ -2220,6 +2225,7 @@ def cmd_install_progress_board(apply=False, repo=None):
     desired["WorkingDirectory"] = runtime_repo
     desired["EnvironmentVariables"] = dict(current.get("EnvironmentVariables", {}))
     desired["EnvironmentVariables"]["PROGRESS_BOARD_ROOT"] = os.path.join(REPO, "out")
+    desired = plistlib.loads(concrete(plistlib.dumps(desired).decode('utf-8')).encode('utf-8'))
     refusal = launchd_path_refusal(plistlib.dumps(desired).decode("utf-8"))
     if refusal:
         print(f"progress-board: REFUSED {refusal}")
@@ -2532,6 +2538,9 @@ def cmd_install(apply):
                     launchd_activation_failures.append(f)
             else:
                 print(f"  SKIP  {f} (writes shared state; runs on the primary machine only)")
+            continue
+        if f in HOST_ONLY and not allowed_on_machine(f, IS_PRIMARY):
+            print(f"  SKIP  {f} (runs only on its declared host)")
             continue
         if f in SECONDARY_ONLY and IS_PRIMARY:
             print(f"  SKIP  {f} (the nightly chain already does this here)")

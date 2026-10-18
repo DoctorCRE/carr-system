@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- doctrine: studio-macbook-failover -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+		<key>PROGRESS_BOARD_ROOT</key>
+		<string>{{REPO}}/out</string>
+	</dict>
+	<key>Label</key>
+	<string>local.carr-progress-board</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>{{REPO}}/ops/progress-board-render.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>{{HOME}}/Library/Logs/carr-progress-board.log</string>
+	<key>StandardOutPath</key>
+	<string>{{HOME}}/Library/Logs/carr-progress-board.log</string>
+	<!-- carr-launchd-interval-seconds: 900 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict><key>Minute</key><integer>0</integer></dict>
+		<dict><key>Minute</key><integer>15</integer></dict>
+		<dict><key>Minute</key><integer>30</integer></dict>
+		<dict><key>Minute</key><integer>45</integer></dict>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>{{REPO}}</string>
+</dict>
+</plist>

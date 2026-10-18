@@ -88,6 +88,96 @@
       "sha256": "11907f15985826b8b5cb0009ab4de02d7f4922a9f53d5950478838f102f8ffaf",
       "rule": "generic-api-key",
       "reason": "Historical generated SCAC v114 source-contract manifest at 710845781. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
+    },
+    {
+      "path": "ops/config/studio-failover-inventory.v1.json",
+      "sha256": "f8aa2ba34a17e57ac18a33b7f2796504e62fbb90a7972bbe86bce658e18f108a",
+      "rule": "pii-phone",
+      "reason": "Machine inventory value (a RAM byte count), not a phone number; no record-layer or client data."
+    },
+    {
+      "path": "ops/config/studio-failover.v1.json",
+      "sha256": "2babac885eb2cdb5d84d6279131a15c208cc107e0af32712a5cffc70bc5c0758",
+      "rule": "pii-email",
+      "reason": "Tailnet SSH login for the operator's own Studio host in the failover config; no client data."
+    },
+    {
+      "path": "ops/config/studio-failover.v1.json",
+      "sha256": "a7d208b4009b6fafdc336ce82ef6cc71e05e67b7dce4c17591b9a527ba3742c4",
+      "rule": "pii-email",
+      "reason": "Tailnet SSH login for the operator's own Studio host in the failover config; no client data."
+    },
+    {
+      "path": "ops/config/studio-failover.v1.json",
+      "sha256": "c7561153b2e392b8ef55f945225789a305a8dd7afb0f00173716d3bc29bf4f25",
+      "rule": "pii-email",
+      "reason": "Tailnet SSH login for the operator's own Studio host in the failover config; no client data."
+    },
+    {
+      "path": "ops/studio-failover-selftest.py",
+      "sha256": "7fda9f55d900cf949ee76cf3b49a3c77b9af2f06bcfb8ea7a411988066d4c1a1",
+      "rule": "credential-url",
+      "reason": "Owned disposable test-fixture connection strings, never a live credential; the lines also carry the ci-secret-scan allow marker."
+    },
+    {
+      "path": "ops/studio-failover-selftest.py",
+      "sha256": "c8f2d9557af54a2892ba79ed2b7140d8abad94565d603efd343bbee81bd27bab",
+      "rule": "credential-url",
+      "reason": "Owned disposable test-fixture connection strings, never a live credential; the lines also carry the ci-secret-scan allow marker."
+    },
+    {
+      "path": "ops/studio-failover-selftest.py",
+      "sha256": "7fda9f55d900cf949ee76cf3b49a3c77b9af2f06bcfb8ea7a411988066d4c1a1",
+      "rule": "pii-email",
+      "reason": "Owned disposable test-fixture connection strings, never a live credential; the lines also carry the ci-secret-scan allow marker."
+    },
+    {
+      "path": "ops/studio-failover-selftest.py",
+      "sha256": "c8f2d9557af54a2892ba79ed2b7140d8abad94565d603efd343bbee81bd27bab",
+      "rule": "pii-email",
+      "reason": "Owned disposable test-fixture connection strings, never a live credential; the lines also carry the ci-secret-scan allow marker."
+    },
+    {
+      "path": "ops/studio-inventory.py",
+      "sha256": "444309390fff258ff429e3df57024b3ee39806e5aae3154de8cb80c2e82b4973",
+      "rule": "pii-email",
+      "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/studio-inventory.py",
+      "sha256": "8814d60d898a51097d7f82a14de0651faeaed692f1a4c5e8706c5c6325588d50",
+      "rule": "pii-email",
+      "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/studio-inventory.py",
+      "sha256": "aecc62b0db39a1900bff4b4a0ce223da41b1bd50c384e16012c7ec15d113d001",
+      "rule": "pii-email",
+      "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/studio-inventory.py",
+      "sha256": "eb2d5b58a4e8cfcd6ed30b5da5fa65d93edc548739a408e06de603de38c35ac8",
+      "rule": "pii-email",
+      "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/studio-inventory.py",
+      "sha256": "f221849bbf75d743392098bf263290aa0255b07a50e893ac8880bd1aa7ef4db6",
+      "rule": "pii-email",
+      "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/study-sources-selftest.py",
+      "sha256": "de0c52738531f876c3187fac4943e86a204fa057348b9c5df3d55b37366b0547",
+      "rule": "credential-url",
+      "reason": "Historical PR 1429 revision whose credential-URL redaction test used a synthetic placeholder password in a made-up example.com URL. Retained in PR history after the fixture moved to a placeholder password; exception binds only these exact immutable bytes and this detector."
+    },
+    {
+      "path": "ops/study-sources-selftest.py",
+      "sha256": "846862e0f4265916a57350fe6a1cfb7b9e0d7b8b973084135537caa3312defed",
+      "rule": "credential-url",
+      "reason": "Historical PR 1429 revision whose credential-URL redaction test used a synthetic placeholder password in a made-up example.com URL. Retained in PR history after the fixture moved to a placeholder password; exception binds only these exact immutable bytes and this detector."
     }
   ]
 }

@@ -1,0 +1,229 @@
+{
+  "schema": "carr-studio-failover/v1",
+  "hosts": {
+    "studio": {
+      "hostname": "Mac",
+      "ssh": "booko@mac-studio.tailc8cc93.ts.net"
+    },
+    "macbook": {
+      "hostname": "MacBookPro",
+      "ssh": "macbook"
+    }
+  },
+  "scheduled_manifest": {
+    "repository": "jbookout/carr-system",
+    "ref": "origin/codex/job-manifest-drift",
+    "captured_machine_role": "secondary",
+    "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",
+    "path": "ops/config/scheduled-jobs.v1.json"
+  },
+  "jobs": [
+    {
+      "label": "com.carr.canary-ingest-sink",
+      "source": "ops/launchd/com.carr.canary-ingest-sink.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.cliproxyapi",
+      "source": "ops/launchd/com.carr.cliproxyapi.plist",
+      "credentials": [
+        "~/.cli-proxy-api/config.yaml",
+        "~/.cli-proxy-api/client-api-key",
+        "~/.cli-proxy-api/management-key"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.control-plane-tick",
+      "source": "ops/launchd/com.carr.control-plane-tick.plist",
+      "credentials": [
+        "~/.config/carr/db.env",
+        "~/.config/carr/engineering-controller.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.cutover-watch",
+      "source": "ops/launchd/com.carr.cutover-watch.plist",
+      "credentials": [
+        "~/.config/carr/mcp-tokens.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.delivery-cadence-a05-sweep",
+      "source": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
+      "credentials": [
+        "~/.config/carr/mcp-tokens.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.fix-train",
+      "source": "ops/launchd/com.carr.fix-train.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.job-watchdog",
+      "source": "ops/launchd/com.carr.job-watchdog.plist",
+      "credentials": [
+        "~/.config/carr/db.env",
+        "~/.config/carr/mcp-tokens.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.local-briefs",
+      "source": "ops/launchd/com.carr.local-briefs.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.nightly-exports-daytime-retry",
+      "source": "ops/launchd/com.carr.nightly-exports-daytime-retry.plist",
+      "credentials": [
+        "~/.config/carr/db.env",
+        "~/.config/carr/tokens.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.nightly-record-layer",
+      "source": "ops/launchd/com.carr.nightly-record-layer.plist",
+      "credentials": [
+        "~/.config/carr/db.env",
+        "~/.config/carr/tokens.env",
+        "~/.config/carr/healthchecks.env",
+        "~/.config/carr/age-key.txt"
+      ],
+      "state": [
+        "~/carr-system/out/backups"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.partner-ping",
+      "source": "ops/launchd/com.carr.partner-ping.plist",
+      "credentials": [
+        "~/.config/carr/db.env"
+      ],
+      "state": [
+        "~/.config/carr/partner-ping.json"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.release-pipeline",
+      "source": "ops/launchd/com.carr.release-pipeline.plist",
+      "credentials": [
+        "~/.config/carr/db.env",
+        "~/.config/carr/tokens.env"
+      ],
+      "state": [
+        "~/carr-system/out/release-pipeline"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.room-bridge",
+      "source": "ops/launchd/com.carr.room-bridge.plist",
+      "credentials": [
+        "~/.config/carr/mcp-tokens.env",
+        "~/.config/carr/engineering-controller.env"
+      ],
+      "state": [
+        "~/.config/carr/room-bridge-state.json",
+        "~/.config/carr/hermes-dispatch-results.jsonl"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.rules-refresh",
+      "source": "ops/launchd/com.carr.rules-refresh.plist",
+      "credentials": [
+        "~/.config/carr/db.env"
+      ],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.tailscale-up",
+      "source": "ops/launchd/com.carr.tailscale-up.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "com.carr.timebomb-audit",
+      "source": "ops/launchd/com.carr.timebomb-audit.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "local.carr-progress-board",
+      "source": "ops/launchd/local.carr-progress-board.plist",
+      "credentials": [],
+      "state": [
+        "~/carr-system/out/boards"
+      ],
+      "enabled": true
+    },
+    {
+      "label": "local.ds4-flash-next",
+      "source": "ops/launchd/local.ds4-flash-next.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    },
+    {
+      "label": "local.flash-desk",
+      "source": "ops/launchd/local.flash-desk.plist",
+      "credentials": [],
+      "state": [],
+      "enabled": true
+    }
+  ],
+  "manual_roles": [
+    {
+      "name": "guarded host startup",
+      "prerequisite": "verify guarded or safely disabled startup on both hosts; bootstrap Studio with failback-to-studio.sh while MacBook is fenced; keep an unprepared returning host off until its old startup jobs are disabled"
+    },
+    {
+      "name": "generated fix-train executable",
+      "prerequisite": "provision and verify out/orch/fix-train.sh from its owning orchestrator"
+    },
+    {
+      "name": "local model runtimes",
+      "prerequisite": "provision model binaries and weights; verify their local server endpoints"
+    },
+    {
+      "name": "local PostgreSQL instances",
+      "prerequisite": "classify observed test clusters; restore and verify any persistent cluster"
+    },
+    {
+      "name": "Model Room profile state",
+      "prerequisite": "restore Hermes profiles and verify non-interactive desk authentication"
+    },
+    {
+      "name": "Tailscale and SSH ingress",
+      "prerequisite": "verify target tailnet and SSH ingress; repoint Studio-bound endpoints"
+    },
+    {
+      "name": "Claude scheduled definitions",
+      "prerequisite": "demote source scheduler and reconcile target primary definitions without client settings edits"
+    }
+  ],
+  "rehearsal_max_age_days": 35
+}

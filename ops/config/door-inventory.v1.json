@@ -57,6 +57,12 @@
       "evidence": "ops/doctorcre-sibling-manifest.py docstring (added 7c75c878, #853, defect b7936d5d)"
     },
     {
+      "path": "ops/failover-to-macbook.sh",
+      "class": "hand_tool",
+      "reason": "Joe or the orchestrator runs it by name for a manual Studio-to-MacBook takeover; source-only until the failover is enabled, never scheduled.",
+      "evidence": "7a7a09907 (Add manual Studio failover to MacBook and monthly readiness rehearsal)"
+    },
+    {
       "path": "ops/guidance-registry-check.py",
       "class": "inert",
       "reason": "Validator for the typed Guidance Registry proposal; nothing runs it because the registry has never been activated.",
@@ -67,6 +73,12 @@
       "class": "one_shot",
       "reason": "The process-audit council's confirm-or-kill shadow test of incident fingerprinting, run once against the August 15-23 ledger.",
       "evidence": "8a0d4aaf (#568)"
+    },
+    {
+      "path": "ops/probe-macbook-failover.py",
+      "class": "hand_tool",
+      "reason": "Read-only probe the operator runs by name to check this branch's failover CLI on the MacBook without installing or activating it.",
+      "evidence": "ops/probe-macbook-failover.py docstring (added with the manual Studio failover, #1593)"
     },
     {
       "path": "ops/propose-guidance-situation-curation.py",
@@ -181,12 +193,6 @@
       "class": "one_shot",
       "reason": "Proved ORDER 40's two decision-history done-tests on the rehearsal branch before the personal set went to records.",
       "evidence": "f163962f (ORDER 40, rehearsed)"
-    },
-    {
-      "path": "tools/reconcile.py",
-      "class": "one_shot",
-      "reason": "Cell-level reconciliation of staged exports against the vault, signed at freeze with zero cell diffs.",
-      "evidence": "f438006c (Wave 1 import: ZERO cell diffs)"
     },
     {
       "path": "tools/rehearse-dossier-render.py",
