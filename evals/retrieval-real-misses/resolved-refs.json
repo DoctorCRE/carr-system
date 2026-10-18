@@ -9,9 +9,9 @@
       ],
       "verb": "find",
       "args": {
-        "query": "Henry Schein"
+        "query": "Example Organization d21c02ee"
       },
-      "readback": "organizations[Henry Schein].refs; live_rows=1, retired_aliases=16",
+      "readback": "organizations[Example Organization d21c02ee].refs; live_rows=1, retired_aliases=16",
       "retired_refs": [
         "P-0099",
         "P-0117",

@@ -48,6 +48,7 @@ def cmd_register(reg: desks.Registry, args) -> int:
         args.name, args.kind, socket=args.socket, model=args.model, cwd=args.cwd,
         family=getattr(args, "family", None), effort=getattr(args, "effort", None), sandbox=args.sandbox, add_dirs=args.add_dirs,
         permission_mode=getattr(args, "permission_mode", None),
+        network_access=getattr(args, "network_access", False),
     )
     if args.seat:
         entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)
@@ -69,12 +70,6 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
         return 2
     entry = entries[args.name]
     if args.cwd and entry.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli"):
-        # desks.Registry.register() always starts a codex-session entry with
-        # thread_id=None (untouched, on purpose — see desks.py). Re-pointing a
-        # stale cwd through it therefore also drops any old thread_id, which is
-        # the right call here: a thread bound to a cwd that no longer exists
-        # (e.g. a deleted worktree) cannot be resumed anyway, and the next
-        # dispatch starts a fresh thread in the corrected directory.
         entry = reg.register(
             args.name, entry["kind"], socket=entry.get("socket"), model=entry.get("model"),
             family=entry.get("family"), effort=entry.get("effort"), cwd=args.cwd, sandbox=entry.get("sandbox"),
@@ -92,7 +87,7 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
     try:
         live = True
         if entry.get("kind") in ("claude-session", "codex-live"):
-            reg.resolve(args.name)  # raises DeskError if the socket is dead
+            reg.resolve(args.name)
             live = True
     except DeskError as e:
         registry_ext.stamp_heartbeat(args.name, live=False, path=reg.path)
@@ -154,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--model", default=None)
     r.add_argument("--family", choices=codex_models.FAMILIES)
     r.add_argument("--effort", default=None, choices=list(desks.EFFORT_CHOICES))
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--cwd", default=None)
     r.add_argument("--permission-mode", default=None,
                    help="dispatched desks use dontAsk only; other modes are refused and "

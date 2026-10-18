@@ -1,5 +1,6 @@
 {
   "version": "retrieval-real-misses/v1",
+  "requires_private_fixture": true,
   "sources": [
     {
       "case": 1,
@@ -98,11 +99,11 @@
       "id": "m01-01",
       "source_case": 1,
       "cause": "never-asked",
-      "question": "Find Henry Schein.",
+      "question": "Find Example Organization d21c02ee.",
       "request": {
         "verb": "find",
         "args": {
-          "query": "Henry Schein"
+          "query": "Example Organization d21c02ee"
         }
       },
       "lane": "organizations",
@@ -114,11 +115,11 @@
       "id": "m01-02",
       "source_case": 1,
       "cause": "never-asked",
-      "question": "Who do we know at Henry Schein?",
+      "question": "Who do we know at Example Organization d21c02ee?",
       "request": {
         "verb": "who-do-we-know",
         "args": {
-          "target": "Henry Schein",
+          "target": "Example Organization d21c02ee",
           "limit": 5
         }
       },
@@ -131,11 +132,11 @@
       "id": "m01-03",
       "source_case": 1,
       "cause": "never-asked",
-      "question": "Find Henry Schein and catch me up.",
+      "question": "Find Example Organization d21c02ee and catch me up.",
       "request": {
         "verb": "find-and-catch-up",
         "args": {
-          "query": "Henry Schein",
+          "query": "Example Organization d21c02ee",
           "limit": 5
         }
       },
@@ -304,11 +305,11 @@
       "id": "m05-01",
       "source_case": 5,
       "cause": "never-asked/drift",
-      "question": "How many live Henry Schein records remain after consolidation? Henry Schein",
+      "question": "How many live Example Organization d21c02ee records remain after consolidation? Example Organization d21c02ee",
       "request": {
         "verb": "find",
         "args": {
-          "query": "Henry Schein"
+          "query": "Example Organization d21c02ee"
         }
       },
       "lane": "organizations",
@@ -326,11 +327,11 @@
       "id": "m05-02",
       "source_case": 5,
       "cause": "never-asked/drift",
-      "question": "How many live Henry Schein records remain after consolidation? Henry Schein company",
+      "question": "How many live Example Organization d21c02ee records remain after consolidation? Example Organization d21c02ee company",
       "request": {
         "verb": "find",
         "args": {
-          "query": "Henry Schein company"
+          "query": "Example Organization d21c02ee company"
         }
       },
       "lane": "organizations",

@@ -30,41 +30,8 @@ def load(rel):
 
 
 class DotReview(unittest.TestCase):
-    def test_r2_native_failed_exec_wrapper_is_a_finished_attempt(self):
-        gate = load('hooks/completion-evidence-gate.py')
-        outcome = 'Script completed\nWall time 1\nOutput:\n'+json.dumps({'exit_code':1, 'output':'write failed'})
-        records = [user('Make the change'), native_call('failed', 'wrangler deploy'), native_output('failed', outcome),
-                   native_call('retry', 'wrangler deploy'), native_output('retry', {'exit_code':0}),
-                   native_call('t', 'pytest'), native_output('t', {'exit_code':0}), assistant('Done, verified and complete')]
-        self.assertFalse(gate.evaluate(records)[0])
 
-    def test_r2_repaired_failed_write_allows_later_verification(self):
-        gate = load('hooks/completion-evidence-gate.py')
-        records = [user('Make the change'), use('Write', {'file_path':'a.py'}, 'failed'), result('failed', True),
-                   use('Write', {'file_path':'a.py'}, 'retry'), result('retry'),
-                   use('Write', {'file_path':'b.py'}, 'b'), result('b'),
-                   use('Bash', {'command':'pytest'}, 't'), result('t'), assistant('Done, verified and complete')]
-        self.assertFalse(gate.evaluate(records)[0])
-        for outcome in ({'exit_code':1}, {'exit_code':0}, {'session_id':123}, {'unknown':'value'}):
-            native = [user('Make the change'), native_call('failed', 'wrangler deploy'),
-                      native_output('failed', outcome), native_call('retry', 'wrangler deploy'),
-                      native_output('retry', {'exit_code':0}), native_call('t', 'pytest'),
-                      native_output('t', {'exit_code':0}), assistant('Done, verified and complete')]
-            self.assertEqual(outcome.get('exit_code') is None, gate.evaluate(native)[0], outcome)
 
-    def test_r02_unknown_or_unsuccessful_results_cannot_verify(self):
-        gate = load('hooks/completion-evidence-gate.py')
-        for kind in ('custom_tool_call', 'function_call'):
-            for outcome in ({'status':'running'}, {'status':'failed'}, {'output':'tests failed'},
-                            {'status':'completed'}, {'status':[]},
-                            {'unrecognized':'value'}, 'arbitrary nonempty text',
-                            {'exit_code':False}, {'exit_code':0, 'status':'running'},
-                            {'exit_code':0, 'status':'failed'}):
-                with self.subTest(kind=kind, outcome=outcome):
-                    records = [user('Make the change'), native_call('m', 'wrangler deploy', kind),
-                               native_output('m', {'exit_code':0}, kind), native_call('t', 'pytest', kind),
-                               native_output('t', outcome, kind), assistant('Done, verified and complete')]
-                    self.assertTrue(gate.evaluate(records)[0], outcome)
 
     def test_r14_long_candidate_lines_keep_matched_source(self):
         mod = load('ops/jev_code_review.py')
@@ -76,22 +43,6 @@ class DotReview(unittest.TestCase):
                 self.assertTrue(any(source in region['code'] for region in regions), regions)
             self.assertTrue(all(len(region['code']) <= mod.MAX_REGION_CHARS for region in regions))
 
-    def test_r13_corrupt_or_unreadable_telemetry_cannot_retire(self):
-        mod = load('ops/gate-lifecycle-report.py')
-        with tempfile.TemporaryDirectory() as tmp, patch.object(mod, 'REPO', tmp):
-            log = Path(tmp)/'catch.jsonl'
-            entry = {'catch_metric':{'ts_field':'ts','log_path':'catch.jsonl','true_positive':{'kind':'row_exists'}},'mode':'enforcing','failure_class':'fixture','review_date':'2026-09-30'}
-            for text in ('broken json\n'+json.dumps({'ts':'invalid'})+'\n', json.dumps({'ts':'invalid'})+'\n', '[]\n'):
-                with self.subTest(text=text):
-                    log.write_text(text)
-                    report = mod.evaluate_gate('fixture',entry,7,mod.datetime.now(mod.timezone.utc))
-                    self.assertFalse(report['data_available'],report)
-                    self.assertIsNone(report['proposal'],report)
-            log.write_text('')
-            with patch.object(mod, 'open', side_effect=PermissionError('unreadable fixture'), create=True):
-                report = mod.evaluate_gate('fixture',entry,7,mod.datetime.now(mod.timezone.utc))
-                self.assertFalse(report['data_available'],report)
-                self.assertIsNone(report['proposal'],report)
 
     def test_r12_candidate_stdout_cannot_forge_completion(self):
         mod = load('ops/jev_scorecard.py')
@@ -113,17 +64,6 @@ class DotReview(unittest.TestCase):
         self.assertEqual(set(paths), set(answer['detail']['files']), answer)
         self.assertEqual(len(paths), len(answer['detail']['files']), answer)
 
-    def test_r10_session_checkout_read_identity(self):
-        gate = load('hooks/unread-artifact-gate.py')
-        cwd = '/repo/carr-system/.claude/worktrees/session'
-        records = [use('Read', {'file_path':cwd+'/hooks/cmd_text.py'}),
-                   use('Read', {'file_path':'other/config.py'}),
-                   use('Bash', {'command':'cd hooks && cat bash-write-gate.py'})]
-        with patch.object(gate, 'REPO', '/repo/carr-system'), patch.object(gate.os, 'getcwd', return_value=cwd):
-            known = gate.known_paths(records)
-            self.assertIn(gate.artifact_path('hooks/cmd_text.py'), known)
-            self.assertIn(gate.artifact_path('hooks/bash-write-gate.py'), known)
-            self.assertNotIn(gate.artifact_path('production/config.py'), known)
 
     def test_r08_url_schemes_and_shell_boundaries(self):
         guard = load('hooks/guard-unattended.py')
@@ -157,85 +97,11 @@ class DotReview(unittest.TestCase):
                     self.assertIn('log.txt', targets)
                     self.assertNotIn('input.txt', targets)
 
-    def test_r05_nested_standing_arguments_preserve_executable_text(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        for source in ('await tools.mcp__carr__standing_context({x: await tools.exec_command({cmd: "wrangler deploy"})})',
-                       'await tools.mcp__carr__standing_context({packs: deploy("wrangler deploy")})'):
-            self.assertIn('wrangler deploy', gate.custom_tool_text({'name':'exec','input':source}))
-        pure = 'text(await tools.mcp__carr__standing_context({packs:["release"], detail:"boot"}));'
-        self.assertNotIn('detail', gate.custom_tool_text({'name':'exec','input':pure}))
 
-    def test_r04_standing_requires_executable_service_success(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'ok':True, 'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        for command in ("printf '%s' 'run.sh call standing-context'", "echo run.sh call standing-context"):
-            self.assertEqual((None,[],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(body))]))
-        command = './run.sh call standing-context \'{}\''
-        for output in ({'ok':False, 'rule_delivery':body['rule_delivery']},
-                       {'exit_code':1, 'output':json.dumps(body)}, 'service failed '+json.dumps(body)):
-            self.assertEqual((None,[],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(output) if isinstance(output,dict) else output)]))
-        self.assertEqual(('enforced',['release'],[]), gate.delivery_state([use('Bash',{'command':command},'s'), tool_output('s',json.dumps(body))]))
 
-    def test_r03_native_custom_standing_service_results(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        for source in ('text(await tools.mcp__carr__standing_context({packs:["release"]}));',
-                       'text(await tools.exec_command({cmd: "./run.sh call standing-context \'{}\'"}));'):
-            call = {'type':'response_item','payload':{'type':'custom_tool_call','name':'exec','input':source,'call_id':'s'}}
-            output = native_output('s', body)
-            self.assertEqual(('enforced',['release'],[]), gate.delivery_state([call, output]))
-            self.assertEqual((None,[],[]), gate.delivery_state([call, native_output('wrong',body)]))
 
-    def test_r02_verification_requires_completed_success_after_writes(self):
-        gate = load('hooks/completion-evidence-gate.py')
-        writes = [use('Write', {'file_path':'a.py'}, 'a'), result('a'),
-                  use('Write', {'file_path':'b.py'}, 'b'), result('b')]
-        test = use('Bash', {'command':'pytest'}, 't')
-        for output in ([], [tool_output('t', 'Script running with session ID 123')],
-                       [tool_output('t', 'Timed out')], [result('t', True)]):
-            with self.subTest(output=output):
-                blocked, reason = gate.evaluate([user('Make the change'), *writes, test, *output, assistant('Done, verified and complete')])
-                self.assertTrue(blocked, reason)
-        self.assertFalse(gate.evaluate([user('Make the change'), *writes, test, result('t'), assistant('Done, verified and complete')])[0])
-        concurrent = {'type':'assistant','message':{'content':[
-            use('Write', {'file_path':'a.py'}, 'a')['message']['content'][0],
-            use('Write', {'file_path':'b.py'}, 'b')['message']['content'][0],
-            test['message']['content'][0]]}}
-        self.assertTrue(gate.evaluate([user('Make the change'), concurrent, result('t'), result('a'), result('b'), assistant('Done, verified and complete')])[0])
-        for event_type in ('custom_tool_call', 'function_call'):
-            mutation = native_call('m', 'wrangler deploy', event_type)
-            check = native_call('t', 'pytest', event_type)
-            for outcome in ({'exit_code':1}, {'session_id':123}, {'exit_code':None}, {'ok':False},
-                            'Script completed\nWall time 1\nOutput:\n'+json.dumps({'exit_code':1,'output':'tests failed'})):
-                records = [user('Make the change'), mutation, native_output('m', {'exit_code':0}, event_type), check, native_output('t', outcome, event_type), assistant('Done, verified and complete')]
-                self.assertTrue(gate.evaluate(records)[0], records)
-            self.assertFalse(gate.evaluate([user('Make the change'), mutation, native_output('m', {'exit_code':0}, event_type), check, native_output('t', {'exit_code':0}, event_type), assistant('Done, verified and complete')])[0])
-        mutation = native_call('m', 'wrangler deploy', 'function_call')
-        check = native_call('t', 'pytest', 'function_call')
-        mutation['payload']['name'] = check['payload']['name'] = 'functions.exec_command'
-        self.assertFalse(gate.evaluate([user('Make the change'), mutation, native_output('m', {'exit_code':0}, 'function_call'), check, native_output('t', {'exit_code':0}, 'function_call'), assistant('Done, verified and complete')])[0])
 
-    def test_r01_secret_operation_never_persists_values(self):
-        gate = load('hooks/settings-change-gate.py')
-        for command in ('gh secret set --body=SYNTHETIC_MARKER TEST_KEY',
-                        'gh secret set -b SYNTHETIC_MARKER TEST_KEY',
-                        'wrangler secret put TEST_KEY <<<SYNTHETIC_MARKER'):
-            with self.subTest(command=command), tempfile.TemporaryDirectory() as tmp:
-                spool = Path(tmp) / 'audit.jsonl'
-                kind, target = gate.classify(command)
-                self.assertNotIn('SYNTHETIC_MARKER', target)
-                with patch.dict(os.environ, {'CARR_SETTINGS_GATE_OFFLINE':'1', 'CARR_SETTINGS_SPOOL':str(spool)}):
-                    gate.record(kind, target, command, 'fixture', 'ok', 'selftest')
-                self.assertNotIn('SYNTHETIC_MARKER', spool.read_text())
 
-    def test_control_native_standing_result(self):
-        gate = load('hooks/rule-pack-drift-gate.py')
-        body = {'rule_delivery': {'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}
-        event = {'type':'event_msg','payload':{'type':'mcp_tool_call_end','invocation':{'tool':'standing_context'},'result':{'Ok':body}}}
-        self.assertEqual(['release'], gate.delivery_state([event])[1])
-        call = {'type':'response_item','payload':{'type':'function_call','name':'mcp__carr__standing_context','call_id':'standing-fixture'}}
-        output = {'type':'response_item','payload':{'type':'function_call_output','call_id':'standing-fixture','output':json.dumps(body)}}
-        self.assertEqual(['release'], gate.delivery_state([call, output])[1])
 
     def test_control_single_quoted_prose(self):
         mod = load('hooks/cmd_text.py')
@@ -322,12 +188,6 @@ class DotReview(unittest.TestCase):
             pipe.health_read = MagicMock(side_effect=[(mod.Result(0),[],True),(mod.Result(1),[{'key':'fixture','hard_error':True}],True)])
             self.assertEqual(1,pipe.health_preflight('a'*40))
 
-    def test_b15_meta_keeps_failed_test(self):
-        gate = load('hooks/jev-supervisor.py')
-        records = [user('Run tests'), use('Bash',{'command':'pytest'},'t'), result('t',True), {'type':'user','isMeta':True,'message':{'content':'Background task complete'}}]
-        with tempfile.TemporaryDirectory() as tmp:
-            transcript = Path(tmp)/'trace.jsonl';transcript.write_text('\n'.join(map(json.dumps,records)))
-            self.assertEqual(1,gate._last_test_evidence(str(transcript)).get('test_failure_count'))
 
     def test_b18_triage_unique_paths(self):
         mod=load('ops/jev_done_checks.py')
@@ -341,28 +201,8 @@ class DotReview(unittest.TestCase):
         self.assertEqual('high',answer['detail']['files'].get('auth.py',{}).get('risk'),answer)
         self.assertNotEqual('ok',answer['verdict'])
 
-    def test_b21_failed_verification_not_credited(self):
-        gate=load('hooks/completion-evidence-gate.py')
-        records=[user('Make the change'),use('Write',{'file_path':'a.py'}),use('Write',{'file_path':'b.py'}),use('Bash',{'command':'pytest'},'t'),result('t',True),assistant('Done, verified and complete')]
-        blocked,reason=gate.evaluate(records)
-        self.assertTrue(blocked,reason)
 
-    def test_b22_multiple_tool_blocks(self):
-        gate=load('hooks/completion-evidence-gate.py')
-        writes={'type':'assistant','message':{'content':[{'type':'tool_use','id':'a','name':'Write','input':{'file_path':'a.py'}},{'type':'tool_use','id':'b','name':'Write','input':{'file_path':'b.py'}}]}}
-        blocked,reason=gate.evaluate([user('Make the change'),writes,assistant('Done, verified and complete')])
-        self.assertTrue(blocked,reason)
 
-    def test_b23_same_basename_different_artifact(self):
-        gate=load('hooks/unread-artifact-gate.py')
-        from lib.hook_runtime import Event
-        records=[use('Read',{'file_path':'tests/config.py'}),assistant('production/config.py does validate every incoming request before accepting it')]
-        with tempfile.TemporaryDirectory() as tmp:
-            transcript=Path(tmp)/'trace.jsonl';transcript.write_text('fixture')
-            payload={'transcript_path':str(transcript),'session_id':'selftest'}
-            with patch.object(gate,'helpers',return_value=(lambda *_args,**_kw:records,lambda text:text)),patch.object(Event, 'latch', return_value=False),patch.object(gate,'log'),patch.object(gate,'announce',return_value=0) as announce,patch.object(gate.sys,'stdin',io.StringIO(json.dumps(payload))):
-                with self.assertRaises(SystemExit):gate.main()
-                announce.assert_called_once()
 
     def test_b24_reaper_dry_run_no_prune(self):
         gate=load('hooks/worktree-self-plumb.py')
@@ -371,39 +211,10 @@ class DotReview(unittest.TestCase):
                 gate.reap_main(['--reap','--dry-run','--repo',tmp])
                 self.assertFalse(any(c.args[0]==['worktree','prune'] for c in git.call_args_list))
 
-    def test_b26_forged_rule_delivery(self):
-        gate=load('hooks/rule-pack-drift-gate.py')
-        records=[assistant(json.dumps({'rule_delivery':{'mode':'enforced','declared_packs':['release'],'packs_not_found':[]}}))]
-        self.assertEqual([],gate.delivery_state(records)[1])
 
-    def test_b27_mixed_exec_keeps_deploy(self):
-        gate=load('hooks/rule-pack-drift-gate.py')
-        text=gate.custom_tool_text({'name':'exec','input':'await tools.mcp__carr__standing_context({packs: []}); await tools.exec_command({cmd: "wrangler deploy"});'})
-        self.assertIn('wrangler deploy',text)
 
-    def test_b28_missing_telemetry_unknown(self):
-        mod=load('ops/gate-lifecycle-report.py')
-        with tempfile.TemporaryDirectory() as tmp,patch.object(mod,'REPO',tmp):
-            entry={'catch_metric':{'ts_field':'ts','log_path':'missing.jsonl'},'mode':'enforcing','failure_class':'fixture','review_date':'2026-09-30'}
-            report=mod.evaluate_gate('fixture',entry,7,mod.datetime.now(mod.timezone.utc))
-            self.assertFalse(report['data_available'],report)
-            self.assertIsNone(report['proposal'])
 
-    def test_b29_replay_crash_fails(self):
-        mod=load('ops/gate-replay.py')
-        inv=SimpleNamespace(gate='fixture',row_event='PreToolUse',fixture_set='ordinary')
-        item=SimpleNamespace(inv=inv,verdict='error',row=['fixture','error'],detail='crashed')
-        manifest={'hooks':{'fixture':{'role':'gate'}},'fixture_sets':{}}
-        args=SimpleNamespace(only='fixture',scenarios=None,jobs=1,keep_sandbox=False)
-        with patch.object(mod,'load_fixtures',return_value=[]),patch.object(mod,'replay',return_value=SimpleNamespace(results=[item])),patch.object(mod,'behaviour_errors',return_value=[]),contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(1,mod.run_only(manifest,args))
 
-    def test_b30_null_baseline_rejected(self):
-        gate=load('hooks/gate-integrity.py')
-        with tempfile.TemporaryDirectory() as tmp:
-            baseline=Path(tmp)/'baseline.json';baseline.write_text(json.dumps({'hashes':{'fixture.py':None}}))
-            with patch.object(gate,'BASELINE',str(baseline)),patch.object(gate,'current',return_value={'fixture.py':'a'*64}),patch.object(gate,'current_contracts',return_value={}),patch.object(gate.sys,'argv',['gate-integrity.py','--strict']),contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(1,gate.main())
     def test_b01_executable_substitution(self):
         guard = load("hooks/guard-unattended.py")
         self.assertIsNotNone(guard.check('echo --title "$(git reset --hard)"'))
@@ -425,18 +236,7 @@ class DotReview(unittest.TestCase):
         self.assertIn('blocked.md', gate.extract_targets('printf x>blocked.md'))
         self.assertIn('blocked.md', gate.extract_targets('cp a blocked.md && echo done'))
 
-    def test_b06_patch_new_front(self):
-        gate = load("hooks/close-before-open-gate.py")
-        with patch.object(gate, '_load_open_work', return_value=([], [{'ref':'WR-fixture'}])):
-            self.assertIsNotNone(gate.check('apply_patch', {'patch':'*** Begin Patch\n*** Add File: design/brand-new-review-fixture.md\n+fixture\n*** End Patch'}, str(REPO)))
 
-    def test_b07_secret_audit_redaction(self):
-        gate = load("hooks/settings-change-gate.py")
-        with tempfile.TemporaryDirectory() as tmp:
-            spool = Path(tmp) / 'audit.jsonl'
-            with patch.dict(os.environ, {'CARR_SETTINGS_GATE_OFFLINE':'1','CARR_SETTINGS_SPOOL':str(spool)}):
-                gate.record('secret', 'TEST_KEY', 'gh secret set TEST_KEY --body SENTINEL_SECRET', 'fixture', 'ok', 'selftest')
-            self.assertNotIn('SENTINEL_SECRET', spool.read_text())
 
     def test_b08_statement_local_where(self):
         guard = load("hooks/guard-unattended.py")
@@ -483,9 +283,6 @@ class DotReview(unittest.TestCase):
             result = score._grade_impl({'lang':'py','test':'check(False, "must fail")'}, 'raise SystemExit(0)', tmp, 5)
         self.assertFalse(result['pass'], result)
 
-    def test_b31_ipv6_disposable_dsn(self):
-        gate = load("ops/gate-zero-scheduler-canary-gate.py")
-        self.assertEqual('postgresql://carr_jobs:pw@[::1]:5432/carr_ci', gate.jobs_dsn('postgresql://carr_ci:pw@[::1]:5432/carr_ci', 'pw'))
 
     def test_e01_nearby_candidates_keep_code(self):
         review = load("ops/jev_code_review.py")

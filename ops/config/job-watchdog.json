@@ -66,7 +66,7 @@
     "release_log": "out/release-pipeline.log"
   },
   "board": "carr-v5",
-  "needs_joe_lane": "needs-joe",
+  "board_github_enabled": false,
   "hang_patterns": [
     "(?m)^Reading additional input from stdin(?:\\.\\.\\.)?\\s*$",
     "(?mi)^Waiting for (?:user input|approval|authentication)(?:\\.\\.\\.)?\\s*$"
@@ -106,7 +106,6 @@
     "environment": "Install the named tool or put it on the job's launchd PATH; findings it feeds remain open.",
     "action_error": "Verify the recorded action intent and any process before retrying.",
     "record_error": "Read the reason: repair the request the record layer or board refused, or restore the one that was unreachable; then retry the same idempotency key.",
-    "board_error": "Restore progress-board reporting and replay the finding.",
     "vendor_release_fetch_error": "Orchestrator: restore access to the named vendor source; the next hourly fetch clears this error on success."
   },
   "fixer": {

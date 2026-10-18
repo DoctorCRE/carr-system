@@ -50,13 +50,14 @@ CAPTURE_CONFIG = Path.home() / ".config" / "carr-capture" / "config.json"
 LOG_PATH = Path.home() / "Library" / "Logs" / "carr-call-mode.log"
 LOCK_PATH = Path.home() / "Library" / "Application Support" / "CARR Call Mode" / "operation.lock"
 CONTEXT_FILE = "call-context.json"
-# The Deal Room is served from both hosts: partners now open it at
-# app.doctorcre.com (the doctorcre-app Worker, whose CSP already admits
-# connect-src http://127.0.0.1:4682); dealroom.doctorcre.com remains the
-# record layer's own host. Any other origin is refused.
+# The production Deal Room is served at app.doctorcre.com, while
+# dealroom.doctorcre.com remains the record layer's own host. The exact
+# doctorcre-app staging Worker origin is also admitted for staging qualification.
+# Local development origins remain explicit; any other origin is refused.
 ALLOWED_ORIGINS = {
     "https://app.doctorcre.com",
     "https://dealroom.doctorcre.com",
+    "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
     "http://127.0.0.1:8787",
     "http://localhost:8787",
     "http://127.0.0.1:4682",

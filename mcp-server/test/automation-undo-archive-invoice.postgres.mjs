@@ -1,4 +1,3 @@
-// Synthetic fixtures only; loopback disposable database; transaction rolls back.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
@@ -32,7 +31,6 @@ try {
   equal((await c.query("select new_value->>'undone_by' as who from event where subject_id=$1 and verb='undo-lead-move'",[lead])).rows[0].who,actor.id);
   equal((await call('advance-leads')).moves.filter(m=>m.lead_id===lead),[]);
   await assert.rejects(()=>call('undo-lead-move',{move_id:move.move_id,base_version:read.base_version}),/stale/);checks++;
-  // A partner's later stage work, including a same-value edit, protects the row.
   const fresh=await call('record-lead-contact',{...contact,native_ref:'local-mail:synthetic-fresh',occurred_at:now.toISOString()});
   const freshMove=(await call('advance-leads')).moves.find(m=>m.activity_id===fresh.activity_id);
   await writeEvent(c,actor,'update-lead','lead',lead,{field:'stage',new:{stage:'qualified'},old:{stage:'qualified'}});
@@ -50,7 +48,6 @@ try {
   equal(after.leads.find(l=>l.id===lead).stage,'archived');
   await assert.rejects(()=>TOOLS['update-lead'].handler(c,{...actor,human:false,slug:'synthetic-agent'},{idempotency_key:randomUUID(),lead:lead,base_version:after.leads.find(l=>l.id===lead).base_version,fields:{stage:'archived'}}),/archive_requires_partner/);checks++;
   await call('undo-lead-move',{move_id:proposal.id,base_version:after.leads.find(l=>l.id===lead).base_version});equal((await TOOLS['lead-board'].handler(c)).metrics.nurture_count,before.metrics.nurture_count);
-  // Two-field invoice match uses the existing update-deal verb and restores both fields.
   const client=randomUUID(),deal=randomUUID(),clientRef='C-SYNTH-'+randomUUID();
   await c.query("insert into client(id,party_id,roster_ref,status,created_by,updated_by)values($1,$2,$3,'active_deal',$4,$4)",[client,party,clientRef,actor.id]);
   await c.query("insert into deal(id,client_id,name,deal_type,phase,created_by,updated_by)values($1,$2,'Synthetic Lease','other','legal',$3,$3)",[deal,client,actor.id]);
@@ -71,7 +68,6 @@ try {
   equal((await callInvoice('invoice-close-queue')).proposals.length,1);
   equal((await call('advance-leads')).invoice_closes[0].status,'proposed');
   equal((await c.query('select phase from deal where id=$1',[deal])).rows[0].phase,'legal');
-  // A later invoice for the same deal cannot overwrite the first date in one batch.
   const first=await callInvoice('record-deal-invoice',{...args,native_ref:'local-mail:synthetic-batch-first',occurred_at:new Date(now-172800000).toISOString()});
   const second=await callInvoice('record-deal-invoice',{...args,native_ref:'local-mail:synthetic-batch-second',occurred_at:new Date(now-86400000).toISOString()});
   const batch=(await call('advance-leads')).invoice_closes;

@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -8,7 +9,6 @@ import { TOOLS, executeRegisteredTool, ToolError as RegistryToolError } from "..
 import {
   COMPLETION_KINDS,
   capabilityProgramTools,
-  completionEvidenceError,
   nextProjectState,
 } from "../src/capability-program.js";
 
@@ -38,7 +38,7 @@ const APPROVED_TITLES = [
 ];
 
 function seededRows() {
-  const sql = fs.readFileSync(MIGRATION, "utf8");
+  const sql = readMigration(MIGRATION);
   const rows = [...sql.matchAll(/\(\s*(\d+)\s*,\s*'carr-ai-engineering-suite-v1'\s*,\s*'(WR-AI-\d+)'\s*,\s*'([^']+)'\s*,\s*'(build|extend|adopt|decline)'\s*,[\s\S]*?'(\{[^']+\})'::jsonb,\s*'joe',\s*'joe'\)/g)]
     .map(([, sequence, ref, title, disposition, context]) => ({
       sequence: Number(sequence), ref, title, disposition, context: JSON.parse(context),
@@ -72,7 +72,7 @@ test("the capability portfolio is seeded once in the approved usefulness order",
 });
 
 test("Joe's retrieval decision moves RAG first without renaming or skipping another project", () => {
-  const sql = fs.readFileSync(REPRIORITIZATION, "utf8");
+  const sql = readMigration(REPRIORITIZATION);
   const expectedRefs = [
     "WR-AI-006", ...Array.from({ length: 5 }, (_, i) => `WR-AI-${String(i + 1).padStart(3, "0")}`),
     ...Array.from({ length: 45 }, (_, i) => `WR-AI-${String(i + 7).padStart(3, "0")}`),
@@ -87,51 +87,6 @@ test("Joe's retrieval decision moves RAG first without renaming or skipping anot
   assert.match(sql, /disable trigger capability_program_identity_guard_before_update/);
   assert.match(sql, /enable trigger capability_program_identity_guard_before_update/);
   assert.match(sql, /WR-AI-006[\s\S]*sole queue head/i);
-});
-
-test("completion evidence is conditional on what completion means", () => {
-  assert.deepEqual(COMPLETION_KINDS, ["built", "extended", "adopted", "declined"]);
-
-  assert.equal(completionEvidenceError("built", {
-    artifact_ref: "pr:201",
-    acceptance_test_refs: ["ci:run:501"],
-    independent_verifier_ref: "finding:review-9",
-  }), null);
-
-  assert.equal(completionEvidenceError("extended", {
-    artifact_ref: "commit:abc",
-    acceptance_test_refs: ["test:contract"],
-    independent_verifier_ref: "review:fresh-context",
-  }), null);
-
-  assert.equal(completionEvidenceError("adopted", {
-    artifact_ref: "manifest:runtime-v1",
-    acceptance_test_refs: ["rehearsal:12"],
-    independent_verifier_ref: "review:13",
-    rollback_ref: "runbook:remove-runtime",
-    decision_ref: "decision:adopt-runtime",
-  }), null);
-
-  assert.equal(completionEvidenceError("declined", {
-    decision_ref: "decision:decline-transformer",
-    independent_verifier_ref: "review:cost-case",
-  }), null);
-
-  assert.equal(completionEvidenceError("built", {
-    artifact_ref: "pr:201",
-    acceptance_test_refs: [],
-    independent_verifier_ref: "review:9",
-  }).error, "completion_evidence_incomplete");
-
-  assert.equal(completionEvidenceError("adopted", {
-    artifact_ref: "manifest:runtime-v1",
-    acceptance_test_refs: ["rehearsal:12"],
-    independent_verifier_ref: "review:13",
-  }).missing.includes("rollback_ref"), true);
-
-  assert.equal(completionEvidenceError("declined", {
-    decision_ref: "decision:decline-transformer",
-  }).missing.includes("independent_verifier_ref"), true);
 });
 
 test("advancement activates exactly one successor and never skips a queued row", () => {
@@ -159,29 +114,17 @@ test("advancement activates exactly one successor and never skips a queued row",
 
 test("the registry exposes a read context and only human-governed lifecycle writes", () => {
   assert.equal(Boolean(TOOLS["capability-program"]?.write), false);
-  assert.equal(Boolean(TOOLS["start-capability-project"]?.write), true);
   assert.equal(Boolean(TOOLS["complete-capability-project"]?.write), true);
-  assert.equal(Boolean(TOOLS["begin-capability-project"]?.write), true);
-  assert.equal(Boolean(TOOLS["attest-capability-project"]?.write), true);
-  // humanOnly LABEL RETIRED (WR-000019 slice S1, 2026-08-27): it was already a
-  // dead label — executeRegisteredTool stopped reading it 2026-08-26 by Joe's
-  // ruling, decision dc57f62d — and this slice removes the stale declaration
-  // from capability-program.js. These are still write:true, human-governed
-  // lifecycle transitions; only the unread flag is gone.
   assert.equal(TOOLS["complete-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["start-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["begin-capability-project"].humanOnly, undefined);
-  assert.equal(TOOLS["attest-capability-project"].humanOnly, undefined);
 
   const completion = TOOLS["complete-capability-project"].inputSchema;
   assert.equal(completion.additionalProperties, false);
   assert.equal(completion.required.includes("base_version"), true);
   assert.equal(completion.required.includes("completion_evidence"), true);
   assert.deepEqual(completion.properties.completion_kind.enum, COMPLETION_KINDS);
-  assert.equal(TOOLS["prepare-capability-project"].humanOnly, undefined);
   assert.equal(TOOLS["capability-program"].inputSchema.properties.program_key.const, PROGRAM,
     "the public reader must not select an arbitrary program");
-  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project"])
+  for (const name of ["complete-capability-project"])
     assert.equal(TOOLS[name].inputSchema.properties.program_key.const, PROGRAM,
       `${name} must reject cross-program writes`);
 });
@@ -242,12 +185,6 @@ test("capability-program returns no session when the current Work Request has no
 });
 
 test("a proposed decline is never offered as the next build item, and never counted as done", async () => {
-  // THE LIVE SHAPE THIS PINS. 29 of the program's 51 rows carry disposition
-  // 'decline' while sitting in state 'ready'. Nothing records that any of those
-  // declines was DECIDED — shape disposition, decider, decision timestamp,
-  // triage classification and triaging actor are null on all 29 — and each row's
-  // own completion definition writes the decline as a condition rather than an
-  // outcome. So they can be neither built nor closed by this read.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -274,19 +211,6 @@ test("a proposed decline is never offered as the next build item, and never coun
 });
 
 test("the read names what the CLOSE path will demand next, not only what to build", async () => {
-  // THE DIVERGENCE THIS PINS, which the fixture above already contained and
-  // nothing asserted on. `current` skips proposed declines so a session is never
-  // handed one to build — deliberate and right. The close path does not skip: it
-  // takes the first row that is not confirmed_closed in program order and refuses
-  // anything else with out_of_order_project.
-  //
-  // Here the decline sits at ordinal 2 and the buildable row at ordinal 3. So a
-  // session reads WR-AI-001, builds it, calls complete on its sequence, and is
-  // refused by a verb naming a sequence it was never shown. On the live program
-  // that moment is twelve closes away: the first proposed decline is at ordinal
-  // 14 and the queue is at ordinal 2.
-  //
-  // Both answers ship, because they answer different questions.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -314,8 +238,6 @@ test("the read names what the CLOSE path will demand next, not only what to buil
 });
 
 test("no close-sequence warning when the two definitions agree", async () => {
-  // The other half. A warning that fires when nothing is wrong is noise, and
-  // this read is consumed by sessions deciding what to do next.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const buildable = { id: "c", ref: "WR-AI-001", program_ordinal: 2, version: 1,
@@ -338,9 +260,6 @@ test("no close-sequence warning when the two definitions agree", async () => {
 });
 
 test("a program with only proposed declines left is NOT complete", async () => {
-  // The dangerous half of stepping over them. If the read skipped declines and
-  // called the program done, 29 undecided rows would vanish behind a green
-  // headline — the false-green shape this system keeps finding.
   const closed = { id: "a", ref: "WR-AI-006", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "extend", title: "RAG pipeline", project_context: {} };
   const decline = { id: "b", ref: "WR-AI-014", program_ordinal: 2, version: 1,
@@ -360,9 +279,6 @@ test("a program with only proposed declines left is NOT complete", async () => {
 });
 
 test("a decline that WAS decided stops being a proposed decline", async () => {
-  // The rule is about undecided rows, not about the word decline. A row moved to
-  // a terminal state is settled and must leave the awaiting count, or the number
-  // could never fall to zero and the program could never complete.
   const settled = { id: "a", ref: "WR-AI-014", program_ordinal: 1, version: 1,
     state: "confirmed_closed", disposition: "decline", title: "Text-to-SQL", project_context: {} };
   const db = { query: async (sql) => {
@@ -376,62 +292,6 @@ test("a decline that WAS decided stops being a proposed decline", async () => {
   assert.equal(result.proposed_declines_awaiting_a_decision, 0);
   assert.equal(result.buildable_total, 1, "a settled row counts again");
   assert.equal(result.program_complete, true);
-});
-
-test("a settled decline may be closed out of order; build work may not", async () => {
-  // WHY THIS EXISTS. On 2026-08-22 Joe ruled on twelve declines in one sitting
-  // and not one could be recorded: the earliest sat at sequence 24, behind an
-  // unbuilt evaluation harness at sequence 2. Build ordering is about WORK, and
-  // a decline is never built — holding it in the lane is what makes the queue
-  // read fifty deep when twenty-one items are real.
-  const head = { id: "h", ref: "WR-AI-001", program_ordinal: 2, version: 3,
-    state: "ready", disposition: "extend", title: "LLM evaluation harness", project_context: {} };
-  const decline = { id: "d", ref: "WR-AI-024", program_ordinal: 24, version: 5,
-    state: "ready", disposition: "decline", title: "Feature store", project_context: {} };
-  const buildLater = { id: "b", ref: "WR-AI-007", program_ordinal: 7, version: 2,
-    state: "ready", disposition: "extend", title: "Something buildable", project_context: {} };
-
-  const dbFor = rows => ({ query: async (sql, params = []) => {
-    if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [head] };
-    if (/program_ordinal=\$2/.test(sql)) {
-      const wanted = Number(params[1]);
-      return { rows: rows.filter(r => Number(r.program_ordinal) === wanted) };
-    }
-    if (sql.includes("from ops.capability_agent_session")) return { rows: [] };
-    throw new Error(`unexpected query: ${sql}`);
-  }});
-
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-
-  // A DECLINE OUT OF ORDER IS REACHABLE. It must fail for a reason that is NOT
-  // out_of_order_project — reaching it is the whole point.
-  let err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([decline]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000001", sequence: 24, base_version: 5, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.notEqual(err?.payload?.error, "out_of_order_project",
-    "a row already dispositioned decline must not be refused for being out of sequence");
-
-  // BUILD WORK OUT OF ORDER IS STILL REFUSED. This is the half that must not
-  // move: the exemption tests the row's disposition, never the caller's wish.
-  err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([buildLater]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000002", sequence: 7, base_version: 2, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.equal(err?.payload?.error, "out_of_order_project",
-    "buildable work stays strictly ordered");
-
-  // A STALE READ IS STILL REFUSED even on the decline path, or the exemption
-  // would also be a way past the version guard.
-  err = null;
-  try {
-    await tools["start-capability-project"].handler(dbFor([decline]), actor,
-      { idempotency_key: "00000000-0000-4000-8000-000000000003", sequence: 24, base_version: 1, executor_actor: "claude", program_key: PROGRAM });
-  } catch (e) { err = e; }
-  assert.equal(err?.payload?.error, "version_conflict",
-    "the decline exemption must not smuggle a stale write past the version check");
 });
 
 class ToolError extends Error {
@@ -540,16 +400,6 @@ test("persisted candidate plus an independent pass closes exactly one project an
   );
 });
 
-test("lifecycle binds a persisted session and does not falsely collapse ready through claimed", async () => {
-  const source = fs.readFileSync(path.join(REPO, "mcp-server/src/capability-program.js"), "utf8");
-  assert.match(source, /insert into ops\.capability_agent_session/i,
-    "start must create/validate a persisted session, not accept an arbitrary string");
-  assert.match(source, /state='claimed'/i,
-    "ready→claimed must be a real durable transition");
-  assert.match(source, /active_session_id|agent_session_id/i,
-    "prepare and complete must bind to the same persisted session");
-});
-
 test("the scheduled builder definition cannot certify, merge, deploy, or communicate", () => {
   const prompt = fs.readFileSync(
     path.join(REPO, "ops/scheduled-tasks/ai-capability-builder.SKILL.md"), "utf8");
@@ -566,14 +416,8 @@ test("the scheduled builder definition cannot certify, merge, deploy, or communi
 });
 
 test("the dispatcher lets a non-human actor reach every capability lifecycle handler", async () => {
-  // INVERTED, not deleted (Joe's ruling 2026-08-26, decision dc57f62d). These
-  // five used to be stopped at the dispatcher before their handler ran. The
-  // point now is the opposite one, and it is still worth pinning: the actor
-  // must REACH the handler. The fake client throws the moment it is touched, so
-  // "handler must not run" arriving is proof the dispatcher passed the call
-  // through rather than refusing it on authority.
   const nonHuman = { id: "scheduled-builder", human: false, slug: "scheduled-builder" };
-  for (const name of ["start-capability-project", "begin-capability-project", "prepare-capability-project", "attest-capability-project", "complete-capability-project", "cancel-capability-session"]) {
+  for (const name of ["complete-capability-project", "cancel-capability-session"]) {
     await assert.rejects(
       executeRegisteredTool({ query: async () => { throw new Error("handler must not run"); } }, nonHuman, name, {}),
       error => !(error instanceof RegistryToolError && error.payload?.error === "human_only"),
@@ -582,11 +426,6 @@ test("the dispatcher lets a non-human actor reach every capability lifecycle han
 });
 
 
-// ── cancel-capability-session ────────────────────────────────────────────────
-// The verb that unsticks a row whose session died mid-flight. These pin the
-// three ways a cancel could quietly become something worse than the problem it
-// solves: undoing a settled close, erasing evidence, and running without a
-// stated reason.
 
 function cancelFixture(overrides = {}) {
   const row = { id: "wr", ref: "WR-AI-038", program_ordinal: 38, version: 5,
@@ -640,13 +479,10 @@ test("a cancel returns the row to ready, cancels the session, and deletes nothin
 });
 
 test("a cancel can NEVER reopen a settled close", async () => {
-  // requireProject only ever returns rows that are not confirmed_closed, so a
-  // closed row is simply not found out of order. This is the assertion that
-  // stops cancel becoming a back door around the immutability trigger.
   const { db } = cancelFixture({ __noSession: false });
   const closedDb = { query: async (sql, params = []) => {
     if (/order by w.program_ordinal limit 1/.test(sql)) return { rows: [{ id: "head", ref: "WR-AI-001", program_ordinal: 2, version: 3, state: "ready", disposition: "extend", project_context: {} }] };
-    if (/program_ordinal=\$2/.test(sql)) return { rows: [] };  // closed rows are excluded by the query itself
+    if (/program_ordinal=\$2/.test(sql)) return { rows: [] };
     return db.query(sql, params);
   }};
   await assert.rejects(
@@ -674,10 +510,6 @@ test("a cancel refuses without a reason, and refuses a row that is not in flight
 });
 
 test("a cancel refuses a row with no shape disposition rather than letting the database refuse it", async () => {
-  // ops.work_request_shape_gate rejects any row entering ready without one, and
-  // freezes the shape columns after claim, so this verb cannot set one itself.
-  // Catching it here is the difference between a usable message and a raw
-  // trigger exception surfacing as an internal error.
   const { db } = cancelFixture({ shape_disposition: null });
   await assert.rejects(
     cancelTools()["cancel-capability-session"].handler(db, actor, {

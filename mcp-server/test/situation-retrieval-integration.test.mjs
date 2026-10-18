@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -148,8 +149,8 @@ test("the visibility resolver still constrains to an active human, in the migrat
   // The predicate this test used to assert on the WIRE now lives in SQL. If it
   // is ever dropped there, the read path would resolve any actor row by slug.
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const migration = fs.readFileSync(
-    path.join(here, "../../migrations/0223_doctrine_search_reads_without_writing_or_reading_actor.sql"), "utf8");
+  const migration = readMigration(
+    path.join(here, "../../migrations/0223_doctrine_search_reads_without_writing_or_reading_actor.sql"));
   const fn = migration.slice(migration.indexOf("function retrieval_visibility_actor_id"));
   assert.match(fn, /kind\s*=\s*'human'/, "resolver must still require a human actor");
   assert.match(fn, /active\s*=\s*true/, "resolver must still require an active actor");

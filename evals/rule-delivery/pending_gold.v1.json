@@ -1,0 +1,62 @@
+{
+ "note": "Rules admitted after the gold labels were written. No case in cases.v2.json or hard_cases.v1.json was ever judged for them, so a delivery of one of these is neither a hit nor a false delivery: it is ungraded until the gold is extended (rule-gold-label second pass) and the id is removed from this file. Grading reads labelled = corpus - pending; a rule listed here that is not in the selection corpus is an error. Added 2026-10-15 for the 14 judgment rules approved 2026-10-13 (loop 1304, PR 1750); their proposed Jev cues were reviewed independently and 12 of 14 were rejected as imprecise, so they reach sessions through pack fallback until reviewed cues exist.",
+ "rules": {
+  "07dde434": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "08c4eda2": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "486584d6": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "4a77c35d": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "578fdd91": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "661d7757": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "67e48aaf": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "76fcbed6": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "a3da3d39": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "a9fc3f0e": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "ac0a6579": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "c363bd8b": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "cfe6b5c6": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  },
+  "f673326b": {
+   "admitted": "2026-10-13",
+   "why": "approved judgment rule; no case labelled for it"
+  }
+ },
+ "schema": "rule-delivery-pending-gold/v1"
+}

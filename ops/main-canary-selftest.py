@@ -13,7 +13,6 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 CANARY = REPO / ".github" / "workflows" / "main-canary.yml"
-PILOT = REPO / ".github" / "workflows" / "automerge-pilot.yml"
 CI_YML = REPO / ".github" / "workflows" / "ci.yml"
 
 failures: list[str] = []
@@ -73,7 +72,8 @@ def test_parallel_classes_match_pr_ci_and_reuse_is_explicit():
     main, pr = workflow(CANARY), workflow(CI_YML)
     classes = main['jobs']['classes']
     check('main has the identical parallel class set as PR CI',
-          classes['strategy']['matrix'] == pr['jobs']['classes']['strategy']['matrix'])
+          classes['strategy']['matrix']['classes'] == pr['jobs']['classes']['strategy']['matrix']['classes']
+          and 'exclude' not in classes['strategy']['matrix'])
     check('all classes run unless exact-tree proof succeeded',
           classes.get('if') == "${{ always() && (needs.evidence.result != 'success' || needs.evidence.outputs.reused != 'true') }}")
     main_steps = classes['steps']
@@ -273,17 +273,6 @@ def test_the_manual_lever_can_freeze_but_never_force_green():
           "green is only ever derived from a successful canary run")
 
 
-def test_the_pilot_asks_before_it_plans():
-    y = PILOT.read_text(encoding="utf-8")
-    check("the automerge pilot consults the freeze",
-          "ops/main-canary-state.py --require-green" in y)
-    check("it asks BEFORE planning, not after a 20-minute verify job",
-          y.find("main-canary-state.py") < y.find("id: plan"),
-          "the cheap refusal has to come first or it saves nothing")
-    check("the plan job can read the canary's runs",
-          "actions: read" in y)
-    check("the manual lever reaches the pilot",
-          "CARR_MAIN_FREEZE: ${{ vars.CARR_MAIN_FREEZE }}" in y)
 
 
 def main():
@@ -298,8 +287,7 @@ def main():
                test_freeze_reads_a_verdict_not_a_cancellation,
                test_every_not_knowing_refuses,
                test_red_freezes_and_green_releases,
-               test_the_manual_lever_can_freeze_but_never_force_green,
-               test_the_pilot_asks_before_it_plans):
+               test_the_manual_lever_can_freeze_but_never_force_green,):
         print(f"\n{fn.__name__}")
         try:
             fn()

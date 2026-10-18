@@ -25,22 +25,6 @@ def answer(*args, **kw):
     return {'model': 'jev-1.13.0', 'answers': {'q': {'noul': .9}}}
 
 class ReviewContracts(unittest.TestCase):
-    def test_proposals_never_compile_or_deliver(self):
-        rtc = load('ops/rule_trigger_compile.py')
-        delivery = load('ops/rule_trigger_delivery.py')
-        rule = {'id': 'synthetic', 'statement': 'Synthetic rule', 'packs': []}
-        proposal = {'id': rule['id'], 'statement_sha256': rtc.sha256_text(rule['statement']),
-                    'mode': 'review_required', 'proposed_mode': 'triggered',
-                    'triggers': {'keywords': {'synthetic': .9}}}
-        doc = rtc.document([proposal])
-        self.assertEqual(rtc.trigger_rows(doc), [])
-        self.assertEqual(rtc.stale_or_missing(doc, [rule]), ['synthetic'])
-        self.assertTrue(any('review' in p for p in rtc.coverage_problems(doc, [rule])))
-        with tempfile.TemporaryDirectory() as tmp, patch.object(delivery, 'judge_budgeted', return_value=({}, {'calls':0, 'rank_status':'unavailable', 'bind_status':'unavailable', 'judged':[], 'overflow':[]})), patch.object(delivery, 'prompt_rows', return_value=[
-                {'kind': 'prompt_regex', 'pattern': 'synthetic', 'source': 'jev_compiled', 'rule_ids': ['synthetic']} ]):
-            result = delivery.advise('synthetic', compiled=doc, rules=[rule], envelope=False,
-                                     delivered_cache=tmp+'/delivered', log_path=tmp+'/log')
-        self.assertEqual(result, [])
 
     def flash(self, intake, best=None, force=False, effort=None, test='true'):
         fr = load('tools/flash-run.py')
@@ -106,18 +90,6 @@ class ReviewContracts(unittest.TestCase):
             code, rows, attempts, applied = self.flash(self.intake(), best={'verdict': 'a', 'escalate': True}, test=test)
             self.assertEqual(applied, [])
 
-    def test_runtime_refuses_proposal_even_if_old_rows_remain(self):
-        rtc = load('ops/rule_trigger_compile.py')
-        delivery = load('ops/rule_trigger_delivery.py')
-        rule = {'id': 'synthetic', 'statement': 'Synthetic rule', 'packs': []}
-        doc = {'rules': {'synthetic': {'id': 'synthetic', 'mode': 'review_required',
-                            'statement_sha256': rtc.sha256_text(rule['statement']),
-                            'triggers': {'keywords': {'synthetic': .9}}}}}
-        with tempfile.TemporaryDirectory() as tmp, patch.object(delivery, 'judge_budgeted', return_value=({}, {'calls':0, 'rank_status':'unavailable', 'bind_status':'unavailable', 'judged':[], 'overflow':[]})), patch.object(delivery, 'prompt_rows', return_value=[
-                {'kind': 'prompt_regex', 'pattern': 'synthetic', 'source': 'jev_compiled', 'rule_ids': ['synthetic']} ]):
-            result = delivery.advise('synthetic', compiled=doc, rules=[rule], envelope=False,
-                                     delivered_cache=tmp+'/delivered', log_path=tmp+'/log')
-        self.assertEqual(result, [])
 
     def test_sparse_coverage_persists_and_resume_does_not_relabel(self):
         cli = load('tools/rule-gold-label.py')

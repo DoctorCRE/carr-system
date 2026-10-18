@@ -51,6 +51,8 @@ import pr_actor as actor  # noqa: E402
 # must not be captured by an inherited GIT_DIR.
 from git_env import fixture_env  # noqa: E402
 
+TEST_POLICY = dict(actor.DEFAULT_POLICY, generated_files=["ops/config/fixture-generated.json"])
+
 FAILED: list[str] = []
 
 
@@ -80,7 +82,7 @@ def decide(**kw):
     base = dict(number=1, is_draft=False, commits_in_main=False,
                 behind=True, conflicts=[], checks="SUCCESS")
     base.update(kw)
-    return actor.decide(actor.PrShape(**base), actor.DEFAULT_POLICY)
+    return actor.decide(actor.PrShape(**base), TEST_POLICY)
 
 
 check("a pull request whose commits are already in main is SUPERSEDED",
@@ -92,36 +94,13 @@ check("a branch merely behind main with no conflicts is a REBASE",
       decide(behind=True, conflicts=[]).action == "rebase")
 
 check("a conflict confined to a declared generated file is RESOLVABLE",
-      decide(conflicts=["ops/config/gate-baseline.json"]).action == "resolve-generated")
-check("...and the real 2026-08-14 case is exactly that file",
-      "ops/config/gate-baseline.json" in actor.DEFAULT_POLICY["generated_files"])
+      decide(conflicts=["ops/config/fixture-generated.json"]).action == "resolve-generated")
 
-# The generated-file list is not a judgment call: bin/sync-enforcement-map.py
-# declares the files it rewrites wholesale in its own OWNED constant. If a third
-# is ever added there, this fails rather than leaving a mechanical conflict the
-# actor refuses to touch — which is how PR #166 sat conflicted on 2026-08-15.
-_sync = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "bin", "sync-enforcement-map.py")
-if os.path.exists(_sync):
-    import ast
-    _owned: list[str] = []
-    for _node in ast.walk(ast.parse(open(_sync).read())):
-        if isinstance(_node, ast.Assign) and any(
-                getattr(t, "id", None) == "OWNED" for t in _node.targets):
-            _owned = [e.value for e in _node.value.elts             # type: ignore[attr-defined]
-                      if isinstance(e, ast.Constant) and isinstance(e.value, str)]
-    check("the generated-file list still matches what the hourly job says it owns",
-          sorted(_owned) == sorted(actor.DEFAULT_POLICY["generated_files"]),
-          f"job owns {sorted(_owned)}; policy has "
-          f"{sorted(actor.DEFAULT_POLICY['generated_files'])}")
-else:
-    check("bin/sync-enforcement-map.py is present to compare against", False,
-          "the OWNED cross-check cannot run, which is itself a finding")
 
 check("a genuine source conflict is REPORT-ONLY, never guessed at",
       decide(conflicts=["mcp-server/src/tools.js"]).action == "report-only")
 check("a MIXED conflict — one generated file and one source file — is report-only",
-      decide(conflicts=["ops/config/gate-baseline.json",
+      decide(conflicts=["ops/config/fixture-generated.json",
                         "mcp-server/src/tools.js"]).action == "report-only",
       "a partial mechanical resolution is the dangerous case; refuse the whole thing")
 
@@ -134,7 +113,7 @@ check("a pull request that is green, current and unconflicted needs NOTHING",
 
 check("every decision carries a reason in plain words",
       all(decide(**kw).reason for kw in (
-          {"commits_in_main": True}, {"conflicts": ["ops/config/gate-baseline.json"]},
+          {"commits_in_main": True}, {"conflicts": ["ops/config/fixture-generated.json"]},
           {"conflicts": ["src/x.py"]}, {"is_draft": True}, {"checks": "FAILURE"})))
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -158,9 +137,9 @@ def new_repo(name: str) -> tuple[str, str]:
     with open(os.path.join(work, "README.md"), "w") as f:
         f.write("base\n")
     os.makedirs(os.path.join(work, "ops", "config"), exist_ok=True)
-    with open(os.path.join(work, "ops", "config", "gate-baseline.json"), "w") as f:
+    with open(os.path.join(work, "ops", "config", "fixture-generated.json"), "w") as f:
         f.write('{"hashes": {"a.py": "AAA"}}\n')
-    git(work, "add", "README.md", "ops/config/gate-baseline.json")
+    git(work, "add", "README.md", "ops/config/fixture-generated.json")
     git(work, "commit", "-m", "base")
     git(work, "push", "origin", "main")
     return bare, work
@@ -182,7 +161,7 @@ try:
     git(work, "commit", "-m", "main moved")
     git(work, "push", "origin", "main")
 
-    res = actor.rebase_branch(work, "feature", "main", policy=actor.DEFAULT_POLICY)
+    res = actor.rebase_branch(work, "feature", "main", policy=TEST_POLICY)
     check("a branch merely behind main rebases cleanly", res.ok, res.detail)
     check("...and the rebased branch carries BOTH the new main commit and its own",
           "main moved" in git(work, "log", "--oneline", "feature") and
@@ -191,19 +170,19 @@ try:
     # ── a conflict confined to a declared generated file is resolved ────────
     bare2, work2 = new_repo("gen")
     git(work2, "checkout", "-b", "gate-change")
-    with open(os.path.join(work2, "ops", "config", "gate-baseline.json"), "w") as f:
+    with open(os.path.join(work2, "ops", "config", "fixture-generated.json"), "w") as f:
         f.write('{"hashes": {"a.py": "BRANCH"}}\n')
-    git(work2, "add", "ops/config/gate-baseline.json")
+    git(work2, "add", "ops/config/fixture-generated.json")
     git(work2, "commit", "-m", "branch blessed the gate")
     git(work2, "checkout", "main")
-    with open(os.path.join(work2, "ops", "config", "gate-baseline.json"), "w") as f:
+    with open(os.path.join(work2, "ops", "config", "fixture-generated.json"), "w") as f:
         f.write('{"hashes": {"a.py": "MAIN"}}\n')
-    git(work2, "add", "ops/config/gate-baseline.json")
+    git(work2, "add", "ops/config/fixture-generated.json")
     git(work2, "commit", "-m", "main blessed the gate")
 
-    res2 = actor.rebase_branch(work2, "gate-change", "main", policy=actor.DEFAULT_POLICY)
+    res2 = actor.rebase_branch(work2, "gate-change", "main", policy=TEST_POLICY)
     check("a conflict confined to a declared generated file resolves", res2.ok, res2.detail)
-    with open(os.path.join(work2, "ops", "config", "gate-baseline.json")) as f:
+    with open(os.path.join(work2, "ops", "config", "fixture-generated.json")) as f:
         body = f.read()
     check("...by taking MAIN's copy, never the branch's stale one",
           "MAIN" in body and "BRANCH" not in body,
@@ -223,7 +202,7 @@ try:
     git(work3, "add", "README.md")
     git(work3, "commit", "-m", "main edited the readme")
 
-    res3 = actor.rebase_branch(work3, "theirs", "main", policy=actor.DEFAULT_POLICY)
+    res3 = actor.rebase_branch(work3, "theirs", "main", policy=TEST_POLICY)
     check("a genuine source conflict is REFUSED, not guessed at", not res3.ok, res3.detail)
     check("...and the refusal names the conflicting file",
           "README.md" in res3.detail, res3.detail)

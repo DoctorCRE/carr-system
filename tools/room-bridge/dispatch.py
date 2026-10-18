@@ -27,6 +27,8 @@ A headless Codex run is synchronous, so its line carries the actual result.
 
 from __future__ import annotations
 
+from contextlib import contextmanager, nullcontext
+import fcntl
 import argparse
 import errno
 import json
@@ -60,7 +62,6 @@ import codex_wire  # noqa: E402  — Codex worked out this protocol, see the mod
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
-import execution_contract  # noqa: E402 — portable Job Passport v1 seam
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
 TOOLS_ROOT = HERE.parent
@@ -68,6 +69,7 @@ if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 import credential_env  # noqa: E402 — shared long-lived-token loader
 import flashlib
+import seat_gate  # noqa: E402 — offline host / failed seat refusal at send time
 
 DEFAULT_RESULTS = Path(
     os.environ.get(
@@ -78,9 +80,46 @@ DEFAULT_RESULTS = Path(
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
 
+# WR-000356: five or more concurrent Codex jobs died mid-run with "exceeded
+# retry limit, last status: 429"; four ran clean. A job past its start may
+# already have committed or pushed, so retrying it is not safe. Instead every
+# Codex job sent through `dispatch.py send` holds one of a few machine-wide
+# slots for its whole run and extra jobs wait for one. flock slots free
+# themselves when a process dies, so a killed job never leaves one held.
+CODEX_MAX_CONCURRENT = 4
+CODEX_SLOT_DIR = Path.home() / ".config" / "carr" / "codex-slots"
+CODEX_SLOT_POLL_S = 5.0
+
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
+
+
+@contextmanager
+def _codex_slot(env):
+    limit = max(1, int(env.get("CARR_CODEX_MAX_CONCURRENT") or CODEX_MAX_CONCURRENT))
+    slot_dir = Path(env.get("CARR_CODEX_SLOT_DIR") or CODEX_SLOT_DIR)
+    slot_dir.mkdir(parents=True, exist_ok=True)
+    announced = False
+    while True:
+        for index in range(limit):
+            handle = open(slot_dir / f"slot-{index}.lock", "a")
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                handle.close()
+                continue
+            try:
+                yield index
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+                handle.close()
+            return
+        if not announced:
+            print(f"queued: all {limit} Codex slots busy; waiting for one to free",
+                  file=sys.stderr, flush=True)
+            announced = True
+        time.sleep(CODEX_SLOT_POLL_S)
 
 
 def _now() -> str:
@@ -135,36 +174,69 @@ def _codex_events(stdout: str) -> list[dict]:
     return out
 
 
+def _codex_timeout_activity(output, thread, env):
+    """Describe a bounded rollout tail without copying private session content."""
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', errors='replace')
+    events = _codex_events(output or '')
+    started = next((e for e in events if e.get('type') == 'thread.started'), {})
+    thread_id = started.get('thread_id') or thread
+    activity = {'source': 'executor_output', 'last_event_type':
+                events[-1].get('type') if events else 'unavailable', 'hook_failures': 0}
+    if not isinstance(thread_id, str) or not re.fullmatch(r'[0-9a-fA-F-]{36}', thread_id):
+        return thread_id, activity
+    home = Path((env or os.environ).get('CODEX_HOME') or Path.home() / '.codex')
+    try:
+        path = next((home / 'sessions').glob(f'*/*/*/rollout-*-{thread_id}.jsonl'), None)
+        if path is None:
+            return thread_id, activity
+        with path.open('rb') as rollout:
+            rollout.seek(0, os.SEEK_END)
+            offset = max(0, rollout.tell() - 2 * 1024 * 1024)
+            rollout.seek(offset)
+            if offset:
+                rollout.readline()
+            tail = rollout.read(2 * 1024 * 1024).decode('utf-8', errors='replace')
+    except OSError:
+        return thread_id, activity
+    rows = [row for row in _codex_events(tail) if isinstance(row.get('payload'), dict)]
+    if not rows:
+        return thread_id, activity
+    last = rows[-1]
+    payload = last.get('payload') or {}
+    activity = {'source': 'rollout', 'last_event_type': '.'.join(filter(None, (
+        last.get('type'), payload.get('type')))), 'hook_failures': 0,
+        'tail_truncated': offset > 0}
+    for row in rows:
+        message = row.get('payload') or {}
+        if message.get('type') != 'message' or message.get('role') != 'user':
+            continue
+        content = message.get('content')
+        if not isinstance(content, list):
+            continue
+        texts = [part['text'] for part in content
+                 if isinstance(part, dict) and isinstance(part.get('text'), str)]
+        if any(text.lstrip().startswith('<hook_prompt ') and
+               re.search(r"\[errno \d+\]|can't open file|\b(?:failed|error)\b", text, re.I)
+               for text in texts):
+            activity['hook_failures'] += 1
+    return thread_id, activity
+
+
 def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
-    receipt_read, receipt_write = os.pipe()
-    gate_read, gate_write = os.pipe()
-    try:
-        proc = subprocess.Popen([sys.executable, str(HERE / 'ownership_executor.py'),
-                                 str(receipt_write), str(gate_read), *argv],
-                                env=env, stdin=subprocess.DEVNULL, **options,
-                                start_new_session=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT if stream_output else subprocess.PIPE,
-                                text=True, pass_fds=(receipt_write, gate_read))
-    except BaseException:
-        os.close(receipt_read)
-        os.close(gate_write)
-        raise
-    finally:
-        os.close(receipt_write)
-        os.close(gate_read)
-    identity = {}
+    proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, **options,
+                            start_new_session=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT if stream_output else subprocess.PIPE,
+                            text=True, pass_fds=(() if write_ownership.CHECKOUT_FD is None
+                                                else (write_ownership.CHECKOUT_FD,)))
+    identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
+                'start_time': write_ownership.process_start(proc.pid), 'kind': 'process_group'}
     chunks = []
     reader = None
     try:
-        if not select.select([receipt_read], [], [], 5)[0]:
-            raise RuntimeError('executor identity handshake timed out')
-        identity = json.loads(os.read(receipt_read, 4096))
-        if identity.get('pid') != proc.pid or identity.get('pgid') != proc.pid or not identity.get('start_time'):
-            raise RuntimeError('executor kernel identity unavailable')
         if on_executor:
             on_executor(identity)
-        os.write(gate_write, b'1')
         if stream_output:
             def relay():
                 with proc.stdout:
@@ -193,11 +265,12 @@ def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options
         except subprocess.TimeoutExpired:
             pass
         if isinstance(exc, subprocess.TimeoutExpired):
+            if reader is not None:
+                reader.join(timeout=2)
+                exc.output = ''.join(chunks)
             exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
         raise
     finally:
-        os.close(receipt_read)
-        os.close(gate_write)
         if reader is None or not reader.is_alive():
             proc.stdout.close()
         if proc.stderr is not None:
@@ -338,7 +411,12 @@ def _to_codex(
         except FileNotFoundError:
             return {"status": "failed", "detail": "codex is not on PATH", 'termination_confirmed': True}
         except subprocess.TimeoutExpired as exc:
-            return {"status": "timed_out", "detail": f"no answer in {limit_s:.0f}s",
+            thread_id, activity = _codex_timeout_activity(exc.output, thread, env)
+            detail = (f"no answer in {limit_s:.0f}s; last event {activity['last_event_type']}; "
+                      f"hook failures in {activity['source'].replace('_', ' ')} tail: "
+                      f"{activity['hook_failures']}")
+            return {"status": "timed_out", "detail": detail,
+                    'thread_id': thread_id, 'resumed': bool(thread), 'last_activity': activity,
                     **({'termination_confirmed': exc.termination_confirmed}
                        if hasattr(exc, 'termination_confirmed') else {})}
 
@@ -399,6 +477,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     cwd = request.get('cwd')
     retrieval = request.get('retrieval', False)
     live_desktop = request.get('live_desktop', False)
+    network_access = entry.get('network_access', False)
     codex_timeout_s = request.get('codex_timeout_s')
     config_overrides = tuple(request.get('config_overrides', ()))
     stream_options: dict = {'stream_output': True} if request.get('stream_output') else {}
@@ -426,6 +505,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             entry["socket"], task,
             thread_id=None if fresh else entry.get("thread_id"),
             cwd=entry.get("cwd"), model=entry.get("model"), effort=entry["effort"],
+            network_access=network_access,
             deadline_s=codex_timeout_s,
             **executor_options,
         )
@@ -480,6 +560,10 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    network_access = entry.get('network_access', False)
+    if network_access and not fresh:
+        raise DeskError('network_access_requires_fresh_thread',
+                        'network_access desks require --fresh for every dispatched turn')
     if checkout is not None and entry['kind'] not in codex_models.CODEX_KINDS:
         raise DeskError('unsupported_checkout', '--checkout requires a Codex desk')
     if entry["kind"] in codex_models.CODEX_KINDS:
@@ -519,65 +603,39 @@ def dispatch(
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
     declared_writes = write_ownership.declaration(original_task, writes)
-    ownership = {}
-    if results_path.resolve() in (write_ownership.LEDGER.resolve(),
-                                 Path(str(write_ownership.LEDGER) + '.lock').resolve()):
-        raise DeskError('bad_results_path', 'results cannot overwrite the ownership authority')
-    if declared_writes:
-        if entry['kind'] not in codex_models.CODEX_KINDS:
-            raise DeskError('unsupported_owned_adapter',
-                            'owned dispatch requires a Codex adapter with verifiable termination recovery')
-        ownership = write_ownership.reserve(base,
-                                             cwd or entry.get("cwd") or str(Path.cwd()), declared_writes)
-        _record(results_path, ownership)
-    else:
-        print("warning: no write set declared; pass --writes or add Writes: to the brief",
-              file=sys.stderr, flush=True)
+    if declared_writes and entry['kind'] not in codex_models.CODEX_KINDS:
+        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex adapter')
 
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
               file=sys.stderr, flush=True)
 
-    def executor_bound(bound):
-        ownership.update(bound)
-        _record(results_path, {**base, **ownership, 'status': 'running'})
-
-    try:
-        if checkout is not None:
-            prepared = codex_checkout.prepare(checkout, cwd or entry.get('cwd') or str(Path.cwd()), env)
-            env = scrubbed_env(env)
-            base.update(prepared)
-            task = codex_checkout.instruction(prepared) + task
-            if fresh or cwd or not entry.get('thread_id'):
-                entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
-                if cwd:
-                    cwd = prepared['checkout_workspace']
-        request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env,
-                   'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
-                   'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
-                   'config_overrides': config_overrides, 'stream_output': stream_output,
-                   'claim_id': msg_id if ownership else None}
-        if ownership:
-            outcome = write_ownership.launch(msg_id, request, on_bound=executor_bound)
-        else:
-            outcome = _execute(request)
-        if outcome.get('thread_id') and (entry['kind'] == 'codex-live'
-                or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
-            registry.remember_thread(name, outcome['thread_id'])
-    except BaseException:
-        if ownership:
-            ownership.update(write_ownership.release(msg_id, reason='executor raised'))
-            _record(results_path, {**base, **ownership, 'status': 'failed', 'detail': 'executor raised'})
-        raise
-
-    if ownership:
-        ownership.update(write_ownership.release(msg_id, reason=outcome.get('detail') or outcome['status']))
+    if checkout is not None:
+        prepared = codex_checkout.prepare(checkout, env)
+        env = scrubbed_env(env)
+        base.update(prepared)
+        task = codex_checkout.instruction(prepared) + task
+        if fresh or cwd or not entry.get('thread_id'):
+            entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
+            if cwd:
+                cwd = prepared['checkout_workspace']
+    request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env,
+               'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
+               'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
+               'config_overrides': config_overrides, 'stream_output': stream_output,
+               'claim_id': msg_id if declared_writes else None}
+    workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
+    with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
+        outcome = _execute(request, on_executor=bind)
+    if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
+            or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
+        registry.remember_thread(name, outcome['thread_id'])
 
     row = {
         **base,
         **outcome,
-        **ownership,
         'status': outcome['status'],
+        **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
     _record(results_path, row)
     return row
@@ -618,35 +676,6 @@ def acknowledge_received(dispatch_ref: str, *, desk: str, log_offset: int,
         "stage": DESK_ACK_STAGE,
         "evidence": evidence,
     })
-
-
-def dispatch_envelope(
-    name: str,
-    envelope: dict,
-    task: str,
-    *,
-    dispatch_fn=None,
-    receipt_sink=None,
-    **dispatch_kwargs,
-) -> dict:
-    """Compatibility seam for a server-issued ExecutionEnvelope v1.
-
-    The legacy ``dispatch`` signature and local NDJSON row are deliberately
-    untouched.  This wrapper validates the portable envelope, delegates over
-    the exact same path (or an injected fake in tests), and returns a redacted
-    AttemptReceipt.  It neither derives authority nor persists a transcript;
-    future server admission/audit slices own those responsibilities.
-    """
-    execution_contract.validate_execution_envelope(envelope)
-    if not isinstance(task, str) or not task.strip():
-        raise execution_contract.ContractError("runtime task must be a non-empty string")
-    fn = dispatch_fn or dispatch
-    row = fn(name, task, **dispatch_kwargs)
-    receipt = execution_contract.receipt_from_dispatch_row(envelope, row)
-    execution_contract.validate_attempt_receipt(receipt, envelope)
-    if receipt_sink is not None:
-        receipt_sink(receipt)
-    return {"dispatch": row, "attempt_receipt": receipt}
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +927,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; omit to leave Codex's default")
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
                    help="a directory this desk may write outside its workspace (repeatable)")
 
@@ -914,10 +945,6 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
-    rc = sub.add_parser('reconcile', help='verify and recover held ownership claims; unknown writers stay stuck')
-    rc.add_argument('--claim', help='one job msg_id; otherwise examine held claims')
-    rc.add_argument('--limit', type=int, default=20, help='maximum claims per call (1..100)')
-
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
     s.add_argument("task")
@@ -925,7 +952,7 @@ def main(argv: list[str]) -> int:
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
     s.add_argument('--checkout', metavar='BRANCH|new:NAME',
-                   help='clone origin before launch into a retained /private/tmp job folder; '
+                   help='clone the canonical carr-system origin before launch into a retained /private/tmp job folder; '
                         'BRANCH uses that branch, new:NAME branches from origin default HEAD. '
                         'Fresh jobs start in its parent workspace with the nested checkout named '
                         'in the task; resumed desks keep cwd and receive the checkout path. '
@@ -942,10 +969,6 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
-        if a.cmd == 'reconcile':
-            claims = write_ownership.reconcile(a.claim, limit=a.limit)
-            print(json.dumps({'ledger': str(write_ownership.LEDGER), 'claims': claims}, indent=2))
-            return 1 if any(row['ownership_state'] == 'held' for row in claims) else 0
         if a.cmd == "where":
             return _cmd_where()
 
@@ -969,6 +992,7 @@ def main(argv: list[str]) -> int:
             entry = reg.register(a.name, kind, socket=a.socket, model=a.model, cwd=a.cwd,
                                  effort=a.effort, family=a.family,
                                  sandbox=getattr(a, "sandbox", None),
+                                 network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
@@ -1002,10 +1026,19 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
-        row = dispatch(a.name, task, registry=reg, results_path=results,
-                       fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
-                       retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                       checkout=a.checkout)
+        # An offline host or a seat whose last probe failed is refused here,
+        # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
+        desk_entry = reg.entries().get(a.name)
+        if isinstance(desk_entry, dict):
+            blocked = seat_gate.check({**desk_entry, "name": a.name})
+            if blocked:
+                raise DeskError(*blocked)
+        codex_job = isinstance(desk_entry, dict) and desk_entry.get("kind") in codex_models.CODEX_KINDS
+        with _codex_slot(os.environ) if codex_job else nullcontext():
+            row = dispatch(a.name, task, registry=reg, results_path=results,
+                           fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
+                           retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
+                           checkout=a.checkout)
         print(json.dumps(row, indent=2))
         return 0 if row["status"] in ("delivered", "completed") else 1
 

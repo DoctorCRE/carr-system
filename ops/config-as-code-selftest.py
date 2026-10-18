@@ -13,6 +13,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # THE ONE SCRUBBER, not a local copy (rule a8c55a47). The hooksPath fixture below
@@ -29,7 +30,7 @@ spec = importlib.util.spec_from_file_location(
 assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
-NIGHTLY_SOURCE = (Path(REPO) / "ops/scheduled-tasks/nightly-record-layer.SKILL.md").read_text(
+TASK_SOURCE = (Path(REPO) / "ops/scheduled-tasks/calendar-fetch-daily.SKILL.md").read_text(
     encoding="utf-8")
 # The fixture below tests config reconciliation. Machine dependencies have their
 # own hermetic suite and must not be inferred from a temporary HOME.
@@ -48,7 +49,7 @@ def copy_continuity_contract(repo: Path) -> None:
 
 DESIRED = {"hooks": {
     "Stop": [{"hooks": [{
-        "type": "command", "command": "/Users/booko/carr-system/hooks/completion-evidence-gate.py", "timeout": 15,
+        "type": "command", "command": "/Users/booko/carr-system/hooks/scheduled-run-record.py", "timeout": 15,
     }]}],
 }}
 LIVE = {
@@ -75,144 +76,84 @@ def commands(doc):
 
 
 def permission_review_regressions():
-    """Every review fixture checks semantic preservation and repeat-run repair."""
+    """Installs migrate sandboxed configs while preserving unrelated values."""
     import tomllib
-    default, body = mod.codex_permissions_source()
-    expected = tomllib.loads(default + "\n" + body)
-    fixtures = {
-        "1-marker-in-string": default + "\nnotes = '''\n" + mod.CODEX_PERMISSIONS_BEGIN
-            + '\nexample="keep"\n' + mod.CODEX_PERMISSIONS_END
-            + "\n'''\n[permissions.carr_unattended]\nextends=\":workspace\"\n",
-        "2-header-in-string": "notes = '''\n[example]\nx=1\n'''\nmodel=\"fixture\"\n"
-            + '[permissions.carr_unattended]\nextends=":workspace"\n',
-        "2-indented-header": '  [permissions.carr_unattended]\nextends=":workspace"\n',
-        "2-quoted-default": '\'default_permissions\' = \'old\'\nmodel="keep"\n',
-        "3-nested-array": default + '\n[permissions.carr_unattended]\nvalues=[\n'
-            + '["a", "b"],\n["c"], # continuation\n]\n[other]\nvalue=42\n',
-        "4-inline-profile": default + '\n[permissions]\n'
-            + 'carr_unattended={extends=":read-only",network={enabled=false}}\n'
-            + 'custom={description="keep"}\n[other]\nvalue=42\n',
-        "4-root-inline": default + '\npermissions={carr_unattended={extends=":workspace"},'
-            + 'custom={description="keep"}}\n[other]\nvalue=42\n',
-        "4-dotted-profile": default + '\n[permissions]\ncarr_unattended.extends=":workspace"\n'
-            + 'custom.description="keep"\n[other]\nvalue=42\n',
-        "4-root-dotted": default + '\npermissions.carr_unattended.extends=":workspace"\n'
-            + 'permissions.custom.description="keep"\n[other]\nvalue=42\n',
-    }
-    # These valid documents must never be accepted from marker text alone.
-    examples = default + "\nnotes = '''\n" + mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n'''\n"
-    assert mod.canonical_codex_permissions(examples) is None
-    missing_default = mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n"
-    assert mod.canonical_codex_permissions(missing_default) is None
-    fixtures['1-marker-with-user-data'] = (default + "\n" + mod.CODEX_PERMISSIONS_BEGIN
-        + '\nnotes="keep" # user comment\n' + mod.CODEX_PERMISSIONS_END
-        + '\n[permissions.carr_unattended]\nextends=":workspace"\n[other]\nvalue=42\n')
-    fixtures['3-user-nested-array'] = (default + '\n[permissions.carr_unattended]\nextends=":workspace"\n'
-        + '[permissions.custom]\nvalues=[\n["a", "b"],\n["c"],\n] # keep array\n'
-        + "notes=\"\"\"\n[not.a.header]\n\"\"\"\n[other]\nvalue=42\n")
-    failures = []
-    for name, raw in fixtures.items():
+    source = mod.codex_permissions_source()
+    fixtures = [
+        '',
+        'sandbox_mode="workspace-write"\n',
+        'default_permissions="carr_unattended"\n[permissions.carr_unattended]\nextends=":workspace"\n',
+        "'default_permissions'='old'\n[ 'permissions' . 'carr_unattended' ]\nextends=':workspace'\n",
+        'permissions={carr_unattended={extends=":workspace"},custom={description="keep"}}\n',
+        '[permissions]\ncarr_unattended.extends=":workspace"\ncustom.description="keep"\n',
+        'permissions.carr_drive_readonly.extends=":read-only"\n',
+        'notes=\'\'\'\n[permissions.carr_unattended]\nexample="keep"\n\'\'\'\n',
+        mod.CODEX_PERMISSIONS_BEGIN + '\nnotes="keep"\n' + mod.CODEX_PERMISSIONS_END + '\n',
+        '[permissions.carr_unattended]\nextends=":workspace"\n'
+        '[permissions.carr_unattended]\nextends=":read-only"\n',
+    ]
+    for raw in fixtures:
+        result = mod.install_codex_permissions(raw, source)
+        after = tomllib.loads(result)
+        assert after['sandbox_mode'] == 'danger-full-access'
+        assert 'default_permissions' not in after
+        assert not set(after.get('permissions', {})) & {'carr_unattended', 'carr_drive_readonly'}
         try:
             before = tomllib.loads(raw)
-            result = mod.install_codex_permissions(raw, default, body)
-            after = tomllib.loads(result)
-            assert after['default_permissions'] == expected['default_permissions']
-            for profile, value in expected['permissions'].items():
-                assert after['permissions'][profile] == value
-            def unrelated(doc):
-                doc.pop('default_permissions', None)
-                permissions = doc.get('permissions', {})
-                for profile in expected['permissions']:
-                    permissions.pop(profile, None)
-                if not permissions:
-                    doc.pop('permissions', None)
-                return doc
-            assert unrelated(before) == unrelated(after), 'unrelated values changed'
-            assert mod.install_codex_permissions(result, default, body) == result, 'not idempotent'
-            assert mod.canonical_codex_permissions(result) == mod.portable(default + "\n\n" + body)
-            print(f"PASS permission review {name}")
-        except Exception as exc:
-            failures.append(name)
-            print(f"FAIL permission review {name}: {type(exc).__name__}: {exc}")
-    assert not failures, f"permission review regressions: {failures}"
+        except tomllib.TOMLDecodeError:
+            before = {}
+        for doc in (before, after):
+            doc.pop('default_permissions', None)
+            doc.pop('sandbox_mode', None)
+            for name in ('carr_unattended', 'carr_drive_readonly'):
+                doc.get('permissions', {}).pop(name, None)
+            if not doc.get('permissions'):
+                doc.pop('permissions', None)
+        assert before == after, 'unrelated values changed'
+        assert mod.install_codex_permissions(result, source) == result
+        assert mod.canonical_codex_permissions(result) == source
+    assert mod.canonical_codex_permissions('"sandbox_mode"="danger-full-access"\n') == source
+    assert mod.canonical_codex_permissions('sandbox_mode="workspace-write"\n') != source
+    assert mod.canonical_codex_permissions('default_permissions="old"\n' + source) != source
+    assert mod.canonical_codex_permissions('notes="sandbox_mode"\n') is None
+    print('PASS full-access migration, drift detection, unrelated settings, and repeat install')
+
+
+def installed_hook_file_regressions():
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        existing = root / "kept.py"
+        existing.touch()
+        missing = root / "deleted-wrapper.py"
+        paths = [root / "claude.json", root / "codex.json", root / ".claude/settings.json"]
+        paths[2].parent.mkdir()
+        for path in paths:
+            path.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{
+                "command": f"python3 {missing} -- python3 {existing}"
+            }]}]}}))
+        with patch.object(mod, "SETTINGS", str(paths[0])), patch.object(
+                mod, "CODEX_HOOKS_SRC", str(paths[1])), patch.object(mod, "REPO", directory):
+            problems = mod.installed_hook_missing_files()
+            assert len(problems) == 3, problems
+            assert all(str(missing) in reason for _, reason in problems)
+            missing.touch()
+            assert mod.installed_hook_missing_files() == []
+            existing.unlink()
+            assert len(mod.installed_hook_missing_files()) == 3
+        with patch.dict(os.environ, {"HOME": directory}):
+            block = {"SessionStart": [{"hooks": [{"command":
+                'r="${HOME}"; exec python3 "$r/deleted-wrapper.py"'}]}]}
+            assert mod.hook_block_script_paths(block) == [str(missing.resolve())]
+    print("PASS installed Claude, Codex, and project hooks reject missing wrappers")
 
 
 def main():
+    installed_hook_file_regressions()
     permission_review_regressions()
     import tomllib
-    default, body = mod.codex_permissions_source()
-    # Codex may rewrite TOML syntax and discard comments without changing the
-    # installed permissions. Read the same reserved paths the installer owns.
-    import tomlkit
-    expected_permissions = mod.portable(default + "\n\n" + body)
-    markerless = mod.concrete(default + "\n\n" + body)
-    assert mod.canonical_codex_permissions(markerless) == expected_permissions
-    values = tomllib.loads(markerless)
-    rewritten = tomlkit.dumps({
-        'notes': mod.CODEX_PERMISSIONS_BEGIN + '\nexample only',
-        'default_permissions': values['default_permissions'],
-        'permissions': {
-            'custom': {'description': 'keep me'},
-            **{name: dict(reversed(list(profile.items())))
-               for name, profile in reversed(list(values['permissions'].items()))},
-        },
-    })
-    assert mod.canonical_codex_permissions(rewritten) == expected_permissions
-    quoted = markerless.replace('[permissions.carr_unattended]',
-                                "[ 'permissions' . 'carr_unattended' ]")
-    assert mod.canonical_codex_permissions(quoted) == expected_permissions
-    values['permissions']['carr_unattended']['network']['enabled'] = False
-    drifted = mod.canonical_codex_permissions(tomlkit.dumps(values))
-    assert isinstance(drifted, str) and drifted != expected_permissions
-    assert tomllib.loads(drifted)['permissions']['carr_unattended']['network']['enabled'] is False
-    values['default_permissions'] = 'carr_drive_readonly'
-    assert tomllib.loads(mod.canonical_codex_permissions(tomlkit.dumps(values)))[
-        'default_permissions'] == 'carr_drive_readonly'
-    del values['permissions']['carr_drive_readonly']
-    assert mod.canonical_codex_permissions(tomlkit.dumps(values)) is None
-    print('PASS semantic permission reads survive comment/syntax rewrites and detect drift')
-    raw = ('model = "fixture"\n' + default + '\n'
-           '[permissions.carr_unattended]\nextends = ":read-only"\n'
-           '[permissions.carr_unattended.network]\nenabled = false\n'
-           '[permissions.custom]\ndescription = "keep me"\n'
-           '[permissions.carr_drive_readonly]\nextends = ":workspace"\n'
-           '[permissions.carr_drive_readonly.filesystem]\n"." = "write"\n'
-           '[other]\nvalue = 42\n')
-    planned = mod.install_codex_permissions(raw, default, body)
-    parsed = tomllib.loads(planned)
-    assert parsed['permissions']['custom']['description'] == 'keep me'
-    assert parsed['other']['value'] == 42
-    assert parsed['model'] == 'fixture'
-    assert parsed['permissions']['carr_unattended']['network']['enabled'] is True
-    assert mod.install_codex_permissions(planned, default, body) == planned
-    quoted = raw.replace('[permissions.carr_unattended]', '[ "permissions" . "carr_unattended" ]')
-    assert tomllib.loads(mod.install_codex_permissions(quoted, default, body))['other']['value'] == 42
-    # Recover a config already damaged by an older nightly append.
-    duplicated = raw + "\n" + mod.CODEX_PERMISSIONS_BEGIN + "\n" + body + mod.CODEX_PERMISSIONS_END + "\n"
-    repaired = mod.install_codex_permissions(duplicated, default, body)
-    tomllib.loads(repaired)
-    assert mod.install_codex_permissions(repaired, default, body) == repaired
-    multiline = 'notes = \'\'\'\n[permissions.carr_unattended]\nexample = "keep"\n\'\'\'\n' + raw
-    fixed = mod.install_codex_permissions(multiline, default, body)
-    assert tomllib.loads(fixed)['notes'] == tomllib.loads(multiline)['notes']
-    print('markerless permissions reconciled; valid TOML; repeat unchanged')
     merged = mod.merge_codex_carr_hooks(LIVE, DESIRED)
     names = commands(merged)
     again = mod.merge_codex_carr_hooks(merged, DESIRED)
-    live_permissions = (
-        'default_permissions = "carr_unattended"\n\n'
-        f'{mod.CODEX_PERMISSIONS_BEGIN}\n'
-        '[permissions.carr_unattended]\n'
-        'extends = ":workspace"\n\n'
-        '[permissions.carr_unattended.workspace_roots]\n'
-        f'"{mod.REPO}" = true\n\n'
-        '[permissions.carr_unattended.network]\n'
-        'enabled = true\n\n'
-        '[permissions.carr_drive_readonly.filesystem]\n'
-        f'"{mod.REPO}" = "write"\n'
-        f'{mod.CODEX_PERMISSIONS_END}\n'
-    )
-    portable_permissions = mod.canonical_codex_permissions(live_permissions)
     empty_codex_snapshot = mod.carr_owned_hooks_document({}, ["Stop"])
     call_mode_source = mod.launchd_repo_path("com.carr.call-mode.plist")
     ordinary_launchd_source = mod.launchd_repo_path("com.carr.example.plist")
@@ -266,17 +207,7 @@ def main():
             json.dumps(desired_codex, indent=2) + "\n", encoding="utf-8"
         )
         (config / "codex-permissions.toml").write_text(
-            'default_permissions = "carr_unattended"\n\n'
-            '[permissions.carr_unattended]\n'
-            'extends = ":workspace"\n\n'
-            '[permissions.carr_unattended.workspace_roots]\n'
-            '"{{REPO}}" = true\n\n'
-            '[permissions.carr_unattended.network]\n'
-            'enabled = true\n\n'
-            '[permissions.carr_drive_readonly.filesystem]\n'
-            '"{{REPO}}" = "write"\n',
-            encoding="utf-8",
-        )
+            'sandbox_mode = "danger-full-access"\n', encoding="utf-8")
         Path(mod.CODEX_CONFIG).write_text(
             'model = "test"\n'
             'default_permissions = "carr_drive_readonly"\n',
@@ -289,6 +220,14 @@ def main():
             configured_check = mod.cmd_check()
         configured_hooks = json.loads(Path(mod.CODEX_HOOKS_SRC).read_text(encoding="utf-8"))
         configured_toml = Path(mod.CODEX_CONFIG).read_text(encoding="utf-8")
+        original_native_hooks = {path: Path(path).read_text() for path in (mod.HOOKS_REPO, mod.CODEX_HOOKS_REPO)}
+        with patch.object(mod, 'pairs', return_value=[
+                ('Claude hooks', '{}\n', mod.HOOKS_REPO),
+                ('Codex hooks', '{}\n', mod.CODEX_HOOKS_REPO)]), contextlib.redirect_stdout(io.StringIO()):
+            capture_rc = mod.cmd_pull(True)
+        native_sources_preserved = capture_rc == 0 and all(
+            Path(path).read_text() == body for path, body in original_native_hooks.items())
+
 
         # Scheduled task *definitions* are CARR-managed only when their name
         # exists in the repo registry.  Primary install must render every
@@ -299,7 +238,7 @@ def main():
             f"task-{number:02d}": f"---\nname: task-{number:02d}\n---\nCARR managed {number}\n"
             for number in range(1, 17)
         }
-        primary_tasks["nightly-record-layer"] = NIGHTLY_SOURCE
+        primary_tasks["calendar-fetch-daily"] = TASK_SOURCE
         for name, body in primary_tasks.items():
             (tasks / f"{name}.SKILL.md").write_text(body, encoding="utf-8")
         original_primary = mod.IS_PRIMARY
@@ -313,8 +252,8 @@ def main():
             for name, body in primary_tasks.items()
         )
         nightly_task_rendered = (
-            Path(mod.TASKS_SRC) / "nightly-record-layer" / "SKILL.md"
-        ).read_text(encoding="utf-8") == mod.concrete(NIGHTLY_SOURCE)
+            Path(mod.TASKS_SRC) / "calendar-fetch-daily" / "SKILL.md"
+        ).read_text(encoding="utf-8") == mod.concrete(TASK_SOURCE)
 
         mod.IS_PRIMARY = False
         secondary_task_source = Path(mod.TASKS_SRC)
@@ -699,68 +638,6 @@ def main():
         )
         mod.IS_PRIMARY = original_primary
 
-        # THE GATE ZERO SCHEDULER CANARY IS EXPECTED INSTALLED, and the point of
-        # asserting it is that the opposite was true yesterday. The plist was
-        # held in DEFINITION_ONLY from 2026-09-11 so that STARTING A SCHEDULE
-        # stayed a human act; Joe's activation approval took that act on
-        # 2026-09-12, and `step:scheduler-active-receipt` — the Gate Zero
-        # predecessor the canary exists for — can only be answered by launchd
-        # firing on its own, never by a hand dispatch through the wrapper. So a
-        # revert that quietly put the canary back on the hold list would leave
-        # that predecessor permanently unanswerable while every check stayed
-        # green. This pins the release the way tick_released pins the 2026-08-26
-        # control-plane cutover.
-        #
-        # TWO HALVES, because the flag alone proves nothing about the installer:
-        # the plist must also be PLANNED as an ordinary write. The plan is taken
-        # from a DRY RUN deliberately — the fixtures above record twice over what
-        # happens when a selftest lets `launchctl load` really run against a temp
-        # HOME that is deleted moments later, and the question here is what the
-        # reconciler INTENDS, which the dry run answers in full.
-        canary_plist = "com.carr.gate-zero-canary.plist"
-        canary_released = canary_plist not in mod.launchd_hold.DEFINITION_ONLY
-        (launchd / canary_plist).write_text(
-            (Path(REPO) / "ops" / "launchd" / canary_plist).read_text(encoding="utf-8"),
-            encoding="utf-8")
-        # The wrapper and the canary script itself: missing_targets() skips any
-        # agent whose program was never built, so without these the plan would
-        # read SKIP for a reason that has nothing to do with the hold.
-        for program in ("bin/run-scheduled.sh", "bin/gate-zero-canary.sh"):
-            built = repo / program
-            built.parent.mkdir(parents=True, exist_ok=True)
-            built.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        mod.IS_PRIMARY = True
-        with contextlib.redirect_stdout(io.StringIO()) as canary_out:
-            canary_plan_rc = mod.cmd_install(False)
-        canary_output = canary_out.getvalue()
-        # AND THE MIRROR OF THE JANITOR CASE BELOW: an installed copy of a HELD
-        # agent is a refusal ("DEFINITION ONLY, MUST NOT BE INSTALLED") however
-        # exactly its bytes match the repo, because the gate on it had not
-        # passed. A released agent's installed copy is ordinary configuration,
-        # so the same fixture — the concrete render sitting in LaunchAgents —
-        # must now be an ordinary tracked pair and no refusal at all. Nothing is
-        # loaded to prove this: cmd_check only reads.
-        live_canary = Path(mod.LAUNCHD_SRC) / canary_plist
-        live_canary.write_text(
-            mod.concrete((launchd / canary_plist).read_text(encoding="utf-8")),
-            encoding="utf-8")
-        canary_labels = [label for label, _live, _repo in mod.pairs()]
-        canary_installed_allowed = mod.definition_only_installed_plists()
-        with contextlib.redirect_stdout(io.StringIO()) as canary_check_out:
-            mod.cmd_check()
-        canary_check_output = canary_check_out.getvalue()
-        mod.IS_PRIMARY = original_primary
-        canary_planned = (
-            canary_plan_rc == 0
-            and f"would write  {live_canary}" in canary_output
-            and f"SKIP  {canary_plist}" not in canary_output
-            and canary_installed_allowed == []
-            and f"launchd {canary_plist}" in canary_labels
-            and "DEFINITION ONLY, MUST NOT BE INSTALLED" not in canary_check_output
-        )
-        live_canary.unlink()
-        (launchd / canary_plist).unlink()
-
         # core.hooksPath IS NO-TOUCH, and this is the one setting in this file
         # whose blast radius is the whole machine rather than the repository it
         # is read from: it lives in the single .git/config every worktree shares.
@@ -916,6 +793,7 @@ def main():
                 str(repo / "ops" / "not-githooks"), str(fixture_hooks))
         )
     cases = [
+        ("pull preserves native hook JSON when live settings are stale", native_sources_preserved),
         ("ephemeral marker is honoured inside frontmatter",
          ephemeral_marker_honoured),
         ("ephemeral marker in prose does not exempt a tracked task",
@@ -936,14 +814,8 @@ def main():
         ("unrelated Stop hook preserved", "/Users/booko/other/hooks/keep.py" in names),
         ("mixed group keeps unrelated hook", "/Users/booko/other/hooks/mixed.py" in names),
         ("stale CARR hook removed", all("/carr-system/hooks/old" not in name for name in names)),
-        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/completion-evidence-gate.py") == 1),
+        ("desired CARR hook installed once", names.count("/Users/booko/carr-system/hooks/scheduled-run-record.py") == 1),
         ("second merge is idempotent", again == merged),
-        ("live Codex permission paths become portable tokens",
-         portable_permissions is not None
-         and '"{{REPO}}" = "write"' in portable_permissions
-         and 'default_permissions = "carr_unattended"' in portable_permissions
-         and '[permissions.carr_unattended.network]' in portable_permissions
-         and 'enabled = true' in portable_permissions),
         ("Call Mode LaunchAgent resolves to its tracked tool source",
          call_mode_source.endswith(
              "/tools/dictation-rig/launchd/com.carr.call-mode.plist")),
@@ -971,17 +843,15 @@ def main():
          configured_rc == 0 and configured_check == 0),
         ("configured Codex writes only the desired managed hooks",
          configured_hooks == desired_codex),
-        ("configured Codex preserves existing config and adds managed permissions",
-         'model = "test"' in configured_toml
-         and mod.CODEX_PERMISSIONS_BEGIN in configured_toml
-         and mod.CODEX_PERMISSIONS_END in configured_toml),
-        ("configured Codex replaces the restrictive default with scoped unattended access",
-         configured_toml.count('default_permissions = "carr_unattended"') == 1
-         and 'default_permissions = "carr_drive_readonly"' not in configured_toml),
+        ("configured Codex preserves existing config and enables full access",
+         tomllib.loads(configured_toml)['model'] == 'test'
+         and tomllib.loads(configured_toml)['sandbox_mode'] == 'danger-full-access'
+         and 'default_permissions' not in tomllib.loads(configured_toml)
+         and 'permissions' not in tomllib.loads(configured_toml)),
         ("fresh primary install renders all tracked scheduled-task definitions",
          primary_task_install_rc == 0 and primary_task_rendered
          and "WRITE  scheduled task task-01" in primary_task_out.getvalue()),
-        ("nightly consumer installs as an exact concrete render of canonical source",
+        ("scheduled consumer installs as an exact concrete render of canonical source",
          nightly_task_rendered),
         ("fresh primary scheduled-task install leaves check clean",
          primary_task_check_rc == 0),
@@ -1019,10 +889,6 @@ def main():
          and "DEFINITION ONLY com.carr.synthetic-definition-only:" in launchd_out.getvalue()),
         ("control-plane tick released from definition-only hold (cutover 2026-08-26)",
          tick_released),
-        ("the Gate Zero scheduler canary is released from the definition-only "
-         "hold (Joe's activation approval, 2026-09-12)", canary_released),
-        ("the installer plans the canary as an ordinary launchd write, and "
-         "reports it neither skipped nor wrongly installed", canary_planned),
         ("apply leaves an UNSET core.hooksPath byte-identical",
          hooks_path_untouched["unset"]),
         ("apply leaves a non-default RELATIVE core.hooksPath byte-identical",

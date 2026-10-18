@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // partner-room.test.mjs — the shared room's contract, written BEFORE the verbs
 // (rule e65efc68). The room is Idea 78's spectator surface: an append-only turn
 // log two brains write and a human watches, served by the Worker so both Macs
@@ -12,7 +13,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { readFile } from "node:fs/promises";
+
 import { TOOLS } from "../src/tools.js";
 import { readRoomQueue, queueProjectionEventFromTurn, queueProjectionHealthFromTurn } from "../src/partner-room.js";
 
@@ -374,7 +375,7 @@ test("read-room: exposes truthful legacy and server-derived provenance fields", 
 });
 
 test("partner-room provenance migration backfills only legacy and replaces the reader view", async () => {
-  const sql = await readFile(new URL("../../migrations/0298_partner_room_origin.sql", import.meta.url), "utf8");
+  const sql = await readMigration(new URL("../../migrations/0298_partner_room_origin.sql", import.meta.url));
   assert.match(sql, /add column if not exists origin_channel text not null default 'legacy'/i);
   assert.match(sql, /add column if not exists origin_actor text not null default 'legacy'/i);
   assert.match(sql, /create or replace view v_partner_room_turn/i);

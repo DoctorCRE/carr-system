@@ -36,6 +36,7 @@ name: DB acceptance
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     # Only the paths that can actually break the disposable-Postgres lane: the
     # migrations themselves, the committed snapshot they apply onto, the CI
     # entry points, and the libraries/tools the acceptance programs import.
@@ -83,6 +84,7 @@ permissions:
 
 jobs:
   acceptance:
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: ${{ matrix.shard == 0 && 'local-db-ci --class migration' || format('DB shadow shard {0}/2', matrix.shard) }}
     strategy:
       fail-fast: false # one red must not cancel the other diagnostic reports
@@ -91,9 +93,10 @@ jobs:
     runs-on: ubuntu-latest
     # The canonical migration class plus this lane's own acceptance programs
     # routinely took 22-24 minutes by 2026-10-04, and a slow runner pushed six
-    # all-green runs past a 25-minute cap. ci.yml's migration budget must stay
+    # all-green runs past a 25-minute cap. By 2026-10-17 it sat at 33-34 min and
+    # 10 of the last 25 runs were cancelled at 35, so the cap is 45. ci.yml's migration budget must stay
     # at least this one (ops/ci-selftest.py checks both).
-    timeout-minutes: 35
+    timeout-minutes: 45
 
     steps:
       - name: Record runner setup start
@@ -114,6 +117,15 @@ jobs:
           # clone.
           fetch-depth: 0
 
+      - name: Decide whether this diff can change the database lane
+        # The path filter above is deliberately wide (ops/**, tools/**), so most
+        # PRs start this job. ops/db-acceptance-scope.py narrows it to
+        # migration, schema and record-layer database files; any other diff
+        # skips the 34-45 minute install and run and the job still reports
+        # green. Schedule, manual and undecidable runs stay full.
+        id: scope
+        run: python3 ops/db-acceptance-scope.py
+
       - name: Read trial queue timestamp through GitHub REST
         id: queue
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.shard_trial }}
@@ -124,26 +136,25 @@ jobs:
           echo "queued=$(date --date="$queued" +%s)" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.scope.outputs.full == 'true'
         with:
           python-version-file: .python-version
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.scope.outputs.full == 'true'
         with:
           node-version-file: .nvmrc
 
       - name: Install Node dependencies from the lock
+        if: steps.scope.outputs.full == 'true'
         run: npm --prefix mcp-server ci
 
       - name: Install zsh
-        # ops/gate-zero-scheduler-canary-gate.py runs the Gate Zero canary
-        # LaunchAgent's own ProgramArguments, and both the wrapper
-        # (bin/run-scheduled.sh) and the canary carry a #!/bin/zsh shebang. A
-        # runner without zsh would fail that gate for the environment rather
-        # than for the code — the same three seconds of apt ci.yml already
-        # spends for bin/review-council-runner.sh.
+        if: steps.scope.outputs.full == 'true'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
 
       - name: Install Python dependencies from the lock
+        if: steps.scope.outputs.full == 'true'
         # The lock, not requirements.txt — same reasoning as ci.yml. The
         # acceptance programs need psycopg; ops/local-pg-ci.py runs them with
         # .venv/bin/python when it exists and the interpreter running it
@@ -153,6 +164,7 @@ jobs:
           python -m pip install -r requirements.lock
 
       - name: Install PostgreSQL 17
+        if: steps.scope.outputs.full == 'true'
         # ops/local-pg-ci.py builds its OWN throwaway cluster with initdb/pg_ctl
         # rather than talking to a service container — that is the whole point of
         # the lane, and it is why this cannot reuse ci.yml's `services:` block.
@@ -184,8 +196,11 @@ jobs:
           # satisfies the pin without moving the server. The script probes this
           # absolute path by major, so no PATH change is needed. Same PGDG repo
           # already configured above; backup-nightly.yml does the same thing.
-          sudo apt-get install -y -qq postgresql-client-18
+          # The offline production-equivalence fixture creates a separate
+          # PostgreSQL 18 cluster. The primary acceptance database stays on 17.
+          sudo apt-get install -y -qq postgresql-client-18 postgresql-18
           /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/initdb --version
           # THE SOCKET DIRECTORY IS THE ONE REAL PLATFORM DIFFERENCE.
           # Snapshot export retains the build's default socket directory.
           # The serial and shard acceptance runners now supply a private -k.
@@ -207,7 +222,7 @@ jobs:
         run: python ops/db-acceptance-shards-selftest.py --postgres
 
       - name: Run the disposable-Postgres migration lane
-        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.shard_trial }}
+        if: ${{ steps.scope.outputs.full == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.shard_trial) }}
         env:
           # ops/local-pg-ci.py refuses hosted runners by DEFAULT and still does.
           # This is the declared opt-in — the module additionally requires the

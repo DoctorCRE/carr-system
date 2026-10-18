@@ -1,18 +1,6 @@
 #!/usr/bin/env python3
 """The wire into a live Codex session: WebSocket over a unix socket.
 
-CODEX WORKED THIS OUT, NOT ME. Dispatched through this very bridge, it found
-what three of my own attempts had missed: the app-server's unix transport is
-not newline-delimited JSON-RPC and not LSP Content-Length framing. It is a
-WebSocket — an HTTP Upgrade to /rpc, then masked text frames. That is why
-every plain client got its connection closed on the spot, and why
-`codex app-server proxy` looked silent: the proxy forwards WebSocket bytes, it
-does not translate anything into them.
-
-The Wire class below is Codex's, kept as it wrote it. Rewriting a working
-protocol client to put it in my own words would add nothing and risk a bug in
-the one part of this package I did not derive.
-
 THE CALL ORDER MATTERS and is not guessable from the schema alone:
 
     initialize   -> wait for its response
@@ -21,10 +9,6 @@ THE CALL ORDER MATTERS and is not guessable from the schema alone:
     turn/start   -> returns turn.id
     then read until turn/completed confirms that exact turn has terminated
 
-Codex proved the message shapes over stdio, where its sandbox let it reach the
-protocol but not the network. The unix-socket half was proven here, from a
-seat allowed to bind: a nonce that existed nowhere but inside the dispatched
-turn came back verbatim in the completed agentMessage.
 """
 
 from __future__ import annotations
@@ -48,11 +32,7 @@ class Wire:
     def __init__(self, path: str, timeout: float = 180.0):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.timeout = timeout
-        # An optional whole-call deadline (time.monotonic()). Each read waits
-        # at most what is left of it, so many short reads cannot add up past it.
         self.deadline: float | None = None
-        # The thread this call opened or resumed, kept so a timeout can still
-        # report it and the desk does not open a second thread on retry.
         self.thread_id: str | None = None
         self.turn_id: str | None = None
         self.turn_requested = False
@@ -157,7 +137,6 @@ class Wire:
 
 
 class _StdioWire:
-    """Read persisted Desktop turns through the supported app-server protocol."""
     def __init__(self, timeout: float):
         self.proc = subprocess.Popen(['codex', 'app-server'], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -290,8 +269,6 @@ def _interrupt(wire: Wire) -> bool:
         return True
     if not wire.thread_id or not wire.turn_id:
         return False
-    # A successful interrupt response only acknowledges the request. Keep the
-    # claim until a terminal notification or an exact-turn read confirms exit.
     wire.deadline = time.monotonic() + CANCEL_TIMEOUT_S
     try:
         wire.send_json({'id': 'turn-interrupt', 'method': 'turn/interrupt',
@@ -303,9 +280,6 @@ def _interrupt(wire: Wire) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
-# one task, one live Codex thread
-# ---------------------------------------------------------------------------
 
 
 def run_turn(
@@ -319,6 +293,7 @@ def run_turn(
     timeout: float = 300.0,
     deadline_s: float | None = None,
     effort: str | None = None,
+    network_access: bool = False,
     on_executor=None,
 ) -> dict:
     """Deliver one turn to a live Codex session and wait for its answer.
@@ -331,17 +306,22 @@ def run_turn(
     if approval_policy != "never":
         raise DeskError("unsafe_approval_policy",
                         "dispatched Codex desks require never; permission needs go to the orchestrator")
+    if type(network_access) is not bool:
+        raise DeskError("bad_network_access", "network_access must be an explicit boolean")
+    if network_access and thread_id is not None:
+        raise DeskError("network_access_requires_fresh_thread",
+                        "network access is permitted only on a fresh thread")
     task = desk_prompt(task)
     started = time.monotonic()
     if on_executor:
         on_executor({'kind': 'no_launch', 'reason': 'setup_pending'})
     wire = Wire(sock_path, timeout=timeout)
     if deadline_s is not None:
-        # The caller's limit covers setup and the turn together.
         wire.deadline = started + deadline_s
     try:
         return _run_turn(wire, task, thread_id=thread_id, cwd=cwd, model=model,
                          sandbox=sandbox, approval_policy=approval_policy, timeout=timeout, effort=effort,
+                         network_access=network_access,
                          on_executor=on_executor)
     except TimeoutError:
         confirmed = _interrupt(wire)
@@ -354,7 +334,7 @@ def run_turn(
 
 
 def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
-              approval_policy, timeout, effort=None, on_executor=None) -> dict:
+              approval_policy, timeout, effort=None, network_access=False, on_executor=None) -> dict:
     transcript: list[dict] = []
     _initialize(wire)
 
@@ -366,6 +346,10 @@ def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
         })
     else:
         params = {"approvalPolicy": approval_policy, "sandbox": sandbox}
+        if network_access:
+            # A network-enabled turn must not leave a persistent thread that a
+            # later invocation could resume without this turn's policy.
+            params["ephemeral"] = True
         if cwd:
             params["cwd"] = cwd
         if model:
@@ -383,6 +367,8 @@ def _run_turn(wire: Wire, task: str, *, thread_id, cwd, model, sandbox,
         turn_params["model"] = model
     if effort:
         turn_params["effort"] = effort
+    if network_access:
+        turn_params["sandboxPolicy"] = {"type": "readOnly", "networkAccess": True}
     wire.turn_requested = True
     wire.send_json({"id": "turn-start", "method": "turn/start", "params": turn_params})
     try:

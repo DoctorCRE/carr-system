@@ -8,7 +8,7 @@ skipped, so tools/migrate.py fails closed on the reordered ledger, and the
 typed staging readback refuses release rehearsals because staging's ledger
 (259 rows) does not equal the declared candidate set (260). Third instance of
 the same shape tonight; see tools/staging-ledger-repair-0315.py and
-tools/staging-heavy-build-parity.py for the pattern's provenance.
+the original isolated staging replay for the pattern's provenance.
 
 CONTRACT, same as its two siblings: marker-verified, repairs exactly one
 named skew, refuses any database not showing it (production records 0324, so
@@ -26,10 +26,14 @@ Usage (through the documented staging door):
         tools/staging-siep-0324-replay.py --apply
 """
 
-import hashlib
-import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import hashlib
+import os
 from typing import Any, NoReturn
 
 import psycopg
@@ -63,7 +67,7 @@ def main() -> None:
     url = os.environ.get("DATABASE_URL")
     if not url:
         fail("DATABASE_URL is not set")
-    sql_text = MIGRATION.read_text()
+    sql_text = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     digest = hashlib.sha256(sql_text.encode()).hexdigest()
     if digest != PRODUCTION_SHA:
         fail(f"{MIGRATION.name} no longer hashes to what production ran "

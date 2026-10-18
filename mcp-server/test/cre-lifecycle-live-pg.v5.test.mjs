@@ -1,21 +1,3 @@
-// DoctorCRE v5 slice V5-J102: the lifecycle driven LIVE, through the real store,
-// against real PostgreSQL.
-//
-// WHAT THIS PROVES THAT NOTHING ELSE HERE DOES. cre-lifecycle-store.v5.test.mjs
-// runs the store against a scripted fake handle, and cre-lifecycle-postgres.sql
-// drives the SQL writers directly with envelopes it builds by hand. Neither one
-// ever put the two together: the envelopes the STORE builds had never been handed
-// to the writers the SQL defines. This suite does exactly that, as three real
-// database principals (carr_authority_joe, carr_authority_dell, and carr_writer
-// acting as a sponsored agent), with evidence produced through F01's own
-// writers and nothing seeded around a guard.
-//
-// It runs only when the three DSNs below are set, which is what
-// ops/cre-lifecycle-local-pg-gate.py does on a scratch database it builds and
-// drops. Without them every test here is skipped by name, never passed.
-//
-// EVERY RECORD IS SYNTHETIC. Ids carry a per-run nonce so the suite can run
-// twice against the same scratch database without colliding.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -60,8 +42,6 @@ async function pool(name) {
   if (!pg) pg = (await import("pg")).default;
   const writer = ["agent", "joe_writer", "agent_unsponsored", "agent_as_dell"].includes(name);
   const config = { connectionString: writer ? DSN.writer : DSN[name], max: 2 };
-  // mcp.js sets carr.sponsoring_human_slug transaction-locally from the
-  // authenticated grant on every write; each pool stands in for that here.
   if (name === "agent") config.options = "-c carr.acting_actor_slug=codex -c carr.sponsoring_human_slug=joe";
   if (name === "joe_writer") config.options = "-c carr.acting_actor_slug=joe -c carr.sponsoring_human_slug=joe";
   if (name === "agent_unsponsored") config.options = "-c carr.acting_actor_slug=codex";
@@ -70,7 +50,6 @@ async function pool(name) {
   return pools[name];
 }
 
-/** A store whose `db` is one real connection per operation, like mcp.js. */
 function storeFor(name) {
   return createCreLifecycleStore({
     db: {
@@ -98,7 +77,6 @@ function storeFor(name) {
 const ACTORS = { joe: JOE, dell: DELL, agent: AGENT, joe_writer: JOE,
   agent_unsponsored: AGENT, agent_as_dell: AGENT };
 
-/** F01's own store over the same per-principal pools. */
 function f01StoreFor(name) {
   return createRecordSourceAuthorityStore({
     db: {
@@ -139,17 +117,7 @@ async function sql(name, text, params = []) {
 const sha = s => createHash("sha256").update(s).digest("hex");
 const D = s => `sha256:${sha(s)}`;
 
-// ---------------------------------------------------------------------------
-// Evidence, produced through F01's own writers. Nothing here writes a row F01
-// or J102 would not write for a real caller.
-// ---------------------------------------------------------------------------
 
-/**
- * A document version, through F01's OWN store door (recordDocumentIdentity), so
- * this suite depends on F01's exported contract rather than on the arity of one
- * of its SQL writers. Declared an original first-party record: the bytes are
- * synthetic and authored here.
- */
 async function f01Document(name, { document_class, states }) {
   const document_id = id("doc");
   const content_digest = D(document_id);
@@ -207,7 +175,6 @@ async function f01Artifact(name) {
   return rows[0].o.artifact_digest;
 }
 
-// ---------------------------------------------------------------------------
 
 after(async () => {
   for (const p of Object.values(pools)) await p.end();
@@ -225,9 +192,6 @@ async function subject(name, subject_kind, subject_id) {
   return answer;
 }
 
-// ---------------------------------------------------------------------------
-// Walk helpers. Each performs one real store operation and asserts it landed.
-// ---------------------------------------------------------------------------
 
 const REF = (subject_kind, subject_id) => ({ subject_kind, subject_id });
 
@@ -250,7 +214,6 @@ async function fact(name, record_kind, subject_kind, subject_id, extra = {}) {
   return record_id;
 }
 
-/** A client with an active engagement, reached through the real doors. */
 async function client(name = "joe") {
   const who = as(name);
   const rel = id("rel"), eng = id("eng");
@@ -265,7 +228,6 @@ async function client(name = "joe") {
   return { rel, eng };
 }
 
-/** An opened assignment under a fresh client. */
 async function openedAssignment(name = "joe") {
   const { rel, eng } = await client(name);
   const asg = id("asg");
@@ -282,7 +244,6 @@ async function openedAssignment(name = "joe") {
   return { rel, eng, asg };
 }
 
-/** A negotiation with a delivered LOI, accepted by the counterparty. */
 async function acceptedNegotiation(name, asg) {
   const neg = id("neg"), property = id("prop");
   ok(await as(name).initializePropertyNegotiation({ idempotency_key: key(),
@@ -304,7 +265,6 @@ async function acceptedNegotiation(name, asg) {
   return { neg, property };
 }
 
-/** A pending deal: the partner commits the winning property. */
 async function pendingDeal(instrument_kind = "lease") {
   const { rel, eng, asg } = await openedAssignment("joe");
   const { neg, property } = await acceptedNegotiation("joe", asg);
@@ -408,26 +368,7 @@ function docRef(doc) {
     expected_content_digest: doc.content_digest };
 }
 
-// ===========================================================================
-// THE FULL TRANSITION TRUTH TABLE, LIVE.
-//
-// v5J102TransitionTruthTable() is the kernel's own enumeration: every guard of
-// every transition against every value that guard can be shown. Each cell here
-// is DRIVEN through the real store against the real database — a subject in the
-// cell's state, reached through the real doors, with admitting evidence bound
-// to it — and the answer is compared with what the cell says.
-//
-// A CELL THE DATABASE CAN NEVER REACH is not quietly passed. Some state values
-// have no door that produces them (no transition writes loi_countered, an
-// expired engagement or a concluded assignment); some guards cannot be shown a
-// wrong value through the store by construction (the store fixes the subject
-// kind per operation and dispatches deal execution on the STORED instrument).
-// Every such cell is named in the coverage report and the unreachable set is
-// pinned, so a new door that makes one reachable fails this suite until the
-// cell is driven.
-// ===========================================================================
 
-/** Deal steps, each a real store operation with admitting evidence. */
 const DEAL_STEPS = {
   async lease_exec(d) {
     const doc = await f01Document("joe", { document_class: "lease" });
@@ -506,11 +447,6 @@ async function dealWith(instrument_kind, steps) {
   return d;
 }
 
-/**
- * A FRESH subject whose `axis` holds `value`, built through the real doors, or
- * null when no door produces that value. `instrument` is the deal instrument
- * wanted, so that record-deal-execution dispatches to the transition under test.
- */
 async function subjectAt(subject_kind, axis, value, instrument = "lease") {
   if (subject_kind === "relationship") {
     if (value === "prospect") {
@@ -584,7 +520,6 @@ async function subjectAt(subject_kind, axis, value, instrument = "lease") {
   }
   if (subject_kind === "deal") {
     const exec = instrument === "purchase" ? "purchase_exec" : "lease_exec";
-    // A purchase closes only after its diligence resolves (Q094).
     const closed = instrument === "purchase"
       ? [exec, "diligence:satisfied", "close"] : [exec, "close"];
     const steps = {
@@ -606,10 +541,9 @@ async function subjectAt(subject_kind, axis, value, instrument = "lease") {
     const d = await dealWith(instrument, steps);
     return { kind: "deal", id: d.deal, ...d };
   }
-  return null; // engagement: no transition takes an engagement as its subject
+  return null;
 }
 
-/** The admitting evidence for one transition, bound to subject `s`. */
 async function admittingEvidence(transition_id, s) {
   switch (transition_id) {
     case "establish-client-and-engagement": {
@@ -674,7 +608,6 @@ async function admittingEvidence(transition_id, s) {
   }
 }
 
-/** One store call performing `transition_id` on subject `s`, as `who`. */
 async function attempt(who, transition_id, s, evidence_refs, { subject_kind } = {}) {
   const store = as(who);
   const payload = { idempotency_key: key(),
@@ -729,17 +662,13 @@ async function digestOf(s) {
   return (await state("joe", s.kind, s.id)).readback?.body?.state_digest ?? null;
 }
 
-/** A subject the transition's four guards all admit, for driving one other guard. */
 async function admittedSubject(transition_id, instrument) {
   const c = v5J102TransitionContract(transition_id);
   const inst = instrument ?? c.instrument_kinds?.[0] ??
     (transition_id === "record-diligence-outcome" ? "purchase" : "lease");
   const [axis, permitted] = Object.entries(c.prerequisites ?? {}).at(-1) ?? [null, []];
-  // A commitment needs an ACCEPTED negotiation under its assignment, which only
-  // an assignment already negotiating has.
   const value = transition_id === "commit-winning-property" ? "negotiation" : permitted[0];
   if (c.subject_kind === "deal") {
-    // Every from-axis admitting at once: build the shape each deal transition needs.
     const steps = {
       "record-diligence-outcome": ["purchase_exec"],
       "record-deal-closing": [inst === "purchase" ? "purchase_exec" : "lease_exec"],
@@ -752,8 +681,6 @@ async function admittedSubject(transition_id, instrument) {
 
 const TABLE = LIVE ? v5J102TransitionTruthTable() : null;
 
-// The state values NO door produces, pinned. A value leaves this set only by
-// being reached — at which point the cells that need it must be driven.
 const UNREACHABLE_STATE_VALUES = Object.freeze([
   "relationship_state=client_paused", "relationship_state=client_ended",
   "assignment_phase=concluded",
@@ -769,15 +696,10 @@ test("LIVE TRUTH TABLE (prerequisite guard): every reachable cell of every trans
     const c = v5J102TransitionContract(cell.transition_id);
     const inst = c.instrument_kinds?.[0] ??
       (cell.transition_id === "record-diligence-outcome" ? "purchase" : "lease");
-    // A REFUSING cell writes nothing, so its subject may be shared; an admitting
-    // cell may move its subject, so it always gets a fresh one.
     const cacheKey = `${c.subject_kind}|${cell.axis}|${cell.value}|${inst}`;
     let s = cell.guard_admits ? undefined : cache.get(cacheKey);
     if (s === undefined) {
       s = await subjectAt(c.subject_kind, cell.axis, cell.value, inst);
-      // Q094's split: diligence exists only on a purchase, so a lease deal is
-      // the one that holds not_applicable, and the prerequisite still has to
-      // refuse it.
       if (s === null && c.subject_kind === "deal" && cell.axis === "diligence_state") {
         s = await subjectAt("deal", cell.axis, cell.value, inst === "purchase" ? "lease" : "purchase");
       }
@@ -808,14 +730,11 @@ test("LIVE TRUTH TABLE (prerequisite guard): every reachable cell of every trans
   for (const u of report.unreachable) {
     const cellValue = u.split(":")[1];
     const pinned = UNREACHABLE_STATE_VALUES.includes(cellValue) ||
-      // Diligence has no in_progress..failed state on a lease and no
-      // not_applicable state on an executed purchase, by Q094's own split.
       cellValue.startsWith("diligence_state=");
     assert.ok(pinned, `${u} was not driven and its value is not pinned unreachable`);
   }
 });
 
-/** Evidence of ANY registered kind, bound to the subject its contract names. */
 async function evidenceOfKind(kind, family) {
   const doc = async (document_class, subject_kind, subject_id, states) => {
     const d = await f01Document("joe", { document_class, states });
@@ -832,9 +751,6 @@ async function evidenceOfKind(kind, family) {
         { signature_state: "unsigned", validity_state: "draft" });
     case "executed_lease": return doc("lease", "deal", family.deal);
     case "signed_purchase_contract":
-      // F01 refuses a fully executed draft (draft_cannot_be_fully_executed), so a
-      // signed purchase contract is `effective` in F01's vocabulary even while
-      // the deal is pending through diligence.
       return doc("purchase_contract", "deal", family.deal);
     case "commission_agreement": return doc("commission_agreement", "deal", family.deal);
     case "counterparty_loi_acceptance": {
@@ -869,15 +785,12 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
     report[guard] ??= {};
     report[guard][outcome] = (report[guard][outcome] ?? 0) + 1;
   };
-  // A family of subjects of every kind, to host evidence bound to a subject
-  // OTHER than the one under test.
   const other = await pendingDeal("lease");
 
   for (const transition_id of V5_J102_TRANSITION_IDS) {
     const c = v5J102TransitionContract(transition_id);
     const own = TABLE.cells.filter(x => x.transition_id === transition_id);
 
-    // --- subject_kind: the store fixes the kind per operation --------------
     const s0 = await admittedSubject(transition_id);
     for (const cell of own.filter(x => x.guard === "subject_kind" && !x.guard_admits)) {
       const ev = await admittingEvidence(transition_id, s0);
@@ -887,7 +800,6 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
       tally("subject_kind", `refused:${r.at}`);
     }
 
-    // --- required_evidence: every kind but the admitting one refuses --------
     const before = await digestOf(s0);
     const family = { rel: s0.rel ?? other.rel, asg: s0.asg ?? other.asg,
       neg: s0.neg ?? other.neg, deal: s0.deal ?? other.deal,
@@ -902,7 +814,6 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
     }
     assert.equal(await digestOf(s0), before, `${transition_id}: an evidence refusal moved the subject`);
 
-    // --- actor_class: both classes, each on a fresh admitted subject --------
     for (const cell of own.filter(x => x.guard === "actor_class")) {
       const who = cell.value === "verified_partner" ? "dell" : "agent";
       const s = await admittedSubject(transition_id);
@@ -922,7 +833,6 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
       }
     }
 
-    // --- instrument_kind: dispatch on the STORED instrument ----------------
     for (const cell of own.filter(x => x.guard === "instrument_kind")) {
       const s = await admittedSubject(transition_id, cell.value);
       const ev = await admittingEvidence(transition_id, s);
@@ -931,9 +841,6 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
         assert.equal(r.decision, "allow", `${transition_id} on a ${cell.value} deal: ${JSON.stringify(r)}`);
         tally("instrument_kind", "admitted");
       } else {
-        // The store never hands the lease transition a purchase deal: it
-        // dispatches on the stored instrument, and the other transition then
-        // refuses this evidence. Either way the transition under test does not run.
         assert.equal(r.decision, "refuse", `${transition_id} on a ${cell.value} deal`);
         assert.notEqual(r.transition_id, transition_id,
           `the store handed ${transition_id} a ${cell.value} deal`);
@@ -944,9 +851,6 @@ test("LIVE TRUTH TABLE (subject_kind, actor_class, instrument_kind, required_evi
   console.log("LIVE guard cells", JSON.stringify(report, null, 1));
 });
 
-// ===========================================================================
-// Q103 LIVE: concurrent edits by two partners against the same base.
-// ===========================================================================
 
 async function body(name, subject_kind, subject_id) {
   return (await state(name, subject_kind, subject_id)).readback.body;
@@ -970,7 +874,6 @@ test("Q103 LIVE: a non-overlapping concurrent edit MERGES automatically and keep
   const d = await dealWith("lease", ["lease_exec"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
 
-  // Dell records the commission agreement, decided against `base`.
   const commission = await f01Document("dell", { document_class: "commission_agreement" });
   await linkDocument("dell", commission, "deal", d.deal);
   ok(await as("dell").recordDealAxis({ idempotency_key: key(),
@@ -978,7 +881,6 @@ test("Q103 LIVE: a non-overlapping concurrent edit MERGES automatically and keep
     evidence_refs: [{ evidence_kind: "commission_agreement", ...docRef(commission) }],
     declared: { axis: "commission_agreement_state" } }), "Dell's commission");
 
-  // Joe records the invoice, ALSO decided against `base`, which has moved.
   const answer = ok(await axisCall("joe", d.deal, "invoice_state", "invoice_issued", "invoice", base),
     "Joe's invoice on a moved base");
   assert.equal(answer.auto_merged, true);
@@ -1050,14 +952,8 @@ test("Q103 LIVE: two intervening writes are UNCHARACTERIZED and reconcile visibl
 });
 
 test("Q103 LIVE: a disjoint edit whose transition no longer holds on the CURRENT row is refused, never merged", { skip: SKIP }, async () => {
-  // Joe decides to close against an executed purchase whose diligence is
-  // satisfied; Dell meanwhile records a failed diligence outcome. The fields are
-  // disjoint (diligence_state vs deal/closing state), so the store re-admits the
-  // closing against the current row — and the re-admission refuses.
   const d = await dealWith("purchase", ["purchase_exec", "diligence:satisfied"]);
   const base = (await body("joe", "deal", d.deal)).state_digest;
-  // A second diligence outcome is not admissible once resolved, so the
-  // intervening write here is a cancellation's disjoint sibling: completion.
   await DEAL_STEPS.completion(d);
   const settlement = await fact("joe", "closing_settlement", "deal", d.deal,
     { closing_date: "2026-09-22T15:00:00Z" });
@@ -1067,11 +963,6 @@ test("Q103 LIVE: a disjoint edit whose transition no longer holds on the CURRENT
   "closing merged over a disjoint completion");
   assert.equal(answer.auto_merged, true);
 
-  // And the refusal half: a lease execution decided against a pending deal that
-  // Dell has since CANCELLED. The fields are disjoint (execution_state against
-  // deal_state and cancellation_reason), so the store re-admits the execution
-  // against the current row — where the deal is no longer pending — and the
-  // kernel refuses. The stale decision never lands.
   const d2 = await pendingDeal("lease");
   const base2 = (await body("joe", "deal", d2.deal)).state_digest;
   await DEAL_STEPS.cancel(d2);
@@ -1115,26 +1006,17 @@ test("Q103 LIVE: two partners racing on disjoint axes from the same base both la
   assert.equal(after.invoice_state === "invoiced", landed(b));
   for (const x of [a, b]) {
     if (landed(x)) continue;
-    // The loser learned it lost: the database's own compare-and-swap refused it.
     assert.ok(x.error?.includes("j102_") || x.ok?.decision !== "allow",
       `a losing write must be refused loudly: ${JSON.stringify(x).slice(0, 400)}`);
   }
 });
 
-// ===========================================================================
-// CREDENTIAL SPLIT LIVE: a verified partner on the WRITER credential.
-// mcp.js routes every verb that is not authorityOnly over carr_writer, and F01
-// derives that credential as a sponsored agent. The store adopts that narrower
-// class rather than refusing, and never lets it reach a partner-only act.
-// ===========================================================================
 
 test("CREDENTIAL SPLIT LIVE: Joe on the writer credential records agent-admitted work under the credential's class", { skip: SKIP }, async () => {
   const rel = id("rel");
   ok(await as("joe_writer").initializeProspectRelationship({ idempotency_key: key(),
     declared: { new_subject_id: rel } }), "Joe initializes over the writer credential");
   assert.equal((await subject("joe", "relationship", rel)).decision, "allow", "the row exists");
-  // An agent-admitted fact written by Joe over the writer credential is stamped
-  // with the CREDENTIAL's class and Joe's name — both facts, neither widened.
   const onWriter = await fact("joe_writer", "invoice", "relationship", rel, { detail: "synthetic" })
     .catch(() => null);
   const asg = (await openedAssignment("joe")).asg;
@@ -1159,7 +1041,6 @@ test("CREDENTIAL SPLIT LIVE: a partner-authored fact over the writer credential 
       e.detail?.use_verb === "record-partner-lifecycle-fact" &&
       e.detail?.credential_split?.handler_authorization_class === "verified_partner",
     "the writer credential never authors a partner fact");
-  // The same fact on Joe's authority credential lands.
   await fact("joe", "closing_settlement", "deal", d.deal, { closing_date: "2026-09-22T15:00:00Z" });
 });
 
@@ -1178,13 +1059,6 @@ test("CREDENTIAL SPLIT LIVE: a partner-only transition over the writer credentia
   assert.equal((await subject("joe", "deal", d.deal)).readback.body.state_digest, base, "nothing moved");
 });
 
-// ===========================================================================
-// Q081 LIVE: the migration shadow runs OLD and NEW side by side.
-// Legacy public.deal rows are seeded on the owner connection (the legacy
-// writers are not this slice's), linked through the real Salesforce reference
-// door, and compared by the real runner. Nothing on either side is modified, and
-// no caller retires: that needs a verified census nobody has produced.
-// ===========================================================================
 
 const OWNER_DSN = process.env.CARR_J102_LIVE_PG_DSN_OWNER;
 const SHADOW_SKIP = SKIP || (!OWNER_DSN &&
@@ -1195,8 +1069,6 @@ async function owner(text, params = []) {
   const c = new pg.Client({ connectionString: OWNER_DSN });
   await c.connect();
   try {
-    // Legacy seeding only: the legacy table's own FK and monitor triggers belong
-    // to other slices and are not what this test is about.
     await c.query("set session_replication_role = replica");
     return (await c.query(text, params)).rows;
   } finally {
@@ -1227,11 +1099,6 @@ async function readiness() {
   return answer.readback.body;
 }
 
-/**
- * KERNEL/SQL PARITY ON THE SAME RUN. The kernel is handed exactly the counts the
- * database recorded and must reach the same cleanliness and the same missing
- * facts; a drift between the two readers fails here, on real rows.
- */
 function assertKernelAgrees(sqlReadiness) {
   const r = sqlReadiness.latest_shadow_run;
   const kernel = v5J102MigrationReadiness({ tenant: ORGANIZATION_TENANT_ID,
@@ -1264,7 +1131,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
     ["exact_caller_census", "shadow_comparison_clean_run"]);
   assertKernelAgrees(before);
 
-  // One executed, pending lease: projects legacy phase 'legal', not closed, open.
   const d = await dealWith("lease", ["lease_exec"]);
   const sfA = `006SYN${RUN}A`, sfB = `006SYN${RUN}B`;
   await linkOpportunity(sfA, "deal", d.deal);
@@ -1273,7 +1139,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   const differing = await legacyRow({ salesforce_id: sfB, phase: "closing", outcome: "won",
     closed_on: "2026-09-20" });
   const unlinked = await legacyRow({ phase: "research" });
-  // RULING (f): a J102 deal whose Salesforce opportunity no legacy row holds.
   const d2 = await dealWith("lease", ["lease_exec"]);
   const sfC = `006SYN${RUN}C`;
   await linkOpportunity(sfC, "deal", d2.deal);
@@ -1302,10 +1167,8 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.deepEqual(byId[differing].differences.map(x => [x.field, x.legacy, x.projected]),
     [["phase", "closing", "legal"], ["closed", true, false], ["outcome", "won", "open"]]);
   assert.equal(byId[unlinked].status, "unlinked");
-  // MANY-TO-ONE is named: both legacy rows resolve to the one J102 deal.
   assert.deepEqual(record.many_to_one.map(m => [m.deal_id, [...m.legacy_row_ids].sort()]),
     [[d.deal, [matching, differing].sort()]]);
-  // And the subject with no legacy row is named with the opportunity it claims.
   assert.deepEqual(record.subjects_without_legacy_rows.map(x => [x.subject_kind, x.subject_id, x.opportunity_ids]),
     [["deal", d2.deal, [sfC]]]);
 
@@ -1313,7 +1176,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.equal((await subject("joe", "deal", d.deal)).readback.body.state_digest, dealBefore,
     "no lifecycle row was touched");
 
-  // Replay returns the same run; it does not append a second observation.
   const replay = ok(await as("agent").runMigrationShadow({ idempotency_key: runKey }), "replay");
   assert.equal(replay.run_seq, run.run_seq);
   assert.equal((await sql("joe", "select count(*)::int as n from ops.j102_migration_shadow_run"))[0].n, 1);
@@ -1326,8 +1188,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
     ["exact_caller_census", "shadow_comparison_clean_run"]);
   assertKernelAgrees(dirty);
 
-  // A person resolves the two problem rows (here: the synthetic rows go away),
-  // and the next run is clean — and STILL retires nobody without a census.
   await owner("delete from public.deal where id = any($1::uuid[])", [[differing, unlinked]]);
   const found = await legacyRow({ salesforce_id: sfC, phase: "legal" });
   const clean = ok(await as("joe").runMigrationShadow({ idempotency_key: key() }), "clean run");
@@ -1343,8 +1203,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.equal(after.latest_shadow_run.snapshot_current, true);
   assertKernelAgrees(after);
 
-  // A CLEAN RUN IS PROOF ONLY OF ITS SNAPSHOT. A legacy row arriving after the
-  // run moves the snapshot, and the reader stops counting the run.
   const late = await legacyRow({ phase: "research" });
   const stale = await readiness();
   assert.equal(stale.latest_shadow_run.clean, true, "the run itself stays clean");
@@ -1352,13 +1210,10 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.equal(stale.shadow_comparison_clean_run, false, "but it is stale");
   assert.match(stale.missing_facts[1].why, /snapshot that has since moved/);
   assertKernelAgrees(stale);
-  // The binding is to CONTENT: remove the late row and the same run is current again.
   await owner("delete from public.deal where id = $1::uuid", [late]);
   assert.equal((await readiness()).shadow_comparison_clean_run, true,
     "the snapshot the run read is the snapshot again");
 
-  // AN EDIT TO A COMPARED FIELD of a row the run already compared stales it too:
-  // the run's verdict on that row is no longer a verdict on what the row says.
   await owner("update public.deal set phase = 'closing' where id = $1::uuid", [matching]);
   const edited = await readiness();
   assert.equal(edited.latest_shadow_run.clean, true);
@@ -1370,8 +1225,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   await owner("update public.deal set phase = 'legal', closed_on = null where id = $1::uuid", [matching]);
   assert.equal((await readiness()).shadow_comparison_clean_run, true, "restored, current again");
 
-  // EACH FAULT ALONE SPOILS A RUN. Every other row matches in each of these, so
-  // the one fault is the only thing standing between the run and "clean".
   const counts = r => [r.compared_rows, r.matching_rows, r.differing_rows, r.unlinked_rows,
     r.many_to_one_subjects, r.subjects_without_legacy_row, r.clean];
   const lone = await legacyRow({ phase: "research" });
@@ -1391,7 +1244,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.deepEqual(counts(ok(await as("joe").runMigrationShadow({ idempotency_key: key() }), "all resolved")),
     [3, 3, 0, 0, 0, 0, true]);
   assert.equal((await readiness()).shadow_comparison_clean_run, true);
-  // The same thing from the NEW side: a linked subject moving also stales it.
   ok(await axisCall("joe", d2.deal, "payment_state", "payment_received", "payment",
     (await body("joe", "deal", d2.deal)).state_digest, { payment_level: "partially_paid" }),
   "a linked deal moves");
@@ -1400,7 +1252,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   assert.equal(moved.shadow_comparison_clean_run, false);
   assertKernelAgrees(moved);
 
-  // The run history is the runner's alone.
   await assert.rejects(sql("agent",
     "insert into ops.j102_migration_shadow_run (tenant) values ('x')"), /permission denied|j102_/);
   await assert.rejects(sql("joe",
@@ -1408,10 +1259,6 @@ test("Q081 LIVE: the shadow compares old and new side by side, reports every dif
   await owner("delete from public.deal where id = any($1::uuid[])", [[matching, found, d3legacy]]);
 });
 
-// ===========================================================================
-// Q103 LIVE, after independent review: the merge is durable, the caller's key
-// survives a conflict, and a stale READ-ONLY subject refuses instead of crashing.
-// ===========================================================================
 
 test("Q103 LIVE: a replay of a merged transition reports the merge the original write made", { skip: SKIP }, async () => {
   const d = await dealWith("lease", ["lease_exec"]);
@@ -1444,10 +1291,8 @@ test("Q103 LIVE: a conflict does not spend the caller's key; the same key lands 
     declared: { axis: "payment_state", payment_level: "paid" } });
   const conflict = await call(base);
   assert.equal(conflict.decision, "reconcile");
-  // Re-sending the same stale request replays the same item, not a second one.
   assert.equal((await call(base)).decision, "reconcile");
   assert.equal((await reconciliationItems("deal", d.deal)).length, 1);
-  // A person looked, re-read, and decided again on the current row: same key.
   const fresh = (await body("joe", "deal", d.deal)).state_digest;
   const landed = ok(await call(fresh), "the same key on a fresh base");
   assert.equal((await body("joe", "deal", d.deal)).state.payment_state, "paid");
@@ -1464,7 +1309,6 @@ test("Q103 LIVE: an untraceable move of a subject the transition only READS refu
   const answer = await as("joe").openCreAssignment({ idempotency_key: key(),
     subject_ref: REF("assignment", asg),
     related_refs: {
-      // A base the engagement never held: its row is not one transition past it.
       engagement: { subject_kind: "engagement", subject_id: eng, expected_state_digest: D("never") },
       relationship: REF("relationship", rel) },
     evidence_refs: [{ evidence_kind: "search_initiation", record_id: mandate }],
@@ -1475,19 +1319,7 @@ test("Q103 LIVE: an untraceable move of a subject the transition only READS refu
   assert.deepEqual(await reconciliationItems("engagement", eng), [], "nothing to reconcile: nothing of the caller's is lost");
 });
 
-// ===========================================================================
-// THE DATABASE COMPARE-AND-SWAP, PROVED DETERMINISTICALLY.
-// The store reads the row, decides, and hands the write to
-// ops.j102_apply_transition. Another partner's write can commit in that window.
-// The store's own staleness judgement cannot see it (it already read), so the
-// ONLY thing standing between that window and a lost update is the SQL
-// compare-and-swap. This hook commits the other write on a different connection
-// at exactly that moment, on the SAME field, so a disabled CAS loses Dell's
-// payment and this test fails. (The disjoint-field race above cannot prove this:
-// the field-level check would hide a missing CAS there.)
-// ===========================================================================
 
-/** A store whose transaction runs `inject` (other connections) just before the SQL writer. */
 function racingStoreFor(name, inject, writer = /ops\.j102_apply_transition\(/) {
   let fired = false;
   return createCreLifecycleStore({ db: {
@@ -1537,9 +1369,6 @@ test("CAS LIVE: a same-field write committed between the store's read and the SQ
   assert.equal(after.payment_state, "partially_paid", "Dell's committed payment survives");
 });
 
-// ===========================================================================
-// OWNER RULINGS (a) and (b), 2026-09-25, encoded and proved live.
-// ===========================================================================
 
 test("RULING (a) LIVE: a prospect may name its CARR party; a party nobody holds refuses", { skip: SHADOW_SKIP }, async () => {
   const [row] = await owner(
@@ -1575,13 +1404,10 @@ test("RULING (b) LIVE: one ACTIVE negotiation per assignment and property; a new
   assert.equal(dup.decision, "refuse");
   assert.equal(dup.reason_id, "active_negotiation_exists_for_property");
   assert.deepEqual(dup.refusal_detail.active_negotiation_ids, [first], "the refusal names the live sibling");
-  // Per PROPERTY: the same assignment may negotiate another property.
   ok(await as("dell").initializePropertyNegotiation({ idempotency_key: key(),
     related_refs: { assignment: REF("assignment", asg) },
     declared: { new_subject_id: id("neg"), property_id: id("prop") } }), "a different property");
 
-  // Once the first is no longer active (won, then its deal failed and the
-  // assignment returned to search), the same property may be negotiated again.
   const deal = id("deal");
   const loi = await f01Document("joe", { document_class: "letter_of_intent",
     states: { signature_state: "unsigned", validity_state: "draft" } });
@@ -1645,11 +1471,6 @@ test("RULING (b) LIVE: a sibling committed inside the store's window is refused 
   assert.doesNotMatch(ix.pred, /selected_winner|loi_withdrawn|loi_rejected|superseded/);
 });
 
-// ===========================================================================
-// OWNER RULING (c), 2026-09-25: every lifecycle row and event is recorded UNDER
-// THE SPONSORING PARTNER, derived from the authenticated login and never from a
-// caller field.
-// ===========================================================================
 
 async function sponsorOf(subject_kind, subject_id) {
   const [row] = await sql("joe",
@@ -1681,15 +1502,12 @@ test("RULING (c) LIVE: an agent's write is recorded under its sponsoring partner
   assert.deepEqual([(await sponsorOf("relationship", byDell)).sponsoring_partner,
     (await sponsorOf("relationship", byDell)).events], ["dell", [["dell", "dell"]]]);
 
-  // Ruling (e) and (c) together: Joe over the writer credential is a
-  // sponsored_agent under his own slug, recorded under himself.
   const byJoeWriter = id("rel");
   ok(await as("joe_writer").initializeProspectRelationship({ idempotency_key: key(),
     declared: { new_subject_id: byJoeWriter } }), "Joe over the writer credential");
   assert.deepEqual([(await sponsorOf("relationship", byJoeWriter)).updated_by,
     (await sponsorOf("relationship", byJoeWriter)).sponsoring_partner], ["joe", "joe"]);
 
-  // A transition stamps it too, on the moved row and on every event it appends.
   const d = await dealWith("lease", ["lease_exec"]);
   ok(await axisCall("agent", d.deal, "invoice_state", "invoice_issued", "invoice",
     (await body("joe", "deal", d.deal)).state_digest), "the agent records an invoice");
@@ -1700,7 +1518,6 @@ test("RULING (c) LIVE: an agent's write is recorded under its sponsoring partner
 });
 
 test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at the SQL writer", { skip: SKIP }, async () => {
-  // At the door: the field is derived-only, wherever the caller puts it.
   for (const payload of [
     { idempotency_key: key(), sponsoring_partner: "dell", declared: { new_subject_id: id("rel") } },
     { idempotency_key: key(), declared: { new_subject_id: id("rel"), sponsoring_partner: "dell" } },
@@ -1710,8 +1527,6 @@ test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at
       "a sponsor named by the caller never reaches the database");
   }
 
-  // Past the door: an envelope that names a different partner than the login
-  // derives is refused by the writer itself, even with its digests correct.
   const tamper = text => /ops\.j102_initialize_subject\(/.test(text);
   const store = createCreLifecycleStore({ db: {
     async query() { throw new Error("transaction() is always used"); },
@@ -1746,8 +1561,6 @@ test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at
     "the writer re-derives the sponsor and refuses the envelope's claim");
   assert.equal(await sponsorOf("relationship", target), undefined, "nothing landed");
 
-  // A login with no verified sponsor cannot write at all; one whose server
-  // sponsor disagrees with the handler's is refused before any write.
   await assert.rejects(
     as("agent_unsponsored").initializeProspectRelationship({ idempotency_key: key(),
       declared: { new_subject_id: id("rel") } }),
@@ -1758,7 +1571,6 @@ test("RULING (c) LIVE: a caller-supplied sponsor is refused, at the store and at
     e => e?.code === "sponsor_context_mismatch");
 });
 
-/** A store on `name`'s pool whose writer call has its params rewritten by `edit`. */
 function tamperingStoreFor(name, writer, edit) {
   return createCreLifecycleStore({ db: {
     async query() { throw new Error("transaction() is always used"); },
@@ -1786,8 +1598,6 @@ test("RULING (c) LIVE: a TRANSITION envelope naming another sponsor, digests rec
   const invoice = await fact("joe", "invoice", "deal", d.deal, { detail: "synthetic" });
   let tampered = 0;
   const store = tamperingStoreFor("agent", /ops\.j102_apply_transition\(/, params => {
-    // $3 is the subject envelopes. Each is re-sealed with a different sponsor, so
-    // every digest the writer checks is honest and only the sponsor lies.
     const envelopes = JSON.parse(params[2]).map(env => {
       tampered += 1;
       return v5J102StoreEnvelope("stored_lifecycle_subject",
@@ -1809,8 +1619,6 @@ test("RULING (c) LIVE: a TRANSITION envelope naming another sponsor, digests rec
 
 test("RULING (c) LIVE: a PARTNER session whose transaction names a different sponsor is refused", { skip: SKIP }, async () => {
   if (!pg) pg = (await import("pg")).default;
-  // Joe's own authority login, with the sponsor setting naming Dell: the partner
-  // is their own sponsor, so the database refuses rather than choose.
   const conflicted = new pg.Pool({ connectionString: DSN.joe, max: 1,
     options: "-c carr.sponsoring_human_slug=dell" });
   try {
@@ -1837,7 +1645,6 @@ test("RULING (c) LIVE: a PARTNER session whose transaction names a different spo
         declared: { new_subject_id: target } }, { actor: JOE }),
       e => /j102_sponsor_context_conflict/.test(String(e?.message)) && e?.code === "42501");
     assert.equal(await sponsorOf("relationship", target), undefined, "nothing landed");
-    // The same login with the setting agreeing (or absent) writes normally.
     const [row] = await sql("joe", "select ops.j102_sponsoring_partner() as s");
     assert.equal(row.s, "joe");
   } finally {

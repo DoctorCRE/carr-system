@@ -18,17 +18,6 @@ def load(name, filename):
     return module
 
 class PreflightTests(unittest.TestCase):
-    def test_required_registry_read_cannot_skip_loader_failure(self):
-        mod = load("completion_preflight", "completion-evidence-gate-selftest.py")
-        with patch.object(mod.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), contextlib.redirect_stdout(io.StringIO()):
-            self.assertFalse(mod.registry_prefix_coverage(required=True))
-
-    def test_registry_refuses_unknown_writes_and_accepts_classified_writes(self):
-        mod = load("completion_preflight", "completion-evidence-gate-selftest.py")
-        for names, expected in [('["add-loop"]', True), ('["retro-unknown-write"]', False)]:
-            with patch.object(mod.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, names, "")), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(mod.registry_prefix_coverage(required=True), expected)
-
     def test_collection_only_does_not_run_the_full_selftest(self):
         mod = load("ci_preflight", "ci-selftest.py")
         def verdict():

@@ -1,4 +1,3 @@
-import datetime
 import hashlib
 import json
 import subprocess
@@ -8,10 +7,6 @@ import score
 ROOT = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
 BASE = 'b4dc32fd'
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():
@@ -39,28 +34,7 @@ def main():
     measured = score.score(exp,arms['baseline'],arms['candidate'])
     assert measured == score.score(exp,arms['baseline'],arms['candidate'])
     assert all(c['required']==(not c['should_not_fire']) for c in cases.values())
-    refs = [f'evals/context-hooks/evidence/{a}.jsonl' for a in arms]
-    source = {f'evals/context-hooks/{f}':sha(HERE/f) for f in ('score.py','make_report.py')}
-    deps = {'ops/config/hooks.json':sha(ROOT/'ops/config/hooks.json')}
-    receipt = json.loads((ROOT/'evals/rule-delivery/receipt.json').read_text())
-    dim = {'dimension_id':'event-route-wiring','critical':True,'status':'passed','direction_vs_baseline':'improved',
-           'evidence_refs':refs,**measured['dimensions']['event-route-wiring']}
-    receipt.update(surface='context-hooks', change='Wire NotebookEdit to the existing full-text preuse rule route; preserve every included and excluded tool class.',
-       measured_on=datetime.date.today().isoformat(),cases={'total':32,'train':16,'test':16,'should_not_fire':10,'sources':['human_judged_hard_case']},
-       split={'method':'exhaustive finite tool-class matrix; paired semantic train/test events, no statistical generalization', 'seed':0,'sealed_test':True},
-       repeats=2, noise_floor=0, min_useful_gain=0.01,primary_dimension='event-route-wiring',dimensions=[dim],
-       stage_results=[{'stage_id':'delivery','status':'passed','dimension_ids':['event-route-wiring'],'evidence_refs':refs}],
-       grader={'kind':'programmatic','validation':{'graded_twice':True,'result':'pass',**measured['controls']}},
-       verdict={'decision':'ship','statement':'The finite wiring gap closes with no regression in its complete event matrix.'},
-       notes=['Exact finite-matrix intervals; no confidence claim about model obedience. Live adapter invocation remains unverified.'],
-       evidence={'scorer':{'path':'evals/context-hooks/score.py','function':'score'},'source':source,'dependencies':deps,
-                 'expectations':{'path':'evals/context-hooks/expectations.v1.json','version':exp['version'],'sha256':sha(HERE/'expectations.v1.json')},
-                 'cohorts':{a:{'path':f'evals/context-hooks/evidence/{a}.jsonl','sha256':sha(HERE/'evidence'/f'{a}.jsonl')} for a in arms}})
-    receipt['adapter'].update(adapter_id='configured-preuse-event-matrix',harness_id='evals/context-hooks/score.py',
-        harness_version=source['evals/context-hooks/score.py'], native_session_ref='01a10e01-1a2a-7590-b830-d1e05450f2a4',
-        configuration_fingerprint='sha256:'+hashlib.sha256(json.dumps(deps,sort_keys=True).encode()).hexdigest())
-    (HERE/'receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
-    print(dim)
+    print(json.dumps(measured, indent=2))
 
 
 if __name__=='__main__':

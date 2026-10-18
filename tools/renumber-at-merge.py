@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Renumber a PR's pending migrations after rebasing onto fetched origin/main.
+"""Renumber a PR's pending migrations after merging fetched origin/main.
 
 The serialized merge queue runs these commands on its owned PR branch:
   git fetch origin main
-  git rebase origin/main
+  git merge origin/main
   python3 tools/renumber-at-merge.py
   git add -- <changed paths reported in the JSON summary>
   printf '%s\n' 'chore: renumber migrations at merge' > /tmp/renumber-commit.txt
   git commit -F /tmp/renumber-commit.txt
-  git push --force-with-lease origin HEAD
+  git push origin HEAD
   gh pr checks <PR> --watch
 Skip add/commit when the summary's changed_paths is empty. CI remains the gate.
 
@@ -49,7 +49,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops"))
 from git_env import scrubbed_env
-from successor_ownership import GENERATED_SQL, JSON_ARTIFACTS, is_owned_file, validate_outputs
+from integration_candidate import require_baseline_unchanged
+from migration_baseline import MANIFEST
+from migration_source import migration_names, read_migration
 from migration_number_contract import (
     MigrationNumberError, SLOT_RE, allocate_integration_successors,
     validate_integration_union,
@@ -152,7 +154,7 @@ class Plan:
     writes: dict[str, bytes]
     commands: list[list[str]]
     generated: dict[str, bytes]
-    immutable: dict[str, bytes]
+    immutable: dict[str, bytes | None]
 
     def summary(self, dry_run: bool) -> dict:
         changed = set(self.writes) | set(self.generated)
@@ -163,15 +165,18 @@ class Plan:
                     renames=self.renames, changed_paths=sorted(changed), generators=self.commands)
 
 
-def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Plan:
+def plan(repo: Path, branch: str | None, generators: dict[str, list[str]],
+         claimed_slots: tuple[int, ...] = (), avoid_slots: tuple[int, ...] = ()) -> Plan:
     base = git(repo, "rev-parse", "origin/main^{commit}").decode().strip()
     head = git(repo, "rev-parse", f"{branch or 'HEAD'}^{{commit}}").decode().strip()
     ancestor = git(repo, "merge-base", base, head).decode().strip()
     if not branch and ancestor != base:
-        raise MigrationNumberError("rebase the PR branch on current origin/main before renumbering")
+        raise MigrationNumberError("merge current origin/main into the PR branch before renumbering")
+    require_baseline_unchanged(repo, base, head if branch else None,
+                               inherited_from=ancestor if branch else None)
     base_paths = paths(repo, base)
-    main = {Path(p).name: blob(repo, base, p) for p in base_paths
-            if p.startswith("migrations/") and p.endswith(".sql")}
+    main = {name: read_migration(repo, name, base).encode()
+            for name in sorted(migration_names(repo, base))}
     comparison = ancestor if branch else base
     delta = git(repo, "diff", "--name-only", "--no-renames", "-z", comparison, *([head] if branch else [])).split(b"\0")
     changed = {p.decode() for p in delta if p}
@@ -185,9 +190,12 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
             contents[path] = read_file(repo, path)
         else:
             contents[path] = None
+    candidate_ref = head if branch else None
+    candidate_names = migration_names(repo, candidate_ref)
+    fork_names = migration_names(repo, ancestor) if branch else set()
     for name, content in main.items():
-        path = f"migrations/{name}"
-        candidate = contents.get(path, content) if branch else read_file(repo, path) if (repo / path).exists() else None
+        candidate = (read_migration(repo, name, candidate_ref).encode() if name in candidate_names
+                     else content if branch and name not in fork_names else None)
         if candidate != content:
             raise MigrationNumberError(f"applied main migration cannot be renamed, deleted or edited: {name}")
     pending = {Path(p).name: content for p, content in contents.items()
@@ -198,45 +206,29 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
     applied = applied_names(blob(repo, base, SNAPSHOT))
     if set(pending) & applied:
         raise MigrationNumberError("applied main migration cannot be reallocated: " + ", ".join(sorted(set(pending) & applied)))
-    immutable = {f"migrations/{name}": content for name, content in main.items() if content is not None}
+    immutable = {
+        path: git(repo, "show", f"{base}:{path}") if branch or (repo / path).exists() else None
+        for path in base_paths
+        if (path.startswith("migrations/") and path.endswith(".sql")) or path == MANIFEST
+    }
     result = Plan(base, head, ancestor != base, {}, {}, [], {}, immutable)
     try:
         validate_integration_union(main, main | pending)
+        if any(int(name[:4]) in claimed_slots for name in pending):
+            raise MigrationNumberError("earlier open PR owns a pending slot")
         return result
     except MigrationNumberError:
-        allocated = allocate_integration_successors(main, pending)
+        allocated = allocate_integration_successors(main, pending, occupied_slots=(*claimed_slots, *avoid_slots))
         result.renames = {old: new for old, new in allocated.items() if old != new}
     if not result.renames:
         return result
-    chain_path = "ops/config/scac-registry-chain.json"
-    scac = any(GENERATED_SQL.fullmatch(f"migrations/{name}") for name in result.renames)
-    if scac:
-        if blob(repo, base, chain_path) is None or contents.get(chain_path) is None:
-            raise MigrationNumberError("generated SCAC successor needs its branch registry chain and main predecessor")
-        for path in JSON_ARTIFACTS:
-            before = blob(repo, base, path)
-            candidate = contents.get(path) or (blob(repo, head, path) if branch else read_file(repo, path))
-            if candidate != before and not is_owned_file(path, before, candidate):
-                raise MigrationNumberError(f"applied registry history cannot be rewritten: {path}")
-        scac_command = ["node", str(ROOT / "tools/renumber-scac-artifacts.mjs"), str(repo), base, json.dumps(result.renames)]
-        result.commands.append(scac_command)
-        registry_inputs: dict[str, bytes] = {}
-        for path in [*JSON_ARTIFACTS, "mcp-server/src/scac-mutation-registry.current.generated.js"]:
-            content = contents.get(path) or (blob(repo, head, path) if branch else read_file(repo, path))
-            if content is None:
-                raise MigrationNumberError(f"generated registry input is missing: {path}")
-            registry_inputs[path] = content
-            result.generated[path] = rewrite(content, blob(repo, comparison, path), result.renames, set(main))
     for path, content in contents.items():
         if content is None:
             continue
         identity = Path(path).name if path.startswith("migrations/") and Path(path).name in pending else None
         transformed = rewrite(content, blob(repo, comparison, path), result.renames, set(main), identity)
         output = f"migrations/{result.renames[Path(path).name]}" if path.startswith("migrations/") and Path(path).name in result.renames else path
-        if scac and (path in JSON_ARTIFACTS or GENERATED_SQL.fullmatch(path) or RUNTIME.fullmatch(path)):
-            if Path(path).name in pending or path in JSON_ARTIFACTS or RUNTIME.fullmatch(path):
-                result.generated[output] = transformed
-        elif transformed != content or output != path or path in generators:
+        if transformed != content or output != path or path in generators:
             if path == SNAPSHOT:
                 result.commands.append([sys.executable, "ops/migration-shadow.py", "--base", base, "--write"])
                 result.generated[output] = transformed
@@ -246,8 +238,7 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
                     result.commands.append(command)
                 result.generated[output] = transformed
             elif RUNTIME.fullmatch(path):
-                result.commands.append(runtime_generator(path))
-                result.generated[output] = transformed
+                raise MigrationNumberError("declare a generator for the current runtime metadata")
             elif ".generated." in path or re.search(rb"(?i)generated by|auto-generated|do not (?:hand[- ]?)?edit", content[:2048]):
                 raise MigrationNumberError(f"generated output needs its owning generator: {path}; supply --generator PATH JSON_ARGV")
             else:
@@ -266,28 +257,8 @@ def plan(repo: Path, branch: str | None, generators: dict[str, list[str]]) -> Pl
         result.generated[SNAPSHOT] = b""
         result.commands.append([sys.executable, "ops/migration-shadow.py", "--base", base, "--write"])
     result.commands.sort(key=lambda command: len(command) > 1 and command[1] == "ops/migration-shadow.py")
-    if scac:
-        proposed: dict[str, str | None] = {path: hashlib.sha256(content).hexdigest() for path, content in result.writes.items()}
-        proposed.update({path: None for path in result.generated})
-        proposed.update({f"migrations/{old}": None for old in result.renames})
-        inputs = {"chain": json.loads(registry_inputs[chain_path]),
-                  "fixture": json.loads(registry_inputs["ops/config/scac-registry-source-inventory-fixtures.v1.json"]),
-                  "source_digests": proposed}
-        run_generator(repo, [*scac_command, "--preflight"], json.dumps(inputs).encode())
     validate_integration_union(main, main | {allocated[name]: result.writes.get(f"migrations/{allocated[name]}", pending[name]) for name in pending})
     return result
-
-
-def runtime_generator(path: str) -> list[str]:
-    code = """import {writeIntegratedArtifact} from './ops/integration-generation.mjs';
-import {renderRuntimeProjection,registryChain} from './ops/registry-chain.mjs';
-import {frozenInventory} from './ops/scac-mutation-inventory.mjs';
-const path=process.argv[1];
-const number=path.match(/\\.v([0-9]+)\\./)?.[1];
-const row=number ? registryChain.versions.find(r=>r.number===Number(number)) : registryChain.versions.at(-1);
-await writeIntegratedArtifact(path,renderRuntimeProjection(frozenInventory(row.version),{version:row.version,dbCatalogBaseline:row.catalog}));
-"""
-    return ["node", "--input-type=module", "-e", code, path]
 
 
 def run_generator(repo: Path, command: list[str], inputs: bytes | None = None) -> None:
@@ -303,6 +274,25 @@ def run_generator(repo: Path, command: list[str], inputs: bytes | None = None) -
             process.wait()
         if process.returncode:
             raise MigrationNumberError(f"generator failed ({command[0:2]}): {stderr.decode(errors='replace').strip()}")
+
+
+def validate_outputs(repo, paths):
+    """Refuse nonregular sinks and symlink ancestors before any write."""
+    import stat
+    root = repo.resolve(strict=True)
+    for name in paths:
+        target = repo / name
+        if not target.is_relative_to(repo) or '..' in target.relative_to(repo).parts:
+            raise MigrationNumberError(f"{name}: output escapes staging")
+        for part in [target, *target.parents]:
+            if part == repo:
+                break
+            if part.is_symlink():
+                raise MigrationNumberError(f"{name}: symlink output or ancestor")
+        if not target.resolve().is_relative_to(root):
+            raise MigrationNumberError(f"{name}: output escapes staging")
+        if target.exists() and not stat.S_ISREG(target.stat().st_mode):
+            raise MigrationNumberError(f"{name}: output is not a regular file")
 
 
 def apply(repo: Path, result: Plan) -> None:
@@ -322,9 +312,14 @@ def apply(repo: Path, result: Plan) -> None:
                 (repo / path).unlink()
         for command in result.commands:
             run_generator(repo, command)
-        for path, content in result.immutable.items():
-            if not (repo / path).is_file() or read_file(repo, path) != content:
+        for path, expected_content in result.immutable.items():
+            observed = read_file(repo, path) if (repo / path).exists() else None
+            if observed != expected_content:
                 raise MigrationNumberError(f"generator changed an applied main migration: {path}")
+        validate_integration_union(
+            {name: read_migration(repo, name, result.base).encode() for name in migration_names(repo, result.base)},
+            {name: read_migration(repo, name).encode() for name in migration_names(repo)},
+        )
         for path, expected in result.generated.items():
             observed = read_file(repo, path)
             if path == SNAPSHOT:
@@ -356,6 +351,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--branch", help="revision to preview without checkout; requires --dry-run")
     parser.add_argument("--generator", nargs=2, action="append", default=[], metavar=("PATH", "JSON_ARGV"))
+    parser.add_argument("--claimed-slot", type=int, action="append", default=[])
+    parser.add_argument("--avoid-slot", type=int, action="append", default=[])
     args = parser.parse_args()
     def interrupted(signum, _frame):
         raise KeyboardInterrupt(f"renumbering cancelled by signal {signum}")
@@ -370,7 +367,8 @@ def main() -> int:
             if not isinstance(command, list) or not command or any(not isinstance(a, str) or not a for a in command):
                 raise MigrationNumberError("generator must be a nonempty JSON argv array")
             generators[path] = command
-        result = plan(args.repo.resolve(), args.branch, generators)
+        result = plan(args.repo.resolve(), args.branch, generators,
+                      tuple(args.claimed_slot), tuple(args.avoid_slot))
         if not args.dry_run:
             apply(args.repo.resolve(), result)
         print(json.dumps(result.summary(args.dry_run), indent=2, sort_keys=True))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,47 @@ def main() -> int:
     platforms = registry.get("platforms")
 
     check("registry is versioned", registry.get("schema_version") == 1)
+    preparation = registry.get("local_worker_preparation", {})
+    check("Dell preparation names its source clause and collection timestamp",
+          preparation.get("source_clause") == "study-gehariharan_2104261974330929208.md#1"
+          and bool(preparation.get("collected_at")))
+    facts = preparation.get("facts", {})
+    required_facts = {"cpu", "ram", "disk", "os", "network", "access"}
+    check("Dell preparation records every required fact without inventing observations",
+          set(facts) == required_facts
+          and all(isinstance(fact, dict) and fact.get("status") == "unknown"
+                  and fact.get("value") is None and bool(fact.get("reason"))
+                  for fact in facts.values()))
+    observations = preparation.get("access_observations", [])
+    check("failed Dell access is distinguished from remote hardware evidence",
+          bool(observations)
+          and all(item.get("provenance") == "local_access_probe"
+                  and item.get("remote_command_ran") is False
+                  for item in observations)
+          and preparation.get("target_identity_verified") is False)
+    check("inventory preparation cannot claim an accepted or executed pilot",
+          preparation.get("status") == "blocked_before_remote_inventory"
+          and preparation.get("remote_changes_made") is False
+          and preparation.get("remote_workload_executed") is False
+          and preparation.get("accepted_pilot_ref") is None
+          and preparation.get("done_test_result") == "incomplete"
+          and bool(preparation.get("unblock_condition")))
+    workload = preparation.get("selected_workload", {})
+    check("one synthetic Tour product check is selected with an exact source and tree",
+          workload.get("repository") == "jbookout/doctorcre-app"
+          and workload.get("command_argv") ==
+              ["node", "--test", "test/tours-search-cart.test.mjs"]
+          and all(re.fullmatch(r"[0-9a-f]{40}", str(workload.get(key, "")))
+                  for key in ("source_commit", "source_tree"))
+          and workload.get("fixture_kind") == "synthetic_jsdom_fetch")
+    inputs = workload.get("input_sha256", {})
+    check("Tour workload binds test, runtime inputs, interface, package and lockfile",
+          set(inputs) == {"test/tours-search-cart.test.mjs", "tours/index.html",
+                          "tours/app.js", "tours/tour-format.js",
+                          "contracts/carr-interface.v1.json", "package.json",
+                          "package-lock.json"}
+          and all(re.fullmatch(r"[0-9a-f]{64}", str(value))
+                  for value in inputs.values()))
     standing_binding = registry.get("standing_rule_binding", {})
     check("the approved spending rule is bound to the mechanical cost gate",
           standing_binding.get("rule_id") == "a57d981a-8f6d-4c18-95ee-0e63a5a90b89"

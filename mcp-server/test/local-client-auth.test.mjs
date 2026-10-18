@@ -62,7 +62,7 @@ test("client profiles never borrow another profile's credential", () => {
   assert.equal(selectLocalClientCredential(
     {}, "CARR_HERMES_COS_MCP_TOKEN=cos-only\n").token, "");
   assert.deepEqual([...LOCAL_CLIENT_PROFILE_NAMES], [
-    "local", "codex-continuity", "claude-continuity", "hermes-projector", "hermes-cos",
+    "local", "unattended", "codex-continuity", "claude-continuity", "hermes-projector", "hermes-cos",
   ]);
 });
 

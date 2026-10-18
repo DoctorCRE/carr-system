@@ -1,8 +1,9 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const sql = fs.readFileSync(new URL("../../migrations/0480_codex_continuity.sql", import.meta.url), "utf8");
+const sql = readMigration(new URL("../../migrations/0480_codex_continuity.sql", import.meta.url));
 
 test("continuity migration is bounded, scoped and append-only", () => {
   assert.match(sql, /create table codex_continuity_checkpoint/);

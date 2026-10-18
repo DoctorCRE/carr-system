@@ -43,10 +43,14 @@ cheap guard that runs on every push; that one is the guarantee.
 
 Run: python3 ops/incident-fingerprint-selftest.py
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
 import importlib.util
 import os
 import re
-import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -184,11 +188,10 @@ def _(assert_):
     # Migration 0293 restates the exit-code meanings so a one-time backfill can
     # reach rows the writer will never touch again. Two copies of one rule is
     # safe only while something fails when they disagree. This is that thing.
-    if not os.path.exists(MIGRATION):
+    if Path(MIGRATION).name not in migration_names(Path(MIGRATION).parent.parent):
         assert_(False, f"the migration this rule is shared with is missing: {MIGRATION}")
         return
-    with open(MIGRATION, encoding="utf-8") as fh:
-        sql = fh.read()
+    sql = read_migration(Path(MIGRATION).parent.parent, Path(MIGRATION).name)
     block = re.search(r"values\s*(\(\s*64\b.*?)\)\s*as m\(code, class\)", sql,
                       re.S | re.I)
     assert_(block is not None, "0293 no longer carries the exit-code backfill table")

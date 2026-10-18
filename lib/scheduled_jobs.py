@@ -17,6 +17,7 @@ sys.path.insert(0, str(SOURCE / "ops"))
 from git_env import scrubbed_env
 import launchd_scope
 import machine_role
+import launchd_hold
 
 SCHEDULE_KEYS = ("StartInterval", "StartCalendarInterval", "KeepAlive", "RunAtLoad",
                  "WatchPaths", "QueueDirectories", "ThrottleInterval")
@@ -160,23 +161,6 @@ def expectation(job, role):
 
 def activity_path(job):
     return expand(job.get("activity_path") or job["log_path"])
-
-
-def receipt_name(argv):
-    """The receipt bin/run-scheduled.sh mints for these arguments, parsed as it parses them."""
-    wrappers = [i for i, v in enumerate(argv) if v.endswith("/bin/run-scheduled.sh")]
-    if not wrappers:
-        return None
-    i = wrappers[0] + 1
-    while i < len(argv):
-        if argv[i] == "--":
-            i += 1
-            break
-        if argv[i] not in ("--heartbeat-interval", "--also-heartbeat"):
-            break
-        i += 2
-    service, key = argv[i:i + 2]
-    return f"{hashlib.sha256(service.encode()).hexdigest()[:16]}.{hashlib.sha256(key.encode()).hexdigest()[:32]}.receipt"
 
 
 def longest_gap_seconds(interval):
@@ -419,89 +403,34 @@ def collect(manifest):
     return snapshot
 
 
-def load_manifest(path):
-    manifest = json.loads(Path(path).read_text())
-    if manifest.get("schema_version") != 1:
-        raise ValueError("unsupported scheduled-job manifest")
-    labels, signals = set(), set()
-    for job in manifest["jobs"]:
-        program = "program_arguments" if job.get("scheduler") == "launchd" else "program_path"
-        for field in ("label", "scheduler", program, "required_checkout", "interval",
-                      "expected_enabled", "log_path", "owner", "done_signal"):
-            if field not in job:
-                raise ValueError("job missing " + field)
-        if job["label"] in labels or job["scheduler"] not in ("launchd", "cron") or not isinstance(job["expected_enabled"], bool):
-            raise ValueError("invalid or duplicate scheduled job")
-        if "{{" in json.dumps(job):
-            raise ValueError(job["label"] + " carries an unrendered template token; store the portable ~ form")
-        if "expected_enabled_by_role" in job or "expected_installed_by_role" in job:
-            raise ValueError(job["label"] + " restates machine placement; lib/launchd_scope.py owns it")
-        if job["scheduler"] == "launchd" and "StartInterval" in job["interval"]:
-            raise ValueError(job["label"] + " declares StartInterval, which launchd on macOS 27 never fires; "
-                             "declare the lib/launchd_calendar.py form")
-        bound = job.get("log_max_age_seconds")
-        if bound is None:
-            if not job.get("freshness_exception"):
-                raise ValueError(job["label"] + " has no freshness bound and no declared freshness_exception")
-        else:
-            gap = longest_gap_seconds(job["interval"]) if job["scheduler"] == "launchd" else None
-            if job["scheduler"] == "launchd" and gap is None:
-                raise ValueError(job["label"] + " never recurs, so log age cannot show a missed firing")
-            if bound <= 0 or (gap is not None and bound <= gap):
-                raise ValueError(job["label"] + " freshness bound does not outlast its longest schedule gap")
-            signal = job.get("activity_path") or job["log_path"]
-            if signal.endswith(SHARED_WRAPPER_LOG) or signal in signals:
-                raise ValueError(job["label"] + " freshness signal is shared with other jobs")
-            signals.add(signal)
-        if job["required_checkout"] != manifest["canonical_checkout"] and not job.get("checkout_exception"):
-            raise ValueError("noncanonical checkout needs a declared exception")
-        labels.add(job["label"])
-    return manifest
-
-
-def check(path=None, snapshot=None, now=None):
-    manifest = load_manifest(path or SOURCE / "ops/config/scheduled-jobs.v1.json")
+def check(snapshot=None, now=None):
+    manifest = native_manifest()
     return report(manifest, collect(manifest) if snapshot is None else snapshot,
                   time.time() if now is None else now)
 
 
-def capture_manifest():
-    manifest = {"schema_version": 1, "canonical_checkout": "~/carr-system",
-                "scope": {"launchd_label_prefixes": ["com.carr.", "local.carr-"],
-                          "cron": "all current-user entries", "claude": "definition drift owned by config-as-code; execution owned by Control Plane"},
-                "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "jobs": []}
-    snapshot = collect(manifest)
-    if snapshot["errors"]:
-        raise ValueError("live inventory is incomplete")
-    def portable(value):
-        if isinstance(value, str):
-            return value.replace(str(Path.home()), "~")
-        if isinstance(value, list):
-            return [portable(v) for v in value]
-        if isinstance(value, dict):
-            return {k: portable(v) for k, v in value.items()}
-        return value
-    for label, plist in sorted(snapshot["plists"].items()):
-        argv = installed_arguments(plist)
-        log = plist.get("StandardOutPath") or plist.get("StandardErrorPath") or str(Path.home() / "carr-system" / SHARED_WRAPPER_LOG)
-        row = {"label": label, "scheduler": "launchd", "program_arguments": portable(argv),
-               "required_checkout": "~/carr-system", "interval": portable(schedule(plist)),
-               "expected_enabled": None, "expected_installed": True, "log_path": portable(log),
-               "log_paths": [portable(plist.get(k)) for k in ("StandardOutPath", "StandardErrorPath")],
-               "log_max_age_seconds": None, "owner": "orchestrator",
-               "done_signal": "No durable completion signal verified; inspect job-specific producer"}
-        receipt = receipt_name(argv)
-        if receipt:
-            row["activity_path"] = "~/carr-system/out/run-scheduled-receipts/" + receipt
-            row["done_signal"] = f"local run-scheduled receipt {row['activity_path']}"
-        manifest["jobs"].append(row)
-    for entry in cron_entries(snapshot["cron"]):
-        command_paths = [w for w in cron_words(entry["command"]) if w.startswith("/")]
-        manifest["jobs"].append({"label": entry["label"], "scheduler": "cron",
-                                 "program_path": portable(command_paths[0] if command_paths else ""),
-                                 "required_checkout": "~/carr-system", "interval": entry["interval"],
-                                 "expected_enabled": None, "expected_installed": True,
-                                 "log_path": None, "log_max_age_seconds": None,
-                                 "owner": "orchestrator", "done_signal": "Requires producer review"})
+def native_manifest(source=SOURCE):
+    """Derive expectations from the same native definitions the installer uses."""
+    source = Path(source)
+    manifest = {"schema_version": 1, "canonical_checkout": "~/carr-system", "jobs": []}
+    holds = launchd_hold.read_holds()
+    for path in sorted((source / "ops/launchd").glob("*.plist")):
+        if path.name == "com.carr.call-mode.plist":
+            path = source / "tools/dictation-rig/launchd" / path.name
+        text = path.read_text().replace("{{REPO}}", "~/carr-system").replace("{{HOME}}", "~")
+        definition = plistlib.loads(text.encode())
+        interval = schedule(definition)
+        if "StartInterval" in interval:
+            raise ValueError(path.name + " uses StartInterval; use the macOS calendar schedule")
+        enabled = not (definition.get("Disabled") or launchd_hold.off_reason(definition["Label"], holds=holds)
+                       or not any(interval.get(k) for k in SCHEDULE_KEYS if k != "ThrottleInterval"))
+        manifest["jobs"].append({
+            "label": definition["Label"], "scheduler": "launchd",
+            "program_arguments": installed_arguments(definition), "interval": interval,
+            "required_checkout": "~/carr-system", "expected_enabled": bool(enabled),
+            "expected_installed": bool(enabled), "owner": "orchestrator",
+            "log_path": definition.get("StandardOutPath") or definition.get("StandardErrorPath"),
+            "log_paths": [definition.get(k) for k in ("StandardOutPath", "StandardErrorPath")],
+            "log_max_age_seconds": None,
+        })
     return manifest
