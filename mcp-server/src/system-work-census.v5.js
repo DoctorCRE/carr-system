@@ -1,4 +1,5 @@
 // System design/build projection of the existing work inventory federation.
+import { readableWorkRequestSql } from './work-request-read.js';
 import { canonicalJson } from './artifact-trust.js';
 import { createHash } from 'node:crypto';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
@@ -13,7 +14,7 @@ export const SYSTEM_WORK_LEGS = [
     w.updated_at as last_activity_at, w.owner_actor as owner, w.version::text as version,
     w.state='confirmed_closed' as completed, w.state in ('declined','superseded') as cancelled,
     jsonb_build_object('human_ref',w.ref) as identity from ops.work_request w
-    where w.organization_tenant_id=$1`),
+    where w.organization_tenant_id=$1 and ${readableWorkRequestSql("w")}`),
   base('ops.portfolio_node', 'portfolio_node', `select n.node_ref as id,n.node_ref as title,
     coalesce(m.status,'unmarked') as state,n.created_at as opened_at,
     coalesce(m.created_at,n.created_at) as last_activity_at,null::text as owner,r.revision_version::text as version,

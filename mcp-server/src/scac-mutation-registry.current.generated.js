@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "0f91661adb8cb59d8887d7e1811926b603c427e55cf2c54e6c27223101fe3ac0";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "649a8162769e40de169ed8390c5657558503af3dd9a46727ddb5dafe78234976";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -10,7 +10,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "accept-outcome-feedback": {
     "ingress_key": "mcp-tool:accept-outcome-feedback",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "d4a0427de45712a0728a821cf80ab7d942acd2738c1ea9d5c7a2a109e12369d3",
     "write": true,
     "human_only": true,
@@ -30,7 +30,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "accept-ready-plan": {
     "ingress_key": "mcp-tool:accept-ready-plan",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "bfddecd87f29f70193ab958b001c0ec53659a1b1fd35caa41f87b09259e27fd2",
     "write": true,
     "human_only": true,
@@ -40,7 +40,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "accept-ready-plan-amendment": {
     "ingress_key": "mcp-tool:accept-ready-plan-amendment",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "9a071af1268ae1dc9beff7e7c4751e5e1fc92242b04601ad66801fe63c02e56c",
     "write": true,
     "human_only": true,
@@ -100,7 +100,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "acknowledge-ready-plan-amendment": {
     "ingress_key": "mcp-tool:acknowledge-ready-plan-amendment",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "8135fef2d2ee7ba14a894765ffa34621db24796b3114a4ef9c4128f161d90ed4",
     "write": true,
     "human_only": false,
@@ -330,7 +330,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "answer-work-request-for-joe": {
     "ingress_key": "mcp-tool:answer-work-request-for-joe",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "b39c0b2fa5bf6ea17ada8e22d5d49eca980ab780e9e69e599d9296cb130001e9",
     "write": true,
     "human_only": true,
@@ -560,7 +560,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "bind-work-request-criterion-evidence": {
     "ingress_key": "mcp-tool:bind-work-request-criterion-evidence",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "f42fd1753f864ce70bb9377c1e79f8ccb295a5ad0c8520427fff4490064a9701",
     "write": true,
     "human_only": false,
@@ -962,7 +962,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "current-work-item": {
     "ingress_key": "mcp-tool:current-work-item",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
@@ -972,7 +972,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "current-work-requests": {
     "ingress_key": "mcp-tool:current-work-requests",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
@@ -1052,7 +1052,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "decline-work-request": {
     "ingress_key": "mcp-tool:decline-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "29f455aa5bcc4811e1108550502be5589c6841d278a8921609dd19e04c068e62",
     "write": true,
     "human_only": false,
@@ -1122,7 +1122,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "effective-ready-plan": {
     "ingress_key": "mcp-tool:effective-ready-plan",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "e812df396087c3696bd9d9c142ecd375ea080dd9335815fe45bf548f4e9b100b",
     "write": false,
     "human_only": false,
@@ -1953,7 +1953,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-outcome-feedback": {
     "ingress_key": "mcp-tool:propose-outcome-feedback",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "bf92a42013eb33f78d2ef296a4f47d79b27e5e68697fe162043000d7e7da5b40",
     "write": true,
     "human_only": false,
@@ -1973,7 +1973,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-ready-plan": {
     "ingress_key": "mcp-tool:propose-ready-plan",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "0b383948846e27a6e8fcb31f6917ed4de693978c1e6206ee6076fadd8161664a",
     "write": true,
     "human_only": false,
@@ -1983,7 +1983,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-ready-plan-amendment": {
     "ingress_key": "mcp-tool:propose-ready-plan-amendment",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "6190ac9d8deeb20a72a98c8b2e675f40b62e94cf50cf5fe3687f175e8d93041b",
     "write": true,
     "human_only": false,
@@ -2513,7 +2513,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "ready-plan-amendment-discovery": {
     "ingress_key": "mcp-tool:ready-plan-amendment-discovery",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "7f907978d4c3bee10601d6800980195c321406ac12ad5ffe7926974757b05041",
     "write": false,
     "human_only": false,
@@ -3093,7 +3093,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "report-problem": {
     "ingress_key": "mcp-tool:report-problem",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "c28b3754255bfbd66c641547717e679b5507174515990184db15aaea67972a69",
     "write": true,
     "human_only": false,
@@ -3218,7 +3218,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "review-and-triage": {
     "ingress_key": "mcp-tool:review-and-triage",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "a1e87aba031deb0f0d129aba3fdaa4406179e1f32e9ba6946e86a2f2a5c6e9c9",
     "write": true,
     "human_only": true,
@@ -3590,7 +3590,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "supersede-work-request": {
     "ingress_key": "mcp-tool:supersede-work-request",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "7be9820032d47bb94888aad94a52f89a50aa5fa7e0638d1d689fefdca03f8ccf",
     "write": true,
     "human_only": false,
@@ -3660,7 +3660,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "unfinished-work": {
     "ingress_key": "mcp-tool:unfinished-work",
     "source_locator": "mcp-server/src/system-work-census.v5.js",
-    "source_digest": "df8abbe337df1f0f385311e5296a1804abda446bddbbf7213ca4f891cb680c9a",
+    "source_digest": "66c5cc28c90265ad6d090ed9169634c77e4dff45a25d8fe924fc3fb08b165e40",
     "schema_digest": "126ebd4723150468d305a554501dcf6d3f15023849350468d33e1bb0d9154fb6",
     "write": false,
     "human_only": false,
@@ -3770,7 +3770,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "work-request-card": {
     "ingress_key": "mcp-tool:work-request-card",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "source_digest": "7b3aa86ddf9d85a1b54ea0aa49d03586264297330ac28d7fa5e47630377b3ed5",
+    "source_digest": "367da0af94a83a9a91064f8ace05693994a0608007c0b72267c85c80af8208ff",
     "schema_digest": "38016ebc2cb6aea790d0ba9633f270f4ea0778518d84b96480ae3d08b6037da2",
     "write": false,
     "human_only": false,

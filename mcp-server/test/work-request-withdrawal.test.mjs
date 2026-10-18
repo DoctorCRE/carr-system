@@ -190,6 +190,7 @@ class CardFake {
   async query(text) {
     const sql = text.replace(/\s+/g, " ").trim(); this.calls.push(sql);
     if (sql.includes("work_request_card")) return { rows: this.row ? [this.row] : [] };
+    if (sql.includes("work-request-intake:readable-card")) return { rows: [] };
     if (sql.includes("acting-identity")) return { rows: [] };
     throw new Error(`unexpected query: ${sql}`);
   }
@@ -250,8 +251,8 @@ test("a live request keeps every one of its previous answers", async () => {
   assert.deepEqual(card.next_human_action, { label: "Review and triage", effect: "none" });
 });
 
-test("a state the card function cannot return is still not found", async () => {
-  for (const row of [null, { ...BASE, state: "claimed" }]) {
+test("a missing request or unknown lifecycle state is still not found", async () => {
+  for (const row of [null, { ...BASE, state: "unknown" }]) {
     const out = await rejected(() => executeRegisteredTool(new CardFake(row), JOE, "work-request-card", { work_request: "WR-000032" }));
     assert.equal(out.error, "work_request_not_found");
   }

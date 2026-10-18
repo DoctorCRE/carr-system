@@ -1,6 +1,7 @@
 // The deliberately small Program 6 bridge: source a problem from the current
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
+import { WORK_REQUEST_PROJECTION_STATE, WORK_REQUEST_READ_STATES, readableWorkRequestSql } from "./work-request-read.js";
 import { searchDoctrineSituations } from "./situation-retrieval.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
@@ -105,16 +106,6 @@ function validate(args, ToolError) {
     ids.add(criterion.id.trim());
   }
 }
-
-// The exact subset of control-room/contracts/work-request-projection.v1.json's
-// crosswalk that ops.work_request_card can ever return a row for. Never
-// invents a mapping: every value here is copied from that contract's
-// "crosswalk" array, not derived or guessed.
-const CARD_PROJECTION_STATE = Object.freeze({
-  captured: "queued", triaged: "queued", ready: "queued",
-  needs_joe: "needs_answer",
-  declined: "declined", superseded: "declined",
-});
 
 function sourceProjection(row) {
   return { label: row.doctrine_source_label || row.source_ref || null,
@@ -612,14 +603,22 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         const result = await c.query(
           `select * from ops.work_request_card($1::text, $2::text)
              /* work-request-intake:card */`, [args.work_request, tenant]);
-        const row = result.rows[0];
-        // A WITHDRAWN REQUEST IS STILL A RECORD. Refusing it here as
-        // work_request_not_found would make the withdrawal capability erase the
-        // one thing it exists to write, and it would say "not found" about a row
-        // the database returned. ops.work_request_card admits the two terminal
-        // states as of 0426 and needs_joe as of 0577, so this list has to admit
-        // exactly those or the SQL widening is dead code.
-        if (!row || !["captured", "triaged", "ready", "needs_joe", "declined", "superseded"].includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
+        let row = result.rows[0];
+        // Keep the sourced detail projection. The intake-only SQL function
+        // omits execution states and general requests that the Queue lists.
+        if (!row) row = (await c.query(
+          `select w.ref,w.title,w.state,w.version,w.desired_outcome,w.acceptance_criteria,
+                  w.doctrine_section_id,w.doctrine_revision_id,
+                  coalesce(s.title,s.section_key) as doctrine_source_label,
+                  coalesce(s.status='active' and s.current_revision_id=w.doctrine_revision_id,false) as source_current,
+                  w.exit_reason,w.closed_at,succ.ref as superseded_by_ref
+             from ops.work_request w
+             left join public.doctrine_section s on s.id=w.doctrine_section_id
+             left join ops.work_request succ on succ.id=w.superseded_by
+            where w.ref=$1::text and w.organization_tenant_id=$2::text
+              and ${readableWorkRequestSql("w")}
+              /* work-request-intake:readable-card */`, [args.work_request, tenant])).rows[0];
+        if (!row || !WORK_REQUEST_READ_STATES.includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const triaged = ["triaged", "ready"].includes(row.state);
         // A withdrawn row carries no plan and no shape: decline is captured-
         // only, and 0888 supersedes a triaged row only when nothing downstream
@@ -639,17 +638,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         return { ok: true, human_ref: row.ref, title: row.title, desired_outcome: row.desired_outcome,
           acting_identity: acting,
           acceptance_criteria: row.acceptance_criteria, state: row.state, version: Number(row.version),
-          // DERIVED FROM THE CROSSWALK, not hardcoded. work-request-projection
-          // .v1.json's crosswalk (control-room/contracts) maps every state this
-          // card can return: captured/triaged/ready to queued, needs_joe to
-          // needs_answer ("a named human decision is outstanding"), and BOTH
-          // terminals to declined — superseded-projects-as-declined is that
-          // contract's declared judgment call, made because doctrine grants the
-          // projection seven states and superseded is not one of them. A
-          // withdrawn card that still read "queued" would tell a requester their
-          // closed record is waiting in line; a needs_joe card that read
-          // "queued" would hide that someone is actively waiting on a decision.
-          projection_state: CARD_PROJECTION_STATE[row.state],
+          projection_state: WORK_REQUEST_PROJECTION_STATE[row.state],
           // A general (needs_joe) row never had a doctrine source to begin with
           // (work_request_sourced_capture_shape's general branch requires
           // doctrine_section_id null), so sourceProjection's "stale" reading
@@ -687,7 +676,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           // captured/triaged default below: it was never captured-and-untriaged,
           // it is the one state answer-work-request-for-joe (0575) exists to
           // resolve, and "Review and triage" would misname the actual next step.
-          next_human_action: withdrawn ? { label: row.state === "superseded" ? "Superseded" : "Declined", effect: "none" } : row.state === "needs_joe" ? { label: "Answer for Joe", effect: "none" } : row.state === "ready" ? (pendingOutcomeFeedback ? { label: "Review outcome feedback", effect: "none" } : row.outcome_feedback ? { label: "Outcome feedback accepted", effect: "none" } : { label: "Plan accepted", effect: "none" }) : triaged ? { label: "Prepare scope and acceptance", effect: "none" } : { label: "Review and triage", effect: "none" },
+          next_human_action: withdrawn ? { label: row.state === "superseded" ? "Superseded" : "Declined", effect: "none" } : row.state === "needs_joe" ? { label: "Answer for Joe", effect: "none" } : row.state === "ready" ? (pendingOutcomeFeedback ? { label: "Review outcome feedback", effect: "none" } : row.outcome_feedback ? { label: "Outcome feedback accepted", effect: "none" } : { label: "Plan accepted", effect: "none" }) : triaged ? { label: "Prepare scope and acceptance", effect: "none" } : row.state === "captured" ? { label: "Review and triage", effect: "none" } : { label: "View work status", effect: "none" },
           actions: [] };
       },
     },
