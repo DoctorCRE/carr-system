@@ -1,0 +1,555 @@
+{
+  "schema": "carr-staging-verb-route-proof/v1",
+  "environment": "staging",
+  "source_sha": "b4dc32fde6c07be4b19497ba0a14e1fcf64c7237",
+  "provider_version": "94dd462e-0b04-4b0b-81d9-122bddd80e1d",
+  "method": "Raw HTTP JSON-RPC route conformance with clientInfo and identical authenticated endpoint. Native clients are not launched; candidate compact discovery is covered separately by local tests.",
+  "fixture_gap": "add-loop reached its handler and returned no_block: staging has no idea/parked loop block. No retry of the refused action.",
+  "routes": [
+    {
+      "client": "Claude desktop",
+      "verbs": [
+        "find",
+        "new-doctrine-doc",
+        "standing-context",
+        "report-problem"
+      ],
+      "direct_and_call_verb": "passed"
+    },
+    {
+      "client": "Claude CLI",
+      "verbs": [
+        "find",
+        "new-doctrine-doc",
+        "standing-context",
+        "report-problem"
+      ],
+      "direct_and_call_verb": "passed"
+    },
+    {
+      "client": "Codex",
+      "verbs": [
+        "find",
+        "new-doctrine-doc",
+        "standing-context",
+        "report-problem"
+      ],
+      "direct_and_call_verb": "passed"
+    }
+  ],
+  "operations": [
+    {
+      "name": "find",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "document_id",
+        "slug"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "add-loop",
+      "via": "direct",
+      "status": "refused",
+      "error": "no_block",
+      "result_keys": [
+        "error",
+        "kind",
+        "section",
+        "hint"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "write-doctrine-section",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "section_id",
+        "version",
+        "revision_id",
+        "generation"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "human_ref",
+        "state",
+        "version",
+        "captured_at",
+        "source"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "state",
+        "source",
+        "version",
+        "human_ref",
+        "captured_at"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "state",
+        "source",
+        "version",
+        "human_ref",
+        "captured_at"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "state",
+        "source",
+        "version",
+        "human_ref",
+        "captured_at"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "find",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "parties",
+        "deals",
+        "connections",
+        "organizations",
+        "lead_client_links",
+        "deals_via_link",
+        "note"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "new-doctrine-doc",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "slug",
+        "document_id"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "standing-context",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "ok",
+        "core_preview",
+        "recite",
+        "identity",
+        "detail",
+        "hint_full_text",
+        "shared_rules",
+        "personal_rules",
+        "rule_delivery",
+        "action_required",
+        "doctrine"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "direct",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "state",
+        "source",
+        "version",
+        "human_ref",
+        "captured_at"
+      ],
+      "result_id": null
+    },
+    {
+      "name": "report-problem",
+      "via": "call-verb",
+      "status": "completed",
+      "error": null,
+      "result_keys": [
+        "replayed",
+        "ok",
+        "state",
+        "source",
+        "version",
+        "human_ref",
+        "captured_at"
+      ],
+      "result_id": null
+    }
+  ]
+}

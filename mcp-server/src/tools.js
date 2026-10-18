@@ -9580,7 +9580,7 @@ registerTools({
 // cached tool list predates a deploy asks the live registry what exists now.
 registerTools({
   "list-verbs": {
-    description: "The LIVE verb registry — names, descriptions, write flags, input schemas — straight from the deployed Worker, bypassing the connector's cached tool list. Use when a verb you expect is missing from your tool list (a deploy since this session connected): find it here, then invoke it through call-verb without any reconnect.",
+    description: "Discover the LIVE verb registry — names, descriptions, write flags and input schemas — beyond the compact startup core or a connector's cached tool list. Use filter to fetch only matching verbs, reuse their schemas in this session, then invoke them through call-verb without reconnecting.",
     inputSchema: { type: "object", properties: {
       filter: { type: "string", description: "case-insensitive substring match over verb name AND description" },
       names_only: { type: "boolean", description: "names plus first-sentence descriptions, no schemas. Composes with filter." } } },
@@ -9851,7 +9851,7 @@ registerTools({
     // call-verb wrapping a read verb lands on the READER connection and fails
     // exactly as the direct call would; it did, on the doctrine-search outage.
     write: true,
-    description: "Invoke ANY live verb by name — the deploy-gap passthrough. A freshly deployed verb is callable here the moment the Worker ships, no connector reconnect needed; its first-class tool appears at your next session start. Takes {verb, args} where args is the inner verb's own argument object (including its idempotency_key for writes). All profile and permission checks apply to the inner verb exactly as a direct call.",
+    description: "Invoke ANY live verb by name, including verbs outside the compact startup core. Discover its schema with list-verbs and reuse it in this session. Takes {verb, args} where args is the inner verb's own argument object (including its idempotency_key for writes). All profile and permission checks apply to the inner verb exactly as a direct call. Newly deployed verbs need no connector reconnect.",
     inputSchema: { type: "object", properties: {
       verb: { type: "string" },
       args: { type: "object" } },

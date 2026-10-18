@@ -1,0 +1,1637 @@
+{
+  "source_sha": "b4dc32fde6c07be4b19497ba0a14e1fcf64c7237",
+  "tool_count": 407,
+  "tool_json_chars": 425485,
+  "tool_name_json_chars": 9927,
+  "instruction_chars": 1904,
+  "tools": [
+    {
+      "name": "read-v5-a02-rule-enforcement-coverage",
+      "chars": 1110
+    },
+    {
+      "name": "find",
+      "chars": 1290
+    },
+    {
+      "name": "who-do-we-know",
+      "chars": 1309
+    },
+    {
+      "name": "counterparty-history",
+      "chars": 655
+    },
+    {
+      "name": "source-attribution",
+      "chars": 566
+    },
+    {
+      "name": "catch-me-up",
+      "chars": 522
+    },
+    {
+      "name": "find-and-catch-up",
+      "chars": 899
+    },
+    {
+      "name": "prepare-conversation",
+      "chars": 1178
+    },
+    {
+      "name": "today-triage",
+      "chars": 370
+    },
+    {
+      "name": "morning-brief",
+      "chars": 510
+    },
+    {
+      "name": "deal-board",
+      "chars": 316
+    },
+    {
+      "name": "deal-room-board",
+      "chars": 930
+    },
+    {
+      "name": "capture-queue",
+      "chars": 372
+    },
+    {
+      "name": "get-call-context",
+      "chars": 564
+    },
+    {
+      "name": "lead-hot",
+      "chars": 379
+    },
+    {
+      "name": "lead-board",
+      "chars": 726
+    },
+    {
+      "name": "claim-card",
+      "chars": 1698
+    },
+    {
+      "name": "stale-records",
+      "chars": 467
+    },
+    {
+      "name": "integrity-digest",
+      "chars": 348
+    },
+    {
+      "name": "read-loop",
+      "chars": 1299
+    },
+    {
+      "name": "loop-board",
+      "chars": 2006
+    },
+    {
+      "name": "record-rule-enforcement-fallback",
+      "chars": 1325
+    },
+    {
+      "name": "log-activity",
+      "chars": 1686
+    },
+    {
+      "name": "stamp-touch",
+      "chars": 657
+    },
+    {
+      "name": "triage-item",
+      "chars": 1263
+    },
+    {
+      "name": "set-next-action",
+      "chars": 767
+    },
+    {
+      "name": "complete-action",
+      "chars": 785
+    },
+    {
+      "name": "add-critical-date",
+      "chars": 615
+    },
+    {
+      "name": "record-executed-lease",
+      "chars": 1095
+    },
+    {
+      "name": "update-deal",
+      "chars": 1255
+    },
+    {
+      "name": "new-deal",
+      "chars": 2853
+    },
+    {
+      "name": "reassign-deal",
+      "chars": 1578
+    },
+    {
+      "name": "set-lead",
+      "chars": 991
+    },
+    {
+      "name": "add-party",
+      "chars": 1207
+    },
+    {
+      "name": "add-premises",
+      "chars": 2518
+    },
+    {
+      "name": "new-lead",
+      "chars": 691
+    },
+    {
+      "name": "promote-pool",
+      "chars": 1757
+    },
+    {
+      "name": "decline-candidate",
+      "chars": 1587
+    },
+    {
+      "name": "log-outreach",
+      "chars": 2244
+    },
+    {
+      "name": "new-client",
+      "chars": 1047
+    },
+    {
+      "name": "new-vendor",
+      "chars": 1199
+    },
+    {
+      "name": "update-vendor",
+      "chars": 599
+    },
+    {
+      "name": "claim-lead",
+      "chars": 591
+    },
+    {
+      "name": "link-lead-client",
+      "chars": 768
+    },
+    {
+      "name": "update-lead",
+      "chars": 1959
+    },
+    {
+      "name": "update-party-contact",
+      "chars": 1723
+    },
+    {
+      "name": "record-counter",
+      "chars": 3953
+    },
+    {
+      "name": "register-template",
+      "chars": 1350
+    },
+    {
+      "name": "prepare-document",
+      "chars": 1160
+    },
+    {
+      "name": "update-document-status",
+      "chars": 1343
+    },
+    {
+      "name": "link-parties",
+      "chars": 2069
+    },
+    {
+      "name": "confirm-merge",
+      "chars": 1164
+    },
+    {
+      "name": "merge-vendor-rows",
+      "chars": 1280
+    },
+    {
+      "name": "record-finding",
+      "chars": 5957
+    },
+    {
+      "name": "find-rule",
+      "chars": 676
+    },
+    {
+      "name": "teach",
+      "chars": 3692
+    },
+    {
+      "name": "admit-rule",
+      "chars": 1710
+    },
+    {
+      "name": "approve-rule",
+      "chars": 1341
+    },
+    {
+      "name": "activate-rule",
+      "chars": 729
+    },
+    {
+      "name": "applicable-rules",
+      "chars": 480
+    },
+    {
+      "name": "governance-queue",
+      "chars": 558
+    },
+    {
+      "name": "accept-workflow",
+      "chars": 791
+    },
+    {
+      "name": "disable-legacy-schedule",
+      "chars": 1045
+    },
+    {
+      "name": "activate-guidance-registry",
+      "chars": 785
+    },
+    {
+      "name": "decide-guidance-import-batch",
+      "chars": 806
+    },
+    {
+      "name": "deactivate-guidance-registry",
+      "chars": 761
+    },
+    {
+      "name": "retire-rule",
+      "chars": 1140
+    },
+    {
+      "name": "amend-rule",
+      "chars": 1933
+    },
+    {
+      "name": "log-capture",
+      "chars": 1952
+    },
+    {
+      "name": "log-decision",
+      "chars": 3570
+    },
+    {
+      "name": "update-decision",
+      "chars": 2710
+    },
+    {
+      "name": "detach-decision",
+      "chars": 1589
+    },
+    {
+      "name": "add-loop",
+      "chars": 4886
+    },
+    {
+      "name": "update-loop",
+      "chars": 4068
+    },
+    {
+      "name": "loop-headers",
+      "chars": 1010
+    },
+    {
+      "name": "edit-loop-header",
+      "chars": 1749
+    },
+    {
+      "name": "close-loop",
+      "chars": 1780
+    },
+    {
+      "name": "amend-closed-loop",
+      "chars": 2978
+    },
+    {
+      "name": "open-campaign",
+      "chars": 2915
+    },
+    {
+      "name": "score-campaign",
+      "chars": 2362
+    },
+    {
+      "name": "attach-to-campaign",
+      "chars": 2325
+    },
+    {
+      "name": "measure-placement",
+      "chars": 3291
+    },
+    {
+      "name": "record-gate-zero-read-only-outcome",
+      "chars": 3101
+    },
+    {
+      "name": "add-industry-event",
+      "chars": 1173
+    },
+    {
+      "name": "list-industry-events",
+      "chars": 373
+    },
+    {
+      "name": "update-industry-event",
+      "chars": 1163
+    },
+    {
+      "name": "read-invoice-tracker",
+      "chars": 508
+    },
+    {
+      "name": "record-commission-receipt",
+      "chars": 784
+    },
+    {
+      "name": "get-deal-room",
+      "chars": 600
+    },
+    {
+      "name": "read-deal-reconciliation",
+      "chars": 546
+    },
+    {
+      "name": "presence-lease",
+      "chars": 479
+    },
+    {
+      "name": "patch-deal-field",
+      "chars": 865
+    },
+    {
+      "name": "add-deal-note",
+      "chars": 423
+    },
+    {
+      "name": "set-next-step",
+      "chars": 491
+    },
+    {
+      "name": "start-deal-review",
+      "chars": 545
+    },
+    {
+      "name": "review-deal",
+      "chars": 562
+    },
+    {
+      "name": "end-deal-review",
+      "chars": 550
+    },
+    {
+      "name": "set-market-agent",
+      "chars": 595
+    },
+    {
+      "name": "set-national-account-owner",
+      "chars": 505
+    },
+    {
+      "name": "create-national-account",
+      "chars": 926
+    },
+    {
+      "name": "create-national-market-deal",
+      "chars": 1169
+    },
+    {
+      "name": "revert-deal-field",
+      "chars": 444
+    },
+    {
+      "name": "resolve-conflict",
+      "chars": 522
+    },
+    {
+      "name": "resolve-candidate",
+      "chars": 583
+    },
+    {
+      "name": "resolve-post-call-candidate",
+      "chars": 627
+    },
+    {
+      "name": "list-verbs",
+      "chars": 740
+    },
+    {
+      "name": "export-email-domains",
+      "chars": 1005
+    },
+    {
+      "name": "record-defect",
+      "chars": 3374
+    },
+    {
+      "name": "find-precedent",
+      "chars": 1298
+    },
+    {
+      "name": "state-as-of",
+      "chars": 1439
+    },
+    {
+      "name": "call-verb",
+      "chars": 672
+    },
+    {
+      "name": "new-doctrine-doc",
+      "chars": 921
+    },
+    {
+      "name": "write-doctrine-section",
+      "chars": 1163
+    },
+    {
+      "name": "set-doctrine-refs",
+      "chars": 1188
+    },
+    {
+      "name": "retire-doctrine-section",
+      "chars": 679
+    },
+    {
+      "name": "read-doctrine",
+      "chars": 589
+    },
+    {
+      "name": "map-architecture",
+      "chars": 567
+    },
+    {
+      "name": "doctrine-sections",
+      "chars": 446
+    },
+    {
+      "name": "search-doctrine",
+      "chars": 941
+    },
+    {
+      "name": "doctrine-index",
+      "chars": 413
+    },
+    {
+      "name": "claim-doctrine-sections",
+      "chars": 775
+    },
+    {
+      "name": "release-doctrine-claims",
+      "chars": 479
+    },
+    {
+      "name": "change-doctrine-sections",
+      "chars": 903
+    },
+    {
+      "name": "resolve-doctrine-rules",
+      "chars": 687
+    },
+    {
+      "name": "standing-context",
+      "chars": 2771
+    },
+    {
+      "name": "dry-run-doctrine-gates",
+      "chars": 714
+    },
+    {
+      "name": "unfinished-work",
+      "chars": 639
+    },
+    {
+      "name": "publish-board-snapshot",
+      "chars": 572
+    },
+    {
+      "name": "ask-board-question",
+      "chars": 730
+    },
+    {
+      "name": "revise-board-question",
+      "chars": 716
+    },
+    {
+      "name": "list-progress-boards",
+      "chars": 439
+    },
+    {
+      "name": "read-progress-board",
+      "chars": 355
+    },
+    {
+      "name": "answer-board-question",
+      "chars": 580
+    },
+    {
+      "name": "read-board-answers",
+      "chars": 460
+    },
+    {
+      "name": "acknowledge-board-answer",
+      "chars": 574
+    },
+    {
+      "name": "record-board-answer-applied",
+      "chars": 510
+    },
+    {
+      "name": "schedule-board",
+      "chars": 426
+    },
+    {
+      "name": "propose-retrieval-concept",
+      "chars": 561
+    },
+    {
+      "name": "propose-retrieval-phrase",
+      "chars": 749
+    },
+    {
+      "name": "propose-retrieval-mapping",
+      "chars": 627
+    },
+    {
+      "name": "propose-retrieval-retirement",
+      "chars": 570
+    },
+    {
+      "name": "approve-retrieval-proposals",
+      "chars": 587
+    },
+    {
+      "name": "retire-retrieval-curation",
+      "chars": 605
+    },
+    {
+      "name": "next-signals",
+      "chars": 534
+    },
+    {
+      "name": "record-signal",
+      "chars": 1255
+    },
+    {
+      "name": "open-investigation",
+      "chars": 645
+    },
+    {
+      "name": "investigation-neighborhood",
+      "chars": 469
+    },
+    {
+      "name": "open-investigation-branch",
+      "chars": 692
+    },
+    {
+      "name": "record-branch-evidence",
+      "chars": 875
+    },
+    {
+      "name": "adjudicate-investigation-branch",
+      "chars": 721
+    },
+    {
+      "name": "get-investigation",
+      "chars": 391
+    },
+    {
+      "name": "close-investigation",
+      "chars": 988
+    },
+    {
+      "name": "add-doc-conversation-turn",
+      "chars": 623
+    },
+    {
+      "name": "create-doc-conversation",
+      "chars": 533
+    },
+    {
+      "name": "share-doc-conversation",
+      "chars": 583
+    },
+    {
+      "name": "rename-doc-conversation",
+      "chars": 611
+    },
+    {
+      "name": "read-doc-conversation",
+      "chars": 522
+    },
+    {
+      "name": "list-doc-conversations",
+      "chars": 529
+    },
+    {
+      "name": "complete-doc-suggestion-scan",
+      "chars": 563
+    },
+    {
+      "name": "suggest-doc-work",
+      "chars": 771
+    },
+    {
+      "name": "list-doc-suggestions",
+      "chars": 461
+    },
+    {
+      "name": "decide-doc-suggestion",
+      "chars": 690
+    },
+    {
+      "name": "propose-doc-correction",
+      "chars": 749
+    },
+    {
+      "name": "read-doc-activity",
+      "chars": 1013
+    },
+    {
+      "name": "whats-new",
+      "chars": 707
+    },
+    {
+      "name": "start-meeting",
+      "chars": 1201
+    },
+    {
+      "name": "claim-meeting-processing",
+      "chars": 829
+    },
+    {
+      "name": "add-meeting-note",
+      "chars": 800
+    },
+    {
+      "name": "propose-meeting-action",
+      "chars": 1424
+    },
+    {
+      "name": "decide-meeting-action",
+      "chars": 1158
+    },
+    {
+      "name": "record-meeting-action-outcome",
+      "chars": 897
+    },
+    {
+      "name": "end-meeting",
+      "chars": 720
+    },
+    {
+      "name": "read-meeting",
+      "chars": 692
+    },
+    {
+      "name": "acknowledge-notification",
+      "chars": 513
+    },
+    {
+      "name": "notification-feed",
+      "chars": 454
+    },
+    {
+      "name": "read-notification-preferences",
+      "chars": 416
+    },
+    {
+      "name": "set-notification-preference",
+      "chars": 746
+    },
+    {
+      "name": "cadence-status",
+      "chars": 647
+    },
+    {
+      "name": "record-cadence-receipt",
+      "chars": 1117
+    },
+    {
+      "name": "raise-delivery-cadence-alert",
+      "chars": 1993
+    },
+    {
+      "name": "read-session-identity",
+      "chars": 615
+    },
+    {
+      "name": "read-dispatch-history",
+      "chars": 623
+    },
+    {
+      "name": "record-dispatch-link",
+      "chars": 713
+    },
+    {
+      "name": "acknowledge-dispatch",
+      "chars": 664
+    },
+    {
+      "name": "read-doc-outcome-cards",
+      "chars": 499
+    },
+    {
+      "name": "capability-program",
+      "chars": 842
+    },
+    {
+      "name": "start-capability-project",
+      "chars": 961
+    },
+    {
+      "name": "begin-capability-project",
+      "chars": 709
+    },
+    {
+      "name": "prepare-capability-project",
+      "chars": 1196
+    },
+    {
+      "name": "attest-capability-project",
+      "chars": 974
+    },
+    {
+      "name": "complete-capability-project",
+      "chars": 1292
+    },
+    {
+      "name": "cancel-capability-session",
+      "chars": 849
+    },
+    {
+      "name": "read-work-shape",
+      "chars": 528
+    },
+    {
+      "name": "set-work-shape-disposition",
+      "chars": 955
+    },
+    {
+      "name": "write-work-shape",
+      "chars": 2989
+    },
+    {
+      "name": "current-work-requests",
+      "chars": 430
+    },
+    {
+      "name": "current-work-item",
+      "chars": 783
+    },
+    {
+      "name": "report-problem",
+      "chars": 1115
+    },
+    {
+      "name": "work-request-card",
+      "chars": 747
+    },
+    {
+      "name": "review-and-triage",
+      "chars": 820
+    },
+    {
+      "name": "answer-work-request-for-joe",
+      "chars": 1502
+    },
+    {
+      "name": "decline-work-request",
+      "chars": 863
+    },
+    {
+      "name": "supersede-work-request",
+      "chars": 956
+    },
+    {
+      "name": "propose-ready-plan",
+      "chars": 6858
+    },
+    {
+      "name": "review-heavy-build-plan",
+      "chars": 1239
+    },
+    {
+      "name": "propose-ready-plan-amendment",
+      "chars": 6300
+    },
+    {
+      "name": "accept-ready-plan-amendment",
+      "chars": 712
+    },
+    {
+      "name": "effective-ready-plan",
+      "chars": 492
+    },
+    {
+      "name": "ready-plan-amendment-discovery",
+      "chars": 520
+    },
+    {
+      "name": "acknowledge-ready-plan-amendment",
+      "chars": 521
+    },
+    {
+      "name": "accept-ready-plan",
+      "chars": 642
+    },
+    {
+      "name": "propose-outcome-feedback",
+      "chars": 1822
+    },
+    {
+      "name": "accept-outcome-feedback",
+      "chars": 803
+    },
+    {
+      "name": "read-portfolio",
+      "chars": 646
+    },
+    {
+      "name": "propose-portfolio-revision",
+      "chars": 1316
+    },
+    {
+      "name": "review-portfolio-revision",
+      "chars": 913
+    },
+    {
+      "name": "accept-portfolio-revision",
+      "chars": 981
+    },
+    {
+      "name": "compare-lease-terms",
+      "chars": 2708
+    },
+    {
+      "name": "add-room-turn",
+      "chars": 1329
+    },
+    {
+      "name": "project-room-queue",
+      "chars": 739
+    },
+    {
+      "name": "read-room",
+      "chars": 834
+    },
+    {
+      "name": "read-room-latest",
+      "chars": 768
+    },
+    {
+      "name": "read-room-queue",
+      "chars": 498
+    },
+    {
+      "name": "read-profiles",
+      "chars": 586
+    },
+    {
+      "name": "assign-profile",
+      "chars": 1389
+    },
+    {
+      "name": "bot-brief",
+      "chars": 876
+    },
+    {
+      "name": "read-execution-environment-providers",
+      "chars": 425
+    },
+    {
+      "name": "register-execution-environment-provider",
+      "chars": 555
+    },
+    {
+      "name": "attest-execution-environment-conformance",
+      "chars": 583
+    },
+    {
+      "name": "transition-execution-environment-provider",
+      "chars": 722
+    },
+    {
+      "name": "assign-execution-route",
+      "chars": 822
+    },
+    {
+      "name": "activate-context-bundle",
+      "chars": 611
+    },
+    {
+      "name": "read-context-activation",
+      "chars": 472
+    },
+    {
+      "name": "render-context-activation",
+      "chars": 538
+    },
+    {
+      "name": "issue-execution-envelope",
+      "chars": 616
+    },
+    {
+      "name": "record-attempt-receipt",
+      "chars": 638
+    },
+    {
+      "name": "propose-evaluation-case",
+      "chars": 792
+    },
+    {
+      "name": "attest-attempt-evaluation",
+      "chars": 2280
+    },
+    {
+      "name": "read-attempt-reliability",
+      "chars": 423
+    },
+    {
+      "name": "transition-evaluation-case",
+      "chars": 886
+    },
+    {
+      "name": "read-resource-dashboard",
+      "chars": 739
+    },
+    {
+      "name": "record-resource-observation",
+      "chars": 1703
+    },
+    {
+      "name": "record-deal-invoice",
+      "chars": 861
+    },
+    {
+      "name": "invoice-close-queue",
+      "chars": 362
+    },
+    {
+      "name": "undo-invoice-close",
+      "chars": 535
+    },
+    {
+      "name": "record-lead-contact",
+      "chars": 1296
+    },
+    {
+      "name": "lead-stage-preview",
+      "chars": 341
+    },
+    {
+      "name": "advance-leads",
+      "chars": 645
+    },
+    {
+      "name": "lead-approval-queue",
+      "chars": 382
+    },
+    {
+      "name": "approve-lead-draft",
+      "chars": 475
+    },
+    {
+      "name": "approve-lead-move",
+      "chars": 534
+    },
+    {
+      "name": "undo-lead-move",
+      "chars": 525
+    },
+    {
+      "name": "last-new-lead-search",
+      "chars": 370
+    },
+    {
+      "name": "ask-jev",
+      "chars": 1571
+    },
+    {
+      "name": "read-jev-call-receipts",
+      "chars": 1038
+    },
+    {
+      "name": "read-jev-call-receipt-integrity",
+      "chars": 596
+    },
+    {
+      "name": "open-workflow-cutover-plan",
+      "chars": 1036
+    },
+    {
+      "name": "cancel-workflow-cutover-plan",
+      "chars": 648
+    },
+    {
+      "name": "advance-workflow-cutover-stage",
+      "chars": 1456
+    },
+    {
+      "name": "retire-workflow-cutover-plan",
+      "chars": 957
+    },
+    {
+      "name": "record-workflow-caller",
+      "chars": 1091
+    },
+    {
+      "name": "workflow-cutover-board",
+      "chars": 776
+    },
+    {
+      "name": "register-slice-checkable-done",
+      "chars": 2461
+    },
+    {
+      "name": "register-slice-criteria-from-catalog",
+      "chars": 740
+    },
+    {
+      "name": "bind-slice-criterion-evidence",
+      "chars": 1612
+    },
+    {
+      "name": "rebind-slice-criterion-evidence",
+      "chars": 1187
+    },
+    {
+      "name": "record-release-slice-members",
+      "chars": 1270
+    },
+    {
+      "name": "list-shipped-releases",
+      "chars": 514
+    },
+    {
+      "name": "mark-slice-progress",
+      "chars": 1151
+    },
+    {
+      "name": "mark-slice-completion",
+      "chars": 1045
+    },
+    {
+      "name": "propose-slice-completion",
+      "chars": 1183
+    },
+    {
+      "name": "confirm-slice-completions",
+      "chars": 1511
+    },
+    {
+      "name": "pending-slice-completion-proposals",
+      "chars": 505
+    },
+    {
+      "name": "set-slice-mark-hold",
+      "chars": 984
+    },
+    {
+      "name": "read-slice-completion",
+      "chars": 740
+    },
+    {
+      "name": "observe-memory",
+      "chars": 789
+    },
+    {
+      "name": "recall-memory",
+      "chars": 531
+    },
+    {
+      "name": "review-memory",
+      "chars": 472
+    },
+    {
+      "name": "promote-memory",
+      "chars": 530
+    },
+    {
+      "name": "correct-memory",
+      "chars": 557
+    },
+    {
+      "name": "forget-memory",
+      "chars": 501
+    },
+    {
+      "name": "list-my-codex-sessions",
+      "chars": 435
+    },
+    {
+      "name": "codex-checkpoint",
+      "chars": 3535
+    },
+    {
+      "name": "codex-read-recovery",
+      "chars": 666
+    },
+    {
+      "name": "codex-record-event",
+      "chars": 708
+    },
+    {
+      "name": "claude-checkpoint",
+      "chars": 4245
+    },
+    {
+      "name": "claude-read-recovery",
+      "chars": 884
+    },
+    {
+      "name": "claude-record-event",
+      "chars": 1244
+    },
+    {
+      "name": "incident-board",
+      "chars": 1844
+    },
+    {
+      "name": "get-incident",
+      "chars": 934
+    },
+    {
+      "name": "open-incident",
+      "chars": 2740
+    },
+    {
+      "name": "triage-incident",
+      "chars": 1058
+    },
+    {
+      "name": "link-incident-work-request",
+      "chars": 778
+    },
+    {
+      "name": "close-incident",
+      "chars": 1759
+    },
+    {
+      "name": "adjudicate-incident",
+      "chars": 1604
+    },
+    {
+      "name": "engineering-passport-source",
+      "chars": 585
+    },
+    {
+      "name": "register-engineering-slice-plan",
+      "chars": 594
+    },
+    {
+      "name": "admit-engineering-slice",
+      "chars": 638
+    },
+    {
+      "name": "review-engineering-slice",
+      "chars": 559
+    },
+    {
+      "name": "engineering-passport",
+      "chars": 477
+    },
+    {
+      "name": "source-merge-authority",
+      "chars": 811
+    },
+    {
+      "name": "engineering-writer-runtime-preflight",
+      "chars": 481
+    },
+    {
+      "name": "append-tour-rights-receipt",
+      "chars": 1275
+    },
+    {
+      "name": "revoke-tour-rights-receipt",
+      "chars": 679
+    },
+    {
+      "name": "append-tour-source-evidence",
+      "chars": 995
+    },
+    {
+      "name": "append-tour-field-assertion",
+      "chars": 1057
+    },
+    {
+      "name": "create-tour-public-projection-draft",
+      "chars": 758
+    },
+    {
+      "name": "seal-tour-public-projection",
+      "chars": 1092
+    },
+    {
+      "name": "read-tour-public-projection",
+      "chars": 472
+    },
+    {
+      "name": "append-tour-property-identifier-assertion",
+      "chars": 1130
+    },
+    {
+      "name": "register-tour-property",
+      "chars": 1214
+    },
+    {
+      "name": "append-tour-coordinate-candidate",
+      "chars": 1119
+    },
+    {
+      "name": "append-tour-entrance-verification-receipt",
+      "chars": 953
+    },
+    {
+      "name": "create-tour-domain",
+      "chars": 1248
+    },
+    {
+      "name": "append-tour-route-version",
+      "chars": 1907
+    },
+    {
+      "name": "prepare-tour-route-version",
+      "chars": 697
+    },
+    {
+      "name": "append-tour-route-stop",
+      "chars": 1075
+    },
+    {
+      "name": "append-tour-route-stop-transition",
+      "chars": 696
+    },
+    {
+      "name": "accept-tour-route-version",
+      "chars": 578
+    },
+    {
+      "name": "append-tour-cheat-sheet-revision",
+      "chars": 537
+    },
+    {
+      "name": "restore-tour-cheat-sheet-revision",
+      "chars": 545
+    },
+    {
+      "name": "search-tour-properties",
+      "chars": 1542
+    },
+    {
+      "name": "append-tour-selection-cart-version",
+      "chars": 807
+    },
+    {
+      "name": "read-tour-selection-cart",
+      "chars": 348
+    },
+    {
+      "name": "record-tour-map-promotion-receipt",
+      "chars": 2956
+    },
+    {
+      "name": "issue-tour-share-grant",
+      "chars": 636
+    },
+    {
+      "name": "rotate-tour-share-grant",
+      "chars": 698
+    },
+    {
+      "name": "revoke-tour-share-grant",
+      "chars": 542
+    },
+    {
+      "name": "read-tour-feedback",
+      "chars": 486
+    },
+    {
+      "name": "read-tour-sharing-library",
+      "chars": 490
+    },
+    {
+      "name": "request-tour-pdf-render",
+      "chars": 1367
+    },
+    {
+      "name": "read-tour-pdf-render",
+      "chars": 408
+    },
+    {
+      "name": "record-tour-pdf-render-result",
+      "chars": 1046
+    },
+    {
+      "name": "record-tour-pdf-human-review",
+      "chars": 734
+    },
+    {
+      "name": "read-benchmark-manifest",
+      "chars": 1652
+    },
+    {
+      "name": "propose-benchmark-manifest-draft",
+      "chars": 1217
+    },
+    {
+      "name": "review-benchmark-manifest-draft",
+      "chars": 2033
+    },
+    {
+      "name": "accept-benchmark-manifest-draft",
+      "chars": 2361
+    },
+    {
+      "name": "read-model-role",
+      "chars": 1254
+    },
+    {
+      "name": "record-model-role-revision",
+      "chars": 1511
+    },
+    {
+      "name": "set-current-model-role-revision",
+      "chars": 2159
+    },
+    {
+      "name": "read-cre-lifecycle",
+      "chars": 472
+    },
+    {
+      "name": "record-lifecycle-fact",
+      "chars": 566
+    },
+    {
+      "name": "record-evidence-subject-link",
+      "chars": 582
+    },
+    {
+      "name": "initialize-prospect-relationship",
+      "chars": 593
+    },
+    {
+      "name": "initialize-assignment",
+      "chars": 848
+    },
+    {
+      "name": "initialize-property-negotiation",
+      "chars": 646
+    },
+    {
+      "name": "record-representation-agreement",
+      "chars": 663
+    },
+    {
+      "name": "open-cre-assignment",
+      "chars": 617
+    },
+    {
+      "name": "record-loi-submission",
+      "chars": 602
+    },
+    {
+      "name": "record-loi-acceptance",
+      "chars": 629
+    },
+    {
+      "name": "commit-winning-property",
+      "chars": 651
+    },
+    {
+      "name": "record-deal-execution",
+      "chars": 659
+    },
+    {
+      "name": "record-diligence-outcome",
+      "chars": 603
+    },
+    {
+      "name": "record-deal-closing",
+      "chars": 659
+    },
+    {
+      "name": "cancel-pending-deal",
+      "chars": 656
+    },
+    {
+      "name": "record-deal-axis",
+      "chars": 638
+    },
+    {
+      "name": "link-salesforce-reference",
+      "chars": 803
+    },
+    {
+      "name": "record-lifecycle-correction",
+      "chars": 710
+    },
+    {
+      "name": "record-lifecycle-reconciliation",
+      "chars": 691
+    },
+    {
+      "name": "run-migration-shadow",
+      "chars": 592
+    },
+    {
+      "name": "record-partner-lifecycle-fact",
+      "chars": 655
+    },
+    {
+      "name": "record-salesforce-page-stop",
+      "chars": 442
+    },
+    {
+      "name": "record-salesforce-duplicate-check",
+      "chars": 611
+    },
+    {
+      "name": "record-salesforce-write-readback",
+      "chars": 466
+    },
+    {
+      "name": "read-salesforce-action-evidence",
+      "chars": 547
+    },
+    {
+      "name": "record-salesforce-run-outcome",
+      "chars": 1274
+    },
+    {
+      "name": "read-salesforce-autonomy-counter",
+      "chars": 737
+    },
+    {
+      "name": "revoke-salesforce-read-consent",
+      "chars": 787
+    },
+    {
+      "name": "read-record-source-authority",
+      "chars": 1177
+    },
+    {
+      "name": "register-record-source-authority-policy",
+      "chars": 1444
+    },
+    {
+      "name": "record-source-observation",
+      "chars": 1137
+    },
+    {
+      "name": "record-corporate-artifact",
+      "chars": 811
+    },
+    {
+      "name": "record-parsed-proposal",
+      "chars": 676
+    },
+    {
+      "name": "register-derivative-source-link",
+      "chars": 744
+    },
+    {
+      "name": "record-document-identity",
+      "chars": 1242
+    },
+    {
+      "name": "record-artifact-preservation-hold",
+      "chars": 655
+    },
+    {
+      "name": "evaluate-artifact-deletion",
+      "chars": 771
+    },
+    {
+      "name": "produce-assurance-fabric-preactivation-receipt",
+      "chars": 563
+    },
+    {
+      "name": "produce-foundation-assurance-benchmark-coverage",
+      "chars": 564
+    },
+    {
+      "name": "produce-foundation-control-plane-preactivation-receipt",
+      "chars": 571
+    },
+    {
+      "name": "produce-global-execution-contract-receipt",
+      "chars": 558
+    },
+    {
+      "name": "produce-global-no-phi-boundary-receipt",
+      "chars": 555
+    },
+    {
+      "name": "produce-global-prompt-injection-boundary-receipt",
+      "chars": 565
+    },
+    {
+      "name": "produce-global-secrets-boundary-receipt",
+      "chars": 556
+    },
+    {
+      "name": "produce-global-source-authority-receipt",
+      "chars": 556
+    },
+    {
+      "name": "record-foundation-assurance-minimum-outcome",
+      "chars": 560
+    },
+    {
+      "name": "read-global-boundaries",
+      "chars": 1169
+    },
+    {
+      "name": "read-journey-one-clock",
+      "chars": 1186
+    },
+    {
+      "name": "advance-journey-one-clock",
+      "chars": 1490
+    },
+    {
+      "name": "correspondence-readiness",
+      "chars": 880
+    },
+    {
+      "name": "read-correspondence-thread",
+      "chars": 982
+    },
+    {
+      "name": "record-correspondence-adapter-consent",
+      "chars": 2145
+    },
+    {
+      "name": "revoke-correspondence-adapter-consent",
+      "chars": 766
+    },
+    {
+      "name": "read-assurance-health",
+      "chars": 828
+    },
+    {
+      "name": "record-assurance-health-evidence",
+      "chars": 2263
+    },
+    {
+      "name": "register-action-class-successor",
+      "chars": 1663
+    },
+    {
+      "name": "read-action-class-successors",
+      "chars": 457
+    },
+    {
+      "name": "read-action-class-gate",
+      "chars": 672
+    },
+    {
+      "name": "open-complete-set-review",
+      "chars": 766
+    },
+    {
+      "name": "record-complete-set-participant",
+      "chars": 991
+    },
+    {
+      "name": "record-complete-set-finding-set",
+      "chars": 1174
+    },
+    {
+      "name": "seal-complete-set-review-round",
+      "chars": 1287
+    },
+    {
+      "name": "record-complete-set-adjudication",
+      "chars": 936
+    },
+    {
+      "name": "read-complete-set-review",
+      "chars": 484
+    },
+    {
+      "name": "read-action-context",
+      "chars": 1234
+    },
+    {
+      "name": "bind-rule-context-contract",
+      "chars": 1335
+    }
+  ]
+}
