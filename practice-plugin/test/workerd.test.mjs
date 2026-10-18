@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { TOOLS } from '../src/tools.mjs';
+import { PUBLIC_TOOLS } from '../src/modern.mjs';
 import assert from 'node:assert/strict';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 
@@ -18,7 +18,7 @@ test('bundled Worker completes MCP requests in local workerd with no bindings', 
     assert.equal(init.status, 200);
     assert.ok((await init.json()).result.capabilities.tools);
     const listing = await post({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    assert.equal((await listing.json()).result.tools.length, TOOLS.length);
+    assert.equal((await listing.json()).result.tools.length, PUBLIC_TOOLS.length);
     const call = await post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: {
       name: 'estimate_occupancy_cost', arguments: { square_feet: 2000, market: 'mobile_downtown', lease_type: 'full_service' },
     } });

@@ -71,7 +71,7 @@ test('missing training formulas and specialty caveats remain visible', () => {
 test('forbidden training material and client references never enter source or tool outputs', () => {
   const excludedHeadings = [['Pitch', 'to', 'Landlord'].join(' '), ['Sample', 'Layout'].join(' ')];
   const forbidden = new RegExp([...excludedHeadings, '\\bC-\\s*\\d+\\b'].join('|'), 'i');
-  for (const directory of ['src', 'test']) {
+  for (const directory of ['src', 'test', 'ui']) {
     for (const f of fs.readdirSync(new URL(`../${directory}/`, import.meta.url))) {
       assert.doesNotMatch(fs.readFileSync(new URL(`../${directory}/${f}`, import.meta.url), 'utf8'), forbidden, f);
     }
