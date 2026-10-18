@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "251be3b2d88ea571cfe6856750de69171b8b7d8a0690186d88ae13ad272ef2e3";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "35872925d7848db9d83a589267e79ee0e54011adc4a371ba572da951bd4898ba";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -80,8 +80,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "acknowledge-dispatch": {
     "ingress_key": "mcp-tool:acknowledge-dispatch",
     "source_locator": "mcp-server/src/dispatch-spine.js",
-    "source_digest": "83cb18817ab583662a880aad6c6ab13319190df6d341fdf5929aecc6bf644934",
-    "schema_digest": "56aacfb5fbc2176b3744e31e85380cc1894e5978e966d1d4f2d4af0ce5a2f658",
+    "source_digest": "650236341f7d6fd604929e73000b911fe0398342f029e697f3b379c5a9946767",
+    "schema_digest": "8a2f036ce4faad712a557b4f336f8e991737485f338d349847660b5af0c552cc",
     "write": true,
     "human_only": false,
     "authority_only": false,
@@ -2663,8 +2663,8 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-dispatch-link": {
     "ingress_key": "mcp-tool:record-dispatch-link",
     "source_locator": "mcp-server/src/dispatch-spine.js",
-    "source_digest": "83cb18817ab583662a880aad6c6ab13319190df6d341fdf5929aecc6bf644934",
-    "schema_digest": "aa8c14c0b73e53aa190be59729c30e375bc331fbd189e1c9be0e87acb209f393",
+    "source_digest": "650236341f7d6fd604929e73000b911fe0398342f029e697f3b379c5a9946767",
+    "schema_digest": "c26cf30b62954f502d18cdf3c7c17921b4f9b375a3bc558bf86343d2e5bf6f33",
     "write": true,
     "human_only": false,
     "authority_only": false,

@@ -70,11 +70,12 @@ export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }) {
       writerConnection: true,
       description: "Record the explicit link between a room turn, named by its msg_id, and the session it was dispatched to, at the moment the turn is appended. Only the server-derived hermes-pilot identity may write one, enforced inside the database function; no argument names an actor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string" },
         dispatch_ref:    { type: "string" },
         turn_msg_id:     { type: "string" },
         session_id:      { type: "string", minLength: 1, maxLength: 200 },
         work_request_id: { type: "string" },
-      }, required: ["dispatch_ref", "turn_msg_id", "session_id"] },
+      }, required: ["idempotency_key", "dispatch_ref", "turn_msg_id", "session_id"] },
       handler: async (c, actor, args) =>
         withEnvelope(c, actor, "record-dispatch-link", args, async () => {
           if (!DISPATCH_UUID.test(String(args.dispatch_ref || ""))) {
@@ -117,10 +118,11 @@ export function dispatchSpineTools({ withEnvelope, writeEvent, ToolError }) {
       writerConnection: true,
       description: "Append one acknowledgement row for a dispatch at one stage -- received when the turn lands in a desk window, acknowledged when the acting session takes it up. The acting actor is derived by the server, so an acknowledgement is first-hand; no argument names one.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string" },
         dispatch_ref: { type: "string" },
         stage:        { type: "string", enum: ["received", "acknowledged"] },
         evidence:     { type: "string", maxLength: 500 },
-      }, required: ["dispatch_ref", "stage"] },
+      }, required: ["idempotency_key", "dispatch_ref", "stage"] },
       handler: async (c, actor, args) =>
         withEnvelope(c, actor, "acknowledge-dispatch", args, async () => {
           if (!DISPATCH_UUID.test(String(args.dispatch_ref || ""))) {
