@@ -3,10 +3,8 @@
 
 The check runs at the only point a bad repository path can still be refused
 without rewriting history: pre-commit.  It examines additions, copies and
-renames in the index, not the whole repository. Declared vendored trees
-preserve their third-party directory depth;
-established third-party trees
-and historical filenames are not silently reclassified as a new violation.
+renames in the index, not the whole repository. Historical filenames are not
+silently reclassified as a new violation.
 
 The mechanical boundary is intentionally narrow and explicit:
   * no more than four directory components below the repository root;
@@ -27,13 +25,11 @@ import sys
 
 MAX_DIRECTORY_DEPTH = 4
 BAD_VERSION_NAME = re.compile(r"(?:^|[_-])(?:final|v\d+)(?:$|[_.-])", re.I)
-VENDORED_TREE_PREFIXES = ("plugins/pstack/skills/",)
 
 
 def violations(paths: list[str]) -> list[str]:
     bad = []
     for path in paths:
-        is_vendored = path.startswith(VENDORED_TREE_PREFIXES) and path == path.strip() and "\\" not in path
         path = path.strip().replace("\\", "/")
         if not path:
             continue
@@ -42,7 +38,7 @@ def violations(paths: list[str]) -> list[str]:
             bad.append(f"unsafe repository path: {path}")
             continue
         depth = len(parts) - 1
-        if depth > MAX_DIRECTORY_DEPTH and not is_vendored:
+        if depth > MAX_DIRECTORY_DEPTH:
             bad.append(f"{path}: {depth} folder levels (maximum is {MAX_DIRECTORY_DEPTH})")
         if BAD_VERSION_NAME.search(parts[-1]):
             bad.append(f"{path}: draft/final version filename is forbidden")

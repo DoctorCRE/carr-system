@@ -69,6 +69,12 @@
       "evidence": "loop #1304 (activate the Guidance Registry; blocked on the situation bridges)"
     },
     {
+      "path": "ops/headless-tasks/install.sh",
+      "class": "hand_tool",
+      "reason": "The orchestrator invokes this explicit cutover helper after a watched first run to install or uninstall reviewed headless launchd jobs; it is not scheduled.",
+      "evidence": "ops/headless-tasks/install.sh header and lib/headless_tasks.py install_main (added f324adc2, #1482)"
+    },
+    {
       "path": "ops/incident-fingerprint-shadow.py",
       "class": "one_shot",
       "reason": "The process-audit council's confirm-or-kill shadow test of incident fingerprinting, run once against the August 15-23 ledger.",
