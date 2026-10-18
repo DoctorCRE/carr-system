@@ -615,20 +615,22 @@ class GithubBudgetTests(unittest.TestCase):
 
     def test_exit_status_means_the_scan_failed_not_that_it_found_things(self):
         from unittest.mock import patch
-        def run(found, errors=()):
+        def run(found, errors=(), vendor_only=False):
             facts = {"errors": list(errors), "jobs": [], "prs": [], "logs": [], "branches": [], "queue": ""}
             with patch.object(self.w, "collect", return_value=facts), \
                  patch.object(self.w, "detect", return_value=[]), \
                  patch.object(self.w, "vendor_release_findings", return_value=[]), \
                  patch.object(self.w, "reconcile", return_value=found), \
                  patch.object(self.w, "digest", return_value=""):
-                return self.w.scan(self.root, self.c)
+                return self.w.scan(self.root, self.c, vendor_only=vendor_only)
         def row(kind):
             return self.w.finding(kind, kind + ":x", "synthetic", self.c)
         # Hundreds of open findings are the product of a working scan.
         self.assertEqual(run([row("branch_idle"), row("pr_conflict"), row("job_failed")]), 0)
         # A third party refusing a vendor fetch is reported, not a failed scan.
         self.assertEqual(run([row("vendor_release_fetch_error")]), 0)
+        # The vendor-only scan exists to make that fetch, so there it is a failure.
+        self.assertEqual(run([row("vendor_release_fetch_error")], vendor_only=True), 1)
         # Effects or reports the scan could not complete, and unreadable evidence, are failures.
         self.assertEqual(run([row("action_error")]), 1)
         self.assertEqual(run([row("record_error")]), 1)
