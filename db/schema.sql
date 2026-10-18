@@ -122559,7 +122559,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
 0897_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 07:03:58.910517+00
-0899_dot_database_design.sql	656a6bf98c3470d142df16951a5257ffa51b13e28d6e7c587fdff720b0cf9561	2026-10-18 06:47:49.612561+00
+0899_dot_database_design.sql	d7844153bf7d6da0d33cc358d9c3c5e0b4dc73b752da991c8a8026435ab2a128	2026-10-18 06:47:49.612561+00
 \.
 
 
