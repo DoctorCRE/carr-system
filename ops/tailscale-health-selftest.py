@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""Selftest for the Tailscale health row and the start-at-login agent (WR-000178).
-
-After the 2026-09-30 macOS reboot Tailscale on the Mac Studio sat "stopped" for
-about six hours and SSH to the MacBook was cut off with nothing reporting it.
-Three pieces close that, and this suite proves each one hermetically, with a
-stub Tailscale binary so no test touches the real daemon:
-
-  1. ops/tailscale_health.py  — classifies `Tailscale status` and renders the
-     health row, which must FAIL on "stopped" and print its bound action.
-  2. bin/tailscale-up.sh      — runs `Tailscale up` only when status says
-     stopped; never when already running, never when logged out (that path
-     would wait on a browser nobody is at).
-  3. ops/launchd/com.carr.tailscale-up.plist — RunAtLoad agent, primary-only,
-     pointing at the script above.
-"""
 from __future__ import annotations
 
 import importlib.util
@@ -48,6 +33,11 @@ cac = importlib.util.module_from_spec(cac_spec)
 cac_spec.loader.exec_module(cac)
 
 FAILS: list[str] = []
+ROUTE_FIXTURE = tempfile.TemporaryDirectory()
+FAKE_ROUTE = Path(ROUTE_FIXTURE.name) / "route"
+FAKE_ROUTE.write_text("#!/bin/sh\nprintf '  interface: utun8\\n'\n")
+FAKE_ROUTE.chmod(0o700)
+os.environ["TAILSCALE_ROUTE_BIN"] = str(FAKE_ROUTE)
 
 
 def check(label: str, cond: bool, detail: object = "") -> None:
@@ -60,13 +50,15 @@ def stub(root: Path, status_out: str, status_rc: int) -> tuple[Path, Path]:
     """A fake Tailscale CLI: `status` prints the given text, every call is logged."""
     log = root / "calls.log"
     fake = root / "Tailscale"
+    started = root / "started"
     fake.write_text(
         "#!/bin/sh\n"
         f"echo \"$*\" >> '{log}'\n"
         "if [ \"$1\" = status ]; then\n"
+        f"  if [ -f '{started}' ]; then printf '%s\\n' '{json.dumps({'BackendState': 'Running', 'Self': {'TailscaleIPs': ['100.64.0.1']}})}'; exit 0; fi\n"
         f"  printf '%s\\n' '{status_out}'\n"
         f"  exit {status_rc}\n"
-        "fi\nexit 0\n", encoding="utf-8")
+        f"fi\nif [ \"$1\" = up ]; then touch '{started}'; fi\nexit 0\n", encoding="utf-8")
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     return fake, log
 
@@ -215,6 +207,7 @@ def recovery_probe(mode: str, *, startup_delay: float = 0) -> tuple[int, list[li
         fake = root / "Tailscale"
         fake.write_text(f'''#!{sys.executable}
 import sys,json,time
+from pathlib import Path
 time.sleep({startup_delay!r})
 with open({str(log)!r}, 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')
 if sys.argv[1] == 'status':
@@ -223,6 +216,9 @@ if sys.argv[1] == 'status':
     if {mode!r} == 'diagnostic':
         print('password=synthetic-sensitive-payload https://private.example.test/value')
         sys.exit(7)
+    if Path({str(root / 'started')!r}).exists():
+        print(json.dumps({{"BackendState":"Running","Self":{{"TailscaleIPs":["100.64.0.1"]}}}}))
+        sys.exit(0)
     print(json.dumps({{"BackendState":"Stopped"}}))
     sys.exit(1)
 if {mode!r} == 'up-stall': time.sleep(60)
@@ -233,6 +229,7 @@ if {mode!r} == 'auth':
     print('Log in at: https://login.tailscale.com/a/synthetic-auth-value')
     print('password=synthetic-sensitive-payload', file=sys.stderr)
     sys.exit(7)
+Path({str(root / 'started')!r}).touch()
 sys.exit(0)
 ''')
         fake.chmod(0o700)
@@ -282,7 +279,7 @@ if PLIST.exists():
           d.get("ProgramArguments"))
     check("plist uses the repo portability token",
           any(a.startswith("{{REPO}}") for a in d.get("ProgramArguments", [])))
-    check("plist is not KeepAlive (one-shot at login)", not d.get("KeepAlive"))
+    check("plist is not KeepAlive (bounded periodic checks)", not d.get("KeepAlive"))
 check("agent is primary-only (the Studio is the hub)", "com.carr.tailscale-up.plist" in cac.PRIMARY_ONLY)
 check("agent is not definition-only (the normal install path loads it)",
       "com.carr.tailscale-up.plist" not in cac.launchd_hold.DEFINITION_ONLY)

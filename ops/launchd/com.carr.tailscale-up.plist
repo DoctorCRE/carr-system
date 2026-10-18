@@ -3,21 +3,6 @@
 <!-- doctrine: tailscale-start-at-login -->
 <plist version="1.0">
 <dict>
-  <!--
-    Start Tailscale at login if it is stopped (WR-000178).
-
-    After the 2026-09-30 macOS reboot the Mac Studio's Tailscale stayed
-    "stopped" for about six hours, which cut off SSH to the MacBook. This agent
-    runs bin/tailscale-up.sh once at login. The script is idempotent: a running
-    node is left alone, a logged-out node is reported rather than prompted.
-
-    PRIMARY-ONLY: the Studio is the hub the MacBook reaches over SSH. The
-    health row in tools/health-check.py (ops/tailscale_health.py) is the
-    detector; this agent is its bound fix.
-
-    One-shot, not KeepAlive: a later manual "stop" in the menu is Joe's choice
-    and must not be overridden every few seconds.
-  -->
   <key>Label</key><string>com.carr.tailscale-up</string>
 
   <key>ProgramArguments</key>
@@ -27,6 +12,40 @@
   </array>
 
   <key>RunAtLoad</key><true/>
+  <!-- carr-launchd-interval-seconds: 120 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>2</integer></dict>
+    <dict><key>Minute</key><integer>4</integer></dict>
+    <dict><key>Minute</key><integer>6</integer></dict>
+    <dict><key>Minute</key><integer>8</integer></dict>
+    <dict><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Minute</key><integer>12</integer></dict>
+    <dict><key>Minute</key><integer>14</integer></dict>
+    <dict><key>Minute</key><integer>16</integer></dict>
+    <dict><key>Minute</key><integer>18</integer></dict>
+    <dict><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Minute</key><integer>22</integer></dict>
+    <dict><key>Minute</key><integer>24</integer></dict>
+    <dict><key>Minute</key><integer>26</integer></dict>
+    <dict><key>Minute</key><integer>28</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Minute</key><integer>32</integer></dict>
+    <dict><key>Minute</key><integer>34</integer></dict>
+    <dict><key>Minute</key><integer>36</integer></dict>
+    <dict><key>Minute</key><integer>38</integer></dict>
+    <dict><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Minute</key><integer>42</integer></dict>
+    <dict><key>Minute</key><integer>44</integer></dict>
+    <dict><key>Minute</key><integer>46</integer></dict>
+    <dict><key>Minute</key><integer>48</integer></dict>
+    <dict><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Minute</key><integer>52</integer></dict>
+    <dict><key>Minute</key><integer>54</integer></dict>
+    <dict><key>Minute</key><integer>56</integer></dict>
+    <dict><key>Minute</key><integer>58</integer></dict>
+  </array>
 
   <key>StandardOutPath</key><string>{{REPO}}/out/tailscale-up.log</string>
   <key>StandardErrorPath</key><string>{{REPO}}/out/tailscale-up.log</string>
