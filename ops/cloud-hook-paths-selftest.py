@@ -42,6 +42,7 @@ CONTRACT = REPO / "ops" / "config" / "delegation-gate-hook.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
 GATE = "delegation-gate.py"
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
+KNOWN_HOOKS = (GATE, "builder-agent-gate.py", *MACHINE_HOOKS)
 
 FAILURES: list[str] = []
 
@@ -60,7 +61,7 @@ def wired_commands() -> list[tuple[str, str, str]]:
         for group in groups:
             for hook in group.get("hooks", []):
                 command = hook["command"]
-                script = next((s for s in (GATE, *MACHINE_HOOKS) if s in command), "")
+                script = next((s for s in KNOWN_HOOKS if s in command), "")
                 out.append((event, script, command))
     return out
 
@@ -188,7 +189,7 @@ def mac_cases() -> None:
         project = tmp / "worktree"
         (project / "hooks").mkdir(parents=True)
         canonical.mkdir(parents=True)
-        for name in (GATE, *MACHINE_HOOKS):
+        for name in KNOWN_HOOKS:
             (canonical / name).write_text(STUB.format(marker="CANONICAL", name=name, rc=0))
             (project / "hooks" / name).write_text(STUB.format(marker="PROJECT", name=name, rc=2))
         env = clean_env(home, project)
@@ -216,7 +217,7 @@ def mac_cases() -> None:
 def contract_cases() -> None:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     commands = {(e, s): c for e, s, c in wired_commands()}
-    check("every wired hook names one of the three known scripts",
+    check("every wired hook names one of the four known scripts",
           all(s for (_e, s) in commands), str(list(commands)))
     pre, stop = commands.get(("PreToolUse", GATE)), commands.get(("Stop", GATE))
     check("PreToolUse and Stop run the identical delegation-gate command", pre == stop)
