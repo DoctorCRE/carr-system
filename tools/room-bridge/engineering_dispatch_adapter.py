@@ -198,7 +198,7 @@ def _safe_child_env() -> dict[str, str]:
 def run(job: dict, *, dispatch_fn=dispatch.dispatch, registry: desks.Registry | None = None) -> dict:
     validate_job(job)
     _dedicated_codex_desk(registry or desks.Registry(DEDICATED_REGISTRY_PATH))
-    prepared = codex_checkout.prepare("new:engineering-" + uuid.uuid4().hex[:12], str(REPO), _safe_child_env())
+    prepared = codex_checkout.prepare("new:engineering-" + uuid.uuid4().hex[:12], _safe_child_env())
     if prepared["checkout_revision"] != job["revision"]:
         raise DispatchRefusal("repository advanced before dispatch; job revision is stale")
     prompt = (

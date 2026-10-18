@@ -8,6 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -52,6 +54,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         checkout_root = patch('codex_checkout.CHECKOUT_ROOT', self.root)
         checkout_root.start()
         self.addCleanup(checkout_root.stop)
+        slot_dir = patch.object(dispatch, 'CODEX_SLOT_DIR', self.root / 'slots')
+        slot_dir.start()
+        self.addCleanup(slot_dir.stop)
 
     def git(self, *args, cwd=None):
         return REAL_RUN(['git', '-C', str(cwd or self.source), *args], check=True,
@@ -64,9 +69,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         Path(argv[argv.index('-o') + 1]).write_text('done')
         return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
 
-    def send(self, **kwargs):
+    def send(self, desk='cx', **kwargs):
         with patch.object(dispatch.subprocess, 'run', side_effect=self.execute):
-            row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+            row = dispatch.dispatch(desk, 'repair it', registry=self.reg,
                                     results_path=self.results, env=self.env, **kwargs)
         workspace = Path(row['checkout_workspace'])
         self.addCleanup(lambda: shutil.rmtree(workspace, ignore_errors=True))
@@ -162,6 +167,56 @@ class CheckoutDispatchTests(unittest.TestCase):
                     dispatch.dispatch('cx', 'repair', registry=self.reg,
                                       results_path=self.results, env=self.env, checkout=target)
                 self.assertEqual(self.codex_calls, [])
+
+    def test_checkout_clones_canonical_origin_whatever_the_desk_cwd(self):
+        # WR-000356: cx-app/cx-app2 sit in another repository (clone exit 128),
+        # sol-fixer in a plain folder (origin lookup exit 128), and retired
+        # worktree desks in folders that no longer exist (branch validation
+        # "unavailable"). The job checkout is a carr-system clone in every case.
+        other = self.root / 'doctorcre-app'
+        other.mkdir()
+        self.git('init', '-b', 'main', cwd=other)
+        self.git('commit', '--allow-empty', '-m', 'app', cwd=other)
+        self.git('remote', 'add', 'origin', str(self.root / 'app-origin.git'), cwd=other)
+        plain = self.root / 'flash-desk'
+        plain.mkdir()
+        for desk, cwd in (('cx-app', other), ('sol-fixer', plain),
+                          ('retired', self.root / 'worktrees' / 'gone')):
+            with self.subTest(desk=desk):
+                self.reg.register(desk, 'codex-session', cwd=str(cwd), family='sol', effort='high')
+                row = self.send(desk=desk, checkout='repair', fresh=True)
+                repo = Path(row['checkout_path'])
+                self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
+                self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
+
+    def test_codex_jobs_queue_for_a_free_slot(self):
+        # WR-000356: five concurrent Sol-high jobs drew 429s; a `send` past
+        # CARR_CODEX_MAX_CONCURRENT waits for a free slot instead of starting.
+        slots = {'CARR_CODEX_MAX_CONCURRENT': '1', 'CARR_CODEX_SLOT_DIR': str(self.root / 'slots'),
+                 'CODEX_HOME': str(self.root)}
+        argv = ['--registry', str(self.reg.path), '--results', str(self.results),
+                'send', 'cx', 'repair it', '--fresh']
+        held = dispatch._codex_slot(slots)
+        held.__enter__()
+        released = False
+        try:
+            with patch.dict(os.environ, slots), \
+                 patch.object(dispatch, 'CODEX_SLOT_POLL_S', 0.01), \
+                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
+                 patch.object(dispatch.subprocess, 'run', side_effect=self.execute), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                job = threading.Thread(target=dispatch.main, args=(argv,))
+                job.start()
+                time.sleep(0.3)
+                self.assertEqual(self.codex_calls, [])
+                held.__exit__(None, None, None)
+                released = True
+                job.join(10)
+            self.assertFalse(job.is_alive())
+            self.assertEqual(len(self.codex_calls), 1)
+        finally:
+            if not released:
+                held.__exit__(None, None, None)
 
     def test_cli_documents_and_forwards_checkout(self):
         out = io.StringIO()
