@@ -47,6 +47,17 @@ class DeliveryTests(unittest.TestCase):
         self.assertIn('RULE LOOKUP UNAVAILABLE', specific['additionalContext'])
         self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False))
 
+    def test_stop_never_blocks_on_lookup_failure(self):
+        """A blocked Stop re-opens the turn; Codex desks looped for hours on it (2026-10-18)."""
+        def crash(command, **kwargs):
+            raise ValueError('unparseable catalog')
+        base = {'hook_event_name': 'Stop', 'session_id': 's', 'turn_id': 't',
+                'last_assistant_message': 'done', 'cwd': str(hook.REPO)}
+        self.assertIsNone(hook.process(base, runner=crash, dedupe=False))
+        self.assertIsNone(hook.process(dict(base, session_id=''), runner=crash, dedupe=False))
+        mismatch = [dict(id='11111111', statement='Binding text', scope={'tools': ['Bash']}, personal_to='dell')]
+        self.assertIsNone(self.invoke(mismatch, event='Stop'))
+
     def test_sponsor_mismatch_still_refuses_the_action(self):
         out = self.invoke([dict(id='11111111', statement='Binding text',
                                scope={'tools': ['Bash']}, personal_to='dell')])
