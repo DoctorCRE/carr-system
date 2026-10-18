@@ -37,6 +37,7 @@ FULL_PATTERNS = (
     'tools/renumber-at-merge*', 'tools/*f03*', 'ops/*f03*', 'ops/*.sql',
     'mcp-server/test/*pg*', 'mcp-server/test/*f03*',
     'mcp-server/test/find-rule-supersedes*', 'mcp-server/test/catch-me-up-writer-route*',
+    'mcp-server/test/one-step-rule-approval*',
 )
 
 
