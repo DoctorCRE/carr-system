@@ -167,6 +167,22 @@ class ReportTests(unittest.TestCase):
         self.snapshot["launchctl_disabled"] = '"com.carr.test" => true'
         self.assertEqual(self.codes(), ["unexpected_enabled"])
 
+    def test_unknown_job_needs_a_loaded_job_or_a_plist_not_a_bare_override(self):
+        """Fixture run through the CLI: launchd override entries outlive retired jobs."""
+        argv = ["/bin/sh", "/machine/carr-system/bin/task.sh"]
+        self.snapshot["launchctl_disabled"] += ' "com.carr.retired" => enabled'
+        self.snapshot["plists"]["com.carr.undeclared-plist"] = {"ProgramArguments": argv}
+        self.snapshot["launchctl_list"] += "-\t0\tcom.carr.undeclared-loaded\n"
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "snapshot.json"
+            path.write_text(json.dumps(self.snapshot))
+            result = subprocess.run([sys.executable, str(ROOT / "ops/scheduled-jobs-check.py"),
+                                     "--fixture", str(path), "--now", "1000", "--json"],
+                                    capture_output=True, text=True)
+        unknown = {r["label"] for r in json.loads(result.stdout) if r["code"] == "unknown_job"}
+        self.assertNotIn("com.carr.retired", unknown)
+        self.assertLessEqual({"com.carr.undeclared-plist", "com.carr.undeclared-loaded"}, unknown)
+
     def test_structured_arguments_keep_paths_with_spaces(self):
         self.use_program(["/bin/sh", "/machine/carr-system/bin/task with space.sh"])
         self.assertEqual(self.codes(), [])
