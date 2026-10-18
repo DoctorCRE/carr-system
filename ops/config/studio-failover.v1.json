@@ -19,13 +19,6 @@
   },
   "jobs": [
     {
-      "label": "com.carr.canary-ingest-sink",
-      "source": "ops/launchd/com.carr.canary-ingest-sink.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.cliproxyapi",
       "source": "ops/launchd/com.carr.cliproxyapi.plist",
       "credentials": [

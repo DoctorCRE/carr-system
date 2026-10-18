@@ -26,29 +26,6 @@
       "schedule_expectation": null
     },
     {
-      "label": "com.carr.canary-ingest-sink",
-      "path": "~/Library/LaunchAgents/com.carr.canary-ingest-sink.plist",
-      "executables": [
-        "/opt/homebrew/bin/python3"
-      ],
-      "dependencies": [
-        "~/carr-system/tools/canary-ingest-sink.py"
-      ],
-      "disabled": false,
-      "environment_names": [
-        "PATH"
-      ],
-      "schedule_source": "~/Library/LaunchAgents/com.carr.canary-ingest-sink.plist",
-      "classification": "leader-job",
-      "macbook_installed": false,
-      "macbook_missing": [],
-      "schedule_expectation": {
-        "scheduler": "launchd",
-        "expected_enabled": false,
-        "expected_installed": false
-      }
-    },
-    {
       "label": "com.carr.cliproxyapi",
       "path": "~/Library/LaunchAgents/com.carr.cliproxyapi.plist",
       "executables": [
