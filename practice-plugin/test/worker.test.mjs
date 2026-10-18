@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { TOOLS } from '../src/tools.mjs';
+import { PUBLIC_TOOLS } from '../src/modern.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -21,7 +21,7 @@ test('SDK client initializes, lists, pings and calls without authentication or s
   try {
     await client.connect(transport);
     assert.equal(transport.sessionId, undefined);
-    assert.equal((await client.listTools()).tools.length, TOOLS.length);
+    assert.equal((await client.listTools()).tools.length, PUBLIC_TOOLS.length);
     await client.ping();
     const r = await client.callTool({ name: 'plan_practice_space', arguments: {
       practice_type: 'medical', providers: 1, operatories: 0, exam_rooms: 3,

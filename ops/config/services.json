@@ -134,8 +134,8 @@
     },
     {
       "key": "tailscale-up",
-      "name": "Tailscale recovery at login",
-      "purpose": "Starts a stopped primary Mac node once at login using its stored preferences and node key. Ordinary health reads the local backend state; logged-out nodes require sign-in.",
+      "name": "Tailscale backend and route recovery",
+      "purpose": "Keeps the primary Mac backend and utun tailnet route up using its stored preferences and node key. A lost route gets one verified reconnect; logged-out nodes require sign-in.",
       "family": "Local Mac edge",
       "criticality": "high",
       "owner_actor": "joe",
@@ -146,7 +146,7 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.tailscale-up.plist",
           "runs_on": "primary",
-          "notes": "Primary-only RunAtLoad, no repeating cadence or KeepAlive. ops/tailscale_health.py reads the backend independently of login frequency."
+          "notes": "Primary-only RunAtLoad and a 120-second cadence as StartCalendarInterval (StartInterval never fires on macOS 27), no KeepAlive. ops/tailscale_health.py verifies Running and the kernel route; repair outcomes are timestamped in out/tailscale-up.log."
         }
       ]
     },

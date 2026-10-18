@@ -57,6 +57,8 @@ class UpdateLeadFake {
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
 
+    if (sql.startsWith("select pg_advisory_xact_lock(hashtextextended($1, 0))"))
+      return { rows: [] };
     if (sql.startsWith("select request_hash, response"))
       return { rows: [] };
 

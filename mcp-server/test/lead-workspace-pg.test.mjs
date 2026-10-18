@@ -674,3 +674,45 @@ run("a stale workspace snapshot keeps its original event proof while a later rea
   assert.equal(fresh.stage_history[1].idempotency_key, firstKey);
   assert.equal(fresh.stage_history[1].after_version, 2);
 });
+
+run("same-key concurrent field patches replay the committed response", async (c) => {
+  const f = await fixture(c);
+  const args = {
+    idempotency_key: randomUUID(), lead: f.lead, base_version: 1,
+    expected_actor: f.human.slug, fields: { notes: "Synthetic revised note" },
+  };
+  const other = new pg.Client({ connectionString: dsn });
+  const observer = new pg.Client({ connectionString: dsn });
+  await other.connect();
+  await observer.connect();
+  try {
+    await c.query("begin");
+    const first = await executeRegisteredTool(c, f.human, "update-lead", args);
+    const pending = (async () => {
+      await other.query("begin");
+      try {
+        const r = await executeRegisteredTool(other, f.human, "update-lead", args);
+        await other.query("commit");
+        return r;
+      } catch (e) {
+        await other.query("rollback");
+        throw e;
+      }
+    })();
+    pending.catch(() => {});
+    // The observer runs outside any transaction, so each probe sees a fresh snapshot.
+    let waited = false;
+    for (let n = 0; n < 200 && !waited; n++) {
+      const row = (await observer.query(
+        "select wait_event_type from pg_stat_activity where pid=$1", [other.processID])).rows[0];
+      waited = row?.wait_event_type === "Lock";
+      if (!waited) await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    await c.query("commit");
+    assert.equal(waited, true, "the second writer must wait while the first transaction is open");
+    assert.deepEqual(await pending, { replayed: true, ...first });
+  } finally {
+    await other.end();
+    await observer.end();
+  }
+});

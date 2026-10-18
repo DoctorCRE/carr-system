@@ -166,6 +166,18 @@
       "sha256": "f221849bbf75d743392098bf263290aa0255b07a50e893ac8880bd1aa7ef4db6",
       "rule": "pii-email",
       "reason": "Operator's own tailnet SSH login literal in the inventory probe; no client data."
+    },
+    {
+      "path": "ops/study-sources-selftest.py",
+      "sha256": "de0c52738531f876c3187fac4943e86a204fa057348b9c5df3d55b37366b0547",
+      "rule": "credential-url",
+      "reason": "Historical PR 1429 revision whose credential-URL redaction test used a synthetic placeholder password in a made-up example.com URL. Retained in PR history after the fixture moved to a placeholder password; exception binds only these exact immutable bytes and this detector."
+    },
+    {
+      "path": "ops/study-sources-selftest.py",
+      "sha256": "846862e0f4265916a57350fe6a1cfb7b9e0d7b8b973084135537caa3312defed",
+      "rule": "credential-url",
+      "reason": "Historical PR 1429 revision whose credential-URL redaction test used a synthetic placeholder password in a made-up example.com URL. Retained in PR history after the fixture moved to a placeholder password; exception binds only these exact immutable bytes and this detector."
     }
   ]
 }

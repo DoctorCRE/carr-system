@@ -630,11 +630,16 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
             stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         pid = None
         try:
+            # write_text truncates before it writes, so the file can exist
+            # while still empty; wait for the pid itself, not the file.
             deadline = time.monotonic()+10
-            while not marker.exists() and time.monotonic()<deadline:
+            while time.monotonic()<deadline:
+                try: text = marker.read_text().strip()
+                except FileNotFoundError: text = ''
+                if text.isdigit(): break
                 time.sleep(.02)
-            self.assertTrue(marker.exists(), 'identity capture never began')
-            pid = int(marker.read_text())
+            self.assertTrue(text.isdigit(), 'identity capture never began')
+            pid = int(text)
             time.sleep(.2)
             wrapper.kill(); wrapper.wait(timeout=5)
             self.assertFalse((self.home/'args.json').exists(),
