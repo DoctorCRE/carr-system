@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run registered jobs, scan deterministic evidence, or print an orchestrator digest."""
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,10 @@ def main():
     commands.add_parser("scan")
     commands.add_parser("vendor-watch", help="Run only the hourly vendor release checks; no agent actions")
     commands.add_parser("digest")
+    resolve = commands.add_parser("resolve-action", help="After inspecting the destination and owned processes, record a failed action whose effect did not occur; never retry it")
+    resolve.add_argument("key", help="exact recorded action key, including the bound PR head")
+    resolve.add_argument("--outcome", choices=["not-executed"], required=True)
+    resolve.add_argument("--evidence", required=True, help="observed destination/process evidence that proves no effect occurred; this assertion is not verified by the command")
     args = parser.parse_args()
     config = watchdog.load_config(args.config)
     if os.environ.get("CARR_JOB_BOARD"):
@@ -39,6 +44,9 @@ def main():
         return watchdog.run_job(root, config, args.card, args.executor, args.minutes, argv)
     if args.mode == "digest":
         print(watchdog.digest(root, config))
+        return 0
+    if args.mode == "resolve-action":
+        print(json.dumps(watchdog.resolve_failed_action(root, config, args.key, args.evidence)))
         return 0
     return watchdog.scan(root, config, args.config, vendor_only=args.mode == "vendor-watch")
 

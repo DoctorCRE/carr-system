@@ -979,6 +979,110 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_scan_recovers_after_verified_absent_effect_without_relaunch(self):
+        from unittest.mock import Mock, patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            f = w.finding("pr_blocked_review", "repo#1@abc", "review", c)
+            w.append(root / c["paths"]["actions"], {
+                "key": f["key"], "action": "fix_once", "status": "failed",
+                "error": "Checkout failed before launch."})
+            effects = Mock()
+            effects.report.return_value = {}
+            with patch.object(w, "collect", return_value={"errors": []}), \
+                 patch.object(w, "detect", return_value=[f]), \
+                 patch.object(w, "Effects", return_value=effects), \
+                 patch.object(w, "vendor_release_findings", return_value=[]), \
+                 patch.object(w, "digest", return_value=""):
+                self.assertEqual(w.scan(root, c), 1)
+                w.resolve_failed_action(root, c, f["key"], "No job registered; remote head unchanged.")
+                self.assertEqual(w.scan(root, c), 0)
+            findings = w.read_latest(root / c["paths"]["findings"])
+            self.assertIsNotNone(findings["action_error:" + f["key"]]["cleared_at"])
+            self.assertIsNone(findings[f["key"]]["cleared_at"])
+            effects.prepare.assert_not_called()
+            effects.act.assert_not_called()
+
+    def test_action_resolution_cli_records_explicit_no_effect_outcome(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger = root / c["paths"]["actions"]
+            w.append(ledger, {"key": "review:repo#1@abc", "action": "fix_once", "status": "failed"})
+            command = [sys.executable, str(ROOT / "tools/job-watchdog.py"),
+                       "--root", str(root), "resolve-action", "review:repo#1@abc",
+                       "--evidence", "No job registered; remote head unchanged."]
+            missing = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertEqual(w.read_latest(ledger)["review:repo#1@abc"]["status"], "failed")
+            result = subprocess.run([*command, "--outcome", "not-executed"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["status"], "resolved_no_effect")
+
+    def test_action_resolution_preserves_failure_and_is_idempotent(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger = root / c["paths"]["actions"]
+            original = {"key": "review:repo#1@abc", "status": "failed", "action": "fix_once",
+                        "error": "Checkout failed before launch."}
+            w.append(ledger, original)
+            evidence = "No job registered; remote head unchanged."
+            result = w.resolve_failed_action(root, c, original["key"], evidence)
+            self.assertEqual(result["status"], "resolved_no_effect")
+            self.assertEqual(result["error"], original["error"])
+            self.assertEqual(result["resolution"]["outcome"], "not_executed")
+            self.assertEqual(result["resolution"]["evidence"], evidence)
+            before = ledger.read_bytes()
+            self.assertEqual(w.resolve_failed_action(root, c, original["key"], evidence), result)
+            self.assertEqual(ledger.read_bytes(), before)
+            self.assertEqual(json.loads(ledger.read_text().splitlines()[0]), original)
+            with self.assertRaisesRegex(ValueError, "different evidence"):
+                w.resolve_failed_action(root, c, original["key"], "Changed claim")
+            self.assertEqual(ledger.read_bytes(), before)
+
+    def test_action_resolution_refuses_ambiguous_or_completed_actions_and_scan_contention(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger = root / c["paths"]["actions"]
+            with self.assertRaisesRegex(ValueError, "not recorded"):
+                w.resolve_failed_action(root, c, "missing", "Inspected")
+            for status in ["intent", "done", "failed"]:
+                w.append(ledger, {"key": status, "status": status, "action": "fix_once"})
+            before = ledger.read_bytes()
+            for status in ["intent", "done"]:
+                with self.assertRaisesRegex(ValueError, "only a recorded failed"):
+                    w.resolve_failed_action(root, c, status, "Inspected")
+            with self.assertRaisesRegex(ValueError, "requires evidence"):
+                w.resolve_failed_action(root, c, "failed", "  ")
+            with w.locked(root / c["paths"]["scan_lock"], blocking=False):
+                with self.assertRaises(BlockingIOError):
+                    w.resolve_failed_action(root, c, "failed", "Inspected")
+            self.assertEqual(ledger.read_bytes(), before)
+
+    def test_resolved_no_effect_action_is_terminal_without_hiding_the_review(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            f = w.finding("pr_blocked_review", "repo#1@abc", "review", c)
+            w.append(root / c["paths"]["actions"], {
+                "key": f["key"], "action": "fix_once", "status": "resolved_no_effect",
+                "resolution": {"outcome": "not_executed", "evidence": "Checkout failed before launch."}})
+            effects = Mock()
+            effects.report.return_value = {}
+            found = w.reconcile(root, c, [f], effects, 100)
+            self.assertEqual([r["kind"] for r in found], ["pr_blocked_review"])
+            effects.prepare.assert_not_called()
+            effects.act.assert_not_called()
+
     def test_scan_files_each_defect_without_creating_or_overlaying_board_cards(self):
         import contextlib
         import io
