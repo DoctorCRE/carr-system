@@ -1125,6 +1125,9 @@ class StateTests(unittest.TestCase):
                  patch.object(effects, "launch", return_value={"ok": True}) as launch:
                 effects.fix(f)
             tree = Path(launch.call_args.args[2])
+            sys.path.insert(0, str(ROOT / "tools/room-bridge"))
+            import desks
+            self.assertIsNotNone(desks.NAME_OK.fullmatch(tree.name))
             self.assertNotEqual(tree.name, abandoned)
             self.assertEqual(git("rev-parse", "HEAD", cwd=tree), head)
             self.assertEqual((tree / payload.name).stat().st_size, payload.stat().st_size)

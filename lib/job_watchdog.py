@@ -1161,7 +1161,7 @@ class Effects:
             raise RuntimeError("authorized repository origin mismatch")
         # Git can retain the new branch when a failed file write rolls back the
         # worktree. Preserve that evidence; a new attempt owns a distinct ref.
-        name = "watchdog-fix-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16] + "-" + uuid.uuid4().hex
+        name = "watchdog-fix-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16] + "-" + uuid.uuid4().hex[:10]
         tree = repository / ".claude/worktrees" / name
         command(["git", "fetch", "origin", f"pull/{f['pr']}/head"], c, repository)
         observed = command(["git", "rev-parse", "FETCH_HEAD"], c, repository).strip()
