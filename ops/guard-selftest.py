@@ -27,10 +27,14 @@ import atexit
 import shutil
 import subprocess
 import sys
+import pathlib
+import shlex
 import tempfile
+from git_env import fixture_env
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GUARD = os.path.join(REPO, "hooks", "guard-unattended.py")
+ENV = fixture_env()
 
 ALLOW, DENY = 0, 2
 # A scratch working directory OUTSIDE any git work tree: a read-only fetch may
@@ -41,7 +45,7 @@ atexit.register(shutil.rmtree, OUTSIDE, True)
 
 def run(payload):
     payload = dict(payload)
-    env = {**os.environ, **payload.pop("__env", {})}
+    env = {**ENV, **payload.pop("__env", {})}
     p = subprocess.run([sys.executable, GUARD], input=json.dumps(payload),
                        capture_output=True, text=True, timeout=20, env=env)
     return p.returncode, (p.stderr or "").strip()
@@ -1155,8 +1159,67 @@ for _cmd in (
     case(f"replay sample: {_cmd!r} is allowed", bash(_cmd, cwd=WORKTREE), ALLOW)
 
 
+def source_restore_cases():
+    failures = []
+    count = 0
+    with tempfile.TemporaryDirectory(prefix="doctorcre-restore-") as directory:
+        root = pathlib.Path(directory)
+        def git(*args):
+            return subprocess.check_output(["git", "-C", directory, *args], text=True, env=ENV)
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "fixture@example.invalid")
+        git("config", "user.name", "Fixture")
+        for path in ("README.md", "module.js"):
+            (root / path).write_text("main\n")
+        git("add", "README.md", "module.js")
+        git("commit", "-qm", "main")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        git("checkout", "-qb", "feature")
+        for path in ("README.md", "module.js"):
+            (root / path).write_text("feature\n")
+        git("add", "README.md", "module.js")
+        git("commit", "-qm", "feature")
+        git("update-ref", "refs/remotes/origin/same", "HEAD")
+        index = git("write-tree")
+        for adapter in (bash, direct_exec, codex_exec):
+            for command, expected in (
+                ("git checkout -q origin/main -- .", DENY),
+                ("git restore --source=origin/main --staged --worktree .", DENY),
+                (f"cd {shlex.quote(directory)} && git checkout origin/main -- .", DENY),
+                (f"git -C {shlex.quote(directory)} checkout origin/main -- :/", DENY),
+                ("git checkout origin/main -- README.md", ALLOW),
+                ("git checkout HEAD -- .", ALLOW),
+                ("git restore --source=origin/same --staged --worktree .", ALLOW),
+                ("git show origin/main:README.md", ALLOW),
+                ("git diff origin/main", ALLOW),
+                ("git checkout -b another origin/main", ALLOW),
+                ('echo "git checkout origin/main -- ."', ALLOW),
+            ):
+                count += 1
+                rc, error = run(adapter(command, directory))
+                ok = rc == expected
+                if expected == DENY:
+                    ok = ok and all(path in error for path in ("README.md", "module.js"))
+                    ok = ok and "explicit" in error
+                if not ok:
+                    failures.append(f"{adapter.__name__}: {command}: {rc} {error}")
+        assert index == git("write-tree")
+        assert (root / "README.md").read_text() == "feature\n"
+        assert (root / "module.js").read_text() == "feature\n"
+        command = "git checkout origin/main -- README.md"
+        assert run(bash(command, directory))[0] == ALLOW
+        git("checkout", "origin/main", "--", "README.md")
+        assert (root / "README.md").read_text() == "main\n"
+        assert (root / "module.js").read_text() == "feature\n"
+    for failure in failures:
+        print("FAIL source restore: " + failure)
+    print(f"source restore replay: {count - len(failures)}/{count} adapter cases; index/source unchanged before execution")
+    return failures
+
+
 def main():
     verbose = "-v" in sys.argv[1:]
+    source_fails = source_restore_cases()
     fails = []
     for name, payload, expect in CASES:
         rc, err = run(payload)
@@ -1173,8 +1236,8 @@ def main():
             "derived list ABSENT (clean checkout — guard falls back to KNOWN_HOSTS; "
              "run ops/fetch-allowlist.py to populate it)")
     print(f"\nguard-selftest: {len(CASES) - len(fails)}/{len(CASES)} passed · {mode}")
-    if fails:
-        print("FAILED: " + "; ".join(fails))
+    if fails or source_fails:
+        print("FAILED: " + "; ".join(fails + source_fails))
         return 1
     return 0
 
