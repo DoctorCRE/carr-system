@@ -942,26 +942,6 @@
       ]
     },
     {
-      "key": "canary-ingest-sink",
-      "name": "Notes-sweep canary ingest sink",
-      "purpose": "Isolated loopback-only ingest destination that proves the notes-sweep CANARY's whole posting path (auth, body shape, external_id dedup) without touching the live ingest socket.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "tools/canary-ingest-sink.py",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.canary-ingest-sink.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 1800,
-          "cadence_grace_seconds": 2700,
-          "notes": "KeepAlive server, same shape as doc-engine and call-mode: the health question is 'is it up', never 'did it fire recently', so it is probed by bin/probe-keepalive.py opening a TCP connection to 127.0.0.1:4684 rather than by recent-run freshness \u2014 a connect proves it is ACCEPTING. Same wrapper exemption and reason as the other two KeepAlive servers: bin/run-scheduled.sh records on child exit, and a KeepAlive child exiting just means launchd restarted it. Refuses to bind unless a mode-0600 credential file is present, so it will show DOWN until ~/.config/carr/notes-canary.env exists \u2014 that is a config precondition, not a service defect."
-        }
-      ]
-    },
-    {
       "key": "capture-watch",
       "name": "Recording capture bridge, claim side",
       "purpose": "Claims new recording sessions as they appear under ~/Recordings.",
