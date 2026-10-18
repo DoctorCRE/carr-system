@@ -274,7 +274,7 @@ class StudySourcesTests(unittest.TestCase):
             self.assertNotIn('danger-full-access', event.get('args', []))
 
     def test_credential_urls_never_enter_any_sink(self):
-        for url in ('https://synthetic-user:synthetic-password@example.com/a',
+        for url in ('https://synthetic-user:changeme@example.com/a',
                     'https://example.com/a?access_token=synthetic-query-secret',
                     'https://example.com/a?key=synthetic-query-secret',
                     'https://example.com/a?sig=synthetic-query-secret'):
@@ -285,7 +285,7 @@ class StudySourcesTests(unittest.TestCase):
                 for path in self.root.rglob('*'):
                     if path.is_file() and ('out' in path.parts or path.name == 'events.jsonl'):
                         sinks += str(path) + path.read_text(errors='replace')
-                for secret in ('synthetic-user', 'synthetic-password', 'synthetic-query-secret'):
+                for secret in ('synthetic-user', 'changeme', 'synthetic-query-secret'):
                     self.assertNotIn(secret, sinks)
 
     def test_transport_fetches_literal_braces(self):
