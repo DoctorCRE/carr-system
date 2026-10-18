@@ -264,6 +264,19 @@ def main() -> int:
     ))
 
     loaded = migration_runner.load_migrations()
+    # A merge can add an earlier migration after a branch exported its snapshot.
+    # The real rebuild must see an immutable prefix, not a hole below its tip.
+    snapshot = (REPO / "db/schema.sql").read_text(encoding="utf-8")
+    marker = "COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;"
+    rows = snapshot.split(marker, 1)[1].split("\n\\.\n", 1)[0].strip().splitlines()
+    snapshot_ledger: dict[str, str] = {}
+    for row in rows:
+        fields = row.split("\t")
+        assert len(fields) == 3, "snapshot ledger row must retain its hash and timestamp"
+        assert fields[0] not in snapshot_ledger, "snapshot ledger filenames must be unique"
+        snapshot_ledger[fields[0]] = fields[1]
+    assert snapshot_ledger, "committed snapshot must carry its applied ledger"
+    migration_runner.validate_applied_ledger(loaded, snapshot_ledger)
     loaded_0169 = tuple(name for name, _sql, _digest in loaded if name.startswith("0169_"))
     assert loaded_0169 == FROZEN_0169, loaded_0169
     loaded_digests = {name: digest for name, _sql, digest in loaded}
