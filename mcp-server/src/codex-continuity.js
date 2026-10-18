@@ -1,9 +1,9 @@
 // Durable continuity for native Codex tasks.  This module stores bounded
-// semantic checkpoints and cursor/event receipts; native transcript bodies
+// semantic checkpoints and reads historical event receipts; native transcript bodies
 // remain on the Codex machine and are read through the local adapter.
 
 import { organizationTenantForActor, personalScopeForActor } from "./identity.js";
-import { canonicalJson, digest } from "./artifact-trust.js";
+import { digest } from "./artifact-trust.js";
 import {
   CONTINUITY_STORAGE_CONTRACT, REFERENCE_MANIFEST_LIMIT, SEMANTIC_STATE_LIMIT, hydrateReferenceManifest,
   referenceManifestSummary, splitReferenceManifest,
@@ -136,12 +136,6 @@ function boundedJson(value, field, ToolError, limit) {
   if (new TextEncoder().encode(encoded).byteLength > limit)
     throw new ToolError({ error: "codex_continuity_payload_too_large", field, max_bytes: limit });
   return value;
-}
-
-function canonicalDbJson(value) {
-  // JSONB discards undefined properties and canonicalizes object key order;
-  // compare that representation so a transport retry has database semantics.
-  return canonicalJson(JSON.parse(JSON.stringify(value)));
 }
 
 function cursor(value, ToolError) {
@@ -532,47 +526,5 @@ export function codexContinuityTools({ withEnvelope, writeEvent, ToolError, asse
       },
     },
 
-    "codex-record-event": {
-      write: true,
-      description: "Record a separate idempotent native Codex lifecycle/cursor receipt. Events never replace semantic checkpoint meaning and are safe to retry with the same key.",
-      inputSchema: { type: "object", properties: { idempotency_key: { type: "string" }, runtime: { type: "string", enum: [RUNTIME] }, native_task_id: { type: "string" }, project_id: { type: "string" }, cwd: { type: "string" }, event_type: { type: "string" }, cursor: { type: "object" }, transcript_ref: { type: "string" } }, required: ["idempotency_key", "runtime", "native_task_id", "project_id", "cwd", "event_type"] },
-      handler: async (c, actor, args) => { guard(args); requireNativeCodex(actor, ToolError); const key = common(args, ToolError); const eventType = text(args.event_type, "event_type", ToolError, 100); const cur = cursor(args.cursor, ToolError);
-        return withEnvelope(c, actor, "codex-record-event", args, async () => {
-          const tenant = organizationTenantForActor(actor);
-          const owner = ownerSlug(actor);
-          await lockTask(c, tenant, owner, key.nativeTaskId);
-          const bindings = await readTaskBindings(c, tenant, owner, key.nativeTaskId,
-            ToolError);
-          assertBinding(bindings, key, "codex_event_binding_conflict", ToolError);
-          const ref = args.transcript_ref ? text(args.transcript_ref, "transcript_ref", ToolError, 1000) : null;
-          const r = await c.query(
-            `insert into codex_continuity_event
-              (organization_tenant_id,owner_actor_id,native_task_id,project_id,cwd,event_type,cursor,transcript_ref,idempotency_key)
-             values ($1,(select id from actor where slug=$2),$3,$4,$5,$6,$7::jsonb,$8,$9)
-             on conflict (organization_tenant_id,owner_actor_id,native_task_id,idempotency_key)
-             do nothing
-             returning id,native_task_id,project_id,cwd,event_type,cursor,transcript_ref,created_at`,
-            [tenant, owner, key.nativeTaskId, key.projectId, key.cwd, eventType, dbCursor(cur), ref, args.idempotency_key]);
-          let event = r.rows[0];
-          if (!event) {
-            const prior = await c.query(
-              `select id,native_task_id,project_id,cwd,event_type,cursor,transcript_ref,created_at
-                 from codex_continuity_event where organization_tenant_id=$1
-                  and owner_actor_id=(select id from actor where slug=$2)
-                  and native_task_id=$3 and idempotency_key=$4`,
-              [tenant, owner, key.nativeTaskId, args.idempotency_key]);
-            event = prior.rows[0];
-            const same = event && event.project_id === key.projectId && event.cwd === key.cwd &&
-              event.event_type === eventType &&
-              canonicalDbJson(event.cursor || null) === canonicalDbJson(cur) && event.transcript_ref === ref;
-            if (!same) throw new ToolError({ error: "codex_event_key_conflict",
-              hint: "reuse an idempotency key only for the identical event payload" });
-          }
-          await writeEvent(c, actor, "codex-record-event", "codex_continuity_event", event.id,
-            { field: "event_type", new: { event_type: eventType }, idempotency_key: args.idempotency_key });
-          return { ok: true, event };
-        });
-      },
-    },
   };
 }

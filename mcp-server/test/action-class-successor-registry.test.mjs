@@ -1,11 +1,3 @@
-// action-class-successor-registry.test.mjs — unit coverage for V5-D01's three
-// verbs (register-action-class-successor, read-action-class-successors,
-// read-action-class-gate) against a fake client. The migration's own
-// guarantees (CHECK-locked status, immutability trigger, an unconditional
-// gate) are proved separately on real PostgreSQL in
-// action-class-successor-registry-postgres.test.mjs.
-//
-// Run with: node --test mcp-server/test/action-class-successor-registry.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -64,12 +56,6 @@ test("all three verbs are registered with the documented write flags", () => {
   assert.equal(TOOLS["read-action-class-gate"].write, false);
 });
 
-// REGISTRATION IS A PARTNER ACT (independent review of PR #1290). A row is
-// unique, append-only and immutable, and it fixes the accountable owner and
-// the activation_predicate for good -- so the first caller must not be just
-// any authenticated agent. These go through executeRegisteredTool, the
-// deployed dispatch path, not the bare handler, because the humanOnly gate
-// lives in the dispatcher.
 test("register-action-class-successor is humanOnly; the two reads are not", () => {
   assert.equal(TOOLS["register-action-class-successor"].humanOnly, true);
   assert.notEqual(TOOLS["read-action-class-successors"].humanOnly, true);
@@ -82,8 +68,6 @@ const noDatabase = {
   },
 };
 
-// Sponsored by joe, but the server has not verified it as a native agent bound
-// to joe's authority connection -- an ordinary sponsored agent principal.
 const sponsored = { id: "10000000-0000-0000-0000-000000000011", slug: "claude", display: "Claude",
   human: false, sponsoring_human_slug: "joe", native_agent_verified: false,
   via: "oauth-agent", client_id: "claude-client" };

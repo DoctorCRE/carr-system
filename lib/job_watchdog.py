@@ -96,6 +96,22 @@ def stamp(now=None):
     return datetime.fromtimestamp(time.time() if now is None else now, timezone.utc).isoformat()
 
 
+# What still waits on Joe for each needs_joe pattern class, in add-loop's
+# residue vocabulary (mcp-server/src/tools.js RESIDUE_KINDS). add-loop refuses
+# a capability or ruling loop that does not name one.
+NEEDS_JOE_RESIDUE = {"credentials": "provider_login", "money": "money_movement",
+                     "client-facing": "external_send"}
+
+
+def loop_blocker(f):
+    """add-loop blocker fields for a loop filed from finding ``f``."""
+    needs = f.get("needs_joe")
+    if not needs:
+        return {"blocker": "other_lane"}
+    return {"blocker": "capability" if needs == "credentials" else "ruling",
+            "residue_kind": NEEDS_JOE_RESIDUE[needs], "residue_host": f["subject"]}
+
+
 def loop_owner(f):
     """Record-layer owner for a loop filed from finding ``f``.
 
@@ -488,6 +504,8 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
     project = project or config["board"]
     board = root / "out/boards" / (project + ".json")
     env = dict(os.environ, PROGRESS_BOARD_ROOT=str(root / "out"), PROGRESS_BOARD_LOCAL_ONLY="1")
+    if not config.get("board_github_enabled", True):
+        env["PROGRESS_BOARD_SKIP_GH"] = "1"
     with locked(root / "out/watchdog/board.lock"):
         if not board.exists():
             result = subprocess.run([sys.executable, str(SOURCE / "tools/progress_board.py"), "init",
@@ -499,7 +517,7 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
         prior = json.loads(board.read_text()).get("tasks", {}).get(card)
         argv = [sys.executable, str(SOURCE / "tools/progress_board.py"), "task", project, card,
                 "--status", status, "--health", health or ("blocked" if status == "blocked" else "healthy"),
-                "--note", note, "--receipt", "--defer-refresh"]
+                "--note", note, "--receipt"]
         if prior is None:
             argv.extend(["--title", card, "--executor", executor])
         elif executor != "orchestrator":
@@ -1028,7 +1046,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") and f["needs_joe"] != "credentials" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": ("Joe must restore authentication through the provider login; "
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
@@ -1054,7 +1072,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") or f.get("board_status") == "question-for-orchestrator" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor or queue repair: " + f["subject"]}
         response = self._record("add-loop", payload)
         if response.get("ok") is not True or not response.get("loop_id"):
@@ -1103,7 +1121,7 @@ class Effects:
                            "idempotency_key": "scheduled-jobs-clear:" + f["loop_id"],
                            "resolution": "done", "outcome":
                            "A complete scheduled-job scan no longer finds " + f["key"] +
-                           "; checked live machine evidence against ops/config/scheduled-jobs.v1.json."}
+                           "; checked live machine evidence against the native launchd definitions."}
                 result = command([str(SOURCE / "run.sh"), "call", "close-loop", json.dumps(payload)], self.config)
                 closed = json.loads(result[result.find("{"):])
                 if closed.get("ok") is not True:

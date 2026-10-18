@@ -10,10 +10,14 @@ NULL-to-``carr-internal`` exception, then rolls the schema and row back.
 """
 from __future__ import annotations
 
-import os
 import sys
-import uuid
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
+import os
+import uuid
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict
@@ -42,9 +46,9 @@ def require_disposable(dsn: str) -> None:
 
 
 def main() -> int:
-    if not MIGRATION.exists():
+    if not MIGRATION.name in migration_names(MIGRATION.parent.parent):
         raise SystemExit(f"legacy tenant backfill gate: missing {MIGRATION.name}")
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     required = (
         "carr.legacy_program_tenant_backfill",
         "to_jsonb(new) - 'organization_tenant_id'",

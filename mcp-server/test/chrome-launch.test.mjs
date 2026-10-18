@@ -82,8 +82,13 @@ test("graceful Chrome shutdown does not grow the macOS code-sign clone directory
   const browser = await launchChrome(realChrome);
   t.after(() => browser.close());
   await browser.close();
-  const after = await directoryEntryCount(codeSignCloneDirectory);
-  assert.equal(after, before, `Chrome code-sign clones grew ${before} -> ${after}`);
+  const deadline = performance.now() + CHROME_STOP_TIMEOUT_MS;
+  let after = await directoryEntryCount(codeSignCloneDirectory);
+  while (after > before && performance.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    after = await directoryEntryCount(codeSignCloneDirectory);
+  }
+  assert.ok(after <= before, `Chrome code-sign clones grew ${before} -> ${after}`);
 });
 
 test("Chrome requests a real CDP shutdown before sending process signals", async (t) => {

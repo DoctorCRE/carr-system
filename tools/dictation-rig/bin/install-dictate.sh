@@ -15,8 +15,6 @@ TOOL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BINARY="$TOOL_DIR/dictate/.build/release/quill-dictate"
 CONFIG_DIR="$HOME/.config/quill-dictate"
 CONFIG="$CONFIG_DIR/config.json"
-PLIST_SRC="$TOOL_DIR/launchd/com.carr.quill-dictate.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/com.carr.quill-dictate.plist"
 
 [ -x "$BINARY" ] || { echo "build first: bin/build-dictate.sh" >&2; exit 1; }
 
@@ -66,9 +64,8 @@ if [ "${1:-}" = "--config-only" ]; then
     exit 0
 fi
 
-mkdir -p "$HOME/Library/LaunchAgents"
-cp "$PLIST_SRC" "$PLIST_DST"
-launchctl bootout "gui/$(id -u)/com.carr.quill-dictate" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
-echo "launchd agent com.carr.quill-dictate loaded"
+# The LaunchAgent comes from config-as-code, which owns this label and rewrites
+# the home path per machine. A bare copy of this tool's plist spells Joe's home
+# literally — see install-agent-via-config.sh for the 2026-08-25 finding.
+sh "$TOOL_DIR/bin/install-agent-via-config.sh" "com.carr.quill-dictate"
 echo "if the menu-bar mic shows a badge: grant Accessibility in System Settings"

@@ -89,10 +89,30 @@ DB_ADVISORY_CLASS = "judgment_advisory"
 # preserved; the map must not claim a gate that does not enforce the duty.
 # Keep the exception exact and fail when either side changes its classification.
 PARTIAL_ADMISSION_RULES = {
-    "1fcaa63a",  # heavy-build phases beyond admission validators
+    "8400cd3d",  # sizing work is judgment; the admission does not mechanically size it
     "204391be",  # decide a missing product verb is required
     "a2e78f48",  # recognize a known repair
     "b7ec8f3b",  # review DoctorCRE surface grammar
+    # Approved through approve-rule between 2026-09-23 and 2026-10-13. That
+    # verb refuses a judgment_advisory admission, so every approved judgment
+    # rule lands in production as human_only, while the reviewed map records
+    # the residual duty (no control enforces it). The admission is preserved;
+    # the map must not claim a gate. Grows with every approved judgment rule
+    # until the admission class follows the map (WR-000285).
+    "07dde434",  # AI feeds conversations with the partners, never replaces them
+    "08c4eda2",  # Alabama leads are no longer Dell-only
+    "486584d6",  # a dashboard step in Joe's signed-in browser is the session's job
+    "4a77c35d",  # the Dot works paid-token-saving tasks first
+    "578fdd91",  # enrichment applies its corrections
+    "661d7757",  # Jev is available for all review work
+    "67e48aaf",  # no exposure warning for a credential Joe pasted
+    "76fcbed6",  # every source Joe sends gets its own full study
+    "a3da3d39",  # ask Joe directly for every approval, same turn
+    "a9fc3f0e",  # research uses the whole internet
+    "ac0a6579",  # client share-site passwords stay simple
+    "c363bd8b",  # batch PRs that touch the same files
+    "cfe6b5c6",  # an obvious improvement ships live, not in shadow mode
+    "f673326b",  # no access fences Joe did not ask for
 }
 
 
@@ -163,6 +183,12 @@ def compare(map_data: dict, export_data: dict) -> dict:
                           "normalize to a known bucket")
             continue
         compared += 1
+        if (removed_gate_reclassification(detail) and f_bucket == "judgment_advisory"
+                and d_bucket == "machine_enforceable"):
+            # The map leads production here: bin/sync-rule-admission-prod.sh
+            # --apply, run after merge, moves the admission and the next
+            # --export makes the buckets agree through the normal path below.
+            continue
         if rule_id in PARTIAL_ADMISSION_RULES:
             if f_bucket != "judgment_advisory" or d_bucket != "machine_enforceable":
                 errors.append(f"{rule_id} partial-admission exception is stale")
@@ -176,6 +202,17 @@ def compare(map_data: dict, export_data: dict) -> dict:
                 "db_bucket": d_bucket,
             })
     return {"errors": errors, "compared": compared, "mismatches": mismatches}
+
+
+def removed_gate_reclassification(detail: dict) -> bool:
+    """A rule PR 1801 moved from a removed automated gate to judgment_ambient.
+
+    Joe's 2026-10-15 purge ruling removed the gates; the reviewed map records
+    each such rule's why_unenforceable in one fixed sentence, so the exception
+    is read from the map and cannot cover any rule it does not name."""
+    why = detail.get("why_unenforceable") or ""
+    return (detail.get("enforcement_class") == "judgment_ambient"
+            and why.startswith("Automated gate ") and " removed in PR 1801 " in why)
 
 
 def main() -> int:

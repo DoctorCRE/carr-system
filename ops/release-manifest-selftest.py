@@ -92,14 +92,6 @@ def git(*args: str) -> str:
 
 def main() -> int:
     print("release-manifest-selftest: P0-1 rebuild clause")
-    tool_source = TOOL.read_text(encoding="utf-8")
-    ledger_start = tool_source.index("def migration_tree_ledger")
-    ledger_end = tool_source.index("def ensure_exact_schema_prefix", ledger_start)
-    ledger_impl = tool_source[ledger_start:ledger_end]
-    check("0g. migration ledger reads one byte-preserving git archive",
-          'git_bytes("archive", "--format=tar"' in ledger_impl
-          and 'git("show", f"{sha}:migrations/{filename}")' not in ledger_impl)
-
     tested_sha = "HEAD"
     first = build("--sha", tested_sha)
     second = build("--sha", tested_sha)

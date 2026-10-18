@@ -4,7 +4,6 @@
   "enabled": true,
   "local_off_file": "~/.config/carr/release-pipeline.off",
   "credential_dir": "~/.config/carr",
-  "merge_event_file": "out/merge-events.jsonl",
   "state_dir": "out/release-pipeline",
   "worker": {
     "enabled": true,
@@ -35,20 +34,9 @@
     "canary_workflow_name": "main canary",
     "test_evidence_label": "ops-ci-strict",
     "security_evidence_label": "ci-secret-class",
-    "review_required_after": "2026-09-25T00:00:00Z",
-    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
     "review_markers": [
       "independent review: pass",
       "approve"
-    ],
-    "default_verifier": "claude-review-agent",
-    "forbidden_verifiers": [
-      "carr_jobs",
-      "joe",
-      "dell",
-      "release-pipeline",
-      "local-machine",
-      "jbookout"
     ],
     "required_db_env_names": [
       "NEON_API_KEY",
@@ -71,7 +59,6 @@
     ],
     "review_logins": [],
     "canary_lookback": 50,
-    "_review_evidence": "Public repositories: only a comment from an OWNER/MEMBER/COLLABORATOR (or a login in review_logins) carries a verdict; the LATEST verdict decides and must be an APPROVE carrying `Reviewed-SHA: <exact PR head SHA>`. Every session posts as the OWNER account, so the verifier identity comes from the merge event (or default_verifier), never from comment text or authorship.",
     "canary_ignored_globs": [
       "corpus/**",
       "audits/**",
@@ -107,17 +94,6 @@
       "COLLABORATOR"
     ],
     "review_logins": [],
-    "review_required_after": "2026-09-25T00:00:00Z",
-    "_review_required_after": "PRs merged before this instant predate the independent-review merge pipeline; inside a batch they are listed as pre_pipeline_prs rather than blocking a batch. The HEAD PR of every batch always needs its own approving comment: that is the verifier the database binds.",
-    "default_verifier": "claude-review-agent",
-    "forbidden_verifiers": [
-      "carr_jobs",
-      "joe",
-      "dell",
-      "release-pipeline",
-      "local-machine",
-      "jbookout"
-    ],
     "required_checks": [
       "test"
     ],

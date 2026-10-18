@@ -62,6 +62,7 @@ Usage:
 """
 
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -203,6 +204,39 @@ def range_files(rev_range):
             yield name, text
 
 
+def identity_changed_files():
+    """Read changed working files against the event's base, or local main.
+
+    Historical applied SQL remains checksum immutable. It is not an exemption:
+    any edit to such a file enters this scope and must pass the identity check.
+    """
+    base = None
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path:
+        event = json.loads(pathlib.Path(event_path).read_text())
+        base = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+        if base == "0" * 40:
+            base = None
+    if base is None:
+        try:
+            base = _git("merge-base", "origin/main", "HEAD").stdout.decode().strip()
+            # On a main push the remote ref can already name the current tip.
+            if base == _git("rev-parse", "HEAD").stdout.decode().strip():
+                # Keep unstaged branch edits in scope; fall back one commit only
+                # on a hosted run where main may already have advanced.
+                if event_path:
+                    base = _git("rev-parse", "HEAD^").stdout.decode().strip()
+        except subprocess.CalledProcessError:
+            yield from tracked_files()
+            return
+    for name in _names("diff", "--name-only", "--diff-filter=ACMR", "-z", base):
+        path = REPO / name
+        if path.exists():
+            text = _decode(path.read_bytes())
+            if text is not None:
+                yield name, text
+
+
 def load_allowed_paths():
     if not ALLOW_FILE.exists():
         return set()
@@ -309,6 +343,20 @@ def main():
         print(f"ci-secret-scan: could not read {scope} -- `{cmd}` failed. "
               "Reporting failure rather than a clean scan.", file=sys.stderr)
         return 2
+
+    import pii_guard
+    identity_source = (staged_files() if "--staged" in argv else
+                       range_files(rev_range) if "--range" in argv else
+                       identity_changed_files())
+    try:
+        identity_status = pii_guard.check(
+            identity_source, REPO / "ops/config/public-source-identities.v1.json",
+            output=sys.stderr)
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        print("ops/ci-secret-scan.py:1", file=sys.stderr)
+        return 2
+    if identity_status:
+        return identity_status
 
     if not findings:
         print(f"secret scan: clean ({scope})")

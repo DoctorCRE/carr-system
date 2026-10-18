@@ -15,7 +15,6 @@ BROLL = ASSETS.brand_root / "Stock" / "broll"
 AUD = ASSETS.brand_root / "Audio" / "library"
 FF = "/opt/homebrew/bin/ffmpeg"
 
-# ---------- the piece ----------
 W, H = 1080, 1920
 SHOT_DUR = 6.5
 SHOTS = [
@@ -38,7 +37,6 @@ FINAL = PIPE / "03_Output/carr_demo_vertical.mp4"
 total = len(SHOTS) * SHOT_DUR + ENDCARD_DUR
 endcard_at = len(SHOTS) * SHOT_DUR
 
-# ---------- 1. job file + AE ----------
 job = {
     "compName": "CARR_Demo",
     "width": W, "height": H, "fps": 29.97,
@@ -77,7 +75,6 @@ print(log)
 if "DONE" not in log:
     sys.exit("AE build failed; see log above")
 
-# ---------- 2. audio design ----------
 # whoosh 120ms before each internal cut; riser 2s into end card; impact at card
 inputs = [FF, "-y", "-nostdin", "-i", str(RAW), "-i", str(MUSIC)]
 filters = [f"[1:a]atrim=0:{total},loudnorm=I=-23:TP=-3:LRA=7,"
@@ -106,7 +103,6 @@ cmd = inputs + ["-filter_complex", fc, "-map", "0:v", "-map", "[aout]",
 print("Mixing + encoding...")
 subprocess.run(cmd, check=True, capture_output=True)
 
-# ---------- 3. verify ----------
 r = subprocess.run([FF, "-i", str(FINAL), "-af", "ebur128", "-f", "null", "-"],
                    capture_output=True, text=True)
 loud = [l for l in r.stderr.splitlines() if "I:" in l and "LUFS" in l]

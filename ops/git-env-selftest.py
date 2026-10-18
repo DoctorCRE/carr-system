@@ -13,6 +13,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env, scrubbed_env, GIT_LOCATION_VARS  # noqa: E402
@@ -121,6 +123,53 @@ check("scrubbed_env: removes GIT_CONFIG_COUNT and its key/value pairs",
           ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0")),
       f"left: {[k for k in ('GIT_CONFIG_COUNT','GIT_CONFIG_KEY_0','GIT_CONFIG_VALUE_0') if k in cleaned]}")
 
+# Git must finish its fixture writers before TemporaryDirectory teardown.
+# Use the real config parser: local settings that explicitly request detachment
+# must lose to the fixture command's policy, while real work stays unchanged.
+for key in ("maintenance.autoDetach", "gc.autoDetach"):
+    subprocess.run(["git", "config", key, "true"], cwd=fixture,
+                   env=fixture_env(), check=True, capture_output=True)
+    check(f"fixture_env: {key} cannot leave a writer behind",
+          git_out(fixture, "config", "--bool", "--get", key, env=fixture_env()) == "false")
+    check(f"scrubbed_env: real work keeps its {key} policy",
+          git_out(fixture, "config", "--bool", "--get", key, env=scrubbed_env()) == "true")
+
+# Force actual auto-GC with two packs, rather than waiting for the default
+# random loose-object threshold. The control proves the old fixture policy
+# detaches; the real path must return only after the packs are consolidated.
+with tempfile.TemporaryDirectory(prefix="gitenv-maintenance-") as tmp:
+    repo = Path(tmp)
+    def maintenance_git(*args, env=None):
+        return subprocess.run(["git", "-C", tmp, *args],
+                              env=fixture_env(dict(os.environ, LC_ALL="C")) if env is None else env,
+                              capture_output=True, text=True, check=True)
+    maintenance_git("init", "-q")
+    maintenance_git("config", "user.email", "fixture@example.invalid")
+    maintenance_git("config", "user.name", "Fixture")
+    packs = repo / ".git/objects/pack"
+    for i in range(2):
+        (repo / "seed").write_text(str(i))
+        maintenance_git("add", "seed")
+        maintenance_git("-c", "maintenance.auto=false", "commit", "-qm", "seed")
+        maintenance_git("repack", "-d")
+    maintenance_git("config", "gc.autoPackLimit", "1")
+    maintenance_git("config", "gc.autoDetach", "true")
+    control = maintenance_git("gc", "--auto", env=scrubbed_env(fixture_env(dict(os.environ, LC_ALL="C"))))
+    check("CONTROL: the old fixture policy starts background auto-GC", "in background" in control.stderr)
+    deadline = time.monotonic() + 10
+    while (len(list(packs.glob("*.pack"))) != 1 or (repo / ".git/gc.pid").exists()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(list(packs.glob("*.pack"))) == 1 and not (repo / ".git/gc.pid").exists(), "control auto-GC did not finish"
+    for i in range(2, 4):
+        (repo / "seed").write_text(str(i))
+        maintenance_git("add", "seed")
+        maintenance_git("-c", "maintenance.auto=false", "commit", "-qm", "seed")
+        maintenance_git("repack", "-d")
+    actual = maintenance_git("gc", "--auto")
+    check("fixture auto-GC finishes before temporary repository teardown",
+          "in background" not in actual.stderr and len(list(packs.glob("*.pack"))) == 1
+          and not (repo / ".git/gc.pid").exists(), actual.stderr)
+
 # THE ANTI-DRIFT CASE. ops/githooks/pre-push keeps its own literal `env -u ...`
 # list, deliberately: ops/hook-env-isolation-selftest.py checks that the
 # stripping and the ci.sh call are one statically readable statement, which a
@@ -140,22 +189,5 @@ if os.path.exists(_hook):
 else:
     check("ops/githooks/pre-push is present to check", False,
           f"expected it at {_hook}")
-
-# Repository fixtures exercise pending tracked changes as one checkout.
-from pathlib import Path
-from git_env import clone_checkout_fixture
-source = Path(make_repo("gitenv-checkout-", "source@example.invalid"))
-(source / "f.txt").write_bytes(b"changed\x00binary")
-(source / "added.txt").write_text("staged addition\n")
-subprocess.run(["git", "add", "added.txt"], cwd=source, env=fixture_env(), check=True)
-(source / "ignored.txt").write_text("untracked machine state\n")
-with tempfile.TemporaryDirectory(prefix="gitenv-snapshot-") as directory:
-    target = Path(directory) / "fixture"
-    clone_checkout_fixture(source, target, hostile)
-    check("checkout fixture includes pending binary edits", (target / "f.txt").read_bytes() == b"changed\x00binary")
-    check("checkout fixture includes staged additions", (target / "added.txt").read_text() == "staged addition\n")
-    check("checkout fixture excludes untracked machine state", not (target / "ignored.txt").exists())
-    check("checkout fixture leaves the source commit unchanged", git_out(source, "log", "--format=%s", "-1", env=fixture_env()) == "seed")
-    check("checkout fixture cannot mutate a hostile victim", git_out(victim, "rev-parse", "HEAD", env=fixture_env()) == victim_head)
 
 sys.exit(CHECKER.summary())

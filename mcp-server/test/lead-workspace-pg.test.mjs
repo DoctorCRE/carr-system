@@ -551,3 +551,126 @@ run('territory backfill emits exact audit, increments versions once, is replay s
     }finally{await c.query('rollback')}
   }
 });
+
+
+run("stage proof retains the actual writer and event versions after owner and record changes", async c => {
+  const f = await fixture(c);
+  const key = randomUUID();
+  await command(c, f, "update-lead", {
+    idempotency_key: key, fields: { stage: "qualified" }, stage_review: review(),
+  }, f.ordinary);
+  const event = (await c.query(
+    "select id,actor_id,old_value,new_value from event where subject_id=$1 and idempotency_key=$2",
+    [f.lead, key],
+  )).rows[0];
+  assert.equal(event.actor_id, f.ordinary.id);
+  assert.deepEqual(event.old_value, { stage: "new" });
+  assert.deepEqual(event.new_value.transition_proof, {
+    actor_slug: f.ordinary.slug, before_version: 1, after_version: 2,
+  });
+  await command(c, f, "update-lead", { fields: { owner: "joe", notes: "Synthetic later edit" } });
+  await c.query("set role carr_reader");
+  try {
+    const detail = (await read(c, f)).detail;
+    const history = detail.stage_history.find(e => e.idempotency_key === key);
+    assert.equal(detail.base_version, 3);
+    assert.equal(detail.owner, "joe");
+    assert.equal(history.event_id, event.id);
+    assert.equal(history.actor_id, f.ordinary.id);
+    assert.equal(history.actor_slug, f.ordinary.slug);
+    assert.equal(history.prior_stage, "new");
+    assert.equal(history.stage, "qualified");
+    assert.equal(history.before_version, 1);
+    assert.equal(history.after_version, 2);
+    assert.equal(history.stage_review.reason, review().reason);
+  } finally {
+    await c.query("reset role");
+  }
+});
+
+run("repeated stage actions replay one event and refuse actor, version and target key mismatches", async c => {
+  const f = await fixture(c), other = await fixture(c);
+  const request = {
+    idempotency_key: randomUUID(), base_version: 1,
+    fields: { stage: "qualified" }, stage_review: review(),
+  };
+  const result = await command(c, f, "update-lead", request);
+  assert.deepEqual(result, { ok: true, updated: ["stage"] });
+  assert.deepEqual(await command(c, f, "update-lead", request), { replayed: true, ...result });
+  for (const [extra, actor] of [
+    [{}, f.ordinary],
+    [{ base_version: 2 }, f.human],
+    [{ lead: other.lead }, f.human],
+    [{ fields: { stage: "engaged" } }, f.human],
+  ]) {
+    await assert.rejects(
+      () => command(c, f, "update-lead", { ...request, ...extra }, actor),
+      refusal("key_reuse"),
+    );
+  }
+  await assert.rejects(
+    () => command(c, f, "update-lead", { fields: { stage: "engaged" }, expected_actor: f.ordinary.slug }),
+    refusal("account_changed"),
+  );
+  await assert.rejects(
+    () => command(c, f, "update-lead", { fields: { stage: "engaged" }, base_version: 1 }),
+    refusal("version_conflict"),
+  );
+  assert.deepEqual((await c.query("select version,stage from lead where id=$1", [f.lead])).rows[0],
+    { version: 2, stage: "qualified" });
+  assert.deepEqual((await c.query("select version,stage from lead where id=$1", [other.lead])).rows[0],
+    { version: 1, stage: "new" });
+  const history = (await read(c, f)).detail.stage_history;
+  assert.equal(history.length, 1);
+  assert.equal(history[0].idempotency_key, request.idempotency_key);
+  assert.equal(history[0].actor_id, f.human.id);
+  assert.equal(history[0].actor_slug, f.human.slug);
+});
+
+run("legacy stage history exposes missing proof without inferring it from owner or current version", async c => {
+  const f = await fixture(c);
+  const key = randomUUID();
+  await c.query(
+    "insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,old_value,new_value,cause,idempotency_key) values(now(),$1,'update-lead','lead',$2,'stage',$3,$4,'automation_job',$5)",
+    [f.ordinary.id, f.lead, { stage: "new" }, { stage: "qualified" }, key],
+  );
+  await command(c, f, "update-lead", { fields: { owner: "joe" } });
+  const history = (await read(c, f)).detail.stage_history.find(e => e.idempotency_key === key);
+  assert.equal(history.actor_id, f.ordinary.id);
+  assert.equal(history.actor_slug, null);
+  assert.equal(history.before_version, null);
+  assert.equal(history.after_version, null);
+});
+
+run("a stale workspace snapshot keeps its original event proof while a later read sees the next action", async c => {
+  const f = await fixture(c);
+  const firstKey = randomUUID(), nextKey = randomUUID();
+  await command(c, f, "update-lead", {
+    idempotency_key: firstKey, fields: { stage: "qualified" }, stage_review: review(),
+  });
+  let reads = 0;
+  const wrapper = { query: async (...args) => {
+    const result = await c.query(...args);
+    reads++;
+    await command(c, f, "update-lead", {
+      idempotency_key: nextKey, fields: { stage: "engaged" }, stage_review: review(),
+    }, f.ordinary);
+    return result;
+  } };
+  const stale = (await read(wrapper, f)).detail;
+  assert.equal(reads, 1);
+  assert.equal(stale.stage, "qualified");
+  assert.equal(stale.base_version, 2);
+  assert.equal(stale.stage_history.length, 1);
+  assert.equal(stale.stage_history[0].idempotency_key, firstKey);
+  assert.equal(stale.stage_history[0].after_version, 2);
+  const fresh = (await read(c, f)).detail;
+  assert.equal(fresh.base_version, 3);
+  assert.equal(fresh.stage_history.length, 2);
+  assert.equal(fresh.stage_history[0].idempotency_key, nextKey);
+  assert.equal(fresh.stage_history[0].actor_id, f.ordinary.id);
+  assert.equal(fresh.stage_history[0].before_version, 2);
+  assert.equal(fresh.stage_history[0].after_version, 3);
+  assert.equal(fresh.stage_history[1].idempotency_key, firstKey);
+  assert.equal(fresh.stage_history[1].after_version, 2);
+});

@@ -5,6 +5,8 @@ Usage: ops/ci-rerun.sh RUN_ID --job JOB_ID [--repo OWNER/REPO].
 The default repository is jbookout/carr-system. Successful jobs are retained;
 GitHub also reruns dependents. Local checks precede policy admission and the
 remote attempt/head is rechecked immediately before the single dispatch.
+Other repositories use their associated PR head; carr-system also requires
+that head to match this checkout.
 """
 from __future__ import annotations
 import argparse
@@ -27,42 +29,70 @@ spec.loader.exec_module(evidence)
 REPO = 'jbookout/carr-system'
 ALLOWED_REPOS = (REPO, 'jbookout/doctorcre-app', 'jbookout/software-factory')
 MAX_ATTEMPTS = 3  # Initial run plus two job-only retries; job timeouts unchanged.
+# Retryable jobs in other repositories: (workflow name, path) -> job names.
+APP_JOBS = {
+    'jbookout/doctorcre-app': {('e2e', '.github/workflows/e2e.yml'): frozenset({'journeys'})},
+}
+GREEN = ('success', 'skipped', 'neutral')
 
 
 class Refusal(RuntimeError):
     pass
 
 
-def admit(run, job, pr, head):
-    if (run.get('name') != 'CI' or run.get('path') != '.github/workflows/ci.yml'
+def admit(run, job, pr, head, repo=REPO):
+    shapes = {('CI', '.github/workflows/ci.yml'): None} if repo == REPO else APP_JOBS.get(repo, {})
+    if ((run.get('name'), run.get('path')) not in shapes
             or run.get('event') != 'pull_request' or run.get('status') != 'completed'
             or run.get('conclusion') not in ('failure', 'cancelled')
             or run.get('head_sha') != head or pr.get('state') != 'open'
             or pr.get('head', {}).get('sha') != head):
-        raise Refusal('requires completed failed/cancelled CI at the open PR and local head')
+        raise Refusal('requires completed failed/cancelled CI at the open PR and candidate head')
     attempt = run.get('run_attempt')
     if type(attempt) is not int or not 1 <= attempt < MAX_ATTEMPTS:
         raise Refusal('CI retry budget exhausted (initial run plus two retries)')
     if (job.get('run_id') != run.get('id') or job.get('status') != 'completed'
             or job.get('conclusion') not in ('failure', 'cancelled')):
         raise Refusal('job must belong to this run and be failed/cancelled')
+    if repo != REPO:
+        if job.get('name') not in shapes[(run['name'], run['path'])]:
+            raise Refusal('only a listed app job may be rerun')
+        return {'head': head, 'job': job['name']}
     groups = {'ops/ci.sh --strict --only ' + g: g for g in evidence.class_groups()}
     if job.get('name') not in groups:
         raise Refusal('only a named CI class job may be rerun')
-    return groups[job['name']]
+    group = groups[job['name']]
+    if pr.get('draft') and group in ('gates', 'migration'):
+        raise Refusal('expensive CI class reruns require a ready PR')
+    return group
+
+
+def hosted_checks(remote, group):
+    """An app job has no carr-system class to run locally; every other check at its head stands in."""
+    latest = {}
+    for check in remote.api(f"commits/{group['head']}/check-runs?per_page=100")['check_runs']:
+        if check['name'] != group['job'] and check['id'] > latest.get(check['name'], {}).get('id', 0):
+            latest[check['name']] = check
+    if not latest or any(c['status'] != 'completed' or c['conclusion'] not in GREEN for c in latest.values()):
+        raise Refusal('other hosted checks at this head are not all green; no remote retry consumed')
 
 
 def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
+    """Pin the candidate to the supplied local head, or the fetched PR head."""
     snapshot = remote.snapshot(run_id, job_id)
-    group = admit(*snapshot, head)
+    if head is None:
+        head = snapshot[2].get('head', {}).get('sha')
+        if not head:
+            raise Refusal('PR head unavailable; no dispatch')
+    group = admit(*snapshot, head, remote.repo)
     checks(group)
     authorize_metered_execution(policy, 'github-actions-remote-ci',
                                {'candidate_sha': head, 'local_checks_green': True})
     current = remote.snapshot(run_id, job_id)
-    admit(*current, head)
+    admit(*current, head, remote.repo)
     if current != snapshot:
         raise Refusal('run, job or PR changed during local checks; no dispatch')
-    dispatch(run_id, job_id, current[0]['run_attempt'])
+    dispatch(run_id, job_id, current[0]['run_attempt'], head)
 
 
 class GitHub:
@@ -109,7 +139,7 @@ def main():
     try:
         if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,text=True).strip():
             raise Refusal('commit tracked changes before rerunning CI')
-        head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
+        local_head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
         policy = json.loads((ROOT / 'ops/config/platform-metering.v1.json').read_text())
         lock_dir = Path(tempfile.gettempdir()) / 'carr-ci-rerun'
         # Keep existing default-repository reservations effective after upgrade.
@@ -119,11 +149,11 @@ def main():
         with (lock_dir / f'{args.run_id}.lock').open('a+') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             remote = GitHub(args.repo)
-            def dispatch(run_id, job_id, attempt):
+            def dispatch(run_id, job_id, attempt, head):
                 reservation = lock_dir / f'{run_id}-{attempt}.json'
                 if reservation.exists():
                     raise Refusal('attempt already dispatched or uncertain; inspect hosted run')
-                if subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip() != head:
+                if subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip() != local_head:
                     raise Refusal('local head changed during checks')
                 if subprocess.check_output(['git','status','--porcelain','--untracked-files=no'],cwd=ROOT,text=True).strip():
                     raise Refusal('local tracked changes appeared during checks')
@@ -136,7 +166,9 @@ def main():
                 if result.returncode:
                     raise Refusal('dispatch refused or uncertain; reservation retained')
                 print(f'CI job retry submitted: run {run_id}, job {job_id}, next attempt {attempt + 1}/{MAX_ATTEMPTS}')
-            rerun(remote,args.run_id,args.job,head,policy,local_checks,dispatch)
+            head = local_head if args.repo == REPO else None
+            checks = local_checks if args.repo == REPO else (lambda group: hosted_checks(remote, group))
+            rerun(remote,args.run_id,args.job,head,policy,checks,dispatch)
         return 0
     except (Refusal, MeteringRefusal) as exc:
         print(f'CI rerun refused: {exc}', file=sys.stderr)

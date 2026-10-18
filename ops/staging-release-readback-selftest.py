@@ -2,6 +2,12 @@
 """Hermetic contract for Program 5 staging deployment/recovery receipts."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import importlib.util
 import hashlib
 import json
@@ -9,12 +15,10 @@ import os
 import re
 import shlex
 import subprocess
-import sys
 import tempfile
 import types
 import uuid
 from typing import Any, cast
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("ops_record", ROOT / "tools" / "ops-record.py")
@@ -628,8 +632,8 @@ for invalid_name in ("0314-doctorcre.sql", "0314_name.txt", "0314_name.sql/evil"
     assert not re.fullmatch(r"[0-9]{4}[a-z]?_[a-z0-9_.-]+\.sql", invalid_name)
 
 
-migration = (ROOT / "migrations" / "0202_staging_release_readback_receipt.sql").read_text()
-forward_migration = (ROOT / "migrations" / "0315_program5_forward_fix_rehearsal.sql").read_text()
+migration = read_migration(ROOT, "0202_staging_release_readback_receipt.sql")
+forward_migration = read_migration(ROOT, "0315_program5_forward_fix_rehearsal.sql")
 result_table = forward_migration.split("create table ops.staging_forward_fix_rehearsal_result", 1)[1].split(");", 1)[0]
 assert "check (writer_session_user='carr_program5_forward_fix_verifier')" in result_table
 assert forward_migration.count("check (writer_session_user='carr_jobs')") == 2
@@ -679,7 +683,7 @@ for forbidden in (
 ):
     assert forbidden not in migration, forbidden
 
-restore_migration = (ROOT / "migrations" / "0295_staging_restore_only_recovery.sql").read_text()
+restore_migration = read_migration(ROOT, "0295_staging_restore_only_recovery.sql")
 for marker in (
     "create table ops.staging_restore_only_attempt",
     "create table ops.staging_restore_only_claim",
@@ -695,7 +699,7 @@ for marker in (
 ):
     assert marker in restore_migration, marker
 assert "staging_recovery_rehearsal_bundle" not in restore_migration
-repair_migration = (ROOT / "migrations" / "0296_restore_only_recovery_repair.sql").read_text()
+repair_migration = read_migration(ROOT, "0296_restore_only_recovery_repair.sql")
 assert "create or replace function ops.prepare_staging_restore_only_attempt" in repair_migration
 # PostgreSQL standard-conforming strings require the single regex escape used
 # by the already-valid Program 5 writer; the double escape in applied 0295 is
@@ -703,7 +707,7 @@ assert "create or replace function ops.prepare_staging_restore_only_attempt" in 
 assert "+\\.sql$'" in repair_migration
 assert "+\\\\.sql$'" not in repair_migration
 
-uuid_repair = (ROOT / "migrations" / "0297_restore_only_provider_uuid_repair.sql").read_text()
+uuid_repair = read_migration(ROOT, "0297_restore_only_provider_uuid_repair.sql")
 assert "create or replace function ops.prepare_staging_restore_only_attempt" in uuid_repair
 assert "provider_version_id !~ '^[0-9a-f]{8}" in uuid_repair
 assert "target_provider_version:=current_release.provider_version_id::uuid" in uuid_repair
@@ -713,7 +717,7 @@ assert "declared_schema_highest_migration ~ '^[0-9]{4}_[a-z0-9_.-]+\\.sql$'" in 
 assert "declared_schema_highest_migration ~ '^[0-9]{4}_[a-z0-9_.-]+\\\\.sql$'" not in uuid_repair
 assert "migration 0295" not in uuid_repair.lower()
 
-completion_grant = (ROOT / "migrations" / "0215_program5_completion_hash_grant.sql").read_text()
+completion_grant = read_migration(ROOT, "0215_program5_completion_hash_grant.sql")
 assert "grant execute on function ops.program5_migration_set_sha256(text[]) to carr_jobs" in completion_grant
 for role in ("public", "carr_reader", "carr_writer", "carr_authority"):
     assert role in completion_grant

@@ -8,7 +8,7 @@ WHY A GENERATED MODULE. The source-merge controller
 (mcp-server/src/source-merge-policy.js) is imported by engineering-runtime.js,
 which mcp.js imports, so it ships inside the Cloudflare Worker bundle, and a
 Worker has no filesystem at request time. The map therefore ships as a
-checked-in module, the same pattern as ops/sync-rule-boot-classes.py. Python
+checked-in module. Python
 consumers read the JSON directly through lib/review_tiers.py.
 
 TWO OUTPUTS, one source (ops/config/review-tiers.v1.json):

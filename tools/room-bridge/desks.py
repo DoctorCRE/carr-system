@@ -24,14 +24,6 @@ DESK KINDS:
   flash-local      the local Flash model itself, answering direct questions (flash_wire.py)
 
 BOTH KINDS KEEP THEIR CONTEXT, and that is the whole point. Joe, 2026-08-20:
-"codex should be able to do the same thing as you. It has its own context. I
-use codex equally as I do Claude code." An earlier draft of this file treated
-Codex as a one-shot that started empty every time, which quietly made it the
-lesser seat — fine for a mechanical job, useless for anything with a thread
-running through it. It is not a lesser seat. A codex-session desk remembers
-its thread id and resumes that thread on every later task, so a Codex desk
-picks up where it left off exactly as a Claude desk does.
-
 The kinds differ only in HOW a turn reaches them: a Claude desk is a live
 process listening on a socket, so a turn is delivered to something already
 running. A Codex thread is durable rather than live — it is stored, resumed
@@ -51,13 +43,10 @@ from pathlib import Path
 
 import codex_models
 
-# a desk name a human can say out loud and a shell will not mangle
 NAME_OK = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
-# /tmp/cc-socks/79534.sock — a process, not a desk
 PID_SOCKET = re.compile(r"^\d+\.sock$")
 
 KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli")
-# the old name for the Codex kind, before it carried a thread
 KIND_ALIASES = {"codex-exec": "codex-session"}
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
 
@@ -71,8 +60,6 @@ DESK_INSTRUCTION = (
 def desk_prompt(task: str) -> str:
     """Carry the fixed instruction on first turns and every resumed task."""
     if task.startswith("[Hermes queue "):
-        # Queue identity/provenance occupy fixed header positions. Decorate
-        # the body, after the header separator, so Flash still reads them.
         headers, separator, body = task.partition("\n\n")
         if separator:
             return headers + separator + desk_prompt(body)
@@ -222,6 +209,7 @@ class Registry:
         host: str | None = None,
         timeout_s: float = 900,
         family: str | None = None,
+        network_access: bool = False,
     ) -> dict:
         if not NAME_OK.match(name or ""):
             raise DeskError(
@@ -232,16 +220,16 @@ class Registry:
         kind = KIND_ALIASES.get(kind, kind)
         if kind not in KINDS:
             raise DeskError("bad_kind", f"{kind!r} is not one of {', '.join(KINDS)}")
+        if type(network_access) is not bool:
+            raise DeskError("bad_network_access", "network_access must be an explicit boolean")
+        if network_access and kind != "codex-live":
+            raise DeskError("bad_network_access", "network_access is supported only by codex-live")
         effort = _normalize_effort(kind, effort)
         if kind in codex_models.CODEX_KINDS:
             family = codex_models.family_default(family, model)
         elif family is not None:
             raise DeskError("bad_family", "family is only supported by Codex desks")
 
-        # dict[str, object]: a desk entry's values are a genuine mix (str,
-        # None, list[str]) depending on kind — a bare literal makes mypy infer
-        # the narrower type of whichever entry it sees first in each branch
-        # and then flag every other shape as incompatible.
         entry: dict[str, object]
         if kind == "claude-session":
             if not socket:
@@ -259,9 +247,6 @@ class Registry:
                 "model": model,
                 "effort": effort,
                 "cwd": str(cwd or Path.cwd()),
-                # Background work cannot stop on a terminal approval dialog.
-                # dontAsk denies unapproved actions instead of widening the
-                # session's authority or leaving a hidden prompt waiting.
                 "permission_mode": dispatched_permission_mode(permission_mode),
             }
         elif kind == "claude-remote":
@@ -274,8 +259,6 @@ class Registry:
             entry = {"kind": kind, "model": model, "effort": effort,
                      "sandbox": sandbox, "cwd": str(cwd or Path.cwd())}
         elif kind == "flash-local":
-            # The model and effort are fixed by the direct protocol (ops/config/model-routes.v1.json): Flash,
-            # thinking off. Recorded on the entry so a dispatch still names both, as every delegation must.
             entry = {"kind": kind, "model": "flash", "effort": "minimal"}
         elif kind == "codex-live":
             if not socket:
@@ -286,16 +269,13 @@ class Registry:
             entry["effort"] = effort
             if family:
                 entry["family"] = family
+            if network_access:
+                entry["network_access"] = True
         else:
-            # thread_id is filled in by the first dispatch and reused after
             entry = {"kind": kind, "cwd": str(cwd or Path.cwd()),
                      "thread_id": None, "effort": effort}
             if family:
                 entry["family"] = family
-            # A seat that cannot bind a socket or write where the work lives
-            # reports its own cage as a fact about the machine. Carrying the
-            # posture on the desk is how a task that genuinely needs more room
-            # gets it WITHOUT every other desk being loosened to match.
             if sandbox:
                 entry["sandbox"] = sandbox
             if add_dirs:
@@ -341,14 +321,15 @@ class Registry:
         if kind == "claude-remote":
             remote_posture(entry)
         if kind in ("claude-session", "claude-desktop"):
-            # Recheck edited/legacy entries at the dispatch boundary.
             entry["permission_mode"] = dispatched_permission_mode(entry.get("permission_mode"))
         if kind == "grok-cli" and (entry.get("model") != "grok-4.7"
                 or entry.get("effort") != "high" or entry.get("sandbox") != "read-only"):
             raise DeskError("bad_grok_posture", "Grok requires grok-4.7/high/read-only")
+        network_access = entry.get("network_access", False)
+        if type(network_access) is not bool or (network_access and kind != "codex-live"):
+            raise DeskError("bad_network_access", "network_access must be boolean and is supported only by codex-live")
         if kind in ("claude-session", "codex-live"):
             sock = entry.get("socket", "")
-            # second refusal: the file is editable, the guard is not
             refuse_pid_socket(sock)
             if not is_live(sock):
                 raise DeskError(

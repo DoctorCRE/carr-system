@@ -78,6 +78,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run
 
 
+def core_cards():
+    """The always-on core cards, or "" when they cannot load (fail open: the boot is unaffected)."""
+    try:
+        from lib.rule_cards import core_text
+        return core_text()
+    except Exception as exc:
+        log(f"CORE-CARDS-UNAVAILABLE {type(exc).__name__}")
+        return ""
+
+
 def _parse_error(exc):
     log(f"DENY(parse-error) {type(exc).__name__}")
     emit("deny", "RULE BOOT UNVERIFIED: invalid hook input; repair the adapter before an ordinary effect.")
@@ -90,6 +100,17 @@ def decide(payload):
         emit("deny", "RULE BOOT UNVERIFIED: hook input must be an object; repair the adapter.")
         return 0
     event = payload.get("hook_event_name") or "PreToolUse"
+    if event == "SessionStart":
+        from lib.rule_boot_gate import arm_session
+        text = arm_session(payload.get("session_id") or payload.get("sessionId"),
+                           payload.get("source"),
+                           agent_id=payload.get("agent_id") or payload.get("agentId"))
+        core = core_cards()
+        print(f"{text}\n\n{core}" if core else text)
+        return 0
+    if event == "SubagentStart":
+        emit("allow", core_cards(), event)
+        return 0
     try:
         if event in ("PostToolUse", "PostToolUseFailure"):
             from lib.rule_boot_gate import observe
@@ -108,6 +129,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide, parse_error=_parse_error)
 
 

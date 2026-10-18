@@ -1,27 +1,8 @@
 #!/usr/bin/env python3
 """One answer to "did a partner actually type this", for every gate that asks.
 
-WHY THIS FILE EXISTS. Two gates asked the same question and gave different
-answers, and the wrong one shipped. ledger-sweep.py worked it out the expensive
-way — patched four times in nine days as each new injected shape defeated it —
-and ended at a POSITIVE test: is there evidence the partner typed this, with
-anything else treated as not his. weekend-quiet-gate.py asked the same question
-with a guessed allowlist of origin kinds, accepting "user" and "keyboard", which
-the harness has never written. Measured across sixteen real transcripts, that
-allowlist matched ZERO of 3,271 candidate records, so its carve-out — a partner
-typing ends the weekend quiet — could not fire once (defect 16291f00).
-
-The knowledge that would have prevented it was sitting in the sibling file the
-whole time, in a field nobody had read. That is the shape rule a8c55a47 names: a
-manual path and an automated path that do the same job must be the same code.
-Two implementations of one question do not double the enforcement; they let the
-weaker one be wrong on its own for a week.
-
-WHAT THE CALLERS GET. is_harness_injected is lifted from ledger-sweep verbatim,
-including the counted-transcript evidence in its docstring, because that
-evidence is the argument for the design and rewriting it would lose the
-provenance. partner_typed_this is the inverse, for callers that want the
-positive form.
+is_harness_injected rejects injected transcript entries.
+partner_typed_this is the inverse, for callers that want the positive form.
 
 CHANGE THIS FILE AGAINST A TRANSCRIPT, NEVER AGAINST AN ASSUMPTION. Every
 correction recorded below was made by counting records in a live session, and
@@ -44,6 +25,18 @@ NON_HUMAN_TEXT_PREFIXES = (
     "<task-notification", "<system-reminder", "[SYSTEM",
     "# Autonomous loop check", "<<autonomous-loop",
     "Another Claude session sent a message",
+    # Fifth shape, counted 2026-10-12 from the Orchestrator.macbook transcript
+    # (11 of them in one session): the COMPACTION SUMMARY the harness writes
+    # when a context fills up. It is a `user` record carrying the model's own
+    # recap of the session — standing rulings, bullet lists of what to do next —
+    # stamped isCompactSummary and with turnOrigin human/peer/task_notification
+    # at random, and with NO origin dict at all. The completion-evidence gate
+    # read its bullets ("- **Release pipeline (ops/release-pipeline", "Merge only
+    # after an independent review at head") as Joe's ORDERED CLAUSES and held
+    # the turn open demanding production receipts for them, three times in one
+    # day. The flag check in is_harness_injected is the discriminator; this
+    # prefix is depth for a record that lost its flags on export.
+    "This session is being continued from a previous conversation",
 )
 
 # Fourth shape, found live 2026-08-14: a message relayed from ANOTHER CLAUDE
@@ -114,6 +107,12 @@ def is_harness_injected(rec, text):
     #    the conversation rather than in it — peer relays, stop-hook feedback.
     #    Never set on a typed turn.
     if rec.get("isMeta"):
+        return True
+    # 1b. COMPACTION SUMMARIES. The harness marks the recap it injects after a
+    #    context fills with isCompactSummary; it never sets origin on it, so
+    #    the inversion in step 3 cannot see it, and it is the one injected
+    #    record that is WRITTEN IN THE MODEL'S VOICE about the partner's orders.
+    if rec.get("isCompactSummary"):
         return True
     # 2. CONTENT SHAPES, kept ahead of the origin check because the loop tick
     #    genuinely does arrive origin-stamped "human" and only its text betrays

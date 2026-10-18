@@ -43,9 +43,14 @@ Run: .venv/bin/python ops/migrate-precondition-selftest.py
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 import pathlib
 import re
-import sys
 import hashlib
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -242,7 +247,7 @@ def test_table_shape() -> None:
     check("the table is not empty and not a wildcard", bool(table) and isinstance(table, dict))
     for name, value in table.items():
         path = REPO / "migrations" / name
-        check(f"{name} names a migration that exists", path.is_file(),
+        check(f"{name} names a migration that exists", path.name in migration_names(path.parent.parent),
               "an entry for a file nobody ships is a stale exemption")
         ok_shape = isinstance(value, tuple) and len(value) == 2 and all(
             isinstance(v, str) and v.strip() for v in value)
@@ -326,7 +331,7 @@ def test_historical_transaction_artifact_is_exact() -> None:
     exact = True
     drift_refused = True
     for name in expected_names:
-        sql = (REPO / "migrations" / name).read_text(encoding="utf-8")
+        sql = read_migration(REPO, name)
         digest = hashlib.sha256(sql.encode()).hexdigest()
         exact = exact and artifacts.get(name) == digest \
             and migrate.contains_transaction_control(sql)
@@ -360,7 +365,7 @@ def test_reviewed_controller_transaction_artifact_is_exact() -> None:
     exact = True
     drift_refused = True
     for name in expected_names:
-        sql = (REPO / "migrations" / name).read_text(encoding="utf-8")
+        sql = read_migration(REPO, name)
         digest = hashlib.sha256(sql.encode()).hexdigest()
         changed_digest = hashlib.sha256((sql + "\n-- drift probe").encode()).hexdigest()
         exact = exact and artifacts.get(name) == digest \
@@ -434,8 +439,8 @@ def test_historical_unpaired_pair_is_byte_exact() -> None:
     """Only the two reviewed, already-applied migration artifacts are exempt."""
     pred_name = "0736_loop_notification_queue.sql"
     succ_name = "0737_incident_triage_scac_successor.sql"
-    pred = (REPO / "migrations" / pred_name).read_bytes().decode("utf-8")
-    succ = (REPO / "migrations" / succ_name).read_bytes().decode("utf-8")
+    pred = read_migration(REPO, pred_name)
+    succ = read_migration(REPO, succ_name)
     pair = (pred_name, succ_name)
     ordered = [("0001_unrelated.sql", "select 1;"), (pred_name, pred), (succ_name, succ)]
     check("the historical 0736/0737 pair still opens authority",
@@ -485,7 +490,7 @@ def test_new_authority_migrations_are_atomically_sealed() -> None:
     require every result to be declared in ATOMIC_MIGRATION_GROUPS, and
     (barring the pre-STRICT allowlist above) in
     STRICT_ATOMIC_MIGRATION_GROUPS too."""
-    ordered = [(name, sql) for name, sql, _digest in migrate.load_migrations()]
+    ordered = [(name, read_migration(REPO, name)) for name in sorted(migration_names(REPO))]
     required = find_atomic_seal_requirements(ordered)
     check("at least one real migration currently opens new SCAC authority "
           "(the predicate is exercised, not vacuous)",
@@ -494,7 +499,7 @@ def test_new_authority_migrations_are_atomically_sealed() -> None:
     atomic_pairs = declared_atomic_pairs(migrate.ATOMIC_MIGRATION_GROUPS)
     historical_names = {name for pair in HISTORICAL_UNPAIRED_SCAC_PAIRS for name in pair}
     historical_unpaired = historical_unpaired_pairs([
-        (name, (REPO / "migrations" / name).read_bytes())
+        (name, read_migration(REPO, name).encode())
         for name, _sql in ordered if name in historical_names
     ])
     missing_atomic = [

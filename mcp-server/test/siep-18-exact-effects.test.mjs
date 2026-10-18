@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -13,8 +14,8 @@ import {
 } from "../src/scac-exact-effects.js";
 import { executeWithTrustedPrincipal } from "../src/mcp.js";
 import { ToolError } from "../src/tools.js";
-const migration = fs.readFileSync(new URL(
-  "../../migrations/0469_siep18_exact_effects_trusted_principal.sql", import.meta.url), "utf8");
+const migration = readMigration(new URL(
+  "../../migrations/0469_siep18_exact_effects_trusted_principal.sql", import.meta.url));
 
 const contract = (ingress_key, direct_effects = [], delegates_to = [], extra = {}) => ({
   schema_version: "scac-exact-effect-contract.v1", ingress_key, direct_effects, delegates_to,
@@ -77,7 +78,7 @@ test("missing, wildcard, cycle, dynamic SQL, opaque, and unintegrated paths defa
     "db-function-acl:ops.discover_ready_plan_amendments(bigint,int):execute",
     "db-function-acl:ops.effective_ready_plan(text):execute",
     "db-function-acl:ops.mint_canonical_ownership_runtime_session(uuid,uuid,uuid,integer,text,text,timestamptz,uuid):execute",
-    "db-function-acl:ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid):execute",
+    "db-function-acl:ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid):execute",
     "db-function-acl:ops.release_canonical_ownership_lease(uuid,uuid,bigint):execute",
     "db-function-acl:ops.renew_canonical_ownership_lease(uuid,uuid,bigint,integer):execute",
     "mcp-tool:accept-ready-plan-amendment",
@@ -101,10 +102,10 @@ test("missing, wildcard, cycle, dynamic SQL, opaque, and unintegrated paths defa
     { kind: "execute", function_signature: "ops.acknowledge_ready_plan_amendment(bigint,uuid)" },
     { kind: "execute", function_signature: "ops.discover_ready_plan_amendments(bigint,int)" },
     { kind: "execute", function_signature: "ops.effective_ready_plan(text)" },
-    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid)" },
+    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid)" },
   ]);
   assert.deepEqual(resolveExactEffects("mcp-tool:propose-ready-plan-amendment"), [
-    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,jsonb,uuid,uuid)" },
+    { kind: "execute", function_signature: "ops.propose_ready_plan_amendment(text,integer,text,text,text,jsonb,text,text,jsonb,uuid,uuid)" },
   ]);
   assert.throws(() => resolveExactEffects("mcp-tool:unknown"),
     error => error instanceof ExactEffectRefusal && error.error === "effect_contract_missing");

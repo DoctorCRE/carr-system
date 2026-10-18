@@ -45,8 +45,6 @@ DEFAULT_SOCKET = os.environ.get(
     "CARR_CODEX_IPC_SOCKET", str(Path.home() / ".codex" / "ipc" / "ipc.sock"))
 CLIENT_TYPE = "carr-room-bridge"
 INITIALIZING = "initializing-client"
-# Per-method versions from the Desktop build's IPC table. Local requests carry
-# no hostId, so the plain table value applies.
 VERSIONS = {
     "initialize": 0,
     "thread-owner-discovery": 1,
@@ -112,7 +110,6 @@ class _Client:
                 self._send({"type": "client-discovery-response",
                             "requestId": reply.get("requestId"),
                             "response": {"canHandle": False}})
-            # broadcasts and anything else addressed to other clients: ignore
 
     def initialize(self) -> None:
         reply = self.request("initialize", {"clientType": CLIENT_TYPE})
@@ -177,8 +174,6 @@ def start_turn(thread_id: str, text: str, *, socket_path: str | None = None,
     typing into that window mid-turn gets. Desk calls requiring never refuse
     instead: steering cannot override the active turn's approval policy.
     """
-    # Ordinary session messages preserve the Desktop owner's posture. Desk
-    # dispatch explicitly supplies never and its already-instructed prompt.
     if approval_policy not in (None, "never"):
         raise ValueError("desk approval policy must be never; ask the orchestrator")
     base = {"thread_id": thread_id}

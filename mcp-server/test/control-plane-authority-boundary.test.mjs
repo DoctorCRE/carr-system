@@ -3,10 +3,6 @@ import assert from "node:assert/strict";
 import { TOOLS, ToolError, canExercisePartnerAuthority } from "../src/tools.js";
 import { authorityDsnForActor, callTool } from "../src/mcp.js";
 import { authenticatedIdentity, agentActorForToken } from "../src/identity.js";
-// `actorFromProps` is module-private under amendment 8 (PR 1013). The exported
-// grant door is `authenticatedIdentity.connectionForGrant`; called without the
-// server's witness it returns exactly the same actor, unbranded, which is what
-// every case in this file is about.
 const actorFromProps = (props, bindings = null) =>
   authenticatedIdentity.connectionForGrant(props, bindings);
 
@@ -41,8 +37,6 @@ class AcceptanceAuthorityFake {
       this.acceptanceCalls.push(params);
       if (params[1] === "canary" && this.sessionSlug !== "joe")
         throw new Error("canary workflow acceptance requires Joe authority session");
-      // A real acceptance returns a uuid; the fixture must too, or the event
-      // assertion below is testing a shape production never produces.
       this.acceptanceIds.push(`${this.sessionSlug}-${params[1]}`);
       return { rows: [{ id: ACCEPTANCE_UUIDS[`${this.sessionSlug}-${params[1]}`] || FALLBACK_UUID }] };
     }
@@ -61,10 +55,6 @@ class AcceptanceAuthorityFake {
     }
     if (text.includes("insert into event")) {
       this.eventWrites += 1;
-      // THE SUBJECT OF AN EVENT IS A UUID. This fake used to accept anything,
-      // which is why the suite stayed green for months while every real call
-      // died on `invalid input syntax for type uuid` and rolled its receipt
-      // back. Assert the shape the database actually enforces.
       const subject = params[4];
       if (subject != null && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(String(subject)))
         throw new Error(`invalid input syntax for type uuid: "${subject}"`);
@@ -75,10 +65,6 @@ class AcceptanceAuthorityFake {
 }
 
 test("control-plane authority operations are explicit human authority verbs", () => {
-  // humanOnly LABEL RETIRED, authorityOnly UNCHANGED (WR-000019 slice S1,
-  // 2026-08-27): the label was dead since executeRegisteredTool stopped
-  // reading it 2026-08-26 (decision dc57f62d); this slice drops the stale
-  // declarations from tools.js. authorityOnly is the live gate here.
   for (const name of ["accept-workflow", "disable-legacy-schedule", "activate-guidance-registry",
     "decide-guidance-import-batch", "deactivate-guidance-registry"]) {
     assert.equal(TOOLS[name].humanOnly, undefined);
@@ -104,16 +90,10 @@ test("partners, sponsored native agents, and the local machine doors cross the p
   assert.equal(canExercisePartnerAuthority(dell), true);
   assert.equal(canExercisePartnerAuthority(codexForJoe), true);
   assert.equal(canExercisePartnerAuthority(claudeForDell), true);
-  // ADDED 2026-08-26 (Joe's ruling, decision dc57f62d): the `./run.sh call`
-  // doors. Their sponsor is server-derived through LOCAL_SPONSOR, never
-  // asserted by the Mac, which is why admitting them is safe.
   const joeLocal = agentActorForToken("Bearer joe-secret", '{"joe-local":"joe-secret"}', "local-token");
   const dellLocal = agentActorForToken("Bearer dell-secret", '{"dell-local":"dell-secret"}', "local-token");
   assert.equal(canExercisePartnerAuthority(joeLocal), true);
   assert.equal(canExercisePartnerAuthority(dellLocal), true);
-  // STILL REFUSED, and these are the ones that matter: a slug with no sponsor
-  // at all, and a sponsored slug that is not an admitted door. The ruling
-  // removed a human-only gate; it did not make the boundary meaningless.
   assert.equal(canExercisePartnerAuthority({ ...codexForJoe, native_agent_verified: false }), false);
   assert.equal(canExercisePartnerAuthority({ slug: "codex", human: false }), false);
   assert.equal(canExercisePartnerAuthority({ slug: "grok", human: false, sponsoring_human_slug: "joe" }), false);
@@ -188,7 +168,6 @@ test("legacy disable emits a distinct Joe-bound surface receipt", async () => {
     pre_observation_ref: "native:enabled", post_observation_ref: "native:disabled",
   });
   assert.equal(result.receipt_ref, "legacy-disable:disable-fixture");
-  // The audit event must name the receipt's uuid, never the workflow key.
   assert.deepEqual(c.receiptLookups, ["legacy-disable:disable-fixture"]);
   assert.equal(c.eventWrites, 1);
   assert.deepEqual(c.disableCalls, [["cc-update-audit", "cc-update-audit.claude-code.v1",

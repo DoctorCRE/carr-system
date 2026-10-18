@@ -1112,6 +1112,7 @@ export async function runSalesforceBrowserReadReconciliation(options = {}) {
         body: `Salesforce opportunity ${f.opportunity_id} in Dell's org has no CARR deal.`,
         blocker: "human_only",
         blocker_detail: `Joe or Dell decides whether ${f.opportunity_id} becomes a CARR deal; creating a deal is humanOnly`,
+        residue_kind: "joe_only_fact", residue_host: "Dell's Salesforce org",
         source_note } });
     }
     for (const f of result.absent_from_salesforce) {

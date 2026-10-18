@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import fs from "node:fs";
@@ -8,7 +9,7 @@ import { containsForbiddenRootMaterial, custodianSetDigest, evaluateRootTrust,
   rootTrustEventDigest, verifyArtifactRootBindingAgainstDigest,
   verifyRootTrustChainAgainstDigest } from "../src/root-trust.js";
 
-const migration = fs.readFileSync(new URL("../../migrations/0458_siep14_root_trust.sql", import.meta.url), "utf8");
+const migration = readMigration(new URL("../../migrations/0458_siep14_root_trust.sql", import.meta.url));
 const sha = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const CUSTODIANS = [generateKeyPairSync("ed25519"), generateKeyPairSync("ed25519"),
   generateKeyPairSync("ed25519")];

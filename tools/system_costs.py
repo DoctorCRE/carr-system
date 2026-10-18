@@ -582,8 +582,6 @@ def main(argv=None):
                 except SystemExit as exc:
                     if str(exc) != 'board already exists: system-costs' or not progress_board.state_path('system-costs').exists():
                         raise
-                    progress_board.publish_board('system-costs', costs=published_costs)
-            else:
-                progress_board.publish_board('system-costs', costs=published_costs)
+            progress_board.publish_board('system-costs', costs=published_costs)
     print(health_row(report, loop_result))
     return 0 if report['state'] == 'ready' and not refusals else 1

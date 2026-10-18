@@ -62,8 +62,11 @@ def recommend(description, prompt, subagent_type="", *, judge=None, client=None,
             "subagent_type": subagent_type or "",
             "prompt": (prompt or "")[:MAX_TASK_CHARS]}
     try:
-        answer = _sibling("jev_semantic").ask({"task": task}, {"tier": question(client)},
-                             timeout=TIMEOUT_SECONDS, client=client, api_key=api_key, caller="jev_executor_tier", version="vendor-v1", transport=judge.judge)
+        semantic = _sibling("jev_semantic")
+        answer = semantic.evaluate(semantic.JudgmentRequest(
+            {"task": task}, {"tier": question(client)}, timeout=TIMEOUT_SECONDS,
+            api_key=api_key, caller="jev_executor_tier", version="vendor-v1"),
+            adapter=semantic.LiveAdapter(client=client, transport=judge.judge)).unwrap()
         probabilities = answer["answers"]["tier"].get("probabilities") or {}
     except Exception as exc:
         try:

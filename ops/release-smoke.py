@@ -29,9 +29,9 @@ rollback cannot repair the other one:
   sign-in-gate      app     each core app page (deal board, Leads, invoices,
                             progress board, Dr. CRE chat) redirects to its own
                             /auth/login?return_to=<page>, and /status renders
-  browser-journeys  app     the committed browser-product-proof.v1 producer in
-                            the --app-dir checkout, against that revision's
-                            synthetic build. A failed run names each failed
+  browser-journeys  app     the native e2e.production.config.ts journeys in
+                            the --app-dir checkout, signed out against the live
+                            app on Chromium. A failed run names each failed
                             test (evidence.failed_tests) so the pipeline can
                             attribute per test. Screenshots and traces are
                             copied into the evidence folder.
@@ -72,6 +72,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parents[1]
+SOURCE_BYTES = Path(__file__).read_bytes()
 
 # The identity and redirect reader is the production smoke's own (GET, no
 # redirects, HTTP errors returned as replies), not a second copy of it.
@@ -81,6 +82,7 @@ assert _SPEC is not None and _SPEC.loader is not None
 _prod = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = _prod   # its dataclass resolves its own module by name
 _SPEC.loader.exec_module(_prod)
+DOCTOR_SOURCE_BYTES = _prod.SOURCE_BYTES
 Reply: Any = _prod.Reply
 read = _prod.read
 
@@ -291,13 +293,16 @@ def run_smoke(*, lane: str, sha: str, phase: str, api: str, app: str,
                 detail = "" if exit_code == 0 and passed else "browser_proof_failed_or_incomplete"
                 failed_tests = sorted(t["id"] for t in tests or [] if t.get("status") != "passed") if complete else []
                 outcome = {"exit": exit_code, "source_commit": source, "test_count": len(tests or []),
-                           "scope": "synthetic application journeys",
-                           "artifacts": ["browser/checkpoint.png", "browser/video.webm", "browser/trace.zip"] if complete and passed else [],
+                           "scope": "signed-out production application journeys",
+                           "artifacts": outcome.get("artifacts", []),
+                           **({"runner": outcome["runner"]} if "runner" in outcome else {}),
                            # Present only when a complete run names what failed: the
                            # pipeline then attributes each test against the baseline.
                            **({"failed_tests": failed_tests} if detail and failed_tests else {})}
-            except Exception:  # noqa: BLE001
-                outcome, detail = {}, "browser_runner_unavailable_or_failed"
+            except BrowserRunnerError as error:
+                outcome, detail = error.evidence, "browser_runner_unavailable_or_failed"
+            except Exception as error:  # noqa: BLE001
+                outcome, detail = {"exception": type(error).__name__}, "browser_runner_unavailable_or_failed"
             probes.append({"id": BROWSER, "status": "fail" if detail else "pass",
                            "ms": int((time.monotonic() - started) * 1000), "detail": detail, "evidence": outcome})
     failed_ids = [p["id"] for p in probes if p["status"] == "fail"]
@@ -384,68 +389,91 @@ def released_verbs(worker_dir: Path) -> list[str]:
     return names
 
 
-def browser_runner(app_dir: Path, out: Path, *, expected_sha: str | None = None) -> Callable[[], dict]:
-    """Run the application's committed browser-product-proof.v1 producer.
+PRODUCTION_BROWSER_TESTS = (
+    "smoke/production/offline-shell.e2e.ts::production%20offline%20shell%20is%20served%20by%20the%20release",
+    "smoke/production/status.e2e.ts::production%20status%20page%20renders%20signed%20out%20and%20reads%20the%20app%20release",
+)
 
-    This contract exercises its synthetic fixture build, including native
-    journeys and continuity. Live authenticated pages remain unexercised.
-    A configured checkout with no producer fails; it never becomes a skip.
-    When the producer refuses, this run's own native report (.e2e/report.json,
-    deleted before the run) still names each test's status, so a failing test
-    is reported by id instead of as a broken proof.
+
+class BrowserRunnerError(RuntimeError):
+    def __init__(self, reason: str, **evidence: Any):
+        super().__init__(reason)
+        self.evidence = {"error": reason, **evidence}
+
+
+def browser_runner(app_dir: Path, out: Path, *, expected_sha: str | None = None,
+                   app_url: str = DEFAULT_APP) -> Callable[[], dict]:
+    """Run the app's native, signed-out production journeys on Chromium.
+
+    Each invocation gets a new output directory inside the app checkout, as
+    required by e2e. Copy its report and artifacts even when the runner fails.
     """
     def run() -> dict:
-        contract_paths = ("scripts/browser-product-proof.mjs", "e2e.config.ts",
-                          "tests/journeys/required-coverage.json", "node_modules/e2e/dist/cli/bin.js")
-        if not all((app_dir / path).is_file() for path in contract_paths):
-            raise RuntimeError("application_browser_contract_unavailable")
+        contract_paths = ("e2e.production.config.ts", "node_modules/e2e/dist/cli/bin.js")
+        missing = [path for path in contract_paths if not (app_dir / path).is_file()]
+        if missing:
+            raise BrowserRunnerError("application_browser_contract_unavailable", missing_paths=missing)
         source = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=app_dir, text=True).strip()
         if not re.fullmatch(r"[0-9a-f]{40}", source) or (expected_sha is not None and source != expected_sha):
-            raise RuntimeError("application_browser_source_mismatch")
-        coverage = json.loads((app_dir / "tests/journeys/required-coverage.json").read_text())
-        required = [row["file"] + "::" + urllib.parse.quote(row["title"], safe="~()*!.'-") for row in coverage["tests"]]
-        if not required or len(required) != len(set(required)):
-            raise RuntimeError("application_browser_coverage_invalid")
-        proof = app_dir / ".e2e/proof"
-        packet_path, native_path, run_report = proof / "packet.json", proof / "native-report.json", app_dir / ".e2e/report.json"
-        for path in (packet_path, native_path, run_report):
-            path.unlink(missing_ok=True)
-
-        def statuses(native: dict) -> list[dict]:
-            selected = {row.get("testId"): row for row in native.get("results", []) if row.get("selected")}
-            return [{"id": key, "status": "passed" if key in selected and selected[key].get("status") == "passed"
-                     and len(selected[key].get("attempts", [])) == 1 else "failed"} for key in required]
+            raise BrowserRunnerError("application_browser_source_mismatch")
+        output = Path(".e2e") / ("release-smoke-" + uuid.uuid4().hex)
+        command = ["node", "node_modules/e2e/dist/cli/bin.js", "run", "--config", "e2e.production.config.ts",
+                   "--target", "chromium", "--output", str(output)]
+        runner: dict[str, Any] = {"command": command, "cwd": str(app_dir), "exit": None, "stderr": ""}
         env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG") if os.environ.get(k)}
-        env.update({"CI": "1", "E2E_TELEMETRY_DISABLED": "1"})
-        proc = subprocess.run(["node", "scripts/browser-product-proof.mjs"], cwd=app_dir, env=env,
-                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=1800)
-        if proc.returncode:
-            try:
-                native = json.loads(run_report.read_text()).get("run", {})
-            except (OSError, ValueError, AttributeError):
-                raise RuntimeError("application_browser_process_failed") from None
-            if (native.get("vcs", {}).get("commit") != source or native.get("vcs", {}).get("dirty") is not False
-                    or not isinstance(native.get("results"), list)):
-                raise RuntimeError("application_browser_process_failed")
-            return {"exit": proc.returncode, "source_commit": source, "required": required,
-                    "tests": statuses(native), "artifacts": []}
-        packet = json.loads(packet_path.read_text())
-        report = json.loads(native_path.read_text())
-        binding, native = packet.get("binding", {}), report.get("run", {})
-        if (packet.get("schema") != "browser-product-proof.v1" or binding.get("sourceCommit") != source
-                or binding.get("repo") != "jbookout/doctorcre-app" or not binding.get("runId")
-                or native.get("id") != binding["runId"] or native.get("vcs", {}).get("commit") != source
-                or native.get("vcs", {}).get("dirty") is not False or native.get("exitCode") != 0
-                or native.get("status") != "passed"):
-            raise RuntimeError("application_browser_report_invalid")
-        tests = statuses(native)
+        env.update({"CI": "1", "E2E_TELEMETRY_DISABLED": "1", "DOCTORCRE_SMOKE_URL": app_url})
         dest = out / "browser"
-        dest.mkdir(parents=True, exist_ok=True)
-        artifacts = []
-        for name in ("checkpoint.png", "video.webm", "trace.zip"):
-            shutil.copyfile(proof / name, dest / name)
-            artifacts.append(str(dest / name))
-        return {"exit": 0, "source_commit": source, "required": required, "tests": tests, "artifacts": artifacts}
+
+        def record(stdout: str | bytes | None, stderr: str | bytes | None) -> None:
+            if (app_dir / output).exists():
+                shutil.copytree(app_dir / output, dest, dirs_exist_ok=True)
+            dest.mkdir(parents=True, exist_ok=True)
+            for name, value in (("stdout", stdout), ("stderr", stderr)):
+                value = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value or ""
+                (dest / (name + ".log")).write_text(value)
+                if name == "stderr":
+                    runner["stderr"] = value[-16384:]
+            runner.update({"stdout_log": "browser/stdout.log", "stderr_log": "browser/stderr.log"})
+
+        try:
+            proc = subprocess.run(command, cwd=app_dir, env=env, stdin=subprocess.DEVNULL,
+                                  capture_output=True, text=True, timeout=1800)
+        except subprocess.TimeoutExpired as error:
+            record(error.stdout, error.stderr)
+            raise BrowserRunnerError("application_browser_timeout", runner=runner) from None
+        except OSError as error:
+            record("", "")
+            raise BrowserRunnerError("application_browser_spawn_failed", runner=runner,
+                                     exception=type(error).__name__) from None
+        runner["exit"] = proc.returncode
+        record(proc.stdout, proc.stderr)
+        try:
+            report = json.loads((app_dir / output / "report.json").read_text())
+            native = report["run"]
+            valid = (report.get("schemaVersion") == "report-1" and native.get("id")
+                     and native.get("vcs", {}).get("commit") == source
+                     and native.get("vcs", {}).get("dirty") is False
+                     and native.get("exitCode") == proc.returncode
+                     and isinstance(native.get("results"), list))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            raise BrowserRunnerError("application_browser_report_unavailable", runner=runner) from None
+        if not valid:
+            raise BrowserRunnerError("application_browser_report_invalid", runner=runner)
+        try:
+            selected = [row for row in native["results"] if row.get("selected")]
+            tests = [{"id": row["testId"], "status": "passed" if row.get("status") == "passed"
+                      and len(row.get("attempts", [])) == 1 and row.get("targetId") == "chromium"
+                      else "failed"} for row in selected]
+        except (KeyError, TypeError, AttributeError):
+            raise BrowserRunnerError("application_browser_report_invalid", runner=runner) from None
+        if len({row["id"] for row in tests}) != len(tests):
+            raise BrowserRunnerError("application_browser_report_invalid", runner=runner)
+        if proc.returncode == 0 and native.get("status") != "passed":
+            raise BrowserRunnerError("application_browser_report_invalid", runner=runner)
+        artifacts = sorted("browser/" + path.relative_to(dest).as_posix()
+                           for path in dest.rglob("*") if path.is_file())
+        return {"exit": proc.returncode, "source_commit": source, "required": sorted(set(PRODUCTION_BROWSER_TESTS) | {row["id"] for row in tests}),
+                "tests": tests, "artifacts": artifacts, "runner": runner}
     return run
 
 
@@ -483,7 +511,7 @@ def main(argv: list[str] | None = None, *, http: Callable[..., Any] = read,
             expected = released_verbs(Path(args.worker_dir))
         except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
             expected_error = str(error)
-    browser = browser_runner(Path(args.app_dir), out, expected_sha=args.sha) if args.app_dir else None
+    browser = browser_runner(Path(args.app_dir), out, expected_sha=args.sha, app_url=args.app) if args.app_dir else None
     only = [j.strip() for j in args.only.split(",") if j.strip()] if args.only else None
 
     summary = run_smoke(lane=args.lane, sha=args.sha, phase=args.phase, api=args.api, app=args.app,

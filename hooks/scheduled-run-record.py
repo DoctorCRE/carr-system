@@ -54,8 +54,7 @@ from lib.scheduled_run import log, quick_launched_task, record_from_transcript  
 def _repo_root():
     """The repo root, from CARR_REPO_ROOT env or script-relative.
 
-    Same contract as hooks/chat-lint-gate.py's repo_root() (2026-08-23
-    load-flake sweep): the selftest points CARR_REPO_ROOT at a throwaway tree
+    The selftest points CARR_REPO_ROOT at a throwaway tree
     so concurrent ci.sh runs never share one idempotency-cache directory.
     Production leaves the variable unset.
     """
