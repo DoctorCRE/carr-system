@@ -73,6 +73,9 @@ def context(text, event):
 
 
 def refused(event, text=FAILURE):
+    if event == 'Stop' and text == FAILURE:
+        # A blocked Stop re-opens the turn, and a lookup failure repeats every time: endless loop.
+        return None
     if event == 'PreToolUse':
         return {'hookSpecificOutput': {'hookEventName': event,
                 'permissionDecision': 'deny', 'permissionDecisionReason': text}}
