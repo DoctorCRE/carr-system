@@ -112,6 +112,30 @@ class SweepSubjectTests(unittest.TestCase):
             result = sweep.sweep_subject(SUBJECT)
         self.assertEqual(result["outcome"], "escalation_failed")
 
+    def test_key_reuse_on_a_later_day_is_the_already_escalated_duplicate(self):
+        """Day two of one miss: same key, new days_since_last_receipt in `detail`."""
+        def fake_call_verb(verb, args):
+            if verb == "cadence-status":
+                return True, {"status": "missed", "expires_at": "2026-09-01T00:00:00Z",
+                              "days_since_last_receipt": 4}
+            return False, 'raise-delivery-cadence-alert refused: {"error": "key_reuse"}'
+
+        with mock.patch.object(sweep, "call_verb", side_effect=fake_call_verb):
+            result = sweep.sweep_subject(SUBJECT)
+            self.assertEqual(result["outcome"], "escalated")
+            self.assertTrue(result["duplicate"])
+            self.assertEqual(sweep.main(), 0)
+
+    def test_other_refusals_are_still_escalation_failed(self):
+        def fake_call_verb(verb, args):
+            if verb == "cadence-status":
+                return True, {"status": "missed", "expires_at": "2026-09-01T00:00:00Z"}
+            return False, 'raise-delivery-cadence-alert refused: {"error": "version_conflict"}'
+
+        with mock.patch.object(sweep, "call_verb", side_effect=fake_call_verb):
+            result = sweep.sweep_subject(SUBJECT)
+        self.assertEqual(result["outcome"], "escalation_failed")
+
     def test_neither_minted_nor_duplicate_is_escalation_failed(self):
         """Review finding 4's explicit case: reaching nobody is not success."""
         def fake_call_verb(verb, args):
