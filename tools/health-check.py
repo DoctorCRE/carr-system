@@ -1457,6 +1457,16 @@ def _tailscale_row():
     return module.row(binary=os.environ.get("TAILSCALE_BIN", module.TAILSCALE_BIN))
 
 
+def _studio_failover_row():
+    spec = importlib.util.spec_from_file_location(
+        'studio_failover_health', os.path.join(REPO_ROOT, 'ops/studio-failover-health.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError('Studio failover health loader unavailable')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.check(reconcile_loop=True)
+
+
 def _system_cost_row():
     import system_costs
     snapshot = system_costs.load_snapshot(os.path.join(REPO_ROOT, 'out/system-costs.json'))
@@ -1503,6 +1513,18 @@ def _canonical_health():
     _GREEN_EVIDENCE.clear()
     rc = 0
     if CANONICAL_SECTION == "all":
+        try:
+            _failover = _studio_failover_row()
+            print('  ' + _failover['line'])
+            if _failover['status'] == 'warn':
+                rc = _red('studio_failover', _failover['line'])
+        except Exception:
+            _failover_line = ('WARN Studio failover evidence unreadable · on breach: '
+                              'ops/studio-failover-health.py --reconcile opens/updates one loop; '
+                              'owner orchestrator; restore the evidence reader and rerun MacBook dry-run; '
+                              'verify a fresh current-contract receipt; auto-clear on that receipt')
+            print('  ' + _failover_line)
+            rc = _red('studio_failover_evidence', _failover_line, hard_error=True)
         _cost_snapshot, _cost_line = _system_cost_row()
         print("  " + _cost_line)
         if _cost_snapshot['state'] != 'ready' or _cost_snapshot['alerts']:

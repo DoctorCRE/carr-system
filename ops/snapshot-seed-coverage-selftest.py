@@ -166,6 +166,17 @@ def main():
                     "begin\n  insert into ops.never_seeded (k) values ('r');\nend $$;\n")
 
     with tempfile.TemporaryDirectory() as tmp:
+        leader_table = "ops.studio_leader"
+        leader_migration = "0900_studio_failover_leader.sql"
+        reason = coverage["excluded"].get(leader_table)
+        leader_repo = build_repo(tmp + "/failover", {
+            leader_migration: (REPO / "migrations" / leader_migration).read_text(),
+        }, {"carried": {}, "excluded": {leader_table: reason} if reason else {}})
+        leader_artifact = artifact([leader_migration])
+        case("runtime failover ownership is classified and omitted from a schema rebuild",
+             module.check(leader_repo, leader_artifact) == [])
+        case("runtime failover ownership refuses if copied into the schema snapshot",
+             "EXCLUDED" in summarise(module.check(leader_repo, leader_artifact + copy_block(leader_table))))
         # Lead UUIDs and creation transactions are business evidence, never
         # reference vocabulary in a structure-only rebuild.
         lead_table = "ops.doc_whats_new_lead_creation"

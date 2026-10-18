@@ -1131,6 +1131,114 @@
           "notes": "Monday 07:00 America/Chicago machine timezone. Preparation only. Keep npi-sweep-weekly enabled at 07:30 for judgment and ranked Hot output. Existing run-scheduled wrapper records the actual exit."
         }
       ]
+    },
+    {
+      "key": "cliproxyapi",
+      "name": "CLIProxyAPI model gateway",
+      "purpose": "Model gateway process; direct files remain outside the repo.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.cliproxyapi.plist",
+          "runs_on": "primary",
+          "notes": "Model gateway process; direct files remain outside the repo. Source declaration only; no service import or activation performed."
+        }
+      ]
+    },
+    {
+      "key": "fix-train",
+      "name": "Generated fix-train orchestration",
+      "purpose": "Requires its owning orchestrator to provision and verify the generated executable.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "out/orch/fix-train.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.fix-train.plist",
+          "runs_on": "primary",
+          "notes": "Requires its owning orchestrator to provision and verify the generated executable. Source declaration only; no service import or activation performed."
+        }
+      ]
+    },
+    {
+      "key": "studio-failover-rehearsal",
+      "name": "Monthly MacBook failover readiness",
+      "purpose": "MacBook-only day 5 at 10:15 local. Dry-run receipt and bound orchestrator health loop; never triggers real failover.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "ops/rehearse-studio-failover.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.studio-failover-rehearsal.plist",
+          "runs_on": "secondary",
+          "notes": "MacBook-only day 5 at 10:15 local. Dry-run receipt and bound orchestrator health loop; never triggers real failover. Source declaration only; no service import or activation performed."
+        }
+      ]
+    },
+    {
+      "key": "progress-board-publication",
+      "name": "Progress board publication",
+      "purpose": "Canonical checkout and out/boards are preserved. Only the active host publishes.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "ops/progress-board-render.sh",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/local.carr-progress-board.plist",
+          "runs_on": "primary",
+          "notes": "Canonical checkout and out/boards are preserved. Only the active host publishes. Source declaration only; no service import or activation performed."
+        }
+      ]
+    },
+    {
+      "key": "ds4-flash-next",
+      "name": "DS4 model serving",
+      "purpose": "External model runtime and weights must be provisioned and fit target memory before takeover.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "~/src/ds4-main/ds4-server",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/local.ds4-flash-next.plist",
+          "runs_on": "primary",
+          "notes": "External model runtime and weights must be provisioned and fit target memory before takeover. Source declaration only; no service import or activation performed."
+        }
+      ]
+    },
+    {
+      "key": "flash-desk",
+      "name": "Flash desk model runtime",
+      "purpose": "External runtime must be provisioned and verified; guarded process group retains one leader.",
+      "family": "Local Mac edge",
+      "criticality": "high",
+      "owner_actor": "joe",
+      "repo_path": "~/.local/bin/flash-desk-start",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/local.flash-desk.plist",
+          "runs_on": "primary",
+          "notes": "External runtime must be provisioned and verified; guarded process group retains one leader. Source declaration only; no service import or activation performed."
+        }
+      ]
     }
   ],
   "dependencies": [

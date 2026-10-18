@@ -1,0 +1,1535 @@
+{
+  "schema": "carr-studio-failover-inventory/v1",
+  "captured_at": "2026-10-05T19:11:36.942524+00:00",
+  "source_sha": "8d5f00b6a81b0cc0a3756989a1f7226efff1b7f7",
+  "manifest_source": {
+    "repository": "jbookout/carr-system",
+    "ref": "origin/codex/job-manifest-drift",
+    "captured_machine_role": "secondary",
+    "source_sha": "c5c4520b57302d0064560d0a1849813aa5443f06",
+    "path": "ops/config/scheduled-jobs.v1.json"
+  },
+  "roles": [
+    {
+      "label": "com.adobe.ccxprocess",
+      "path": "~/Library/LaunchAgents/com.adobe.ccxprocess.plist",
+      "executables": [
+        "/Applications/Utilities/Adobe Creative Cloud Experience/CCXProcess/CCXProcess.app/Contents/MacOS/CCXProcess"
+      ],
+      "dependencies": [],
+      "disabled": false,
+      "environment_names": [],
+      "schedule_source": "~/Library/LaunchAgents/com.adobe.ccxprocess.plist",
+      "classification": "device-vendor",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": null
+    },
+    {
+      "label": "com.carr.canary-ingest-sink",
+      "path": "~/Library/LaunchAgents/com.carr.canary-ingest-sink.plist",
+      "executables": [
+        "/opt/homebrew/bin/python3"
+      ],
+      "dependencies": [
+        "~/carr-system/tools/canary-ingest-sink.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.canary-ingest-sink.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.cliproxyapi",
+      "path": "~/Library/LaunchAgents/com.carr.cliproxyapi.plist",
+      "executables": [
+        "/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi"
+      ],
+      "dependencies": [
+        "~/.cli-proxy-api/config.yaml"
+      ],
+      "disabled": false,
+      "environment_names": [],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.cliproxyapi.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [
+        "/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi",
+        "~/.cli-proxy-api/config.yaml"
+      ],
+      "schedule_expectation": null
+    },
+    {
+      "label": "com.carr.control-plane-tick",
+      "path": "~/Library/LaunchAgents/com.carr.control-plane-tick.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/control-plane-tick.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.control-plane-tick.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.cutover-watch",
+      "path": "~/Library/LaunchAgents/com.carr.cutover-watch.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "/bin/zsh",
+        "~/carr-system/bin/cutover-watch.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.cutover-watch.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.delivery-cadence-a05-sweep",
+      "path": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/delivery-cadence-a05-sweep.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "CARR_REPO",
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.delivery-cadence-a05-sweep.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.fix-train",
+      "path": "~/Library/LaunchAgents/com.carr.fix-train.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/out/orch/fix-train.sh"
+      ],
+      "disabled": false,
+      "environment_names": [],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.fix-train.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [
+        "~/carr-system/out/orch/fix-train.sh"
+      ],
+      "schedule_expectation": null
+    },
+    {
+      "label": "com.carr.job-watchdog",
+      "path": "~/Library/LaunchAgents/com.carr.job-watchdog.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/job-watchdog.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "CARR_REPO",
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.job-watchdog.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.local-briefs",
+      "path": "~/Library/LaunchAgents/com.carr.local-briefs.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "/bin/zsh",
+        "~/carr-system/bin/local-briefs.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.local-briefs.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.nightly-exports-daytime-retry",
+      "path": "~/Library/LaunchAgents/com.carr.nightly-exports-daytime-retry.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/nightly-exports-retry.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.nightly-exports-daytime-retry.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.nightly-record-layer",
+      "path": "~/Library/LaunchAgents/com.carr.nightly-record-layer.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/nightly.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.nightly-record-layer.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.partner-ping",
+      "path": "~/Library/LaunchAgents/com.carr.partner-ping.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/db-tap.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "CARR_PARTNER",
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.partner-ping.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.release-pipeline",
+      "path": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/release-pipeline.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.release-pipeline.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.room-bridge",
+      "path": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/tools/room-bridge/bridge.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "CARR_ENGINEERING_DISPATCH_ENABLED",
+        "CARR_ROOM_BRIDGE_ROOM",
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.room-bridge.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.rules-refresh",
+      "path": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "/bin/zsh",
+        "~/carr-system/bin/refresh-rules.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.tailscale-up",
+      "path": "~/Library/LaunchAgents/com.carr.tailscale-up.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/tailscale-up.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.tailscale-up.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "com.carr.timebomb-audit",
+      "path": "~/Library/LaunchAgents/com.carr.timebomb-audit.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "~/carr-system/.venv/bin/python",
+        "~/carr-system/ops/timebomb-audit.py"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "CARR_REPO",
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.timebomb-audit.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
+      "label": "local.carr-progress-board",
+      "path": "~/Library/LaunchAgents/local.carr-progress-board.plist",
+      "executables": [
+        "/bin/bash"
+      ],
+      "dependencies": [
+        "~/carr-system/ops/progress-board-render.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PROGRESS_BOARD_ROOT"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/local.carr-progress-board.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": true,
+        "expected_installed": true
+      }
+    },
+    {
+      "label": "local.ds4-flash-next",
+      "path": "~/Library/LaunchAgents/local.ds4-flash-next.plist",
+      "executables": [
+        "~/src/ds4-main/ds4-server"
+      ],
+      "dependencies": [
+        "~/.ds4/server-kv"
+      ],
+      "disabled": false,
+      "environment_names": [],
+      "schedule_source": "~/Library/LaunchAgents/local.ds4-flash-next.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [
+        "~/src/ds4-main/ds4-server",
+        "~/.ds4/server-kv"
+      ],
+      "schedule_expectation": null
+    },
+    {
+      "label": "local.flash-desk",
+      "path": "~/Library/LaunchAgents/local.flash-desk.plist",
+      "executables": [
+        "~/.local/bin/flash-desk-start"
+      ],
+      "dependencies": [],
+      "disabled": false,
+      "environment_names": [],
+      "schedule_source": "~/Library/LaunchAgents/local.flash-desk.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [
+        "~/.local/bin/flash-desk-start"
+      ],
+      "schedule_expectation": null
+    }
+  ],
+  "credential_files": [
+    {
+      "path": "~/.cli-proxy-api/client-api-key",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.cli-proxy-api/management-key",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/age-key.txt",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar-prebrief-joe-activation.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar-prebrief-joe-child.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar-prebrief-joe-private.pem",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar-prebrief-joe-public.pem",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar-prebrief-joe.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/calendar.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/claude-continuity-spool.key",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/db.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/device-evidence.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/dot-reader.connection",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/elevenlabs.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/engineering-controller.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/gmail.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/healthchecks.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/ingest.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/mcp-tokens.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/neon-production-root.pem",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-foundation-assurance-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-gate-zero-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-reader.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/0b7bf6a6-e400-4c68-9c91-23c5f8ffb1a5/jobs.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/0b7bf6a6-e400-4c68-9c91-23c5f8ffb1a5/verifier.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/jobs.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/staging-foundation-assurance-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/staging-gate-zero-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/staging-reader.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/staging-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/15b2a43b-c84f-40f1-ac4a-b7d97c7ab7d2/verifier.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/jobs.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/staging-foundation-assurance-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/staging-gate-zero-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/staging-reader.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/staging-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/27bb2477-94b8-45a2-8161-fc50fef296a4/verifier.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/jobs.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/staging-foundation-assurance-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/staging-gate-zero-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/staging-reader.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/staging-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/6d1480ee-72a8-4741-b5be-165a017d2763/verifier.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/jobs.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/staging-foundation-assurance-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/staging-gate-zero-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/staging-reader.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/staging-writer.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/b8d7f586-8c95-4f56-8547-3b4ca8056014/verifier.env",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/f870b3e2-f99a-4bf2-ba16-629d9725ba6d/jobs.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/f870b3e2-f99a-4bf2-ba16-629d9725ba6d/staging-reader.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/f870b3e2-f99a-4bf2-ba16-629d9725ba6d/staging-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-replacements/f870b3e2-f99a-4bf2-ba16-629d9725ba6d/verifier.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-tokens.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/staging-writer.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/tokens.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/typesafe.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.config/carr/wr95-review-tokens.env",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/authorized_keys",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/carr_dell_ed25519",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/carr_dell_ed25519.pub",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/carr_macbook_ed25519",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.ssh/carr_macbook_ed25519.pub",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.ssh/config",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/known_hosts",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.ssh/known_hosts.old",
+      "macbook_present": true
+    }
+  ],
+  "listeners": [
+    {
+      "pid": "554",
+      "command": "claude",
+      "listen": "127.0.0.1:60683",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "873",
+      "command": "rapportd",
+      "listen": "*:49152",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "873",
+      "command": "rapportd",
+      "listen": "*:49152",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "976",
+      "command": "ControlCenter",
+      "listen": "*:7000",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "976",
+      "command": "ControlCenter",
+      "listen": "*:7000",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "976",
+      "command": "ControlCenter",
+      "listen": "*:5000",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "976",
+      "command": "ControlCenter",
+      "listen": "*:5000",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "1259",
+      "command": "ds4-server",
+      "listen": "127.0.0.1:8000",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "1300",
+      "command": "AdobeResourceSynchronizer",
+      "listen": "127.0.0.1:19292",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "1755",
+      "command": "Adobe Desktop Service",
+      "listen": "127.0.0.1:15292",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "1755",
+      "command": "Adobe Desktop Service",
+      "listen": "127.0.0.1:15393",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "1755",
+      "command": "Adobe Desktop Service",
+      "listen": "127.0.0.1:16494",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "4197",
+      "command": "postgres",
+      "listen": "127.0.0.1:55541",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "9193",
+      "command": "whisper-server",
+      "listen": "127.0.0.1:8595",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "9229",
+      "command": "llama-server",
+      "listen": "127.0.0.1:8596",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "9237",
+      "command": "whisper-server",
+      "listen": "127.0.0.1:8597",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "9896",
+      "command": "claude.exe",
+      "listen": "127.0.0.1:56276",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "12325",
+      "command": "ARDAgent",
+      "listen": "*:3283",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "15055",
+      "command": "postgres",
+      "listen": "127.0.0.1:55484",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "15838",
+      "command": "claude",
+      "listen": "127.0.0.1:60489",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "22630",
+      "command": "claude",
+      "listen": "127.0.0.1:61381",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "24434",
+      "command": "postgres",
+      "listen": "127.0.0.1:55611",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "24456",
+      "command": "2.1.284",
+      "listen": "127.0.0.1:65308",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "28733",
+      "command": "postgres",
+      "listen": "127.0.0.1:55620",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "31441",
+      "command": "claude",
+      "listen": "127.0.0.1:58329",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "35230",
+      "command": "claude",
+      "listen": "127.0.0.1:50153",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "41648",
+      "command": "OneDrive Sync Service",
+      "listen": "[::1]:42050",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "54396",
+      "command": "Google Drive",
+      "listen": "[::1]:7679",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "55577",
+      "command": "postgres",
+      "listen": "127.0.0.1:55493",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "56052",
+      "command": "postgres",
+      "listen": "127.0.0.1:55576",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "58743",
+      "command": "postgres",
+      "listen": "127.0.0.1:52177",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "60855",
+      "command": "postgres",
+      "listen": "127.0.0.1:55596",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "62383",
+      "command": "postgres",
+      "listen": "127.0.0.1:55461",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "62497",
+      "command": "postgres",
+      "listen": "127.0.0.1:56817",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "63895",
+      "command": "claude.exe",
+      "listen": "127.0.0.1:51392",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "65416",
+      "command": "postgres",
+      "listen": "127.0.0.1:65157",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "66241",
+      "command": "postgres",
+      "listen": "127.0.0.1:65156",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "68236",
+      "command": "claude",
+      "listen": "127.0.0.1:50144",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "68239",
+      "command": "postgres",
+      "listen": "127.0.0.1:55568",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "68534",
+      "command": "postgres",
+      "listen": "[::1]:55495",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "68534",
+      "command": "postgres",
+      "listen": "127.0.0.1:55495",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "69379",
+      "command": "claude",
+      "listen": "127.0.0.1:52846",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "69971",
+      "command": "claude",
+      "listen": "127.0.0.1:51950",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "70376",
+      "command": "claude.exe",
+      "listen": "127.0.0.1:58635",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "71728",
+      "command": "cliproxyapi",
+      "listen": "127.0.0.1:8317",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "73312",
+      "command": "2.1.284",
+      "listen": "127.0.0.1:52013",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "73850",
+      "command": "claude",
+      "listen": "127.0.0.1:56498",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "81465",
+      "command": "postgres",
+      "listen": "127.0.0.1:55451",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "82268",
+      "command": "postgres",
+      "listen": "127.0.0.1:55488",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "82308",
+      "command": "postgres",
+      "listen": "127.0.0.1:55795",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "88170",
+      "command": "claude.exe",
+      "listen": "127.0.0.1:53021",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "88367",
+      "command": "claude.exe",
+      "listen": "127.0.0.1:50936",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "89259",
+      "command": "Python",
+      "listen": "127.0.0.1:4682",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "89374",
+      "command": "Python",
+      "listen": "127.0.0.1:4680",
+      "macbook_same_endpoint": true,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "98186",
+      "command": "postgres",
+      "listen": "127.0.0.1:55490",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "98237",
+      "command": "claude",
+      "listen": "127.0.0.1:51904",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "99196",
+      "command": "postgres",
+      "listen": "127.0.0.1:55432",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    },
+    {
+      "pid": "99392",
+      "command": "postgres",
+      "listen": "127.0.0.1:55794",
+      "macbook_same_endpoint": false,
+      "required_action": "classify dependency and verify replacement endpoint before takeover"
+    }
+  ],
+  "local_databases": [
+    {
+      "path": "~/.hermes/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/kanban/boards/carr-build/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/kanban/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/state-snapshots/20260905-145828-pre-update/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/builder/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/deal-steward/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/state-snapshots/20260905-145828-pre-update/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/designer/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/intake-clerk/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/marketing-ops/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/Default/CdmStorage.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/Default/Storage/ext/nmmhkkegccagdldgiimedpiccmgmieda/def/declarative_performance_observer.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/Default/declarative_performance_observer.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/Default/heavy_ad_intervention_opt_out.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/GPUPersistentCache/GPUCache/NCJR6QREIV6KRJGRZWTU7KPGU7MYHCMV/cache.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/browser-profile/chrome/first_party_sets.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/state-snapshots/20260905-145828-pre-update/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/reviewer/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/state-snapshots/20260905-145828-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/state-snapshots/20260905-145828-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/state-snapshots/20260905-145828-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/profiles/system-watch/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/shared-state.db",
+      "macbook_present": false
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/kanban/boards/carr-build/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/.20260826-135633-pre-update.99541.partial/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/cron/executions.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/kanban/boards/carr-build/kanban.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/projects.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state-snapshots/20260905-145827-pre-update/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/state.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/.hermes/verification_evidence.db",
+      "macbook_present": true
+    },
+    {
+      "path": "~/carr-system/out/jev-calls.jsonl.daily-cap.sqlite3",
+      "macbook_present": true
+    },
+    {
+      "path": "~/carr-system/out/jev-judge-cache.sqlite3",
+      "macbook_present": true
+    },
+    {
+      "path": "~/carr-system/out/run-spool.sqlite3",
+      "macbook_present": true
+    },
+    {
+      "path": "~/carr-system/out/wt-dot-job3/.git-recovery.qiybFN/repo/out/jev-judge-cache.sqlite3",
+      "macbook_present": false
+    },
+    {
+      "path": "~/carr-system/out/wt-dot-job3/out/jev-judge-cache.sqlite3",
+      "macbook_present": false
+    }
+  ],
+  "state_search_roots": [
+    "~/.hermes",
+    "~/.local/share/carr",
+    "~/carr-system/out",
+    "~/Library/Application Support/Tailscale"
+  ],
+  "hardware": {
+    "studio_memory_bytes": 68719476736,
+    "macbook_memory_bytes": 17179869184,
+    "required_action": "verify model weights and context fit target memory; do not assume equivalent capacity"
+  },
+  "ssh_roles": {
+    "studio_aliases": [
+      "macbook",
+      "dell"
+    ],
+    "macbook_aliases": [
+      "github.com",
+      "dell"
+    ],
+    "tailscale_app_studio": true,
+    "tailscale_app_macbook": true,
+    "required_action": "verify target ingress and repoint callers pinned to Studio"
+  },
+  "collections": {
+    "launchd": "all user agents and readable /Library/LaunchDaemons",
+    "cron": {
+      "studio_entries": 0,
+      "macbook_entries": 0
+    },
+    "claude": {
+      "studio_definitions": [
+        "ai-capability-builder",
+        "calendar-fetch-daily",
+        "calendar-prebrief-projection-joe-daily",
+        "cc-update-audit",
+        "contact-enrichment-weekly",
+        "content-fuel-harvest-weekly",
+        "deal-history-research-weekly",
+        "engineering-slice",
+        "health-audit-monthly",
+        "idea-resurface-monthly",
+        "linkedin-engagement-daily",
+        "loop-drain-weekdays",
+        "nightly-record-layer",
+        "notes-sweep-hourly",
+        "npi-sweep-weekly",
+        "playbook-review-monthly",
+        "radar-weekly",
+        "restore-rehearse-weekly",
+        "social-batch-weekly",
+        "social-metrics-pull-weekly",
+        "system-sweep-monthly",
+        "x-reply-run-daily"
+      ],
+      "macbook_definitions": [
+        "frontier-docs-landing-deadman",
+        "handoff-continuation-20260822-1310",
+        "handoff-continuation-20260901-1608",
+        "handoff-continuation-20260901-2035",
+        "reenable-paused-schedules-0826",
+        "shadow-drain-0827",
+        "shadow-drain-0901-restore"
+      ]
+    },
+    "errors": [
+      "/Library/LaunchDaemons/com.microsoft.teams.TeamsUpdaterDaemon.plist: unreadable plist"
+    ]
+  }
+}
