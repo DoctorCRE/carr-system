@@ -22,10 +22,13 @@ Usage:
     DATABASE_URL=... .venv/bin/python tools/ledger-repair.py --apply
 """
 
-import hashlib
-import os
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+import hashlib
+import os
 
 import psycopg
 
@@ -69,7 +72,7 @@ def main():
                 print(f"  {name}: MARKER FAILED (got {got}, expected {expected}) — "
                       "left PENDING, this one really does need applying")
                 continue
-            digest = hashlib.sha256((MIGRATIONS / name).read_bytes()).hexdigest()
+            digest = hashlib.sha256(read_migration(MIGRATIONS.parent, name).encode()).hexdigest()
             print(f"  {name}: marker ok ({got}) -> recording as applied")
             if apply:
                 cur.execute(

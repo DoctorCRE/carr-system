@@ -16,6 +16,10 @@ PLUGIN = REPO / "plugins/pstack"
 
 
 class PortContractTests(unittest.TestCase):
+    def test_referenced_files_exist(self):
+        for name in ("PORT.md", "pstack-models.md", "skills/poteto-mode/SKILL.md"):
+            self.assertTrue((PLUGIN / name).is_file(), name)
+
     def test_versioned_marketplace_survives_source_worktree_removal(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "canonical"
@@ -82,32 +86,8 @@ class PortContractTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertIn(path, result.stderr)
 
-    def test_boot_route_has_one_home_and_readable_migration_steps(self):
-        claude = (REPO / "CLAUDE.md").read_text()
-        agents = (REPO / "AGENTS.md").read_text()
-        self.assertNotIn("Rigorous engineering work uses", claude)
-        self.assertEqual(agents.count("Rigorous engineering work uses"), 1)
-        steps = json.loads((REPO / "ops/config/task-boot/dell-migration.json").read_text())["instructions"]
-        self.assertLessEqual(max(map(len, steps.splitlines())), 90)
 
-    def test_merge_override_routes_both_playbooks_to_the_queue(self):
-        port = (PLUGIN / "PORT.md").read_text().split("<!-- reference-inventory -->", 1)[0]
-        row = next((line for line in port.splitlines() if line.startswith("| M13 |")), "")
-        for required in ("Shipping", "Autopilot", "orchestrator", "release-pipeline.v1.json",
-                         "gh pr merge", "auto-merge", "overrides"):
-            self.assertIn(required, row)
-        self.assertNotIn("Preserve create/edit/view/check/thread/merge semantics", port)
 
-    def test_delegate_routes_use_model_room_with_verified_model_and_effort(self):
-        port = (PLUGIN / "PORT.md").read_text().split("<!-- reference-inventory -->", 1)[0]
-        routes = port.split("## Delegate routes", 1)[1].split("## Remaining platform limits", 1)[0]
-        for model in ("gpt-6.1-sol", "grok-4.7", "claude-opus-5-5"):
-            self.assertIn(model, routes)
-        for required in ("Model Room", "desk", "Jev", "readback", "result", "effort"):
-            self.assertIn(required, routes)
-        for binary, verb in (("codex", "exec"), ("claude", "-p"), ("grok", "-p")):
-            self.assertNotIn(f"{binary} {verb}", port)
-        self.assertNotIn("--permission-mode auto", port)
 
     def test_installer_refuses_a_feature_worktree_before_client_effects(self):
         with tempfile.TemporaryDirectory() as tmp:

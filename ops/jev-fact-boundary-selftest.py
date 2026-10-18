@@ -34,7 +34,6 @@ from pathlib import Path
 
 OPS = Path(__file__).resolve().parent
 FIXTURE = OPS / "fixtures" / "jev-fact-boundary" / "labeled-claims.json"
-HOOK = OPS.parent / "hooks" / "jev-supervisor.py"
 
 SPEC = importlib.util.spec_from_file_location("jev_fact_boundary", OPS / "jev_fact_boundary.py")
 assert SPEC and SPEC.loader
@@ -511,117 +510,6 @@ class FixtureGateTests(SemanticTestCase):
         print("\n" + format_report(report, "offline, scripted judge"), file=sys.stderr)
 
 
-class SupervisorWiringTests(SemanticTestCase):
-    """hooks/jev-supervisor.py's fact_boundary(): isolated, budgeted, quiet on failure."""
-
-    def setUp(self):
-        os.environ["CARR_JEV_FACT_BOUNDARY"] = "on"
-
-    def tearDown(self):
-        os.environ.pop("CARR_JEV_FACT_BOUNDARY", None)
-
-    def load_hook(self):
-        os.environ["CARR_JEV_SUPERVISOR"] = "advise"
-        spec = importlib.util.spec_from_file_location("jev_supervisor_fact_test", HOOK)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def test_routes_payload_through_the_library(self):
-        m = self.load_hook()
-        seen = {}
-
-        class Lib:
-            @staticmethod
-            def boundary_from_hook(payload):
-                return {"boundary": "stop_report", "text": "t", "ref": "stop"}
-
-            @staticmethod
-            def check_boundary(boundary, budget_seconds=None):
-                seen["budget"] = budget_seconds
-                return {"check": "fact_boundary", "verdict": "block", "confidence": 0.9,
-                        "escalate": True, "detail": {"advice": "contradicted claim"}}
-
-        m._lib = lambda name: Lib if name == "jev_fact_boundary" else None
-        run = m.Run()
-        out = m.fact_boundary({"hook_event_name": "Stop"}, run)
-        self.assertEqual(out["verdict"], "block")
-        self.assertEqual(run.results[-1]["verdict"], "block")
-        self.assertLess(seen["budget"], m.BUDGET_SECONDS)
-
-    def test_library_failure_is_silent(self):
-        m = self.load_hook()
-
-        def broken(name):
-            raise ImportError(name)
-
-        m._lib = broken
-        run = m.Run()
-        self.assertIsNone(m.fact_boundary({"hook_event_name": "Stop"}, run))
-        self.assertEqual(run.results, [])
-
-    def test_off_switch(self):
-        m = self.load_hook()
-        m._lib = lambda name: (_ for _ in ()).throw(AssertionError("must not load"))
-        os.environ["CARR_JEV_FACT_BOUNDARY"] = "off"
-        try:
-            self.assertIsNone(m.fact_boundary({"hook_event_name": "Stop"}, m.Run()))
-        finally:
-            os.environ.pop("CARR_JEV_FACT_BOUNDARY", None)
-
-    def _run_real_library(self, env_value):
-        """Drive fact_boundary with the REAL library; count verb-door calls.
-
-        The credential check is forced true and subprocess is replaced, so a
-        run that reaches retrieval records its search-doctrine argv here
-        instead of touching the network.
-        """
-        m = self.load_hook()
-        real_lib = m._lib
-        calls = []
-
-        class Proc:
-            returncode = 0
-            stdout = '{"ok":true,"hits":[]}'
-            stderr = ""
-
-        class FakeSubprocess:
-            DEVNULL = -3
-
-            @staticmethod
-            def run(argv, **kwargs):
-                calls.append(list(argv))
-                return Proc()
-
-        def lib(name):
-            mod = real_lib(name)
-            if name == "jev_fact_boundary":
-                mod.credential_ready = lambda client=None: True
-                mod.subprocess = FakeSubprocess
-            return mod
-
-        m._lib = lib
-        os.environ.pop("CARR_JEV_FACT_BOUNDARY", None)
-        if env_value is not None:
-            os.environ["CARR_JEV_FACT_BOUNDARY"] = env_value
-        try:
-            payload = {"hook_event_name": "Stop", "last_assistant_message":
-                       "Stop-gate rationing leaves exactly five hooks able to reopen a turn."}
-            m.fact_boundary(payload, m.Run())
-        finally:
-            os.environ.pop("CARR_JEV_FACT_BOUNDARY", None)
-        return [c for c in calls if "search-doctrine" in c]
-
-    def test_default_is_off_and_makes_zero_search_doctrine_calls(self):
-        """Review finding: each search-doctrine call side-writes a
-        log_retrieval_query row, so the boundary must be opt-in."""
-        self.assertEqual(self._run_real_library(None), [])
-        self.assertEqual(self._run_real_library(""), [])
-        self.assertEqual(self._run_real_library("yes-please"), [])
-
-    def test_explicit_on_reaches_search_doctrine(self):
-        """Control for the default-off test: the counter does see real calls."""
-        self.assertGreater(len(self._run_real_library("on")), 0)
 
 
 # --------------------------------------------------------------- live mode

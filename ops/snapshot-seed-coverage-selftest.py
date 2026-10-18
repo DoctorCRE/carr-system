@@ -22,6 +22,8 @@ never writes inside the repository.
 """
 
 import importlib.util
+import hashlib
+import subprocess
 import json
 import os
 import pathlib
@@ -33,6 +35,8 @@ import io
 import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+
+from git_env import fixture_env
 
 # INSERT provenance belongs to one live database's transactions. A rebuild
 # carries schema, never old xid8 values that could collide with its own xids.
@@ -119,6 +123,35 @@ def summarise(failures):
 def main():
     module = load_module()
     print("ops/snapshot-seed-coverage-selftest.py")
+
+    # The classifier must retain seeds after their covered SQL leaves the tree.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(build_repo(tmp, {
+            "0001_seed.sql": "insert into ops.widget values ('seed');\n",
+        }, {"excluded": {"ops.widget": "fixture runtime data"}}))
+        git_env = dict(fixture_env(), GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                       GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(root), *args], env=git_env, text=True)
+        git("init", "-q")
+        git("add", "migrations/0001_seed.sql")
+        git("commit", "-qm", "Historical seed")
+        source = git("rev-parse", "HEAD").strip()
+        before = module.check(str(root), artifact(["0001_seed.sql"]))
+        (root / "db").mkdir()
+        manifest = {
+            "schema": "carr-migration-baseline/v1", "source_revision": source,
+            "snapshot": {"path": "db/schema.sql", "sha256": "0" * 64},
+            "cutoff": "0001_seed.sql", "migrations": [{"filename": "0001_seed.sql",
+                "sha256": hashlib.sha256(b"insert into ops.widget values ('seed');\n").hexdigest()}],
+        }
+        (root / "db/migration-baseline.json").write_text(json.dumps(manifest))
+        (root / "migrations/0001_seed.sql").unlink()
+        case("covered seeds retain exactly their full-file classification result",
+             before == [] and module.check(str(root), artifact(["0001_seed.sql"])) == before)
+        case("covered excluded seed rows still refuse when present in the snapshot",
+             "EXCLUDED" in summarise(module.check(str(root),
+                 artifact(["0001_seed.sql"]) + copy_block("ops.widget"))))
 
     seeding = ("create table ops.widget (k text);\n"
                "insert into ops.widget (k) values ('alpha'),('beta');\n")
@@ -611,6 +644,21 @@ def main():
                           {"carried": {}, "excluded": {}})
         case("an E-string with a backslash-escaped quote does not silence the migration",
              any("ops.new_registry" in f for f in module.check(repo, artifact(["0100_e.sql"]))))
+        tail_calls = [0]
+        original_tail = module._tail
+
+        def count_tail_calls(parts, count):
+            tail_calls[0] += 1
+            return original_tail(parts, count)
+
+        module._tail = count_tail_calls
+        try:
+            scanned, do_bodies, routines = module.scan_sql("select 'x';\n" * 1000)
+        finally:
+            module._tail = original_tail
+        case("ordinary string scanning does not rebuild the accumulated output tail",
+             tail_calls[0] == 0 and scanned.count("select") == 1000
+             and not do_bodies and not routines)
         # A backslash in an ORDINARY literal is a plain character, not an escape.
         repo = build_repo(tmp + "/r6esc2",
                           {"0100_p.sql": "comment on table t is 'a plain \\ backslash';\n"
@@ -1041,6 +1089,20 @@ def main():
         # payload, pass all 34 cases while the guard refused nothing.
         repo = build_repo(tmp + "/mainok", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {"ops.widget": "runtime"}})
+        seed_artifact = artifact(["0100_seed.sql"])
+        seed_analysis = module.analyze_seeds(repo, seed_artifact)
+        original_written_tables = module.written_tables
+
+        def reject_migration_rescan(sql):
+            raise AssertionError("precomputed seed analysis was not reused")
+
+        module.written_tables = reject_migration_rescan
+        try:
+            reused_findings = module.check(repo, seed_artifact, seed_analysis)
+        finally:
+            module.written_tables = original_written_tables
+        case("check reuses precomputed migration seed analysis",
+             reused_findings == [])
         path_clean = os.path.join(tmp, "clean.sql")
         open(path_clean, "w").write(artifact(["0100_seed.sql"]))
         err = io.StringIO()
@@ -1094,8 +1156,8 @@ def main():
         # ---------------------------------------------------------------- G6
         repo = build_repo(tmp + "/g6", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {"ops.widget": "runtime"}})
-        case("a ledger entry with no file on disk is reported, not silently skipped",
-             any("NOT ON DISK" in f for f in
+        case("a ledger entry with no source is reported, not silently skipped",
+             any("HAS NO SOURCE" in f for f in
                  module.check(repo, artifact(["0100_seed.sql", "0999_renamed_away.sql"]))))
 
         # ---------------------------------------------------------------- G3

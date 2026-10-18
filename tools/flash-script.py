@@ -1,31 +1,16 @@
 #!/usr/bin/env python3
-"""flash-script.py — Flash answers a question about data too large to read, by writing and running scripts, with
-Jev steering each turn. This is the `flash-script-v3` protocol of the Model Room routing policy
-(ops/config/model-routes.v1.json, route "script").
+"""Answer a large-data question through Flash's supervised script protocol.
 
-WHERE IT CAME FROM. Revision 3 of the Jev-steered harness, tested 2026-09-24 on nine data tasks with 15 runs each
-per version: Flash alone 7 of 9 once; with Jev 8, 9, 10 and then 12 of 15 as each fault was found and fixed. Only the
-revision 3 path is kept here; the planning mode (7 of 15) and the one-phrase-per-call labelling (1 of 6) lost.
-
-THE LOOP. Flash sees the question and a preview of the files (sizes, line counts, first lines), never whole files.
-Each turn it replies with ONE python block, which runs in a throwaway working folder holding copies of the files,
-or with FINAL: <answer>. Up to three scripts. Around it:
-  - Jev pre-read: hints for multi-document questions and for labelling by meaning.
-  - After each script, Jev reads its output for warning signs (misparsed records, too few matches, a value far
-    outside the sample range) and picks the next turn's focus: answer now, compute the full answer, or no steer.
-  - Every script-writing turn is capped at COMPUTE_TOKENS. A turn that runs out of room is followed by one with
-    thinking OFF and a short-rules instruction (fault 8: thinking spirals, a cap alone only shortens them).
-  - A counts answer that sums below a printed record total gets one free fix when Jev agrees every record belongs
-    to a category.
-  - FINAL: @file followed by code runs that code before reading the file (fault 9).
-Code, not Jev, decides the hand-off: ops/jev_model_route.handoff_reason() on the answer and the turn log
-(no answer, an answer its scripts never printed, two runaway turns in a row) names why it goes to the route's
-`then` desk.
+The command copies allowed inputs into a temporary directory, lets Flash write
+bounded Python scripts, and uses Jev to inspect the results. Deterministic code
+decides whether to return an answer or hand the task to the configured next
+desk. When Flash is switched off, the command reads no input and returns that
+handoff immediately.
 
     flash-script.py "<question>" <file-or-folder> [...] [--json]
 
 Exit codes: 0 answered and grounded, 4 hand off (reason printed), 2 usage or environment problem.
-Every run appends one row to out/flash-script-runs.jsonl.
+Completed and switched-off attempts append a row to out/flash-script-runs.jsonl.
 """
 from __future__ import annotations
 
@@ -47,6 +32,8 @@ from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOLS = os.path.join(REPO, "tools")
+sys.path.insert(0, TOOLS)
+import flashlib
 RUNS_LOG = os.path.join(REPO, "out", "flash-script-runs.jsonl")
 FLASH_URL = os.environ.get("CARR_FLASH_URL", "http://127.0.0.1:8000")
 FLASH_MODEL = os.environ.get("CARR_FLASH_MODEL", "qwen3.8-flash-next")
@@ -59,6 +46,12 @@ MAX_TURNS = MAX_RUNS + 2
 # script-writing turn is capped here.
 COMPUTE_TOKENS = 12288
 JEV_TIMEOUT = 60
+
+
+def append_run(row):
+    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
+    with open(RUNS_LOG, "a") as fh:
+        fh.write(json.dumps(row) + "\n")
 
 SYSTEM = """You solve data questions whose files are far too large to read. You never see whole files: you
 write Python 3 that reads them and prints what you need. Working directory is the data folder.
@@ -101,7 +94,7 @@ def chat(messages, *, max_tokens=COMPUTE_TOKENS, think=True, timeout=THINK_TIMEO
         body["chat_template_kwargs"] = {"enable_thinking": False}
     req = urllib.request.Request(f"{FLASH_URL}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with flashlib.request_scope(FLASH_URL), urllib.request.urlopen(req, timeout=timeout) as r:
         reply = json.load(r)
     choice = reply["choices"][0]
     msg = choice["message"]
@@ -259,22 +252,24 @@ def run_code(code, work, n, *, sandbox=True):
             return "[refused: no script sandbox on this machine; model-written code does not run unsandboxed]", 0.0
         argv = [SANDBOX_EXEC, "-p", sandbox_profile(work), *argv]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONPATH": work, "LANG": "C.UTF-8",
-           "PYTHONDONTWRITEBYTECODE": "1", "CARR_FLASH_URL": FLASH_URL, "CARR_FLASH_MODEL": FLASH_MODEL}
+           "PYTHONDONTWRITEBYTECODE": "1", "CARR_FLASH_URL": FLASH_URL, "CARR_FLASH_MODEL": FLASH_MODEL,
+           "CARR_FLASH_PREPARED": "1"}
     out_path, err_path = os.path.join(work, f".flash_out_{n}"), os.path.join(work, f".flash_err_{n}")
     t = time.monotonic()
-    with open(out_path, "wb") as so, open(err_path, "wb") as se:
-        p = subprocess.Popen(argv, cwd=work, stdout=so, stderr=se, stdin=subprocess.DEVNULL, env=env,
-                             start_new_session=True, preexec_fn=_limits)
-        try:
-            p.wait(timeout=RUN_TIMEOUT)
-            timed_out = False
-        except subprocess.TimeoutExpired:
-            timed_out = True
+    with flashlib.activity_scope():
+        with open(out_path, "wb") as so, open(err_path, "wb") as se:
+            p = subprocess.Popen(argv, cwd=work, stdout=so, stderr=se, stdin=subprocess.DEVNULL, env=env,
+                                 start_new_session=True, preexec_fn=_limits)
             try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            p.wait()
+                p.wait(timeout=RUN_TIMEOUT)
+                timed_out = False
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                p.wait()
     stdout, stderr = _tail(out_path, OUT_CLIP), _tail(err_path, 1200)
     out = (stdout + ("\n[stderr]\n" + stderr if stderr.strip() else "")).strip()
     if timed_out:
@@ -499,6 +494,19 @@ def main(argv):
     ap.add_argument("paths", nargs="+", help="data files or folders (copied into a throwaway folder)")
     ap.add_argument("--json", action="store_true", help="print the result row as JSON")
     a = ap.parse_args(argv)
+    if flashlib.is_switched_off():
+        route = _lib("jev_model_route")
+        policy = route.load_policy()
+        row = {"at": datetime.now(timezone.utc).isoformat(), "question": a.question[:500],
+               "paths": [os.path.abspath(p) for p in a.paths], "answer": "", "support": None,
+               "handoff": flashlib.OFF_REASON, "handoff_desk": policy["routes"]["script"]["then"]["desk"],
+               "turns": 0, "jev_errors": 0, "secs": 0, "log": [], "detail": flashlib.OFF_REASON}
+        append_run(row)
+        if a.json:
+            print(json.dumps({k: v for k, v in row.items() if k != "log"}))
+        else:
+            print(f"HAND OFF ({flashlib.OFF_REASON}) to {row['handoff_desk']}")
+        return 4
     missing = [p for p in a.paths if not os.path.exists(p)]
     if missing:
         print(f"no such file or folder: {', '.join(missing)}", file=sys.stderr)
@@ -532,9 +540,7 @@ def main(argv):
            "handoff": reason, "handoff_desk": policy["routes"]["script"]["then"]["desk"] if reason else None,
            "turns": sum(1 for e in log if "turn" in e), "jev_errors": jev.errors,
            "secs": round(time.monotonic() - t, 1), "log": log}
-    os.makedirs(os.path.dirname(RUNS_LOG), exist_ok=True)
-    with open(RUNS_LOG, "a") as fh:
-        fh.write(json.dumps(row) + "\n")
+    append_run(row)
     if a.json:  # the full answer: a long list is the answer, and the log row keeps only its first 3,000 characters
         print(json.dumps({**{k: v for k, v in row.items() if k != "log"}, "answer": answer or ""}))
     elif reason:

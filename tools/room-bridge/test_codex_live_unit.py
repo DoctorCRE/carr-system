@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""Unit proof for the codex-live desk. No Codex, no model spend.
-
-A stand-in speaks the app-server's side of the wire — the WebSocket upgrade,
-then the four messages a turn actually needs — so the client is tested against
-the protocol rather than against a live seat. What it pins down is the part
-that is not guessable from the schema: the ORDER (initialize, then the
+"""the ORDER (initialize, then the
 initialized notification, then thread/start or thread/resume, then turn/start),
 and that a resumed desk sends thread/resume with the id it was given instead of
 starting a fresh thread.
-
-Codex derived this protocol; see codex_wire.py. The live half is proven in
-test_codex_live_live.py, which needs a real app-server.
-
-Run:  python3 tools/room-bridge/test_codex_live_unit.py
 """
 
 from __future__ import annotations
@@ -26,6 +16,7 @@ import struct
 import sys
 import tempfile
 import threading
+from unittest.mock import patch
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -33,6 +24,7 @@ sys.path.insert(0, str(HERE))
 
 import desks  # noqa: E402
 import dispatch  # noqa: E402
+import desk_cli  # noqa: E402
 
 FAILURES: list[str] = []
 
@@ -51,11 +43,16 @@ def check(label: str, fn) -> None:
 
 
 class FakeAppServer:
-    """Speaks the server half: upgrade, then answer the four messages."""
 
-    def __init__(self, path: str, answer: str = "the live seat answered"):
+    def __init__(self, path: str, answer: str = "the live seat answered",
+                 silent_turn: bool = False, finish_on_interrupt: bool = False,
+                 message_only: bool = False, terminal_before_response: bool = False):
         self.path = path
         self.answer = answer
+        self.silent_turn = silent_turn
+        self.finish_on_interrupt = finish_on_interrupt
+        self.message_only = message_only
+        self.terminal_before_response = terminal_before_response
         self.seen: list[dict] = []
         try:
             os.unlink(path)
@@ -67,7 +64,6 @@ class FakeAppServer:
         self.srv.settimeout(10)
         threading.Thread(target=self._serve, daemon=True).start()
 
-    # -- websocket plumbing, mirrored from the client side -----------------
     @staticmethod
     def _accept_key(key: str) -> str:
         return base64.b64encode(
@@ -116,9 +112,6 @@ class FakeAppServer:
             return None
 
     def _serve(self) -> None:
-        # Accept in a loop. resolve() probes liveness by connecting, and that
-        # probe would otherwise consume the only accept the real turn needs —
-        # the same trap the Claude stand-in hit.
         while True:
             try:
                 conn, _ = self.srv.accept()
@@ -156,15 +149,33 @@ class FakeAppServer:
                     tid = (msg.get("params") or {}).get("threadId") or "thread-live-0001"
                     self._send(conn, {"id": msg["id"], "result": {"thread": {"id": tid}}})
                 elif method == "turn/start":
+                    if self.terminal_before_response:
+                        self._send(conn, {'method': 'turn/completed', 'params': {
+                            'threadId': msg['params']['threadId'],
+                            'turn': {'id': 'turn-1', 'status': 'completed'}}})
                     self._send(conn, {"id": msg["id"], "result": {"turn": {"id": "turn-1"}}})
+                    if self.silent_turn:
+                        continue
                     self._send(conn, {"method": "item/completed", "params": {
+                        "threadId": msg["params"]["threadId"], "turnId": "turn-1",
                         "item": {"type": "agentMessage", "text": self.answer}}})
+                    if self.message_only:
+                        continue
+                    self._send(conn, {'method': 'turn/completed', 'params': {
+                        'threadId': 'thread-live-0001', 'turn': {'id': 'turn-1', 'status': 'completed'}}})
+                elif method == 'turn/interrupt':
+                    self._send(conn, {'id': msg['id'], 'result': {}})
+                    if self.finish_on_interrupt:
+                        self.silent_turn = False
+                        self._send(conn, {'method': 'turn/completed', 'params': {
+                            'threadId': msg['params']['threadId'],
+                            'turn': {'id': msg['params']['turnId'], 'status': 'interrupted'}}})
+                elif method == 'thread/read':
+                    self._send(conn, {'id': msg['id'], 'result': {'thread': {
+                        'id': msg['params']['threadId'], 'turns': [
+                            {'id': 'turn-1', 'status': 'inProgress' if self.silent_turn else 'completed'}]}}})
 
     def methods(self) -> list[str]:
-        # str(...): the JSON-RPC `method` field is always a string when
-        # present; the explicit coercion is only here so mypy's comprehension
-        # narrowing (which does not apply the `if` filter to the element
-        # expression's type) does not read this as list[Any | None].
         return [str(m.get("method")) for m in self.seen if m.get("method")]
 
     def close(self) -> None:
@@ -174,6 +185,10 @@ class FakeAppServer:
             pass
 
 
+from test_codex_models_unit import catalog_fixture
+
+
+@catalog_fixture()
 def main() -> int:
     tmp = tempfile.TemporaryDirectory(prefix="codex-live-test-")
     root = Path(tmp.name)
@@ -193,11 +208,120 @@ def main() -> int:
             assert row["result"] == "the live seat answered", row
             assert row["resumed"] is False, row
             assert row["thread_id"] == "thread-live-0001", row
+            turn = next(m for m in srv.seen if m.get("method") == "turn/start")
+            assert turn["params"]["model"] == "gpt-6.1-sol", turn
+            assert turn["params"]["effort"] == "medium", turn
+            assert "sandboxPolicy" not in turn["params"], turn
         finally:
             srv.close()
 
     check("a task reaches a live Codex seat and its answer comes straight back",
           a_turn_reaches_a_live_codex_seat)
+
+    def read_only_network_access_is_opt_in_fresh_and_ephemeral():
+        srv = FakeAppServer(sock)
+        try:
+            reg.register("cx-network", "codex-live", socket=sock, cwd=str(root),
+                         model="gpt-5.1-codex-mini", effort="medium", network_access=True)
+            try:
+                dispatch.dispatch("cx-network", "read the authorized source", registry=reg,
+                                  results_path=results)
+            except desks.DeskError as exc:
+                assert exc.code == "network_access_requires_fresh_thread", exc.code
+            else:
+                raise AssertionError("network-enabled dispatch without --fresh was accepted")
+            assert srv.methods() == [], srv.methods()
+
+            row = dispatch.dispatch("cx-network", "read the authorized source", registry=reg,
+                                   results_path=results, fresh=True)
+            assert row["status"] == "completed", row
+            assert row["thread_id"] == "thread-live-0001", row
+            assert row["ephemeral_thread"] is True and row["thread_resumable"] is False, row
+            receipt = json.loads(results.read_text().splitlines()[-1])
+            assert receipt["thread_id"] == row["thread_id"], receipt
+            assert receipt["ephemeral_thread"] is True and receipt["thread_resumable"] is False, receipt
+            start = next(m for m in srv.seen if m.get("method") == "thread/start")
+            assert start["params"]["ephemeral"] is True, start
+            turn = next(m for m in srv.seen if m.get("method") == "turn/start")
+            assert turn["params"]["sandboxPolicy"] == {"type": "readOnly", "networkAccess": True}, turn
+            assert srv.methods()[:4] == ["initialize", "initialized", "thread/start", "turn/start"], srv.methods()
+            assert reg.entries()["cx-network"].get("thread_id") is None, reg.entries()["cx-network"]
+        finally:
+            srv.close()
+
+    check("read-only network access is explicit, fresh-only, and never pinned for resume",
+          read_only_network_access_is_opt_in_fresh_and_ephemeral)
+
+    def network_access_registry_values_are_strict_and_codex_live_only():
+        for value in (1, "true", None):
+            try:
+                reg.register("bad-network", "codex-live", socket=sock,
+                             model="gpt-5.1-codex-mini", effort="medium", network_access=value)
+            except desks.DeskError as exc:
+                assert exc.code == "bad_network_access", exc.code
+            else:
+                raise AssertionError(f"non-boolean network_access accepted: {value!r}")
+        try:
+            reg.register("wrong-kind", "codex-session", model="gpt-5.6-sol", effort="high",
+                         network_access=True)
+        except desks.DeskError as exc:
+            assert exc.code == "bad_network_access", exc.code
+        else:
+            raise AssertionError("network_access accepted on codex-session")
+
+    check("network access registry opt-in rejects non-booleans and other desk kinds",
+          network_access_registry_values_are_strict_and_codex_live_only)
+
+    def wire_refuses_network_on_resume_before_connecting():
+        for value, thread_id, expected in (
+            (True, "existing-thread", "network_access_requires_fresh_thread"),
+            (1, None, "bad_network_access"),
+        ):
+            try:
+                dispatch.codex_wire.run_turn(sock, "read", thread_id=thread_id,
+                                             network_access=value)
+            except desks.DeskError as exc:
+                assert exc.code == expected, exc.code
+            else:
+                raise AssertionError(f"unsafe wire request accepted: {value!r}, {thread_id!r}")
+
+    check("the wire rejects resume and non-boolean network requests before socket use",
+          wire_refuses_network_on_resume_before_connecting)
+
+    def both_registration_clis_expose_only_codex_live_network_opt_in():
+        for cli_name, invoke in (
+            ("dispatch", lambda registry, sock: dispatch.main([
+                "--registry", str(registry), "register", "cli-network", "--kind", "codex-live",
+                "--socket", sock, "--model", "gpt-5.1-codex-mini", "--effort", "medium", "--network-access"])),
+            ("desk_cli", lambda registry, sock: desk_cli.main([
+                "--registry", str(registry), "register", "cli-network", "--kind", "codex-live",
+                "--socket", sock, "--model", "gpt-5.1-codex-mini", "--effort", "medium", "--network-access"])),
+        ):
+            cli_root = root / cli_name
+            cli_root.mkdir()
+            path = cli_root / "registry.json"
+            cli_sock = str(cli_root / "codex-live.sock")
+            if cli_name == "desk_cli":
+                with patch.object(desk_cli.desks, "is_live", return_value=True):
+                    assert invoke(path, cli_sock) == 0
+            else:
+                assert invoke(path, cli_sock) == 0
+            assert desks.Registry(path).entries()["cli-network"]["network_access"] is True
+            try:
+                bad_path = cli_root / "wrong-kind.json"
+                invoke_args = ["--registry", str(bad_path), "register", "wrong-kind", "--kind",
+                               "codex-session", "--model", "gpt-5.6-sol", "--effort", "high", "--network-access"]
+                if cli_name == "dispatch":
+                    status = dispatch.main(invoke_args)
+                else:
+                    status = desk_cli.main(invoke_args)
+                assert status == 2, (cli_name, status)
+                assert not bad_path.exists(), (cli_name, bad_path)
+            except TypeError as exc:
+                raise AssertionError(f"{cli_name} rejected the supported boolean option: {exc}")
+
+    check("both registration CLIs expose a strict codex-live-only network opt-in",
+          both_registration_clis_expose_only_codex_live_network_opt_in)
 
     def the_call_order_is_the_one_codex_found():
         srv = FakeAppServer(sock)
@@ -257,6 +381,162 @@ def main() -> int:
 
     check("a codex-live desk whose app-server is gone is refused",
           a_dead_app_server_is_refused)
+
+    def a_silent_seat_stops_at_the_callers_limit():
+        import time as _time
+        quiet = str(root / "quiet.sock")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(quiet)
+        server.listen(8)
+        held: list = []
+        stop = threading.Event()
+
+        def accept_and_hold():
+            server.settimeout(0.2)
+            while not stop.is_set():
+                try:
+                    conn, _ = server.accept()
+                    held.append(conn)
+                except OSError:
+                    continue
+
+        t = threading.Thread(target=accept_and_hold, daemon=True)
+        t.start()
+        try:
+            reg.register("cx-quiet", "codex-live", socket=quiet, cwd=str(root),
+                         model="gpt-5.1-codex-mini", effort="medium")
+            began = _time.monotonic()
+            row = dispatch.dispatch("cx-quiet", "do the thing", registry=reg,
+                                    results_path=results, codex_timeout_s=1)
+            took = _time.monotonic() - began
+            assert row["status"] == "timed_out", row
+            assert took < 10, took
+        finally:
+            stop.set()
+            t.join(timeout=2)
+            for conn in held:
+                conn.close()
+            server.close()
+
+    check("a silent live Codex seat stops at the caller's whole-call limit",
+          a_silent_seat_stops_at_the_callers_limit)
+
+    def a_turn_that_times_out_keeps_its_new_thread():
+        stalled = str(root / "stalled.sock")
+        srv = FakeAppServer(stalled, silent_turn=True)
+        try:
+            reg.register("cx-stall", "codex-live", socket=stalled, cwd=str(root),
+                         model="gpt-5.1-codex-mini", effort="medium")
+            row = dispatch.dispatch("cx-stall", "do the thing", registry=reg,
+                                    results_path=results, codex_timeout_s=1)
+            assert row["status"] == "timed_out", row
+            assert row["thread_id"] == "thread-live-0001", row
+            assert reg.entries()["cx-stall"].get("thread_id") == "thread-live-0001", reg.entries()["cx-stall"]
+        finally:
+            srv.close()
+
+    check("a live Codex turn that times out keeps the thread it started",
+          a_turn_that_times_out_keeps_its_new_thread)
+
+    def timeout_requires_terminal_confirmation():
+        for confirms in (False, True):
+            path = str(root / f'cancel-{confirms}.sock')
+            srv = FakeAppServer(path, silent_turn=True, finish_on_interrupt=confirms)
+            try:
+                with patch.object(dispatch.codex_wire, 'CANCEL_TIMEOUT_S', 0.1):
+                    row = dispatch.codex_wire.run_turn(path, 'build', deadline_s=0.1)
+                assert row['status'] == 'timed_out', row
+                assert row['termination_confirmed'] is confirms, row
+                request = next(m for m in srv.seen if m.get('method') == 'turn/interrupt')
+                assert request['params'] == {'threadId': 'thread-live-0001', 'turnId': 'turn-1'}, request
+            finally:
+                srv.close()
+
+    check('timeout interrupts the exact turn; acknowledgement alone is not termination',
+          timeout_requires_terminal_confirmation)
+
+    def agent_message_does_not_release_a_running_turn():
+        path = str(root / 'message.sock')
+        srv = FakeAppServer(path, message_only=True)
+        try:
+            with patch.object(dispatch.codex_wire, 'CANCEL_TIMEOUT_S', 0.1):
+                row = dispatch.codex_wire.run_turn(path, 'build', deadline_s=0.1)
+            assert row['status'] == 'timed_out', row
+            assert not row['termination_confirmed'], row
+        finally:
+            srv.close()
+
+    check('an agent message is not proof that its turn has stopped',
+          agent_message_does_not_release_a_running_turn)
+
+    def terminal_read_requires_the_exact_turn():
+        path = str(root / 'read.sock')
+        srv = FakeAppServer(path)
+        try:
+            assert dispatch.codex_wire.turn_terminated(path, 'thread-live-0001', 'turn-1')
+            assert not dispatch.codex_wire.turn_terminated(path, 'thread-live-0001', 'old-turn')
+            srv.silent_turn = True
+            assert not dispatch.codex_wire.turn_terminated(path, 'thread-live-0001', 'turn-1')
+        finally:
+            srv.close()
+
+    check('thread read reconciles a terminal turn and refuses active or absent turns',
+          terminal_read_requires_the_exact_turn)
+
+    def terminal_notification_can_precede_start_response():
+        path = str(root / 'early-terminal.sock')
+        srv = FakeAppServer(path, silent_turn=True, terminal_before_response=True)
+        try:
+            with patch.object(dispatch.codex_wire, 'CANCEL_TIMEOUT_S', 0.1):
+                row = dispatch.codex_wire.run_turn(path, 'build', deadline_s=0.1)
+            assert row['status'] == 'completed', row
+            assert row['termination_confirmed'], row
+        finally:
+            srv.close()
+
+    check('terminal notification queued before the start response still confirms termination',
+          terminal_notification_can_precede_start_response)
+
+    def desktop_recovery_reads_only_the_marked_terminal_turn():
+        binary = root / 'bin'
+        binary.mkdir()
+        codex = binary / 'codex'
+        trace = root / 'stdio-requests.json'
+        marker = 'Room write owner: unique-job'
+        user_item = {'type': 'userMessage', 'content': [{'type': 'text', 'text': marker}]}
+        cases = [
+            ('desktop-thread', 'completed', user_item, True),
+            ('desktop-thread', 'inProgress', user_item, False),
+            ('desktop-thread', 'completed', {'type': 'userMessage', 'content': [
+                {'type': 'text', 'text': 'Room write owner: different-job'}]}, False),
+            ('desktop-thread', 'completed', {'type': 'agentMessage', 'content': [
+                {'type': 'text', 'text': marker}]}, False),
+            ('other-thread', 'completed', user_item, False),
+        ]
+        for tid, status, item, expected in cases:
+            reply = {'thread': {'id': tid, 'turns': [
+                {'id': 'desktop-turn', 'status': status, 'items': [item]}]}}
+            codex.write_text(f'''#!{sys.executable}
+import json, sys
+from pathlib import Path
+methods = []
+for line in sys.stdin:
+ msg = json.loads(line)
+ methods.append(msg['method'])
+ if msg['method'] == 'initialize':
+  print(json.dumps({{'id':msg['id'], 'result':{{}}}}), flush=True)
+ elif msg['method'] == 'thread/read':
+  print(json.dumps({{'id':msg['id'], 'result':{reply!r}}}), flush=True)
+Path({str(trace)!r}).write_text(json.dumps(methods))
+''')
+            codex.chmod(0o755)
+            with patch.dict(os.environ, {'PATH': str(binary)}):
+                got = dispatch.codex_wire.desktop_turn_terminated('desktop-thread', marker)
+            assert got is expected, (tid, status, item, got)
+            assert json.loads(trace.read_text()) == ['initialize', 'initialized', 'thread/read']
+
+    check('Desktop reconciliation reads marked terminal history without starting or resuming a turn',
+          desktop_recovery_reads_only_the_marked_terminal_turn)
 
     tmp.cleanup()
     print()

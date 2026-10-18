@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""LIVE proof: Hermes can dispatch a task into a real Claude desk session.
-
-Rule 97326357 binds — a claim about what a surface can do is only doctrine
-after a live test from that surface. So this asserts against no mock. It boots
-a REAL Claude Code session on a LABELED socket (never one of Joe's windows),
-dispatches one task through the same dispatch.py Hermes will call, and checks
-the session actually answered THAT task.
-
-FALSE-POSITIVE GUARD, inherited from the Idea 78 spike: the seed prompt the
-desk is started with must not be able to produce the success token on its own,
-or the seed's answer races the dispatch and the test passes for the wrong
-reason. The token is a nonce minted at runtime and placed ONLY in the
-dispatched task. If it comes back, the desk read the socket.
-
-Run:  python3 tools/room-bridge/test_claude_desk_live.py
-Exit 0 = dispatch proven end to end.
-"""
 
 from __future__ import annotations
 
@@ -69,11 +52,8 @@ def main() -> int:
             pass
 
     print(f"booting a labeled desk on {DESK_SOCK}")
-    # A DESK MUST OUTLIVE ITS FIRST ANSWER. Plain `claude -p` prints and
-    # exits, so a turn dispatched into it lands on a process already on its
-    # way out — the first version of this test passed exactly once, by
-    # winning that race. Streaming input keeps the session alive and waiting,
-    # which is what a desk is.
+    # Plain `claude -p` prints and
+    # exits.
     proc = subprocess.Popen(
         ["claude", "--messaging-socket-path", DESK_SOCK,
          "-p", "--input-format", "stream-json", "--output-format", "stream-json",
@@ -84,7 +64,7 @@ def main() -> int:
         cwd=str(root),
         text=True,
     )
-    assert proc.stdin is not None  # guaranteed by stdin=subprocess.PIPE above
+    assert proc.stdin is not None
     proc.stdin.write(json.dumps(
         {"type": "user", "message": {"role": "user", "content": SEED}}) + "\n")
     proc.stdin.flush()
@@ -94,11 +74,6 @@ def main() -> int:
             return 1
         print(f"  desk bound {DESK_SOCK} (pid {proc.pid})")
 
-        # Wait for the seed answer to LAND before dispatching. A socket that is
-        # bound is not a desk that is listening: the session is still working
-        # through its startup turn, and a turn delivered into that window is
-        # read by a process on its way out. The Idea 78 spike hit this and said
-        # so; this test raced it anyway on its second run.
         def seeded() -> bool:
             try:
                 return "READY" in log.read_text(errors="replace")

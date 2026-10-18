@@ -19,7 +19,7 @@ class LeadStageJobTests(unittest.TestCase):
                 if failure == "timeout":
                     raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output="private-sentinel")
                 raise OSError("private-sentinel launch failure")
-            with self.subTest(failure=failure), patch.object(job.subprocess, "run", run):
+            with self.subTest(failure=failure), patch("subprocess.run", run):
                 try:
                     job.call_verb("record-lead-contact", args)
                 except Exception:
@@ -78,8 +78,8 @@ class LeadStageJobTests(unittest.TestCase):
 class ScheduleTest(unittest.TestCase):
     def test_job_follows_local_mail_capture(self):
         chain=(Path(__file__).resolve().parents[1]/"bin/nightly.sh").read_text()
-        capture=chain.index('step "mail capture (extract + match, writes nothing)"')
-        job=chain.index('step "lead stages (evidence and approval drafts)"')
+        capture=chain.index('step "mail capture"')
+        job=chain.index('step "lead stages"')
         self.assertGreater(job,capture)
         self.assertIn('bin/lead-stage-job.py',chain[job:job+140])
 

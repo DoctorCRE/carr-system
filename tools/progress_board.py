@@ -12,6 +12,7 @@ all-repos board is built here from gh data on every publish.
 from __future__ import annotations
 
 import argparse
+import copy
 import contextlib
 import fcntl
 import functools
@@ -20,7 +21,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import time
 import sys
@@ -35,7 +35,7 @@ from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
 
-STATUSES = ("queued", "running", "review", "blocked", "done", "failed", "superseded")
+STATUSES = ("queued", "running", "review", "blocked", "question-for-orchestrator", "done", "failed", "superseded")
 # Failed and superseded cards leave the pipeline: they show only in History,
 # each with its reason.
 RETIRED_STATUSES = ("failed", "superseded")
@@ -55,6 +55,7 @@ STATUS_TO_STAGE = {
     "running": "build",
     "review": "review",
     "blocked": "review",
+    "question-for-orchestrator": "review",
     "failed": "ci",
     "superseded": "ci",
 }
@@ -83,7 +84,7 @@ BLOCKER_EXCERPT_LIMIT = 192
 ALL_REPOS_BOARD = "all-repos"
 GITHUB_OWNER = "jbookout"
 CORE_REPOS = ("jbookout/carr-system", "jbookout/doctorcre-app", "jbookout/software-factory")
-RECENT_MERGED = timedelta(days=7)
+RECENT_MERGED = timedelta(days=14)
 # The repository this tool reads its release config, review rules and verbs
 # from. The launchd wrapper binds it explicitly, so a copy of the tool run from
 # anywhere else still reads the canonical checkout.
@@ -155,7 +156,37 @@ def board_dir() -> Path:
     configured = os.environ.get("PROGRESS_BOARD_ROOT")
     if configured:
         return Path(configured).expanduser().resolve() / "boards"
-    return Path.cwd() / "out" / "boards"
+    return shared_checkout_root() / "out" / "boards"
+
+
+@functools.lru_cache(maxsize=1)
+def shared_checkout_root() -> Path:
+    """The checkout whose out/ holds the boards: the main working tree when
+    the current directory is a linked git worktree, else the current directory.
+
+    A board is per-project state, not per-worktree state. Resolving it from
+    the current directory meant every worktree had its own empty out/boards,
+    so the merge queue run from the 2026-10-10 orchestrator worktree logged
+    `board does not exist: carr-v5; run init first`, four attempts per event,
+    on every event, until its attempts were exhausted. `git rev-parse
+    --git-common-dir` names the shared .git of a worktree family; its parent
+    is the main working tree. Outside git, or when git is unavailable, the
+    current directory stands, as before."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--git-common-dir"], capture_output=True,
+                             text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return Path.cwd()
+    common = out.stdout.strip()
+    if out.returncode != 0 or not common:
+        return Path.cwd()
+    common_dir = Path(common)
+    if not common_dir.is_absolute():
+        common_dir = Path.cwd() / common_dir
+    common_dir = common_dir.resolve()
+    if common_dir.name != ".git":
+        return Path.cwd()  # a bare or unusual layout; do not guess a root
+    return common_dir.parent
 
 
 def safe_project(project: str) -> str:
@@ -582,42 +613,49 @@ def checks_summary(payload: dict[str, Any]) -> str:
     return f"{passed} pass · {pending} pending · {failed} fail"
 
 
-# launchd starts jobs with PATH=/usr/bin:/bin:/usr/sbin:/sbin, where Homebrew's
-# gh is invisible; a silent "no gh" there left every PR card frozen.
-GH_FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
+def repo_lib(name: str) -> ModuleType:
+    """A lib/ module from the bound repository, imported when first used, so
+    an extracted copy still loads and reports what it cannot reach."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    return importlib.import_module(f"lib.{name}")
 
 
 def gh_binary() -> str | None:
     if os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         return None
-    found = shutil.which("gh")
-    if found:
-        return found
-    return next((path for path in GH_FALLBACKS if os.access(path, os.X_OK)), None)
+    return repo_lib("github_reader").resolve_gh()
 
 
 def log(message: str) -> None:
     print(f"progress-board: {message}", file=sys.stderr)
 
 
+# The board re-renders on a short interval and keeps the last known state when
+# a read fails, so one quick retry is worth having and a long wait is not.
+GH_RETRY_DELAYS = (2,)
+
+
+@functools.lru_cache(maxsize=None)
+def gh_reader(binary: str, timeout: int) -> Any:
+    """One lib/github_reader reader per binary and timeout for the whole run,
+    so a GitHub outage costs one retry cycle per render rather than one per read."""
+    return repo_lib("github_reader").GitHubReader(gh=binary, timeout=timeout,
+                                                  retry_delays=GH_RETRY_DELAYS)
+
+
 def gh_text(args: list[str], timeout: int = 30) -> str:
     binary = gh_binary()
     if binary is None:
         raise RuntimeError("gh CLI unavailable")
-    try:
-        result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=timeout, check=False)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {exc}") from exc
-    if result.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args[:2])} failed: {(result.stderr or result.stdout).strip()[:200]}")
-    return result.stdout
+    return gh_reader(binary, timeout).text(args)
 
 
 def gh_json(args: list[str], timeout: int = 30) -> Any:
-    try:
-        return json.loads(gh_text(args, timeout))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"gh {' '.join(args[:2])} returned invalid JSON") from exc
+    binary = gh_binary()
+    if binary is None:
+        raise RuntimeError("gh CLI unavailable")
+    return gh_reader(binary, timeout).json(args)
 
 
 # All GitHub reads for a render share this pass, including the all-repos
@@ -657,7 +695,7 @@ def rest_pr(raw: Any) -> dict[str, Any]:
         "url": raw.get("html_url"), "createdAt": raw.get("created_at"), "updatedAt": raw.get("updated_at"),
         "state": "MERGED" if merged else raw["state"].upper(), "isDraft": raw["draft"],
         "headRefOid": raw["head"]["sha"], "headRefName": raw["head"].get("ref", ""),
-        "author": {"login": raw["user"]["login"]}, "mergedAt": raw.get("merged_at"),
+        "author": {"login": raw["user"]["login"]}, "mergedAt": raw.get("merged_at"), "closedAt": raw.get("closed_at"),
         # An open PR's merge_commit_sha is a test merge, never a delivered commit.
         "mergeCommit": {"oid": raw["merge_commit_sha"]} if merged and raw.get("merge_commit_sha") else None,
         "mergeable": ("MERGEABLE" if raw.get("mergeable") is True else
@@ -1592,7 +1630,8 @@ def assemble_all_repos(prior: dict[str, Any],
         "version": 2, "project": ALL_REPOS_BOARD, "title": "All repositories", "kind": "all-repos",
         "created_at": prior.get("created_at") or at,
         "updated_at": max((str(t.get("updated_at") or "") for t in tasks.values()), default=at) or at,
-        "tasks": tasks, "questions": {}, "deliverables": [], "notes": [], "repos": rows,
+        "tasks": tasks, "questions": prior.get("questions", {}), "deliverables": prior.get("deliverables", []),
+        "notes": prior.get("notes", []), "task_notes": prior.get("task_notes", {}), "repos": rows,
         "github_sync": {"checked_at": at, "failed": failed, "stale": bool(failed),
                         "last_verified_at": at if not failed else previous_sync.get("last_verified_at")},
     }
@@ -1606,46 +1645,24 @@ def assemble_all_repos(prior: dict[str, Any],
 DERIVED_STATE = ("status", "stage", "pr_phase", "blocked_reason", "next_action")
 
 
-def manual_block_holds(task: dict[str, Any], info: dict[str, Any], derived_status: str) -> bool:
-    """A blocked note the orchestrator wrote stays until GitHub shows it
-    cleared: the PR merged or closed, or a new head was pushed that is not
-    itself blocked. (Legacy blocks without a source count as manual.)"""
-    if task.get("status") != "blocked" or task.get("blocked_source", "manual") != "manual":
-        return False
-    if not task.get("blocked_reason"):
-        return False
-    if str(info.get("state") or "").upper() in {"MERGED", "CLOSED"}:
-        return False
-    pinned = str(task.get("blocked_head") or task.get("pr_head") or "")
-    moved = bool(pinned) and str(info.get("headRefOid") or "") != pinned
-    return not (moved and derived_status != "blocked")
-
-
 def sync_pr_task(task: dict[str, Any], info: dict[str, Any], at: str) -> bool:
     """Bring one PR card to GitHub's state. Returns True if anything changed."""
     status, stage, phase = derived_pr_state(info, task_repo(task))
-    floor = task.get("manual_stage")
     current = task_stage(task)
-    if current == "live":
+    if current == "live" and info["state"] == "MERGED":
         status, stage = "done", "live"
-    elif floor in PIPELINE_STAGES and PIPELINE_STAGES.index(stage) < PIPELINE_STAGES.index(floor):
-        stage = floor  # never move a card back past a later stage set by hand
     target: dict[str, Any] = {"status": status, "stage": stage, "pr_phase": phase,
                               "blocked_reason": None, "next_action": None, "blocked_source": None}
-    if manual_block_holds(task, info, status):
-        target.update({"status": "blocked", "blocked_reason": task["blocked_reason"],
-                       "next_action": task.get("next_action"), "blocked_source": "manual",
-                       "blocked_head": task.get("blocked_head") or task.get("pr_head") or info.get("headRefOid")})
-    elif status == "blocked" and current != "live":
+    if status == "blocked":
         block = derived_block(info, phase)
         if block:
             target.update({"blocked_reason": block[0], "next_action": block[1], "blocked_source": "github"})
-    if target["blocked_source"] != "manual":
-        target["blocked_head"] = None
     facts: dict[str, Any] = {"pr_checks": checks_summary(info), "pr_head": info.get("headRefOid") or "",
                              "review_verdict": review_verdict(info, task_repo(task))}
     if info.get("_legacy_terminal"):
         facts = {"pr_head": task.get("pr_head") or info.get("headRefOid") or ""}
+    facts.update({"github_state": info["state"], "merged_at": info.get("mergedAt"),
+                  "closed_at": info.get("closedAt")})
     if merge_sha(info):
         facts["merge_sha"] = merge_sha(info)
     stamped = any(task.get(field) != target.get(field) for field in DERIVED_STATE)
@@ -1766,6 +1783,7 @@ def render(project: str) -> None:
         build_all_repos()
         return
     generation, initial = begin_refresh(project)
+    retain_recent_cards(initial, {})
     tasks = initial.get("tasks", {}).values()
     assert GITHUB_PASS is not None
     GITHUB_PASS.seed(tasks)
@@ -1798,6 +1816,30 @@ def render(project: str) -> None:
     (board_dir() / f"{safe_project(project)}.html").unlink(missing_ok=True)
 
 
+def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]]) -> int:
+    """Expire old GitHub cards and watchdog projections while retaining their notes."""
+    cutoff = now_utc() - RECENT_MERGED
+    expired = []
+    for task_id, task in state.get("tasks", {}).items():
+        generated = task_id.startswith("wd-") and task.get("pr") is None
+        if task.get("pr") is None and not generated:
+            continue
+        info = facts.get(pr_key(task), {}) if task.get("pr") is not None else {}
+        terminal = info.get("state") or task.get("github_state")
+        closed = parse_time(info.get("mergedAt") or info.get("closedAt")
+                            or task.get("merged_at") or task.get("closed_at"))
+        if not generated and (terminal not in {"MERGED", "CLOSED"} or closed is None or closed >= cutoff):
+            continue
+        content = {key: task[key] for key in ("title", "note", "summary", "question_ids", "reason")
+                   if task.get(key)}
+        if content:
+            state.setdefault("task_notes", {})[task_id] = content
+        expired.append(task_id)
+    for task_id in expired:
+        del state["tasks"][task_id]
+    return len(expired)
+
+
 def apply_sync(state: dict[str, Any],
                fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]],
                evidence: dict[tuple[str, int], str | None] | None = None) -> bool:
@@ -1826,6 +1868,8 @@ def apply_sync(state: dict[str, Any],
             changed = True
         if delivered_live(task, task_repo(task), at, (evidence or {}).get(key)):
             changed = True
+    if retain_recent_cards(state, {key: info for key, (info, error) in fetched.items() if info and not error}):
+        changed = True
     if fetched and not os.environ.get("PROGRESS_BOARD_SKIP_GH"):
         raw_sync = state.get("github_sync")
         previous: dict[str, Any] = raw_sync if isinstance(raw_sync, dict) else {}
@@ -1839,45 +1883,25 @@ def local_only() -> bool:
     return bool(os.environ.get("PROGRESS_BOARD_LOCAL_ONLY"))
 
 
-def refresh_and_publish(project: str) -> None:
-    """Every mutation reaches the app board, the only board UI. A failed
-    publication is loud: the local state is kept and the retry is named."""
-    render(project)
-    if local_only():
-        log(f"{project}: saved locally; not published to the app board (PROGRESS_BOARD_LOCAL_ONLY is set)")
-        return
-    try:
-        publish_board(project)
-    except RuntimeError as exc:
-        raise SystemExit(f"progress-board: {project} saved locally but not published to the app board: {exc}. "
-                         f"Retry: tools/progress_board.py render {project} --publish")
-
-
-def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> None:
-    """Read, change and write one board as a single locked transaction, then
-    refresh and publish it."""
+def mutate(project: str, change: Callable[[dict[str, Any]], bool | None]) -> bool:
+    """Save a local note, question or task without publishing."""
     with board_lock(project):
         state = read_state(project)
         if change(state) is False:
-            return
+            return False
         state["updated_at"] = stamp()
         write_json(state)
-    refresh_and_publish(project)
+    return True
 
 
 def call_verb(verb: str, args: dict[str, Any]) -> dict[str, Any]:
-    """Use the existing noninteractive local-token route; no model is involved."""
-    repo = REPO_ROOT
-    result = subprocess.run(
-        [str(repo / "run.sh"), "call", verb, json.dumps(args, sort_keys=True, separators=(",", ":"))],
-        cwd=repo, capture_output=True, text=True, timeout=30, check=False,
-    )
-    if result.returncode:
-        raise RuntimeError(f"{verb} failed: {(result.stderr or result.stdout).strip()[:500]}")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"{verb} returned invalid JSON") from exc
+    """Use the existing noninteractive local-token route; no model is involved.
+    Anything short of an explicit ok:true reply raises."""
+    record_call = repo_lib("record_call")
+    result = record_call.call_verb(verb, args, timeout=30)
+    payload = result.reply
+    if not result.ok and result.kind != record_call.REFUSED:
+        raise RuntimeError(result.describe())
     if not isinstance(payload, dict) or payload.get("ok") is not True:
         raise RuntimeError(f"{verb} refused: {payload.get('error', 'unknown result') if isinstance(payload, dict) else 'invalid result'}")
     return payload
@@ -1933,9 +1957,22 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     return snapshot
 
 
-def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
-    """The versioned data contract the app page renders. Deterministic for a
-    given state. Full diagnostics stay local; the app receives bounded cards."""
+@functools.cache
+def cost_snapshot_reader() -> Callable:
+    """Use the collector's validation contract without importing a provider client."""
+    path = Path(__file__).resolve().with_name("system_costs.py")
+    spec = importlib.util.spec_from_file_location("carr_system_costs", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("system cost snapshot reader unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.load_snapshot
+
+
+def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    """The versioned data contract the app page renders, including fresh local
+    cost evidence. Full diagnostics stay local; the app receives bounded cards."""
     tasks = {}
     all_tasks = state.get("tasks") or {}
     for task_id, task in all_tasks.items():
@@ -1966,13 +2003,17 @@ def board_snapshot(state: dict[str, Any]) -> dict[str, Any]:
                       "pr": task.get("pr"), "repo": task.get("repo"), "updated_at": task.get("updated_at")}
             for task_id, task in all_tasks.items() if is_retired(task)},
         "deliverables": list(state.get("deliverables") or [])[:24],
-        "notes": list(state.get("notes") or [])[:50],
+        "notes": [*list(state.get("notes") or []),
+                  *({"text": str(note.get("title") or task_id) + "\n" + note["note"]}
+                    for task_id, note in state.get("task_notes", {}).items()
+                    if not task_id.startswith("wd-") and isinstance(note.get("note"), str) and note["note"])],
         "decisions": decisions,
         "ledger": executor_ledger(all_tasks),
         "repos": list(state.get("repos") or []),
         # When GitHub facts were last checked and verified, and what failed:
         # a card kept from before an outage is never shown as fresh.
         "github_sync": state.get("github_sync"),
+        "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=now_utc()),
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
     })
@@ -2020,16 +2061,21 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
-def publish_board(project: str) -> dict[str, int]:
+def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
-    snapshot = board_snapshot(state)
-    if board == "carr-v5":
+    snapshot = board_snapshot(state, costs=costs)
+    if board == "carr-v5" and refresh_inventory:
         from system_work_cache import cached_github
         snapshot["external_inventory"] = publish_external_inventory(cached_github(board_dir() / "system-work-github-cache.json",
             Path.home() / "carr-system/out/orch/dot/job13/report-G.md"))
+    elif board == "carr-v5" and remote_snapshot:
+        inventory = remote_snapshot.get("snapshot_json", {}).get("external_inventory")
+        if inventory is not None:
+            snapshot["external_inventory"] = inventory
+    snapshot = fit_snapshot(snapshot)
     if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
@@ -2182,7 +2228,8 @@ def command_render(args: argparse.Namespace) -> None:
         publish_board(args.project)
     if args.project == LAUNCHD_BOARD:
         poll_board_answers(args.project)
-        # The system-wide board rides the same two-minute job, after the
+        publish_needs_joe_local()
+        # The system-wide board rides the same scheduled job, after the
         # project board so a gh outage never holds that one back. A failed
         # rebuild is logged and the last known board is published again.
         try:
@@ -2192,6 +2239,22 @@ def command_render(args: argparse.Namespace) -> None:
             if not state_path(ALL_REPOS_BOARD).exists():
                 return
         publish_board(ALL_REPOS_BOARD)
+
+
+def publish_needs_joe_local() -> None:
+    """Publish the machine-local half of governance-queue's needs_joe list.
+    A failure is logged and left for the verb to report: it marks the page
+    stale after two hours, so a dead publisher shows on Joe's list itself."""
+    def pr_state(repo: str, number: int) -> dict[str, Any]:
+        return gh_json(["pr", "view", str(number), "--repo", repo, "--json", "state,title"])
+    try:
+        import needs_joe_local
+
+        count = needs_joe_local.publish(call_verb, stable_key, pr_state,
+                                        needs_joe_local.read_source(), stamp())
+        log(f"needs-joe local page published with {count} item(s)")
+    except Exception as exc:
+        log(f"needs-joe local page not published: {exc}")
 
 
 def command_poll(args: argparse.Namespace) -> None:
@@ -2216,25 +2279,36 @@ def command_init(args: argparse.Namespace) -> None:
     }
     with board_lock(args.project):
         create_json(state)
-    refresh_and_publish(args.project)
 
 
 def command_task(args: argparse.Namespace) -> None:
     expected = json.loads(args.expected_task) if args.expected_task is not None else None
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
+    receipt = {"applied": False, "before": None, "after": None}
     def change(state):
+        before = copy.deepcopy(state.get("tasks", {}).get(args.task_id))
+        receipt["before"] = before
         if expected is not None and any(
                 state.get("tasks", {}).get(args.task_id, {}).get(key) != value
                 for key, value in expected.items()):
+            receipt["after"] = before
             return False
         update_task(state, args)
-    mutate(args.project, change)
+        receipt["applied"] = True
+        receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
+    applied = mutate(args.project, change)
+    if args.receipt:
+        print(json.dumps(receipt, separators=(",", ":")))
 
 
 def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     task_time = stamp()
     prior = state.setdefault("tasks", {}).get(args.task_id, {})
+    if prior and args.creation_defaults:
+        args = copy.copy(args)
+        for field in ("title", "executor", "provider", "model", "effort"):
+            setattr(args, field, None)
     if not prior and not all((args.title, args.status, args.executor)):
         raise SystemExit("new tasks require --title, --status, and --executor")
     stage = "live" if args.stage == "measured" else args.stage
@@ -2295,6 +2369,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
             task["blocked_reason"] = args.reason.strip()
     if args.next_action is not None:
         task["next_action"] = args.next_action.strip()
+    settle_done_without_pr(task)
     normalize_task(task)
     finished = task.get("status") == "done" or task_stage(task) == "live"
     if not finished and (task.get("status") == "blocked" or task.get("health") == "blocked"):
@@ -2380,7 +2455,6 @@ def command_note(args: argparse.Namespace) -> None:
     def add(state: dict[str, Any]) -> None:
         notes = state.setdefault("notes", [])
         notes.insert(0, {"text": text[:2000], "created_at": stamp()})
-        del notes[50:]
     mutate(args.project, add)
 
 
@@ -2400,6 +2474,8 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--provider")
     task.add_argument("--model")
     task.add_argument("--effort")
+    task.add_argument("--creation-defaults", action="store_true",
+                      help="apply title and executor metadata only when creating a task")
     task.add_argument("--summary")
     task.add_argument("--pr", type=int)
     task.add_argument("--repo")
@@ -2410,6 +2486,7 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--next-action", dest="next_action", help="what unblocks it (required with blocked)")
     task.add_argument("--lane", choices=("status", "needs-joe"))
     task.add_argument("--expected-task", help="update only if these task fields still match this JSON object")
+    task.add_argument("--receipt", action="store_true", help="print the locked before/after task mutation receipt")
     task.add_argument("--note")
     task.add_argument("--evidence")
     task.add_argument("--delivery-target", choices=("worker", "app", "workstation", "database", "manual"),

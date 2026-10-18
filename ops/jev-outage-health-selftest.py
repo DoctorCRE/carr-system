@@ -79,7 +79,7 @@ class OutageTests(unittest.TestCase):
             self.assertEqual({event for event, _, _ in rows}, health.EVENTS)
             for event, after, verdict in rows:
                 with self.subTest(before=before, event=event):
-                    initial = {"state": before, "loop_id": "loop-123"} if before == "outage_open" else {"state": before}
+                    initial = {"state": before, "loop_id": "loop-123", "version": 1, "status": "open"} if before == "outage_open" else {"state": before}
                     if before == "failing_in_grace":
                         initial["first_failure_at"] = old.isoformat()
                     result = health.transition(initial, event, at=now, now=now,
@@ -224,7 +224,7 @@ class OutageTests(unittest.TestCase):
                 warning = health.evaluate(judge, calls,
                     now=health.parse_time("2026-09-28T14:00:00Z"), state_path=state)
                 self.assertEqual(health.reconcile(warning, state,
-                    lambda name, payload: {"ok": True, "loop_id": "loop-123"}), "opened")
+                    lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}), "opened")
                 if damaged is None:
                     judge.unlink()
                 else:
@@ -236,16 +236,112 @@ class OutageTests(unittest.TestCase):
                 updates = []
                 def update(name, payload):
                     updates.append((name, payload))
-                    return {"ok": True, "loop_id": "loop-123"}
+                    return {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}
                 self.assertEqual(health.reconcile(result, state, update), "updated")
-                self.assertIn("judgment log", updates[0][1]["body"])
+                self.assertIn("judgment log", next(payload["body"] for name, payload in updates if name == "update-loop"))
                 calls.write_text(calls.read_text() + json.dumps(
                     receipt("2026-09-28T14:11:00Z")) + "\n")
                 recovered = health.evaluate(judge, calls,
                     now=health.parse_time("2026-09-28T14:12:00Z"), state_path=state)
                 self.assertEqual(recovered["status"], "ok")
                 self.assertEqual(health.reconcile(recovered, state,
-                    lambda name, payload: {"ok": True, "loop_id": "loop-123"}), "cleared")
+                    lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}), "cleared")
+
+    def test_every_outage_payload_satisfies_the_add_loop_residue_gate(self):
+        # add-loop refuses human_only/ruling/capability without a residue
+        # (mcp-server/src/tools.js RESIDUE_CLASSES, RESIDUE_KINDS). Read the
+        # contract from the verb's own source, so a drift fails here.
+        import re
+        source = (Path(__file__).resolve().parents[1] / "mcp-server/src/tools.js").read_text()
+        def frozen(name):
+            body = re.search(name + r" = Object\.freeze\(\[(.*?)\]\)", source, re.S).group(1)
+            return set(re.findall(r'"([a-z_]+)"', body))
+        classes, kinds, owners = frozen("RESIDUE_CLASSES"), frozen("RESIDUE_KINDS"), frozen("LOOP_OWNERS")
+        self.assertEqual(classes, {"human_only", "ruling", "capability"})
+        for reason in ("billing_exhausted", "auth_failed", "rate_limited", "timeout", "log_unreadable"):
+            with self.subTest(reason=reason):
+                fields = health.outage_blocker(reason)
+                self.assertIn(fields["owner"].lower(), owners)
+                self.assertGreaterEqual(len(fields["blocker_detail"].strip()), 12)
+                if fields["blocker"] == "capability":  # verb-gate-checks.js needsDecider()
+                    self.assertRegex(fields["blocker_detail"], re.compile(r"\b(joe|dell)\b", re.I))
+                if fields["blocker"] in classes:
+                    self.assertIn(fields["residue_kind"], kinds)
+                    self.assertGreaterEqual(len(fields["residue_host"].strip()), 2)
+                else:
+                    self.assertNotIn("residue_kind", fields)
+
+    def test_capability_blocker_names_its_decider(self):
+        """mcp-server/src/verb-gate-checks.js needsDecider() refuses an add-loop
+        whose blocker is `capability` unless the row names Joe or Dell. The
+        state_unreadable payload named neither, so every open was refused and
+        the health row read "loop error" (2026-10-12)."""
+        import re
+        for reason in ("state_unreadable", "log_unreadable", "invalid_data", "http_500"):
+            with tempfile.TemporaryDirectory() as directory:
+                calls = []
+                def verb(name, payload):
+                    calls.append((name, payload))
+                    return {"ok": True, "loop_id": "loop-1", "version": 1, "status": "open"}
+                health.reconcile({"status": "warn", "reason": reason, "age_hours": None},
+                                 Path(directory) / "state.json", verb)
+                payload = calls[0][1]
+                if payload["blocker"] == "capability":
+                    text = "\n".join(str(payload.get(f) or "") for f in
+                                     ("title", "body", "unblocks", "source_note", "blocker_detail"))
+                    self.assertRegex(text, re.compile(r"\b(joe|dell)\b", re.I), reason)
+
+    def test_refused_open_is_not_replayed_forever(self):
+        """A persisted open payload is replayed so a LOST reply cannot file a
+        second loop. A REFUSED one wrote nothing and can only be refused again:
+        it is dropped, so the next run sends the current payload (2026-10-12,
+        the stuck state_unreadable open on the Studio)."""
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"open_key": "old-key", "open_payload": {
+                "idempotency_key": "old-key", "kind": "open_loop", "owner": "Joe", "domain": "system",
+                "blocker": "capability", "blocker_detail": "TypeSafe provider failure: state_unreadable",
+                "body": "stale"}}))
+            sent = []
+            def refusing(name, payload):
+                sent.append(payload)
+                return {"ok": False, "refused": True}
+            warning = {"status": "warn", "reason": "state_unreadable", "age_hours": None}
+            self.assertEqual(health.reconcile(warning, state, refusing), "error")
+            self.assertEqual(sent[0]["idempotency_key"], "old-key")
+            def accepting(name, payload):
+                sent.append(payload)
+                return {"ok": True, "loop_id": "loop-9", "version": 1, "status": "open"}
+            self.assertEqual(health.reconcile(warning, state, accepting), "opened")
+            self.assertNotEqual(sent[-1]["idempotency_key"], "old-key")
+            fresh = sent[-1]
+            if fresh["blocker"] == "capability":
+                self.assertIn("Joe", fresh["blocker_detail"])
+            else:
+                # Not Joe's: an internal outage files as other_lane (decision cbe91287).
+                self.assertEqual((fresh["blocker"], fresh["owner"]), ("other_lane", "claude"))
+            lost = []
+            def transient(name, payload):
+                lost.append(payload)
+                return {"ok": False}
+            state.write_text(json.dumps({"open_key": "kept", "open_payload": dict(sent[0], idempotency_key="kept")}))
+            health.reconcile(warning, state, transient)
+            self.assertEqual(json.loads(state.read_text())["open_key"], "kept",
+                             "an unconfirmed (not refused) reply must keep its key for replay")
+
+    def test_call_verb_marks_only_a_record_layer_refusal(self):
+        """repair_loop drops a persisted open payload only on `refused`; an
+        unconfirmed reply must keep it for replay."""
+        from unittest import mock
+        from lib.record_call import VerbResult
+        for kind, refused in (("refused", True), ("transient", False), ("failed", False)):
+            with self.subTest(kind=kind), mock.patch.object(
+                    health.record_call, "call_verb",
+                    return_value=VerbResult("add-loop", kind, reply={"error": "fixture"})):
+                self.assertEqual(health.call_verb("add-loop", {}), {"ok": False, "refused": refused})
+        with mock.patch.object(health.record_call, "call_verb",
+                               return_value=VerbResult("add-loop", "ok", reply={"ok": True, "loop_id": "l"})):
+            self.assertEqual(health.call_verb("add-loop", {}), {"ok": True, "loop_id": "l"})
 
     def test_one_loop_then_auto_close_after_success(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -253,7 +349,7 @@ class OutageTests(unittest.TestCase):
             calls = []
             def verb(name, payload):
                 calls.append((name, payload))
-                return {"ok": True, "loop_id": "loop-123", "number": "777"}
+                return {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open", "number": "777"}
             warning = {"status": "warn", "reason": "billing_exhausted", "age_hours": 10}
             self.assertEqual(health.reconcile(warning, state, verb), "opened")
             self.assertEqual(health.reconcile(warning, state, verb), "open")
@@ -268,13 +364,62 @@ class OutageTests(unittest.TestCase):
             self.assertEqual(calls[-1][0], "close-loop")
             self.assertEqual(calls[-1][1]["loop_id"], "loop-123")
 
+    def test_recovery_remains_healthy_on_next_poll_with_unchanged_logs(self):
+        for fail_close in (False, True):
+            with self.subTest(fail_close=fail_close), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state = root / "state.json"
+                calls = root / "calls.jsonl"
+                judge = root / "judge.jsonl"
+                state.write_text(json.dumps({"state": "healthy",
+                    "event_at": "2026-09-28T09:00:00Z",
+                    "last_success_at": "2026-09-28T09:00:00Z"}))
+                calls.write_text(json.dumps(receipt("2026-09-28T09:00:00Z")) + "\n")
+                judge.write_text(json.dumps({"at": "2026-09-28T10:00:00Z",
+                                             "error": "TypeSafe returned HTTP 402"}) + "\n")
+                mutations = []
+                loop_status = "open"
+                close_failed = False
+                def verb(name, payload):
+                    nonlocal loop_status, close_failed
+                    mutations.append((name, payload))
+                    if name == "close-loop":
+                        if fail_close and not close_failed:
+                            close_failed = True
+                            return {"ok": False}
+                        loop_status = "done"
+                    return {"ok": True, "loop_id": "loop-123", "version": 1,
+                            "status": loop_status}
+                def poll(when):
+                    result = health.evaluate(judge, calls, state_path=state,
+                        now=health.parse_time(when))
+                    return result, health.reconcile(result, state, verb)
+                self.assertEqual(poll("2026-09-28T13:00:00Z")[1], "opened")
+                calls.write_text(calls.read_text() + json.dumps(
+                    receipt("2026-09-28T13:01:00Z")) + "\n")
+                result, outcome = poll("2026-09-28T13:02:00Z")
+                self.assertEqual(result["status"], "ok")
+                self.assertEqual(outcome, "error" if fail_close else "cleared")
+                if fail_close:
+                    self.assertEqual(poll("2026-09-28T13:03:00Z")[1], "cleared")
+                    closes = [payload for name, payload in mutations if name == "close-loop"]
+                    self.assertEqual(closes[0], closes[1])
+                result, outcome = poll("2026-09-28T13:04:00Z")
+                self.assertEqual((result["state"], result["status"], outcome),
+                                 ("healthy", "ok", "none"))
+                self.assertEqual(sum(name == "add-loop" for name, _ in mutations), 1)
+                persisted = json.loads(state.read_text())
+                self.assertNotIn("loop_id", persisted)
+                self.assertNotIn("open_key", persisted)
+                self.assertNotIn("close_payload", persisted)
+
     def test_existing_loop_without_attempt_time_requires_new_success(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             state = root / "state.json"
             judge = root / "missing-judge.jsonl"
             calls = root / "calls.jsonl"
-            state.write_text(json.dumps({"loop_id": "loop-123",
+            state.write_text(json.dumps({"loop_id": "loop-123", "version": 1, "status": "open",
                                          "reason": "billing_exhausted"}))
             opened = health.parse_time("2026-09-28T11:00:00Z").timestamp()
             os.utime(state, (opened, opened))
@@ -301,7 +446,7 @@ class OutageTests(unittest.TestCase):
             calls.write_text(json.dumps(receipt("2026-09-28T09:00:00Z")) + "\n")
             judge.write_text(json.dumps({"at": "2026-09-28T11:00:00Z",
                                          "error": "TypeSafe returned HTTP 402"}) + "\n")
-            verb = lambda name, payload: {"ok": True, "loop_id": "loop-123"}
+            verb = lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}
             first = health.evaluate(judge, calls,
                 now=health.parse_time("2026-09-28T14:00:00Z"), state_path=state)
             self.assertEqual(health.reconcile(first, state, verb), "opened")
@@ -324,7 +469,7 @@ class OutageTests(unittest.TestCase):
             state = root / "state.json"
             judge = root / "judge.jsonl"
             calls = root / "calls.jsonl"
-            state.write_text(json.dumps({"loop_id": "loop-123", "reason": "billing_exhausted"}))
+            state.write_text(json.dumps({"loop_id": "loop-123", "version": 1, "status": "open", "reason": "billing_exhausted"}))
             opened = health.parse_time("2026-09-28T10:00:00Z")
             os.utime(state, (opened.timestamp(), opened.timestamp()))
             judge.write_text(json.dumps({"at": "2026-09-28T14:00:00Z",
@@ -340,7 +485,7 @@ class OutageTests(unittest.TestCase):
             state = root / "state.json"
             judge = root / "judge.jsonl"
             calls = root / "calls.jsonl"
-            state.write_text(json.dumps({"state": "outage_open", "loop_id": "loop-123",
+            state.write_text(json.dumps({"state": "outage_open", "loop_id": "loop-123", "version": 1, "status": "open",
                                          "reason": "billing_exhausted",
                                          "first_failure_at": "2026-09-28T10:00:00+00:00",
                                          "attempt_at": "2026-09-28T11:00:00+00:00"}))
@@ -355,7 +500,7 @@ class OutageTests(unittest.TestCase):
             verbs = []
             def verb(name, payload):
                 verbs.append(name)
-                return {"ok": True}
+                return {"ok": True, "version": 1, "status": "open"}
             self.assertIn(health.reconcile(result, state, verb), ("open", "updated"))
             self.assertNotIn("close-loop", verbs)
 
@@ -379,7 +524,7 @@ class OutageTests(unittest.TestCase):
                 now=health.parse_time("2026-09-28T14:00:00Z"), state_path=state)
             self.assertEqual((result["state"], result["status"]), ("outage_open", "warn"))
             self.assertEqual(health.reconcile(result, state,
-                lambda name, payload: {"ok": True, "loop_id": "loop-123"}), "opened")
+                lambda name, payload: {"ok": True, "loop_id": "loop-123", "version": 1, "status": "open"}), "opened")
             saved = list(root.glob("state.json.corrupt-*"))
             self.assertEqual(len(saved), 1)
             self.assertEqual(saved[0].read_text(), "broken-state")

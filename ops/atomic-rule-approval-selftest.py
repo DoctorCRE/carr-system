@@ -2,7 +2,12 @@
 """Static contract: approval is impossible without immediate enforcement."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 
 REPO = Path(__file__).resolve().parent.parent
 LEGACY_MIGRATION = REPO / "migrations" / "0194_atomic_rule_approval.sql"
@@ -10,22 +15,28 @@ MIGRATION = REPO / "migrations" / "0228_atomic_rule_lifecycle_forward_upgrade.sq
 SCOPE_FIX = REPO / "migrations" / "0247_system_rule_scope_binding.sql"
 BINDING_REPAIR = REPO / "migrations" / "0479_rule_control_binding_writer.sql"
 DELIVERY_REPAIR = REPO / "migrations" / "0482_rule_delivery_binding_writer.sql"
+LEGACY_ADOPTION = REPO / "migrations" / "0867_adopt_active_legacy_rule_approval.sql"
+ADOPTION_PROOF = REPO / "mcp-server" / "test" / "approve-rule-legacy-adoption-postgres.test.mjs"
+CI = REPO / "ops" / "ci.sh"
 TOOLS = REPO / "mcp-server" / "src" / "tools.js"
 DB_GATE = REPO / "ops" / "control-plane-db-gate.py"
 LOCAL_ACCEPTANCE = REPO / "ops" / "atomic-rule-approval-local-pg-acceptance.py"
 
 
 def main() -> int:
-    forward_sql = MIGRATION.read_text(encoding="utf-8").lower()
-    scope_fix = SCOPE_FIX.read_text(encoding="utf-8").lower() if SCOPE_FIX.exists() else ""
+    forward_sql = read_migration(MIGRATION.parent.parent, MIGRATION.name).lower()
+    scope_fix = read_migration(SCOPE_FIX.parent.parent, SCOPE_FIX.name).lower() if SCOPE_FIX.name in migration_names(SCOPE_FIX.parent.parent) else ""
     catalog_seed = forward_sql.split("-- two joe-approved system rules", 1)[0]
-    binding_repair = BINDING_REPAIR.read_text(encoding="utf-8").lower() if BINDING_REPAIR.exists() else ""
-    delivery_repair = DELIVERY_REPAIR.read_text(encoding="utf-8").lower() if DELIVERY_REPAIR.exists() else ""
-    sql = (LEGACY_MIGRATION.read_text(encoding="utf-8").lower()
+    binding_repair = read_migration(BINDING_REPAIR.parent.parent, BINDING_REPAIR.name).lower() if BINDING_REPAIR.name in migration_names(BINDING_REPAIR.parent.parent) else ""
+    delivery_repair = read_migration(DELIVERY_REPAIR.parent.parent, DELIVERY_REPAIR.name).lower() if DELIVERY_REPAIR.name in migration_names(DELIVERY_REPAIR.parent.parent) else ""
+    sql = (read_migration(LEGACY_MIGRATION.parent.parent, LEGACY_MIGRATION.name).lower()
            + forward_sql + binding_repair + delivery_repair)
     tools = TOOLS.read_text(encoding="utf-8")
     gate = DB_GATE.read_text(encoding="utf-8")
     acceptance = LOCAL_ACCEPTANCE.read_text(encoding="utf-8")
+    adoption = read_migration(LEGACY_ADOPTION.parent.parent, LEGACY_ADOPTION.name).lower() if LEGACY_ADOPTION.name in migration_names(LEGACY_ADOPTION.parent.parent) else ""
+    adoption_proof = ADOPTION_PROOF.read_text(encoding="utf-8") if ADOPTION_PROOF.exists() else ""
+    ci = CI.read_text(encoding="utf-8")
     failures: list[str] = []
 
     def check(name: str, condition: bool) -> None:
@@ -235,8 +246,41 @@ def main() -> int:
     check("delivery repair leaves transaction ownership to the migration runner",
           not delivery_repair.startswith("begin;")
           and not delivery_repair.endswith("commit;"))
+    # WR-000262 (0867): an ACTIVE legacy admission is adopted, not refused,
+    # and only that rule; every other active rule stays verify-only.
+    adoption_body = adoption.split("create function ops.adopt_legacy_active_rule_v1(", 1)[-1]
+    check("only a legacy active admission is adopted; other active rules stay verify-only",
+          bool(adoption)
+          and "ops.legacy_rule_admission_note(v_rule.id,v_rule.status,v_rule.activated_at)" in adoption
+          and "if v_legacy_note is null then\n      if exists (" in adoption
+          and "active rule % lacks its immutable exact control binding" in adoption
+          and "active rule % is not a legacy admission; it cannot be adopted" in adoption
+          and "return ops.adopt_legacy_active_rule_v1(" in adoption
+          and adoption.index("perform ops.bind_rule_delivery(")
+              < adoption.rindex("perform ops.bind_rule_controls(")
+              < adoption.rindex("return ops.adopt_legacy_active_rule_v1(")
+              < adoption.rindex("return ops.approve_rule_receipt_activation_v1("))
+    check("adoption keeps the rule row and admitted contract and receipts the current version",
+          bool(adoption)
+          and "update public.rule" not in adoption_body
+          and "update rule" not in adoption_body
+          and "values (p_idempotency_key,p_rule_id,v_rule.version,v_statement_hash" in adoption_body
+          and "'binding_moment',v_admission.binding_moment" in adoption_body
+          and "'projection',v_admission.projection" in adoption_body
+          and "if v_rule.activated_by is distinct from v_actor_id then" in adoption_body
+          and "if v_admission.enforcement_class is distinct from p_policy_kind then" in adoption_body
+          and "rule approval refused: exact enforcement is not installed" in adoption_body
+          and "'approval:'||p_idempotency_key,'activation'" in adoption_body
+          and "revoke all on function ops.adopt_legacy_active_rule_v1" in adoption
+          and "from public,carr_reader,carr_writer,carr_jobs,carr_authority" in adoption
+          and not adoption.lstrip().startswith("begin;"))
+    check("the adoption proof runs on real PostgreSQL in the migration class",
+          "approve-rule-legacy-adoption-postgres" in ci
+          and "CARR_APPROVE_RULE_ADOPTION_DB_REQUIRED=1" in ci
+          and "AC-ADOPT" in adoption_proof and "AC-REFUSE" in adoption_proof
+          and "lacks its immutable exact control binding" in adoption_proof)
 
-    total = 32
+    total = 35
     print()
     print(f"atomic-rule-approval-selftest: {total-len(failures)}/{total} passed")
     return 1 if failures else 0

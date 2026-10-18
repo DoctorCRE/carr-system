@@ -1,17 +1,14 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 
-const migration = fs.readFileSync(
-  new URL("../../migrations/0324_siep_program_authority.sql", import.meta.url),
-  "utf8",
-);
-const controllerMigration = fs.readFileSync(
-  new URL("../../migrations/0335_engineering_controller_currentness.sql", import.meta.url),
-  "utf8",
-);
+const migration = readMigration(
+  new URL("../../migrations/0324_siep_program_authority.sql", import.meta.url));
+const controllerMigration = readMigration(
+  new URL("../../migrations/0335_engineering_controller_currentness.sql", import.meta.url));
 const dbGate = fs.readFileSync(new URL("../../ops/siep-program-local-pg-gate.py", import.meta.url), "utf8");
-const migrationNames = fs.readdirSync(new URL("../../migrations/", import.meta.url))
+const migrationNames = listMigrationNames()
   .filter((name) => name.endsWith(".sql"))
   .sort();
 

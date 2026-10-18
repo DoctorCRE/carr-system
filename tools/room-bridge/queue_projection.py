@@ -244,15 +244,9 @@ def project_once(*, state: dict, add_room_turn, target_catalog: dict,
                            receipt_for(event, dict(task_row), target_catalog=target_catalog, board=board))
                 add_room_turn(body=json.dumps(receipt, separators=(",", ":")), seat="hermes",
                               kind="receipt", msg_id=event_msg_id(board, event["id"]))
-                # Only a successful, idempotent room append makes this event safe to
-                # advance; an exception intentionally leaves it for the next cycle.
                 state["queue_event_cursor"] = event["id"]
                 state["queue_projection_digest"] = event_msg_id(board, event["id"])
                 projected.append(receipt)
-            # This is deliberately a separate receipt: it carries no task/card
-            # data and never advances the Hermes task-event cursor.  It is emitted
-            # only after every task event in this pass has been durably appended;
-            # any append failure or incomplete page leaves the cycle unhealthy.
             end_head = int(conn.execute(
                 "select coalesce(max(id), 0) as head from task_events").fetchone()["head"] or 0)
             complete = complete and source_head == end_head and int(state.get("queue_event_cursor", cursor) or 0) == end_head
@@ -265,9 +259,6 @@ def project_once(*, state: dict, add_room_turn, target_catalog: dict,
                               kind="receipt", msg_id=health_msg_id(board, int(state.get("queue_event_cursor", cursor) or 0), stamp))
                 state["queue_projection_health_last_posted_at"] = stamp
     except Exception:
-        # If the health marker did not land, do not persist a cursor that claims
-        # the same cycle was complete. Replaying already-appended task receipts
-        # is safe because their message ids are deterministic and append-only.
         state["queue_event_cursor"] = original_cursor
         state["queue_projection_digest"] = original_digest
         state["queue_projection_health_last_posted_at"] = original_health_posted_at

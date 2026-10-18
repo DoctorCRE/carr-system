@@ -239,6 +239,20 @@ check("the gates class runs in a CI matrix group",
       re.search(r'-\s*"[^"\n]*\bgates\b[^"\n]*"', ci_yml) is not None)
 
 
+# A forward number can still collide with another pending file in the same PR.
+with tempfile.TemporaryDirectory() as tmp:
+    repo = pathlib.Path(tmp) / "collision"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    add(repo, "migrations/0800_base.sql", "base")
+    git(repo, "checkout", "-q", "-b", "feature")
+    add(repo, "migrations/0801_first.sql", "first")
+    add(repo, "migrations/0801_second.sql", "second")
+    r = run_gate(repo, "--base", "main")
+    check("a forward number collision refuses before any database work",
+          r.returncode == 1 and "unregistered collision 0801" in r.stderr,
+          r.stdout + r.stderr)
+
 print(f"\n{passed} passed, {len(failures)} failed")
 if failures:
     for f in failures:

@@ -64,8 +64,8 @@ def main():
         sys.exit(f"mail extract not found: {extract}")
 
     cal = load_calendar_matcher()
-    # Shares the calendar matcher's loader, which reads the LIVE exports at the
-    # exporters' EXPORT_HOME and refuses an empty book (2026-09-27).
+    # Shares the calendar matcher's loader, which reads the record layer's
+    # export views and fails closed when any view is unreachable (2026-10-08).
     try:
         by_email, by_domain = cal.load_record_contacts()
     except cal.NoRecordContacts as exc:

@@ -22,7 +22,13 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from migration_source import migration_names, read_migration
+from lib.hook_runtime import decision, run, Event
 
 PACK_DELIVERY_RAIL = (
     " RULE DELIVERY: use only exact canonical pack names from standing-context "
@@ -277,10 +283,11 @@ def _seed_evidence_rows(repo=None):
     import re
     if repo is None:
         repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    migration = os.path.join(repo, "migrations", "0125_ai_capability_program.sql")
-    if not os.path.exists(migration):
+    repository = Path(repo)
+    migration = "0125_ai_capability_program.sql"
+    if migration not in migration_names(repository):
         return []
-    sql = open(migration, encoding="utf-8").read()
+    sql = read_migration(repository, migration)
     # The seed rows look like:
     # (N, 'carr-ai-engineering-suite-v1', 'WR-AI-00X', 'Title', 'build', ...,
     #  '{"scope":"...","evidence":["path/a","path/b"],...}'::jsonb, 'joe', 'joe')
@@ -321,11 +328,6 @@ def _oldest_ref(rows):
 
 def _has_uncommitted_writes(repo):
     """True when this checkout has this session's own uncommitted tracked writes.
-
-    Reuses the loose-work helpers already in this module (loose_tracked in
-    loose-work-gate.py) rather than reimplementing git status parsing. A
-    session that cannot tell whose file is whose must not act on the whole
-    tree — but the brief can report it.
 
     Returns True when `git status --porcelain --ignore-submodules=dirty` has
     any tracked-modified or added entries (not untracked — untracked is not
@@ -457,11 +459,8 @@ def close_before_open_brief(repo=None):
     )
 
 
-def main():
-    try:
-        json.load(sys.stdin)          # hook payload; nothing needed from it
-    except Exception:
-        pass
+@decision(failure="raise")
+def decide(payload):
     extra = ""
     # CLOSE-BEFORE-OPEN goes FIRST — before any other extra line, so a session
     # that skims the top of the brief cannot miss it.
@@ -487,6 +486,10 @@ def main():
         pass
     print(STATIC_RAIL + extra)
     sys.exit(0)
+
+
+def main():
+    return run(decide, invalid_event={})
 
 
 if __name__ == "__main__":

@@ -2,7 +2,12 @@
 """Static contract checks for deterministic canary rollout fencing."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 
 REPO = Path(__file__).resolve().parents[1]
 MIGRATION = REPO / "migrations" / "0169_control_plane_canary_fencing.sql"
@@ -16,7 +21,7 @@ def check(label: str, condition: bool) -> None:
 
 
 def main() -> int:
-    source = MIGRATION.read_text(encoding="utf-8").lower() if MIGRATION.is_file() else ""
+    source = read_migration(MIGRATION.parent.parent, MIGRATION.name).lower() if MIGRATION.name in migration_names(MIGRATION.parent.parent) else ""
     check("forward migration exists", bool(source))
     check("generic claim is replaced", "create or replace function ops.claim_job(" in source)
     check("mode-filtered claim is replaced", "create or replace function ops.claim_job_mode(" in source)

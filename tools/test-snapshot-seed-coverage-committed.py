@@ -60,8 +60,9 @@ def main() -> int:
     # Measured, not assumed. A guard that cannot reach its own failure case is not a
     # guard, and leaving it in place claims a protection that check() was already
     # providing more loudly. Found by the seventh independent review.
-    applied = module.applied_migrations(artifact)
-    seeds, _missing = module.seeded_tables(str(ROOT), applied)
+    seed_analysis = module.analyze_seeds(str(ROOT), artifact)
+    applied = seed_analysis.applied
+    seeds = seed_analysis.seeds
 
     # A BUDGET, because the cost of this check is not a fixed price. scan_sql was
     # quadratic in artifact size -- 1.5s at 0.5MB, 7.4s at 1MB, 28.9s at 1.5MB --
@@ -74,7 +75,7 @@ def main() -> int:
     # that, loose enough for a loaded machine and tight enough to catch a return to
     # the shape that cost 37s.
     started = time.monotonic()
-    failures = module.check(str(ROOT), artifact)
+    failures = module.check(str(ROOT), artifact, seed_analysis)
     elapsed = time.monotonic() - started
     if elapsed > 30.0:
         print(f"  FAIL the seed-coverage check took {elapsed:.1f}s against a 30s budget. "

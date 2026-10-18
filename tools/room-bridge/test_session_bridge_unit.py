@@ -227,6 +227,10 @@ def test_queue_task_to_a_desktop_held_thread_is_never_left_pending_for_a_retry()
     assert out.get("outcome") != "pending", out  # nothing waits on a log that never fills
 
 
+from test_codex_models_unit import catalog_fixture
+
+
+@catalog_fixture()
 def test_dispatch_forwards_the_live_desktop_opt_in():
     seen = []
 
@@ -238,7 +242,7 @@ def test_dispatch_forwards_the_live_desktop_opt_in():
         def remember_thread(self, *_a):
             pass
 
-    def fake_to_codex(entry, task, env, fresh=False, config_overrides=(), live_desktop=False):
+    def fake_to_codex(entry, task, env, fresh=False, config_overrides=(), live_desktop=False, timeout_s=None):
         seen.append(live_desktop)
         return {"status": "completed", "result": "ok"}
 

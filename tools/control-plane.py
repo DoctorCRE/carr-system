@@ -598,6 +598,27 @@ def _workflow(manifest: dict[str, Any], key: str, version: int) -> dict[str, Any
     raise KeyError(f"{key} v{version}")
 
 
+# bin/restore-rehearse.sh loads NEON_API_KEY itself through this loader, so the
+# dispatcher's own environment says nothing about whether the job can run. The
+# preflight asks the loader whether the key CAN be loaded and takes a boolean:
+# the child's stdout/stderr are discarded and the key is never exported, copied,
+# printed or returned here. Fail closed: a missing script, a timeout or any
+# non-zero exit is False. (Decision: 4.Orchestrator, 2026-10-08.)
+ROUTINE_CREDENTIAL_LOADER = REPO / 'bin' / 'routine-credential-env.sh'
+ROUTINE_CREDENTIAL_CHECK_TIMEOUT = 15
+
+
+def _routine_credential_loadable(*keys: str) -> bool:
+    try:
+        done = subprocess.run(
+            ['zsh', str(ROUTINE_CREDENTIAL_LOADER), '--check', *keys],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=ROUTINE_CREDENTIAL_CHECK_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def _scheduled_for(payload: Any) -> datetime:
     if not isinstance(payload, dict) or not isinstance(payload.get("scheduled_for"), str):
         raise ValueError("job payload must contain scheduled_for ISO timestamp")
@@ -738,7 +759,15 @@ class RuntimeWorkflowFactCollector:
         if fact.endswith('.weekday') or fact.endswith('.weekday_slot'):
             return local.weekday() < 5
         if fact == 'notes.business_hour_weekday':
-            return local.weekday() < 5 and 8 <= local.hour < 18
+            # Cron is "0 8-18 * * 1-5" (America/Chicago) -- it fires a run AT
+            # 18:00 on purpose. The old `< 18` bound excluded exactly that
+            # run, so every 6pm weekday dispatch routed straight to
+            # dead-letter: loop 568 measured every "routing predicate was
+            # not satisfied" notes-sweep-hourly failure landing on hour==18
+            # (2026-08-26 through 2026-09-01, no exceptions). bin/notes-sweep-
+            # post.sh's own --scheduled guard already tolerates hour 18
+            # (`-gt 18`, not `-ge 18`), so this bound was the one out of step.
+            return local.weekday() < 5 and 8 <= local.hour <= 18
         if fact == 'calendar.eventkit_bundle_registered':
             # REGISTERED means the bundle's tracked SOURCES are in the repo, not
             # that a compiled artifact is sitting in the working tree. Until
@@ -762,7 +791,7 @@ class RuntimeWorkflowFactCollector:
                                   REPO / 'tools' / 'calendar-access-stub.c')
             return all(path.is_file() for path in registered_sources)
         if fact == 'restore.non_interactive_credential':
-            return bool(os.environ.get('NEON_API_KEY') or os.environ.get('CARR_AGE_IDENTITY'))
+            return _routine_credential_loadable('NEON_API_KEY')
         if fact == 'restore.encrypted_dump_exists':
             return any((REPO / 'backups').glob('*.age'))
         if fact == 'notes.canonical_schedule_owner':

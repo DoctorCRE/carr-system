@@ -1,0 +1,1 @@
+{"projects":[{"project_id":"fixture-project","periods":[{"period_plan":"launch","consumption":[{"timeframe_start":"2026-10-04T00:00:00Z","timeframe_end":"2026-10-05T00:00:00Z","metrics":[{"metric_name":"compute_unit_seconds","value":7200}]}]}]}]}

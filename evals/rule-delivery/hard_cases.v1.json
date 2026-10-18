@@ -319,8 +319,8 @@
   },
   {
    "id": "h-pos-gmail-send",
-   "kind": "positive",
-   "why": "Sending mail from the AI Gmail is governed by the email-handover rule.",
+   "kind": "should_not_fire",
+   "why": "Sending mail from the AI Gmail is held by the Worker's no_send_worker gate in code; the email-handover rule 9b081605 that used to own it retired on 2026-08-01 and no active taught rule binds the send, so the trigger layer owes nothing.",
    "prompt": "",
    "tool_calls": [
     {
@@ -332,15 +332,8 @@
      }
     }
    ],
-   "required": [
-    "9b081605"
-   ],
-   "acceptable": [
-    "236ca227",
-    "49533583",
-    "c66dc739",
-    "eaa31ac5"
-   ]
+   "required": [],
+   "acceptable": []
   },
   {
    "id": "h-pos-add-loop",

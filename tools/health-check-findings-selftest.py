@@ -91,12 +91,25 @@ import copy
 import json
 import tempfile
 import unittest
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HEALTH_CHECK_PATH = Path(__file__).resolve().parent / "health-check.py"
 SOURCE = HEALTH_CHECK_PATH.read_text(encoding="utf-8")
 TREE = ast.parse(SOURCE, filename=str(HEALTH_CHECK_PATH))
+sys.path.insert(0, str(HEALTH_CHECK_PATH.parent.parent / "lib"))
+
+
+def setUpModule():
+    from unittest.mock import patch
+    global scheduled_machine
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
+
+
+def tearDownModule():
+    scheduled_machine.stop()
 
 # The two names a finding-recording call inside tools/health-check.py may
 # appear under: the low-level `_canonical_finding` itself (still called
@@ -119,8 +132,9 @@ STRUCTURAL_KEYS = {
     "canonical_health_refused", "source_unreadable", "export_unreadable",
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
+    "storage_health_unavailable", "verb_usage",
 }
-ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "studio_failover_evidence"}
+ALWAYS_HARD_ERROR_KEYS = STRUCTURAL_KEYS | {"jev_call_receipt_integrity", "scheduled_jobs_evidence_unavailable", "studio_failover_evidence"}
 
 
 def _find_function(name: str) -> ast.FunctionDef:
@@ -568,8 +582,86 @@ class RedHelper(unittest.TestCase):
         self.assertEqual(self.ns["_FINDINGS"][0]["count"], 2)
 
 
+def _load_verb_usage_lines():
+    wanted = {"VERB_USAGE_LIST_ALL_BELOW", "VERB_USAGE_LIST_HEAD"}
+    constants = [n for n in TREE.body if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Name) and t.id in wanted for t in n.targets)]
+    mod = ast.Module(body=constants + [_find_function("_verb_usage_lines")], type_ignores=[])
+    ast.fix_missing_locations(mod)
+    ns: dict = {}
+    exec(compile(mod, str(HEALTH_CHECK_PATH), "exec"), ns)  # noqa: S102 — trusted repo source
+    return ns["_verb_usage_lines"]
+
+
+VERB_USAGE_ACTION = ("each uncalled verb is retired through a SCAC successor or gets a named "
+                     "consumer; record the call on WR-000284")
+
+
+def _verb_usage_value(uncalled, registered):
+    return {"window_days": 30, "registered": registered,
+            "called": registered - len(uncalled), "uncalled": uncalled,
+            "action": VERB_USAGE_ACTION}
+
+
+class VerbUsageLines(unittest.TestCase):
+    """WR-000284 C5: v_integrity_digest's verb_usage_30d row as the canonical report prints it."""
+
+    def test_few_uncalled_verbs_are_all_named_under_the_sentence(self):
+        uncalled = [
+            {"verb": "add-loop", "write": True, "human_only": False,
+             "authority_only": False, "last_called_at": "2026-09-01T00:00:00+00:00"},
+            {"verb": "approve-rule", "write": True, "human_only": True,
+             "authority_only": False, "last_called_at": None},
+            {"verb": "find", "write": False, "human_only": False,
+             "authority_only": False, "last_called_at": None},
+        ]
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value(uncalled, 411)), [
+            "verb usage: 3 of 411 registered verbs uncalled in 30 days (2 write, 1 read; "
+            "1 human/authority-only) — " + VERB_USAGE_ACTION,
+            "  add-loop, approve-rule, find",
+        ])
+
+    def test_sixty_uncalled_verbs_name_the_first_twenty_and_count_the_rest(self):
+        uncalled = [{"verb": f"v{i:02d}", "write": i < 50, "human_only": False,
+                     "authority_only": i < 5, "last_called_at": None} for i in range(60)]
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value(uncalled, 411)), [
+            "verb usage: 60 of 411 registered verbs uncalled in 30 days (50 write, 10 read; "
+            "5 human/authority-only) — " + VERB_USAGE_ACTION,
+            "  v00, v01, v02, v03, v04, v05",
+            "  v06, v07, v08, v09, v10, v11",
+            "  v12, v13, v14, v15, v16, v17",
+            "  v18, v19",
+            "  … and 40 more (integrity-digest lists every one)",
+        ])
+
+    def test_nothing_uncalled_is_one_sentence(self):
+        self.assertEqual(_load_verb_usage_lines()(_verb_usage_value([], 411)), [
+            "verb usage: 0 of 411 registered verbs uncalled in 30 days (0 write, 0 read; "
+            "0 human/authority-only) — " + VERB_USAGE_ACTION,
+        ])
+
+    def test_a_missing_row_raises_rather_than_printing_zero(self):
+        with self.assertRaises(TypeError):
+            _load_verb_usage_lines()(None)
+
+
 class PaidCapCanonicalHealthTests(unittest.TestCase):
     """Execute the shipped health function and CLI with only external readers stubbed."""
+
+    def test_cloudflare_rows_record_each_failure_and_only_verified_green(self):
+        import contextlib, io
+        ns = self.namespace()
+        rows = [
+            {"subject": "studio:CLOUDFLARE_API_TOKEN", "status": "failed", "line": "WARN Cloudflare studio CLOUDFLARE_API_TOKEN failed"},
+            {"subject": "macbook:CLOUDFLARE_API_TOKEN", "status": "ok", "line": "OK Cloudflare macbook CLOUDFLARE_API_TOKEN ok"},
+            {"subject": "dell:CLOUDFLARE_API_TOKEN", "status": "unreachable", "line": "WARN Cloudflare dell CLOUDFLARE_API_TOKEN unreachable"},
+        ]
+        ns["_cloudflare_rows"] = lambda: rows
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ns["_canonical_health"](), 1)
+        actual = {r["subject"] for r in ns["_FINDINGS"] if r["key"] == "cloudflare_token"}
+        self.assertEqual(actual, {"studio:CLOUDFLARE_API_TOKEN", "dell:CLOUDFLARE_API_TOKEN"})
+        self.assertEqual(ns["_GREEN_EVIDENCE"]["cloudflare_token"], {"macbook:CLOUDFLARE_API_TOKEN"})
 
     def namespace(self):
         import os, re, sys, time, subprocess
@@ -579,11 +671,20 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                                _find_function("_jev_paid_cap_row")], type_ignores=[])
         ns.update(os=os, re=re, sys=sys, time=time, REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent),
                   _studio_failover_row=lambda: {'status': 'ok', 'line': 'OK fixture Studio failover'},
+                  _uptime=Mock(row=Mock(return_value=("OK production uptime fixture", False))),
                   CANONICAL_SECTION="credentials", CANONICAL_FIXTURE=None, timedelta=timedelta,
                   _HEALTH_COMPLETION_MARKER="HEALTH_COMPLETE", importlib=__import__("importlib"),
+                  _system_cost_row=lambda: ({"state": "ready", "alerts": []}, "OK fixture costs"),
+                  _cloudflare_rows=lambda: [],
                   _canonical_snapshot=lambda: {}, _jev_spend_row=lambda: (None, "OK spend"),
+                  # The breach consumer reaches the record layer; its own
+                  # hermetic suite is ops/health-act-selftest.py.
+                  _breach_consumer=lambda: None,
+                  _GREEN_EVIDENCE={},
+                  _verb_usage_lines=_load_verb_usage_lines(),
                   _jev_site_spend_row=lambda: "OK jev spend by site — fixture",
                   _grok_session_row=lambda: ("OK fixture Grok session", 0),
+                  flashlib=Mock(health_row=Mock(return_value="OK Flash stopped")),
                   subprocess=Mock(run=Mock(return_value=subprocess.CompletedProcess([], 0, "SKIP fixture", ""))))
         exec(compile(mod, str(HEALTH_CHECK_PATH), "exec"), ns)
         return ns
@@ -674,15 +775,55 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
         self.assertEqual(ns["_canonical_health"](), 1)
         self.assertEqual([row["key"] for row in ns["_FINDINGS"]], ["grok_session"])
 
+    def test_storage_section_does_not_read_unrelated_canonical_snapshot(self):
+        import contextlib, io
+        ns = self.namespace()
+
+        def unrelated_snapshot():
+            raise AssertionError("storage-only health read the canonical snapshot")
+
+        ns.update(CANONICAL_SECTION="storage", _canonical_snapshot=unrelated_snapshot,
+                  _storage_hygiene_row=lambda: ("OK storage hygiene fixture", False))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 0)
+        self.assertIn("OK storage hygiene fixture", out.getvalue())
+        self.assertEqual(ns["_FINDINGS"], [])
+
+    def test_sends_section_reports_its_own_row_and_breach(self):
+        import contextlib, io
+        for row, breach, hard, rc in (("OK system sends fixture", False, False, 0),
+                                      ("WARN system sends fixture · held claims 1", True, False, 1),
+                                      ("UNKNOWN system sends fixture", True, True, 1)):
+            with self.subTest(row=row):
+                ns = self.namespace()
+
+                def unrelated_snapshot():
+                    raise AssertionError("sends-only health read the canonical snapshot")
+
+                ns.update(CANONICAL_SECTION="sends", _canonical_snapshot=unrelated_snapshot,
+                          _system_sends_row=lambda row=row, breach=breach, hard=hard: (row, breach, hard))
+                with contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(ns["_canonical_health"](), rc)
+                self.assertIn(row, out.getvalue())
+                self.assertEqual([(f["key"], f["subject"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                                 [("system_sends", "system-sender", hard)] if breach else [])
+
     def all_namespace(self):
         from unittest.mock import Mock
         ns = self.namespace()
-        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}}
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": _verb_usage_value([], 411)}
         ns.update(CANONICAL_SECTION="all", _canonical_snapshot=lambda: snap,
+                  _seat_health_rows=lambda: ["PASS seat fixture"],
+                  _branch_janitor_row=lambda: ("OK branch janitor fixture", False),
+                  _storage_hygiene_row=lambda: ("OK storage hygiene fixture", False),
                   _canonical_now=lambda snap: datetime.now(timezone.utc),
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
+                  _system_sends_row=lambda: ("OK system sends fixture", False, False),
+                  _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
+                  _build_duration_row=lambda: ("OK fixture build duration", 0),
                   _health_sub=Mock(classify_loose_status=Mock(return_value={
                       "actionable_tracked": [], "actionable_untracked": [],
                       "expected_patched_submodules": [], "managed_artifacts": []}),
@@ -693,6 +834,49 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                      "_legacy_scheduled_definitions", "_calendar_prebrief_standing", "_calendar_prebrief_unknowns"):
             ns[name] = lambda *args: []
         return ns
+
+    def test_uncalled_verbs_print_without_turning_the_report_red(self):
+        import contextlib, io
+        uncalled = [{"verb": "add-loop", "write": True, "human_only": False,
+                     "authority_only": False, "last_called_at": None}]
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": _verb_usage_value(uncalled, 411)}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 0)
+        self.assertIn("  →︎ verb usage: 1 of 411 registered verbs uncalled in 30 days "
+                      "(1 write, 0 read; 0 human/authority-only) — " + VERB_USAGE_ACTION + "\n"
+                      "    add-loop\n", out.getvalue())
+        self.assertEqual(ns["_FINDINGS"], [])
+
+    def test_an_unreadable_verb_usage_row_is_a_hard_error(self):
+        import contextlib, io
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {}, "verb_usage": None}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertIn("verb usage UNREADABLE", out.getvalue())
+        self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                         [("verb_usage", True)])
+
+    def test_a_verb_usage_line_not_yet_deployed_is_a_soft_finding(self):
+        import contextlib, io
+        ns = self.all_namespace()
+        snap = {"exports": {}, "jobs": [], "job_definitions": [], "controls": {},
+                "verb_usage": None, "verb_usage_absent": True}
+        ns["_canonical_snapshot"] = lambda: snap
+        ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(ns["_canonical_health"](), 1)
+        self.assertIn("verb usage NOT DEPLOYED", out.getvalue())
+        self.assertEqual([(f["key"], f["hard_error"]) for f in ns["_FINDINGS"]],
+                         [("verb_usage", False)])
+
+
 
     def test_all_health_sections_report_cap_failure_with_other_checks_clean(self):
         import io, contextlib
@@ -776,6 +960,68 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
             [finding] = [row for row in rows if row["key"] == "jev_paid_cap"]
             self.assertEqual(finding["key"], "jev_paid_cap")
             self.assertTrue(finding["hard_error"])
+
+
+class ActModeContract(unittest.TestCase):
+    """`./run.sh health --act` (tools/health_breach.py): the shipped argument
+    guard, exit status and Jev row text, each executed from the real source."""
+
+    def reader_args(self):
+        ns = {"os": __import__("os"), "DEFAULT_RECOVERY_VAULT": "/fixture/vault"}
+        exec(compile(ast.Module(body=[_find_function("_reader_args")], type_ignores=[]),
+                     str(HEALTH_CHECK_PATH), "exec"), ns)
+        return ns["_reader_args"]
+
+    def test_act_refuses_a_partial_report(self):
+        """A partial run cannot prove a row green, so --act must never run on
+        one: its auto-clear would close every loop the run did not look at."""
+        reader_args = self.reader_args()
+        for argv in (["--act", "--section", "jobs"], ["--act", "--fixture", "f.json"],
+                     ["--act", "--recovery", "--reason", "drill"]):
+            with self.subTest(argv=argv), self.assertRaises(SystemExit) as refused:
+                reader_args(argv)
+            self.assertIn("--act runs only on a full canonical report", str(refused.exception))
+        recovery, _, _, section, fixture, _, act, _ = reader_args(["--act"])
+        self.assertEqual((recovery, section, fixture, act), (False, "all", None, True))
+
+    def run_exit(self, rc, act_mode, act_errors):
+        [node] = [n for n in TREE.body if isinstance(n, ast.If) and isinstance(n.test, ast.UnaryOp)
+                  and isinstance(n.test.operand, ast.Name) and n.test.operand.id == "RECOVERY_MODE"]
+        ns = {"sys": sys, "RECOVERY_MODE": False, "FINDINGS_JSON_PATH": None,
+              "ACT_MODE": act_mode, "_ACT_ERRORS": act_errors, "_canonical_health": lambda: rc}
+        with self.assertRaises(SystemExit) as exited:
+            exec(compile(ast.Module(body=[node], type_ignores=[]), str(HEALTH_CHECK_PATH), "exec"), ns)
+        return exited.exception.code
+
+    def test_act_exit_status_reports_the_act_not_the_health(self):
+        self.assertEqual(self.run_exit(1, True, 0), 0, "a red report is --act's normal input")
+        self.assertEqual(self.run_exit(0, True, 2), 1, "a failed act turns the nightly step red")
+        self.assertEqual(self.run_exit(1, False, 0), 1, "plain health still exits with its rc")
+        self.assertEqual(self.run_exit(0, False, 3), 0)
+
+    def test_jev_outage_rows_carry_their_bound_action(self):
+        """Without the action in the finding the breach consumer reads the row
+        as unbound and never files its loop."""
+        import contextlib, io
+        from unittest.mock import Mock
+        action = lambda reason: f"on breach: owner Joe; fix {reason}; auto-clear on judgment"  # noqa: E731
+        cases = (
+            ({"status": "warn", "reason": "http_500", "age_hours": 3, "pending": False}, "opened", None,
+             "on breach: owner Joe; fix http_500"),
+            ({"status": "ok", "reason": None, "age_hours": 1, "pending": False}, "error", None,
+             "on breach: owner Joe; fix None"),
+            (None, None, OSError("fixture"), "on breach: owner Joe; fix log_unreadable"),
+        )
+        for evaluated, outcome, raised, expected in cases:
+            with self.subTest(outcome=outcome, raised=raised):
+                ns = PaidCapCanonicalHealthTests().all_namespace()
+                ns["_jev_paid_cap_row"] = lambda: "OK jev paid cap"
+                ns["_jev_outage"] = Mock(evaluate=Mock(return_value=evaluated, side_effect=raised),
+                                         reconcile=Mock(return_value=outcome), action=Mock(side_effect=action))
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ns["_canonical_health"]()
+                [row] = [f for f in ns["_FINDINGS"] if f["key"] == "jev_live_outage"]
+                self.assertIn(expected, row["detail"])
 
 
 class RcAssignedOnlyViaRed(unittest.TestCase):
@@ -997,6 +1243,22 @@ class RcAssignedOnlyViaRed(unittest.TestCase):
         overlap = business_keys & hard_error_keys
         self.assertEqual(overlap, set(),
                          f"business-count key(s) wrongly marked hard_error=True: {overlap}")
+
+
+class ProvisioningPendingIsNamedAndTemporary(unittest.TestCase):
+    """production_uptime left ALWAYS_HARD_ERROR_KEYS on 2026-10-06: its "monitor unreachable"
+    state is WARN while carr-uptime is unprovisioned (Joe: unprovisioned monitors must not block
+    releases). This pins the exemption to exactly the named keys, so widening it fails here.
+    When PROVISIONING_PENDING loses production_uptime, put it back in ALWAYS_HARD_ERROR_KEYS."""
+
+    def test_pending_set_is_exactly_the_two_named_monitors(self):
+        source = (ROOT / "tools/health-check.py").read_text() if "ROOT" in globals() else \
+            Path(__file__).resolve().parents[1].joinpath("tools/health-check.py").read_text()
+        tree = ast.parse(source)
+        pending = next(node for node in tree.body if isinstance(node, ast.Assign)
+                       and any(getattr(t, "id", None) == "PROVISIONING_PENDING" for t in node.targets))
+        keys = {k.value for k in pending.value.keys}
+        self.assertEqual(keys, {"production_uptime", "system_costs"})
 
 
 class CanonicalHealthReturnsAreAllowlisted(unittest.TestCase):

@@ -93,7 +93,6 @@ def canonical_digest(value: Any) -> str:
 
 
 def formulation_registry() -> dict[str, Any]:
-    """Read the CARR-owned formulation boundary, never an external skill."""
     return json.loads(REGISTRY_PATH.read_text())
 
 
@@ -138,8 +137,6 @@ def _promotion(value: Any, reference: dict[str, Any], as_of: str | None) -> dict
     row = _exact(value, PROMOTION_FIELDS, "policy-learning promotion request")
     if row["current_state"] not in LIFECYCLE or row["requested_state"] not in LIFECYCLE:
         raise PolicyLearningError("policy-learning promotion lifecycle state is invalid")
-    # This v1 evaluator can create a review recommendation only.  Any request
-    # to enact exploration or active routing belongs to a future authority path.
     if row["requested_state"] not in {"observed", "shadow", "eligible_for_human_review"}:
         raise PolicyLearningError("offline policy-learning v1 cannot request bounded exploration or active policy")
     _id(row["policy_version_cas"], "policy-learning policy_version_cas")
@@ -377,8 +374,6 @@ def offline_candidate_evaluation(raw: Any, *, as_of: str | None = None, max_impo
     if not dimensions: reasons.append("no_available_outcome_dimensions")
     if any(reason.startswith(("unknown_or_zero", "candidate_action_without", "low_effective", "critical_dimension", "terminal_outcome", "process_outcome")) for reason in reasons):
         return _reasoned_failure(reasons, estimators=estimators)
-    # A failed process/judge signal must remain visible even if numerical reward
-    # looks favourable; it is a critical evaluation blocker, never a tradeoff.
     if any("signal_not_passed" in reason for reason in reasons):
         return _reasoned_failure(reasons, estimators=estimators)
     return {"schema_version": "carr-policy-learning-assessment.v1", "decision": "eligible_for_human_review", "reason_codes": sorted(set(reasons + ["offline_observational_evidence_only", "human_approval_required_before_any_exploration"])), "estimators": estimators, "causal_claim": "not_established_without_randomized_or_known_assignment"}
@@ -442,7 +437,6 @@ def _refs(value: Any, label: str, *, allow_empty: bool = False) -> list[str]:
 
 
 def _bounded_value(value: Any, label: str) -> Any:
-    """Accept only numeric or opaque metadata values, never result content."""
     if value is None:
         return None
     if isinstance(value, bool):

@@ -97,11 +97,74 @@ class InstallerTest(unittest.TestCase):
         self.assertNotIn("token", json.dumps(continuity).lower())
         self.assertIn("continuity-stdio-proxy.mjs", json.dumps(continuity))
 
+    def test_pre_1817_canonical_commands_upgrade_and_refresh_receipt(self):
+        command = ("CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 "
+                   f"{ROOT}/ops/claude-continuity-hook.py")
+        for retired in (False, True):
+            with self.subTest(retired=retired):
+                live = copy.deepcopy(self.unrelated)
+                events = ["PreCompact", "SessionStart"]
+                if retired:
+                    events += ["UserPromptSubmit", "PostToolUse", "Stop"]
+                for event in events:
+                    entry = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+                    if event == "SessionStart":
+                        entry["matcher"] = "^(startup|compact|resume)$"
+                    live["hooks"].setdefault(event, []).append(entry)
+                self.settings.write_text(json.dumps(live))
+                self.mode.parent.mkdir(parents=True, exist_ok=True)
+                self.mode.write_text(json.dumps({"schema_version": 1, "mode": "inject",
+                                               "config_digest": "sha256:" + "0" * 64}))
+                before = self.settings.read_bytes(), self.mode.read_bytes()
+                dry = self.invoke("install", "--mode", "inject")
+                self.assertEqual(dry.returncode, 0, dry.stderr)
+                self.assertEqual((self.settings.read_bytes(), self.mode.read_bytes()), before)
+                result = self.invoke("install", "--mode", "inject", "--apply")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.invoke("verify").returncode, 0)
+                upgraded = json.loads(self.settings.read_text())
+                self.assertNotIn(command, [hook["command"] for entries in upgraded["hooks"].values()
+                    for entry in entries if isinstance(entry, dict)
+                    for hook in entry.get("hooks", []) if "command" in hook])
+                self.assert_unrelated_preserved(upgraded)
+                self.assertFalse(set(events[2:]) & set(upgraded["hooks"]))
+                first = self.settings.read_bytes(), self.mode.read_bytes()
+                self.assertEqual(self.invoke("install", "--mode", "inject", "--apply").returncode, 0)
+                self.assertEqual((self.settings.read_bytes(), self.mode.read_bytes()), first)
+
+    def test_prior_command_tampering_refuses_with_exit_one_and_no_writes(self):
+        command = ("CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 "
+                   f"{ROOT}/ops/claude-continuity-hook.py")
+        original_mcp = self.claude_config.read_bytes()
+        self.mode.parent.mkdir(parents=True, exist_ok=True)
+        self.mode.write_text('{"stale":"receipt"}')
+        original_mode = self.mode.read_bytes()
+        for event, mutation in [
+            ("SessionStart", lambda entry: entry.update(matcher=".*")),
+            ("PreCompact", lambda entry: entry["hooks"][0].update(timeout=999)),
+            ("Stop", lambda entry: entry["hooks"][0].update(command=command + " --foreign")),
+            ("UnknownEvent", lambda entry: None),
+        ]:
+            live = copy.deepcopy(self.unrelated)
+            entry = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+            if event == "SessionStart":
+                entry["matcher"] = "^(startup|compact|resume)$"
+            mutation(entry)
+            live["hooks"].setdefault(event, []).append(entry)
+            self.settings.write_text(json.dumps(live))
+            before = self.settings.read_bytes()
+            for action in ("install", "remove"):
+                with self.subTest(event=event, action=action):
+                    result = self.invoke(action, "--apply")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("noncanonical Claude continuity hook", result.stderr)
+                    self.assertEqual(self.settings.read_bytes(), before)
+                    self.assertEqual(self.mode.read_bytes(), original_mode)
+                    self.assertEqual(self.claude_config.read_bytes(), original_mcp)
+
     def test_mode_digest_is_identical_in_installer_hook_and_dedupe(self):
         installer = load_module("claude_installer_digest", INSTALLER)
-        hook = load_module("claude_hook_digest", ROOT / "ops/claude-continuity-hook.py")
         dedupe = load_module("claude_dedupe_digest", ROOT / "lib/claude_rule_delivery_dedupe.py")
-        self.assertEqual(installer.expected_config_digest(), hook.expected_config_digest())
         self.assertEqual(installer.expected_config_digest(), dedupe.expected_config_digest())
 
     def test_remove_is_selective_and_idempotent(self):
@@ -148,14 +211,14 @@ class InstallerTest(unittest.TestCase):
     def test_remove_refuses_substring_collision_without_deleting_either_hook(self):
         self.assertEqual(self.invoke("install", "--mode", "inject", "--apply").returncode, 0)
         configured = json.loads(self.settings.read_text())
-        canonical = next(entry for entry in configured["hooks"]["UserPromptSubmit"]
+        canonical = next(entry for entry in configured["hooks"]["PreCompact"]
                          if "claude-continuity-hook.py" in json.dumps(entry))
         wrapper = copy.deepcopy(canonical)
         wrapper["hooks"][0]["command"] = (
             "/usr/bin/env python3 /tmp/diagnose.py --mentions "
             + wrapper["hooks"][0]["command"]
         )
-        configured["hooks"]["UserPromptSubmit"].append(wrapper)
+        configured["hooks"]["PreCompact"].append(wrapper)
         self.settings.write_text(json.dumps(configured), encoding="utf-8")
         before = self.settings.read_bytes()
 
@@ -164,7 +227,7 @@ class InstallerTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("noncanonical Claude continuity hook", result.stderr)
         self.assertEqual(self.settings.read_bytes(), before)
-        remaining = json.loads(self.settings.read_text())["hooks"]["UserPromptSubmit"]
+        remaining = json.loads(self.settings.read_text())["hooks"]["PreCompact"]
         self.assertIn(canonical, remaining)
         self.assertIn(wrapper, remaining)
 
@@ -211,13 +274,63 @@ class InstallerTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.claude_config.read_bytes(), before_mcp)
 
+    def test_install_upgrades_the_retired_five_event_overlay(self):
+        self.assertEqual(self.invoke("install", "--apply").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        command = live["hooks"]["PreCompact"][-1]["hooks"][0]["command"]
+        old = {"hooks": [{"type": "command", "command": command, "timeout": 10}]}
+        for event in ("UserPromptSubmit", "PostToolUse", "Stop"):
+            live["hooks"][event] = [old]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        self.assertNotEqual(self.invoke("verify").returncode, 0)
+        result = self.invoke("install", "--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        upgraded = json.loads(self.settings.read_text())
+        self.assertFalse({"UserPromptSubmit", "PostToolUse", "Stop"} & set(upgraded["hooks"]))
+        self.assertEqual(self.invoke("verify").returncode, 0)
+        self.assert_unrelated_preserved(upgraded)
+
+    def test_retired_cleanup_keeps_foreign_hooks_on_the_same_events(self):
+        self.assertEqual(self.invoke("install", "--apply").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        command = live["hooks"]["PreCompact"][-1]["hooks"][0]["command"]
+        owned = {"type": "command", "command": command, "timeout": 10}
+        prompt = {"type": "prompt", "prompt": "Preserve this unrelated prompt hook"}
+        foreign_command = {"type": "command", "command": "/usr/local/bin/keep-me.sh", "timeout": 3}
+        live["hooks"]["Stop"] = [{"hooks": [owned, prompt]}]
+        live["hooks"]["UserPromptSubmit"] = [{"hooks": [foreign_command]}, {"hooks": [owned]}]
+        live["hooks"]["PostToolUse"] = [{"matcher": "Bash", "hooks": [foreign_command, owned]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        result = self.invoke("install", "--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        after = json.loads(self.settings.read_text())["hooks"]
+        self.assertEqual(after["Stop"], [{"hooks": [prompt]}])
+        self.assertEqual(after["UserPromptSubmit"], [{"hooks": [foreign_command]}])
+        self.assertEqual(after["PostToolUse"], [{"matcher": "Bash", "hooks": [foreign_command]}])
+        self.assertEqual(self.invoke("verify").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        live["hooks"]["Stop"] = [{"hooks": [owned, prompt]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        self.assertEqual(self.invoke("remove", "--apply").returncode, 0)
+        self.assertEqual(json.loads(self.settings.read_text())["hooks"]["Stop"], [{"hooks": [prompt]}])
+
+    def test_tampered_retired_entry_is_refused_without_writing(self):
+        self.assertEqual(self.invoke("install", "--apply").returncode, 0)
+        live = json.loads(self.settings.read_text())
+        command = live["hooks"]["PreCompact"][-1]["hooks"][0]["command"]
+        live["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": command, "timeout": 999}]}]
+        self.settings.write_text(json.dumps(live), encoding="utf-8")
+        before = self.settings.read_bytes()
+        self.assertNotEqual(self.invoke("install", "--apply").returncode, 0)
+        self.assertEqual(self.settings.read_bytes(), before)
+
     def test_tampered_matcher_command_or_timeout_fails_closed(self):
         self.assertEqual(self.invoke("install", "--apply").returncode, 0)
         canonical = json.loads(self.settings.read_text())
         for event, mutation in [
             ("SessionStart", lambda entry: entry.update(matcher=".*")),
             ("PreCompact", lambda entry: entry["hooks"][0].update(command="/bin/sh -c injected")),
-            ("Stop", lambda entry: entry["hooks"][0].update(timeout=999)),
+            ("SessionStart", lambda entry: entry["hooks"][0].update(timeout=999)),
         ]:
             tampered = copy.deepcopy(canonical)
             entry = next(item for item in tampered["hooks"][event]

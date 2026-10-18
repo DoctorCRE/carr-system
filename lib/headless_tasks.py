@@ -507,7 +507,7 @@ def record_failure(repo: Path, task_id: str, code: int, reason: str, log_path: P
                     f'repair the failure, run bin/headless-task {task_id}, '
                     'and verify a successful ledger row plus run.sh health.',
             'source_note': f'headless-task:{task_id}', 'marker': 'none',
-            'blocker': 'capability',
+            'blocker': 'other_lane',
             'blocker_detail': f'The unattended {task_id} executor failed; an attended session must inspect its local ledger and repair the named tool, runtime or login dependency.'}
     # A stable task key makes repeated failures one record-layer write. A
     # failed record write remains visible in the log and never becomes success.

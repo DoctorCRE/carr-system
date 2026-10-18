@@ -155,6 +155,8 @@ for target_model in ("loaded", "opus", None):
         (root / "ops/config").mkdir(parents=True)
         copied_hook = root / "hooks/executor-tier-gate.py"
         shutil.copyfile(HOOK, copied_hook)
+        os.makedirs(os.path.join(root, "lib"), exist_ok=True)
+        shutil.copyfile(os.path.join(REPO, "lib", "hook_runtime.py"), os.path.join(root, "lib", "hook_runtime.py"))
         candidate = json.loads(json.dumps(policy))
         if target_model != "loaded":
             candidate["dispatch_targets"]["merge_review_test"] = {"subagent_model": target_model}

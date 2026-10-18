@@ -74,6 +74,8 @@ import sys
 from datetime import date, datetime
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from lib.credential_file import carr_config, credential, read_env_file  # noqa: E402
 LOOP_REF = re.compile(r"(?:loop\s*#|#)(\d{1,4})", re.I)
 
 # The four base tables the counterparty test would have to join. Named here so
@@ -184,33 +186,21 @@ def credential_present(name: str) -> bool:
     the ~/.config/carr/*.env files the rest of the system reads."""
     if os.environ.get(name):
         return True
-    conf = os.path.expanduser("~/.config/carr")
-    if not os.path.isdir(conf):
+    conf = carr_config()
+    if not conf.is_dir():
         return False
-    for fn in os.listdir(conf):
-        if not fn.endswith(".env"):
-            continue
+    for path in sorted(conf.glob("*.env")):
         try:
-            with open(os.path.join(conf, fn), encoding="utf-8") as fh:
-                for line in fh:
-                    if line.startswith(f"{name}=") and line.split("=", 1)[1].strip():
-                        return True
+            if read_env_file(path).get(name):
+                return True
         except OSError:
             continue
     return False
 
 
-
 def db_url() -> str | None:
-    url = os.environ.get("CARR_DB_EXPORTER_URL") or os.environ.get("DATABASE_URL")
-    if url:
-        return url
-    env = os.path.expanduser("~/.config/carr/db.env")
-    if os.path.exists(env):
-        for line in open(env, encoding="utf-8"):
-            if line.startswith("CARR_DB_EXPORTER_URL="):
-                return line.split("=", 1)[1].strip().strip("\"'")
-    return None
+    return os.environ.get("CARR_DB_EXPORTER_URL") or os.environ.get("DATABASE_URL") \
+        or credential("CARR_DB_EXPORTER_URL", environ={})
 
 
 def main() -> int:

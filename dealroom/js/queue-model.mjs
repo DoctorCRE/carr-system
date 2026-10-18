@@ -30,7 +30,7 @@ export function queueProjection(events) {
     const existing = latest.get(event.task_id);
     if (!existing || Date.parse(event.card.updated_at) >= Date.parse(existing.card.updated_at)) latest.set(event.task_id, event);
   }
-  const cards = [...latest.values()].map((event) => ({ task_id: event.task_id, summary: event.summary, ...event.card }))
+  const cards = [...latest.values()].map((event) => ({ ...event.card, task_id: event.task_id, summary: event.summary }))
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
   const byColumn = Object.fromEntries(QUEUE_COLUMNS.map((column) => [column.id, []]));
   for (const card of cards) byColumn[queueColumnFor(card.status)].push(card);

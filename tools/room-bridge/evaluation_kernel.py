@@ -80,7 +80,7 @@ BEHAVIOR_FINDING_FIELDS = {"finding_id", "root_cause_key", "failure_mode_id", "e
 
 def _exact(value: Any, fields: set[str], label: str) -> dict[str, Any]:
     try:
-        return contract._expect_exact(value, fields, label)  # shared strict contract primitive
+        return contract._expect_exact(value, fields, label)
     except contract.ContractError as exc:
         raise EvalPortfolioError(str(exc)) from exc
 
@@ -397,8 +397,7 @@ def critical_dimension_blockers(dimension_results: Any) -> list[str]:
     """Name every critical dimension that blocks, whatever any overall score did.
 
     The same no-aggregate rule the portfolio applies, exposed for callers that
-    hold dimension rows but not a whole portfolio (ops/check-eval-receipt.py,
-    the LLM-steering eval receipt). A critical dimension blocks when it failed,
+    hold dimension rows but not a whole portfolio. A critical dimension blocks when it failed,
     was blocked, or regressed against baseline. Rows are validated against
     DIMENSION_FIELDS; extra measurement fields are the caller's to strip.
     """
@@ -418,13 +417,6 @@ def critical_dimension_blockers(dimension_results: Any) -> list[str]:
 
 
 def _active_case(value: dict[str, Any], case: dict[str, Any]) -> bool:
-    """Return whether a case has current accepted golden-set membership.
-
-    Lifecycle history is retained for audit and validation, but only an
-    accepted case whose case id is still present in its golden set is usable
-    as admission evidence.  Retired cases may remain in the portfolio and in
-    the append-only golden-set history; they are not active evidence.
-    """
     if case["lifecycle"] != "accepted":
         return False
     golden_ref = case["golden_set_ref"]
@@ -435,11 +427,6 @@ def _active_case(value: dict[str, Any], case: dict[str, Any]) -> bool:
 
 
 def _risk_gate_reasons(value: dict[str, Any], requirement: dict[str, Any], as_of: str | None) -> list[str]:
-    """Apply explicit sample, evaluator, confidence, and critical-failure gates.
-
-    This is intentionally a reason-code projection.  It never emits an
-    aggregate score and it treats immature or missing evidence as unknown.
-    """
     reasons: list[str] = []
     active_case_ids = {case["case_id"] for case in value["cases"] if _active_case(value, case)}
     held_out = [case for case in value["cases"] if case["case_id"] in active_case_ids and case["split"] == "held_out"]
@@ -532,8 +519,6 @@ def admission_decision(kernel: Any, *, as_of: str | None = None, visual_gate_rep
             raise EvalPortfolioError(str(exc)) from exc
     if policy_learning_assessment is not None:
         try:
-            # This is a reason-code projection, not a score contribution: a
-            # learning refusal cannot be averaged away by other dimensions.
             reasons.extend(policy_learning.evaluation_kernel_blockers(policy_learning_assessment))
         except policy_learning.PolicyLearningError as exc:
             raise EvalPortfolioError(str(exc)) from exc
@@ -552,7 +537,5 @@ def admission_decision(kernel: Any, *, as_of: str | None = None, visual_gate_rep
     }
 
 
-# Canonical shared names. The legacy aliases below keep the prior Job Passport
-# call sites read-compatible while migrations are in progress.
 validate_evaluation_kernel = validate_eval_portfolio
 evaluate_admission = admission_decision

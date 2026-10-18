@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -13,8 +14,8 @@ const root = path.resolve(import.meta.dirname, "../..");
 const read = file => fs.readFileSync(path.join(root, file), "utf8");
 const contract = JSON.parse(read("workspace/contracts/tour-operations-foundation.v1.json"));
 const fixture = JSON.parse(read("mcp-server/test/fixtures/tour-operations-foundation.v1.json"));
-const migration = read("migrations/0318_tour_operations_foundation.sql");
-const rightsHardeningMigration = read("migrations/0427_tour_rights_projection_hardening.sql");
+const migration = readMigration("migrations/0318_tour_operations_foundation.sql");
+const rightsHardeningMigration = readMigration("migrations/0427_tour_rights_projection_hardening.sql");
 
 test("foundation contract preserves provenance, conflicts, audit, rights versions and tenant integrity", () => {
   assert.equal(contract.version, "1.8.0");

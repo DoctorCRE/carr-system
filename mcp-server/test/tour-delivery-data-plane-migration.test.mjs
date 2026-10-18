@@ -1,10 +1,11 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const migration = fs.readFileSync(path.join(root, "migrations/0430_tour_delivery_data_plane.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0430_tour_delivery_data_plane.sql"));
 const ci = fs.readFileSync(path.join(root, "ops/ci.sh"), "utf8");
 
 test("Tour delivery data plane implements every registered SQL seam", () => {

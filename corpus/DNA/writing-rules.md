@@ -42,6 +42,8 @@ Applies to every piece of writing Claude produces or edits for Joe, on any surfa
 
 ## Claims about Joe and Dell — hard ban (Joe, July 16, 2026)
 
+Standing fact on every turn, including internal work: this is our vendor network, shared by Joe and Dell. Dell's 15+ years of healthcare experience is his differentiator; it does not make the network his alone.
+
 **Default: all of Joe's marketing is solo-Joe — do not mention Dell at all.** Joe and Dell each market themselves individually most of the time; partner or "we as partners" framing is opt-in and used ONLY when Joe explicitly directs it for a specific piece. Writing as Joe, first person is "I / my" (or the firm "we"), never "Joe and Dell." The vendor and referral network is "our network" (or "my network"), NEVER "Dell's network" and NEVER credited to Dell or his years of experience. Banned constructions in any client- or public-facing content, no exceptions:
 - "Dell's [N] years in healthcare / in the industry built (or helped build) the / a vendor network"
 - "Dell brings [N] years ... and a vendor network"

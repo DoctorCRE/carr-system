@@ -12,7 +12,19 @@ const JOE = { slug: "joe", display: "Joe", human: true, via: "oauth-google", cli
 const DELL = { slug: "dell", display: "Dell", human: true, via: "oauth-google", client_id: "fixture" };
 const UNSPONSORED = { slug: "codex", display: "Codex", human: false, via: "agent-token" };
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null } = {}) {
+function costFixture() {
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  return { schema: "carr-system-costs.v1", observed_at: new Date().toISOString(),
+    month: yesterday.slice(0, 7), through: yesterday, state: "ready",
+    providers: [{ provider: "jev", label: "Jev", plan: "Per call", mtd_usd: 2.5,
+      projection_usd: 10, budget_usd: 50, state: "ready", reason: null,
+      daily: [{ day: yesterday, usd: 2.5, drivers: { "hook:route": 2.5 } }],
+      call_sites: { "hook:route": 2.5 } }],
+    months: [{ month: yesterday.slice(0, 7), usd: 2.5, providers: { jev: 2.5 } }],
+    alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
+}
+
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture() } = {}) {
   const queries = [];
   return {
     queries,
@@ -43,7 +55,17 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Renewal Safe", city: "Pensacola", est_lease_event: "2027-01-01",
           tier_status: "t1", flag_status: "clear", has_channel: true },
       ] };
+      if (sql.includes("from board_snapshot") && params[2] === "system-costs")
+        return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
       if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
+      if (sql.includes("read_governance_queue")) return { rows: [{ queue: { pending_rule_approvals: [
+        { rule_id: "rule-1", statement: "Name the deal in every question box.", admitted_at: "2026-10-01T00:00:00Z" },
+      ] } }] };
+      if (sql.includes("from ops.work_request")) return { rows: [] };
+      if (sql.includes("from board_question")) return { rows: [] };
+      if (sql.includes("from board_snapshot")) return { rows: [
+        { snapshot_json: { schema: "needs-joe-local.v1", items: [] }, updated_at: new Date().toISOString() },
+      ] };
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -55,7 +77,8 @@ test("morning-brief derives Joe's sponsor from authenticated context and compose
   assert.equal(result.state, "ready");
   assert.equal(result.sponsor, "joe");
   assert.deepEqual(Object.keys(result.sections).sort(),
-    ["claim_card", "deals", "renewals", "today", "loops", "assurance_cadence"].sort());
+    ["needs_joe", "claim_card", "deals", "renewals", "today", "loops", "assurance_cadence", "costs"].sort());
+  assert.equal(Object.keys(result.sections)[0], "needs_joe", "the list of what waits on Joe leads the brief");
   assert.equal(result.sections.renewals.state, "ready");
   assert.equal(result.sections.renewals.items[0].display_name, "Renewal Safe");
   const sql = c.queries.map(({ sql }) => sql).join("\n");
@@ -74,6 +97,7 @@ test("morning-brief derives Dell separately; no caller field may select an audie
   const c = client();
   const dell = await executeRegisteredTool(c, DELL, "morning-brief", {});
   assert.equal(dell.sponsor, "dell");
+  assert.equal(dell.sections.needs_joe, undefined, "Joe's desk is not Dell's brief");
   for (const args of [{ sponsor: "joe" }, { audience: "joe" }, { partner: "joe" }]) {
     await assert.rejects(
       executeRegisteredTool(client(), DELL, "morning-brief", args),
@@ -96,6 +120,22 @@ test("morning-brief filters accounts by authenticated sponsor rather than exposi
   assert.doesNotMatch(JSON.stringify(dell), /Joe Account/);
   assert.doesNotMatch(JSON.stringify(joe), /Unowned Account/);
   assert.doesNotMatch(JSON.stringify(dell), /Unowned Account/);
+});
+
+test("Joe's brief leads with the needs-Joe list, read through governance-queue", async () => {
+  const result = await executeRegisteredTool(client(), JOE, "morning-brief", {});
+  const section = result.sections.needs_joe;
+  assert.equal(section.state, "ready");
+  assert.equal(section.schema, "needs-joe.v1");
+  assert.ok(section.items.some((item) => item.title.includes("Name the deal in every question box")));
+  assert.ok(section.items.every((item) => item.why && item.action && item.blocks));
+  assert.equal(typeof section.excluded.count, "number");
+});
+
+test("a needs-Joe list with a failed source and no items is unavailable, never empty", async () => {
+  const result = await executeRegisteredTool(client({ unavailable: "read_governance_queue" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.needs_joe.state, "unavailable");
+  assert.equal(result.state, "unavailable");
 });
 
 test("morning-brief refuses an unsponsored runtime rather than selecting a shared or caller-supplied brain", async () => {
@@ -130,4 +170,61 @@ test("tool_read_call remains metadata-only for the composite response", () => {
   assert.doesNotMatch(receipt.text, /response|argument|body|sponsor.*\$11/i);
   assert.doesNotMatch(JSON.stringify(receipt.params), /Candidate Safe|Renewal Safe|private_body/);
   assert.equal(output.sections.renewals.items.length, 1); // Guard against a vacuous metadata-only test.
+});
+
+
+test("morning costs preserves daily and call-site evidence using authenticated board scope", async () => {
+  const costs = costFixture();
+  costs.billing_response = { card_number: "never-return-fixture" };
+  costs.providers[0].raw_response = { account_number: "never-return-fixture" };
+  const c = client({ costs });
+  const result = await executeRegisteredTool(c, DELL, "morning-brief", {});
+  const value = result.sections.costs;
+  assert.equal(value.state, "ready");
+  assert.equal(value.providers[0].mtd_usd, 2.5);
+  assert.deepEqual(value.providers[0].call_sites, { "hook:route": 2.5 });
+  assert.deepEqual(value.providers[0].daily, costs.providers[0].daily);
+  assert.equal(value.months[0].usd, 2.5);
+  assert.doesNotMatch(JSON.stringify(value), /never-return-fixture|billing_response|raw_response/);
+  const query = c.queries.find(({ sql }) => sql.includes("from board_snapshot"));
+  assert.match(query.sql, /organization_tenant_id=\$1.*sponsoring_human_slug=\$2.*board_id=\$3/s);
+  assert.deepEqual(query.params, ["carr-internal", "dell", "system-costs"]);
+});
+
+
+test("partial cost coverage remains partial with unavailable providers visible", async () => {
+  const costs = costFixture();
+  costs.state = "partial";
+  costs.providers.push({ provider: "neon", label: "Neon", plan: "Usage", state: "unavailable",
+    reason: "missing NEON_API_KEY", mtd_usd: null, projection_usd: null, budget_usd: 50,
+    daily: [], call_sites: {} });
+  const result = await executeRegisteredTool(client({ costs }), JOE, "morning-brief", {});
+  assert.equal(result.state, "partial");
+  assert.equal(result.sections.costs.state, "partial");
+  assert.equal(result.sections.costs.providers[1].mtd_usd, null);
+  assert.equal(result.sections.costs.providers[1].reason, "missing NEON_API_KEY");
+});
+
+test("missing, stale, future, and malformed cost evidence is unavailable with a bound recovery action", async () => {
+  const stale = costFixture();
+  stale.observed_at = new Date(Date.now() - 37 * 3600000).toISOString();
+  const future = costFixture();
+  future.observed_at = new Date(Date.now() + 3600000).toISOString();
+  const malformed = costFixture();
+  malformed.providers[0].mtd_usd = -1;
+  const raw = { schema: "carr-system-costs.v1", card_number: "never-return-fixture" };
+  for (const costs of [null, stale, future, malformed, raw]) {
+    const result = await executeRegisteredTool(client({ costs }), JOE, "morning-brief", {});
+    assert.equal(result.sections.costs.state, "unavailable");
+    assert.deepEqual(result.sections.costs.providers, []);
+    assert.match(result.sections.costs.action, /owner orchestrator.*verify.*auto-clear/);
+    assert.doesNotMatch(JSON.stringify(result.sections.costs), /never-return-fixture/);
+  }
+});
+
+test("a failed cost board read never exposes driver error details", async () => {
+  const result = await executeRegisteredTool(client({ unavailable: "from board_snapshot" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.costs.state, "unavailable");
+  assert.match(result.sections.costs.action, /owner orchestrator.*verify.*auto-clear/);
+  assert.doesNotMatch(JSON.stringify(result), /fixture source unavailable/);
 });

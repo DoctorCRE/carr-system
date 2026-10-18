@@ -37,44 +37,53 @@ DEFAULT_DAYS = 120
 GROUP_CONTAINER = os.path.expanduser(
     "~/Library/Group Containers/group.com.apple.calendar/Calendar.sqlitedb"
 )
-# WHERE THE RECORD CONTACTS COME FROM (fixed 2026-09-27). This used to read
-# ~/carr-system/out/exports/<name>.xlsx — the exporters' DRAFT directory. Since
-# Joe's 2026-08-22 ruling the nightly chain exports LIVE, to EXPORT_HOME
-# (CARR's OneDrive), and never writes the draft copy; on the Studio the draft
-# directory does not exist at all. openpyxl was never reached, the loader
-# returned two empty maps, and every weekday run reported "record contacts
-# loaded: 0 emails, 0 domains" — so every external attendee read as unknown and
-# the intake gate refused the capture. The live projection is the file a person
-# opens, rebuilt every night; the draft is not the record.
+# WHERE THE RECORD CONTACTS COME FROM (fixed 2026-10-08). The record layer's
+# export views, read through the carr_exporter login the exporters use. Until
+# then this read the OneDrive workbook projections the nightly chain renders from
+# those same views. On 2026-10-07 and 10-08 OneDrive evicted the lead registry workbook
+# to an online-only placeholder; every read answered EDEADLK, the workbook reader raised
+# BadZipFile, and calendar capture failed two days running while the database
+# held every contact. The projection is a rendering for people; the view is the
+# record. There is deliberately no file fallback: an unreachable view fails the
+# run closed (NoRecordContacts), because a stale or partial rendering read as
+# the book would silently turn real contacts into unknowns.
 #
-# The relative paths are the exporters' own ROSTER_REL / REGISTRY_REL
-# (exporters/targets.py); tools/test-calendar-touch-matcher.py pins them so the
-# two cannot drift apart silently again.
-VENDORS_REL = "DNA/Network/vendors.xlsx"
-ROSTER_REL = "DNA/Clients/client-roster.xlsx"
-REGISTRY_REL = "DNA/Leads/lead-registry.xlsx"
+# (view, id column, name column, org column). Each view also carries "Email".
+# tools/test-calendar-touch-matcher.py pins these against exporters/targets.py.
+RECORD_VIEWS = (
+    ("v_export_clients", "Client ID", "Name", "Practice / Entity"),
+    ("v_export_leads", "Lead ID", "Contact Name", "Practice"),
+    ("v_export_vendors", "ID", "Name", "Company"),
+)
 INTERNAL_DOMAIN = "carr.us"
 
 
-def export_home():
-    """The live export root, resolved exactly as the exporters resolve it."""
+def read_view(view):
+    """Column names and all rows of one export view, through the exporters' login.
+
+    ``view`` is always one of the RECORD_VIEWS constants, never caller input.
+    exporters.common.connect resolves its own credential and exits when there
+    is none; the caller treats that exit as an unreachable view.
+    """
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from exporters.common import EXPORT_HOME
-    return str(EXPORT_HOME)
+    from exporters.common import connect
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(f"select * from {view}")
+        cols = [d[0] for d in cur.description]
+        return cols, [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
 class NoRecordContacts(RuntimeError):
-    """The contact exports yielded no contact at all: a source failure."""
+    """The contact views yielded no usable contact book: a source failure."""
 FREEMAIL = {"gmail.com", "icloud.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com"}
 
 
-def load_record_contacts(snapshot=None, root=None):
-    """Return (email -> label) and (domain -> label) from the client, lead and vendor exports.
+def load_record_contacts(snapshot=None):
+    """Return (email -> label) and (domain -> label) from the client, lead and vendor views.
 
-    Without a snapshot this reads client, lead and vendor LIVE exports under ``root`` (default: the
-    exporters' EXPORT_HOME) and raises NoRecordContacts when they yield nothing,
-    because zero known contacts is a broken source, never an empty book: read as
-    data it turns every attendee into an unknown.
+    Without a snapshot this reads RECORD_VIEWS and raises NoRecordContacts when
+    any view is unreachable or malformed, or when together they yield no
+    contact: zero known contacts is a broken source, never an empty book.
     """
     by_email, by_domain = {}, {}
     if snapshot is not None:
@@ -88,59 +97,33 @@ def load_record_contacts(snapshot=None, root=None):
             by_email.setdefault(email,label); dom=email.split("@",1)[1]
             if dom not in FREEMAIL and dom!=INTERNAL_DOMAIN: by_domain.setdefault(dom,label)
         return by_email,by_domain
-    import openpyxl
-    base = root if root is not None else export_home()
     missing = []
-
-    def ingest(path, sheet, id_col, name_col, org_col, email_col):
-        full = os.path.join(base, path)
-        if not os.path.exists(full):
-            missing.append(f"{path} (absent)")
-            return
-        wb = openpyxl.load_workbook(full, read_only=True, data_only=True)
-        if sheet not in wb.sheetnames:
-            missing.append(f"{path} (no sheet {sheet!r})")
-            wb.close()
-            return
-        ws = wb[sheet]
-        header, idx = None, {}
-        for row in ws.iter_rows(values_only=True):
-            cells = [str(c).strip() if c is not None else "" for c in row]
-            if header is None:
-                if any(c.lower() == "email" for c in cells):
-                    header = cells
-                    for want, key in ((id_col, "id"), (name_col, "name"),
-                                      (org_col, "org"), (email_col, "email")):
-                        for i, c in enumerate(cells):
-                            if c.lower() == want.lower():
-                                idx[key] = i
-                if header is not None and set(idx) != {"id", "name", "org", "email"}:
-                    missing.append(f"{path} (required headers missing)")
-                    break
+    for view, id_col, name_col, org_col in RECORD_VIEWS:
+        try:
+            cols, rows = read_view(view)
+        except (Exception, SystemExit) as exc:
+            # The exception TYPE only: its text can carry a DSN or an address.
+            missing.append(f"{view} (unreachable: {type(exc).__name__})")
+            continue
+        if not {id_col, name_col, org_col, "Email"} <= set(cols):
+            missing.append(f"{view} (required columns missing)")
+            continue
+        for row in rows:
+            # Out-of-market vendors never reach the Vendors sheet; same here.
+            if row.get("_out_of_market"):
                 continue
-            if "email" not in idx:
+            email = str(row.get("Email") or "").strip().lower()
+            if "@" not in email:
                 continue
-            email = cells[idx["email"]].strip().lower() if idx["email"] < len(cells) else ""
-            name = cells[idx.get("name", 0)] if idx.get("name", 0) < len(cells) else ""
-            org = cells[idx.get("org", 0)] if idx.get("org", 0) < len(cells) else ""
-            ref = cells[idx.get("id", 0)] if idx.get("id", 0) < len(cells) else ""
+            ref, name, org = (str(row.get(c) or "").strip() for c in (id_col, name_col, org_col))
             label = " / ".join(x for x in (ref, name or org) if x) or "(unnamed row)"
-            if email and "@" in email:
-                by_email.setdefault(email, label)
-                dom = email.split("@", 1)[1]
-                if dom not in FREEMAIL and dom != INTERNAL_DOMAIN:
-                    by_domain.setdefault(dom, label)
-
-        if header is None:
-            missing.append(f"{path} (required headers missing)")
-        wb.close()
-
-    ingest(ROSTER_REL, "Clients", "Client ID", "Name", "Practice / Entity", "Email")
-    ingest(REGISTRY_REL, "Registry", "Lead ID", "Contact Name", "Practice", "Email")
-    ingest(VENDORS_REL, "Vendors", "ID", "Name", "Company", "Email")
+            by_email.setdefault(email, label)
+            dom = email.split("@", 1)[1]
+            if dom not in FREEMAIL and dom != INTERNAL_DOMAIN:
+                by_domain.setdefault(dom, label)
     if missing or not by_email:
         detail = "; ".join(missing) or "no row carried an email address"
-        raise NoRecordContacts(f"record contacts: none loaded from the live exports ({detail})")
+        raise NoRecordContacts(f"record contacts: none loaded from the record views ({detail})")
     return by_email, by_domain
 
 

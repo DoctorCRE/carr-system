@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 import { readSystemWorkCensus, SYSTEM_WORK_LEGS } from "../src/system-work-census.v5.js";
 import {
   canonicalDigest,
@@ -148,6 +149,49 @@ function reviewerRow(id, receipt_id, slice_ref, state = "passed", created_at = "
     fact: { attempt_id, slice_ref, reviewer_ref: "reviewer:reviewer", session_ref: `session:reviewer:${id}`, state, evidence_refs: state === "passed" ? [{ ref: "evidence:review", redaction_class: "metadata_only", content_digest: `sha256:${"c".repeat(64)}` }] : [], is_independent: true, reviewed_deviation_refs: ["deviation:resolved"], resolved_deviation_refs: ["deviation:resolved"] },
   };
 }
+
+test("completed adapter result satisfies the retained receipt completion validator", () => {
+  const result = JSON.parse(execFileSync("python3", ["-c", `
+import copy, json, sys
+from unittest.mock import patch
+sys.path.insert(0, "tools/room-bridge")
+import engineering_dispatch_adapter as adapter
+revision = "a" * 40
+prepared = {"checkout_path": "/private/tmp/room-codex-example/checkout",
+    "checkout_branch": "fix/controller-completion", "checkout_revision": revision}
+evidence = {"ref": "evidence:adapter", "redaction_class": "metadata_only",
+    "content_digest": "sha256:" + "a" * 64}
+job = {"repository": "jbookout/carr-system", "revision": revision,
+    "permitted_work": {"objective": "Fix dispatch", "scope_boundary": "Dispatch only",
+        "actions": [], "resource_refs": [], "component_refs": [], "paths": []},
+    "checks": [{"check_ref": "check:slice:one"}]}
+result = {**copy.deepcopy(job),
+    "checks": [{"check_ref": "check:slice:one", "state": "passed", "evidence_refs": [evidence]}],
+    "outcome": {"status": "claimed_complete", "artifact_refs": ["artifact:adapter"],
+        "evidence_refs": [evidence], "source_evidence": {
+            "worktree_ref": prepared["checkout_path"], "branch_ref": prepared["checkout_branch"],
+            "source_sha": revision, "evidence_refs": [evidence]}}}
+with patch.object(adapter, "_dedicated_codex_desk"), \
+     patch.object(adapter.codex_checkout, "prepare", return_value=prepared), \
+     patch.object(adapter.subprocess, "check_output", side_effect=[revision, "", ""]):
+    print(json.dumps(adapter.run(job, dispatch_fn=lambda *a, **kw: {
+        "status": "completed", "result": json.dumps(result)})))
+`], { cwd: new URL("../../", import.meta.url), encoding: "utf8" }));
+  const plan = typedEngineeringPlan([engineeringSlice("slice:one", 1)]);
+  const envelope = envelopeRow("11111111-1111-4111-8111-111111111111", "slice:one", "2026-08-26T00:00:01Z");
+  const receipt = receiptRow("22222222-2222-4222-8222-222222222222", envelope.id, "slice:one", result.outcome.status, "2026-08-26T00:00:02Z");
+  Object.assign(receipt.receipt, {
+    checks: result.checks, source_evidence: result.outcome.source_evidence,
+    artifact_refs: result.outcome.artifact_refs, evidence_refs: result.outcome.evidence_refs,
+  });
+  bindReceiptLineage(receipt, plan, envelope);
+  const review = reviewerRow("33333333-3333-4333-8333-333333333333", receipt.id, "slice:one", "passed", "2026-08-26T00:00:03Z");
+  const projection = closureProjection(passportFacts(plan, {
+    envelopes: [envelope], receipts: [receipt], reviewer_facts: [review],
+  }), EngineeringToolError);
+  assert.equal(projection.current_receipts.length, 1);
+  assert.equal(projection.closure.work.state, "complete");
+});
 
 test("canonical digest is stable across object key order and matches SHA-256", () => {
   assert.equal(canonicalDigest({ b: 2, a: 1 }), canonicalDigest({ a: 1, b: 2 }));

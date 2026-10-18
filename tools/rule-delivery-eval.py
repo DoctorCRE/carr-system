@@ -134,8 +134,7 @@ def main(argv=None):
         jev_mode = args.jev
     ev.add_system_rows(deliveries)
     report = ev.score(cases, deliveries,
-                      ev.universes(meta, list(deliveries),
-                                   boot_ids=ev.boot_always_on_ids(REPO)), meta,
+                      ev.universes(meta, list(deliveries)), meta,
                       labelled=set(live_ids) if live_ids else None,
                       classes=_classes(meta), groups=_groups(meta),
                       doctrine_labelled=_doctrine_labelled(args.cases),

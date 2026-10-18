@@ -1,21 +1,3 @@
-// a02-rule-enforcement-postgres.test.mjs — V5-A02 rule-enforcement coverage
-// and its fallback writer on REAL PostgreSQL.
-//
-// WHY THIS FILE EXISTS. The first version of this slice shipped a stub FakeDb
-// suite plus greps of the migration text. No test ever executed
-// ops.v5_a02_rule_enforcement_coverage() or ops.record_rule_enforcement_fallback,
-// so a planted bug in either one survived every test. This suite seeds real
-// rule, approval, enforcement-point, catalog, binding and fallback rows into a
-// disposable copy of the migrated database, calls the two functions (and the
-// two MCP verbs over them) as the real database principals, and asserts the
-// exact per-rule reason for every leg of the guard. Each scenario below names
-// the planted SQL mutant it exists to kill.
-//
-// Skips in the unit class. The migration class supplies DATABASE_URL and sets
-// CARR_A02_RULE_COVERAGE_DB_REQUIRED=1, which turns a silent skip into a
-// failure. It commits only into a template copy it creates and drops.
-//
-// EVERY RECORD IS SYNTHETIC.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -30,25 +12,28 @@ const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost
 
 const sha = text => createHash("sha256").update(text, "utf8").digest("hex");
 
-// One rule per leg of the guard. Ids are fixed: the copy is fresh per run.
 const R = Object.freeze({
   covered:            "a0200001-0000-4000-8000-000000000000",
   unmapped:           "a0200002-0000-4000-8000-000000000000",
-  bindingStale:       "a0200003-0000-4000-8000-000000000000", // S9
-  amendedVersion:     "a0200004-0000-4000-8000-000000000000", // S4, ruling 5a
-  amendedStatement:   "a0200005-0000-4000-8000-000000000000", // ruling 5a
-  testsMissing:       "a0200006-0000-4000-8000-000000000000", // S5
-  futureDated:        "a0200007-0000-4000-8000-000000000000", // item 3
-  changedSinceApproval: "a0200008-0000-4000-8000-000000000000", // correction 1
-  fallbackAbsent:     "a0200009-0000-4000-8000-000000000000", // S10
-  fallbackOldVersion: "a020000a-0000-4000-8000-000000000000", // S2
-  fallbackOldHash:    "a020000b-0000-4000-8000-000000000000", // S3
-  proposed:           "a020000c-0000-4000-8000-000000000000", // S6
-  writerTarget:       "a020000d-0000-4000-8000-000000000000", // S1, S8, writer paths
-  oneOfTwoInstalled:  "a020000e-0000-4000-8000-000000000000", // probe E, S20
-  oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000", // N7
-  oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000", // N8
-  catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000", // "changed" means either direction
+  bindingStale:       "a0200003-0000-4000-8000-000000000000",
+  amendedVersion:     "a0200004-0000-4000-8000-000000000000",
+  amendedStatement:   "a0200005-0000-4000-8000-000000000000",
+  testsMissing:       "a0200006-0000-4000-8000-000000000000",
+  futureDated:        "a0200007-0000-4000-8000-000000000000",
+  changedSinceApproval: "a0200008-0000-4000-8000-000000000000",
+  fallbackAbsent:     "a0200009-0000-4000-8000-000000000000",
+  fallbackOldVersion: "a020000a-0000-4000-8000-000000000000",
+  fallbackOldHash:    "a020000b-0000-4000-8000-000000000000",
+  proposed:           "a020000c-0000-4000-8000-000000000000",
+  writerTarget:       "a020000d-0000-4000-8000-000000000000",
+  oneOfTwoInstalled:  "a020000e-0000-4000-8000-000000000000",
+  oneOfTwoUnverified: "a020000f-0000-4000-8000-000000000000",
+  oneOfTwoChanged:    "a0200010-0000-4000-8000-000000000000",
+  catalogMovedEarlier: "a0200011-0000-4000-8000-000000000000",
+  hardEnforcedNoFallback: "a0200012-0000-4000-8000-000000000000",
+  hardEnforcedTransactional: "a0200013-0000-4000-8000-000000000000",
+  hardEnforcedNonHook: "a0200014-0000-4000-8000-000000000000",
+  hardEnforcedHookPlusScript: "a0200015-0000-4000-8000-000000000000",
 });
 
 const EXPECTED_GAPS = Object.freeze({
@@ -67,6 +52,8 @@ const EXPECTED_GAPS = Object.freeze({
   [R.fallbackOldVersion]: "active_rule_fallback_absent",
   [R.fallbackOldHash]: "active_rule_fallback_absent",
   [R.writerTarget]: "active_rule_fallback_absent",
+  [R.hardEnforcedNonHook]: "active_rule_fallback_absent",
+  [R.hardEnforcedHookPlusScript]: "active_rule_fallback_absent",
 });
 
 const JOE = { slug: "joe", display: "Joe", human: true, via: "mcp", client_id: "a02-postgres-test" };
@@ -85,7 +72,6 @@ async function clientFor(pg, database, role = null) {
   return client;
 }
 
-/** Seed one rule and whichever legs of its evidence the scenario names. */
 async function seedRule(db, ctx, id, spec) {
   const statement = spec.statement ?? `a02 synthetic rule ${id}`;
   const version = spec.version ?? 1;
@@ -102,15 +88,11 @@ async function seedRule(db, ctx, id, spec) {
   await db.query(
     `insert into ops.enforcement_control_catalog
        (control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
-     values ($1, 'synthetic/impl', 'synthetic/test', 'deny_gate', true,
+     values ($1, $2, 'synthetic/test', $3, true,
              ${spec.catalogVerifiedAt ?? verified})`,
-    [control]);
+    [control, spec.implementationRef ?? "synthetic/impl", spec.controlClass ?? "deny_gate"]);
   const controls = [control];
   if (spec.second) {
-    // Two approved controls; the first is fully good, the second carries the
-    // one defect the scenario names, so only an "every control" check sees it.
-    // uninstalled: probe E. pointVerifiedNull: installed but unverified (N7).
-    // catalogVerifiedAt: installed and verified, but changed since approval (N8).
     const second = `${control}_b`;
     const installed = !spec.second.uninstalled;
     controls.push(second);
@@ -131,9 +113,9 @@ async function seedRule(db, ctx, id, spec) {
   await db.query(
     `insert into ops.rule_enforcement_point
        (rule_id, control_key, implementation_ref, test_ref, enforcement_class, installed, verified_at)
-     values ($1, $2, 'synthetic/impl', 'synthetic/test', 'deny_gate', true,
+     values ($1, $2, $3, 'synthetic/test', $4, true,
              ${spec.pointVerifiedNull ? "null" : verified})`,
-    [id, control]);
+    [id, control, spec.implementationRef ?? "synthetic/impl", spec.controlClass ?? "deny_gate"]);
   await db.query(
     `insert into ops.rule_control_binding (rule_id, control_key, statement_hash, binding_contract)
      values ($1, $2, $3, '{}'::jsonb)`,
@@ -143,11 +125,13 @@ async function seedRule(db, ctx, id, spec) {
        (idempotency_key, rule_id, rule_version, statement_hash, actor_id, policy_kind,
         enforcement_status, requested_control_keys, installed_control_keys, reason,
         normalized_contract, contract_hash, evidence_refs, created_at)
-     values ($1, $2, $3, $4, $5, 'machine_enforceable', 'hard_enforced', $6::text[], $6::text[],
+     values ($1, $2, $3, $4, $5, $7, $8, $6::text[], $6::text[],
              'synthetic approval', '{}'::jsonb,
              encode(public.digest('{}'::jsonb::text, 'sha256'), 'hex'), array['synthetic'],
              now() - interval '2 hours')`,
-    [`a02-pg-approval-${id}`, id, approvedVersion, sha(approvedStatement), ctx.joeId, controls]);
+    [`a02-pg-approval-${id}`, id, approvedVersion, sha(approvedStatement), ctx.joeId, controls,
+     spec.policyKind ?? "machine_enforceable",
+     (spec.policyKind ?? "machine_enforceable") === "human_only" ? "authority_enforced" : "hard_enforced"]);
   if (spec.fallback === false) return;
   const fallbackStatement = spec.fallbackStatement ?? statement;
   await db.query(
@@ -181,8 +165,6 @@ async function refusedWithCode(promise, code) {
   });
 }
 
-/** One verb call exactly as mcp.js runs it: its own transaction on the
- * principal's own connection, acting actor set transaction-locally. */
 async function callVerb(pg, database, role, actor, verb, args) {
   const client = await clientFor(pg, database, role);
   try {
@@ -230,8 +212,6 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       "select 1 from public.schema_migrations where filename = '0721_a02_rule_enforcement_coverage.sql'");
     assert.equal(applied.rows.length, 1, "migration 0721 is applied as the numbered file");
 
-    // Isolation: whatever active rules the snapshot carries are retired in
-    // this copy, so every count below is exact.
     await db.query("begin");
     await db.query("set local session_replication_role = replica");
     await db.query("update public.rule set status = 'retired' where status = 'active'");
@@ -260,8 +240,6 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
 
     await db.query("begin");
     await db.query("set local session_replication_role = replica");
-    // Correction 1: evidence verified long BEFORE the approval (what 0228's
-    // copy of the catalog value produces) is current, not a gap.
     await seedRule(db, ctx, R.covered, { verifiedAt: "now() - interval '3 days'" });
     await seedRule(db, ctx, R.unmapped, { approval: false });
     await seedRule(db, ctx, R.bindingStale, { staleBinding: true });
@@ -271,36 +249,40 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       approvedStatement: "a02 original statement A" });
     await seedRule(db, ctx, R.testsMissing, { pointVerifiedNull: true });
     await seedRule(db, ctx, R.futureDated, { verifiedAt: "now() + interval '1 day'" });
-    // The approval captured one verified_at on the enforcement point; the
-    // catalog control now carries a different one.
     await seedRule(db, ctx, R.changedSinceApproval, {
       verifiedAt: "now() - interval '3 days'", catalogVerifiedAt: "now() - interval '1 hour'" });
     await seedRule(db, ctx, R.oneOfTwoInstalled, { second: { uninstalled: true } });
     await seedRule(db, ctx, R.oneOfTwoUnverified, { second: { pointVerifiedNull: true } });
     await seedRule(db, ctx, R.oneOfTwoChanged, {
       second: { catalogVerifiedAt: "now() - interval '10 minutes'" } });
-    // The catalog now carries an EARLIER verified_at than the approval
-    // captured. Every other "changed" case moves it later, so a check that
-    // only asked "is the catalog newer?" would pass them all; this one is
-    // the case that pins "distinct from", in either direction.
     await seedRule(db, ctx, R.catalogMovedEarlier, {
       verifiedAt: "now() - interval '1 hour'", catalogVerifiedAt: "now() - interval '5 days'" });
-    await seedRule(db, ctx, R.fallbackAbsent, { fallback: false });
-    await seedRule(db, ctx, R.fallbackOldVersion, { version: 2, fallbackVersion: 1 });
-    await seedRule(db, ctx, R.fallbackOldHash, {
+    const HUMAN = { policyKind: "human_only" };
+    await seedRule(db, ctx, R.fallbackAbsent, { ...HUMAN, fallback: false });
+    await seedRule(db, ctx, R.fallbackOldVersion, { ...HUMAN, version: 2, fallbackVersion: 1 });
+    await seedRule(db, ctx, R.fallbackOldHash, { ...HUMAN,
       statement: "a02 current statement B", fallbackStatement: "a02 earlier statement A" });
     await seedRule(db, ctx, R.proposed, { status: "proposed" });
-    await seedRule(db, ctx, R.writerTarget, { fallback: false });
+    await seedRule(db, ctx, R.writerTarget, { ...HUMAN, fallback: false });
+    await seedRule(db, ctx, R.hardEnforcedNoFallback, { fallback: false,
+      implementationRef: "hooks/a02-synthetic-gate.py; hooks/a02_synthetic_helper.py" });
+    await seedRule(db, ctx, R.hardEnforcedTransactional, { fallback: false,
+      controlClass: "transactional_schema", implementationRef: "mcp-server/src/tools.js" });
+    await seedRule(db, ctx, R.hardEnforcedNonHook, { fallback: false,
+      implementationRef: "tools/room-bridge/dispatch.py" });
+    await seedRule(db, ctx, R.hardEnforcedHookPlusScript, { fallback: false,
+      implementationRef: "hooks/a02-synthetic-gate.py; ops/a02-synthetic-check.py" });
     await db.query("commit");
 
     await t.test("every leg of the guard reports its exact named gap (S2 S3 S4 S5 S6 S9 S10 S20 N7 N8, rulings 5a, corrections 1-2)", async () => {
       const record = await coverage(db);
       assert.equal(record.schema_version, "doctorcre-v5-a02-rule-enforcement-coverage.v2");
       assert.deepEqual(gapsByRule(record), EXPECTED_GAPS);
-      // S6: the proposed rule is never counted, covered or not.
-      assert.equal(record.active_rule_count, 16);
-      assert.equal(record.covered_rule_count, 1);
-      assert.equal(record.gap_count, 15);
+      assert.equal(record.active_rule_count, 20);
+      assert.equal(record.covered_rule_count, 3);
+      assert.equal(record.gap_count, 17);
+      assert.equal(gapsByRule(record)[R.hardEnforcedNoFallback], undefined);
+      assert.equal(gapsByRule(record)[R.hardEnforcedTransactional], undefined);
       assert.equal(record.coverage_state, "gaps");
       assert.equal(record.coverage_complete, false);
       for (const gap of record.gaps) assert.ok(gap.detail.trim().length > 0);
@@ -312,7 +294,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
         const read = await readRuleEnforcementCoverage(reader);
         assert.equal(read.status, "available", JSON.stringify(read));
         assert.equal(read.coverage_state, "gaps");
-        assert.equal(read.gap_count, 15);
+        assert.equal(read.gap_count, 17);
         assert.deepEqual(Object.fromEntries(read.gaps.map(g => [g.rule_id, g.reason_id])), EXPECTED_GAPS);
       } finally {
         await reader.end();
@@ -382,7 +364,7 @@ test("V5-A02 coverage and fallback writer on real PostgreSQL", async t => {
       const expected = { ...EXPECTED_GAPS };
       delete expected[R.writerTarget];
       assert.deepEqual(gapsByRule(record), expected);
-      assert.equal(record.covered_rule_count, 2);
+      assert.equal(record.covered_rule_count, 4);
     });
 
     await t.test("S7 and item 2: UPDATE, DELETE and the owner's TRUNCATE are refused", async () => {

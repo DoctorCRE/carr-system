@@ -8,17 +8,11 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools/room-bridge"))
-from grok_wire import MODEL, TIMEOUT_S, invoke_cli, parse_stream
+from grok_wire import TIMEOUT_S, PreflightError, invoke_cli, run_request
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 from grok_session import sign_in_alert, authentication_result
 
 PREFIX = "Do not call any CARR or record-layer tool; do not write anything unless asked."
-
-
-class PreflightError(Exception):
-    def __init__(self, message, code=1):
-        super().__init__(message)
-        self.code = code
 
 
 def command(argv, timeout):
@@ -68,22 +62,10 @@ def preflight():
     return version
 
 
-def parse_output(lines, cli_version, returncode=0):
-    parsed = parse_stream(lines, returncode)
-    end = parsed["end"]
-    usage = end.get("modelUsage", {})
-    models = sorted(usage) if isinstance(usage, dict) else []
-    receipt = {
-        "requested_model": MODEL, "actual_models": models,
-        "stopReason": end.get("stopReason"), "num_turns": end.get("num_turns"),
-        "cost_usd": end.get("total_cost_usd", end.get("cost_usd")), "cli_version": cli_version,
-    }
-    return parsed["text"], receipt, parsed["code"]
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        "Exit 3: sign-in required; 4: incomplete run; 5: wrong model. "
+        "Exit 3: sign-in required; 4: incomplete run; 5: wrong model; 6: unusable retrieval. "
+        "--retrieve explicitly requires source text JSON and retains a private diagnostic receipt. "
         "GROK_RUN_RECEIPT selects a receipt file instead of stderr. "
         "GROK_RUN_FAKE_NDJSON replays a fixture without calling Grok/npm."))
     parser.add_argument("--effort", choices=("low", "medium", "high"), default="high")
@@ -91,6 +73,10 @@ def main():
     parser.add_argument("--timeout-seconds", type=int, default=int(TIMEOUT_S),
                         help="model invocation timeout in seconds (1-1800; default: 180)")
     parser.add_argument("--writable", action="store_true")
+    parser.add_argument("--no-sign-in-alert", action="store_true",
+                        help="The calling health job owns failure notification")
+    parser.add_argument("--retrieve", action="store_true",
+                        help="validate retrieved public source text for the prompt URLs")
     prompt = parser.add_mutually_exclusive_group(required=True)
     prompt.add_argument("--prompt")
     prompt.add_argument("--prompt-file", type=Path)
@@ -101,36 +87,39 @@ def main():
         parser.error("--timeout-seconds must be between 1 and 1800")
     try:
         requested_prompt = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else args.prompt
-        fixture = os.environ.get("GROK_RUN_FAKE_NDJSON")
-        if fixture:
-            with open(fixture, encoding="utf-8") as stream:
-                output, receipt, code = parse_output(stream, "fixture")
-        else:
-            cli_version = preflight()
-            result = invoke_cli(PREFIX + "\n\n" + requested_prompt, effort=args.effort,
-                                max_turns=args.max_turns, writable=args.writable,
-                                timeout_seconds=args.timeout_seconds)
-            output, receipt, code = parse_output(result.stdout.splitlines(), cli_version, result.returncode)
-        serialized = json.dumps(receipt, sort_keys=True) + "\n"
-        if os.environ.get("GROK_RUN_RECEIPT"):
-            Path(os.environ["GROK_RUN_RECEIPT"]).write_text(serialized, encoding="utf-8")
-        else:
-            sys.stderr.write(serialized)
-        if output:
-            sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
-        return code
-    except PreflightError as error:
-        line = str(error)
-        if error.code == 3:
-            try:
-                sign_in_alert()
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-                line += " · alert FAILED"
-        print(line, file=sys.stderr)
-        return error.code
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+    except (OSError, ValueError) as error:
         print(f"grok-run: {type(error).__name__}", file=sys.stderr)
         return 4
+
+    def checked_preflight():
+        try:
+            return preflight()
+        except PreflightError as error:
+            line = str(error)
+            if error.code == 3 and not args.no_sign_in_alert:
+                try:
+                    sign_in_alert()
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                    line += " · alert FAILED"
+            print(line, file=sys.stderr)
+            raise
+
+    configured = os.environ.get("GROK_RUN_RECEIPT")
+    outcome = run_request(requested_prompt, retrieval=args.retrieve, prefix=PREFIX,
+        effort=args.effort, max_turns=args.max_turns, writable=args.writable,
+        timeout_seconds=args.timeout_seconds, invoke=invoke_cli, preflight=checked_preflight,
+        fixture=os.environ.get("GROK_RUN_FAKE_NDJSON"), require_identity=False,
+        receipt_path=configured)
+    receipt = outcome.pop("receipt")
+    if not configured or outcome.get("detail") == "grok_receipt_unavailable":
+        # The same schema lands on stderr for ordinary and retrieval runs.
+        if args.retrieve or receipt["cli_version"] is not None or configured:
+            sys.stderr.write(json.dumps(receipt, sort_keys=True) + "\n")
+    if args.retrieve:
+        sys.stdout.write(json.dumps(outcome, sort_keys=True) + "\n")
+    elif output := outcome.get("result"):
+        sys.stdout.write(output + ("" if output.endswith("\n") else "\n"))
+    return outcome["code"]
 
 
 if __name__ == "__main__":

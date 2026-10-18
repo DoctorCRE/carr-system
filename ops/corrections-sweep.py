@@ -1,249 +1,364 @@
 #!/usr/bin/env python3
-"""Find corrections the partner has had to make MORE THAN ONCE, and propose rules.
+"""Collect a bounded correction corpus through verbs and native user records.
 
-WHY THIS EXISTS. The rule store has a rich output path — rules bind sessions, render
-to files, recite at boot — and no INPUT path except a session noticing in the moment
-and remembering to call `teach`. A correction the partner makes twice is the clearest
-possible signal that a rule is missing, and nothing was looking for repeats.
-
-WHAT IT READS, three substrates, weakest last:
-
-  1. THE DEFECT LOG (0103). A defect_class with more than one row IS a repeated
-     correction, already clustered by a human-written class name and already
-     carrying what was claimed, what was true, and which rule it broke. This is by
-     far the strongest input and it did not exist before 2026-08-13.
-
-  2. DECISION HISTORY. Rulings carrying the partner's verbatim words. A quote that
-     reads as a correction ("no", "actually", "thats a stupid rule") is a
-     correction he had to state, whether or not it became a rule.
-
-  3. SESSION TRANSCRIPTS. His actual turns, filtered through the SAME partner-turn
-     filter the displacement baselines use — imported, never reimplemented, because
-     that filter was inverted for weeks and a second copy would have been a second
-     thing to get wrong (rule a8c55a47).
-
-WHAT IT WILL NOT DO. It proposes; it never teaches. Every candidate is checked
-against the ACTIVE rules first, because re-proposing something already taught is
-noise that trains the partner to ignore the channel. And a candidate with only one
-instance is dropped: this is a sweep for REPEATS, and one correction is a moment,
-not a pattern.
-
-Read-only. Run it monthly, or when Joe asks.
+Raw evidence stays in a private directory outside every checkout. A regex marks
+review candidates; it never decides whether a partner corrected the session.
+Every retained turn needs a disposition before transcript review is complete.
 """
+import argparse
+from collections import Counter
+from datetime import date, datetime, timedelta, timezone
+import hashlib
 import importlib.util
 import json
 import os
+from pathlib import Path
 import re
-import sys
-from collections import defaultdict
-from urllib.parse import unquote, urlsplit
+import subprocess
+import uuid
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO)
-from lib.loadpy import load_module_from_path  # noqa: E402
-
-# The partner-turn filter, imported from the instrument that owns it. That module
-# spent weeks with an inverted filter; the fix now carries 25 assertions and a
-# second copy here would be a second thing to get wrong.
-_baselines = load_module_from_path(
-    "displacement_baselines", os.path.join(REPO, "tools", "displacement-baselines.py"))
-
-# A correction is the partner saying the system got it wrong. These are his shapes,
-# taken from turns he actually typed rather than invented: blunt, short, often
-# starting with the negation.
-CORRECTION = re.compile(
-    r"\b(?:no[,.]? (?:it|that|thats|you|we|its)|actually|thats? (?:wrong|not right|stupid|"
-    r"backwards)|you (?:missed|didnt|did not|forgot|keep|already)|never (?:do|say|use|call)|"
-    r"i (?:already )?(?:told|said)|not what i|stop (?:doing|using)|dont (?:do|use|say)|"
-    r"wrong|incorrect|thats not)\b", re.I)
+REPO = Path(__file__).resolve().parents[1]
 
 
-def defect_repeats(cur):
-    cur.execute("""
-        select defect_class, occurrences, caught_by_human, first_seen, last_seen,
-               sources_unread, rules_violated
-          from v_correction_sweep_defects where occurrences > 1
-         order by caught_by_human desc, occurrences desc
-    """)
-    return [dict(zip(("defect_class", "occurrences", "caught_by_human", "first_seen",
-                      "last_seen", "sources_unread", "rules_violated"), r))
-            for r in cur.fetchall()]
+def load_script(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'{name}: dependency could not be loaded')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def quoted_corrections(cur):
-    cur.execute("""
-        select entry_date, title, human_quote
-          from v_correction_sweep_decisions
-         order by entry_date desc
-    """)
-    out = []
-    for day, title, quote in cur.fetchall():
-        if CORRECTION.search(quote or ""):
-            out.append({"date": str(day), "title": title, "quote": quote.strip()[:280]})
-    return out
+BASELINES = load_script('correction_baselines', REPO / 'tools/displacement-baselines.py')
+HISTORY = load_script('correction_history', REPO / 'ops/codex-history.py')
+CORRECTION = re.compile(r"\b(?:wrong|incorrect|correction|corrected|overruled|actually|already|supposed|"
+                        r"why|stop|misunderstanding|missed|forgot|not what|never made|you keep)\b", re.I)
+MACHINE = re.compile(r'^\s*(?:<hook_prompt\b|<subagent_notification\b|<task-notification\b|'
+                     r'</task-notification>|<cross-session-message\b|Another Claude session sent a message:|'
+                     r'The following is the Codex agent history|\[/usr/bin/|'
+                     r'SEND THE DELTA, NOT THE MESSAGE AGAIN\b)', re.I)
+BOOTSTRAP = ('# AGENTS.md instructions for ', '<environment_context>', '<INSTRUCTIONS>', '<recommended_plugins>')
+ROUTES = {'rule_delivery', 'stale_source', 'missing_context', 'tool_default',
+          'source_discovery', 'verification', 'capture', 'workflow_scope', 'unknown'}
+MECHANISMS = {'delivery_contract', 'source_version_check', 'context_contract',
+              'tool_contract', 'source_enumeration', 'artifact_readback',
+              'capture_contract', 'scope_contract', 'proposal'}
+READ_VERBS = {'standing-context', 'find-precedent', 'read-doc-activity'}
+PROSE_CREDENTIALS = re.compile(
+    r'(\b(?:make|set|change|use)\s+(?:(?:the|a|new)\s+)*'
+    r'(?:password|passphrase|api[ _-]?key|access[ _-]?token)\s+(?:(?:to|as)\s+)?|'
+    r'\b(?:password|passphrase|api[ _-]?key|access[ _-]?token)\s+(?:is|was)\s+)'
+    r'(?!\b(?:policy|protection|requirements?|reset|field|to|as)\b)'
+    r'(?:"[^"\r\n]*"|\'[^\'\r\n]*\'|`[^`\r\n]*`|'
+    r'[^\r\n]+?(?=[.!?;](?:\s|$)|[\r\n]|$))', re.I)
 
 
-def active_rule_text(cur):
-    cur.execute("select statement from v_compiled_rules")
-    return " \n ".join((r[0] or "").lower() for r in cur.fetchall())
+def redact_text(text):
+    text, count = HISTORY._redact_text(text)
+    text, prose_count = PROSE_CREDENTIALS.subn(r'\1<REDACTED>', text)
+    return text, count + prose_count
 
 
-def jobs_dsn() -> str:
-    """Require the routine jobs credential; never inherit a broad DSN."""
-    value = os.environ.get("CARR_DB_JOBS_URL", "").strip()
-    if not value:
-        raise RuntimeError("CARR_DB_JOBS_URL is required for correction sweep")
-    try:
-        login = unquote(urlsplit(value).username or "").strip().lower()
-    except ValueError:
-        login = ""
-    if login in {"carr_writer", "carr_owner", "owner", "writer", "postgres"}:
-        raise RuntimeError("CARR_DB_JOBS_URL must not name an owner or writer login")
+def redact_evidence(value):
+    if isinstance(value, str):
+        return redact_text(value)[0]
+    if isinstance(value, list):
+        return [redact_evidence(item) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_evidence(item) for key, item in value.items()}
     return value
 
 
-def jobs_connection(psycopg):
-    conn = psycopg.connect(jobs_dsn())
-    with conn.cursor() as cur:
-        cur.execute("select session_user, current_user")
-        row = cur.fetchone()
-        if not isinstance(row, (tuple, list)) or tuple(map(str, row)) != ("carr_jobs", "carr_jobs"):
-            conn.close()
-            raise RuntimeError("correction sweep requires the carr_jobs database identity")
-        cur.execute("begin transaction read only")
-    return conn
+def user_text(row, family, meta):
+    if family == 'claude':
+        if row.get('type') != 'user' or row.get('isSidechain'):
+            return None
+        message = row.get('message', {})
+        content = message.get('content', []) if isinstance(message, dict) else []
+        if isinstance(content, list) and any(isinstance(b, dict) and b.get('type') == 'tool_result' for b in content):
+            return None
+        text = BASELINES.INJECTED.sub('', BASELINES.text_of(row)).strip()
+    else:
+        if not isinstance(meta, dict):
+            return None
+        if isinstance(meta.get('source'), dict) and 'subagent' in meta['source']:
+            return None
+        payload = row.get('payload', {})
+        if not isinstance(payload, dict):
+            return None
+        if row.get('type') != 'response_item' or payload.get('type') != 'message' or payload.get('role') != 'user':
+            return None
+        content = payload.get('content', [])
+        if not isinstance(content, list):
+            return None
+        text = '\n'.join(b['text'] for b in content if isinstance(b, dict) and b.get('type') in {'input_text', 'text'} and isinstance(b.get('text'), str)).strip()
+    if not text or text.startswith(BOOTSTRAP) or MACHINE.search(text) or BASELINES.is_machine_origin(text):
+        return None
+    return text
 
 
-def transcript_corrections(limit_files=None):
-    """Partner turns that read as corrections, from his real typed turns only."""
-    # SCOPED TO THE CARR PROJECT ROOTS, not every project on the machine.
-    #
-    # This walked ~/.claude/projects with rglob, which recurses into EVERY project
-    # directory a session has ever opened here. That is a data-class boundary
-    # crossing rather than a measurement bug: this sweep proposes RULES for the
-    # CARR store from the partner's typed corrections, so a correction he made in
-    # the separate Life AI environment could become a CARR taught rule. Measured
-    # 2026-08-13: 240 CARR transcript files and 13 non-CARR, the latter all
-    # scratchpad and doc-convo tooling — so nothing personal was in fact harvested.
-    # The exposure was structural, and it would have opened the first time he ran a
-    # personal session on this machine.
-    #
-    # Roots come from the instrument that owns them, for the same reason the
-    # partner-turn filter does: that discovery already handles the CARR project
-    # living under two paths after a mount change, and a second copy would be a
-    # second thing to get wrong.
-    hits = []
-    files = sorted(f for root in _baselines._project_roots()
-                   for f in root.glob("*.jsonl"))
-    if limit_files:
-        files = files[-limit_files:]
-    for f in files:
+def utc_day(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        instant = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if instant.tzinfo is None:
+            return None
+        return instant.astimezone(timezone.utc).date().isoformat()
+    except ValueError:
+        return None
+
+
+def scan_transcripts(files, since, until, cwd_roots=None):
+    date.fromisoformat(since)
+    date.fromisoformat(until)
+    if since >= until:
+        raise ValueError('since must be earlier than until')
+    turns = {}
+    coverage = {}
+    gaps = []
+    for family, paths in files.items():
+        counts = Counter(files_found=len(paths))
+        days = []
+        for path in sorted(map(Path, paths)):
+            meta = {}
+            try:
+                before = path.stat()
+                if path.is_symlink():
+                    gaps.append({'source': str(path), 'reason': 'symlink not scanned'})
+                    continue
+                with path.open(encoding='utf-8') as handle:
+                    for number, line in enumerate(handle, 1):
+                        try:
+                            row = json.loads(line)
+                        except (ValueError, UnicodeError):
+                            gaps.append({'source': str(path), 'line': number, 'reason': 'unreadable JSON row'})
+                            continue
+                        if not isinstance(row, dict):
+                            gaps.append({'source': str(path), 'line': number, 'reason': 'non-object row'})
+                            continue
+                        if row.get('type') == 'session_meta':
+                            payload = row.get('payload')
+                            if not isinstance(payload, dict):
+                                gaps.append({'source': str(path), 'line': number, 'reason': 'invalid session metadata'})
+                                meta = {}
+                                continue
+                            meta = payload
+                        if family == 'codex' and cwd_roots is not None:
+                            raw_cwd = meta.get('cwd')
+                            if not isinstance(raw_cwd, str) or not raw_cwd:
+                                gaps.append({'source': str(path), 'line': number, 'reason': 'invalid session cwd'})
+                                continue
+                            cwd = Path(raw_cwd).resolve()
+                            if not any(cwd == root or root in cwd.parents for root in cwd_roots):
+                                continue
+                        try:
+                            text = user_text(row, family, meta)
+                        except (AttributeError, TypeError):
+                            gaps.append({'source': str(path), 'line': number, 'reason': 'invalid native user record'})
+                            continue
+                        if text is None:
+                            continue
+                        day = utc_day(row.get('timestamp'))
+                        if day is None:
+                            gaps.append({'source': str(path), 'line': number, 'reason': 'user timestamp unavailable'})
+                            continue
+                        if not since <= day < until:
+                            continue
+                        counts['user_records'] += 1
+                        days.append(day)
+                        session = row.get('sessionId') or meta.get('id') or path.stem
+                        native_id = row.get('uuid') or row.get('id') or row.get('timestamp')
+                        identity = [family, session, native_id, text]
+                        key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
+                        source = {'path': str(path), 'line': number, 'timestamp': row['timestamp']}
+                        if key in turns:
+                            turns[key]['sources'].append(source)
+                            counts['copies'] += 1
+                            continue
+                        redacted, redactions = redact_text(text)
+                        turns[key] = {'id': key, 'family': family, 'text': redacted,
+                                      'sources': [source], 'origin': 'user-role; human attribution needs review',
+                                      'candidate': bool(CORRECTION.search(text) or text.lower().strip('.!? ') == 'no'),
+                                      'redactions': redactions}
+                        counts['retained_turns'] += 1
+                after = path.stat()
+                if (before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns):
+                    gaps.append({'source': str(path), 'reason': 'source changed during scan'})
+                counts['files_read'] += 1
+            except (OSError, UnicodeError) as exc:
+                gaps.append({'source': str(path), 'reason': type(exc).__name__})
+        coverage[family] = {**counts, 'first_user_day': min(days) if days else None,
+                            'last_user_day': max(days) if days else None}
+    return {'turns': list(turns.values()), 'coverage': coverage, 'gaps': gaps}
+
+
+def read_verb(verb, args):
+    if verb not in READ_VERBS:
+        raise ValueError('verb is outside the read-only correction corpus')
+    result = subprocess.run([str(REPO / 'run.sh'), 'call', verb, json.dumps(args)],
+                            text=True, capture_output=True, timeout=45)
+    try:
+        value = json.loads(result.stdout)
+    except ValueError:
+        raise RuntimeError(f'{verb}: invalid read response') from None
+    if not isinstance(value, dict) or result.returncode or value.get('ok') is not True:
+        raise RuntimeError(f'{verb}: read refused')
+    return value
+
+
+def collect_records(since, until, call=read_verb):
+    records = {}
+    gaps = []
+    jobs = [('active_rules', 'standing-context', {'detail': 'full'})]
+    jobs += [('precedent_' + query, 'find-precedent', {'query': query, 'since': since, 'limit': 25})
+             for query in ('correction', 'overruled', 'Joe corrected', 'Dell corrected', 'vendor network')]
+    for key, verb, args in jobs:
         try:
-            for line in f.open():
-                if '"user"' not in line:
-                    continue
+            value = call(verb, args)
+            records[key] = value
+            if verb == 'find-precedent' and value.get('count', 0) >= 25:
+                gaps.append({'source': key, 'reason': 'precedent search reached result cap; not an exhaustive history'})
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+            gaps.append({'source': key, 'reason': type(exc).__name__})
+    for kind in ('rule', 'decision', 'doctrine_section'):
+        entries = []
+        cursor = None
+        cursors = set()
+        try:
+            while True:
+                args = {'record_type': kind, 'since': since + 'T00:00:00Z',
+                        'until': until + 'T00:00:00Z', 'limit': 100}
+                if cursor:
+                    args['cursor'] = cursor
+                page = call('read-doc-activity', args)
+                entries.extend(page.get('entries', []))
+                cursor = page.get('next_cursor')
+                if not cursor:
+                    break
+                encoded = json.dumps(cursor, sort_keys=True)
+                if encoded in cursors:
+                    raise RuntimeError('non-advancing activity cursor')
+                cursors.add(encoded)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+            gaps.append({'source': kind + '_activity', 'reason': type(exc).__name__})
+        records[kind + '_activity'] = entries
+    gaps.append({'source': 'record_history', 'reason': 'activity includes autonomous events only; search and current rules cannot prove complete human decisions or rule amendments'})
+    return {'records': records, 'gaps': gaps}
+
+
+def scan_conduct(path, since, until):
+    counts = Counter()
+    gaps = []
+    try:
+        with Path(path).open() as handle:
+            for number, line in enumerate(handle, 1):
                 try:
-                    rec = json.loads(line)
-                except Exception:
+                    row = json.loads(line)
+                except ValueError:
+                    gaps.append({'source': str(path), 'line': number, 'reason': 'unreadable conduct row'})
                     continue
-                if not _baselines.is_typed_prompt(rec):
+                if not isinstance(row, dict):
+                    gaps.append({'source': str(path), 'line': number, 'reason': 'non-object conduct row'})
                     continue
-                text = _baselines.partner_text(rec)
-                if not text:
-                    continue
-                # A PASTED DOCUMENT IS NOT A CORRECTION. Handoff packets and briefs
-                # are genuinely typed by Joe — the turn filter is right to keep them
-                # — but they are machine-authored prose he is carrying, and their
-                # bodies happen to contain correction words. The first run counted
-                # three of them as corrections.
-                stripped = text.strip()
-                if stripped.startswith("#") or len(stripped) > 1500:
-                    continue
-                m = CORRECTION.search(stripped)
-                if m:
-                    # CARRY THE MATCHED PHRASE. The first version stored the text
-                    # TRUNCATED to 220 characters and re-matched later, so any hit
-                    # past that point vanished and fell into an "other" bucket that
-                    # then looked like the largest cluster. Match once, keep the key.
-                    hits.append((m.group(0).lower().strip(), stripped[:220]))
-        except Exception:
+                day = utc_day(row.get('ts'))
+                if day and since <= day < until:
+                    labels = row.get('classes', [row.get('hook', 'unknown')])
+                    if not isinstance(labels, list) or not labels or not all(isinstance(label, str) and label for label in labels):
+                        gaps.append({'source': str(path), 'line': number, 'reason': 'invalid conduct classes'})
+                        continue
+                    counts.update(labels)
+    except OSError as exc:
+        gaps.append({'source': str(path), 'reason': type(exc).__name__})
+    return {'class_counts': dict(counts), 'meaning': 'gate events, not human corrections', 'gaps': gaps}
+
+
+def review_gaps(turns, review):
+    known = {row['id'] for row in turns}
+    seen = set()
+    gaps = []
+    if not isinstance(review, list):
+        gaps.append({'reason': 'review must be a list'})
+        review = []
+    for row in review:
+        if not isinstance(row, dict):
+            gaps.append({'reason': 'review entry must be an object'})
             continue
-    return hits
+        key = row.get('id')
+        if not isinstance(key, str) or key not in known or key in seen:
+            gaps.append({'id': key, 'reason': 'unknown or duplicate review id'})
+            continue
+        seen.add(key)
+        disposition = row.get('disposition')
+        if disposition not in {'correction', 'not_correction', 'machine', 'uncertain'}:
+            gaps.append({'id': key, 'reason': 'disposition required'})
+        elif disposition == 'uncertain':
+            gaps.append({'id': key, 'reason': 'human attribution or correction unresolved'})
+        elif disposition == 'correction':
+            if row.get('partner') not in {'joe', 'dell'}:
+                gaps.append({'id': key, 'reason': 'correction must be attributed to Joe or Dell'})
+            if row.get('route') not in ROUTES - {'unknown'} or row.get('mechanism') not in MECHANISMS:
+                gaps.append({'id': key, 'reason': 'an upstream route and mechanism are required; output patches do not qualify'})
+            refs = row.get('source_refs')
+            fix = row.get('fix')
+            if not isinstance(refs, list) or not refs or not all(isinstance(ref, str) and ref.strip() for ref in refs) or not isinstance(fix, str) or not fix.strip():
+                gaps.append({'id': key, 'reason': 'source evidence and a fix or proposal are required'})
+    gaps.extend({'id': key, 'reason': 'turn has not been reviewed'} for key in sorted(known - seen))
+    return gaps
 
 
-def cluster(texts):
-    """Crude but honest: group on the correction phrase that fired, not on meaning.
-
-    A smarter clusterer would need an embedding store, which the deferral gate on
-    this row's sibling already ruled against for precedent search. The phrase IS
-    the cluster key here because the partner repeats his own wording.
-    """
-    groups = defaultdict(list)
-    for key, t in texts:
-        groups[key].append(t)
-    return groups
+def write_private(path, value):
+    path = Path(path).expanduser().absolute()
+    if path.is_symlink():
+        raise ValueError('evidence file must not be a symlink')
+    path = path.resolve()
+    for parent in (path.parent, *path.parents):
+        if (parent / '.git').exists() or parent == REPO:
+            raise ValueError('correction evidence must stay outside checkouts')
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.parent.stat().st_mode & 0o077:
+        raise ValueError('evidence directory must be private (mode 700)')
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    with os.fdopen(os.open(path, flags, 0o600), 'w') as handle:
+        handle.write(json.dumps(redact_evidence(value), ensure_ascii=False, indent=2, default=str) + '\n')
 
 
 def main():
-    import psycopg
-    try:
-        conn = jobs_connection(psycopg)
-    except RuntimeError as exc:
-        sys.exit(str(exc))
-    with conn:
-        cur = conn.cursor()
-        repeats = defect_repeats(cur)
-        quotes = quoted_corrections(cur)
-        rules_blob = active_rule_text(cur)
-
-    # SCANS EVERYTHING BY DEFAULT. The first run capped this at the newest 60 of 771
-    # transcript files and reported ZERO correction-shaped turns, which read as "he
-    # never corrects us" rather than "we looked at 8% of the corpus". That is the
-    # absence-from-one-sweep failure already in the defect log. This is a MONTHLY
-    # job; reading every file costs seconds and buys a true answer.
-    recent_only = "--recent" in sys.argv
-    turns = transcript_corrections(60 if recent_only else None)
-    groups = cluster(turns)
-
-    print("# CORRECTIONS SWEEP\n")
-    print("## 1. Repeated defect classes — the strongest signal\n")
-    if not repeats:
-        print("None. Every recorded defect class has exactly one instance, so nothing "
-              "here is yet a pattern rather than a moment.\n")
-    for r in repeats:
-        already = any(w in rules_blob for w in r["defect_class"].split("-") if len(w) > 5)
-        print(f"- **{r['defect_class']}** — {r['occurrences']} times, "
-              f"{r['caught_by_human']} caught by a human, {r['first_seen']} to {r['last_seen']}")
-        if r["rules_violated"]:
-            print(f"  - rules already broken: {', '.join(r['rules_violated'])}")
-        if r["sources_unread"]:
-            print(f"  - artifacts that keep going unread: {r['sources_unread'][0]}")
-        print(f"  - PROPOSE A RULE: {'probably already covered — check before teaching' if already else 'YES, no active rule mentions this'}")
-    print()
-
-    print("## 2. Corrections in the partner's own recorded words\n")
-    for q in quotes[:12]:
-        print(f"- {q['date']}: \"{q['quote']}\"\n  - from: {q['title'][:90]}")
-    if not quotes:
-        print("None found in the ruling history.")
-    print()
-
-    print(f"## 3. Correction-shaped turns in transcripts "
-          f"({'newest 60 files' if recent_only else 'every transcript file'})\n")
-    for key, items in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-        if len(items) < 2:
-            continue          # a repeat sweep drops singletons, by definition
-        print(f"- **\"{key}\"** — {len(items)} turns")
-        for t in items[:3]:
-            print(f"  - {t}")
-    print()
-
-    print("## WHAT TO DO WITH THIS\n")
-    print("Nothing here is a rule yet. A candidate earns a `teach` call only if it "
-          "repeats, names a concrete past mistake, and is not already covered by an "
-          "active rule. Teaching writes it as PROPOSED and it binds nobody until Joe "
-          "says yes, which is the gate — not this script.")
+    parser = argparse.ArgumentParser(description=__doc__)
+    until_default = datetime.now(timezone.utc).date() + timedelta(days=1)
+    parser.add_argument('--since', default=(until_default - timedelta(days=30)).isoformat())
+    parser.add_argument('--until', default=until_default.isoformat(), help='Exclusive UTC date')
+    parser.add_argument('--all-projects', action='store_true', help='Explicitly include all local Claude and Codex projects')
+    parser.add_argument('--offline', action='store_true', help='Skip record reads and report the gap')
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--review', type=Path, help='Private JSON list of dispositions keyed by evidence id')
+    args = parser.parse_args()
+    claude_roots = [Path.home() / '.claude/projects'] if args.all_projects else BASELINES._project_roots()
+    files = {'claude': sorted({path for root in claude_roots for path in root.rglob('*.jsonl')}),
+             'codex': sorted((Path.home() / '.codex/sessions').rglob('*.jsonl'))}
+    cwd_roots = None if args.all_projects else {REPO, (Path.home() / 'carr-system').resolve()}
+    result = scan_transcripts(files, args.since, args.until, cwd_roots=cwd_roots)
+    result.update(schema='correction-routes.v1', since=args.since, until=args.until)
+    if args.offline:
+        result['gaps'].append({'source': 'records', 'reason': 'record reads skipped'})
+    else:
+        remote = collect_records(args.since, args.until)
+        result['records'] = remote['records']
+        result['gaps'].extend(remote['gaps'])
+    result['conduct'] = scan_conduct(REPO / 'out/conduct-gate.jsonl', args.since, args.until)
+    result['gaps'].extend(result['conduct']['gaps'])
+    result['review'] = json.loads(args.review.read_text()) if args.review else []
+    review_missing = review_gaps(result['turns'], result['review'])
+    result['review_gaps'] = review_missing
+    result['complete'] = not result['gaps'] and not review_missing
+    path = args.output or Path.home() / '.local/state/carr/correction-sweeps' / (str(uuid.uuid4()) + '.json')
+    write_private(path, result)
+    print(json.dumps({'evidence': str(path), 'coverage': result['coverage'],
+                      'candidate_turns': sum(row['candidate'] for row in result['turns']),
+                      'unreviewed_or_invalid': len(review_missing), 'source_gaps': len(result['gaps']),
+                      'complete': result['complete']}))
+    return 0
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    raise SystemExit(main())

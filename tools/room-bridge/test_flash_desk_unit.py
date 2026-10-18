@@ -6,10 +6,12 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import urllib.error
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -105,7 +107,7 @@ def test_registry_takes_a_flash_local_desk_naming_model_and_effort():
         assert reg.resolve("flash-model")["kind"] == "flash-local"
 
 
-def test_bridge_delivers_flash_synchronously_and_probes_its_server():
+def test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available():
     rooms = []
     out = bridge.deliver("flash-model", {"kind": "flash-local"}, "flash",
                          {"body": "hi", "msg_id": "m", "seq": 1, "seat": "joe"}, state={}, registry=None,
@@ -115,7 +117,7 @@ def test_bridge_delivers_flash_synchronously_and_probes_its_server():
     saved = flash_wire.is_up
     try:
         flash_wire.is_up = lambda *a, **k: False
-        assert bridge.probe_live({"kind": "flash-local"}) is False
+        assert bridge.probe_live({"kind": "flash-local"}) is True
     finally:
         flash_wire.is_up = saved
 
@@ -174,6 +176,27 @@ def test_auto_judgment_task_goes_to_opus():
 def test_auto_flash_route_falls_back_when_flash_is_down():
     svc, adapter, _ = service("direct", flash_up=False, overflow=True)
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
+    accepted = out["receipt"]["queue_accepted"]
+    assert accepted["target"] == "claude-desktop", accepted
+    assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
+
+
+def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
+    with tempfile.TemporaryDirectory() as root:
+        state = Path(root) / "state"
+        home = Path(root) / "home"
+        state.mkdir()
+        plist = home / "Library/LaunchAgents/local.ds4-flash-next.plist"
+        plist.parent.mkdir(parents=True)
+        plist.touch()
+        (state / "flash.off").touch()
+        router = FakeRouter("direct", overflow=True)
+        adapter = FakeAdapter()
+        service = kanban_adapter.QueueService(catalog=CATALOG, adapter=adapter, router=router)
+        with patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(state)}), \
+             patch.object(kanban_adapter.Path, "home", return_value=home), \
+             patch.object(flash_wire, "is_up", return_value=True):
+            out = service.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
     accepted = out["receipt"]["queue_accepted"]
     assert accepted["target"] == "claude-desktop", accepted
     assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
@@ -915,7 +938,7 @@ def main() -> int:
     check("wire empty reply is no_answer", test_wire_empty_reply_is_no_answer_not_completed)
     check("wire unreachable and malformed fail cleanly", test_wire_unreachable_and_malformed_fail_cleanly)
     check("registry takes a flash-local desk", test_registry_takes_a_flash_local_desk_naming_model_and_effort)
-    check("bridge delivers flash synchronously and probes it", test_bridge_delivers_flash_synchronously_and_probes_its_server)
+    check("bridge delivers flash synchronously and probes it", test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available)
     check("grammar accepts auto, keeps human-only on Joe's lane", test_grammar_accepts_auto_and_keeps_human_only_on_joes_lane)
     check("auto direct task goes to flash", test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt)
     check("auto judgment task goes to opus", test_auto_judgment_task_goes_to_opus)

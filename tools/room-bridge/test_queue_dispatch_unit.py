@@ -1132,20 +1132,28 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
 
 
 class ReplyWordingTests(unittest.TestCase):
-    """PR #1254 round 2, finding 4: _bounded_reply strips and truncates; it does not
-    redact (no secret/PII scrubbing happens), and its own docstrings must say so."""
+    def test_bounded_reply_preserves_body_and_strips_terminal_protocol(self):
+        self.assertEqual(
+            queue_dispatch._bounded_reply(
+                'A synthetic email: person@example.invalid\nCARR_QUEUE_RESULT {"status":"done"}'
+            ),
+            "A synthetic email: person@example.invalid",
+        )
+        self.assertEqual(
+            queue_dispatch._bounded_reply("CARR_QUEUE_RESULT belongs in the body\nMore text"),
+            "CARR_QUEUE_RESULT belongs in the body\nMore text",
+        )
 
-    def test_bounded_reply_docstring_does_not_overclaim_redaction(self):
-        source = inspect.getsource(queue_dispatch._bounded_reply)
-        # The old wording ("the desk's own prose, redacted of the protocol line")
-        # claimed redaction as a positive attribute. A bare "not redaction"/"never
-        # redacts" disclaimer is fine — what must never come back is a claim that
-        # this function redacts anything.
-        self.assertNotIn("prose, redacted", source.lower())
-        self.assertNotIn("redacted exception", source.lower())
-        self.assertIn("not redaction", source.lower())
-        self.assertIn("stripped", source.lower())
-        self.assertIn("truncat", source.lower())
+    def test_bounded_reply_truncates_at_the_reply_boundary(self):
+        self.assertEqual(
+            queue_dispatch._bounded_reply("x" * 4002),
+            "x" * 4000
+            + "\n... [truncated 2 chars; full reply in ~/.config/carr/hermes-dispatch-results.jsonl]",
+        )
+
+    def test_bounded_reply_reports_empty_input(self):
+        self.assertEqual(queue_dispatch._bounded_reply("   "), "(empty reply)")
+        self.assertEqual(queue_dispatch._bounded_reply('CARR_QUEUE_RESULT {}'), "(empty reply)")
 
     def test_completion_payload_docstring_does_not_overclaim_redaction_either(self):
         source = inspect.getsource(queue_dispatch.QueueDeskExecutor.completion_payload)
@@ -1530,6 +1538,31 @@ class ConversationalRuntimeErrorTests(unittest.TestCase):
 def main() -> int:
     result = unittest.main(module=__name__, exit=False)
     return 0 if result.result.wasSuccessful() else 1
+
+
+class QueueCodexLimitInsideClaimTests(unittest.TestCase):
+    """PR 1660 review: the router default rose to 5400 s while a queue claim
+    lasts 900 s, so a long queued Codex job could outlive its claim and be
+    handed out twice."""
+
+    def test_codex_queue_job_ends_inside_its_claim(self):
+        import kanban_adapter
+        for kind in ("codex-session", "codex-live"):
+            limit = bridge.queue_dispatch_kwargs({"kind": kind})["codex_timeout_s"]
+            self.assertLess(limit, kanban_adapter.CLAIM_TTL_S)
+
+    def test_other_desks_get_no_codex_limit(self):
+        for kind in ("claude-session", "flash-local", "grok-cli"):
+            self.assertEqual(bridge.queue_dispatch_kwargs({"kind": kind}), {})
+
+    def test_claim_uses_the_shared_ttl(self):
+        import kanban_adapter
+        seen = []
+        adapter = kanban_adapter.KanbanAdapter.__new__(kanban_adapter.KanbanAdapter)
+        adapter.command_runner = seen.append
+        adapter.claim("t-1")
+        argv = seen[0]
+        self.assertEqual(argv[argv.index("--ttl") + 1], str(kanban_adapter.CLAIM_TTL_S))
 
 
 if __name__ == "__main__":
