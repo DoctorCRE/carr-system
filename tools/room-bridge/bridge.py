@@ -183,8 +183,11 @@ def record_dispatch_link(*, turn_msg_id: str, session_id: str,
                           dispatch_ref: str | None = None,
                           call_verb=verb_io._run_verb) -> dict:
     """Mint the explicit link between a room turn and the session it went to."""
+    idempotency_key = f"dispatch-link:{turn_msg_id}:{session_id}"
     args = {
-        "dispatch_ref": dispatch_ref or str(uuid.uuid4()),
+        "idempotency_key": idempotency_key,
+        # The envelope hashes dispatch_ref too, so a retry must keep it stable.
+        "dispatch_ref": dispatch_ref or str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key)),
         "turn_msg_id": turn_msg_id,
         "session_id": session_id,
     }
