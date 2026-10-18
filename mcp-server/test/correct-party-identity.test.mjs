@@ -606,3 +606,62 @@ test("state-only correction preserves confirmed city corroboration", async () =>
   assert.deepEqual((await call(fake, { fields: { state: "FL" }, evidence: { ...confirmedEvidence,
     corroborating_field: "city", corroborating_value: "Pensacola" } })).updated, ["state"]);
 });
+
+// Review follow-ups on PR 1666 (2026-10-08): four evidence-check edges.
+test("an 'OR' state abbreviation or a slash inside one value is not read as two alternatives", async () => {
+  for (const value of ["1200 NW Lovejoy St, Portland OR 97209", "Suite 200 / Building B"]) {
+    const fake = new Fake(basePlan({ street_address: value }));
+    const out = await call(fake, { fields: { name: "Alex Morgan" },
+      evidence: { ...confirmedEvidence, corroborating_field: "address", corroborating_value: value } });
+    assert.deepEqual(out.updated, ["name"], value);
+  }
+  // a genuine either-or still refuses
+  await assert.rejects(call(new Fake(basePlan({ street_address: "12 Bay St or 14 Bay St" })), { fields: { name: "Alex Morgan" },
+    evidence: { ...confirmedEvidence, corroborating_field: "address", corroborating_value: "12 Bay St or 14 Bay St" } }),
+  e => e.payload.error === "identity_evidence_required");
+  await assert.rejects(call(new Fake(basePlan()), { fields: { org: "Harbor Point Legal or Coastline Bank" } }),
+    e => e.payload.error === "unconfirmed_identity");
+});
+
+test("'confirm' inside a source URL is not an unconfirmed marker; the word in prose still is", async () => {
+  const fake = new Fake(basePlan());
+  const out = await call(fake, { fields: { name: "Alex Morgan" },
+    source: "https://example-it.test/confirm-visit/team" });
+  assert.deepEqual(out.updated, ["name"]);
+  await assert.rejects(call(new Fake(basePlan()), { fields: { name: "Alex Morgan" },
+    source: "https://example-it.test/team (identity unconfirmed)" }),
+  e => e.payload.error === "unconfirmed_identity");
+});
+
+test("a bare record-finding UUID is accepted as the source, as the schema documents", async () => {
+  const fake = new Fake(basePlan());
+  const out = await call(fake, { fields: { name: "Alex Morgan" }, source: "6a2668a2-76b1-4374-9266-5ee560ac90e2" });
+  assert.deepEqual(out.updated, ["name"]);
+  await assert.rejects(call(new Fake(basePlan()), { fields: { name: "Alex Morgan" }, source: "the firm website" }),
+    e => e.payload.error === "source_not_a_locator");
+});
+
+test("a free-mail domain never counts as corroboration, even when it matches the stored email", async () => {
+  for (const domain of ["gmail.com", "Yahoo.com", "outlook.com", "icloud.com", "aol.com", "hotmail.com"]) {
+    await assert.rejects(call(new Fake(basePlan({ email: `alex@${domain.toLowerCase()}` })), { fields: { name: "Alex Morgan" },
+      evidence: { ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain } }),
+    e => e.payload.error === "identity_evidence_required", domain);
+  }
+});
+
+test("a corrected name or org listing two candidates is still refused in any case or with a slash", async () => {
+  for (const fields of [{ name: "Smith OR Jones" }, { name: "Lee Or Kim" }, { name: "Dr Lee / Dr Kim" },
+    { org: "Acme / Beta Corp" }]) {
+    await assert.rejects(call(new Fake(basePlan()), { fields }),
+      e => e.payload.error === "unconfirmed_identity", JSON.stringify(fields));
+  }
+});
+
+test("regional ISP and other consumer mail domains never count as corroboration", async () => {
+  for (const domain of ["bellsouth.net", "att.net", "comcast.net", "sbcglobal.net", "cox.net", "charter.net",
+    "ymail.com", "mac.com", "protonmail.com", "proton.me"]) {
+    await assert.rejects(call(new Fake(basePlan({ email: `alex@${domain}` })), { fields: { name: "Alex Morgan" },
+      evidence: { ...confirmedEvidence, corroborating_field: "email_domain", corroborating_value: domain } }),
+    e => e.payload.error === "identity_evidence_required", domain);
+  }
+});

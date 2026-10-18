@@ -111,6 +111,10 @@ class Listener:
             pass
 
 
+from test_codex_models_unit import catalog_fixture
+
+
+@catalog_fixture()
 def main() -> int:
     tmp = tempfile.TemporaryDirectory(prefix="hermes-dispatch-test-")
     root = Path(tmp.name)
@@ -301,7 +305,7 @@ def main() -> int:
         assert out["result"] == "the cheap model answered", out
         argv = json.loads(argv_log.read_text().splitlines()[0])
         assert argv[0] == "exec", argv
-        assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-5.1-codex-mini", argv
+        assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-6.1-sol", argv
         assert "-c" in argv and argv[argv.index("-c") + 1] == "model_reasoning_effort=low", argv
         assert "-C" in argv and argv[argv.index("-C") + 1] == str(root), argv
         assert argv[-1] == desks.DESK_INSTRUCTION + "\n\nrename the variable", argv

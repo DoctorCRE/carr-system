@@ -39,11 +39,16 @@ Usage:
   ./run.sh next-migration --quiet    # just the number, for scripting
 """
 
-import json
 import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+
+from migration_baseline import MANIFEST
+from migration_source import migration_names, read_migration
+
+from migration_reservations import read_reservation_rows, reservation_paths
 
 from migration_number_contract import (
     APPROVED_INTERSTITIAL_COLLISIONS,
@@ -91,7 +96,9 @@ def worktree_paths():
     for line in run(["git", "worktree", "list", "--porcelain"]).splitlines():
         if line.startswith("worktree "):
             paths.append(line.split(" ", 1)[1].strip())
-    return paths or [REPO]
+    if not paths:
+        raise MigrationNumberError("cannot identify the shared checkout; no migration number allocated")
+    return paths
 
 
 TRANSIENT_ORIGIN_COLLISION = {
@@ -114,7 +121,7 @@ def _head_contains_origin_main() -> bool:
             stderr=subprocess.DEVNULL,
             timeout=30,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError):
         return False
     return result.returncode == 0
 
@@ -122,16 +129,9 @@ def _head_contains_origin_main() -> bool:
 def _repair_contents_match() -> bool:
     """Require the 0299 memory file to be 0298 with only ordinal labels changed."""
     try:
-        old_blob = subprocess.run(
-            ["git", "show", f"origin/main:migrations/{TRANSIENT_MEMORY_OLD}"],
-            cwd=REPO,
-            capture_output=True,
-            timeout=30,
-            check=True,
-        ).stdout
-        with open(os.path.join(REPO, "migrations", TRANSIENT_MEMORY_NEW), "rb") as fh:
-            new_blob = fh.read()
-    except (OSError, subprocess.SubprocessError):
+        old_blob = read_migration(Path(REPO), TRANSIENT_MEMORY_OLD, "origin/main").encode()
+        new_blob = read_migration(Path(REPO), TRANSIENT_MEMORY_NEW).encode()
+    except (OSError, ValueError, subprocess.SubprocessError):
         return False
     if old_blob.count(b"0298") != 3 or new_blob.count(b"0299") != 3:
         return False
@@ -185,13 +185,18 @@ def main():
     quiet = "--quiet" in sys.argv[1:]
     claims = {}
     try:
-        current_names = os.listdir(os.path.join(REPO, "migrations"))
-    except OSError:
-        current_names = []
+        current_names = migration_names(Path(REPO))
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: cannot read this tree migration identities: {exc}", file=sys.stderr)
+        return 1
 
     # 1. everything merged on the remote
-    remote = run(["git", "ls-tree", "--name-only", "origin/main", "migrations/"])
-    remote_names = [os.path.basename(name.strip()) for name in remote.splitlines() if name.strip()]
+    try:
+        remote_names = sorted(migration_names(Path(REPO), "origin/main"))
+    except ValueError as exc:
+        print(f"ERROR: cannot read origin/main migration identities: {exc}", file=sys.stderr)
+        return 1
+    remote = bool(remote_names)
     merge(claims, numbers_from_names(remote_names), "origin/main")
     if not remote:
         print("WARNING: could not read origin/main — the number below is based only on "
@@ -231,14 +236,19 @@ def main():
 
     # 2 & 3. every worktree's migrations/ directory, on disk, committed or not
     here = os.path.realpath(REPO)
-    for wt in worktree_paths():
+    trees = worktree_paths()
+    for wt in trees:
         mdir = os.path.join(wt, "migrations")
-        if not os.path.isdir(mdir):
+        if not os.path.isdir(mdir) and not (Path(wt) / MANIFEST).is_file():
             continue
         label = "this tree" if os.path.realpath(wt) == here else f"worktree {os.path.basename(wt)}"
         try:
-            tree_names = os.listdir(mdir)
-        except OSError:
+            tree_names = migration_names(Path(wt))
+        except (OSError, ValueError) as exc:
+            if os.path.realpath(wt) == here:
+                print(f"ERROR: cannot read this tree migration identities: {exc}", file=sys.stderr)
+                return 1
+            print(f"WARNING: cannot read {label} migration identities: {exc}", file=sys.stderr)
             continue
         try:
             validate_migration_names(tree_names, allow_frozen_subset=True)
@@ -278,22 +288,11 @@ def main():
     # 4. THE RESERVATION LEDGER (2026-08-24, council cluster B). A number
     # another session has RESERVED at mint time is claimed whether or not any
     # file exists yet — the whole point of reserving. The ledger lives in the
-    # canonical checkout's out/, which every worktree on this machine shares.
-    # A torn or missing ledger line is skipped by read_reservations(), and a
-    # ledger this tool cannot read degrades to today's behaviour (warn, don't
-    # refuse) rather than blocking allocation.
-    ledger = os.path.join(REPO, "out", "migration-reservations.jsonl")
-    try:
-        with open(ledger, encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(row, dict) and isinstance(row.get("number"), int):
-                    merge(claims, {row["number"]: {"reserved"}}, "reservation")
-    except OSError:
-        pass  # no ledger yet — nothing reserved on this machine
+    # canonical checkout's out/. Worktrees need not symlink their out dirs.
+    # Existing worktree-local ledgers still claim their numbers; never reuse
+    # them merely because the writer now uses the canonical ledger.
+    for row in read_reservation_rows(reservation_paths(trees)):
+        merge(claims, {row["number"]: {"reserved"}}, "reservation")
 
     merge(claims, {
         number: {f"burned:{reason}"}

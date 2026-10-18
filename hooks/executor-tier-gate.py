@@ -52,16 +52,6 @@ about to happen and NOTHING has named the tier it will run on.
                                            before Jev acted. An abstaining
                                            judge never loosens the gate.
 
-IT DENIES RATHER THAN WARNS, which is the opposite of
-its neighbour rule-shape-gate.py, and the difference is deliberate. That gate
-warns because blocking would make `teach` refuse a partner's own words, which
-it must never do. Here the cost of a false stop is one round trip and one
-extra parameter, while the cost of a warning is that it gets clicked past —
-and prose that gets clicked past is precisely the failure being fixed. A gate
-that only warns would be the same aspiration in a new costume. Jev acting
-removes the round trip when it is confident, never the deny when it is not:
-a vendor outage leaves the gate exactly as strict as it was before Jev.
-
 FAILS OPEN on any error, like every other hook here. A gate that crashes must
 never be able to stop work. Logged to out/hook-guard.log.
 """
@@ -80,11 +70,6 @@ except Exception:                       # a missing meter must not change a verd
     LOG = os.path.expanduser("~/carr-system/out/hook-guard.log")
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, REPO)
-# Decision c136a8e1-c135-4553-9e50-64c9640d12b7 (Joe, 2026-09-25)
-# narrows 0b11c89b to judgment points. The orchestrator's 2026-10-02 PR 1407
-# ruling retires C07's generated prompt-facet propagation deny in favor of
-# batched boundary checks in hooks/jev-supervisor.py. Executor naming and
-# exact routing-policy pin checks below remain enforced.
 # Where a subagent definition may live. Project scope first: that is where the
 # fifteen CARR agents are, and a project definition wins over a user-level one
 # of the same name.

@@ -14,7 +14,7 @@
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpOriginRefusal } from "./oauth-policy.js";
 import { DOC_TOOL_NAMES, DOC_INSTRUCTIONS, docToolAnnotations } from "./doc-profile.js";
-import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput,
+import { TOOLS, ToolError, executeRegisteredTool, assertRegisteredToolInput, UNATTENDED_AUTHORITY_VERBS,
   auditIdentity, assertNoCallerAuthorityFields, coerceArgsToSchema,
   pgConstraintError, describeConstraint } from "./tools.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
@@ -23,12 +23,9 @@ import { authenticatedIdentity, isKnownPartner, authorizationClassForActor, orga
 import { deriveTrustedPrincipalBinding,
   ExactEffectRefusal, SCAC_TRUSTED_PRINCIPAL_READBACK_SQL } from "./scac-exact-effects.js";
 import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFailureClass, RPC_INTERNAL_ERROR_CODE } from "./trace.js";
-import { gateZeroSeatConnection } from "./gate-zero-seat-connection.v5.js";
 import { providerFor as judgeProviderFor } from "./judge-provider.js";
-import { jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
+import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
   validateAskJevArgs } from "./jev-call-receipt.js";
-import { foundationAssuranceSeatConnection } from
-  "./foundation-assurance-seat-connection.v5.js";
 import { stampedGitSha } from "./build-stamp.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
@@ -290,10 +287,10 @@ export const PROFILES = {
   // Native lifecycle credentials are purpose-bound server-side. They expose
   // only their own record surface even if a caller asks for ?profile=full.
   "codex-continuity": new Set([
-    "codex-checkpoint", "codex-read-recovery", "codex-record-event",
+    "codex-checkpoint", "codex-read-recovery",
   ]),
   "claude-continuity": new Set([
-    "claude-checkpoint", "claude-read-recovery", "claude-record-event",
+    "claude-checkpoint", "claude-read-recovery",
   ]),
 
   // Reads plus the capture verbs that are safe to run unattended: each one is
@@ -307,6 +304,11 @@ export const PROFILES = {
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
     "record-signal", "record-branch-evidence",
     "report-problem",
+    // propose-outcome-feedback proposes and completes nothing (0872). Its
+    // completion door, bind-work-request-criterion-evidence, is deliberately
+    // absent from this and every unattended profile: completing a Work Request
+    // on bound evidence replaces a human, so it stays with a partner's session
+    // or a sponsored agent on the full surface.
     "propose-outcome-feedback",
     // record-defect (0103) belongs in the NARROWEST writing profile, not the widest.
     // An unattended run is exactly where an error is least likely to be caught by a
@@ -323,6 +325,9 @@ export const PROFILES = {
     // detected -> triaged with a next action and provisional impact; it cannot
     // set severity, root cause, recovery evidence, or a closed state.
     "open-incident", "triage-incident",
+    // The research-site index (#1646): the weekly research runs add a source
+    // they found useful and retire a dead one. Both are keyed; removal is soft.
+    "add-research-site", "remove-research-site",
   ]),
 
   // AWAY MODE, added 2026-08-03 on Joe's ruling. The scheduled CEO session that
@@ -358,6 +363,7 @@ export const PROFILES = {
     "log-activity", "stamp-touch", "add-loop", "update-loop",
     "set-next-action", "complete-action", "add-critical-date", "record-finding",
     "record-signal", "record-branch-evidence", "record-defect", "open-incident", "triage-incident",
+    "add-research-site", "remove-research-site",
     // plus: close what it opened, advance the book, draft, and keep the record honest
     "close-loop", "update-deal", "add-premises", "record-counter",
     "prepare-document", "update-document-status",
@@ -410,35 +416,10 @@ export const PROFILES = {
   // the profile is the whole point, not a suggestion the model could widen by
   // passing a different verb name (callTool's allowedIn() check enforces this
   // at call time, same as every other profile).
-  // THE SECOND ENTRY, ADDED 2026-09-13, AND IT IS NARROWER THAN IT LOOKS. The
-  // profile now admits two write verbs rather than one, and the addition is
-  // record-gate-zero-read-only-outcome under Joe's ruling
-  // d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70. This entry is NOT the authority: it
-  // is the blast-radius limiter, and on its own it would admit BOTH reviewer
-  // lanes, because grok-reviewer authenticates through the same door and lands
-  // in the same profile. The authority is the `oracleSeatOnly` gate in
-  // executeRegisteredTool, which reads the staffed seat off the frozen
-  // registration and refuses every lane but that one. Both are kept: the
-  // profile keeps a reviewer out of the other two hundred write verbs, and the
-  // seat gate keeps the wrong reviewer out of this one.
-  reviewer: new Set([
-    "record-finding", "record-gate-zero-read-only-outcome",
-    "produce-foundation-assurance-benchmark-coverage",
-    "produce-assurance-fabric-preactivation-receipt",
-    "produce-foundation-control-plane-preactivation-receipt",
-    "produce-global-execution-contract-receipt",
-    "produce-global-no-phi-boundary-receipt",
-    "produce-global-prompt-injection-boundary-receipt",
-    "produce-global-secrets-boundary-receipt",
-    "produce-global-source-authority-receipt",
-    "record-foundation-assurance-minimum-outcome",
-  ]),
+  reviewer: new Set(["record-finding"]),
 
-  // The benchmark subject author and independent reviewer are separate
-  // server-locked Codex review-token actors. Each gets only its half of the
-  // exact-digest rail; neither can accept the benchmark or call an oracle.
-  "benchmark-author": new Set(["propose-benchmark-manifest-draft"]),
-  "benchmark-reviewer": new Set(["review-benchmark-manifest-draft"]),
+  "benchmark-author": new Set(),
+  "benchmark-reviewer": new Set(),
 
   // HERMES (R0 runtime evaluation, 2026-08-16). The write set is EMPTY, which
   // is the whole design: the 2026-08-12 frontier council cleared Hermes for a
@@ -488,6 +469,30 @@ export const PROFILES = {
     "project-room-queue", "record-dispatch-link",
   ]),
 
+  // UNATTENDED (PR #1727 review, finding 2; rule b42e217e: unattended runs get
+  // a narrow profile). The profile of the UNATTENDED_TOKENS runner, forced in
+  // profileForActor on that door like probe/reviewer/hermes, so ?profile= can
+  // neither widen it to `full` nor change it. Written out rather than spread
+  // from capture, for hermes's reason: a verb added to capture must not land in
+  // a runner with partner authority without somebody editing this list.
+  //
+  // capture's additive set, plus close-loop (Joe's ruling names loop closes),
+  // plus the two V5-A05 cadence doors so the daily sweep can run here as the
+  // system seat (delivery-cadence-a05-tools.js), plus exactly the
+  // partner-authority acts tools.js's UNATTENDED_AUTHORITY_VERBS admits. The
+  // authority half is that same exported list, so the profile and the
+  // executeRegisteredTool gate cannot disagree. Nothing here merges, re-points
+  // ownership, creates a party, touches a rule or schedule, or sends.
+  unattended: new Set([
+    "log-activity", "stamp-touch", "add-loop", "update-loop",
+    "set-next-action", "complete-action", "add-critical-date", "record-finding",
+    "record-signal", "record-branch-evidence", "report-problem", "record-defect",
+    "open-incident", "triage-incident",
+    "close-loop",
+    "record-cadence-receipt", "raise-delivery-cadence-alert",
+    ...UNATTENDED_AUTHORITY_VERBS,
+  ]),
+
   // HERMES CoS (loop #459). This is a separate server-locked capability door,
   // never a request-side profile override. It inherits the ordinary Hermes
   // business-write set and adds exactly the two bounded brief/premises verbs.
@@ -531,11 +536,8 @@ const PROFILE_NOTICE = {
     "server-side by a PROBE_TOKENS bearer, not by ?profile=, and cannot be widened by this token " +
     "under any request. This is the smoke-probe machine actor, never a human seat.</notice>",
   reviewer:
-    "\n\n<notice>This session runs on the REVIEWER profile: reads, plus exactly two write verbs, " +
-    "record-finding and record-gate-zero-read-only-outcome. The second one additionally refuses every " +
-    "reviewer lane except the one staffed with the DoctorCRE v5 Gate Zero oracle seat, so being in this " +
-    "profile is not by itself permission to call it. Every other write verb refuses with not_in_profile " +
-    "— no advancing a deal, no " +
+    "\n\n<notice>This session runs on the REVIEWER profile: reads and record-finding. " +
+    "Every other write verb refuses with not_in_profile. No advancing a deal or " +
     "drafting a document, no touching a party or a rule. This profile is locked server-side by a " +
     "REVIEW_TOKENS bearer, not by ?profile=, and cannot be widened by this token under any request. " +
     "This is the Automatic Review Council's Codex-reviewer machine actor, never a human seat. Land " +
@@ -553,6 +555,13 @@ const PROFILE_NOTICE = {
     "widened by this token under any request. You carry Joe's personal brain and never Dell's. " +
     "File what he tells you to file; for anything outside those nine business verbs and two dispatch doors, say what you would have " +
     "written and hand it back for a human.</notice>",
+  unattended:
+    "\n\n<notice>This session runs on the UNATTENDED profile: nobody is watching. You hold " +
+    "reads, the additive capture verbs, close-loop, the cadence doors, and exactly these " +
+    "partner-authority acts on Joe's behalf: " + UNATTENDED_AUTHORITY_VERBS.join(", ") + ". " +
+    "Every other write refuses with not_in_profile, and the profile is locked server-side by an " +
+    "UNATTENDED_TOKENS bearer, not by ?profile=. Rules, schedules, merges, deal facts and anything " +
+    "outward stay with a session a partner attends: report what you would have done.</notice>",
   "hermes-cos":
     "\n\n<notice>This session runs on the HERMES CoS profile: the ordinary Hermes business-write set " +
     "plus exactly update-deal (deal_type, segment, city and lane only) and add-premises against " +
@@ -593,6 +602,7 @@ export function profileForActor(actor, request) {
   if (actor?.benchmarkAuthor === true && actor?.via === "review-token") return "benchmark-author";
   if (actor?.benchmarkReviewer === true && actor?.via === "review-token") return "benchmark-reviewer";
   if (actor?.review) return "reviewer";
+  if (actor?.unattended === true || actor?.via === "unattended-token") return "unattended";
   if (actor?.hermesCos === true && actor?.via === "hermes-cos-token") return "hermes-cos";
   if (actor?.hermes) return "hermes";
   return profileFor(request);
@@ -624,9 +634,24 @@ export function hermesCosPremisesRefusal(profile, name, args) {
     Array.isArray(args?.ownership) && args.ownership.some((row) => row && row.new_party);
 }
 
+// Discovery is smaller than authority. Keep established direct permission and
+// dispatcher routes; everything else is discovered through list-verbs.
+const CORE_TOOL_NAMES = new Set([
+  "standing-context", "list-verbs", "call-verb",
+  "report-problem", "record-defect", "add-loop",
+  "teach", "activate-rule",
+  "capability-program", "catch-me-up", "find", "loop-board",
+  "read-doctrine", "read-loop", "read-room", "search-doctrine",
+  "deal-room-board", "get-deal-room", "lead-board", "morning-brief", "today-triage",
+  "engineering-passport-source", "doctrine-sections",
+  "ask-jev", "add-room-turn", "map-architecture",
+  "applicable-rules", "resolve-doctrine-rules", "doctrine-index",
+]);
+
 function toolList(profile = "full") {
   return Object.entries(TOOLS)
     .filter(([name, t]) => allowedIn(profile, name, t))
+    .filter(([name]) => profile !== "full" || CORE_TOOL_NAMES.has(name))
     .map(([name, t]) => ({
       name,
       description: t.description + (profile === "full" ? "" : (PROFILE_NOTICE[profile] || "")),
@@ -945,20 +970,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
   const connectionString = needsAuthority ? authorityDsnForActor(env, actor) : env.DATABASE_URL_WRITER;
   const pool = new Pool({ connectionString });
   const client = await pool.connect();
-  // THE ORACLE SEAT WRITES ON ITS OWN CREDENTIAL, under standing-rule amendment
-  // 9 (2026-09-14): seat-only write is enforced by connection role, not by a
-  // session setting. `client` above authenticates as the ordinary writer, whose
-  // EXECUTE on ops.gate_zero_record_read_only_outcome migration 0502 revokes; the
-  // seat's own login role holds it and nothing else does. This attaches the door
-  // rather than opening it — nothing connects unless the handler calls it, and a
-  // Worker with no such secret gets null, which the handler refuses by name
-  // instead of silently falling back to the writer connection.
-  if (tool.oracleSeatOnly === true && tool.oracleFamily !== "foundation-assurance")
-    client.seatConnection = gateZeroSeatConnection(env, Pool);
-  if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
-    client.seatConnection = foundationAssuranceSeatConnection(env, Pool);
-  if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
-    client.foundationAssuranceRuntime = foundationAssuranceRuntimeBinding(env);
   let jevPrefetched, jevAsk, jevRequest;
   let jevKeyLocked = false;
   const writerRead = tool.writerConnection === true && !tool.write;
@@ -978,9 +989,11 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
         const actorRow = (await client.query("select id from actor where slug=$1", [actor.slug])).rows[0];
         if (!actorRow?.id)
           throw new ToolError({ error: "actor_not_provisioned", slug: actor.slug });
-        jevAsk = jevAskBinding(env, fetch, { reserveAttempt: async () => {
-          return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs);
-        } });
+        jevAsk = jevAskBinding(env, fetch, {
+          countPaidAttemptsToday: () => countPaidJevAttemptsToday(client),
+          reserveAttempt: async dailyCap => {
+            return reserveJevCallAttempt(client, { ...actor, id: actorRow.id }, jevArgs, dailyCap);
+          } });
         jevPrefetched = await prefetchJevAnswer(jevArgs, jevAsk, judgeWorkClass);
         client.jevPrefetched = jevPrefetched;
       }
@@ -998,8 +1011,6 @@ export async function callTool(env, actor, name, args, profile = "full", judgeWo
             "provision the actor before any write verb will run" });
     // In place, not a copy — see executeWithTrustedPrincipal above.
     const actorWithId = Object.assign(actor, { id: a.rows[0].id });
-    if (tool.oracleSeatOnly === true && tool.oracleFamily === "foundation-assurance")
-      client.foundationAssuranceActorSlug = actorWithId.slug;
     await setWriterActorContext(client, actorWithId,
       { partnerAuthorityAct: tool.humanOnly === true });
     const principalReadback = await client.query(SCAC_TRUSTED_PRINCIPAL_READBACK_SQL.text);
@@ -1136,7 +1147,10 @@ export async function dispatch(request, env, ctx, actor) {
             "OPENING ACT, every session: call standing-context FIRST — it returns the taught rules " +
             "with the counts to recite in your first response, open action-required items, and the " +
             "doctrine pointer. There are NO doctrine files: read via doctrine-index / search-doctrine / " +
-            "read-doctrine; state via catch-me-up / today-triage. WRITE LAW (rule 14181e60): database " +
+            "read-doctrine; state via catch-me-up / today-triage. Discovery advertises a compact core. " +
+            "For any other verb, use list-verbs with a filter to fetch its schema, then call-verb. " +
+            "Reuse discovered schemas in this session; do not load the complete catalog at startup. " +
+            "WRITE LAW (rule 14181e60): database " +
             "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
             "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
             "version_conflict and needs_confirm are questions for the human, never auto-retried. There " +

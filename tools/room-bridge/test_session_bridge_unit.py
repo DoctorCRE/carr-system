@@ -227,6 +227,10 @@ def test_queue_task_to_a_desktop_held_thread_is_never_left_pending_for_a_retry()
     assert out.get("outcome") != "pending", out  # nothing waits on a log that never fills
 
 
+from test_codex_models_unit import catalog_fixture
+
+
+@catalog_fixture()
 def test_dispatch_forwards_the_live_desktop_opt_in():
     seen = []
 

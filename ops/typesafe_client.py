@@ -204,7 +204,8 @@ class JevCallRefused(TypeSafeError):
 # global hourly cap. All four are checked before any transport and before
 # the daily reservation, fail closed, and are logged without being paid.
 JEV_CALL_SITES_PATH = os.path.join(REPO, "ops", "config", "jev-call-sites.v1.json")
-BUDGET_REFUSALS = ("hourly_paid_call_cap", "site_hourly_budget", "site_daily_budget")
+BUDGET_REFUSALS = ("hourly_paid_call_cap", "site_hourly_budget", "site_daily_budget",
+                   "jev_worker_daily_cap")
 POLICY_REFUSALS = ("fixture_offline", "unregistered_caller", "unattributed_call", "unattended_worker_off",
                    "call_site_registry_invalid")
 # Declined because of what the vendor already said: its account is out of
@@ -593,6 +594,7 @@ def _server_error_category(stderr):
             ('"jev_proxy_unconfigured"', "worker_key_unbound"),
             ('"jev_upstream_failed"', "vendor_failed_at_worker"),
             ('"jev_admission_required"', "admission_refused_at_worker"),
+            ('"jev_worker_daily_cap"', "worker_daily_cap"),
             ("could not reach the deployed Worker", "worker_unreachable"),
             ("no MCP token", "local_token_missing"),
             ("refusing MCP token file", "local_token_insecure")):
@@ -691,6 +693,15 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
                 _after_worker_vendor_failure(status, reason, caller)
             except TypeSafeError as error:
                 refusal = error
+        elif category == "worker_daily_cap":
+            # The Worker's own ceiling binds every route this machine has: the
+            # direct key bills the same account, so hold paid calls until reset.
+            resets_at = _windows(datetime.now(timezone.utc))[3]
+            _hold_worker_daily_cap(resets_at)
+            refusal = JevCallRefused(f"Jev unavailable: jev_worker_daily_cap reached at the Worker; "
+                                     f"resets {resets_at}; not retried direct",
+                                     code="jev_worker_daily_cap", site=caller,
+                                     scope="jev_worker_daily_cap", resets_at=resets_at)
         elif category == "admission_refused_at_worker":
             # The reservation is spent; a direct retry would pay a second slot.
             refusal = TypeSafeError("Jev unavailable: the Worker refused the admission "
@@ -1470,6 +1481,19 @@ def _open_hold(table, seconds):
         # The Worker breaker is advisory; credit protection is mandatory.
 
 
+def _hold_worker_daily_cap(resets_at):
+    """Pause every paid route until the Worker's UTC day resets. Advisory: if
+    the pause cannot be written, the next paid call asks the Worker, which
+    refuses again before it reserves or spends."""
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            _budget_tables(db)
+            db.execute("INSERT OR IGNORE INTO budget_pause VALUES (?,?,?)",
+                       ("jev_worker_daily_cap", "*", resets_at))
+    except (OSError, sqlite3.Error):
+        pass
+
+
 def _finish_credit_probe(token):
     """Only a verified successful lease owner can clear the recovered hold."""
     if token is None:
@@ -1643,6 +1667,13 @@ def _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256,
             if row[0] >= cap and not row[1]:
                 notice = True
                 db.execute("UPDATE daily_cap SET notified=1 WHERE day=?", (day,))
+            if allowed:
+                held = db.execute("SELECT resets_at FROM budget_pause WHERE scope='jev_worker_daily_cap' "
+                                  "AND resets_at > ? ORDER BY resets_at DESC LIMIT 1",
+                                  (now.strftime("%Y-%m-%dT%H:%M:%SZ"),)).fetchone()
+                if held:
+                    allowed = False
+                    refused = ("jev_worker_daily_cap", "*", held[0])
             if allowed and registry is not None and site is not None:
                 hour_used = db.execute("SELECT COALESCE(SUM(count),0) FROM site_usage WHERE hour=?",
                                        (hour,)).fetchone()[0]
@@ -1743,7 +1774,8 @@ def active_pause(*, sites=None, now=None):
 PAUSE_WORDS = {"daily_paid_call_cap": "daily paid-call cap",
                "hourly_paid_call_cap": "hourly paid-call cap",
                "site_daily_budget": "this check's daily budget",
-               "site_hourly_budget": "this check's hourly budget"}
+               "site_hourly_budget": "this check's hourly budget",
+               "jev_worker_daily_cap": "the Worker's daily paid-call ceiling"}
 
 
 def pause_notice(session, *, sites=None, now=None):

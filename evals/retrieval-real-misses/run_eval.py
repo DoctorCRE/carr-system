@@ -201,24 +201,19 @@ def boot_rule_ids(read):
 
 def routing_candidates(case, read, boot_ids):
     sys.path.insert(0, str(REPO))
-    from lib.rule_routes import load_routes, matched_rule_ids
-    spec = importlib.util.spec_from_file_location('real_miss_trigger', REPO / 'ops/rule_trigger_delivery.py')
-    if spec is None or spec.loader is None:
-        raise ReadError('rule_trigger_table_invalid')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    rows = module.prompt_rows(str(REPO / 'ops/config/rule-jit-triggers.v1.json'))
-    if rows is None:
-        raise ReadError('rule_trigger_table_invalid')
+    from lib.rule_scope_lookup import select_rules, moment_judge
     args = case['request']['args']
-    ids = list(module.match(args['prompt'], rows))
-    if 'tool_name' in args:
-        ids += matched_rule_ids(load_routes(REPO), args['tool_name'], args['tool_input'])
-    ids = sorted(set(ids))
-    response = read('standing-context', {'rule_ids': ids})
-    returned = {r['id'] for r in response['shared_rules'] + response['personal_rules']
-                if r.get('statement')}
-    delivered = boot_ids | (set(ids) & returned)
+    catalog = read('standing-context', {'detail': 'scopes'})
+    try:
+        result = select_rules(catalog, {'hook_event_name': 'PreToolUse' if 'tool_name' in args else 'UserPromptSubmit',
+                                       'task': args['prompt'], 'tool_name': args.get('tool_name', ''),
+                                       'tool_input': args.get('tool_input', {})},
+                              judge=moment_judge('retrieval-real-misses'))
+    except ValueError:
+        raise ReadError('rule_scope_catalog_invalid') from None
+    if not result['complete']:
+        raise ReadError('rule_scope_selection_incomplete')
+    delivered = boot_ids | {r['id'] for r in result['rules']}
     return [candidate(['rule:' + rid]) for rid in sorted(delivered)]
 
 
@@ -311,8 +306,7 @@ def provenance():
             'source_revision': subprocess.check_output(
                 ['git', 'rev-parse', 'HEAD'], cwd=REPO, text=True).strip(),
             'routing_sha256': {p: sha(REPO / p) for p in [
-                'ops/config/rule-routes.v1.json', 'ops/config/rule-jit-triggers.v1.json',
-                'ops/rule_trigger_delivery.py', 'lib/rule_routes.py']}}
+                'lib/rule_scope_lookup.py', 'lib/rule_operations.py']}}
 
 
 def build_result(cases, observations, fixture_digest, saved=None):
@@ -333,7 +327,10 @@ def main():
     parser.add_argument('--replay', type=Path, help='Rescore a refs-only run without calling production')
     args = parser.parse_args()
     try:
-        cases = validate_fixture(json.loads(args.fixture.read_text()))
+        fixture = json.loads(args.fixture.read_text())
+        cases = validate_fixture(fixture)
+        if fixture.get('requires_private_fixture') and not args.replay:
+            parser.error('live evaluation requires --fixture with private source queries')
         saved = None
         if args.replay:
             saved = json.loads(args.replay.read_text())

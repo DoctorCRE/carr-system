@@ -123,12 +123,20 @@ gh = Gh(subprocess.TimeoutExpired("gh", 30), (0, "[]", ""))
 check("a timeout is retried", reader(gh, sleeps).api("x") == [] and sleeps == [5], sleeps)
 
 gh = Gh((1, "", "HTTP 429: rate limit exceeded\n"), (0, "{}", ""))
-exc = raised(lambda: reader(gh).api("x"))
-check("a 429 stops without a quick retry", exc is not None and exc.kind == "rate_limit" and len(gh.calls) == 1)
+sleeps = []
+exc = raised(lambda: reader(gh, sleeps).api("x"))
+check("a 429 is classified as rate limited without a quick retry",
+      exc is not None and exc.kind == "rate_limit" and exc.transient is True
+      and exc.attempts == 1 and len(gh.calls) == 1 and sleeps == [],
+      (exc, len(gh.calls), sleeps))
 
 gh = Gh((1, "", "HTTP 403: API rate limit exceeded for user ID 1.\n"), (0, "{}", ""))
-exc = raised(lambda: reader(gh).api("x"))
-check("a 403 rate limit stops without a quick retry", exc is not None and exc.kind == "rate_limit" and len(gh.calls) == 1)
+sleeps = []
+exc = raised(lambda: reader(gh, sleeps).api("x"))
+check("a 403 rate limit is classified without a quick retry",
+      exc is not None and exc.kind == "rate_limit" and exc.transient is True
+      and exc.attempts == 1 and len(gh.calls) == 1 and sleeps == [],
+      (exc, len(gh.calls), sleeps))
 
 sleeps = []
 gh = Gh(CONNECT, CONNECT, CONNECT, CONNECT, (0, "{}", ""), CONNECT, CONNECT, (0, "[]", ""))

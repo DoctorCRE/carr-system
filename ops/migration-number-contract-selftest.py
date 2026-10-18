@@ -33,6 +33,17 @@ assert NEXT_MIGRATION_SPEC and NEXT_MIGRATION_SPEC.loader
 next_migration: Any = importlib.util.module_from_spec(NEXT_MIGRATION_SPEC)
 NEXT_MIGRATION_SPEC.loader.exec_module(next_migration)
 
+# These slot-policy fixtures supply inventories, not Git objects. Stub the
+# logical-source interface while the compacted Git fixtures exercise its reads.
+def fixture_migration_names(repo, ref=None):
+    if ref is None:
+        return {p.name for p in (Path(repo) / "migrations").glob("*.sql")}
+    return {Path(p).name for p in next_migration.run(
+        ["git", "ls-tree", "--name-only", ref, "migrations/"]
+    ).splitlines() if p.strip()}
+
+next_migration.migration_names = fixture_migration_names
+
 
 FROZEN_0169 = (
     "0169_control_plane_canary_fencing.sql",
@@ -117,7 +128,8 @@ def allocator_refuses_interstitial(
 
 
 def main() -> int:
-    actual = tuple(path.name for path in (REPO / "migrations").glob("*.sql"))
+    from migration_source import migration_names
+    actual = tuple(migration_names(REPO))
     expected_next = max(
         max(next_migration.numbers_from_names(actual)),
         max(PERMANENTLY_BURNED_MIGRATION_SLOTS),

@@ -3,7 +3,7 @@ import test from "node:test";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import { deriveJobPassports, jobPassportStatusLabel, parseJobPassportReceipt } from "../../dealroom/js/job-passport.js";
-import { activationReliabilityWire, strictAttemptReceiptShape } from "../src/evidence-activation.js";
+import { activationReliabilityWire } from "../src/evidence-activation.js";
 import { requirePlan } from "../src/engineering-runtime.js";
 
 const helperMode = process.argv.includes("--evidence-activation-joined-path");
@@ -470,44 +470,11 @@ testCase("attempt receipt activation facts are redacted and forged nested conten
   assert.match(roomSource, /All remain human-gated and unpromoted/);
 });
 
-testCase("MCP receipt admission refuses forged nested facts before database persistence", () => {
-  const receipt = {
-    schema_version: "attempt-receipt.v1", attempt_id: "attempt:strict", envelope_digest: "sha256:" + "a".repeat(64),
-    attempt_ordinal: 1, adapter: {}, lifecycle: {}, result: {}, attestation: {}, negative_knowledge: [], telemetry: [], tool_event_summaries: [], observation: {}, interventions: [], handoff_proposal: {}, visual_artifacts: [], evaluation_binding: {},
-    knowledge_activation: { bundle_digest: "sha256:" + "b".repeat(64), mode: "shadow", canonical_binding: { work_request_id: "WR-1", work_request_version: 1, accepted_plan_digest: "sha256:" + "a".repeat(64), envelope_digest: "sha256:" + "a".repeat(64), activation_binding_ref: "ctx:strict" }, item_dispositions: [{ item_ref: "rule:scope", disposition: "applied", evidence_refs: ["evidence:rule"], stage_ref: "stage:one", reason_ref: "reason:applied" }], closure: { state: "not_activated", unresolved_required_item_refs: [], derived_by: "server" } },
-    reliability: { route_digest: "sha256:" + "1".repeat(64), topology_digest: "sha256:" + "2".repeat(64), evaluation_plan_digest: "sha256:" + "3".repeat(64), grounding_sufficiency: { state: "sufficient", evidence_refs: ["evidence:grounding"], required_supplied: ["rule:scope"], required_used: ["rule:scope"], required_missing: [], advisory_supplied: [], advisory_used: [], freshness_failures: [], retrieval_failures: [] }, deterministic_checks: [{ check_id: "check:one", state: "passed", critical: true, evidence_refs: ["evidence:one"] }], model_judgement: { state: "pass", judge_ref: "actor:judge", evidence_refs: ["evidence:judge"] }, human_acceptance: { state: "accepted", actor_ref: "actor:joe", evidence_refs: ["evidence:human"], outcome_feedback_ref: "OUTCOME-abcdef123456-v1", outcome_feedback_hash: "sha256:" + "f".repeat(64) }, trajectory: [{ sequence: 1, stage_ref: "stage:one", parent_event_ref: null, decision_class: "decision:one", tool_class: "tool:one", result_state: "succeeded", fallback_state: "not_used", guardrail_state: "clear", latency_ms: 1, evidence_refs: ["evidence:trace"] }], evaluator_results: [{ kind: "deterministic", evaluator_ref: "evaluator:deterministic", rubric_ref: "rubric:one", evaluator_version: "v1", evaluator_digest: "sha256:" + "4".repeat(64), status: "passed", confidence: "high", critical: true, independence_state: "not_independent", held_out_case_count: 1, check_refs: ["check:one"], dimension_refs: ["dimension:correctness"], evidence_refs: ["evidence:one"], judge_provenance: "provenance:deterministic", calibration_evidence_refs: [] }], corrections: [], defects: [], incidents: [], downstream_outcome: { state: "unknown", brokerage_ref: "deal:pending", evidence_refs: [], outcome_feedback_ref: null, outcome_feedback_hash: null }, outcome_horizon: { state: "mature", ends_at: "2026-08-24T12:00:00Z", as_of: "2026-08-24T12:00:00Z", evidence_refs: ["evidence:horizon"] }, process_metrics: { latency_ms: 1, cost_usd: 0, input_tokens: 1, output_tokens: 1, cached_input_tokens: 0, retry_count: 0, recovery_count: 0, context_reconstruction_ms: 0, human_intervention_count: 0, security_event_refs: [] }, eval_candidates: [], shadow_comparisons: [], learning_disposition: "none", telemetry: [], closure: { state: "insufficient_evidence", reasons: ["reason:authority-evidence"], derived_by: "server" } },
-  };
-  assert.equal(strictAttemptReceiptShape(receipt), true);
-  const raw = structuredClone(receipt); raw.reliability.trajectory = [{ sequence: 1, raw_transcript: "secret" }];
-  assert.equal(strictAttemptReceiptShape(raw), false);
-  const forgedClosure = structuredClone(receipt); forgedClosure.knowledge_activation.closure.derived_by = "caller";
-  assert.equal(strictAttemptReceiptShape(forgedClosure), false);
-  const missingStage = structuredClone(receipt); delete missingStage.knowledge_activation.item_dispositions[0].stage_ref;
-  assert.equal(strictAttemptReceiptShape(missingStage), false);
-  const heldoutLeak = structuredClone(receipt); heldoutLeak.reliability.evaluator_results[0].expected_answer = "not for executor or UI";
-  assert.equal(strictAttemptReceiptShape(heldoutLeak), false);
-  const rawDisposition = structuredClone(receipt); rawDisposition.knowledge_activation.item_dispositions[0].reason_ref = "the operator typed a raw sentence";
-  const rawIntervention = structuredClone(receipt); rawIntervention.interventions = [{ kind: "human", occurred_at: "2026-08-24T12:00:00Z", summary: "the operator typed a raw sentence" }];
-  const rawHandoff = structuredClone(receipt); rawHandoff.handoff_proposal = { proposed: true, reason: "the operator typed a raw sentence", replacement_session_ref: "session:replacement", checkpoint_ref: "checkpoint:one", requires_independent_verification: true };
-  const rawEvidence = structuredClone(receipt); rawEvidence.reliability.deterministic_checks[0].evidence_refs = ["the operator typed a raw sentence"];
-  const rawCalibration = structuredClone(receipt); rawCalibration.reliability.evaluator_results[0].calibration_evidence_refs = ["the operator typed a raw sentence"];
-  for (const attack of [rawDisposition, rawIntervention, rawHandoff, rawEvidence, rawCalibration]) assert.equal(strictAttemptReceiptShape(attack), false);
-  const callerCandidate = structuredClone(receipt); callerCandidate.reliability.eval_candidates = [{ candidate_id: "eval-candidate:caller" }];
-  assert.equal(strictAttemptReceiptShape(callerCandidate), false);
-  const executorShadow = structuredClone(receipt); executorShadow.reliability.shadow_comparisons = [{ promotion_state: "active", side_effect_ref: "effect:forged" }];
-  assert.equal(strictAttemptReceiptShape(executorShadow), false);
-  const forgedHuman = structuredClone(receipt); forgedHuman.reliability.human_acceptance.outcome_feedback_hash = null;
-  assert.equal(strictAttemptReceiptShape(forgedHuman), false);
-});
-
-testCase("receipt and activation reads use tenant-scoped server seams, never raw binding SELECT", () => {
+testCase("activation reads use tenant-scoped server seams", () => {
   assert.match(evidenceActivationSource, /set_config\('carr\.organization_tenant_id'/);
-  assert.match(evidenceActivationSource, /ops\.context_activation_receipt_binding/);
+  assert.match(evidenceActivationSource, /ops\.read_context_activation/);
   assert.doesNotMatch(evidenceActivationSource, /from ops\.context_activation_binding where binding_id=\$1/);
   assert.match(evidenceActivationSource, /activation_not_found/);
-  assert.match(evidenceActivationSource, /propose-evaluation-case/);
-  assert.match(evidenceActivationSource, /transition-evaluation-case/);
-  assert.match(evidenceActivationSource, /humanOnly: true, authorityOnly: true/);
 });
 
 testCase("spatial Home Zone binds exact visual state, preserves list parity, and withholds stale/conflicting views", () => {

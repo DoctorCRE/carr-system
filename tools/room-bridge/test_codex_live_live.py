@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""LIVE proof for the codex-live desk. Boots a real Codex app-server.
-
-Rule 97326357 binds — a claim about what a surface can do is only doctrine
-after a live test from that surface. The unit test proves the wire against a
-stand-in; this proves it against Codex itself.
-
-TWO THINGS ARE PROVEN, and the second is the one that makes it a desk:
-
-  1. A nonce minted here, appearing nowhere but inside the dispatched turn,
-     comes back verbatim in the answer.
-  2. A SECOND dispatch into the same desk recalls something from the first.
-     Without that a live desk is just a slower one-shot.
-
-TWO MECHANICAL TRAPS the socket path has to dodge, both found the hard way:
-the path must fit the 104-character limit macOS puts on unix sockets, and its
-parent must be a real directory — passing /tmp fails, because /tmp is a
-symlink and the server refuses it as "not a directory".
-
-Costs a small amount of Codex credit. Run:
-    python3 tools/room-bridge/test_codex_live_live.py
+"""the path must fit the limit macOS puts on unix sockets.
 """
 
 from __future__ import annotations
@@ -38,7 +19,6 @@ sys.path.insert(0, str(HERE))
 import desks  # noqa: E402
 import dispatch  # noqa: E402
 
-# short, and a real directory rather than a symlink
 RUN_DIR = Path("/private/tmp/hermes-codex-live-test")
 BOOT_TIMEOUT_S = 90
 

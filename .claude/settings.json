@@ -8,7 +8,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
+            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
             "timeout": 10
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; [ -f \"$r/hooks/delegation-gate.py\" ] || exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
+            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/delegation-gate.py\" ] && [ ! -L \"$r/hooks/delegation-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/delegation-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/delegation-gate.py\"",
             "timeout": 10
           }
         ]
@@ -30,12 +30,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/worktree-self-plumb.py\"",
+            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; if [ ! -e \"${HOME}/carr-system/hooks/worktree-self-plumb.py\" ] && [ ! -L \"${HOME}/carr-system/hooks/worktree-self-plumb.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script ${HOME}/carr-system/hooks/worktree-self-plumb.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/worktree-self-plumb.py\"",
             "timeout": 20
           },
           {
             "type": "command",
-            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/machine-converge.py\"",
+            "command": "[ -d \"${HOME}/carr-system/hooks\" ] || exit 0; if [ ! -e \"${HOME}/carr-system/hooks/machine-converge.py\" ] && [ ! -L \"${HOME}/carr-system/hooks/machine-converge.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script ${HOME}/carr-system/hooks/machine-converge.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"${HOME}/carr-system/hooks/machine-converge.py\"",
             "timeout": 180
           }
         ]

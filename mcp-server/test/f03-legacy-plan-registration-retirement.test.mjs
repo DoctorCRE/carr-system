@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // V5-F03: new engineering-slice-plan.v1 registrations are retired at the
 // registration doors only (migration 0616 and the register-engineering-slice-plan
 // handler).  Stored v1 plans keep the read path requirePlan has always given them.
@@ -19,7 +20,7 @@ class EngineeringToolError extends Error {
 }
 
 const corpus = JSON.parse(fs.readFileSync(new URL("./fixtures/f03-design-contract-parity.v1.json", import.meta.url), "utf8"));
-const MIGRATION = fs.readFileSync(new URL("../../migrations/0616_f03_retire_legacy_slice_plan_registration.sql", import.meta.url), "utf8");
+const MIGRATION = readMigration(new URL("../../migrations/0616_f03_retire_legacy_slice_plan_registration.sql", import.meta.url));
 const RUNTIME = fs.readFileSync(new URL("../src/engineering-runtime.js", import.meta.url), "utf8");
 
 function sealed(base) {
@@ -203,7 +204,7 @@ test("0616 carries the 0507a register body verbatim except the one marked block"
     const start = sql.indexOf("create or replace function ops.engineering_register_slice_plan(");
     return sql.slice(start, sql.indexOf("end $$;", start));
   };
-  const prior = body(fs.readFileSync(new URL("../../migrations/0507a_engineering_slice_plan_validators.sql", import.meta.url), "utf8"));
+  const prior = body(readMigration(new URL("../../migrations/0507a_engineering_slice_plan_validators.sql", import.meta.url)));
   const current = body(MIGRATION);
   const blockStart = current.indexOf("  -- V5-F03 v1 retirement (0616)");
   const blockEnd = current.indexOf("  end if;\n", current.indexOf("is not registrable", blockStart)) + "  end if;\n".length;

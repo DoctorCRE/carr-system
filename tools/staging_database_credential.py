@@ -453,6 +453,24 @@ def promote_pending(paths: CredentialPaths, *, key: str, expected_value: str) ->
     _fsync_directory(paths.final.parent)
 
 
+def discard_pending(paths: CredentialPaths, *, key: str, expected_value: str) -> None:
+    """Remove a pending credential whose password change never committed.
+
+    The undo for a deliberate rotation of a lost credential: the role already
+    holds a password, so a pending file left behind after the ALTER rolled back
+    would name a password the database never accepted, and the next run would
+    try to resume it. Only the exact value this run minted is removed; a file
+    that changed underneath it is refused rather than deleted.
+    """
+    if _safe_lstat(paths.pending) is None:
+        return
+    _validate_private_directory(paths.pending.parent)
+    if _secure_read(paths.pending) != f"{key}={expected_value}\n".encode():
+        raise CredentialRefusal("pending credential changed before discard")
+    paths.pending.unlink()
+    _fsync_directory(paths.pending.parent)
+
+
 @contextlib.contextmanager
 def exclusive_lock(path: pathlib.Path) -> Iterator[None]:
     """Process lock shared by cleanup and provisioning, with no symlink seam."""

@@ -1,6 +1,7 @@
 """Sampled semantic label proposals, cached once per bounded case. Exact universal policy labels stay in code; omitted candidates are explicitly unjudged. Independent adjudication supplies gold, not model self-agreement."""
 
 import hashlib
+from pathlib import Path
 import json
 import math
 import os
@@ -540,10 +541,7 @@ def rule_classes(repo=REPO, rule_ids=None):
     with open(os.path.join(repo, "ops", "config", "rule-enforcement-map.json"),
               "r", encoding="utf-8") as handle:
         emap = json.load(handle)
-    with open(os.path.join(repo, "ops", "config", "rule-jit-triggers.v1.json"),
-              "r", encoding="utf-8") as handle:
-        jit = {rid for row in json.load(handle).get("triggers") or []
-               for rid in row.get("rule_ids") or []}
+    jit = set(json.loads(Path(repo, 'ops/fixtures/rule-scope-compatibility.v1.json').read_text())['legacy_action_point_ids'])
     layers = emap.get("rule_load_layers") or {}
     controls = emap.get("rule_controls") or {}
     ids = list(rule_ids) if rule_ids is not None else list(layers)

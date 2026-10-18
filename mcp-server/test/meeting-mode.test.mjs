@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // V5-UX-B11 — non-recording shared Meeting Mode acceptance proofs.
 //
 // UX05  double click, two-client acceptance, reconnect and rejoin yield one
@@ -31,7 +32,7 @@ const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_MEETING_MODE_DB_REQUIRED === "1";
 const LOOPBACK = /@(localhost|127[.]0[.]0[.]1)[:/]|^postgres(ql)?:\/\/(localhost|\/)/;
 const TENANT = "carr-internal";
-const MIGRATION = fs.readFileSync(new URL("../../migrations/0556_meeting_mode_store.sql", import.meta.url), "utf8");
+const MIGRATION = readMigration(new URL("../../migrations/0556_meeting_mode_store.sql", import.meta.url));
 const SOURCE = fs.readFileSync(new URL("../src/meeting-mode.js", import.meta.url), "utf8");
 
 class ToolError extends Error {

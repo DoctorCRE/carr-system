@@ -62,23 +62,11 @@ import subprocess
 from datetime import datetime, timezone
 
 CONTROL_ALLOWED_ACTIONS = frozenset({"login"})
-# The two humans this system has. Deliberately a module constant and NOT
-# anything a state file, a registry entry or a turn body could widen.
 HUMAN_PARTNERS = frozenset({"joe", "dell"})
 AUTHORIZED_CONTROL_SEATS = frozenset({"human"})
 LOGIN_THROTTLE_S = 600.0
-# TIGHT ON PURPOSE, and the number comes from the service's own cadence rather
-# than from taste: com.carr.room-bridge wakes every 60 seconds, and every
-# registered desk is probed each cycle. At eight seconds a machine with four
-# desks spends at most ~32s in probes even when every vendor CLI hangs, which
-# leaves the cycle's real work — routing, delivery and reply capture — inside
-# the wake interval. A probe that needs longer than eight seconds to say whether
-# a token exists locally has already told us it cannot answer.
 PROBE_TIMEOUT_S = 8.0
 
-# The vendor's OWN commands, per desk kind. A kind absent from these maps is
-# refused by name rather than guessed at: launching the wrong binary at a
-# sign-in prompt is exactly the class of mistake an allowlist exists to stop.
 AUTH_STATUS_COMMANDS = {
     "grok-cli": ["grok", "models"],
     "claude-session": ["claude", "auth", "status"],
@@ -156,9 +144,6 @@ def probe_auth(entry: dict, *, run=subprocess.run, timeout: float = PROBE_TIMEOU
     answer = parse_auth_output(f"{getattr(proc, 'stdout', '') or ''}\n{getattr(proc, 'stderr', '') or ''}")
     if answer is not None:
         return answer
-    # A status command that exits clean with output this parser does not know
-    # is still not proof of anything, so it stays None rather than becoming a
-    # confident guess from the exit code alone.
     return None
 
 
@@ -245,6 +230,6 @@ def restart_desk(name: str, *, registry, stop, start) -> dict:
     try:
         stop(name)
         started = start(name, registry=registry)
-    except Exception as e:  # noqa: BLE001 — a restart failure is a receipt, never a crashed cycle
+    except Exception as e:
         return {"restarted": False, "reason": f"{type(e).__name__}: {e}"}
     return {"restarted": True, "detail": started}

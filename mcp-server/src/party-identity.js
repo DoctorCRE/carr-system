@@ -29,6 +29,21 @@ export const PARTY_IDENTITY_FIELDS = Object.freeze(["name", "org", "state"]);
 const CORROBORATING_FIELDS = Object.freeze(["firm", "email_domain", "city", "phone", "address", "npi"]);
 const UNCONFIRMED = /\b(?:unconfirmed|unverified|confirm|possible match|surname[- ]only|not (?:yet )?confirmed)\b/i;
 
+// Evidence values (addresses, cities) must be one value, not a list. Only a
+// separator or a lowercase " or " counts, so a capital OR state code
+// ("Portland OR 97209") and a slash in a suite number are not misread.
+const ALTERNATIVES = /[;\r\n]|\s+or\s+(?=\S)/;
+// The corrected name or org itself stays strict: "Smith OR Jones" or
+// "Dr Lee / Dr Kim" is two candidates, never one confirmed value.
+const FIELD_ALTERNATIVES = /[;\r\n]|\s(?:or|\/)\s/i;
+// A consumer mail domain proves nothing about who someone works for.
+const FREE_MAIL_DOMAINS = new Set(["gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "hotmail.com", "live.com", "msn.com", "protonmail.com",
+  "proton.me", "bellsouth.net", "att.net", "comcast.net", "sbcglobal.net", "cox.net", "charter.net"]);
+const UUID = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i;
+// "confirm" inside a URL path is not an unconfirmed marker.
+const withoutUrls = text => text.replace(/https?:\/\/\S+/gi, " ");
+
 const NAME_IDENTIFIERS = new Set(["email_domain", "phone", "address", "npi"]);
 const normalizedText = v => typeof v === "string" ? v.trim().replace(/\s+/g, " ").toLowerCase() : "";
 
@@ -69,12 +84,14 @@ function identityEvidence(args, before) {
   const city = evidence?.city;
   if (!evidence || evidence.confirmed !== true || !["high", "medium"].includes(evidence.confidence)
       || !CORROBORATING_FIELDS.includes(evidence.corroborating_field) || !value || value.length > 200
-      || UNCONFIRMED.test(value) || /[;\r\n]|\s(?:or|\/)\s/i.test(value) || isPlaceholder(value)
+      || UNCONFIRMED.test(value) || ALTERNATIVES.test(value) || isPlaceholder(value)
       || (evidence.corroborating_field === "email_domain" && /(?:^|\.)carr\.us$/i.test(value))
+      || (evidence.corroborating_field === "email_domain"
+        && FREE_MAIL_DOMAINS.has(value.toLowerCase().replace(/^@/, "")))
       || (changesName && (!NAME_IDENTIFIERS.has(evidence.corroborating_field)
         || (before && !storedIdentifierMatches(evidence.corroborating_field, value, before))))
       || (city !== undefined && (typeof city !== "string" || !city.trim() || city.length > 200
-        || UNCONFIRMED.test(city) || /[;\r\n]|\s(?:or|\/)\s/i.test(city)
+        || UNCONFIRMED.test(city) || ALTERNATIVES.test(city)
         || (changesName && before && normalizedText(city) !== normalizedText(before.city))))
       || (!changesName && [args.fields?.state, before?.state].some(v => normalizedText(v) === normalizedText(value))))
     throw new ToolError({ error: "identity_evidence_required",
@@ -99,7 +116,7 @@ export function normalizeIdentityFields(fields) {
     hint: "identity fields only (name, org, state); contact facts go through update-party-contact" });
   const clean = {};
   for (const k of keys) {
-    if (typeof fields[k] === "string" && (UNCONFIRMED.test(fields[k]) || /[;\r\n]|\s(?:or|\/)\s/i.test(fields[k])))
+    if (typeof fields[k] === "string" && (UNCONFIRMED.test(fields[k]) || FIELD_ALTERNATIVES.test(fields[k])))
       throw new ToolError({ error: "unconfirmed_identity", field: k,
         hint: "apply only one clean, confirmed value; values marked unconfirmed or confirm, or listing alternatives, cannot be written" });
     const value = typeof fields[k] === "string" ? fields[k].trim().replace(/\s+/g, " ") : "";
@@ -182,12 +199,12 @@ export function partyIdentityTools({ withEnvelope, writeEvent, versionGuard, res
         const source = typeof args.source === "string" ? args.source.trim() : "";
         if (!source) throw new ToolError({ error: "missing_source",
           hint: "an identity correction without provenance cannot be checked or undone; say where it came from" });
-        if (UNCONFIRMED.test(source)) throw new ToolError({ error: "unconfirmed_identity",
+        if (UNCONFIRMED.test(withoutUrls(source))) throw new ToolError({ error: "unconfirmed_identity",
           hint: "this source marks identity unconfirmed; record a possible match without applying a correction" });
         const evidence = identityEvidence(args);
         if (!/https?:\/\/[^\s/]+/i.test(source)
             && !/\b(?:registry|nppes|npi|sunbiz)\b.*\b[a-z]*\d[a-z\d-]*\b/i.test(source)
-            && !/\brecord-finding\s+[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i.test(source))
+            && !UUID.test(source))
           throw new ToolError({ error: "source_not_a_locator",
             hint: "supply a re-verifiable URL, registry and identifier, or record-finding UUID" });
         const fields = normalizeIdentityFields(args.fields);

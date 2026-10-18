@@ -220,8 +220,9 @@ RULES = [
 
     # --- Joe / Dell attribution -----------------------------------------
     ("dell-attribution", "HARD",
-     r"Dell'?s?\s+(?:\d+\+?\s*years|network|experience|tenure|background|relationships)"
-     r"|Dell brings\b",
+     r"(?<![\w'’])Dell(?:['’]?s?\s+"
+     r"(?:\d+\+?\s*years|network|experience|tenure|background|relationships)\b"
+     r"|\s+brings\b)",
      "Banned Dell attribution. Third correction on this theme; hard ban since 2026-07-16.",
      "Call it 'our network' or 'my network' in the first person."),
     ("dell-mention", "REVIEW", r"\bDell\b",

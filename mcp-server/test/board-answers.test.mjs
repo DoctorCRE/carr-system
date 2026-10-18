@@ -1,6 +1,7 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { TOOLS, ToolError } from "../src/tools.js";
 import { BOARD_ANSWER_WRITE_VERBS } from "../src/board-answers.js";
 
@@ -240,7 +241,7 @@ test("read cursor and asker reference are both in the tenant scoped query", asyn
 });
 
 test("typed board records install reference monitors and question uniqueness", () => {
-  const schema = readFileSync(new URL("../../migrations/0740_board_answers.sql", import.meta.url), "utf8");
+  const schema = readMigration(new URL("../../migrations/0740_board_answers.sql", import.meta.url));
   for (const table of ["board_snapshot", "board_question", "board_answer"])
     assert.match(schema, new RegExp(`create table public\\.${table}`));
   for (const table of ["board_snapshot", "board_question", "board_answer"]) {

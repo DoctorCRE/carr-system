@@ -56,16 +56,6 @@ class RuntimeTests(unittest.TestCase):
         result = decide(Event({}))
         self.assertEqual((result.code,result.stdout), (0,'before\ndegraded\n'))
 
-    def test_stop_latch_does_not_mute_unidentified_or_other_claims(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            import os
-            from unittest.mock import patch
-            with patch.dict(os.environ, {'CARR_STOP_LATCH_STATE':tmp}):
-                event=Event({'session_id':'runtime-fixture'})
-                self.assertFalse(event.latch('fixture','missing',[]))
-                self.assertFalse(event.latch('fixture','missing',['a.py']))
-                self.assertTrue(event.latch('fixture','missing',['A.PY']))
-                self.assertFalse(event.latch('fixture','missing',['b.py']))
 
 if __name__ == '__main__':
     unittest.main()

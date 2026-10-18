@@ -14,6 +14,8 @@ The marker alone is insufficient: inherited or forged markers cannot exempt
 a writable/interactive Grok ancestor. Failed process readback keeps hooks on.
 This is a context boundary; effect guards do not use it.
 """
+from __future__ import annotations
+
 import ctypes
 import os
 import re

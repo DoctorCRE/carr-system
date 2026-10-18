@@ -113,12 +113,14 @@ class GitHubReadBudget:
         self.legacy_cooldown = float(env.get('GH_LIMITER_COOLDOWN', 900))
 
     @contextmanager
-    def state(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with os.fdopen(os.open(str(self.path) + ".lock", os.O_RDWR | os.O_CREAT, 0o600), "r+") as lock:
-            deadline = time.monotonic() + self.lock_timeout
+    def _lock(self, path, timeout, *, cancel):
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError('GitHub budget lock timeout must be positive and finite')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+") as lock:
+            deadline = time.monotonic() + timeout
             while True:
-                self.cancel()
+                cancel()
                 try:
                     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     break
@@ -127,6 +129,16 @@ class GitHubReadBudget:
                     if remaining <= 0:
                         raise GitHubBudgetLockTimeout('GitHub budget lock deadline expired; calls stopped') from None
                     time.sleep(min(.05, remaining))
+            yield
+
+    @contextmanager
+    def state(self):
+        with self._state(cancel=self.cancel) as data:
+            yield data
+
+    @contextmanager
+    def _state(self, *, cancel):
+        with self._lock(Path(str(self.path) + ".lock"), self.lock_timeout, cancel=cancel):
             try:
                 data = json.loads(self.path.read_text()) if self.path.exists() else {}
                 if not isinstance(data, dict):
@@ -146,6 +158,31 @@ class GitHubReadBudget:
                 os.replace(temporary, self.path)
             except (OSError, ValueError, TypeError):
                 raise RuntimeError("GitHub budget state unreadable; reads stopped") from None
+
+    @contextmanager
+    def call_slot(self, *, timeout):
+        with self._lock(Path(str(self.path) + ".call.lock"), timeout, cancel=self.cancel):
+            started = False
+
+            def mark_started():
+                nonlocal started
+                started = True
+
+            try:
+                yield mark_started
+            finally:
+                if started:
+                    end = time.monotonic() + self.spacing
+                    try:
+                        with self._state(cancel=lambda: None) as data:
+                            row = data.setdefault(self.shared, {})
+                            row["next_start"] = max(float(row.get("next_start", 0)),
+                                                    self.clock() + self.spacing)
+                    except Exception:
+                        # Cleanup must preserve the dispatched command's outcome.
+                        # With no durable deadline, keep peers behind the call lock.
+                        while time.monotonic() < end:
+                            time.sleep(min(.2, max(0, end - time.monotonic())))
 
     def _check(self, data, resource):
         now = self.clock()
@@ -170,7 +207,8 @@ class GitHubReadBudget:
         with self.state() as data:
             self._check(data, resource)
 
-    def reserve(self, resource):
+    def reserve(self, resource, *, with_slot=False):
+        """Return the reserved delay, optionally paired with its absolute wall slot."""
         with self.state() as data:
             self._check(data, resource)
             row = data.setdefault(self.shared, {})
@@ -178,7 +216,8 @@ class GitHubReadBudget:
             slot = max(now, float(row.get("next_start", 0)))
             row["next_start"] = slot + self.spacing
             data[self.shared] = row
-            return max(0, slot - now)
+            delay = max(0, slot - now)
+            return (slot, delay) if with_slot else delay
 
     def observe(self, resource, headers, diagnostic, observed_at):
         until = retry_deadline(headers, diagnostic, observed_at)

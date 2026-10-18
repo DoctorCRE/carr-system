@@ -64,6 +64,15 @@ const MAX_QUESTIONS = requestContract.max_questions;
 const MAX_SESSION_ID_CHARS = 200;
 const READ_LIMIT_DEFAULT = 200;
 const READ_LIMIT_MAX = 500;
+// THE WORKER'S OWN CEILING (WR-000292). The per-site budgets in
+// ops/config/jev-call-sites.v1.json live on the calling machine; a valid
+// admission proves a caller reserved there, not that the day is affordable.
+// This counts the attempt ledger's paid rows for the UTC day, whoever asked,
+// before any reservation, and counts again inside the reservation transaction
+// under one advisory lock, so concurrent callers at the boundary cannot both
+// reserve. JEV_WORKER_DAILY_CAP overrides it; a value that is not a safe whole
+// number keeps this default.
+const WORKER_DAILY_CAP_DEFAULT = 300;
 
 export const JEV_PURPOSES = Object.freeze(["call", "build_advisory"]);
 export const JEV_QUESTION_TYPES = Object.freeze(Object.keys(requestContract.question_types));
@@ -131,6 +140,18 @@ async function verifyAdmission(secret, token, session, now) {
         payload[4] !== session)
       throw new Error("invalid admission");
   } catch { throw new LeafToolError({ error: "jev_admission_required" }); }
+}
+
+function workerDailyCap(env) {
+  const raw = env?.JEV_WORKER_DAILY_CAP;
+  // A digit string past the safe range parses to Infinity, which lifts the cap.
+  const cap = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(cap) ? cap : WORKER_DAILY_CAP_DEFAULT;
+}
+
+function nextUtcMidnight(ms) {
+  const day = new Date(ms);
+  return new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + 1)).toISOString();
 }
 
 function isPlainObject(value) {
@@ -233,7 +254,8 @@ function upstreamFailure(status, reason, body, key) {
 
 // Returns the Worker's Jev caller, or null when the Worker holds no key.
 // mcp.js calls it before the writer transaction opens (prefetchJevAnswer).
-// Production supplies reserveAttempt; tests also inject time and transport.
+// Production supplies reserveAttempt and countPaidAttemptsToday; tests also
+// inject time and transport.
 // The second argument is the in-process call context ({ workClass }), never
 // request data, so a caller cannot claim the Worker-admitted runtime class.
 export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
@@ -243,6 +265,8 @@ export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
   const budgetMs = options.budgetMs ?? TOTAL_BUDGET_MS;
   const cache = options.cache ?? (typeof caches !== "undefined" ? caches.default : null);
   const reserveAttempt = options.reserveAttempt;
+  const countPaidAttemptsToday = options.countPaidAttemptsToday;
+  const dailyCap = workerDailyCap(env);
   const cacheKeyFor = async body =>
     new Request(`https://jev-cache-v2.invalid/${await sha256Hex(`${key}\n${body}`)}`);
   const jevAsk = async function ({ state, model, questions, transport_mode, idempotency_key, session_id },
@@ -271,10 +295,22 @@ export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
       throw new LeafToolError({ error: "jev_cache_miss" });
     if (workClass !== "app_runtime")
       await verifyAdmission(env.JEV_ADMISSION_SECRET, idempotency_key, session_id, now());
-    if (!reserveAttempt) throw new LeafToolError({ error: "jev_receipt_store_unavailable" });
-    let reservedAttempt;
-    try { reservedAttempt = await reserveAttempt(); }
+    if (!reserveAttempt || !countPaidAttemptsToday)
+      throw new LeafToolError({ error: "jev_receipt_store_unavailable" });
+    let paidToday;
+    try { paidToday = await countPaidAttemptsToday(); }
     catch { throw new LeafToolError({ error: "jev_receipt_store_unavailable" }); }
+    if (!Number.isInteger(paidToday) || paidToday < 0)
+      throw new LeafToolError({ error: "jev_receipt_store_unavailable" });
+    if (paidToday >= dailyCap)
+      throw new LeafToolError({ error: "jev_worker_daily_cap", cap: dailyCap, count: paidToday,
+        resets_at: nextUtcMidnight(now()) });
+    let reservedAttempt;
+    try { reservedAttempt = await reserveAttempt(dailyCap); }
+    catch { throw new LeafToolError({ error: "jev_receipt_store_unavailable" }); }
+    if (reservedAttempt?.capped === true)
+      throw new LeafToolError({ error: "jev_worker_daily_cap", cap: dailyCap, count: reservedAttempt.count,
+        resets_at: nextUtcMidnight(now()) });
     if (typeof reservedAttempt?.key !== "string" || !reservedAttempt.key ||
         typeof reservedAttempt?.receipt_id !== "string" || !reservedAttempt.receipt_id)
       throw new LeafToolError({ error: "jev_receipt_store_unavailable" });
@@ -340,11 +376,23 @@ export function jevAskBinding(env, fetchImpl = fetch, options = {}) {
 
 // Reserve the receipt and its pending ledger partner atomically before fetch.
 // Vendor failure leaves linked unknown spend, never an orphan or credited answer.
-export async function reserveJevCallAttempt(client, actor, args) {
+// With dailyCap, the day's count and the reservation share one transaction
+// behind one advisory lock; at the ceiling it reserves nothing and returns
+// { capped: true, count }.
+export async function reserveJevCallAttempt(client, actor, args, dailyCap) {
   const { stateJson, questions, facets, model } = validateAskJevArgs(args);
   const key = `jev-attempt:${args.idempotency_key}`;
   await client.query("begin");
   try {
+    if (dailyCap !== undefined) {
+      await client.query("select pg_advisory_xact_lock(hashtext('jev-worker-daily-cap'))");
+      const count = await countPaidJevAttemptsToday(client);
+      if (!Number.isInteger(count) || count < 0) throw new Error("jev_attempt_count_invalid");
+      if (count >= dailyCap) {
+        await client.query("rollback");
+        return { capped: true, count };
+      }
+    }
     const row = (await client.query(
       `select r.receipt_id from ops.record_jev_call_receipt($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) r`,
       [args.session_id, "call", Object.keys(questions).sort(compareCodePoints), facets,
@@ -365,6 +413,16 @@ export async function reserveJevCallAttempt(client, actor, args) {
     await client.query("rollback");
     throw error;
   }
+}
+
+// Every paid attempt leaves one ask-jev-attempt row (settlement rewrites only
+// its response), so this is the day's paid-attempt count on the database clock.
+export async function countPaidJevAttemptsToday(client) {
+  const row = (await client.query(
+    `select count(*)::int as attempts from tool_call where verb = 'ask-jev-attempt'
+       and created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc'`,
+  )).rows[0];
+  return row?.attempts;
 }
 
 function validateSessionId(ToolError, value) {

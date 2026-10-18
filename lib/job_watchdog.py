@@ -96,6 +96,22 @@ def stamp(now=None):
     return datetime.fromtimestamp(time.time() if now is None else now, timezone.utc).isoformat()
 
 
+# What still waits on Joe for each needs_joe pattern class, in add-loop's
+# residue vocabulary (mcp-server/src/tools.js RESIDUE_KINDS). add-loop refuses
+# a capability or ruling loop that does not name one.
+NEEDS_JOE_RESIDUE = {"credentials": "provider_login", "money": "money_movement",
+                     "client-facing": "external_send"}
+
+
+def loop_blocker(f):
+    """add-loop blocker fields for a loop filed from finding ``f``."""
+    needs = f.get("needs_joe")
+    if not needs:
+        return {"blocker": "other_lane"}
+    return {"blocker": "capability" if needs == "credentials" else "ruling",
+            "residue_kind": NEEDS_JOE_RESIDUE[needs], "residue_host": f["subject"]}
+
+
 def loop_owner(f):
     """Record-layer owner for a loop filed from finding ``f``.
 
@@ -483,11 +499,12 @@ def process_group_alive(pgid):
         return True
 
 
-def board_task(root, config, card, executor, status, note, project=None, pr=None, repo=None, needs_joe=False, health=None,
-               expected_task=None, reason=None, next_action=None):
-    project = project or config["board"]
+def board_task(root, config, card, executor, status, note, health=None, reason=None, next_action=None):
+    project = config["board"]
     board = root / "out/boards" / (project + ".json")
     env = dict(os.environ, PROGRESS_BOARD_ROOT=str(root / "out"), PROGRESS_BOARD_LOCAL_ONLY="1")
+    if not config.get("board_github_enabled", True):
+        env["PROGRESS_BOARD_SKIP_GH"] = "1"
     with locked(root / "out/watchdog/board.lock"):
         if not board.exists():
             result = subprocess.run([sys.executable, str(SOURCE / "tools/progress_board.py"), "init",
@@ -499,19 +516,14 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
         prior = json.loads(board.read_text()).get("tasks", {}).get(card)
         argv = [sys.executable, str(SOURCE / "tools/progress_board.py"), "task", project, card,
                 "--status", status, "--health", health or ("blocked" if status == "blocked" else "healthy"),
-                "--note", note, "--receipt", "--defer-refresh"]
+                "--note", note, "--receipt", "--lane", "status"]
         if prior is None:
             argv.extend(["--title", card, "--executor", executor])
         elif executor != "orchestrator":
             argv.extend(["--executor", executor])
-        argv.extend(["--lane", config["needs_joe_lane"] if needs_joe else "status"])
-        if expected_task is not None:
-            argv.extend(["--expected-task", json.dumps(expected_task)])
         if status == "blocked":
             argv.extend(["--reason", reason or note,
                          "--next-action", next_action or config["next_actions"]["job_failed"]])
-        if pr is not None:
-            argv.extend(["--pr", str(pr), "--repo", repo])
         result = subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                 timeout=config["thresholds"]["command_timeout_seconds"])
         if result.returncode:
@@ -599,8 +611,6 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
         if f["kind"] in {"scheduled_job_drift", "vendor_release_fetch_error"} and prior.get("cleared_at"):
             first_seen = stamp(now)
         row = {**f, "first_seen": first_seen, "cleared_at": None}
-        if prior.get("cleared_at"):
-            row["board_recovery"] = None
         if f["kind"] == "vendor_release_fetch_error":
             new_incident = not prior or bool(prior.get("cleared_at"))
             legacy_key = "job-watchdog:" + hashlib.sha256(f["key"].encode()).hexdigest()
@@ -613,7 +623,7 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
         # Failed reporting is retried with the SAME record-layer idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
             try:
-                row.update(effects.report(row) or {})
+                row.update(effects.report(row))
                 row["reported"] = True
                 append(findings_path, row)
                 error_key = "record_error:" + key
@@ -663,7 +673,7 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
             append(findings_path, row)
         if not prior.get("reported") or prior.get("cleared_at"):
             try:
-                row.update(effects.report(row) or {})
+                effects.report(row)
                 append(findings_path, {**row, "reported": True})
             except Exception:
                 pass  # Original failure remains durable and visible; no recursive record writes.
@@ -687,18 +697,14 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
                         current[key] = {**row, "reason": "Vendor fetch recovered; recovery reporting failed: " + str(exc),
                                         "next_action": "Retry watchdog recovery reporting; inspect the board or record-layer error."}
                         continue  # Keep recovery pending until every visible effect succeeds.
-                retire_generated = getattr(effects, "retire_generated_card_without_receipt", None)
-                if prior.get("board_recovery") or (not prior.get("card") and retire_generated is not None):
+                if prior.get("kind") == "scheduled_job_drift" and prior.get("loop_id"):
                     try:
-                        if prior.get("board_recovery"):
-                            effects.clear(prior, list(current.values()))
-                        else:
-                            retire_generated(prior)
+                        effects.clear(prior)
                     except Exception as exc:
-                        error = finding("board_error", key, str(exc), config)
+                        error = finding("record_error", key, str(exc), config)
                         current[error["key"]] = error
                         append(findings_path, {**error, "first_seen": stamp(now), "cleared_at": None})
-                        continue  # Keep the original open so board recovery is retried.
+                        continue  # Keep the original open so the loop closure is retried.
                 append(findings_path, {**prior, "cleared_at": prior.get("cleared_at") or stamp(now),
                                        "recovery_reported": True, "recovery_error": None})
     return list(current.values())
@@ -989,12 +995,6 @@ class Effects:
     def card(self, f):
         return f.get("card") or "wd-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16]
 
-    def show_finding(self, f, expected_task=None):
-        return board_task(self.root, self.config, self.card(f), "orchestrator", "blocked",
-                          f["reason"] + "\nNext action: " + f["next_action"],
-                          pr=f.get("pr"), repo=f.get("repo"), needs_joe=bool(f.get("needs_joe")),
-                          expected_task=expected_task, reason=f["reason"], next_action=f["next_action"])
-
     def report(self, f):
         c = self.config
         if f["kind"] == "vendor_release_fetch_error" or f.get("board_status"):
@@ -1006,20 +1006,6 @@ class Effects:
                 key = f.get("loop_idempotency_key") or "job-watchdog:" + hashlib.sha256(f["key"].encode()).hexdigest()
                 return self._file_defect(f, key)
             return {"ok": True}
-        card = self.card(f)
-        before = self.show_finding(f)
-        # Sibling findings share the original state, not each other's blocked overlay.
-        for prior in read_latest(path_at(self.root, c["paths"]["findings"])).values():
-            recovery = prior.get("board_recovery")
-            if recovery and recovery["card"] == card and not prior.get("cleared_at"):
-                before = recovery["before"]
-                break
-        recovery = {"card": card, "before": before,
-                    "note": f["reason"] + "\nNext action: " + f["next_action"],
-                    "lane": c["needs_joe_lane"] if f.get("needs_joe") else None}
-        # Persist ownership even if the later record-layer write fails.
-        append(path_at(self.root, c["paths"]["findings"]),
-               {"key": f["key"], "board_recovery": recovery})
         if c["actions"]["file_defects"] and f["kind"] != "pr_ready":
             episode_key = f["key"] + (":" + f["first_seen"] if f["kind"] == "scheduled_job_drift" else "")
             digest_key = hashlib.sha256(episode_key.encode()).hexdigest()
@@ -1028,7 +1014,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") and f["needs_joe"] != "credentials" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": ("Joe must restore authentication through the provider login; "
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
@@ -1040,8 +1026,8 @@ class Effects:
             if response.get("ok") is not True or not response.get("loop_id"):
                 raise RuntimeError("record layer refused watchdog defect: " + str(response))
             if f["kind"] == "scheduled_job_drift":
-                return {"board_recovery": recovery, "loop_id": response["loop_id"]}
-        return {"board_recovery": recovery}
+                return {"loop_id": response["loop_id"]}
+        return {}
 
     def _record(self, verb, payload):
         result = command([str(SOURCE / "run.sh"), "call", verb, json.dumps(payload)], self.config)
@@ -1054,7 +1040,7 @@ class Effects:
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") or f.get("board_status") == "question-for-orchestrator" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor or queue repair: " + f["subject"]}
         response = self._record("add-loop", payload)
         if response.get("ok") is not True or not response.get("loop_id"):
@@ -1083,53 +1069,30 @@ class Effects:
                 })
                 if response.get("ok") is not True:
                     raise RuntimeError("record layer refused watchdog recovery close: " + str(response))
-        card = f.get("card") or "wd-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16]
-        board_task(self.root, self.config, card, "orchestrator", "done",
+        board_task(self.root, self.config, self.card(f), "orchestrator", "done",
                    "Vendor fetch recovered: " + f["url"] + "\nNext action: continue the configured vendor watch.")
         return {"ok": True}
 
-    def clear(self, f, active):
-        if f["kind"] == "scheduled_job_drift" and f.get("loop_id"):
-            result = command([str(SOURCE / "run.sh"), "call", "read-loop",
-                              json.dumps({"loop_id": f["loop_id"]})], self.config)
-            current = json.loads(result[result.find("{"):])
-            if current.get("loop_id") != f["loop_id"] or not isinstance(current.get("version"), int):
-                raise RuntimeError("scheduled-job loop readback failed")
-            if current["status"] == "open":
-                payload = {"loop_id": f["loop_id"], "base_version": current["version"],
-                           "idempotency_key": "scheduled-jobs-clear:" + f["loop_id"],
-                           "resolution": "done", "outcome":
-                           "A complete scheduled-job scan no longer finds " + f["key"] +
-                           "; checked live machine evidence against ops/config/scheduled-jobs.v1.json."}
-                result = command([str(SOURCE / "run.sh"), "call", "close-loop", json.dumps(payload)], self.config)
-                closed = json.loads(result[result.find("{"):])
-                if closed.get("ok") is not True:
-                    raise RuntimeError("scheduled-job loop closure failed")
-        recovery = f["board_recovery"]
-        card = recovery["card"]
-        owned = {"status": "blocked", "health": "blocked", "note": recovery["note"],
-                 "lane": recovery["lane"]}
-        siblings = [row for row in active if self.card(row) == card]
-        if siblings:
-            self.show_finding(siblings[-1], expected_task=owned)
-            return
-        before = recovery["before"]
-        board_task(self.root, self.config, card, before.get("executor", "orchestrator"),
-                   before.get("status", "done"),
-                   before.get("note", "Watchdog finding recovered; evidence source is healthy."),
-                   needs_joe=before.get("lane") == self.config["needs_joe_lane"],
-                   health=before.get("health", "healthy"), expected_task=owned,
-                   reason=before.get("blocked_reason"), next_action=before.get("next_action"))
-
-    def retire_generated_card_without_receipt(self, f):
-        card = self.card(f)
-        note = f["reason"] + "\nNext action: " + f["next_action"]
-        owned = {"status": "blocked", "health": "blocked", "note": note, "executor": "orchestrator",
-                 "lane": self.config["needs_joe_lane"] if f.get("needs_joe") else None,
-                 "blocked_reason": f["reason"], "next_action": f["next_action"]}
-        board_task(self.root, self.config, card, "orchestrator", "done",
-                   "Watchdog finding recovered; evidence source is healthy.",
-                   expected_task=owned)
+    def clear(self, f):
+        """Close a recovered scheduled-job drift's versioned loop."""
+        result = command([str(SOURCE / "run.sh"), "call", "read-loop",
+                          json.dumps({"loop_id": f["loop_id"]})], self.config)
+        response = json.loads(result[result.find("{"):])
+        current = response.get("loop") if isinstance(response, dict) else None
+        if (not isinstance(current, dict) or current.get("loop_id") != f["loop_id"]
+                or type(current.get("version")) is not int or current["version"] < 1
+                or current.get("status") not in {"open", "done", "dropped"}):
+            raise RuntimeError("scheduled-job loop readback failed")
+        if current["status"] == "open":
+            payload = {"loop_id": f["loop_id"], "base_version": current["version"],
+                       "idempotency_key": "scheduled-jobs-clear:" + f["loop_id"],
+                       "resolution": "done", "outcome":
+                       "A complete scheduled-job scan no longer finds " + f["key"] +
+                       "; checked live machine evidence against ops/config/scheduled-jobs.v1.json."}
+            result = command([str(SOURCE / "run.sh"), "call", "close-loop", json.dumps(payload)], self.config)
+            closed = json.loads(result[result.find("{"):])
+            if closed.get("ok") is not True:
+                raise RuntimeError("scheduled-job loop closure failed")
 
     def launch(self, f, argv, cwd, *, job_id, restart_count=0, root_id=None):
         c = self.config

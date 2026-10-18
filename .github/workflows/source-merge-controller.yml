@@ -9,7 +9,10 @@ on:
     workflows: [CI]
     types: [completed]
   schedule:
-    - cron: "*/15 * * * *"
+    # Skips 06:00-11:59 UTC, which covers the 01:00-06:00 America/Chicago quiet
+    # window in both CST and CDT so production Neon can sleep overnight. CI
+    # completions (workflow_run) still trigger the controller at any hour.
+    - cron: "*/15 0-5,12-23 * * *"
   workflow_dispatch:
 
 concurrency:

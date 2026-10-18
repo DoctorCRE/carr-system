@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { probeProduction, runMinute as tickMinute, STATE_KEY } from "../src/uptime-monitor.js";
+import {
+  inQuietWindow, probeProduction, QUIET_END_HOUR, QUIET_START_HOUR, QUIET_TIME_ZONE, ROUND_TRIP_VERB,
+  runMinute as tickMinute, STATE_KEY,
+} from "../src/uptime-monitor.js";
 import worker, { UptimeLedger } from "../uptime-worker.js";
 import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse, convertV4MiniflareOptions } from "miniflare";
@@ -17,7 +20,10 @@ const APP = {
   provider_version_id: "fixture-app", carr_contract: { schema: "doctorcre-carr-interface.v1", version: "1.43.0" },
   route_contract: { schema: "doctorcre-app-routes.v1", version: "1.20.0" },
 };
-const DIGEST = { digest: [{ line: "row_counts", value: { deals: 0, leads: 0, clients: 0, vendors: 0 } }] };
+const PROFILES = { ok: true, total: 2, profiles: [
+  { profile_key: "builder", display_name: "Builder", charter: [], current_model: "fixture", current_desk: "hermes-desktop", sponsor_scope: "shared", status: "active", version: "2" },
+  { profile_key: "doc", display_name: "Doc", charter: [], current_model: null, current_desk: null, sponsor_scope: "shared", status: "unstaffed", version: "1" },
+] };
 const rpc = (value) => ({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(value) }] } });
 const env = { CARR_MCP_PROBE_TOKEN: "fixture-probe", UPTIME_RECORD_TOKEN: "fixture-record", UPTIME_HEALTHCHECKS_PING_URL: "https://hc-ping.com/00000000-0000-4000-8000-000000000021" };
 const START = Date.parse("2026-10-05T19:00:00Z");
@@ -27,7 +33,7 @@ function harness() {
   const values = new Map();
   const calls = [];
   const h = {
-    calls, down: false, api: API, app: APP, digest: rpc(DIGEST),
+    calls, down: false, api: API, app: APP, profiles: rpc(PROFILES),
     storage: {
       async get(key) { return structuredClone(values.get(key)); },
       async put(key, value) { values.set(key, structuredClone(value)); },
@@ -39,7 +45,7 @@ function harness() {
       if (url.endsWith("/release")) return Response.json(h.api);
       if (url.endsWith("/app-release")) return Response.json(h.app);
       const name = JSON.parse(options.body).params.name;
-      if (name === "integrity-digest") return Response.json(h.digest);
+      if (name === "read-profiles") return Response.json(h.profiles);
       if (name === "add-loop") return Response.json(rpc({ ok: true, loop_id: "00000000-0000-4000-8000-000000000001" }));
       if (name === "read-loop") return Response.json(rpc({ loop_id: "00000000-0000-4000-8000-000000000001", version: 1, status: "open" }));
       if (name === "close-loop") return Response.json(rpc({ ok: true }));
@@ -56,7 +62,9 @@ test("validates all three production contracts, including the read-only verb", a
   assert.deepEqual(result.checks.map(({ name, ok }) => ({ name, ok })), [
     { name: "api-release", ok: true }, { name: "app-release", ok: true }, { name: "verb-round-trip", ok: true },
   ]);
-  assert.equal(JSON.parse(h.calls[2].body).params.name, "integrity-digest");
+  assert.equal(ROUND_TRIP_VERB, "read-profiles");
+  assert.deepEqual(JSON.parse(h.calls[2].body).params, { name: "read-profiles", arguments: {} });
+  assert.equal(h.calls[2].headers.Authorization, "Bearer fixture-probe");
 });
 
 test("confirms on third failure, alerts once through a prolonged outage, then recovers and files one timed loop", async () => {
@@ -89,15 +97,84 @@ test("confirms on third failure, alerts once through a prolonged outage, then re
 test("HTTP 200 with wrong release, app, or nested RPC shape fails the respective probe", async () => {
   for (const [field, fixture, check] of [
     ["api", { ok: true }, "api-release"], ["app", { service: "doctorcre-app" }, "app-release"],
-    ["digest", { jsonrpc: "2.0", id: 1, result: {} }, "verb-round-trip"],
-    ["digest", rpc({ digest: [] }), "verb-round-trip"],
-    ["digest", { ...rpc(DIGEST), result: { ...rpc(DIGEST).result, isError: true } }, "verb-round-trip"],
+    ["profiles", { jsonrpc: "2.0", id: 1, result: {} }, "verb-round-trip"],
+    ["profiles", rpc({ ok: true, total: 0, profiles: [] }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, ok: false }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, total: 3 }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, profiles: [{ ...PROFILES.profiles[0], status: "retired" }] }), "verb-round-trip"],
+    ["profiles", rpc({ ...PROFILES, profiles: [{ ...PROFILES.profiles[0], profile_key: "" }] }), "verb-round-trip"],
+    ["profiles", rpc({ digest: [{ line: "row_counts", value: { deals: 0, leads: 0, clients: 0, vendors: 0 } }] }), "verb-round-trip"],
+    ["profiles", { ...rpc(PROFILES), result: { ...rpc(PROFILES).result, isError: true } }, "verb-round-trip"],
   ]) {
     const h = harness(); h[field] = fixture;
     const result = await probeProduction(env, h.fetch);
     assert.equal(result.ok, false);
     assert.equal(result.checks.find((item) => item.name === check).ok, false);
   }
+});
+
+const DB_FAILURES = [
+  ["database error surfaced as a tool error", () => Response.json({ jsonrpc: "2.0", id: 1,
+    result: { isError: true, content: [{ type: "text", text: JSON.stringify({ error: "internal_error" }) }] } }), "invalid_json_or_transport"],
+  ["JSON-RPC error", () => Response.json({ jsonrpc: "2.0", id: 1, error: { code: -32603, message: "fixture" } }), "invalid_json_or_transport"],
+  ["wrong shape", () => Response.json(rpc({ ok: true, total: 0, profiles: [] })), "wrong_shape"],
+  ["HTTP 500", () => new Response("fixture", { status: 500 }), "http_500"],
+  ["HTTP 401", () => new Response("fixture", { status: 401 }), "http_401"],
+];
+
+test("a broken verb round trip alone fails the sample with its own reason", async () => {
+  for (const [label, respond, reason] of DB_FAILURES) {
+    const h = harness();
+    const fetcher = async (url, options = {}) => (url.endsWith("/mcp") ? (h.calls.push({ url, ...options }), respond()) : h.fetch(url, options));
+    const result = await probeProduction(env, fetcher);
+    assert.equal(result.ok, false, label);
+    assert.deepEqual(result.checks.map(({ name, ok }) => ({ name, ok })), [
+      { name: "api-release", ok: true }, { name: "app-release", ok: true }, { name: "verb-round-trip", ok: false },
+    ], label);
+    assert.equal(result.checks[2].reason, reason, label);
+  }
+});
+
+test("three verb-round-trip failures confirm one incident, alert once, and recovery files and closes one loop", async () => {
+  for (const [label, respond] of DB_FAILURES) {
+    const h = harness();
+    let broken = true;
+    const fetcher = async (url, options = {}) => {
+      if (broken && url.endsWith("/mcp") && JSON.parse(options.body).params.name === "read-profiles") {
+        h.calls.push({ url, ...options });
+        return respond();
+      }
+      return h.fetch(url, options);
+    };
+    for (let minute = 0; minute < 4; minute++) {
+      await runMinute(h.storage, env, START + minute * 60000, fetcher);
+      assert.equal(h.calls.filter((call) => call.url.endsWith("/fail")).length, minute < 2 ? 0 : 1, label);
+    }
+    let state = await h.storage.get(STATE_KEY);
+    assert.equal(state.incidents.length, 1, label);
+    assert.equal(state.incidents[0].checks.find((check) => check.name === "verb-round-trip").ok, false, label);
+    // The record writer is gated on a healthy round trip, so no loop is attempted while it is down.
+    assert.equal(state.incidents[0].loop_id, null, label);
+    broken = false;
+    await runMinute(h.storage, env, START + 4 * 60000, fetcher);
+    state = await h.storage.get(STATE_KEY);
+    assert.equal(state.active_incident, null, label);
+    assert.equal(state.incidents[0].loop_closed, true, label);
+    assert.equal(state.incidents[0].recovery_sent, true, label);
+  }
+});
+
+test("the minute probe never calls integrity-digest, healthy or failing", async () => {
+  const h = harness();
+  for (let minute = 0; minute < 3; minute++) await runMinute(h.storage, env, START + minute * 60000, h.fetch);
+  h.down = true;
+  for (let minute = 3; minute < 7; minute++) await runMinute(h.storage, env, START + minute * 60000, h.fetch);
+  h.down = false;
+  await runMinute(h.storage, env, START + 7 * 60000, h.fetch);
+  const verbs = h.calls.filter((call) => call.url.endsWith("/mcp")).map((call) => JSON.parse(call.body).params.name);
+  assert.equal(verbs.filter((name) => name === "read-profiles").length, 8);
+  assert.equal(verbs.includes("integrity-digest"), false);
+  assert.deepEqual([...new Set(verbs)].sort(), ["add-loop", "close-loop", "read-loop", "read-profiles"]);
 });
 
 test("slow response headers and slow JSON bodies both time out", async () => {
@@ -390,4 +467,150 @@ test("terminal dropped records and refused older records do not starve later inc
       assert.equal(state.incidents[0].loop_status, "dropped");
     } else assert.ok(state.record_error);
   }
+});
+
+// Overnight quiet window: production Neon may sleep 01:00-06:00 America/Chicago.
+const at = (stamp) => Date.parse(stamp);
+const dbCalls = (h) => h.calls.filter((call) => call.url.endsWith("/release") || call.url.endsWith("/mcp"));
+const appCalls = (h) => h.calls.filter((call) => call.url.endsWith("/app-release"));
+async function tickRange(h, from, to) {
+  for (let time = from; time < to; time += 60000) await runMinute(h.storage, env, time, h.fetch);
+}
+
+test("quiet window is one Chicago-local constant pair with exact boundary minutes", () => {
+  assert.deepEqual([QUIET_TIME_ZONE, QUIET_START_HOUR, QUIET_END_HOUR], ["America/Chicago", 1, 6]);
+  // 2026-10-12 is CDT (UTC-5).
+  assert.equal(inQuietWindow(at("2026-10-12T05:59:00Z")), false); // 00:59
+  assert.equal(inQuietWindow(at("2026-10-12T06:00:00Z")), true); // 01:00
+  assert.equal(inQuietWindow(at("2026-10-12T10:59:00Z")), true); // 05:59
+  assert.equal(inQuietWindow(at("2026-10-12T11:00:00Z")), false); // 06:00
+});
+
+test("quiet window follows the fall-back DST edge on 2026-11-01", () => {
+  assert.equal(inQuietWindow(at("2026-11-01T05:59:00Z")), false); // 00:59 CDT
+  assert.equal(inQuietWindow(at("2026-11-01T06:00:00Z")), true); // 01:00 CDT
+  assert.equal(inQuietWindow(at("2026-11-01T07:00:00Z")), true); // 01:00 CST, the repeated hour
+  assert.equal(inQuietWindow(at("2026-11-01T11:30:00Z")), true); // 05:30 CST (06:30 under CDT)
+  assert.equal(inQuietWindow(at("2026-11-01T11:59:00Z")), true); // 05:59 CST
+  assert.equal(inQuietWindow(at("2026-11-01T12:00:00Z")), false); // 06:00 CST
+  assert.equal(inQuietWindow(at("2026-10-31T11:30:00Z")), false); // 06:30 CDT the day before
+});
+
+test("quiet window follows the spring-forward DST edge on 2027-03-14", () => {
+  assert.equal(inQuietWindow(at("2027-03-14T06:30:00Z")), false); // 00:30 CST (01:30 under CDT)
+  assert.equal(inQuietWindow(at("2027-03-14T06:59:00Z")), false); // 00:59 CST
+  assert.equal(inQuietWindow(at("2027-03-14T07:00:00Z")), true); // 01:00 CST
+  assert.equal(inQuietWindow(at("2027-03-14T08:00:00Z")), true); // 03:00 CDT, 02:00 never happens
+  assert.equal(inQuietWindow(at("2027-03-14T10:59:00Z")), true); // 05:59 CDT
+  assert.equal(inQuietWindow(at("2027-03-14T11:00:00Z")), false); // 06:00 CDT
+  assert.equal(inQuietWindow(at("2027-03-14T11:30:00Z")), false); // 06:30 CDT (05:30 under CST)
+});
+
+test("inside the window only the DB-free app probe runs, and skips are neither failures nor incidents", async () => {
+  const h = harness();
+  h.api = {}; // a broken DB-backed probe must not even be called
+  h.profiles = { jsonrpc: "2.0", id: 1, error: { code: -1 } };
+  await tickRange(h, at("2026-10-12T06:00:00Z"), at("2026-10-12T06:10:00Z"));
+  const state = await h.storage.get(STATE_KEY);
+  assert.equal(dbCalls(h).length, 0);
+  assert.equal(appCalls(h).length, 10);
+  assert.equal(state.failures, 0);
+  assert.equal(state.incidents.length, 0);
+  assert.equal(state.probes_ok, true);
+  assert.equal(state.ok, true);
+  assert.equal(state.quiet_window, true);
+  assert.equal(state.complete, false);
+  assert.deepEqual(state.checks.map(({ name, ok, skipped, reason }) => ({ name, ok, skipped, reason })), [
+    { name: "api-release", ok: null, skipped: true, reason: "skipped_quiet_window" },
+    { name: "app-release", ok: true, skipped: undefined, reason: "ok" },
+    { name: "verb-round-trip", ok: null, skipped: true, reason: "skipped_quiet_window" },
+  ]);
+  assert.equal(h.calls.filter((call) => call.url.endsWith("/fail")).length, 0);
+  assert.equal(h.calls.filter((call) => call.url.startsWith("https://hc-ping.com/") && !call.url.endsWith("/fail")).length, 10);
+});
+
+test("boundary minutes: 00:59 and 06:00 probe the database, 01:00 and 05:59 do not", async () => {
+  for (const [stamp, db] of [["2026-10-12T05:59:00Z", 2], ["2026-10-12T06:00:00Z", 0], ["2026-10-12T10:59:00Z", 0], ["2026-10-12T11:00:00Z", 2]]) {
+    const h = harness();
+    await runMinute(h.storage, env, at(stamp), h.fetch);
+    assert.equal(dbCalls(h).length, db, stamp);
+    assert.equal(appCalls(h).length, 1, stamp);
+    const sampled = await h.storage.get(STATE_KEY);
+    assert.equal(sampled.ok, true, stamp);
+    assert.equal(sampled.quiet_window, db === 0, stamp);
+    assert.equal(sampled.complete, db !== 0, stamp);
+  }
+});
+
+test("a DB-free failure inside the window still confirms an incident on its third minute", async () => {
+  const h = harness();
+  h.app = {};
+  await tickRange(h, at("2026-10-12T07:00:00Z"), at("2026-10-12T07:03:00Z"));
+  const state = await h.storage.get(STATE_KEY);
+  assert.equal(state.failures, 3);
+  assert.equal(state.incidents.length, 1);
+  assert.equal(h.calls.filter((call) => call.url.endsWith("/fail")).length, 1);
+  assert.equal(dbCalls(h).length, 0); // the loop is filed after the window, not by waking Neon
+  assert.equal(state.pending_records, 1);
+});
+
+test("a failure streak spanning the window boundary is held, not reset, by skipped minutes", async () => {
+  const h = harness();
+  h.api = {};
+  await tickRange(h, at("2026-10-12T05:58:00Z"), at("2026-10-12T06:00:00Z")); // 00:58, 00:59 fail
+  assert.equal((await h.storage.get(STATE_KEY)).failures, 2);
+  await tickRange(h, at("2026-10-12T06:00:00Z"), at("2026-10-12T11:00:00Z")); // whole window, app healthy
+  let state = await h.storage.get(STATE_KEY);
+  assert.equal(state.failures, 2);
+  assert.equal(state.first_failure_at, "2026-10-12T05:58:00.000Z");
+  assert.equal(state.incidents.length, 0);
+  await runMinute(h.storage, env, at("2026-10-12T11:00:00Z"), h.fetch); // 06:00, still broken
+  state = await h.storage.get(STATE_KEY);
+  assert.equal(state.failures, 3);
+  assert.equal(state.incidents.length, 1);
+  assert.equal(state.incidents[0].first_failure_at, "2026-10-12T05:58:00.000Z");
+  assert.equal(state.incidents[0].confirmed_at, "2026-10-12T11:00:00.000Z");
+});
+
+test("an in-window app failure cannot launder a held DB failure when the app recovers", async () => {
+  const h = harness();
+  h.api = {};
+  await runMinute(h.storage, env, at("2026-10-12T05:59:00Z"), h.fetch); // 00:59 DB probe fails
+  h.app = {};
+  await runMinute(h.storage, env, at("2026-10-12T06:00:00Z"), h.fetch); // 01:00 app fails
+  h.app = APP;
+  await runMinute(h.storage, env, at("2026-10-12T06:01:00Z"), h.fetch); // 01:01 app passes
+  const state = await h.storage.get(STATE_KEY);
+  assert.equal(state.failures, 2);
+  assert.deepEqual(state.failing_checks, ["api-release"]);
+});
+
+test("an app-only streak inside the window is reset when the app passes again", async () => {
+  const h = harness();
+  h.app = {};
+  await tickRange(h, at("2026-10-12T07:00:00Z"), at("2026-10-12T07:02:00Z"));
+  h.app = APP;
+  await runMinute(h.storage, env, at("2026-10-12T07:02:00Z"), h.fetch);
+  const state = await h.storage.get(STATE_KEY);
+  assert.equal(state.failures, 0);
+  assert.equal(state.first_failure_at, null);
+});
+
+test("an incident open at 01:00 recovers and files its loop only after the window", async () => {
+  const h = harness();
+  h.down = true;
+  await tickRange(h, at("2026-10-12T05:57:00Z"), at("2026-10-12T06:00:00Z"));
+  h.down = false;
+  const before = h.calls.length;
+  await tickRange(h, at("2026-10-12T06:00:00Z"), at("2026-10-12T11:00:00Z"));
+  let state = await h.storage.get(STATE_KEY);
+  assert.equal(state.active_incident, "production-" + at("2026-10-12T05:59:00Z") / 60000);
+  assert.equal(state.incidents[0].recovered_at, null);
+  assert.equal(dbCalls({ calls: h.calls.slice(before) }).length, 0);
+  await runMinute(h.storage, env, at("2026-10-12T11:00:00Z"), h.fetch);
+  state = await h.storage.get(STATE_KEY);
+  assert.equal(state.active_incident, null);
+  assert.equal(state.incidents[0].recovered_at, "2026-10-12T11:00:00.000Z");
+  assert.equal(state.incidents[0].loop_closed, true);
+  assert.equal(state.ok, true);
 });
