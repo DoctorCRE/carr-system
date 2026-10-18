@@ -6,7 +6,6 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
-import { USAGE_PATH, usageResponse } from './usage-signals.js';
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
@@ -1183,7 +1182,6 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
-          url.pathname !== USAGE_PATH && url.pathname !== `${USAGE_PATH}/session` &&
           url.pathname !== JEV_DEAL_READING_PATH &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
@@ -1214,7 +1212,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
         if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
-        if (url.pathname.startsWith(USAGE_PATH) || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+        if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
             url.pathname === METERING_PATH ||
             isBusinessApiPath(url.pathname)) {
@@ -1232,8 +1230,6 @@ async function handleRequest(request, env, ctx, dependencies) {
       if (url.pathname === "/auth/session") {
         response = request.method === "GET" ? await systemWorkSession(session, dependencies)
           : json({ error: "method_not_allowed" }, 405);
-      } else if (url.pathname === USAGE_PATH || url.pathname === `${USAGE_PATH}/session`) {
-        response = await usageResponse(request, env, session, dependencies, guardSystemWorkPost);
       } else if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
         response = await dependencies.tourHandler.fetch(request, env, ctx, session.actor, session);
       } else if (url.pathname.startsWith(ROOM_PREFIX)) {
