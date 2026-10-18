@@ -597,9 +597,9 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   if ! CARR_RULE_TEST_DATABASE_URL="$dsn" run_quiet "$LOGDIR/migration-rule-supersession.log" \
-      node --test mcp-server/test/find-rule-supersedes.test.mjs; then
+      node --test mcp-server/test/find-rule-supersedes.test.mjs mcp-server/test/one-step-rule-approval.test.mjs; then
     tail -30 "$LOGDIR/migration-rule-supersession.log" >&2
-    bad migration "rule lookup or atomic teach supersession database proof failed"
+    bad migration "rule lookup, teach supersession or one-step approval database proof failed"
     return
   fi
 

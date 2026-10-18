@@ -2644,17 +2644,72 @@ CREATE FUNCTION ops.approve_rule(p_rule_id uuid, p_policy_kind text, p_control_k
     SET search_path TO 'ops', 'public', 'pg_temp'
     AS $$
 declare
+  v_policy_kind text := p_policy_kind;
+  v_control_keys text[] := p_control_keys;
   v_bind_controls text[];
   v_adopt boolean := false;
-  v_status text;
-  v_activated_at timestamptz;
+  v_rule public.rule%rowtype;
+  v_teach jsonb;
+  v_control text;
+  v_joe uuid;
+  v_intake uuid;
+  v_contract jsonb;
 begin
+  select * into v_rule from public.rule r where r.id=p_rule_id;
+  select e.new_value into v_teach from public.event e
+   where e.verb='teach' and e.subject_type='rule' and e.subject_id=p_rule_id
+   order by e.recorded_at,e.id limit 1;
+  v_control := nullif(btrim(coalesce(v_teach->>'carrying_control','')),'');
+  if v_teach->>'enforcement_home'='gate' and v_control is not null then
+    v_policy_kind := coalesce(v_policy_kind,'machine_enforceable');
+    if cardinality(coalesce(v_control_keys,'{}'::text[]))=0 then
+      v_control_keys := array[v_control];
+    end if;
+    if v_rule.status='proposed'
+       and not exists (select 1 from ops.rule_admission a where a.rule_id=p_rule_id)
+       and not exists (select 1 from ops.rule_load_layer l where l.rule_id=p_rule_id) then
+      if ops.authority_actor_slug() is distinct from 'joe' then
+        raise exception 'system rule approval requires Joe authority';
+      end if;
+      if v_policy_kind<>'machine_enforceable' or not (v_control=any(v_control_keys)) then
+        raise exception 'gate rule % must be approved as machine_enforceable with its carrying_control %',
+          p_rule_id,v_control;
+      end if;
+      select id into v_joe from public.actor where slug='joe' and kind='human' and active;
+      select id into v_intake from ops.guidance_intake
+       where lane='rule' and source_ref='rule:'||p_rule_id::text order by captured_at limit 1;
+      v_contract := jsonb_build_object(
+        'enforcement_class','machine_enforceable',
+        'binding_moment','when the taught rule applies',
+        'applicability',case when v_rule.scope='{}'::jsonb
+          then '{"workflows":["*"],"surfaces":["*"],"tiers":["*"]}'::jsonb else v_rule.scope end,
+        'projection',jsonb_build_object('delivery',jsonb_build_object(
+          'load_layer','control','packs','[]'::jsonb,'why',v_rule.statement)),
+        'reachability','{"paths":["record-layer","session-boot","registered-controls"]}'::jsonb,
+        'input_contract','{"type":"object"}'::jsonb,
+        'teach',v_teach);
+      insert into ops.rule_admission
+        (rule_id,guidance_intake_id,enforcement_class,binding_moment,applicability,projection,
+         reachability,input_contract,fixture_refs,state,admitted_by,admitted_at,reason)
+      values
+        (p_rule_id,v_intake,'machine_enforceable',v_contract->>'binding_moment',
+         v_contract->'applicability',v_contract->'projection',v_contract->'reachability',
+         v_contract->'input_contract',array['rule:'||p_rule_id::text],'admitted',v_joe,now(),
+         btrim(p_reason));
+      insert into ops.authority_receipt
+        (idempotency_key,kind,subject_type,subject_id,actor_id,decision,contract_hash,evidence_refs)
+      values
+        ('admission:'||p_idempotency_key,'admission','rule',p_rule_id,v_joe,btrim(p_reason),
+         encode(public.digest(v_contract::text,'sha256'),'hex'),array['rule:'||p_rule_id::text]);
+    end if;
+  end if;
+
   v_bind_controls := array(
     select distinct btrim(u.control_key)
-      from unnest(coalesce(p_control_keys,'{}'::text[])) as u(control_key)
+      from unnest(coalesce(v_control_keys,'{}'::text[])) as u(control_key)
      where btrim(u.control_key)<>''
      order by btrim(u.control_key));
-  if p_policy_kind='human_only'
+  if v_policy_kind='human_only'
      and not ('human_authority_runtime'=any(v_bind_controls)) then
     v_bind_controls := array_append(v_bind_controls,'human_authority_runtime');
   end if;
@@ -2663,17 +2718,15 @@ begin
   -- 0867: an ACTIVE legacy admission (receiptless and older than the receipt
   -- system) is adopted; every other rule takes the unchanged path. Decided
   -- before binding, because binding is what the adoption is.
-  select r.status,r.activated_at into v_status,v_activated_at
-    from public.rule r where r.id=p_rule_id;
-  v_adopt := v_status='active'
-    and ops.legacy_rule_admission_note(p_rule_id,v_status,v_activated_at) is not null;
+  v_adopt := v_rule.status='active'
+    and ops.legacy_rule_admission_note(p_rule_id,v_rule.status,v_rule.activated_at) is not null;
   perform ops.bind_rule_controls(p_rule_id,v_bind_controls,p_reason);
   if v_adopt then
     return ops.adopt_legacy_active_rule_v1(
-      p_rule_id,p_policy_kind,p_control_keys,p_idempotency_key,p_reason);
+      p_rule_id,v_policy_kind,v_control_keys,p_idempotency_key,p_reason);
   end if;
   return ops.approve_rule_receipt_activation_v1(
-    p_rule_id,p_policy_kind,p_control_keys,p_idempotency_key,p_reason);
+    p_rule_id,v_policy_kind,v_control_keys,p_idempotency_key,p_reason);
 end $$;
 
 
@@ -122651,6 +122704,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0897_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 07:03:58.910517+00
 0900_studio_failover_leader.sql	a6dfdd933aeb33abb9ab449939a63041605c4c38b636d057198d8e625bf05629	2026-10-18 08:27:43.727306+00
 0902_feature_switches.sql	22a66e95e02aef1e0ea8871ea4d5148a2eb946e3f7444fdd75738fc1897fe72c	2026-10-18 09:03:05.153122+00
+0904_one_step_gate_rule_approval.sql	905efb2e63c9c78be92f524634c1f829c3c71b8bc720f473d13d1bf2fe6dfc19	2026-10-18 09:49:15.78479+00
 \.
 
 
