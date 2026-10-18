@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Practice space planner</title><style>/* PLANNER_CSS */</style></head>
+<body><main>
+<header><span class="eyebrow">Practice planning</span><h1>Practice space planner</h1></header>
+<div class="layout"><section class="card"><h2>Practice program</h2><form id="program">
+<label for="vertical">Vertical</label><select id="vertical" name="vertical"></select>
+<label for="subtype">Subtype</label><select id="subtype" name="practice_type"></select>
+<div class="counts"><div><label for="providers">Simultaneous providers</label><input id="providers" name="providers" type="number" min="1" max="50" value="1" required></div>
+<div><label id="rooms-label" for="rooms">Operatories</label><input id="rooms" type="number" min="1" max="100" value="4" required></div></div>
+<p id="capacity-note" class="muted"></p>
+<label for="market">Market context</label><select id="market" name="market"></select>
+<p class="muted">Sizing does not vary by market. Verify local parking, zoning and code. Enter counts only.</p>
+<button class="cursor-interaction" type="submit">Update space plan</button>
+</form><button id="undo" class="secondary cursor-interaction" type="button" disabled>Undo last change</button></section>
+<section class="card output"><p id="status" role="status" aria-live="polite">Opening planner…</p><div id="plan" aria-live="polite"></div></section></div>
+<p id="sync-note" class="muted"></p>
+</main><script id="catalog" type="application/json">/* PLANNER_CATALOG */</script><script>/* PLANNER_SCRIPT */</script></body></html>
