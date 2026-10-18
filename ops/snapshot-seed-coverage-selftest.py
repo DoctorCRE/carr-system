@@ -182,9 +182,9 @@ def main():
         switch_table = "feature_switch"
         switch_reason = classification["excluded"].get(switch_table)
         switch_repo = build_repo(tmp + "/feature-switches", {
-            "0894_feature_switches.sql": (REPO / "migrations/0894_feature_switches.sql").read_text(),
+            "0898_feature_switches.sql": (REPO / "migrations/0898_feature_switches.sql").read_text(),
         }, {"carried": {}, "excluded": {switch_table: switch_reason} if switch_reason else {}})
-        switch_artifact = artifact(["0894_feature_switches.sql"])
+        switch_artifact = artifact(["0898_feature_switches.sql"])
         case("runtime switches are omitted from a schema-only rebuild",
              module.check(switch_repo, switch_artifact) == [])
         case("runtime switch values refuse if copied into a tracked snapshot",

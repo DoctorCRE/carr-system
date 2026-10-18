@@ -78,7 +78,7 @@ test('Feature switch record lifecycle on disposable PostgreSQL', { skip: !bin &&
     await c.query(`create schema ops;
       create function ops.scac_reference_monitor_guard() returns trigger
       language plpgsql as $$ begin return new; end $$;`);
-    await c.query(readFileSync(path.join(root,'migrations/0894_feature_switches.sql'),'utf8'));
+    await c.query(readFileSync(path.join(root,'migrations/0898_feature_switches.sql'),'utf8'));
     const guards = (await c.query(`select tgname,tgtype,tgenabled from pg_trigger
       where tgrelid='public.feature_switch'::regclass
       and tgfoid='ops.scac_reference_monitor_guard()'::regprocedure order by tgname`)).rows;
