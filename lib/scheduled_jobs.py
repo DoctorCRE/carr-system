@@ -27,6 +27,10 @@ CHECKOUT_ENV = ("CARR_REPO", "CARR_REPO_ROOT")
 # nothing about any single job.
 SHARED_WRAPPER_LOG = "out/run-scheduled.log"
 WEEK_MINUTES = 7 * 24 * 60
+# A package manager's own repository is git's answer for every binary it
+# installs (Homebrew's cellar links resolve to /opt/homebrew); it is never the
+# checkout a job's code lives in.
+PACKAGE_MANAGER_ROOTS = ("/opt/homebrew", "/usr/local/Homebrew", "/usr/local")
 
 
 def schedule(plist):
@@ -340,10 +344,13 @@ def collect(manifest):
     snapshot["launchctl_list"] = command(["launchctl", "list"], "launchctl_list").stdout
     snapshot["launchctl_disabled"] = command(["launchctl", "print-disabled", domain], "launchctl_disabled").stdout
     prefixes = tuple(manifest.get("scope", {}).get("launchd_label_prefixes", ["com.carr.", "local.carr-"]))
+    # A declared job is observed under its own label even when it sits outside the scope
+    # prefixes (local.ds4-flash-next); otherwise an installed one reads as absent.
+    declared = {j["label"] for j in manifest["jobs"] if j["scheduler"] == "launchd"}
     directories = [Path.home() / "Library/LaunchAgents", Path("/Library/LaunchAgents"), Path("/Library/LaunchDaemons")]
     for directory in directories:
         for path in sorted(directory.glob("*.plist")):
-            if not path.name.startswith(prefixes):
+            if not (path.name.startswith(prefixes) or path.stem in declared):
                 continue
             try:
                 plist = plistlib.loads(path.read_bytes())
@@ -354,7 +361,7 @@ def collect(manifest):
             except (OSError, ValueError, KeyError, plistlib.InvalidFileException):
                 snapshot["errors"].append("plist:" + path.name)
     for label in listed(snapshot["launchctl_list"]):
-        if label.startswith(prefixes):
+        if label.startswith(prefixes) or label in declared:
             snapshot["launchctl_print"][label] = command(["launchctl", "print", domain + "/" + label], "launchctl_print:" + label).stdout
     cron = command(["crontab", "-l"], "crontab", absent_ok=True)
     if cron.returncode and "crontab" not in snapshot["errors"] and not (
@@ -378,7 +385,7 @@ def collect(manifest):
             if result.returncode not in (0, 128):
                 snapshot["errors"].append("runtime_checkout")
         checkout = directories_seen[directory]
-        if checkout:
+        if checkout and os.path.realpath(checkout) not in PACKAGE_MANAGER_ROOTS:
             snapshot["checkout_roots"][path] = checkout
     logs = {activity_path(j) for j in manifest["jobs"] if j.get("log_path")}
     logs.update(p[k] for p in snapshot["plists"].values() for k in ("StandardOutPath", "StandardErrorPath") if p.get(k))
