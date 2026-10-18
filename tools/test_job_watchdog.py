@@ -979,6 +979,40 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_report_reuses_keys_only_for_identical_record_payloads(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        changes = ({"reason": "TLS handshake timeout on page 2"},
+                   {"next_action": "Repair the collection timeout."},
+                   {"needs_joe": "credentials"})
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                effects = w.Effects(Path(directory), c)
+                f = {**w.finding("collection_error", "jbookout/carr-system branches",
+                                 "TLS handshake timeout on page 1", c),
+                     "first_seen": w.stamp(100)}
+                requests, calls = {}, []
+
+                def record(argv, config, cwd=None):
+                    self.assertEqual(argv[1:3], ["call", "add-loop"])
+                    payload = json.loads(argv[3])
+                    key = payload["idempotency_key"]
+                    if key in requests and requests[key] != argv[3]:
+                        raise RuntimeError("TOOL ERROR key_reuse")
+                    requests[key] = argv[3]
+                    calls.append(payload)
+                    return json.dumps({"ok": True, "loop_id": "synthetic-loop"})
+
+                with patch.object(w, "command", side_effect=record):
+                    effects.report(f)
+                    effects.report({**f, "first_seen": w.stamp(200), "reported": False})
+                    effects.report({**f, **change})
+                    effects.report({**f, **change})
+                self.assertEqual(calls[0], calls[1], "scan metadata is not part of the record request")
+                self.assertEqual(calls[2], calls[3], "an identical retry must replay the same request")
+                self.assertNotEqual(calls[0]["idempotency_key"], calls[2]["idempotency_key"])
+
     def test_scan_files_each_defect_without_creating_or_overlaying_board_cards(self):
         import contextlib
         import io

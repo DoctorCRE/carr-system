@@ -620,7 +620,7 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
                        reported=False if new_incident else prior.get("reported", False))
         if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
             append(findings_path, row)
-        # Failed reporting is retried with the SAME record-layer idempotency key.
+        # An unchanged record request retries with the same idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
             try:
                 row.update(effects.report(row))
@@ -1008,9 +1008,7 @@ class Effects:
             return {"ok": True}
         if c["actions"]["file_defects"] and f["kind"] != "pr_ready":
             episode_key = f["key"] + (":" + f["first_seen"] if f["kind"] == "scheduled_job_drift" else "")
-            digest_key = hashlib.sha256(episode_key.encode()).hexdigest()
-            payload = {"idempotency_key": "job-watchdog:" + digest_key,
-                       "kind": "open_loop", "owner": loop_owner(f), "domain": "system",
+            payload = {"kind": "open_loop", "owner": loop_owner(f), "domain": "system",
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") and f["needs_joe"] != "credentials" else "none",
@@ -1019,7 +1017,9 @@ class Effects:
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
                        else "Orchestrator's named executor or queue repair: " + f["subject"]}
-            result = command([str(SOURCE / "run.sh"), "call", "add-loop", json.dumps(payload)], c)
+            request = json.dumps([episode_key, payload], sort_keys=True)
+            payload["idempotency_key"] = "job-watchdog:report-v2:" + hashlib.sha256(request.encode()).hexdigest()
+            result = command([str(SOURCE / "run.sh"), "call", "add-loop", json.dumps(payload, sort_keys=True)], c)
             # run.sh emits an identity banner before JSON; validate the response itself.
             start = result.find("{")
             response = json.loads(result[start:])
