@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
-from lib.control_plane_inputs import InputUnavailable
+from lib.control_plane_inputs import InputUnavailable, NoEligibleRecords
 
 
 class ReadOnlyQuery(Protocol):
@@ -164,7 +164,11 @@ def collect_audit_facts(builder_key: str, reader: ReadOnlyQuery, *, mode: str,
                     "counterparty": row.get("counterparty_ref"), "event_blocker": row.get("event_blocker_ref")}
                    for row in rows]
         if not actions:
-            raise InputUnavailable(builder_key, "no actionable system-owned loop rows")
+            # Loops filed through the deferral gate carry an outside blocker,
+            # so an empty actionable queue is the ordinary weekday state: a
+            # clean skip, not a dead letter (rule 88e9b5eb). It dead-lettered
+            # 13 straight shadow runs through 2026-10-07 before this.
+            raise NoEligibleRecords(builder_key)
         return {"actions": actions}
     if builder_key == "doctrine.review-due":
         due, failures = _rows(reader, "doctrine_due"), _rows(reader, "doctrine_failures")

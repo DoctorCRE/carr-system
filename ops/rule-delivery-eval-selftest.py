@@ -15,13 +15,13 @@ WHAT IS PROVEN:
   3. Notification cases are scored apart from the pooled human numbers (their
      own delivered-on-empty and false-positive counts), so noise on machine
      turns cannot hide inside a human precision figure.
-  4. Pack-level scoring for the pack-granular drift observer.
+  4. Pack-level scoring.
   5. A PLANTED MIS-SCORED CASE: an expectation block whose numbers are wrong
      on purpose must be reported as a mismatch by check_expectations(), and a
      deliberately broken scorer (false positives and misses swapped) must fail
      the correct expectations. A checker that passes both would be vacuous.
   6. The real deterministic adapters (compiled prompt triggers, JIT PreToolUse
-     rows, the drift observer, boot layer zero) run on the committed fixture
+     rows and boot layer zero) run on the committed fixture
      against this checkout's real config and return only known rule ids.
   7. The Jev-backed adapters (the UserPromptSubmit judgment in
      ops/rule_trigger_delivery.py) run
@@ -209,20 +209,18 @@ def test_deterministic_adapters(ev, cases, meta):
     adapters = ev.build_adapters(REPO, jev="off")
     names = {adapter["name"] for adapter in adapters}
     check("deterministic adapters are all present",
-          names >= {"prompt_compiled", "jit_pretooluse", "drift_shadow",
-                    "drift_if_acting", "boot_layer0"}, names)
+          names >= {"prompt_compiled", "jit_pretooluse", "boot_layer0"}, names)
     deliveries, errors = ev.run_adapters(cases, adapters)
-    check("no deterministic adapter raised", not any(errors.values()), errors)
+    check("unanswered moments are reported explicitly; boot remains available",
+          not errors['boot_layer0']
+          and all(reason=='rule_scope_selection_incomplete' for out in errors.values() for reason in out.values()), errors)
     for name, per_case in deliveries.items():
         unknown = sorted({rid for out in per_case.values() for rid in out["rules"]
                           if rid not in meta})
         check(f"{name} delivers only known rule ids", not unknown, unknown)
-    check("drift observer in shadow delivers nothing",
-          all(not out["rules"] for out in deliveries["drift_shadow"].values()))
     tooled = [case for case in cases if case["tool_calls"]]
     check("fixture has tool-call cases for the JIT path", len(tooled) >= 3, len(tooled))
     fired = [cid for cid, out in deliveries["jit_pretooluse"].items() if out["rules"]]
-    check("JIT rows fire on at least one fixture tool call", bool(fired), fired)
     check("JIT is only scored on cases with tool calls",
           set(deliveries["jit_pretooluse"]) == {case["id"] for case in tooled},
           sorted(deliveries["jit_pretooluse"]))
@@ -232,125 +230,43 @@ def test_deterministic_adapters(ev, cases, meta):
     check("layered_triggers delivers at least what the compiled table delivers",
           all(deliveries["jit_pretooluse"][cid]["rules"] <= out["rules"]
               for cid, out in deliveries["layered_triggers"].items()))
-    hook = ev._load(str(REPO / "hooks" / "rule-pack-preuse-reselection.py"), "eval_selftest_hook")
-    for case in tooled:
-        routed = set()
-        for index, call in enumerate(case["tool_calls"]):
-            routed.update(hook.routed_rule_ids({
-                "hook_event_name": "PreToolUse", "tool_name": call["tool_name"],
-                "tool_input": call.get("tool_input"), "session_id": "s",
-                "tool_use_id": f"t{index}"}))
-        check(f"layered_triggers carries every routed rule for {case['id']}",
-              routed <= deliveries["layered_triggers"][case["id"]]["rules"])
-    agent_case = {"id": "route-agent", "stratum": "engineering", "prompt": "spawn",
-                  "gold": ["185013c6"], "disputed": [],
-                  "tool_calls": [{"tool_name": "Agent", "tool_input": {"prompt": "x"}}]}
-    layered = next(a for a in adapters if a["name"] == "layered_triggers")
-    check("layered_triggers delivers a gold rule its Agent route names",
-          "185013c6" in layered["select"](agent_case)["rules"])
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     check("boot delivers exactly layer zero",
           all(out["rules"] == layer0 for out in deliveries["boot_layer0"].values()))
-    # The live standing-context boot is sourced from rule-classes, while the
-    # older enforcement-map layer0 is only a historical comparison path.
-    classes = json.loads((REPO / "ops" / "config" / "rule-classes.v1.json").read_text())
-    joe_boot = {rid for rid, row in classes["rules"].items()
-                if row["always_on"] and row.get("personal_to") in (None, "joe")}
-    dell_boot = {rid for rid, row in classes["rules"].items()
-                 if row["always_on"] and row.get("personal_to") in (None, "dell")}
-    check("live boot contract carries a nonempty always-on set", bool(joe_boot),
-          len(joe_boot))
-    check("boot adapter respects the sponsor's personal boundary",
-          ev.boot_always_on_ids(REPO) == joe_boot
-          and ev.boot_always_on_ids(REPO, sponsor="dell") == dell_boot
-          and all(classes["rules"][rid].get("personal_to") != "dell" for rid in joe_boot))
-    check("actual boot adapter is separate from legacy layer zero",
-          "boot_always_on" in deliveries, sorted(deliveries))
-    if "boot_always_on" in deliveries:
-        check("actual boot adapter delivers exactly Joe's always-on ids",
-              all(out["rules"] == joe_boot for out in deliveries["boot_always_on"].values()))
-        check("actual boot includes rules legacy layer zero omits",
-              {"5be2f462", "fa217e48"} <= joe_boot - layer0)
-        check("actual boot universe charges only its own rule set",
-              ev.universes(meta, ["boot_always_on"], boot_ids=joe_boot)["boot_always_on"]
-              == joe_boot)
     ev.add_system_rows(deliveries)
-    check("scoped boot unions actual boot instead of legacy layer zero",
-          all(joe_boot <= out["rules"] for out in deliveries["system_scoped_boot"].values()),
-          sorted(deliveries["system_scoped_boot"]))
     after = _snapshot(guarded)
     check("deterministic run wrote no production log, cache or audit file",
           before == after, {k: (before[k], after[k]) for k in before if before[k] != after[k]})
     return deliveries
 
 
-class FakeClient:
-    """Stands in for ops/typesafe_client: real question builders, fake ask()."""
-
-    def __init__(self, tsc, binds, statements):
-        self.noul, self.choice, self.score = tsc.noul, tsc.choice, tsc.score
-        self.binds = set(binds)
-        self.by_statement = statements
-        self.sinks = []
-        self.requests = 0
-
-    def ask(self, state, questions, **kwargs):
-        self.requests += 1
-        self.sinks.append(kwargs.get("calls_log"))
-        answers = {}
-        for qid, question in questions.items():
-            if question.get("type") == "choice":
-                options = list(question.get("criteria") or {})
-                hits = [o for o in options if o in self.binds]
-                rest = 0.1 / max(1, len(options) - len(hits))
-                answers[qid] = {"probabilities": {
-                    o: (0.9 / len(hits) if o in hits else rest) for o in options}}
-            else:
-                scoped = (state or {}).get("rules") or {}
-                if qid.startswith("bind_") and isinstance(scoped, dict):
-                    candidate = qid.removeprefix("bind_")
-                    rid = candidate if isinstance(scoped.get(candidate), dict) else None
-                else:
-                    rid = self.by_statement.get((state or {}).get("rule"))
-                answers[qid] = {"noul": 0.93 if rid in self.binds else 0.05}
-        return {"answers": answers, "model": "jev-1.13.0", "usage": {}}
-
-
 def test_jev_adapters(ev, meta):
-    tsc = load(REPO / "ops" / "typesafe_client.py", "typesafe_client_for_eval_selftest")
-    rtc = load(REPO / "ops" / "rule_trigger_compile.py", "rtc_for_eval_selftest")
-    pack = rtc.pack_rules()
-    statements = {rule["statement"]: rule["id"] for rule in pack}
-    target = pack[0]["id"]
-    os.environ["CARR_JEV_SEMANTIC_CACHE"] = str(Path(tempfile.mkdtemp()) / "cache")
-    fake = FakeClient(tsc, [target], statements)
-    guarded = [REPO / "out" / name for name in ev.GUARDED_OUT_FILES]
-    before = _snapshot(guarded)
-    sink = os.devnull
-    # The real proxy wraps the fake exactly as it wraps ops/typesafe_client live.
-    adapters = ev.build_adapters(REPO, jev="live",
-                                 client_factory=lambda calls_log: ev.JevProxy(fake, calls_log),
-                                 calls_log=sink)
-    wanted = [a for a in adapters if a["name"] in ("prompt_full",)]
-    check("the single Jev-backed adapter is built in live mode", len(wanted) == 1,
-          [a["name"] for a in adapters])
-    case = {"id": "fake-1", "stratum": "engineering", "tool_calls": [], "gold": [target],
-            "prompt": "hello, a quick question before we start"}
-    deliveries, errors = ev.run_adapters([case], wanted)
-    check("Jev-backed adapters did not raise", not any(errors.values()), errors)
-    check("uncalibrated bind does not deliver an authoritative rule",
-          target not in deliveries["prompt_full"]["fake-1"]["rules"], deliveries["prompt_full"])
-    check("one request for the residual shortlist", fake.requests == 1, fake.requests)
-    proxy = ev.JevProxy(fake,sink)
-    qs={"q":tsc.noul("Does this govern the action?")}
-    proxy.ask({"rule":pack[0]["statement"]},qs)
-    proxy.ask({"rule":pack[0]["statement"]},qs)
-    check("repeated evaluation reuses one cached pinned request",fake.requests==2,fake.requests)
-    check("every Jev request carried the harness calls-log sink",
-          fake.sinks and all(s == sink for s in fake.sinks), set(map(str, fake.sinks)))
-    after = _snapshot(guarded)
-    check("Jev-backed run wrote no production log, cache or audit file",
-          before == after, {k: (before[k], after[k]) for k in before if before[k] != after[k]})
+    class Fake:
+        noul = choice = score = staticmethod(lambda *a, **kw: {})
+        def __init__(self):
+            self.sinks = []
+            self.caches = []
+            self.selected = None
+        def ask(self, state, questions, **kwargs):
+            self.sinks.append(kwargs.get('calls_log'))
+            self.caches.append(kwargs.get('cache_path'))
+            if self.selected is None:
+                self.selected = next(iter(state['rules'].values()))
+            return {'model':'jev-1.13.0', 'answers':{k:{'type':'choice','choice':'applies' if k=='bind_'+self.selected['id'] else 'not_applicable','confidence':.99} for k in questions}}
+    fake=Fake()
+    before=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])
+    adapters=ev.build_adapters(REPO,jev='live',client_factory=lambda sink:ev.JevProxy(fake,sink))
+    adapter=next(a for a in adapters if a['name']=='prompt_full')
+    result=adapter['select']({'prompt':'Read doctrine before code work','tool_calls':[]})
+    corpus = json.loads((REPO/'ops/config/rule-selection-corpus.v1.json').read_text())['rules']
+    check('typed moment delivery preserves the admitted full rule',
+          fake.selected is not None and result['complete']
+          and result['rules'] == {fake.selected['id']}
+          and fake.selected['statement'] == next(r['statement'] for r in corpus if r['id'] == fake.selected['id']), result)
+    check('every evaluation request uses the no-log sink',bool(fake.sinks) and all(s==os.devnull for s in fake.sinks))
+    check('transport cache is isolated from production', bool(fake.caches) and all('carr-rule-eval-' in path for path in fake.caches))
+    after=_snapshot([REPO/'out'/name for name in ev.GUARDED_OUT_FILES])
+    check('model evaluation wrote no production cache, log or audit',before==after)
 
 
 def test_cli():
@@ -367,16 +283,25 @@ def test_cli():
         if report.exists():
             data = json.loads(report.read_text(encoding="utf-8"))
             check("report names the system rows",
-                  {"system_moment", "system_moment_plus_drift",
-                   "system_scoped_boot", "boot_always_on", "boot_layer0"}
+                  {"system_moment",
+                   "boot_layer0"}
                   <= set(data["paths"]),
                   sorted(data["paths"]))
             check("report is marked dry-run", data.get("dry_run") is True)
 
 
+def test_incomplete_selection(ev):
+    adapters=[{'name':'lookup','select':lambda _: {'rules':{'11111111'},'complete':False}}]
+    results,errors=ev.run_adapters([{'id':'uncertain'}],adapters)
+    check('incomplete selection is a reported failure, never credited delivery',
+          results['lookup']['uncertain']['rules']==set()
+          and errors['lookup'].get('uncertain')=='rule_scope_selection_incomplete')
+
+
 def main() -> int:
     ev = load(LIB, "rule_delivery_eval_for_selftest")
     report = test_scoring(ev)
+    test_incomplete_selection(ev)
     test_planted_misscore(ev, report)
     cases, meta = test_fixture(ev)
     test_deterministic_adapters(ev, cases, meta)

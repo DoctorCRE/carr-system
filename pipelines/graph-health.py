@@ -354,7 +354,6 @@ for v in vendors: email_check("vendor", v.get("Name"), v.get("Email"), s(v.get("
 for l in leads:   email_check("lead",   l.get("Contact Name"), l.get("Email"), s(l.get("Lead ID")), s(l.get("Practice")), s(l.get("Notes")))
 for c in clients: email_check("client", c.get("Name"), c.get("Email"), s(c.get("Client ID")), s(c.get("Practice / Entity")), s(c.get("Notes")))
 
-# ---------- report ----------
 ORDER = {"HIGH": 0, "MED": 1, "LOW": 2}
 by_cat = defaultdict(list)
 for sev, cat, detail in findings: by_cat[(ORDER[sev], sev, cat)].append(detail)

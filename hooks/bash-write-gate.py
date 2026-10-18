@@ -315,71 +315,81 @@ def warn_jev_calls_write(hits):
     }))
 
 
-def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    if tool not in ("Bash", "functions.exec"):
         sys.exit(0)
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        if tool not in ("Bash", "functions.exec"):
-            sys.exit(0)
-        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-        command = (tool_input or {}).get("command") or ""
-        if not command.strip():
-            sys.exit(0)
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    command = (tool_input or {}).get("command") or ""
+    if not command.strip():
+        sys.exit(0)
 
-        targets = extract_targets(command)
-        jev_hits = jev_calls_write_targets(command, targets)
-        if not targets:
-            if jev_hits:
-                warn_jev_calls_write(jev_hits)
-            sys.exit(0)
-
-        cwd = payload.get("cwd") or os.getcwd()
-        record_home = load("carr_record_home_policy", "record-home-gate.py")
-        one_repo = load("carr_one_repo_policy", "one-repo-gate.py")
-
-        for raw in targets:
-            path = os.path.expanduser(raw)
-            if not os.path.isabs(path):
-                path = os.path.join(cwd, path)
-            path = os.path.abspath(path)
-
-            reason = None
-            if record_home is not None:
-                try:
-                    reason = record_home.check("Write", {"file_path": path})
-                except Exception as exc:
-                    log(f"record-home policy errored on {path}: {exc}")
-            if reason is None and one_repo is not None:
-                try:
-                    reason = one_repo.check({"file_path": path}, cwd)
-                except Exception as exc:
-                    log(f"one-repo policy errored on {path}: {exc}")
-
-            if reason:
-                text = (
-                    f"BLOCKED by the CARR bash-write gate: {path}\n"
-                    f"{reason}\n"
-                    "This came through Bash rather than Write or Edit, and the "
-                    "answer is the same either way — that is the point of this "
-                    "gate. The same content must not be refused or allowed "
-                    "purely by which tool carries it.\n"
-                    "Re-route the content through the record verbs rather than "
-                    "around the gate (rule 76a53dfe)."
-                )
-                log(f"DENY {path} :: {reason[:160]}")
-                print(text, file=sys.stderr)
-                sys.exit(2)
+    targets = extract_targets(command)
+    jev_hits = jev_calls_write_targets(command, targets)
+    if not targets:
         if jev_hits:
             warn_jev_calls_write(jev_hits)
         sys.exit(0)
-    except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+
+    cwd = payload.get("cwd") or os.getcwd()
+    record_home = load("carr_record_home_policy", "record-home-gate.py")
+    one_repo = load("carr_one_repo_policy", "one-repo-gate.py")
+
+    for raw in targets:
+        path = os.path.expanduser(raw)
+        if not os.path.isabs(path):
+            path = os.path.join(cwd, path)
+        path = os.path.abspath(path)
+
+        reason = None
+        if record_home is not None:
+            try:
+                reason = record_home.check("Write", {"file_path": path})
+            except Exception as exc:
+                log(f"record-home policy errored on {path}: {exc}")
+        if reason is None and one_repo is not None:
+            try:
+                reason = one_repo.check({"file_path": path}, cwd)
+            except Exception as exc:
+                log(f"one-repo policy errored on {path}: {exc}")
+
+        if reason:
+            text = (
+                f"BLOCKED by the CARR bash-write gate: {path}\n"
+                f"{reason}\n"
+                "This came through Bash rather than Write or Edit, and the "
+                "answer is the same either way — that is the point of this "
+                "gate. The same content must not be refused or allowed "
+                "purely by which tool carries it.\n"
+                "Re-route the content through the record verbs rather than "
+                "around the gate (rule 76a53dfe)."
+            )
+            log(f"DENY {path} :: {reason[:160]}")
+            print(text, file=sys.stderr)
+            sys.exit(2)
+    if jev_hits:
+        warn_jev_calls_write(jev_hits)
+    sys.exit(0)
+
+
+def main():
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

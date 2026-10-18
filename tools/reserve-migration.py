@@ -50,6 +50,7 @@ import json
 import os
 import socket
 import sys
+from pathlib import Path
 
 from migration_reservations import read_reservation_rows, reservation_paths
 
@@ -92,17 +93,16 @@ def _scan_claims(nm):
     claims = {}
     warnings = []
 
-    remote = nm.run(["git", "ls-tree", "--name-only", "origin/main", "migrations/"])
-    remote_names = [os.path.basename(n.strip()) for n in remote.splitlines() if n.strip()]
+    remote_names = nm.migration_names(Path(REPO), "origin/main")
     nm.merge(claims, nm.numbers_from_names(remote_names), "origin/main")
 
     here = os.path.realpath(REPO)
     for wt in nm.worktree_paths():
         mdir = os.path.join(wt, "migrations")
-        if not os.path.isdir(mdir):
+        if not os.path.isdir(mdir) and not (Path(wt) / nm.MANIFEST).is_file():
             continue
         label = "this tree" if os.path.realpath(wt) == here else f"worktree {os.path.basename(wt)}"
-        nm.merge(claims, nm.numbers_from_names(os.listdir(mdir)), label)
+        nm.merge(claims, nm.numbers_from_names(nm.migration_names(Path(wt))), label)
 
     for row in read_reservations(nm):
         num = row["number"]
@@ -141,7 +141,11 @@ def main():
     with open(lock, "a") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
         try:
-            claims, _ = _scan_claims(nm)
+            try:
+                claims, _ = _scan_claims(nm)
+            except ValueError as exc:
+                print(f"ERROR: cannot read migration identities: {exc}", file=sys.stderr)
+                return 1
 
             nxt = (max(claims) + 1) if claims else 1
             wanted = args.number if args.number is not None else nxt

@@ -243,6 +243,12 @@ CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
 CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
+# Hard ceiling on paid Jev (TypeSafe) attempts per UTC day across every caller
+# and purpose, counted in the Worker's own attempt ledger (WR-000292). The
+# per-site budgets in ops/config/jev-call-sites.v1.json are enforced only on
+# the calling machine; this one holds even when a caller's admission is valid.
+# Must equal worker_daily_paid_call_cap there (ops/jev-call-sites-selftest.py).
+JEV_WORKER_DAILY_CAP = "300"
 
 # Cloudflare supplies the immutable version ID, optional tag, and creation
 # timestamp at runtime. /release reads this binding as provider identity; it is
@@ -339,12 +345,14 @@ APP_HOST = "carr-mcp-staging.joe-bookout-carr-us.workers.dev"
 # private service binding. This exact host keeps OAuth redirects, host-only
 # sessions, CSRF, tenant checks, and authorization inside CARR.
 DOCTORCRE_APP_HOST = "doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+CARR_MCP_ALLOWED_ORIGINS = '["https://carr-mcp-staging.joe-bookout-carr-us.workers.dev","https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"]'
 DEALROOM_PROGRAM6_ACTIONS_ENABLED = "true"
 WORKSPACE_COMMAND_CENTER_READ_ENABLED = "true"
 CONTINUITY_SURFACE_ENFORCEMENT = "required"
 CANONICAL_OWNERSHIP_RUNTIME_MODE = "disabled"
 CANONICAL_OWNERSHIP_ISSUER_ACTIVE_GENERATION = "none"
 CANONICAL_OWNERSHIP_CANARY_JOB_ID = "none"
+JEV_WORKER_DAILY_CAP = "300"
 
 # Environment configuration is explicit: staging's separate Worker needs the
 # same runtime version-identity binding and must not depend on inheritance.

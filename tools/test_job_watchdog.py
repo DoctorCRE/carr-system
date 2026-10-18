@@ -15,16 +15,131 @@ FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 def setUpModule():
     from unittest.mock import patch
-    global board_publication
+    global board_publication, scheduled_machine, vendor_sources
     board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1"})
     board_publication.start()
+    scheduled_machine = patch("scheduled_jobs.check", return_value=[])
+    scheduled_machine.start()
+    vendor_sources = patch("job_watchdog.vendor_release_findings", return_value=[])
+    vendor_sources.start()
 
 
 def tearDownModule():
     board_publication.stop()
+    scheduled_machine.stop()
+    vendor_sources.stop()
 
 
 class ReplayTests(unittest.TestCase):
+    def test_ci_replacement_attempts_restore_ready_without_false_red(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        head = "a" * 40
+        def check(name, conclusion, minute):
+            return {"__typename": "CheckRun", "name": name, "workflowName": "CI",
+                    "provider": "github-actions", "status": "COMPLETED",
+                    "conclusion": conclusion, "startedAt": f"2026-01-01T00:{minute}:00Z"}
+        checks = [check("gates", "CANCELLED", "01"), check("strict", "FAILURE", "01"),
+                  check("gates", "SUCCESS", "02"), check("strict", "SUCCESS", "02")]
+        pr = {"repo": "jbookout/carr-system", "number": 1, "headRefOid": head,
+              "updatedAt": "2026-01-01T00:00:00Z", "mergeable": "MERGEABLE",
+              "comments": [{"body": "REVIEW: APPROVED\nReviewed-SHA: " + head,
+                            "createdAt": "2026-01-01T00:03:00Z"}]}
+        for order in (checks, list(reversed(checks))):
+            with self.subTest(order=order):
+                self.assertTrue(w.green(order))
+                found = w.detect({"prs": [{**pr, "statusCheckRollup": order}]}, config, 2000000000)
+                self.assertEqual([f["kind"] for f in found], ["pr_ready"])
+
+    def test_ci_current_pending_or_failed_attempt_does_not_inherit_success(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        old = {"__typename": "CheckRun", "provider": "github-actions", "workflowName": "CI",
+               "name": "strict", "startedAt": "2026-01-01T00:01:00Z",
+               "completedAt": "2026-01-01T00:05:00Z", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        pr = {"repo": "jbookout/carr-system", "number": 1, "headRefOid": "a" * 40,
+              "updatedAt": "2026-01-01T00:00:00Z"}
+        for status, conclusion in (("IN_PROGRESS", None), ("COMPLETED", "FAILURE")):
+            with self.subTest(status=status):
+                checks = [old, {**old, "startedAt": "2026-01-01T00:02:00Z",
+                                "completedAt": None, "status": status, "conclusion": conclusion}]
+                self.assertFalse(w.green(checks))
+                kinds = {f["kind"] for f in w.detect({"prs": [{**pr, "statusCheckRollup": checks}]}, config, 2000000000)}
+                self.assertEqual("pr_ci_red" in kinds, conclusion == "FAILURE")
+
+    def test_ci_identity_keeps_providers_workflows_and_context_types_separate(self):
+        import job_watchdog as w
+        old = {"__typename": "CheckRun", "provider": "app-one", "workflowName": "CI",
+               "name": "strict", "startedAt": "2026-01-01T00:01:00Z",
+               "status": "COMPLETED", "conclusion": "FAILURE"}
+        for identity in ({"provider": "app-two"}, {"workflowName": "DB"},
+                         {"__typename": "StatusContext", "context": "strict", "state": "SUCCESS"}):
+            with self.subTest(identity=identity):
+                checks = [old, {**old, **identity, "startedAt": "2026-01-01T00:02:00Z", "conclusion": "SUCCESS"}]
+                self.assertFalse(w.green(checks))
+
+    def test_ci_gh_export_resolves_actions_reruns_and_status_contexts(self):
+        import job_watchdog as w
+        actions = {"__typename": "CheckRun", "workflowName": "CI", "name": "strict",
+                   "status": "COMPLETED", "conclusion": "FAILURE", "startedAt": "2026-01-01T00:01:00Z",
+                   "detailsUrl": "https://github.com/example/repo/actions/runs/100/job/101"}
+        status = {"__typename": "StatusContext", "context": "lint", "state": "ERROR",
+                  "startedAt": "2026-01-01T00:01:00Z", "targetUrl": "https://checks.example/lint/100"}
+        checks = [actions, {**actions, "conclusion": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+                            "detailsUrl": "https://github.com/example/repo/actions/runs/200/job/201"},
+                  status, {**status, "state": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+                           "targetUrl": "https://checks.example/lint/200"}]
+        self.assertTrue(w.green(checks))
+
+    def test_ci_ambiguous_attempts_stay_fail_closed_and_ids_break_time_ties(self):
+        import job_watchdog as w
+        old = {"__typename": "CheckRun", "provider": "app-one", "workflowName": "CI",
+               "name": "strict", "status": "COMPLETED", "conclusion": "FAILURE"}
+        self.assertFalse(w.green([old, {**old, "conclusion": "SUCCESS"}]))
+        self.assertFalse(w.green([]))
+        old = {**old, "startedAt": "2026-01-01T00:01:00Z", "databaseId": 1}
+        self.assertTrue(w.green([{**old, "databaseId": 2, "conclusion": "SUCCESS"}, old]))
+
+    def test_collected_ci_keeps_provider_workflow_and_head_bindings(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        head = "a" * 40
+        raw = {"__typename": "CheckRun", "name": "strict", "databaseId": 2,
+               "status": "COMPLETED", "conclusion": "SUCCESS", "startedAt": "2026-01-01T00:02:00Z",
+               "checkSuite": {"app": {"id": "app-one"},
+                              "workflowRun": {"workflow": {"id": "workflow-one"}}}}
+        response = {"data": {"repository": {"pullRequest": {"mergeQueueEntry": None,
+                    "commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": {
+                        "contexts": {"nodes": [raw], "pageInfo": {"hasNextPage": False}}}}}]}}}}}
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), json.dumps(response)]) as command:
+            pr = w.collect_pr("example/repo", 1, w.load_config(ROOT / "ops/config/job-watchdog.json"))
+            self.assertEqual(pr["statusCheckRollup"], [raw])
+            self.assertIn("checkSuite", command.call_args.args[0][4])
+        response["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]["oid"] = "b" * 40
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), json.dumps(response)]):
+            with self.assertRaisesRegex(RuntimeError, "head changed"):
+                w.collect_pr("example/repo", 1, w.load_config(ROOT / "ops/config/job-watchdog.json"))
+
+    def test_merge_queue_membership_is_read_only_for_listed_repositories(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        self.assertEqual(config["github_merge_queue_repositories"], [])
+        head = "a" * 40
+        def response(entry):
+            observed = {"commits": {"nodes": [{"commit": {"oid": head, "statusCheckRollup": None}}]}}
+            return json.dumps({"data": {"repository": {"pullRequest": {**observed, **entry}}}})
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}), response({})]) as command:
+            pr = w.collect_pr("example/repo", 1, config)
+        self.assertIsNone(pr["mergeQueueEntry"])
+        self.assertNotIn("mergeQueueEntry", command.call_args.args[0][4])
+        queued = {**config, "github_merge_queue_repositories": ["example/repo"]}
+        with patch.object(w, "command", side_effect=[json.dumps({"headRefOid": head}),
+                                                     response({"mergeQueueEntry": {"id": "q"}})]) as command:
+            pr = w.collect_pr("example/repo", 1, queued)
+        self.assertEqual(pr["mergeQueueEntry"], {"id": "q"})
+        self.assertIn("mergeQueueEntry", command.call_args.args[0][4])
+
     def test_fixtures_have_only_synthetic_name_vocabulary(self):
         # No record-layer access or client-name literals. Unknown name-like
         # words form the denylist relative to this closed synthetic vocabulary.
@@ -34,6 +149,7 @@ class ReplayTests(unittest.TestCase):
             "parse error: synthetic queue", "synthetic fixture",
             "SUCCESS", "COMPLETED", "FAILURE", "MERGEABLE", "CONFLICTING",
             "UNKNOWN", "DIRTY", "CLEAN", "APPROVED", "CHANGES_REQUESTED",
+            "Service Unavailable", "Responses", "Decisions", "Synthetic",
         }
         allowed = set(re.findall(r"[A-Z][a-z]+", " ".join(synthetic_set)))
 
@@ -240,6 +356,111 @@ class ReplayTests(unittest.TestCase):
             self.assertEqual(state[pipeline["key"]]["cleared_at"], w.stamp(200))
             self.assertIsNone(state[red["key"]]["cleared_at"])
 
+    def test_successful_report_retry_clears_record_error_during_incomplete_scan(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["actions"]["job_hang"] = "report"
+        class Effects:
+            failing = True
+            def report(self, finding):
+                if self.failing:
+                    raise RuntimeError("progress board timed out")
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            effects = Effects()
+            found = w.finding("job_hang", "synthetic-job", "worker stopped producing output", c)
+            w.reconcile(root, c, [found], effects, 100, complete=False)
+            path = root / c["paths"]["findings"]
+            error_key = "record_error:" + found["key"]
+            self.assertIsNone(w.read_latest(path)[error_key]["cleared_at"])
+            rows_before = [json.loads(line) for line in path.read_text().splitlines()]
+
+            effects.failing = False
+            w.reconcile(root, c, [found], effects, 200, complete=False)
+
+            latest = w.read_latest(path)
+            self.assertTrue(latest[found["key"]]["reported"])
+            self.assertEqual(latest[error_key]["cleared_at"], w.stamp(200))
+            rows_after = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertGreater(len(rows_after), len(rows_before))
+            self.assertTrue(any(row["key"] == error_key and row.get("cleared_at") is None for row in rows_after))
+
+    def test_disappeared_finding_and_record_error_clear_without_deleting_history(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["actions"]["job_hang"] = "report"
+        class Effects:
+            def report(self, finding):
+                raise RuntimeError("progress board timed out")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            found = w.finding("job_hang", "synthetic-job", "worker stopped producing output", c)
+            w.reconcile(root, c, [found], Effects(), 100)
+            path = root / c["paths"]["findings"]
+            rows_before = [json.loads(line) for line in path.read_text().splitlines()]
+
+            w.reconcile(root, c, [], Effects(), 200)
+
+            error_key = "record_error:" + found["key"]
+            latest = w.read_latest(path)
+            self.assertEqual(latest[found["key"]]["cleared_at"], w.stamp(200))
+            self.assertEqual(latest[error_key]["cleared_at"], w.stamp(200))
+            rows_after = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertGreater(len(rows_after), len(rows_before))
+            for row in rows_before:
+                self.assertIn(row, rows_after)
+
+    def test_board_task_forces_deferred_local_progress_board_mutation(self):
+        from unittest.mock import patch
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            board = root / "out/boards" / (c["board"] + ".json")
+            board.parent.mkdir(parents=True)
+            board.write_text(json.dumps({"tasks": {}}))
+            completed = subprocess.CompletedProcess([], 0, json.dumps({"applied": True, "before": None, "after": {}}), "")
+            with patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": ""}), \
+                 patch.object(w.subprocess, "run", return_value=completed) as run:
+                w.board_task(root, c, "synthetic", "orchestrator", "blocked", "failure",
+                             reason="failure", next_action="retry")
+            self.assertEqual(run.call_args.kwargs["env"]["PROGRESS_BOARD_LOCAL_ONLY"], "1")
+            self.assertIn("--receipt", run.call_args.args[0])
+            self.assertNotIn("--defer-refresh", run.call_args.args[0])
+
+    def test_clear_without_recovery_retires_only_exact_generated_watchdog_card(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["actions"]["file_defects"] = False
+        c["actions"]["job_hang"] = "report"
+        for mode in ("generated", "reassigned", "explicit"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                effects = w.Effects(root, c)
+                fields = {"card": "shared-card"} if mode == "explicit" else {}
+                found = w.finding("job_hang", "synthetic-job", "worker stopped producing output", c, **fields)
+                card = effects.card(found)
+                effects.show_finding(found)
+                if mode == "reassigned":
+                    w.board_task(root, c, card, "new-executor", "blocked",
+                                 found["reason"] + "\nNext action: " + found["next_action"],
+                                 reason=found["reason"], next_action=found["next_action"])
+                path = root / c["paths"]["findings"]
+                w.append(path, {**found, "reported": False, "cleared_at": None})
+                rows_before = [json.loads(line) for line in path.read_text().splitlines()]
+
+                w.reconcile(root, c, [], effects, 200)
+
+                task = json.loads((root / "out/boards" / (c["board"] + ".json")).read_text())["tasks"][card]
+                self.assertEqual(task["status"], "done" if mode == "generated" else "blocked")
+                if mode == "reassigned":
+                    self.assertEqual(task["executor"], "new-executor")
+                self.assertEqual(w.read_latest(path)[found["key"]]["cleared_at"], w.stamp(200))
+                rows_after = [json.loads(line) for line in path.read_text().splitlines()]
+                for row in rows_before:
+                    self.assertIn(row, rows_after)
+
     def test_current_head_latest_review_and_active_fixer(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
@@ -281,6 +502,7 @@ class GithubBudgetTests(unittest.TestCase):
         self.listing = [{"number": 7, "head": {"sha": "a" * 40}, "updated_at": "2026-10-04T10:00:00Z"}]
         self.calls = []
         self.limited = False
+        self.branches = []
 
     def gh(self, argv, config, cwd=None):
         self.calls.append(argv)
@@ -288,7 +510,9 @@ class GithubBudgetTests(unittest.TestCase):
         if "pulls?state=open" in target:
             return json.dumps([self.listing])
         if "branches?" in target:
-            return "[[]]"
+            return json.dumps([self.branches])
+        if "/commits/" in target:
+            return json.dumps({"commit": {"committer": {"date": "2026-10-01T00:00:00Z"}}})
         if argv[:2] == ["gh", "api"] and target == "rate_limit":
             return json.dumps({"resources": {
                 "core": {"limit": 5000, "used": 12, "remaining": 4988, "reset": 2000000000},
@@ -306,34 +530,65 @@ class GithubBudgetTests(unittest.TestCase):
             return json.dumps({"data": {"repository": {"pullRequest": {"mergeQueueEntry": None}}}})
         raise AssertionError(f"unexpected command {argv}")
 
+    def transport(self, argv, config, cwd=None):
+        """Serve self.gh's snapshot as gh does: checks arrive head-bound via GraphQL."""
+        out = self.gh(argv, config, cwd)
+        if argv[:3] == ["gh", "pr", "view"]:
+            pr = json.loads(out)
+            self.served = (pr["headRefOid"], pr.pop("statusCheckRollup"))
+            return json.dumps(pr)
+        if argv[:3] == ["gh", "api", "graphql"]:
+            reply = json.loads(out)
+            head, checks = self.served
+            reply["data"]["repository"]["pullRequest"]["commits"] = {"nodes": [{"commit": {
+                "oid": head, "statusCheckRollup": {"contexts": {
+                    "nodes": checks, "pageInfo": {"hasNextPage": False}}}}}]}
+            return json.dumps(reply)
+        return out
+
     def collect(self, now):
         from unittest.mock import patch
         self.calls.clear()
-        with patch.object(self.w, "command", side_effect=self.gh):
+        with patch.object(self.w, "command", side_effect=self.transport):
             return self.w.collect(self.root, self.c, now)
 
     def graphql_calls(self):
         return [a for a in self.calls if a[:3] in (["gh", "pr", "view"], ["gh", "api", "graphql"])]
 
+    def test_branch_dates_reuse_immutable_sha_but_retired_refs_leave_the_facts(self):
+        self.branches = [{"name": "codex/old", "commit": {"sha": "b" * 40}}]
+        first = self.collect(1000)
+        self.assertEqual(len(first["branches"]), 1)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.collect(1120)
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 0)
+        dates = self.root / "out/watchdog/branch-dates.json"
+        dates.write_text(json.dumps({self.REPO + ":" + "b" * 40: float("nan")}))
+        refreshed = self.collect(1180)
+        self.assertEqual(refreshed["branches"], first["branches"])
+        self.assertEqual(sum("/commits/" in a[-1] for a in self.calls), 1)
+        self.branches = []
+        self.assertEqual(self.collect(1240)["branches"], [])
+
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)
-        self.assertEqual(len(self.graphql_calls()), 1, "no merge queue configured: one query per PR")
+        self.assertEqual(len(self.graphql_calls()), 2, "snapshot and check identities per collected PR")
         second = self.collect(1000 + 120)
         self.assertEqual(self.graphql_calls(), [])
         self.assertEqual(second["prs"], first["prs"])
         self.assertEqual([f["kind"] for f in self.w.detect(second, self.c, 1120)], ["pr_ci_red"])
         self.collect(1000 + self.c["thresholds"]["pr_cache_seconds"])
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
 
     def test_changed_head_or_update_recollects(self):
         self.collect(1000)
         self.listing[0]["head"]["sha"] = "b" * 40
         facts = self.collect(1120)
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
         self.assertEqual(facts["prs"][0]["headRefOid"], "b" * 40)
         self.listing[0]["updated_at"] = "2026-10-04T10:05:00Z"
         self.collect(1240)
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
 
     def test_pending_checks_recollect_on_the_short_interval(self):
         original = self.gh
@@ -347,10 +602,9 @@ class GithubBudgetTests(unittest.TestCase):
         self.gh = pending
         self.collect(1000)
         self.collect(1000 + self.c["thresholds"]["pr_cache_pending_seconds"])
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
 
-    def test_merge_queue_lookup_only_for_configured_repositories(self):
-        self.c["github_merge_queue_repositories"] = [self.REPO]
+    def test_collection_reads_snapshot_then_head_bound_checks_and_queue(self):
         self.collect(1000)
         self.assertEqual([a[:3] for a in self.graphql_calls()], [["gh", "pr", "view"], ["gh", "api", "graphql"]])
 
@@ -433,7 +687,7 @@ class GithubBudgetTests(unittest.TestCase):
         queue.write_text("")
         state[0] = "PENDING"
         effects = self.w.Effects(self.root, self.c)
-        with patch.object(self.w, "command", side_effect=self.gh), patch.object(effects, "report", return_value={}):
+        with patch.object(self.w, "command", side_effect=self.transport), patch.object(effects, "report", return_value={}):
             stale = self.w.detect(self.w.collect(self.root, self.c, 1120), self.c, 1120)
             self.assertEqual([f["kind"] for f in stale], ["pr_ready"])
             self.w.reconcile(self.root, self.c, stale, effects, 1120)
@@ -462,7 +716,7 @@ class GithubBudgetTests(unittest.TestCase):
         self.assertEqual(self.w.detect(self.collect(1000), self.c, 1000), [])
         empty[0] = False
         facts = self.collect(1360)
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
         self.assertEqual([f["kind"] for f in self.w.detect(facts, self.c, 1360)], ["pr_ci_red"])
 
     def test_unknown_check_result_uses_pending_interval(self):
@@ -479,7 +733,7 @@ class GithubBudgetTests(unittest.TestCase):
                 self.gh = unknown
                 self.collect(5000 * (index + 1))
                 self.collect(5000 * (index + 1) + 360)
-                self.assertEqual(len(self.graphql_calls()), 1)
+                self.assertEqual(len(self.graphql_calls()), 2)
 
     def test_invalid_cache_is_discarded_and_repaired(self):
         cache = self.w.path_at(self.root, self.c["paths"]["pr_cache"])
@@ -513,7 +767,7 @@ class GithubBudgetTests(unittest.TestCase):
         contents[self.REPO + "#7"]["pr"]["reviews"] = [{"state": [], "body": ""}]
         cache.write_text(json.dumps(contents))
         facts = self.collect(1120)
-        self.assertEqual(len(self.graphql_calls()), 1)
+        self.assertEqual(len(self.graphql_calls()), 2)
         self.assertEqual([f["kind"] for f in self.w.detect(facts, self.c, 1120)], ["pr_ci_red"])
 
     def test_exhausted_allowance_is_diagnosed_once_and_stops_provider_reads(self):
@@ -574,9 +828,11 @@ class RunnerTests(unittest.TestCase):
             executable.chmod(0o755)
             dispatch = ROOT / "tools/room-bridge/dispatch.py"
             registry = root / "desk.json"
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"])
+            (root / "models_cache.json").write_text(json.dumps({"models": [
+                {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol"}]}))
+            env = dict(os.environ, CODEX_HOME=str(root), PATH=str(root) + os.pathsep + os.environ["PATH"])
             registration = subprocess.run([sys.executable, str(dispatch), "--registry", str(registry),
-                                           "register", "fixture", "--kind", "codex-session", "--model", "gpt-6.1-sol",
+                                           "register", "fixture", "--kind", "codex-session", "--family", "sol",
                                            "--effort", "high", "--sandbox", "workspace-write", "--cwd", directory],
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(registration.returncode, 0, registration.stderr)
@@ -604,22 +860,61 @@ class RunnerTests(unittest.TestCase):
             root = Path(directory)
             executable = root / "bin/gh"
             executable.parent.mkdir()
-            executable.write_text("#!/bin/sh\nprintf '[[]]\\n'\n")
+            executable.write_text("#!/bin/sh\nprintf 'HTTP/2.0 200\\nX-RateLimit-Remaining: 20\\n\\n[]\\n'\n")
             executable.chmod(0o755)
             config = json.loads((ROOT / "ops/config/job-watchdog.json").read_text())
+            config["vendor_release_watches"] = []  # Offline clean-scan fixture.
             config["paths"]["merge_queue"] = "queue.txt"
             config["paths"]["queue_logs"] = []
             config["actions"]["file_defects"] = False
             cp = root / "config.json"
             cp.write_text(json.dumps(config))
-            env = dict(os.environ, PATH=str(executable.parent) + os.pathsep + os.environ["PATH"])
-            result = subprocess.run([sys.executable, str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"],
+            env = dict(os.environ, PATH=str(executable.parent) + os.pathsep + os.environ["PATH"],
+                       CARR_GITHUB_READ_BUDGET=str(root / "budget.json"))
+            script = ("import sys, runpy; sys.path.insert(0, " + repr(str(ROOT / "lib")) + "); "
+                      "import scheduled_jobs; scheduled_jobs.check = lambda **kwargs: []; "
+                      "sys.argv = " + repr([str(ROOT / "tools/job-watchdog.py"), "--root", directory, "--config", str(cp), "scan"]) + "; "
+                      "runpy.run_path(sys.argv[0], run_name='__main__')")
+            result = subprocess.run([sys.executable, "-c", script],
                                     env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "")
             ledger = [json.loads(s) for s in (root / "out/watchdog/runs.jsonl").read_text().splitlines()]
             self.assertEqual(ledger[-1]["status"], "completed")
             self.assertEqual(ledger[-1]["findings"], 0)
+
+    def test_board_github_opt_out_survives_re_registration(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = root / "github-calls"
+            gh = root / "gh"
+            gh.write_text("#!" + sys.executable + "\nfrom pathlib import Path\n"
+                          + "Path(" + repr(str(calls)) + ").open('a').write('call\\n')\n"
+                          + "print('{}')\n")
+            gh.chmod(0o755)
+            config_path = root / "config.json"
+            c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+            c["board_github_enabled"] = False
+            config_path.write_text(json.dumps(c))
+            real_run = subprocess.run
+            observed_env = []
+            def observe(argv, **kwargs):
+                observed_env.append(kwargs["env"])
+                return real_run(argv, **kwargs)
+            with patch.object(w.subprocess, "run", side_effect=observe), patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"],
+                                         "PROGRESS_BOARD_SKIP_GH": "0"}):
+                for status in ("running", "review"):
+                    # Every registration starts from disk, without an inherited opt-out.
+                    w.board_task(root, w.load_config(config_path), "synthetic-card", "executor",
+                                 status, "Synthetic evidence", pr=7, repo="fixture/repository")
+            self.assertTrue(observed_env)
+            self.assertTrue(all(e.get("PROGRESS_BOARD_SKIP_GH") == "1" for e in observed_env))
+            self.assertFalse(calls.exists(), "re-registration must spend zero GitHub requests")
+            board = json.loads((root / "out/boards/carr-v5.json").read_text())
+            self.assertEqual(board["tasks"]["synthetic-card"]["status"], "review")
+            self.assertFalse(w.load_config(ROOT / "ops/config/job-watchdog.json")["board_github_enabled"])
 
     def test_command_gets_eof_and_exit_is_recorded_on_board(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -693,6 +988,66 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_scheduled_drift_recovery_reads_loop_envelope(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["actions"]["file_defects"] = False
+        for status in ("open", "done", "dropped"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                effects = w.Effects(root, c)
+                f = w.finding("scheduled_job_drift", "synthetic-schedule", "schedule missing", c)
+                w.reconcile(root, c, [f], effects, 100)
+                path = root / c["paths"]["findings"]
+                w.append(path, {"key": f["key"], "loop_id": "synthetic-loop"})
+                calls = []
+                def record(argv, config):
+                    verb, payload = argv[2], json.loads(argv[3])
+                    calls.append((verb, payload))
+                    if verb == "read-loop":
+                        self.assertEqual(payload, {"loop_id": "synthetic-loop"})
+                        return "local-verb identity -> test actor\n" + json.dumps({
+                            "loop": {"loop_id": "synthetic-loop", "version": 7, "status": status},
+                            "amended": False, "amendments": []})
+                    self.assertEqual(verb, "close-loop")
+                    return json.dumps({"ok": True})
+                with patch.object(w, "command", side_effect=record):
+                    recovered = w.reconcile(root, c, [], effects, 200)
+                    w.reconcile(root, c, [], effects, 300)
+                self.assertEqual(recovered, [])
+                self.assertEqual(w.read_latest(path)[f["key"]]["cleared_at"], w.stamp(200))
+                self.assertEqual([verb for verb, _ in calls],
+                                 ["read-loop", "close-loop"] if status == "open" else ["read-loop"])
+                if status == "open":
+                    closed = calls[1][1]
+                    self.assertEqual(closed["loop_id"], "synthetic-loop")
+                    self.assertEqual(closed["base_version"], 7)
+                    self.assertEqual(closed["resolution"], "done")
+                    self.assertEqual(closed["idempotency_key"], "scheduled-jobs-clear:synthetic-loop")
+                board = json.loads((root / "out/boards/carr-v5.json").read_text())
+                self.assertEqual(board["tasks"][effects.card(f)]["status"], "done")
+
+    def test_scheduled_drift_recovery_refuses_invalid_loop_readback(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        loop = {"loop_id": "synthetic-loop", "version": 7, "status": "open"}
+        responses = [{}, loop, {"loop": None}, {"loop": {**loop, "loop_id": "other-loop"}},
+                     {"loop": {**loop, "version": True}}, {"loop": {**loop, "version": 0}},
+                     {"loop": {**loop, "status": "unknown"}}]
+        with tempfile.TemporaryDirectory() as directory:
+            effects = w.Effects(Path(directory), c)
+            for response in responses:
+                with self.subTest(response=response), \
+                     patch.object(w, "command", return_value=json.dumps(response)) as command, \
+                     patch.object(w, "board_task") as board:
+                    with self.assertRaisesRegex(RuntimeError, "scheduled-job loop readback failed"):
+                        effects.clear({"kind": "scheduled_job_drift", "loop_id": "synthetic-loop"}, [])
+                    command.assert_called_once()
+                    self.assertEqual(command.call_args.args[0][2], "read-loop")
+                    board.assert_not_called()
+
     def test_fixer_uses_verified_model_room_desk_and_agent_runner(self):
         import job_watchdog as w
         from unittest.mock import patch
@@ -754,6 +1109,47 @@ class StateTests(unittest.TestCase):
                 self.assertEqual(state["tasks"]["credentials"]["lane"], "needs-joe")
                 self.assertEqual(state["tasks"]["credentials"]["status"], "blocked")
 
+    def test_every_filed_loop_names_an_owner_the_verb_accepts(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        accepted = set(json.loads(re.search(
+            r"LOOP_OWNERS = Object\.freeze\((\[[^\]]*\])\)",
+            (ROOT / "mcp-server/src/tools.js").read_text()).group(1)))
+        self.assertEqual(accepted, {"joe", "dell", "claude"})
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        cases = (("pr_ci_red", None, "claude"), ("job_hang", "credentials", "joe"),
+                 ("pr_blocked_review", "money", "joe"))
+        # add-loop refuses a capability or ruling loop without a residue, so
+        # every needs_joe class the config can produce must map to one.
+        self.assertEqual(set(c["needs_joe_patterns"]), set(w.NEEDS_JOE_RESIDUE))
+        for kind, needs_joe, owner in cases:
+            with self.subTest(kind=kind, needs_joe=needs_joe):
+                f = w.finding(kind, "subject-" + kind, "reason", c)
+                f["needs_joe"] = needs_joe
+                self.assertEqual(f["owner"], "orchestrator", "the board seat keeps its own name")
+                payloads = []
+                def capture(argv, config, cwd=None):
+                    payloads.append(json.loads(argv[3]))
+                    return json.dumps({"ok": True, "loop_id": "synthetic-loop"})
+                with tempfile.TemporaryDirectory() as directory, \
+                        patch.object(w, "command", side_effect=capture):
+                    effects = w.Effects(Path(directory), c)
+                    effects._file_defect(f, "job-watchdog:probe")
+                    with patch.object(effects, "show_finding", return_value={}):
+                        effects.report({**f, "first_seen": "2026-10-08T00:00:00+00:00"})
+                self.assertEqual(len(payloads), 2, payloads)
+                for payload in payloads:
+                    self.assertIn(payload["owner"], accepted)
+                    self.assertEqual(payload["owner"], owner)
+
+    def test_record_error_next_step_does_not_claim_only_an_access_problem(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        step = w.finding("record_error", "x", "TOOL ERROR unknown_owner", c)["next_action"]
+        self.assertNotIn("Restore record-layer access", step)
+        self.assertIn("refused", step)
+        self.assertIn("unreachable", step)
+
     def test_credential_escalation_reaches_production_record_gate(self):
         import job_watchdog as w
         from unittest.mock import patch
@@ -764,8 +1160,14 @@ class StateTests(unittest.TestCase):
           import fs from 'node:fs';
           const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
           let queried = false;
-          const client = {query: async () => {
-            queried = true; throw new Error('test database boundary');
+          // The handler asks the database two things before its ownership gate
+          // (idempotency replay, domain taxonomy). Answer those so the payload
+          // reaches the gate; any later query is the database boundary.
+          const client = {query: async (sql) => {
+            queried = true;
+            if (/tool_call/.test(sql)) return {rows: []};
+            if (/loop_domain/.test(sql)) return {rows: [{slug: 'system'}]};
+            throw new Error('test database boundary');
           }};
           try {
             await executeRegisteredTool(client,
@@ -785,6 +1187,9 @@ class StateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             observed = json.loads(result.stdout)
             self.assertTrue(observed["queried"], observed)
+            # Only the database boundary may stop the payload: a verb-level
+            # refusal (unknown_owner, joint_ownership_refused) is a real defect.
+            self.assertEqual(observed["refusal"], "test database boundary", observed)
             payloads.append(payload)
             return json.dumps({"ok": True, "loop_id": "synthetic-loop"})
         with tempfile.TemporaryDirectory() as directory:

@@ -29,7 +29,6 @@ THE FOUR OUTCOMES, and there are only four:
                     written wholesale by tooling, so there is no human intent in
                     either copy to preserve. Take main's, continue, push. PR #79
                     on 2026-08-14 was exactly this: its sole conflict was
-                    ops/config/gate-baseline.json, rewritten by an hourly job.
 
   report-only       anything else. A real source conflict, a red check, a draft,
                     or a conflict set that MIXES generated and source files. The
@@ -67,6 +66,9 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.github_reader import GitHubReader  # noqa: E402
+
 # ── policy ──────────────────────────────────────────────────────────────────
 # generated_files: paths written wholesale by tooling, where neither side of a
 # conflict carries human intent. Adding one here is a real decision: it says
@@ -74,20 +76,7 @@ from dataclasses import dataclass, field
 # silently discard someone's work.
 DEFAULT_POLICY: dict = {
     "base_branch": "main",
-    # These are not a judgment call: they are exactly the OWNED list that
-    # bin/sync-enforcement-map.py declares for itself — the two files the hourly
-    # job rewrites wholesale. The selftest asserts this list still equals that
-    # one, so adding a third owned file there without adding it here is caught
-    # rather than silently leaving a mechanical conflict unresolvable.
-    "generated_files": [
-        # Derived render order; its own docstring says "active_rule_ids is
-        # DERIVED DATA: its only correct value is the render order. Nothing is
-        # decided here". The sole conflict on PR #166, 2026-08-15.
-        "ops/config/rule-enforcement-map.json",
-        # Rewritten by that same job and by every pull request that changes a
-        # gate. The sole conflict on PR #79, 2026-08-14.
-        "ops/config/gate-baseline.json",
-    ],
+    "generated_files": [],
     # Re-derive the branch's intent after taking main's copy. Empty means the
     # caller re-runs the generator itself; the actor never invents a recipe.
     "regenerate": {},
@@ -262,10 +251,7 @@ def rebase_branch(repo: str, branch: str, base: str, policy: dict) -> GitResult:
 
 # ── GitHub shell (thin on purpose; the decision above is where the logic is) ──
 def _gh_json(args: list[str]) -> object:
-    p = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=120)
-    if p.returncode != 0:
-        raise RuntimeError((p.stderr or p.stdout or "gh failed").strip()[:300])
-    return json.loads(p.stdout or "[]")
+    return GitHubReader(timeout=120).json(args)
 
 
 def probe_conflicts(repo: str, branch: str, base: str, policy: dict) -> GitResult:

@@ -155,20 +155,6 @@ def delivered_tools(hooks_json):
                         f"canonical-edit-gate.py or one-repo-gate.py")
 
 
-def set_mode(root, value):
-    """Write ops/config/gate-lifecycle.json in the fixture with this gate's mode.
-
-    `value is None` writes a file with the gate ABSENT, which is the
-    "nobody staged this gate" case and must default to enforcing.
-    """
-    path = os.path.join(root, "ops", "config", "gate-lifecycle.json")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    gates = {} if value is None else {"canonical-edit-gate.py": {"mode": value}}
-    with open(path, "w") as fh:
-        json.dump({"gates": gates}, fh)
-    return path
-
-
 def build_fixture(hook_src):
     """A real git repo with two real registered worktrees, one of them outside
     .claude/worktrees/. Returns (root, paths dict)."""
@@ -178,6 +164,8 @@ def build_fixture(hook_src):
     os.makedirs(os.path.join(root, "hooks"))
     shutil.copyfile(hook_src, os.path.join(root, "hooks",
                                            "canonical-edit-gate.py"))
+    os.makedirs(os.path.join(root, "lib"), exist_ok=True)
+    shutil.copyfile(os.path.join(REPO, "lib", "hook_runtime.py"), os.path.join(root, "lib", "hook_runtime.py"))
     with open(os.path.join(root, "tracked.py"), "w") as fh:
         fh.write("# a file the fixture repo really tracks\n")
     run(["git", "init", "-q", "-b", "main"], root)
@@ -351,54 +339,6 @@ def main():
                              env_extra={"CARR_ALLOW_CANONICAL_EDIT": "1"})
         check("escape-hatch-no-longer-allows", "DENY", v,
               "disposition 3: the scoped-edit allowance is removed")
-
-        # ROLLOUT MODES. gate-lifecycle.json's `mode` is documentary for every
-        # gate but conduct-stop-gate.py, which reads its own key directly; this
-        # gate copies that one exception. Offering a staged rollout the code
-        # cannot honour would be worse than not offering it, so each mode is
-        # exercised against the tracked-file case that enforcing refuses.
-        set_mode(root, "shadow")
-        v, code, out, err, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-shadow-allows", "ALLOW", v, f"exit={code}")
-        check("mode-shadow-is-silent", True, out.strip() == "" and err.strip() == "",
-              "shadow records to the audit log and says nothing to the session")
-
-        set_mode(root, "announce")
-        v, code, out, err, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-announce-allows", "ALLOW", v, f"exit={code}")
-        announced = False
-        try:
-            doc = json.loads(out)
-            announced = (doc["hookSpecificOutput"]["permissionDecision"] == "allow"
-                         and "announced, not refused" in doc["systemMessage"])
-        except Exception:
-            pass
-        check("mode-announce-emits-structured-allow", True, announced,
-              "same announce shape gate-edit-gate.py uses")
-        check("mode-announce-still-names-the-remedy", True,
-              "--from origin/main" in out)
-
-        set_mode(root, "enforcing")
-        v, _, _, _, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-enforcing-denies", "DENY", v)
-
-        # The default direction, and it is chosen: a gate nobody staged
-        # enforces. Defaulting to shadow would mean an unreadable or renamed
-        # config silently disables enforcement, which is the 2026-08-08
-        # five-gates-off-for-a-day failure.
-        set_mode(root, None)
-        v, _, _, _, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-absent-defaults-to-enforcing", "DENY", v)
-
-        lifecycle = os.path.join(root, "ops", "config", "gate-lifecycle.json")
-        with open(lifecycle, "w") as fh:
-            fh.write("{ this is not json")
-        v, _, _, _, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-unreadable-defaults-to-enforcing", "DENY", v,
-              "a corrupt config must not silently disable the gate")
-        os.unlink(lifecycle)
-        v, _, _, _, _ = fire(p["hook"], "Edit", p["tracked"])
-        check("mode-missing-file-defaults-to-enforcing", "DENY", v)
 
         # FAIL OPEN, both directions.
         t0 = time.time()

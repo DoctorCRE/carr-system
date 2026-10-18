@@ -9,8 +9,7 @@ ONE COMMAND, so live misses feed the benchmark instead of a to-do list:
 `--case-id` is either
   * a case already in the benchmark (a shape the tuned system still missed
     live): the new case copies its prompt and tool calls; or
-  * a live reference: a drift-observer event id from
-    out/rule-delivery-shadow.jsonl, or a transcript turn uuid. The command finds
+  * a live reference: a transcript turn uuid. The command finds
     the partner's words for that turn in local session history to CHECK the
     paraphrase against — they are never written anywhere. Without --prompt it
     stops and says so.
@@ -64,7 +63,6 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO, "ops", "fixtures", "rule-delivery-eval", "cases.v2.json")
-SHADOW = os.path.join(REPO, "out", "rule-delivery-shadow.jsonl")
 PROJECTS = os.path.expanduser("~/.claude/projects")
 DEFAULT_CALLS = os.path.join(REPO, "out", "rule-delivery-eval", "jev-label-calls.jsonl")
 
@@ -91,45 +89,22 @@ def _human_text(record):
     return None
 
 
-def find_live_turn(ref, shadow=SHADOW, projects=PROJECTS):
-    """The partner's words for a live reference, or None. A drift event id
-    resolves to its session and time, then to the last human message at or
-    before that time; a transcript uuid resolves directly."""
-    session, ts = None, None
-    if os.path.exists(shadow):
-        with open(shadow, "r", encoding="utf-8") as handle:
-            for line in handle:
-                if ref in line:
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    if str(row.get("event_id", "")).startswith(ref):
-                        session, ts = row.get("session"), row.get("ts")
-                        break
-    pattern = f"{projects}/*/{session}.jsonl" if session else f"{projects}/*/*.jsonl"
-    best = None
-    for path in glob.glob(pattern):
+def find_live_turn(ref, projects=PROJECTS):
+    """Return the partner's words for a transcript turn uuid, or None."""
+    for path in glob.glob(f"{projects}/*/*.jsonl"):
         with open(path, "r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
-                if not session and ref not in line:
+                if ref not in line:
                     continue
                 try:
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if not isinstance(rec, dict):
-                    continue
-                text = _human_text(rec)
-                if text is None:
-                    continue
-                if not session:
-                    if rec.get("uuid") == ref:
+                if isinstance(rec, dict) and rec.get("uuid") == ref:
+                    text = _human_text(rec)
+                    if text is not None:
                         return text
-                    continue
-                if ts is None or (rec.get("timestamp") or "") <= ts.replace("Z", ".999Z"):
-                    best = text
-    return best
+    return None
 
 
 def _verb(verb, args):

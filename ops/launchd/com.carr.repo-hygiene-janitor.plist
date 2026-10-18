@@ -4,7 +4,7 @@
 <dict>
   <!-- doctrine: repo-hygiene-program-build-plan -->
   <!-- DEFINITION ONLY. This agent is deliberately not installed and not loaded.
-       It is listed in DEFINITION_ONLY in ops/config-as-code.py, so `install`
+       It is listed in DEFINITION_ONLY in lib/launchd_hold.py, so `install`
        skips it by name and `check` accepts its absence from the machine as the
        intended state while refusing any copy that turns up in LaunchAgents.
 

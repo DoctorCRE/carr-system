@@ -116,18 +116,20 @@ def check(payload, recs):
 
     The contract's artifacts are read from the session's working directory.
     Nothing in the hook payload or the assistant's close counts as evidence.
+    Only an explicit contract carries an advisory: prose clauses name nothing
+    to act on, so they go to receipts as needs_review and announce nothing.
     """
     prompt = last_request(recs or [])
     if not prompt:
         return None
     acceptance = _acceptance()
-    criteria = acceptance.contract(prompt).get("criteria")
-    if not criteria:
+    explicit_contract = acceptance.contract(prompt)
+    criteria = explicit_contract.get("criteria")
+    if not explicit_contract:
         requirements = split_requirements(prompt)
         if not requirements:
             return None
-        return {"status":"needs_review","advisory":"Semantic requirement acceptance needs review.",
-                "unmet":[],"needs_review":requirements}
+        return {"status":"needs_review","unmet":[],"needs_review":requirements}
     result = acceptance.evaluate(criteria,root=(payload or {}).get("cwd") or REPO)
     unmet = [{"index":i+1,"text":str(criteria[i].get("id",i)),"reason":row["reason"]}
              for i,row in enumerate(result["criteria"]) if row["status"] == "failed"]

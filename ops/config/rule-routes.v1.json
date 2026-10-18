@@ -57,36 +57,11 @@
     }
    ]
   },
-  "0f38532e": {
-   "moment": "duplicate of 14181e60 (single source of truth / DB-first)",
-   "routes": [
-    {
-     "kind": "duplicate",
-     "survivor": "14181e60"
-    }
-   ]
-  },
   "1021fa84": {
    "moment": "any turn - assessing Joe's work patterns/history",
    "routes": [
     {
      "kind": "boot"
-    }
-   ]
-  },
-  "113b3833": {
-   "moment": "run.sh retrieve lookup beyond standing core",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "find-precedent",
-      "search-doctrine"
-     ],
-     "bash_patterns": [
-      "\\brun\\.sh\\s+retrieve\\b"
-     ]
     }
    ]
   },
@@ -112,8 +87,15 @@
     {
      "kind": "gate",
      "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "152ceb65": {
    "moment": "any turn explaining something with a shape",
@@ -178,10 +160,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -229,26 +208,9 @@
     }
    ]
   },
-  "1d50a3bb": {
-   "moment": "conduct_stop gate",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
-     "kind": "boot"
-    }
-   ],
-   "no_trigger_reason": "binds on the reply after a Stop gate reopens the turn; no tool call marks it"
-  },
   "1f3a7372": {
    "moment": "completion_evidence gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -294,42 +256,6 @@
     }
    ]
   },
-  "1fcaa63a": {
-   "moment": "heavy build protocol invoked",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "begin-capability-project",
-      "start-capability-project"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
-  "1fddcffb": {
-   "moment": "deciding what belongs in always-read core vs task-loaded files",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ]
-  },
-  "204391be": {
-   "moment": "discovering a missing record-layer verb while building",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "call-verb",
-      "list-verbs"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "20d106f1": {
    "moment": "Joe's development: new builds, predictions, confident direction",
    "routes": [
@@ -337,9 +263,7 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
       "log-decision",
-      "review-heavy-build-plan",
       "update-loop",
       "write-work-shape"
      ],
@@ -350,10 +274,6 @@
   "2271e684": {
    "moment": "completion_evidence gate, terminal technical claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -425,8 +345,17 @@
      "path_globs": [
       "*ops/ci.sh"
      ]
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [],
+     "bash_patterns": [
+      "\\bgit\\b(?:\\s+[^\\n;]+)?\\s+commit\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "25fab860": {
    "moment": "weekly social batch proposal validation",
@@ -456,9 +385,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project",
       "write-work-shape"
      ],
      "bash_patterns": []
@@ -479,8 +405,17 @@
     {
      "kind": "gate",
      "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "2b66211d": {
    "moment": "fan-out brief / delegating tasks to agents",
@@ -491,12 +426,10 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
-      "\\bdispatch\\.py\\s+send\\b",
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
       "\\bcodex\\s+exec\\b",
       "\\bgrok\\b",
       "\\brun-engineering-dispatch\\b",
@@ -545,11 +478,7 @@
      "tools": [
       "WebSearch"
      ],
-     "verbs": [
-      "begin-capability-project",
-      "prepare-capability-project",
-      "start-capability-project"
-     ],
+     "verbs": [],
      "bash_patterns": []
     }
    ]
@@ -568,23 +497,6 @@
       "resolve-candidate"
      ],
      "bash_patterns": []
-    }
-   ]
-  },
-  "308ef1de": {
-   "moment": "pr_only_main_ruleset (GitHub server ruleset) - before a change reaches main",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "github-ruleset:main-pr-only"
-    },
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgit\\s+(?:checkout|switch|branch|worktree)\\b"
-     ]
     }
    ]
   },
@@ -645,10 +557,6 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "mcp__*__create_draft",
@@ -666,12 +574,8 @@
    ]
   },
   "3a9dbafd": {
-   "moment": "conduct_stop (conduct-stop-gate.py Stop)",
+   "moment": "external communication",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -821,10 +725,6 @@
    "moment": "completion_evidence gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [
@@ -832,7 +732,6 @@
       "admit-engineering-slice",
       "propose-ready-plan",
       "register-engineering-slice-plan",
-      "review-heavy-build-plan",
       "set-work-shape-disposition",
       "write-work-shape"
      ],
@@ -848,21 +747,6 @@
       "*bin/*",
       "*mcp-server/src/*.js",
       "*migrations/*.sql"
-     ]
-    }
-   ]
-  },
-  "4402973a": {
-   "moment": "healing/regenerating detected drifted vault content",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Write"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bvault-drift-watch\\b"
      ]
     }
    ]
@@ -936,8 +820,20 @@
     {
      "kind": "gate",
      "gate": "hooks/canonical-edit-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+      "NotebookEdit"
+     ],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4a9188f3": {
    "moment": "the teach verb, at a partner-correction/decision trigger",
@@ -979,16 +875,21 @@
     {
      "kind": "gate",
      "gate": "mcp-server/src/tools.js"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [
+      "update-document-status"
+     ],
+     "tools": [],
+     "bash_patterns": []
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "4e104d4c": {
    "moment": "completion_evidence gate, new-verb deployment claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -1006,14 +907,6 @@
      "path_globs": [
       "*mcp-server/src/tools.js"
      ]
-    }
-   ]
-  },
-  "4f7c348f": {
-   "moment": "session start",
-   "routes": [
-    {
-     "kind": "boot"
     }
    ]
   },
@@ -1065,8 +958,15 @@
     {
      "kind": "gate",
      "gate": "ops/trigger-grant-check.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*migrations/*.sql"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "54e2bcb9": {
    "moment": "versioned_record schema (tools.js+db) - contact fact promotion",
@@ -1108,24 +1008,6 @@
     }
    ]
   },
-  "5697071b": {
-   "moment": "an Alabama lead or deal arriving",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "new-client",
-      "new-deal",
-      "new-lead",
-      "prepare-document",
-      "set-market-agent",
-      "update-deal"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "57d13061": {
    "moment": "any X/x.com retrieval",
    "routes": [
@@ -1164,23 +1046,6 @@
     }
    ]
   },
-  "58b44ccb": {
-   "moment": "one_repo gate",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/one-repo-gate.py"
-    },
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgit\\s+clone\\b"
-     ]
-    }
-   ]
-  },
   "58cef3a1": {
    "moment": "correcting one of Joe's mislabeled statements",
    "routes": [
@@ -1192,10 +1057,6 @@
   "590b11e1": {
    "moment": "completion_evidence gate, metric completion claim",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "path_rule",
      "path_globs": [
@@ -1216,10 +1077,6 @@
   "5be2f462": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -1313,13 +1170,11 @@
      "verbs": [
       "accept-workflow",
       "advance-workflow-cutover-stage",
-      "assign-execution-route",
-      "issue-execution-envelope",
       "open-workflow-cutover-plan",
       "record-workflow-caller"
      ],
      "bash_patterns": [
-      "\\bdispatch\\.py\\s+send\\b",
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
       "\\bgrok\\b",
       "\\bcodex\\s+exec\\b",
       "\\blaunchctl\\b",
@@ -1497,10 +1352,6 @@
    "moment": "completion_evidence gate (shipping claim)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Artifact",
@@ -1530,12 +1381,10 @@
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
-      "\\bdispatch\\.py\\s+send\\b",
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
       "\\bcodex\\s+exec\\b",
       "\\bgrok\\b",
       "\\brun-engineering-dispatch\\b",
@@ -1647,10 +1496,6 @@
    "moment": "completion_evidence stop_gate - config-file change completion",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [],
@@ -1667,11 +1512,11 @@
    ]
   },
   "737a68d6": {
-   "moment": "duplicate of 204391be",
+   "moment": "duplicate of 49c627cc: discover and build a missing record-layer verb",
    "routes": [
     {
      "kind": "duplicate",
-     "survivor": "204391be"
+     "survivor": "49c627cc"
     }
    ]
   },
@@ -1691,10 +1536,6 @@
   "767f9b41": {
    "moment": "completion_evidence gate, confirmation response",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -1829,10 +1670,31 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": []
+    }
+   ]
+  },
+  "8400cd3d": {
+   "moment": "starting a plan, propose-ready-plan, or a Codex or Dot brief",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "EnterPlanMode",
+      "UpdatePlan",
+      "update_plan",
+      "functions.update_plan"
+     ],
+     "verbs": [
+      "propose-ready-plan",
+      "accept-ready-plan",
+      "register-engineering-slice-plan"
+     ],
+     "bash_patterns": [
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:/Users/booko/carr-system/|(?:\\./)?)bin/dot-relay['\"]?(?:\\s+--(?:credentials|state-dir)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send-job(?=[\\s;&|()<>]|$)"
+     ]
     }
    ]
   },
@@ -1859,10 +1721,6 @@
   "847f9995": {
    "moment": "completion_evidence stop_gate - unattended-path credential verification",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -1926,8 +1784,7 @@
    "moment": "blocker_decider gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/blocker-decider-gate.py"
+     "kind": "boot"
     }
    ]
   },
@@ -1959,10 +1816,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -1972,10 +1826,6 @@
   "8c1e6057": {
    "moment": "chat_lint stop_gate - asking a partner to open/edit/review a file",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -2110,10 +1960,6 @@
    "moment": "completion_evidence gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [
@@ -2167,38 +2013,6 @@
       "\\byt-dlp\\b",
       "\\bgrok\\b",
       "\\bpdftotext\\b"
-     ]
-    }
-   ]
-  },
-  "99e951b9": {
-   "moment": "index_upkeep pre-commit - content added under indexed multi-folder category",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "ops/githooks/index-upkeep-check.py"
-    }
-   ]
-  },
-  "9b081605": {
-   "moment": "no_send_worker check (outbound send)",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "mcp-server/src/mcp.js"
-    },
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_draft",
-      "mcp__*__forward",
-      "mcp__*__reply",
-      "mcp__*__send_message",
-      "mcp__*__update_draft"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\bgmail-handover\\b"
      ]
     }
    ]
@@ -2270,21 +2084,14 @@
     {
      "kind": "gate",
      "gate": "hooks/guard-unattended.py"
-    }
-   ]
-  },
-  "a2e78f48": {
-   "moment": "detecting a known broken thing with a known fix",
-   "routes": [
+    },
     {
      "kind": "trigger",
      "tools": [],
-     "verbs": [
-      "open-incident",
-      "record-defect",
-      "report-problem"
-     ],
-     "bash_patterns": []
+     "verbs": [],
+     "bash_patterns": [
+      "\\b(?:ssh|scp|sftp)\\b"
+     ]
     }
    ]
   },
@@ -2299,10 +2106,6 @@
   "a6e6ab4e": {
    "moment": "completion_evidence stop_gate - changed-system completion",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2383,10 +2186,6 @@
    "moment": "completion_evidence stop_gate - check-result reporting",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "path_rule",
      "path_globs": [
       "*hooks/*.py",
@@ -2404,8 +2203,12 @@
    "moment": "rule_shape gate (approve-rule)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/rule-shape-gate.py"
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "approve-rule"
+     ],
+     "bash_patterns": []
     }
    ]
   },
@@ -2487,10 +2290,8 @@
      "tools": [],
      "verbs": [
       "accept-ready-plan",
-      "begin-capability-project",
       "propose-ready-plan",
       "register-engineering-slice-plan",
-      "review-heavy-build-plan",
       "set-work-shape-disposition"
      ],
      "bash_patterns": [
@@ -2558,19 +2359,6 @@
     }
    ]
   },
-  "bbffc139": {
-   "moment": "Joe overrules, predicts, compresses, rules, or corrects within CARR work",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "log-decision"
-     ],
-     "bash_patterns": []
-    }
-   ]
-  },
   "bc4145f6": {
    "moment": "monthly review or recurring behavior pattern",
    "routes": [
@@ -2587,10 +2375,6 @@
   "bc9188b4": {
    "moment": "loose_work stop_gate - session Stop",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/loose-work-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -2653,38 +2437,9 @@
      "path_globs": [
       "*ops/config/rule-enforcement-map.json",
       "*ops/*-gate.py",
-      "*ops/config/gate-baseline.json",
       "*hooks/*.py",
       "*ops/*-check.py",
       "*ops/githooks/*"
-     ]
-    }
-   ]
-  },
-  "c1547ed1": {
-   "moment": "creating a new workflow/system/asset",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_scheduled_task"
-     ],
-     "verbs": [
-      "begin-capability-project",
-      "propose-ready-plan",
-      "register-engineering-slice-plan",
-      "review-heavy-build-plan",
-      "start-capability-project",
-      "write-work-shape"
-     ],
-     "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*Management/system-evolution-plan.md",
-      "*ops/scheduled-tasks/*",
-      "*ops/launchd/*"
      ]
     }
    ]
@@ -2704,7 +2459,6 @@
      "kind": "trigger",
      "tools": [],
      "verbs": [
-      "issue-execution-envelope",
       "record-finding"
      ],
      "bash_patterns": []
@@ -2714,10 +2468,6 @@
   "c315befa": {
    "moment": "chat_lint gate",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -2796,9 +2546,7 @@
      "tools": [
       "Agent"
      ],
-     "verbs": [
-      "assign-execution-route"
-     ],
+     "verbs": [],
      "bash_patterns": [
       "\\bclaude\\s+-p\\b"
      ]
@@ -2835,6 +2583,12 @@
     {
      "kind": "gate",
      "gate": "hooks/record-home-gate.py"
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*.md"
+     ]
     }
    ]
   },
@@ -2944,14 +2698,6 @@
     }
    ]
   },
-  "d5dcfe26": {
-   "moment": "asserting a decision or memo state is stale or unruled",
-   "routes": [
-    {
-     "kind": "boot"
-    }
-   ]
-  },
   "d7c69aa6": {
    "moment": "calendar ingest surfaces an unmatched attendee",
    "routes": [
@@ -2993,21 +2739,15 @@
    "moment": "chat_lint gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/chat-lint-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [
       "Agent"
      ],
      "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
       "record-dispatch-link"
      ],
      "bash_patterns": [
-      "\\bdispatch\\.py\\s+send\\b",
+      "\\A(?:(?:\\\\[^\\n]|\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\\\'\";&|()\\n])*[;&|()\\n])*[ \\t]*(?:['\"]?(?:/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/|(?:\\./)?\\.venv/bin/)?python3['\"]?\\s+)?['\"]?(?:(?:/(?:[^\\s\\'\";&|()]+/)?carr-system/|(?:\\./)?)tools/room-bridge/|(?:\\./)?)dispatch\\.py['\"]?(?:\\s+--(?:registry|results)(?:=|\\s+)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s'\";&|()]+))*\\s+send(?=[\\s;&|()<>]|$)",
       "\\bcodex\\s+exec\\b",
       "\\bgrok\\b",
       "\\brun-engineering-dispatch\\b",
@@ -3058,10 +2798,6 @@
   "dcf98880": {
    "moment": "completion_evidence gate (human verification instruction)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "boot"
     }
@@ -3129,10 +2865,6 @@
    "moment": "conduct_stop gate (before command handoff)",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/conduct-stop-gate.py"
-    },
-    {
      "kind": "boot"
     }
    ],
@@ -3183,42 +2915,9 @@
     }
    ]
   },
-  "e8868cbe": {
-   "moment": "completion_evidence gate",
-   "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
-     "kind": "trigger",
-     "tools": [
-      "mcp__*__create_scheduled_task",
-      "mcp__*__update_scheduled_task"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "\\blaunchctl\\b",
-      "\\bcrontab\\b"
-     ]
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*ops/scheduled-tasks/*",
-      "*ops/launchd/*",
-      "*.plist"
-     ]
-    }
-   ]
-  },
   "eaa31ac5": {
    "moment": "completion_evidence gate (delivery claim)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -3235,24 +2934,6 @@
       "record-finding"
      ],
      "bash_patterns": []
-    }
-   ]
-  },
-  "ede4b241": {
-   "moment": "dispatching work to another model or launching a cloud session (model choice)",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Agent",
-      "mcp__*__create_session",
-      "mcp__*__create_trigger"
-     ],
-     "verbs": [],
-     "bash_patterns": [
-      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--(?:remote|cloud)(?=[\\s=;&|)<>]|$)",
-      "(?<![\\w.-])claude[ \\t]+(?:(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)[ \\t]+)*--environment(?:[ \\t]+|=)(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()'\"]+)"
-     ]
     }
    ]
   },
@@ -3313,10 +2994,6 @@
   "f04a05aa": {
    "moment": "completion_evidence gate (autonomous-run completion)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [
@@ -3384,10 +3061,6 @@
    "moment": "completion_evidence gate",
    "routes": [
     {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
-    {
      "kind": "trigger",
      "tools": [],
      "verbs": [
@@ -3429,8 +3102,21 @@
     {
      "kind": "gate",
      "gate": "hooks/costar-lane-gate.py"
+    },
+    {
+     "kind": "trigger",
+     "verbs": [],
+     "tools": [
+      "mcp__*__navigate",
+      "mcp__*__get_page_text",
+      "mcp__*__computer"
+     ],
+     "bash_patterns": [
+      "\\bcostar\\.com\\b"
+     ]
     }
-   ]
+   ],
+   "note": "Candidate event route; full boot retained until rule-specific benchmark and real-turn replacement proofs pass."
   },
   "f92dfab2": {
    "moment": "client_asset_packet render (search-packet)",
@@ -3455,10 +3141,6 @@
   "fa217e48": {
    "moment": "completion_evidence gate (completion/file claims)",
    "routes": [
-    {
-     "kind": "gate",
-     "gate": "hooks/completion-evidence-gate.py"
-    },
     {
      "kind": "trigger",
      "tools": [],
@@ -3510,49 +3192,6 @@
     }
    ]
   },
-  "fb110a39": {
-   "moment": "starting a task or fan-out brief (model choice)",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [
-      "Agent"
-     ],
-     "verbs": [
-      "assign-execution-route",
-      "issue-execution-envelope",
-      "record-dispatch-link"
-     ],
-     "bash_patterns": [
-      "\\bdispatch\\.py\\s+send\\b",
-      "\\bcodex\\s+exec\\b",
-      "\\bgrok\\b",
-      "\\brun-engineering-dispatch\\b",
-      "\\bclaude\\s+-p\\b"
-     ]
-    }
-   ]
-  },
-  "fb2b263d": {
-   "moment": "after deciding or building, checking other index/context files",
-   "routes": [
-    {
-     "kind": "trigger",
-     "tools": [],
-     "verbs": [
-      "log-decision"
-     ],
-     "bash_patterns": []
-    },
-    {
-     "kind": "path_rule",
-     "path_globs": [
-      "*INDEX.md",
-      "*.md"
-     ]
-    }
-   ]
-  },
   "fc21a431": {
    "moment": "any partner correction",
    "routes": [
@@ -3572,6 +3211,246 @@
    "routes": [
     {
      "kind": "boot"
+    }
+   ]
+  },
+  "661d7757": {
+   "moment": "seeking an independent review judgment (Jev) on code, CI, a PR, product or a record",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "ask-jev",
+      "review-engineering-slice"
+     ],
+     "bash_patterns": [
+      "\\bgh\\s+pr\\s+review\\b"
+     ]
+    }
+   ]
+  },
+  "f673326b": {
+   "moment": "granting or briefing an agent's access to CARR knowledge, records or tools",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Agent"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bdispatch\\.py\\s+send\\b"
+     ]
+    }
+   ]
+  },
+  "a3da3d39": {
+   "moment": "leaving a rule, decision or retirement waiting on Joe's approval",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "AskUserQuestion"
+     ],
+     "verbs": [
+      "teach",
+      "amend-rule",
+      "retire-rule",
+      "log-decision",
+      "admit-rule"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "76fcbed6": {
+   "moment": "Joe sends a link, article, repo, video or other source",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch",
+      "mcp__*__get_page_text",
+      "mcp__*__navigate"
+     ],
+     "verbs": [
+      "record-source-observation"
+     ],
+     "bash_patterns": [
+      "\\bcurl\\b",
+      "\\bwget\\b",
+      "\\byt-dlp\\b",
+      "\\bpdftotext\\b"
+     ]
+    }
+   ]
+  },
+  "08c4eda2": {
+   "moment": "assigning, working or representing an Alabama lead or deal",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "new-client",
+      "new-deal",
+      "new-lead",
+      "prepare-document",
+      "set-market-agent",
+      "update-deal",
+      "claim-lead",
+      "record-representation-agreement",
+      "record-loi-submission"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "67e48aaf": {
+   "moment": "Joe pastes a token or credential into chat or a screenshot",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bwrangler\\s+secret\\b",
+      "\\bgh\\s+auth\\b",
+      "\\bexport\\s+\\w*(?:TOKEN|KEY|SECRET|PASSWORD)\\w*=",
+      "\\bpbpaste\\b"
+     ]
+    }
+   ]
+  },
+  "a9fc3f0e": {
+   "moment": "running research or a fact-check",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "WebFetch",
+      "WebSearch"
+     ],
+     "verbs": [
+      "list-research-sites",
+      "add-research-site",
+      "remove-research-site"
+     ],
+     "bash_patterns": []
+    }
+   ]
+  },
+  "ac0a6579": {
+   "moment": "building or reviewing access for a client share-site page",
+   "routes": [
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*share*"
+     ]
+    }
+   ]
+  },
+  "578fdd91": {
+   "moment": "contact enrichment finds a wrong or blank field",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "correct-party-identity",
+      "update-party-contact",
+      "update-vendor",
+      "record-finding"
+     ],
+     "bash_patterns": [
+      "\\bnppes\\b",
+      "\\benrich"
+     ]
+    }
+   ]
+  },
+  "486584d6": {
+   "moment": "work needs a web console Joe is signed into on the MacBook",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "mcp__*__navigate",
+      "mcp__*__get_page_text"
+     ],
+     "verbs": [],
+     "bash_patterns": [
+      "\\bpbpaste\\b",
+      "\\bwrangler\\s+login\\b"
+     ]
+    }
+   ]
+  },
+  "07dde434": {
+   "moment": "designing or reviewing anything a prospect or client will use",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [
+      "Artifact"
+     ],
+     "verbs": [
+      "create-tour-public-projection-draft",
+      "issue-tour-share-grant",
+      "seal-tour-public-projection"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "read_only": true,
+     "path_globs": [
+      "*dealroom/*",
+      "*workspace/public/*",
+      "*control-room/public/*",
+      "*design/*",
+      "*.html",
+      "*share*"
+     ]
+    }
+   ]
+  },
+  "cfe6b5c6": {
+   "moment": "designing or reviewing a mechanism that defaults to shadow, dry-run or record-only",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "propose-ready-plan"
+     ],
+     "bash_patterns": []
+    },
+    {
+     "kind": "path_rule",
+     "path_globs": [
+      "*hooks/*.py",
+      "*ops/launchd/*",
+      "*ops/config/*.json"
+     ]
+    }
+   ]
+  },
+  "c363bd8b": {
+   "moment": "preparing to merge open PRs",
+   "routes": [
+    {
+     "kind": "trigger",
+     "tools": [],
+     "verbs": [
+      "confirm-merge"
+     ],
+     "bash_patterns": [
+      "\\bgh\\s+pr\\s+merge\\b"
+     ]
     }
    ]
   }

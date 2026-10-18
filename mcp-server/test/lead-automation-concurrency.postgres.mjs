@@ -50,8 +50,8 @@ try {
     if(mode==='draft')match=sql=>sql.includes('select l.id,l.party_id,l.owner_id');
     if(mode==='approve-draft'){const d=await draft(f);verb='approve-lead-draft';args={draft_id:d.id};match=sql=>sql.includes('select d.* from lead_contact_draft d join lead');}
     if(mode==='approve-move') {
-      const m=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by)
-        values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3) returning id`,[f.lead,f.activity,actor.id])).rows[0];
+      const m=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by,reason)
+        values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3,'Synthetic reply received') returning id`,[f.lead,f.activity,actor.id])).rows[0];
       verb='approve-lead-move';args={move_id:m.id,base_version:1};match=sql=>sql.includes('select m.*,l.version,l.stage');
     }
     const pause=pauseAfter(a,match);
@@ -68,8 +68,8 @@ try {
     let args={idempotency_key:randomUUID()};
     if(verb==='approve-lead-draft')args.draft_id=(await draft(f)).id;
     if(verb==='approve-lead-move') {
-      args.move_id=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by)
-        values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3) returning id`,[f.lead,f.activity,actor.id])).rows[0].id;
+      args.move_id=(await observer.query(`insert into lead_stage_move(lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by,reason)
+        values($1,'new','qualified',$2,'local-mail:synthetic','weak','proposed',$3,'Synthetic reply received') returning id`,[f.lead,f.activity,actor.id])).rows[0].id;
       args.base_version=1;
     }
     if(verb==='record-lead-contact')args={...args,lead:f.ref,native_ref:'local-mail:overlap-'+randomUUID(),counterparty_address:'contact@example.test',kind:'email_in',occurred_at:new Date(Date.now()-10000).toISOString(),automated:false};

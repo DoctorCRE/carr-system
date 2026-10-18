@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-import uuid
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import record_call, repair_loop  # noqa: E402
 
 THRESHOLD_HOURS = 2
 REMEDIATION = {
@@ -189,7 +190,8 @@ def evaluate(judge_path, calls_path, *, now=None, threshold_hours=THRESHOLD_HOUR
         state = transition(state, "legacy_incomplete", at=now, now=now, legacy_mtime=mtime)
     if ((state["state"] in ("failing_in_grace", "outage_open") and
          not parse_time(state.get("first_failure_at"))) or
-            (state.get("loop_id") and state["state"] == "healthy")):
+            (state.get("loop_id") and state["state"] == "healthy" and
+             state.get("recovered_by_usable_success") is not True)):
         state = transition(state, "legacy_incomplete", at=now, now=now, legacy_mtime=mtime)
 
     calls, call_loss = _log(calls_path)
@@ -254,14 +256,6 @@ def evaluate(judge_path, calls_path, *, now=None, threshold_hours=THRESHOLD_HOUR
     return state
 
 
-def _save(path, state):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
-    temporary.replace(path)
-
-
 def _body(reason):
     if reason in ("log_unreadable", "state_unreadable"):
         return ("Jev outage remains open: judgment log or call receipt log is "
@@ -276,100 +270,61 @@ def _body(reason):
             "Verify with a usable Jev judgment. This loop auto-closes on that judgment.")
 
 
+def outage_blocker(reason):
+    """add-loop owner and blocker fields for an outage, in its residue vocabulary.
+
+    Only credits and the API credential wait on Joe (decision cbe91287); a
+    timeout, rate limit or unreadable log is the orchestrator's to repair.
+    """
+    if reason == "billing_exhausted":
+        return {"owner": "Joe", "blocker": "human_only",
+                "blocker_detail": "Joe must add TypeSafe account credits",
+                "residue_kind": "money_movement", "residue_host": "TypeSafe"}
+    if reason == "auth_failed":
+        return {"owner": "Joe", "blocker": "capability",
+                "blocker_detail": "Joe signs back in to the TypeSafe provider (auth_failed)",
+                "residue_kind": "provider_login", "residue_host": "TypeSafe"}
+    return {"owner": "claude", "blocker": "other_lane",
+            "blocker_detail": f"The orchestrator must restore TypeSafe judgments after a provider failure: {reason}"}
+
+
 def reconcile(result, state_path, verb):
     """Idempotently open/update the one outage loop, then close on success."""
-    path = Path(state_path)
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(state, dict):
-            raise ValueError("non-object state")
-    except FileNotFoundError:
-        state = {}
-    except (OSError, UnicodeError, ValueError):
-        # Preserve the damaged evidence before replacing the generated state.
-        try:
-            shutil.copy2(path, path.with_name(path.name + f".corrupt-{uuid.uuid4()}"))
-        except OSError:
-            return "error"
-        state = {}
-    if result["status"] == "skip" and result["pending"]:
-        _save(state_path, {**state, **result})
-        return "none"
-    if result["status"] == "warn":
-        reason = result["reason"]
+        state = repair_loop.read_state(state_path)
         previous = dict(state)
-        state = {**state, **result}
+        state.update(result)
         first = parse_time(result.get("first_failure_at"))
-        first_changed = bool(first and previous.get("first_failure_at") != first.isoformat())
         if first:
             state["first_failure_at"] = first.isoformat()
-        if state.get("loop_id"):
-            newer_attempt = parse_time(result.get("attempt_at"))
-            saved_attempt = parse_time(previous.get("attempt_at"))
-            if newer_attempt and (not saved_attempt or newer_attempt > saved_attempt):
-                state["attempt_at"] = newer_attempt.isoformat()
-            if previous.get("reason") == reason:
-                if first_changed or newer_attempt and (
-                        not saved_attempt or newer_attempt > saved_attempt):
-                    _save(state_path, state)
-                return "open"
-            payload = {"idempotency_key": str(uuid.uuid4()), "loop_id": state["loop_id"],
-                       "body": _body(reason)}
-            response = verb("update-loop", payload)
-            if not response.get("ok"):
-                return "error"
-            state["reason"] = reason
-            _save(state_path, state)
-            return "updated"
-        key = state.get("open_key") or str(uuid.uuid4())
-        state["open_key"] = key
-        _save(state_path, state)
-        payload = {"idempotency_key": key, "kind": "open_loop", "owner": "Joe",
-                   "domain": "system",
-                   "blocker": "human_only" if reason == "billing_exhausted" else "capability",
-                   "blocker_detail": ("Joe must add TypeSafe account credits"
-                                      if reason == "billing_exhausted"
-                                      else f"TypeSafe provider failure: {reason}"),
-                   "body": _body(reason)}
-        response = verb("add-loop", payload)
-        loop_id = response.get("loop_id")
-        if not response.get("ok") or not isinstance(loop_id, str):
-            return "error"
-        _save(state_path, {**state, "loop_id": loop_id, "state": "outage_open"})
-        return "opened"
-    if (result["status"] == "ok" and result.get("state") == "healthy" and
-            result.get("recovered_by_usable_success") is True and state.get("loop_id")):
-        key = state.get("close_key") or str(uuid.uuid4())
-        state["close_key"] = key
-        _save(state_path, state)
-        response = verb("close-loop", {
-            "idempotency_key": key, "loop_id": state["loop_id"], "resolution": "done",
-            "outcome": "A new usable Jev judgment verified that the TypeSafe outage cleared."})
-        if not response.get("ok"):
-            return "error"
-        _save(state_path, {key: value for key, value in result.items()
-                           if key not in ("loop_id", "open_key", "close_key")})
-        return "cleared"
-    if (result["status"] == "ok" and result.get("state") == "healthy" and
-            result.get("recovered_by_usable_success") is True and state.get("first_failure_at")):
-        _save(state_path, result)
-        return "cleared"
-    if (result["status"] == "ok" and result.get("state") == "healthy" and
-            result.get("recovered_by_usable_success") is True):
-        _save(state_path, result)
-    return "none"
+        def save():
+            repair_loop.save_state(state_path, state)
+        if result["status"] == "skip" and result["pending"]:
+            save()
+            return "none"
+        if result["status"] == "warn":
+            reason = result["reason"]
+            payload = {"kind": "open_loop", "domain": "system", **outage_blocker(reason), "body": _body(reason)}
+            outcome = repair_loop.reconcile(state, payload, verb, save)
+            if state.get("loop_id"):
+                state["state"] = "outage_open"
+            save()
+            return outcome
+        if (result["status"] == "ok" and result.get("state") == "healthy" and
+                result.get("recovered_by_usable_success") is True):
+            outcome = repair_loop.reconcile(state, None, verb, save, outcome=
+                "A new usable Jev judgment verified that the TypeSafe outage cleared.")
+            save()
+            return "cleared" if outcome == "cleared" or previous.get("first_failure_at") else "none"
+        return "none"
+    except (OSError, ValueError, RuntimeError):
+        return "error"
 
 
-def call_verb(name, payload, *, repo):
-    process = subprocess.run(["./run.sh", "call", name, json.dumps(payload)],
-                             cwd=repo, capture_output=True, text=True, timeout=35,
-                             stdin=subprocess.DEVNULL)
-    if process.returncode:
-        return {"ok": False}
-    output = process.stdout
-    start = output.find("{")
-    try:
-        response = json.loads(output[start:]) if start >= 0 else {}
-    except json.JSONDecodeError:
-        response = {}
-    return response if isinstance(response, dict) else {"ok": False}
+def call_verb(name, payload):
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
+    `refused` marks a definite no from the record layer (nothing written)."""
+    result = record_call.call_verb(name, payload, timeout=35)
+    if result.ok and isinstance(result.reply, dict):
+        return result.reply
+    return {"ok": False, "refused": result.kind == record_call.REFUSED}

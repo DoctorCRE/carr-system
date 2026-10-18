@@ -301,7 +301,11 @@ def _review(region, task, client=None, api_key=None):
         for qid, (text, true, false) in TASK_QUESTIONS.items():
             questions[qid] = tsc.noul(text, true=true, false=false)
         state["task"] = {"latest_human_request": task[:3000]}
-    answer = _semantic().ask(state, questions, caller="jev_code_review", version="vendor-v1", client=tsc, timeout=TIMEOUT_SECONDS, api_key=api_key)
+    semantic = _semantic()
+    answer = semantic.evaluate(semantic.JudgmentRequest(
+        state, questions, caller="jev_code_review", version="vendor-v1",
+        timeout=TIMEOUT_SECONDS, api_key=api_key),
+        adapter=semantic.LiveAdapter(client=tsc)).unwrap()
     scores = {qid: answer_value(body)
               for qid, body in (answer.get("answers") or {}).items()}
     model = answer.get("model")

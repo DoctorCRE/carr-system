@@ -1,2 +1,10 @@
-**/traces/
-report.html
+*
+!.gitignore
+!baseline/
+!baseline/*
+!v3/
+!v3/results.jsonl
+!v3/summary.json
+!v3/compare.txt
+!trajectory/
+!trajectory/scores.tsv

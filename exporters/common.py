@@ -28,6 +28,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.credential_file import credential  # noqa: E402
+
 import psycopg
 
 REPO = Path(__file__).resolve().parent.parent
@@ -237,23 +240,11 @@ class ProviderWaitResult:
 
 
 def connect():
-    url = os.environ.get("CARR_DB_EXPORTER_URL")
-    if not url:
-        env = Path.home() / ".config/carr/db.env"
-        if env.exists():
-            for line in env.read_text().splitlines():
-                if line.startswith("CARR_DB_EXPORTER_URL="):
-                    # .strip("\"'") IS LOAD-BEARING, added 2026-08-02. db.env has TWO
-                    # parsers with OPPOSITE requirements. `set -a; . db.env` (the exact
-                    # line bin/nightly.sh uses) needs values QUOTED: an unquoted `&` in
-                    # the jobs URL killed that line for two days and the cadence engine
-                    # and availability matcher reported NOT CONFIGURED the whole time.
-                    # Quoting the file fixed the shell and broke THIS parser, which fed
-                    # psycopg a DSN with a literal apostrophe on the front and died with
-                    # `invalid connection option` — blinding the export register, the one
-                    # check that would report exports having stopped. Do not remove either
-                    # half. Same fix in pipelines/brief_pack.py and lib/record_sources.py.
-                    url = line.split("=", 1)[1].strip().strip("\"'")
+    # db.env is read through lib/credential_file, the one Python reader of it.
+    # Its values are shell-quoted so `set -a; . db.env` survives an `&` in the
+    # DSN; on 2026-08-02 a hand-rolled parser here fed psycopg the quotes and
+    # blinded the export register. The shared reader unquotes as the shell does.
+    url = credential("CARR_DB_EXPORTER_URL")
     if not url:
         sys.exit("no CARR_DB_EXPORTER_URL (see ~/.config/carr/db.env)")
     return psycopg.connect(url)

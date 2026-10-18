@@ -4,6 +4,7 @@ runs in a real throwaway folder. No Flash server, no Jev, no network. The live r
 from __future__ import annotations
 
 import atexit
+from contextlib import ExitStack
 import functools
 import importlib.util
 import json
@@ -26,8 +27,8 @@ SANDBOXED = os.path.exists(fs.SANDBOX_EXEC)
 # The loop tests run real scripts. On the Mac they run inside the real sandbox; where there is no sandbox (Linux CI)
 # they opt out in code, never through the environment, because the CLI has no way to reach sandbox=False.
 RUNNER = fs.run_code if SANDBOXED else functools.partial(fs.run_code, sandbox=False)
-TEMPS: list[str] = []
-atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True) for d in TEMPS])
+TEMP_STACK = ExitStack()
+atexit.register(TEMP_STACK.close)
 
 
 def solve(*args, **kw):
@@ -35,9 +36,7 @@ def solve(*args, **kw):
 
 
 def tmpdir(prefix="fs-test-"):
-    d = tempfile.mkdtemp(prefix=prefix)
-    TEMPS.append(d)
-    return d
+    return TEMP_STACK.enter_context(tempfile.TemporaryDirectory(prefix=prefix))
 
 
 def check(label, fn):

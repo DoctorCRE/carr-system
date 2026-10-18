@@ -19,7 +19,6 @@ import {
   validateBenchmarkManifest, validateBenchmarkPayload,
 } from "../src/benchmark-minimum.v5.js";
 
-// --- fixtures ---------------------------------------------------------------
 
 const D = n => `sha256:${String(n).padStart(2, "0").repeat(32)}`;
 const I = actor => ({
@@ -79,7 +78,6 @@ function manifest(body = payload(), { acceptedAt = ACCEPTED_AT, acceptor = I("jo
   };
 }
 
-/** One well-formed measurement set covering exactly the required matrix. */
 function measurements(body = payload(), { valueFor = () => 100 } = {}) {
   return {
     schema_version: "doctorcre-v5-benchmark-measurement-set.v1",
@@ -95,12 +93,6 @@ function measurements(body = payload(), { valueFor = () => 100 } = {}) {
   };
 }
 
-/**
- * The coverage fact a trusted producer would compose from that measurement set.
- * Composed through the module's own composer so the fixture cannot drift from
- * the evaluator; a test that needs a fact the evaluator would never emit builds
- * it by mutating this one, which is the only way such a fact can exist.
- */
 function coverageFact(body = payload(), overrides = {}) {
   const fact = copy(proposeBenchmarkCoverageFact({
     payload: body,
@@ -174,10 +166,6 @@ const at = (s, step) => s.members.find(m => m.step_ref === step);
 const PHI = "step:global-no-phi-boundary-independent-receipt";
 const SECRETS = "step:global-secrets-boundary-independent-receipt";
 
-/**
- * Test-only authenticating capability. The evidence map is installed by trusted
- * test code; no JSON flag can cause an unknown envelope to acquire a projection.
- */
 function harness() {
   const evidence = new Map();
   let serial = 0;
@@ -201,7 +189,6 @@ const run = projection => harness().evaluate(projection);
 const refuse = (projection, code) => assert.throws(() => run(projection), e => e.code === code, code);
 const refuseCall = (fn, code) => assert.throws(fn, e => e.code === code, code);
 
-// --- the closed benchmark manifest -----------------------------------------
 
 test("the manifest is exactly thirty closed fields split into payload and envelope", () => {
   assert.equal(BENCHMARK_MANIFEST_FIELDS.length, 30);
@@ -344,8 +331,6 @@ test("the payload digest omits the acceptance envelope and is stable across key 
   const m = manifest(body);
   assert.equal(m.benchmark_manifest_digest, expected);
   assert.deepEqual(benchmarkPayloadOf(m), body);
-  // Re-accepting the same payload with a different acceptor or instant does not
-  // move the digest: the envelope is authenticated separately, never hashed in.
   assert.equal(manifest(body, { acceptor: I("dell"), acceptedAt: "2026-03-09T00:00:00.000Z" })
     .benchmark_manifest_digest, expected);
 });
@@ -377,7 +362,6 @@ test("no caller boolean can stand in for a verified human acceptance", () => {
   refuseCall(() => validateBenchmarkManifest({ ...manifest(), verified_human: true }), "closed_shape");
 });
 
-// --- admissibility is a proposal, never an acceptance -----------------------
 
 test("benchmark admissibility proposes a digest and accepts nothing", () => {
   const body = payload();
@@ -397,23 +381,18 @@ test("benchmark admissibility proposes a digest and accepts nothing", () => {
   assert.ok(Object.isFrozen(result));
 });
 
-// --- the workload matrix and the nearest-rank p95 rule ----------------------
 
 test("nearest-rank p95 is the one-based ceiling(0.95 * n) observation", () => {
   assert.equal(nearestRankP95(Array.from({ length: 20 }, (_, i) => i + 1)), 19);
   assert.equal(nearestRankP95(Array.from({ length: 100 }, (_, i) => i + 1)), 95);
   assert.equal(nearestRankP95(Array.from({ length: 40 }, (_, i) => i + 1)), 38);
   assert.equal(nearestRankP95([5, 1, 3]), 5);
-  // Order of presentation cannot change the answer.
   assert.equal(nearestRankP95([9, 2, 7, 4, 1]), 9);
 });
 
 test("the required matrix is the declared cross product and every cell must be measured", () => {
   const body = payload();
   const cells = benchmarkRequiredCells(body);
-  // 2 capacity x 2 workloads x 2 concurrency x 1 arrival x 1 browser x 1 runtime
-  // x 1 device x 1 hardware x 1 network = 8 environment cells, crossed with
-  // 1 warm route + 1 cold route + 1 endpoint over both cache states.
   assert.equal(cells.length, 8 * (1 + 1 + 2));
   assert.equal(new Set(cells.map(c => digest(c))).size, cells.length);
   for (const metric of Object.keys(BENCHMARK_METRICS)) {
@@ -478,7 +457,6 @@ test("warmup runs must be exercised and excluded, and exclusions cannot shrink a
   noWarmup.cells[0].warmup_samples = [];
   refuseCall(() => evaluateBenchmarkWorkloadCoverage({ payload: body, measurements: noWarmup }),
     "benchmark_warmup_run_count_mismatch");
-  // A warmup observation is never a sample: a slow warmup cannot fail a cell.
   const slowWarmup = measurements(body);
   slowWarmup.cells.forEach(c => { c.warmup_samples = c.warmup_samples.map(() => 60000); });
   assert.equal(evaluateBenchmarkWorkloadCoverage({ payload: body, measurements: slowWarmup })
@@ -487,9 +465,6 @@ test("warmup runs must be exercised and excluded, and exclusions cannot shrink a
   thin.cells[0].excluded_sample_indexes = [0];
   refuseCall(() => evaluateBenchmarkWorkloadCoverage({ payload: body, measurements: thin }),
     "benchmark_sample_floor_not_met");
-  // With headroom above the floor an exclusion is permitted, and it excludes:
-  // twenty-two samples put the nearest-rank index on the twenty-first, so the
-  // two outliers decide the cell unless they are actually removed.
   const wide = measurements(body, { valueFor: () => 10 });
   wide.cells.forEach(c => {
     c.samples = [...c.samples, 9000, 9000];
@@ -534,7 +509,6 @@ test("admissibility carries the coverage verdict when measurements are supplied"
   }), "benchmark_slo_not_met");
 });
 
-// --- the Foundation/Assurance minimum join ----------------------------------
 
 test("the join consumes exactly the eight declared gates and Gate Zero", () => {
   assert.equal(MINIMUM_REQUIRED_MEMBERS.length, 8);
@@ -589,7 +563,6 @@ test("source construction cannot start the clock, accept the benchmark or claim 
     creates_effect: false, database_writes: 0, network_calls: 0, provider_actions: 0,
     notifications: 0, schedules: 0, deployments: 0, activations: 0, acceptances: 0,
   });
-  // Two evaluations of the same projection are byte-identical: nothing accrued.
   assert.equal(digest(run(snapshot())), digest(result));
 });
 
@@ -597,7 +570,6 @@ test("the join is unreachable without an installed authenticating dependency", (
   refuseCall(() => createFoundationAssuranceMinimumGate(), "authenticated_verifier_required");
   refuseCall(() => createFoundationAssuranceMinimumGate({}), "authenticated_verifier_required");
   refuseCall(() => createFoundationAssuranceMinimumGate({ authenticateEvidence: true }), "authenticated_verifier_required");
-  // A projection is not reachable by asserting one in the request.
   const gate = createFoundationAssuranceMinimumGate({ authenticateEvidence: () => { throw new Error("refused"); } });
   assert.throws(() => gate.evaluate({ snapshot: snapshot() }), /refused/);
 });
@@ -613,7 +585,6 @@ test("authentication must bind to the exact envelope bytes supplied", () => {
   refuseCall(() => open.evaluate({ synthetic_evidence_ref: "a00-test-open" }), "closed_shape");
 });
 
-// --- missing, extra, duplicate and unrequired members -----------------------
 
 test("a missing member denies, whichever member it is", () => {
   for (const spec of MINIMUM_REQUIRED_MEMBERS) {
@@ -645,7 +616,6 @@ test("a duplicated member, receipt or gate denies the join", () => {
   refuse(empty, "missing_required_member");
 });
 
-// --- currentness, binding, scope and provenance -----------------------------
 
 test("a stale, future or over-long member receipt denies", () => {
   const stale = snapshot();
@@ -729,7 +699,6 @@ test("a contract-presence receipt with no comparator or evidence pointer denies"
   refuse(unsafe, "invalid_evidence_ref");
 });
 
-// --- independence -----------------------------------------------------------
 
 test("a member that reviews its own maker is self-attested", () => {
   for (const seat of ["producer_identity", "evaluator_identity"]) {
@@ -737,7 +706,6 @@ test("a member that reviews its own maker is self-attested", () => {
     at(s, PHI).receipt[seat] = copy(at(s, PHI).receipt.subject_maker_identity);
     assert.throws(() => run(s), e => e.code === "member_self_attestation" && e.detail.field === seat, seat);
   }
-  // Sharing only the session is still one seat.
   const session = snapshot();
   at(session, PHI).receipt.producer_identity.session_ref = at(session, PHI).receipt.subject_maker_identity.session_ref;
   refuse(session, "member_self_attestation");
@@ -774,14 +742,11 @@ test("the human benchmark authority is distinct from the builder, the reviewers 
     install(s);
     assert.throws(() => run(s), e => e.code === "benchmark_authority_not_independent");
   }
-  // Either verified partner may hold the benchmark authority: independence is
-  // per seat, not a prohibition on a partner appearing in the record.
   const other = snapshot();
   at(other, BENCHMARK_STEP_REF).receipt = manifest(payload(), { acceptor: I("dell") });
   assert.equal(run(other).admissible, true);
 });
 
-// --- the benchmark member inside the join -----------------------------------
 
 test("the join binds the one exact accepted manifest digest", () => {
   const replacement = payload();
@@ -819,20 +784,11 @@ test("benchmark acceptance before or at Gate Zero is refused, and after it is ad
 });
 
 test("acceptance AT the reference instant is refused, because M01 needs it strictly earlier", () => {
-  // The join stamps the receipt it proposes with observed_at = as_of, and the
-  // clock kernel refuses a benchmark accepted at or after the origin receipt's
-  // own observation. Admitting the equal instant here would propose a receipt
-  // that can never become a clock origin, so the two boundaries are one.
   const equal = snapshot();
   at(equal, BENCHMARK_STEP_REF).receipt = manifest(payload(), { acceptedAt: AS_OF });
-  // The coverage fact beside it is complete, current and passing: a fully
-  // measured benchmark accepted at the reference instant is still refused, and
-  // the acceptance boundary is not something coverage evidence can buy past.
   assert.equal(equal.benchmark_coverage.coverage_complete, true);
   assert.equal(equal.benchmark_coverage.all_required_cells_meet_slo, true);
   refuse(equal, "benchmark_accepted_at_or_after_reference");
-  // One millisecond earlier is admitted, so the rule is exclusive rather than
-  // merely strict-looking, and the admitted instant is the one reported.
   const before = snapshot();
   const acceptedAt = iso(Date.parse(AS_OF) - 1);
   at(before, BENCHMARK_STEP_REF).receipt = manifest(payload(), { acceptedAt });
@@ -842,7 +798,6 @@ test("acceptance AT the reference instant is refused, because M01 needs it stric
   assert.ok(Date.parse(result.benchmark_accepted_at) < Date.parse(result.proposed_receipt.observed_at));
 });
 
-// --- the authenticated benchmark coverage fact ------------------------------
 
 test("the join consumes an authenticated coverage fact and republishes what it bound", () => {
   const result = run(snapshot());
@@ -854,21 +809,14 @@ test("the join consumes an authenticated coverage fact and republishes what it b
   assert.equal(result.benchmark_coverage_evaluation_digest, fact.evaluation_digest);
   assert.equal(result.benchmark_coverage_observed_at, COVERAGE_AT);
   assert.equal(result.benchmark_coverage_required_cell_count, benchmarkRequiredCells(payload()).length);
-  // The join evaluated no measurements and verified no stored artifact; it bound
-  // a fact and says so in both directions.
   assert.equal(result.benchmark_coverage_evaluated_here, false);
   assert.equal(result.durable_coverage_verification_required, true);
   assert.equal(result.authority_granted, false);
-  // And none of it touches the r7-exact receipt or its digest.
   assert.deepEqual(Object.keys(result.proposed_receipt).sort(), [...CONSUMER_GATE_RECEIPT_FIELDS].sort());
   assert.equal(result.proposed_receipt_reference_digest, digest(result.proposed_receipt));
 });
 
 test("a projection carrying no coverage fact refuses by naming the fact it lacks", () => {
-  // This is the gap the audit found: an accepted manifest with no measurement
-  // evidence used to be indistinguishable here from a measured one. It now
-  // refuses, and it refuses with the concrete missing fact rather than by
-  // defaulting the manifest to unevaluated and passing anyway.
   const absent = snapshot();
   delete absent.benchmark_coverage;
   assert.throws(() => run(absent),
@@ -888,8 +836,6 @@ test("a coverage fact bound to another payload, rule or method refuses", () => {
   const wrongPayload = snapshot();
   wrongPayload.benchmark_coverage.benchmark_payload_digest = D(96);
   refuse(wrongPayload, "benchmark_coverage_payload_binding_mismatch");
-  // A complete, passing evaluation of a DIFFERENT benchmark is not evidence
-  // about this one, however honest it is about its own.
   const other = payload();
   other.routes = ["/prospecting"];
   const swapped = snapshot();
@@ -915,11 +861,6 @@ test("the measurement and evaluation pointers are bound in form and left to the 
   const unsafe = snapshot();
   unsafe.benchmark_coverage.evidence_ref = "https://example.invalid/coverage";
   refuse(unsafe, "invalid_evidence_ref");
-  // STATED PLAINLY, because it is the limit of what a source kernel holding no
-  // measurements can prove: a well-formed pointer to the WRONG measurement set
-  // is admitted here. Re-deriving these two digests from the stored artifacts is
-  // the verifier obligation the module header retains, and nothing in this file
-  // discharges it or claims it was discharged.
   const unbound = snapshot();
   unbound.benchmark_coverage.measurement_set_digest = D(95);
   unbound.benchmark_coverage.evaluation_digest = D(94);
@@ -944,10 +885,6 @@ test("counts cannot be claimed: the join re-derives the required cell count", ()
   const incomplete = snapshot();
   incomplete.benchmark_coverage.coverage_complete = false;
   refuse(incomplete, "benchmark_coverage_incomplete");
-  // The case the re-derivation exists for: the accepted manifest's matrix is
-  // wider than the one the evaluation covered, and every field of the fact is
-  // internally consistent. Only recomputing the count from the ACCEPTED payload
-  // catches it.
   const wider = payload();
   wider.routes = ["/deals", "/prospecting"];
   assert.ok(benchmarkRequiredCells(wider).length > required);
@@ -971,8 +908,6 @@ test("a coverage claim with no per-cell SLO proof cannot pass", () => {
   invented.benchmark_coverage.worst_p95_by_slo_key.invented_p95_ms =
     copy(invented.benchmark_coverage.worst_p95_by_slo_key.cold_lcp_p95_ms);
   refuse(invented, "benchmark_coverage_slo_proof_missing");
-  // The outcome boolean does not carry itself: `all_required_cells_meet_slo`
-  // still says true here, and the p95 beside it refuses.
   const over = snapshot();
   over.benchmark_coverage.worst_p95_by_slo_key.warm_core_navigation_p95_ms.p95_ms =
     BENCHMARK_SLO_THRESHOLDS.warm_core_navigation_p95_ms + 1;
@@ -981,13 +916,10 @@ test("a coverage claim with no per-cell SLO proof cannot pass", () => {
   const claimed = snapshot();
   claimed.benchmark_coverage.all_required_cells_meet_slo = false;
   refuse(claimed, "benchmark_coverage_slo_not_met");
-  // Exactly at the threshold passes, on the same reading the evaluator uses.
   const exact = snapshot();
   exact.benchmark_coverage.worst_p95_by_slo_key.warm_core_navigation_p95_ms.p95_ms =
     BENCHMARK_SLO_THRESHOLDS.warm_core_navigation_p95_ms;
   assert.equal(run(exact).admissible, true);
-  // A proof filed under the wrong threshold, and a proof about a cell the
-  // accepted matrix never required.
   const mismatched = snapshot();
   mismatched.benchmark_coverage.worst_p95_by_slo_key.cold_lcp_p95_ms.cell.metric = "command_acknowledgement_ms";
   refuse(mismatched, "benchmark_coverage_slo_proof_mismatched");
@@ -1009,8 +941,6 @@ test("a stale, future, pre-Gate-Zero or over-long coverage proof refuses", () =>
   const early = snapshot();
   early.benchmark_coverage.observed_at = "2026-01-20T00:00:00.000Z";
   refuse(early, "benchmark_coverage_observed_before_gate_zero");
-  // The boundary instant itself, on the one exclusive convention this file reads
-  // every other instant under.
   const atGateZero = snapshot();
   atGateZero.benchmark_coverage.observed_at = GATE_ZERO_AT;
   refuse(atGateZero, "benchmark_coverage_observed_before_gate_zero");
@@ -1040,15 +970,12 @@ test("the coverage evaluator must be a declared, independent seat", () => {
   const undeclared = snapshot();
   undeclared.benchmark_coverage.evaluator_identity = I("some-other-evaluator");
   refuse(undeclared, "benchmark_coverage_evaluator_not_declared");
-  // Matched on the seat pair the manifest's own duplicate-evaluator rule uses,
-  // never on a class string read back out of a record.
   const otherSession = snapshot();
   otherSession.benchmark_coverage.evaluator_identity.session_ref = "session:a00-test-bench-evaluator-two";
   refuse(otherSession, "benchmark_coverage_evaluator_not_declared");
   const openIdentity = snapshot();
   openIdentity.benchmark_coverage.evaluator_identity.verified_human = true;
   refuse(openIdentity, "closed_shape");
-  // Declared and STILL self-attested: the builder measuring its own subject.
   const withMaker = payload();
   withMaker.evaluator_identities = [I("bench-evaluator"), I("builder")];
   const maker = snapshot();
@@ -1056,12 +983,9 @@ test("the coverage evaluator must be a declared, independent seat", () => {
   at(maker, BENCHMARK_STEP_REF).receipt = manifest(withMaker);
   maker.benchmark_coverage = coverageFact(withMaker, { evaluator_identity: I("builder") });
   refuse(maker, "benchmark_coverage_self_attestation");
-  // The join's own oracle may not have measured the benchmark it consumes...
   const oracle = snapshot();
   oracle.minimum_receipt_context.producer_identity = copy(oracle.benchmark_coverage.evaluator_identity);
   refuse(oracle, "minimum_producer_not_independent");
-  // ...and the partner who accepted the manifest may not be the seat that
-  // measured it, on the same independence rule that already covers reviewers.
   const partner = payload();
   partner.evaluator_identities = [I("joe")];
   const acceptor = snapshot();
@@ -1097,22 +1021,16 @@ test("composing a coverage fact from the evaluator is not authenticating one", (
   const fact = compose();
   assert.ok(Object.isFrozen(fact));
   assert.deepEqual(Object.keys(fact).sort(), [...BENCHMARK_COVERAGE_FACT_FIELDS].sort());
-  // The composer is the one deterministic coverage evaluator and nothing else:
-  // its numbers are that evaluator's, and evaluation_digest names that result.
   const evaluated = evaluateBenchmarkWorkloadCoverage({ payload: body, measurements: measurements(body) });
   assert.equal(fact.evaluation_digest, digest(evaluated));
   assert.equal(fact.required_cell_count, evaluated.required_cell_count);
   assert.equal(fact.measurement_set_digest, digest(measurements(body)));
-  // It cannot compose evidence the evaluator denies...
   const short = measurements(body);
   short.cells.pop();
   refuseCall(() => compose({ measurements: short }), "benchmark_matrix_coverage_incomplete");
   refuseCall(() => compose({ measurements: measurements(body, { valueFor: () => 99999 }) }), "benchmark_slo_not_met");
   refuseCall(() => compose({ ttl_expires_at: COVERAGE_AT }), "benchmark_coverage_window_invalid");
   refuseCall(() => compose({ evidence_ref: "https://example.invalid/coverage" }), "invalid_evidence_ref");
-  // ...and composing one grants nothing. It carries no acceptance, no authority
-  // and no claim to have been verified; it reaches the join only by way of the
-  // installed verifier, which is the act this function is not.
   for (const field of ["verified", "authenticated", "accepted", "authority_granted"]) {
     assert.ok(!Object.hasOwn(fact, field), field);
   }
@@ -1142,7 +1060,6 @@ test("Gate Zero itself must be present, correctly named and not in the future", 
   refuse(asserted, "closed_shape");
 });
 
-// --- projection and canonicalization discipline -----------------------------
 
 test("the projection is closed and tenant-bound", () => {
   const wrongTenant = snapshot();
@@ -1182,8 +1099,6 @@ test("values that would canonicalize ambiguously are refused before they are has
   const accessor = payload();
   Object.defineProperty(accessor, "routes", { get: () => ["/deals"], enumerable: true, configurable: true });
   refuseCall(() => validateBenchmarkPayload(accessor), "hidden_key");
-  // A lone surrogate still refuses inside an authenticated projection, because
-  // that one does survive the round trip.
   const s = snapshot();
   at(s, PHI).receipt.comparator = "lone \uD800 surrogate comparator";
   refuse(s, "invalid_unicode");
@@ -1204,7 +1119,6 @@ test("identities are closed three-field records with a well-formed session refer
   refuse(empty, "invalid_identity");
 });
 
-// --- negative admission, proved rather than asserted ------------------------
 
 test("the negative admission result is earned by re-deriving every required denial", () => {
   const proof = foundationAssuranceMinimumNegativeAdmission();
@@ -1224,7 +1138,6 @@ test("the negative admission result is earned by re-deriving every required deni
   assert.equal(foundationAssuranceMinimumNegativeAdmission(), proof, "memoized, not re-derived per call");
 });
 
-// --- reuse of the M01 deadline contract -------------------------------------
 
 test("the manifest deadline contract and the M01 kernel contract are one contract", () => {
   for (const field of Object.keys(BENCHMARK_DEADLINE_CONTRACT)) {
@@ -1240,18 +1153,13 @@ test("the manifest deadline contract and the M01 kernel contract are one contrac
 test("the M01 receipt view keeps one receipt with one canonical form and one digest", () => {
   const result = run(snapshot());
   const proposed = result.proposed_receipt;
-  // r7's consumer-gate-receipt.v1 is closed and declares no schema_version, and
-  // neither side of the seam adds one.
   assert.ok(!Object.hasOwn(proposed, "schema_version"));
   const view = journeyOneClockMinimumReceiptView(proposed);
   assert.ok(!Object.hasOwn(view, "schema_version"));
   assert.equal(Object.keys(view).length, CONSUMER_GATE_RECEIPT_FIELDS.length);
   assert.deepEqual({ ...view }, { ...proposed });
-  // The identity that matters downstream: the digest A00 publishes is the digest
-  // M01 records as the clock origin, so a store keyed on one finds the other.
   assert.equal(digest(view), digest(proposed));
   assert.equal(digest(view), result.proposed_receipt_reference_digest);
-  // The view is still a distinct object, not the frozen result's own receipt.
   assert.notEqual(view, proposed);
 });
 
@@ -1264,22 +1172,14 @@ test("a receipt carrying an added schema_version is refused on both sides of the
   refuse(s, "closed_shape");
 });
 
-// --- the denial set earns the field it writes -------------------------------
 
 test("the denial set exercises both categories r7's denial_rule names, by their exact codes", () => {
   const proof = foundationAssuranceMinimumNegativeAdmission();
   for (const code of [
-    // The replayed receipt and the over-long window: the two categories r7
-    // names verbatim and the set previously asserted without exercising.
     "duplicate_member_receipt", "member_receipt_ttl_policy_exceeded",
     "member_receipt_window_invalid", "member_observed_before_gate_zero",
     "member_producers_not_distinct",
-    // Both acceptance boundaries, including the equal instant the clock kernel
-    // refuses, so the seam's convention is proved and not merely written down.
     "benchmark_accepted_at_or_after_reference",
-    // The "unevaluated" category. An accepted manifest with no coverage fact,
-    // one bound to another payload, one whose counts or SLO proof do not hold
-    // up, one measured by an undeclared seat, and one that has gone stale.
     "benchmark_coverage_payload_binding_mismatch", "benchmark_coverage_cell_count_mismatch",
     "benchmark_coverage_slo_not_met", "benchmark_coverage_slo_proof_missing",
     "benchmark_coverage_unrequired_cell", "benchmark_coverage_evaluator_not_declared",
@@ -1295,8 +1195,6 @@ test("a member receipt replayed under a second step is a replay, not a second pa
   const s = snapshot();
   at(s, SECRETS).receipt = copy(at(s, PHI).receipt);
   refuse(s, "duplicate_member_receipt");
-  // Byte-identical evidence under the SAME step is caught one check earlier, as
-  // a duplicate step; the replay code exists for the cross-step case above.
   const sameStep = snapshot();
   sameStep.members.push(copy(at(sameStep, PHI)));
   refuse(sameStep, "duplicate_member_step");
@@ -1306,14 +1204,11 @@ test("an over-long member window denies on policy even while it is still current
   const s = snapshot();
   const expires = Date.parse(OBSERVED_AT) + 400 * DAY;
   at(s, PHI).receipt.ttl_expires_at = iso(expires);
-  // Still current as of the reference instant: it is the policy that refuses it,
-  // not currentness, which is why the two codes are distinct.
   assert.ok(expires > Date.parse(AS_OF));
   assert.ok(expires - Date.parse(OBSERVED_AT) > snapshot().binding.maximum_member_receipt_ttl_ms);
   refuse(s, "member_receipt_ttl_policy_exceeded");
 });
 
-// --- one definition of a seat, everywhere -----------------------------------
 
 test("two member producers sharing one session are one seat whatever their actor ids", () => {
   const s = snapshot();
@@ -1322,62 +1217,46 @@ test("two member producers sharing one session are one seat whatever their actor
   assert.notEqual(secretsProducer.actor_id, phiProducer.actor_id);
   secretsProducer.session_ref = phiProducer.session_ref;
   refuse(s, "member_producers_not_distinct");
-  // The converse holds too: one actor id under two sessions is still one actor.
   const actor = snapshot();
   at(actor, SECRETS).receipt.producer_identity.actor_id = at(actor, PHI).receipt.producer_identity.actor_id;
   refuse(actor, "member_producers_not_distinct");
-  // Genuinely distinct seats stay admissible; this is a distinctness rule, not a
-  // prohibition on producers resembling one another.
   const distinct = snapshot();
   at(distinct, SECRETS).receipt.producer_identity = I("producer-second-seat");
   assert.equal(run(distinct).admissible, true);
 });
 
-// --- the Gate Zero boundary is one convention, not two ----------------------
 
 test("a member observed AT the Gate Zero instant is refused exactly as one observed before it", () => {
   const exactly = snapshot();
   at(exactly, PHI).receipt.observed_at = GATE_ZERO_AT;
   at(exactly, PHI).receipt.ttl_expires_at = iso(Date.parse(GATE_ZERO_AT) + 20 * DAY);
   refuse(exactly, "member_observed_before_gate_zero");
-  // One millisecond after it is admitted, so the rule is exclusive rather than
-  // merely strict-looking.
   const after = snapshot();
   const observed = Date.parse(GATE_ZERO_AT) + 1;
   at(after, PHI).receipt.observed_at = iso(observed);
   at(after, PHI).receipt.ttl_expires_at = iso(observed + 20 * DAY);
   assert.equal(run(after).admissible, true);
-  // And it is the SAME convention the benchmark acceptance is read under, which
-  // is what the header claims for both.
   const acceptedAtGateZero = snapshot();
   at(acceptedAtGateZero, BENCHMARK_STEP_REF).receipt = manifest(payload(), { acceptedAt: GATE_ZERO_AT });
   refuse(acceptedAtGateZero, "benchmark_accepted_before_gate_zero");
 });
 
-// --- the benchmark member carries no role to compare ------------------------
 
 test("the benchmark member's role is a load-time registry invariant, not an evidence check", () => {
   const entry = MINIMUM_REQUIRED_MEMBERS.find(m => m.step_ref === BENCHMARK_STEP_REF);
   assert.equal(entry.producer_role, "verified_partner_benchmark_authority");
   assert.equal(entry.output_schema_ref, BENCHMARK_MANIFEST_SCHEMA);
-  // benchmark-manifest.v1 declares no producer_role at all, so there is nothing
-  // on the accepted manifest for a validator to compare the entry against: one
-  // supplied is refused as an open shape, never matched.
   assert.ok(!BENCHMARK_MANIFEST_FIELDS.includes("producer_role"));
   const s = snapshot();
   at(s, BENCHMARK_STEP_REF).receipt.producer_role = "verified_partner_benchmark_authority";
   refuse(s, "closed_shape");
-  // member_role_mismatch stays reachable from the receipts that do carry it.
   const role = snapshot();
   at(role, PHI).receipt.producer_role = "independent_secret_boundary_oracle";
   refuse(role, "member_role_mismatch");
 });
 
-// --- the envelope digest must be injective ----------------------------------
 
 test("an envelope that is not a plain JSON object is refused before anything is hashed", () => {
-  // The collision this refusal exists to prevent: a top-level string is hashed
-  // as its own bytes, which are exactly the canonical bytes of the object.
   const asObject = { synthetic_evidence_ref: "a00-test-collision" };
   const asString = '{"synthetic_evidence_ref":"a00-test-collision"}';
   assert.equal(digest(asString), digest(asObject), "the two shapes do share a digest");
@@ -1387,11 +1266,9 @@ test("an envelope that is not a plain JSON object is refused before anything is 
   for (const notAnObject of [asString, ["a00-test-collision"], null, 7, true]) {
     refuseCall(() => gate.evaluate(notAnObject), "invalid_object");
   }
-  // The object form still evaluates, so this closes a shape rather than a path.
   assert.equal(gate.evaluate(asObject).admissible, true);
 });
 
-// --- the M01 seam refuses what it cannot adapt ------------------------------
 
 test("the M01 receipt view refuses a hidden property instead of dropping it in the copy", () => {
   const proposed = run(snapshot()).proposed_receipt;
@@ -1406,19 +1283,14 @@ test("the M01 receipt view refuses a hidden property instead of dropping it in t
 test("the M01 seam rejects a reference or instant M01 cannot read, and shortens neither", () => {
   const long = `safe:a00-test:${"e".repeat(400)}`;
   assert.ok(long.length > 300);
-  // r7 declares minLength 1 and no maximum on evidence_ref, so this file invents
-  // no cap: the long reference is admissible evidence HERE...
   const s = snapshot();
   s.minimum_receipt_context.evidence_ref = long;
   const admitted = run(s);
   assert.equal(admitted.admissible, true);
   assert.equal(admitted.proposed_receipt.evidence_ref, long, "evidence is carried whole");
-  // ...and the seam is where M01's 300-character domain refuses it, by name and
-  // without truncating it into a different reference.
   refuseCall(() => journeyOneClockMinimumReceiptView(admitted.proposed_receipt),
     "m01_incompatible_evidence_ref");
 
-  // r7's date-time admits up to nine fractional digits; M01's stamp reads three.
   const proposed = run(snapshot()).proposed_receipt;
   refuseCall(() => journeyOneClockMinimumReceiptView({ ...copy(proposed), observed_at: "2026-02-04T00:00:00.123456789Z" }),
     "m01_incompatible_timestamp");
@@ -1429,8 +1301,6 @@ test("the M01 seam rejects a reference or instant M01 cannot read, and shortens 
     producer_identity: { ...copy(proposed.producer_identity), session_ref: `session:${"s".repeat(400)}` },
   }), "m01_incompatible_session_ref");
 
-  // The receipt this join actually proposes is inside every M01 domain, which is
-  // why the remaining divergence is a seam to check and not a live defect.
   const view = journeyOneClockMinimumReceiptView(proposed);
   assert.equal(view.evidence_ref, proposed.evidence_ref);
   assert.equal(view.observed_at, proposed.observed_at);
@@ -1440,15 +1310,12 @@ test("the seam changes no field of the receipt and converts no deadline contract
   const view = journeyOneClockMinimumReceiptView(run(snapshot()).proposed_receipt);
   assert.deepEqual(Object.keys(view).sort(), [...CONSUMER_GATE_RECEIPT_FIELDS].sort());
   assert.ok(!Object.hasOwn(view, "deadline_contract"));
-  // Days here, hours there: reconciled at module load, never silently converted
-  // for a caller. Neither contract carries the other's unit.
   assert.equal(BENCHMARK_DEADLINE_CONTRACT.maximum_external_blocker_pause_days, 5);
   assert.equal(JOURNEY_ONE_DEADLINE_CONTRACT.maximum_external_blocker_pause_hours, 120);
   assert.ok(!Object.hasOwn(BENCHMARK_DEADLINE_CONTRACT, "maximum_external_blocker_pause_hours"));
   assert.ok(!Object.hasOwn(JOURNEY_ONE_DEADLINE_CONTRACT, "maximum_external_blocker_pause_days"));
 });
 
-// --- the two derived rules that over-constrain an r7 silence ----------------
 
 test("the derived percentile uniqueness rule reaches an accepted manifest inside the join", () => {
   const p = payload();
@@ -1456,18 +1323,12 @@ test("the derived percentile uniqueness rule reaches an accepted manifest inside
   const s = snapshot();
   s.binding.benchmark_manifest_digest = digest([BENCHMARK_PAYLOAD_DOMAIN_TAG, p]);
   at(s, BENCHMARK_STEP_REF).receipt = manifest(p);
-  // Stated rather than silent: r7 declares no uniqueItems here, so a manifest a
-  // partner accepted with a repeated percentile IS denied by this file.
   refuse(s, "benchmark_duplicate_request_size_percentile");
 });
 
-// --- the proposed TTL is the projection's, bounded by the issuer ------------
 
 test("the proposed receipt's TTL is the projection's own, under no invented global rule", () => {
   const s = snapshot();
-  // Deliberately longer than the policy bounding CONSUMED member receipts. r7
-  // states no relation between the two, so this file states none either; the
-  // bound that applies is the downstream issuer's and is named in the header.
   s.binding.minimum_receipt_ttl_ms = 60 * DAY;
   assert.ok(s.binding.minimum_receipt_ttl_ms > s.binding.maximum_member_receipt_ttl_ms);
   const result = run(s);

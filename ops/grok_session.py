@@ -238,6 +238,7 @@ def _reconcile_breach(message):
     incident = str(uuid.uuid4())
     payload = {"kind": "open_loop", "domain": "system", "owner": "joe", "marker": "none",
                "blocker": "human_only", "blocker_detail": "Grok sign-in needs authentication verification",
+               "residue_kind": "provider_login", "residue_host": "grok.com",
                "idempotency_key": incident, "body": message}
     state = {"incident": incident, "create_payload": payload}
     # Durable intent precedes the external write. A timeout or process death

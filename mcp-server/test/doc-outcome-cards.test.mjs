@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -24,7 +25,7 @@ test("invented state or auto launch is refused", () => {
 });
 
 test("SQL cursor, attempts, and fallback stay source-bound", () => {
-  const sql = fs.readFileSync(new URL("../../migrations/0546_read_doc_outcome_cards_successor.sql", import.meta.url), "utf8");
+  const sql = readMigration(new URL("../../migrations/0546_read_doc_outcome_cards_successor.sql", import.meta.url));
   assert.match(sql, /from page p where p\.rn=page_limit/);
   assert.doesNotMatch(sql, /max\(updated_at\).*max\(id::text\)/s);
   assert.match(sql, /ops\.job_attempt x[\s\S]*x\.job_id=j\.id and x\.attempt=j\.attempt/);

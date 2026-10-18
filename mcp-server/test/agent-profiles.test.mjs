@@ -4,9 +4,6 @@ import assert from "node:assert/strict";
 import { agentProfileTools } from "../src/agent-profiles.js";
 import { ToolError } from "../src/tool-error.js";
 
-// The withEnvelope test double mirrors the real one's contract narrowly: it
-// requires the idempotency key and runs the handler; replay is the real
-// envelope's job and is proven by its own suite.
 async function withEnvelope(_c, _actor, _verb, args, fn) {
   if (!args.idempotency_key) throw new ToolError({ error: "missing_idempotency_key" });
   return fn();
@@ -114,7 +111,7 @@ test("a caller-claimed profile can never ride as authority: the verb accepts no 
 
 test("a stale base_version is a version_conflict carrying the current version", async () => {
   const client = { query: async (sql) => {
-    if (/update agent_profile/.test(sql)) return { rows: [] };          // no row matched the version
+    if (/update agent_profile/.test(sql)) return { rows: [] };
     if (/select .* from agent_profile/.test(sql)) return { rows: [profileRow({ version: "5" })] };
     return { rows: [] };
   } };
@@ -131,7 +128,7 @@ test("a stale base_version is a version_conflict carrying the current version", 
 test("an unknown profile key names itself", async () => {
   const client = { query: async (sql) => {
     if (/update agent_profile/.test(sql)) return { rows: [] };
-    if (/select .* from agent_profile/.test(sql)) return { rows: [] };  // no such profile
+    if (/select .* from agent_profile/.test(sql)) return { rows: [] };
     return { rows: [] };
   } };
   await assert.rejects(

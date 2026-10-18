@@ -84,7 +84,7 @@ MODULES: dict[str, dict[str, Any]] = {
     "HK": dict(name="Hooks & gates", grid=(0, 0.6), foot=(1.15, 1.15), shape="prisms",
         glob=["hooks/*.py"],
         blurb="The harness edge: session, tool-use and stop hooks can inject context, deny unsafe actions, and record evidence before the model reaches a handler.",
-        cites=["hooks/session-brief.py", "hooks/map-architecture-gate.py", "hooks/gate-integrity.py", "hooks/gate-edit-gate.py", "hooks/record-home-gate.py"],
+        cites=["hooks/session-brief.py", "hooks/gate-integrity.py", "hooks/record-home-gate.py"],
         note="The directory includes helpers as well as blocking gates; registration and enforcement are defined by tracked hook configuration, not by filename alone."),
     "WS": dict(name="Workspace contracts", grid=(2.3, 0.2), foot=(1.1, 1.1), shape="block",
         glob=["workspace/contracts/*.json", "workspace/public/*"],

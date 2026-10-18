@@ -119,6 +119,9 @@ node_modules/
 # and a phase4 continuity branch), so these are ignored, never removed.
 .codex-worktrees/
 
+# Per-worktree Codex hook projection; the source is ops/config/codex-hooks.json.
+/.codex/hooks.json
+
 # CI and selftest scratch trees. Named by convention (.tmp-*, and mktemp-suffixed
 # selftest dirs), created per run, and never source. Added 2026-08-22: twelve of
 # these had accumulated since 08-15 and made the health check's `loose-work` row

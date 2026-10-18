@@ -54,16 +54,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def refusal_detail(exc: Exception) -> str:
-    """Say WHY, not merely which exception class.
-
-    query_store already raises with the useful text — the verb subprocess's own
-    stderr, or a named envelope failure. Printing only type(exc).__name__ threw
-    all of it away and left the caller reading "(RuntimeError)", which names the
-    machinery and not the fault. That is the same refusal-must-name-itself rule
-    the doctrine search path already follows; this path had not been brought
-    along. Class name is kept as a prefix so an exception with an empty message
-    still identifies itself.
-    """
     message = " ".join(str(exc).split())
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
@@ -100,8 +90,6 @@ def recovery_vault(explicit: str | None) -> Path:
 def print_store_hits(store_hits: list[Any]) -> None:
     if not store_hits:
         return
-    # Fallback rows only exist when no section matched every query word; the
-    # ranker marks each one, and the two lanes never mix in a single answer.
     if all(isinstance(hit, dict) and (hit.get("provenance") or {}).get("fallback")
            for hit in store_hits):
         print(
@@ -115,7 +103,7 @@ def print_store_hits(store_hits: list[Any]) -> None:
             key = hit.get("section_key")
             title = hit.get("title")
             snippet = hit.get("snippet") or ""
-        else:  # compatibility for focused test fixtures
+        else:
             slug, key, title, _rank, snippet = hit
         label = f"{slug} § {key}" + (f" - {title}" if title else "")
         print(f"  [store]  {label}")

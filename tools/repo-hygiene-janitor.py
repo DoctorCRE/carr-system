@@ -1325,33 +1325,6 @@ def build_parser() -> argparse.ArgumentParser:
                              "separately reviewed live-effect packet AND the repository "
                              "is not the canonical checkout.")
     parser.add_argument("--json", action="store_true", help="Machine-readable report.")
-    # WR-000040 AC-FRESH rides on this command rather than on scripts of its own.
-    # It shares the program (R07 repo hygiene), it shares the canonical-checkout
-    # subject, and — the deciding reason — a new executable script is a new SCAC
-    # ingress row, while this command already holds one. See the module header of
-    # lib/canonical_freshness.py for why a new row is not a small cost.
-    #
-    # It runs BEFORE and INSTEAD OF the census. The freshness modes take no
-    # maintenance mutex because they remove nothing: the fast-forward's only
-    # branch-moving command is `git merge --ff-only` against a tree with no
-    # tracked modification, and the watchdog only reads. Waiting on the reaper's
-    # lock would buy no safety and would turn a contended moment into a freshness
-    # check that silently did not happen.
-    parser.add_argument("--canonical-freshness", choices=("fast-forward", "watchdog"),
-                        default=None,
-                        help="WR-000040 AC-FRESH. Run the canonical fast-forward or the "
-                             "independent dirty/staleness watchdog against --repository "
-                             "and exit; the hygiene census is not run.")
-    parser.add_argument("--max-age-hours", type=int, default=24,
-                        help="Watchdog staleness bar. Exclusive: a HEAD exactly at the "
-                             "limit is AT it, not past it, so a daily job that lands a "
-                             "minute late does not page.")
-    parser.add_argument("--no-page", action="store_true",
-                        help="Watchdog only: skip the record-layer page. The nonzero exit "
-                             "still stands, because that is the channel that cannot be "
-                             "silenced.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Fast-forward only: report what would move and move nothing.")
     return parser
 
 
@@ -1359,7 +1332,7 @@ def _load_module_by_path(name: str, module_path: Path, description: str):
     """Import a sibling module that is deliberately NOT an entrypoint.
 
     Two of this command's collaborators — R09's isolation module and WR-000040's
-    freshness machinery — carry no shebang and no main guard on purpose, so that
+    cleanup helpers — carry no shebang and no main guard on purpose, so that
     ops/scac-mutation-inventory.mjs does not read them as new SCAC ingress rows
     in a sealed inventory. The price of that choice is that neither has a package
     home and both must be loaded by path; this function is that loading, written
@@ -1380,13 +1353,6 @@ def _load_module_by_path(name: str, module_path: Path, description: str):
     return module
 
 
-def _load_canonical_freshness(module_path: Path | None = None):
-    """WR-000040's freshness machinery."""
-    return _load_module_by_path(
-        "canonical_freshness",
-        module_path or (Path(__file__).resolve().parents[1] / "lib"
-                        / "canonical_freshness.py"),
-        "canonical freshness module")
 
 
 def _load_r09_module(module_path: Path | None = None):
@@ -1548,23 +1514,10 @@ def run(args: argparse.Namespace, *, sink: ReceiptSink | None = None) -> tuple[i
         mutex.release()
 
 
-def run_canonical_freshness(args: argparse.Namespace, *, out=sys.stdout, err=sys.stderr) -> int:
-    """AC-FRESH, kept whole: the library decides, this function only routes."""
-    module = _load_canonical_freshness()
-    return module.run(args.canonical_freshness, repository=args.repository,
-                      max_age_hours=args.max_age_hours, page=not args.no_page,
-                      dry_run=args.dry_run, out=out, err=err)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.canonical_freshness:
-        try:
-            return run_canonical_freshness(args)
-        except JanitorRefusal as exc:
-            print(json.dumps({"mode": "refused", "reason": str(exc)}, indent=2, sort_keys=True),
-                  file=sys.stderr)
-            return 2
     try:
         code, report = run(args)
     except JanitorRefusal as exc:

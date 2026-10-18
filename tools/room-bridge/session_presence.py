@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 """session_presence.py — every session announces itself to the Model Room.
 
-Requirement, 2026-09-27: "sessions need to post theirself to the model room at session
-start so that every other session can reach them easily", widened the same day
-to "not just claude or codex, every session no matter what model".
-
-ONE RUNTIME-NEUTRAL ENTRY. Every runtime's hook adapter and every launcher calls
-this file (directly, through hooks/session-presence-hook.py, or through
-bin/session-presence). A new runtime needs one line in its hook config or its
-launcher, never a copy of this logic.
-
 WHAT A SESSION PUBLISHES, as one kind="receipt" room turn whose body is
 {"session_presence": {...}}:
   runtime     claude | codex | grok | <launcher-supplied slug>
@@ -20,20 +11,15 @@ WHAT A SESSION PUBLISHES, as one kind="receipt" room turn whose body is
   title       a one-line summary of the first prompt, when one exists
   cwd, host, pid, model
   address     how to reach it: claude-socket (the uds path), codex-thread
-              (the thread id), or none (Grok has no inbound channel)
+              (the thread id), or none
   announced_at / beat_at
-
-WHY A RECEIPT AND NOT A TURN: route_turn fans kind="turn" rows out to every
-seated desk. A presence notice is bookkeeping, and as a turn it would wake every
-desk in the room each time a session started.
 
 THE HOOK NEVER BLOCKS A SESSION START. The hook writes the record to a local
 outbox (one file per session, so concurrent sessions never race on one file)
 and spawns a detached child that posts it. Nothing on the session's own path
 touches the network. If the room is unreachable the child logs one notice line
 to ~/.config/carr/session-presence/presence.log and leaves the outbox pending;
-the next heartbeat retries it. The hook prints nothing: SessionStart stdout
-becomes model context in both Claude Code and Codex.
+the next heartbeat retries it. The hook prints nothing.
 
 HEARTBEAT. The bridge probes every local session each cycle (socket connect,
 Desktop thread owner, or pid) and expires the ones that stopped answering, so a
@@ -96,10 +82,7 @@ def _parse(ts: str | None) -> datetime | None:
 
 
 def this_host() -> str:
-    """A stable per-machine name. The DHCP hostname ("Mac") is the same on
-    every Mac on the network, so macOS's LocalHostName ("Mac-Studio") wins.
-    scutil is called by absolute path: launchd PATHs can lack /usr/sbin, and
-    the DHCP fallback then made the bridge treat local sessions as remote."""
+    """A stable per-machine name. macOS's LocalHostName ("Mac-Studio") wins."""
     name = ""
     try:
         name = subprocess.run(["/usr/sbin/scutil", "--get", "LocalHostName"], capture_output=True,
@@ -129,7 +112,6 @@ def _title(prompt: object) -> str | None:
 
 
 def _codex_surface(transcript_path: object) -> str:
-    """codex-desktop or codex-cli, from the rollout's own session_meta line."""
     try:
         with open(str(transcript_path), encoding="utf-8") as fh:
             first = json.loads(fh.readline())
@@ -148,7 +130,6 @@ def _pid(value: object) -> int | None:
 
 
 def _runtime_pid(env: Mapping[str, str]) -> int | None:
-    """The long-lived runtime process: the hook's parent, skipping a shell."""
     explicit = _pid(env.get("CLAUDE_PID") or env.get("CARR_SESSION_PID"))
     if explicit:
         return explicit
@@ -171,8 +152,6 @@ def build_record(payload: dict, *, runtime_hint: str, env: Mapping[str, str], ho
         raise PresenceError("hook payload is not an object")
     now = now or _now()
     runtime = runtime_hint
-    # Grok Build scans ~/.claude/settings.json, so the Claude-configured entry
-    # fires inside Grok too. Grok's payload carries camelCase keys.
     if "sessionId" in payload or "hookEventName" in payload:
         runtime = "grok"
     if not RUNTIME_SLUG.match(runtime or ""):
@@ -189,9 +168,6 @@ def build_record(payload: dict, *, runtime_hint: str, env: Mapping[str, str], ho
         if runtime == "claude":
             sock = env.get("CLAUDE_CODE_MESSAGING_SOCKET")
             if isinstance(sock, str) and sock.startswith("/"):
-                # A Desktop-hosted socket requires the session's own token as
-                # its first line and silently drops anything else. Publish only
-                # THAT a token is required, never the token.
                 address = {"kind": "claude-socket", "value": sock,
                            "auth": "token" if env.get("CLAUDE_CODE_MESSAGING_TOKEN") else "none"}
         elif runtime == "codex":
@@ -221,8 +197,6 @@ def build_record(payload: dict, *, runtime_hint: str, env: Mapping[str, str], ho
         "pid": _runtime_pid(env) if env is os.environ else _pid(env.get("CLAUDE_PID") or env.get("CARR_SESSION_PID")),
         "model": model,
         "child": env.get("CLAUDE_CODE_CHILD_SESSION") == "1",
-        # the Claude Desktop app's own session id: what a Claude sender passes
-        # to SendMessage / the Desktop session tools to reach a token socket
         "host_session_id": (env.get("CLAUDE_CODE_HOST_SESSION_ID") or None) if runtime == "claude" else None,
         "address": address,
         "announced_at": now,
@@ -230,9 +204,6 @@ def build_record(payload: dict, *, runtime_hint: str, env: Mapping[str, str], ho
     }
 
 
-# ---------------------------------------------------------------------------
-# the local outbox: one file per session, written atomically
-# ---------------------------------------------------------------------------
 
 
 def _log(presence_dir: Path, message: str) -> None:
@@ -267,7 +238,6 @@ def _write_box(path: Path, box: dict) -> None:
 
 
 def _spawn_flush(path: Path) -> None:
-    """Post the outbox entry from a detached child, off the session's path."""
     subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "flush", str(path)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -276,7 +246,7 @@ def _spawn_flush(path: Path) -> None:
 
 
 def _default_post(body: str, seat: str, **kw) -> dict:
-    import verb_io  # deferred: the hook path must not pay for it
+    import verb_io
     return verb_io.add_room_turn(body, seat, **kw)
 
 
@@ -296,7 +266,7 @@ def flush(path: Path, *, post=None, room: str = ROOM) -> bool:
             json.dumps({"session_presence": rec}, separators=(",", ":")),
             rec.get("runtime") if SLUG.match(str(rec.get("runtime") or "")) else "hermes",
             kind="receipt", room=room, msg_id=msg_id, idempotency_key=f"presence:{msg_id}")
-    except Exception as exc:  # noqa: BLE001 — any failure is the same fail-open notice
+    except Exception as exc:
         _log(presence_dir, f"{rec.get('handle')}: room post failed, will retry on next beat: {exc}")
         return False
     fresh = _read_box(path) or box
@@ -360,13 +330,11 @@ def run_hook(runtime_hint: str, *, stdin=None, env=None, presence_dir: Path | No
              host: str | None = None, post=None, spawn_flush=None, stdout=None,
              stderr=None) -> int:
     """The hook entry. Always exits 0 and prints nothing."""
-    del post, stdout, stderr  # the hook never posts inline and never prints
+    del post, stdout, stderr
     presence_dir = Path(presence_dir or PRESENCE_DIR)
     env = os.environ if env is None else env
     spawn = spawn_flush or _spawn_flush
     if env.get("CARR_GATE_REPLAY_ROOT"):
-        # ops/gate-replay.py runs every wired hook over fixtures in a sandbox.
-        # The record is still built and written there; it never reaches the room.
         def spawn(path: Path) -> None:
             return None
     try:
@@ -375,14 +343,11 @@ def run_hook(runtime_hint: str, *, stdin=None, env=None, presence_dir: Path | No
         handle_event(payload, runtime_hint=runtime_hint, env=env,
                      presence_dir=presence_dir, host=host or this_host(),
                      spawn_flush=spawn)
-    except Exception as exc:  # noqa: BLE001 — fail open, always
+    except Exception as exc:
         _log(presence_dir, f"{runtime_hint} hook skipped: {exc.__class__.__name__}: {exc}")
     return 0
 
 
-# ---------------------------------------------------------------------------
-# lookup and send: what another session uses to reach one
-# ---------------------------------------------------------------------------
 
 
 def load_directory(path: Path = DIRECTORY_PATH) -> dict:
@@ -416,8 +381,7 @@ def send(directory: dict, query: str, text: str, *, seat: str, post=None,
          room: str = ROOM) -> dict:
     """Post a session_message receipt; the bridge carries it into the session.
 
-    A receipt, not a turn: every seated desk answers a kind="turn" row, so a
-    message for one session would cost each desk a dispatch. The bridge's
+    The bridge's
     session router (session_directory.addressed) delivers it to one handle."""
     target = lookup(directory, query)
     if not text.strip():
@@ -427,9 +391,6 @@ def send(directory: dict, query: str, text: str, *, seat: str, post=None,
     return (post or _default_post)(body, seat, kind="receipt", room=room)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:

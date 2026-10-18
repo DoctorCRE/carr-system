@@ -1,0 +1,10 @@
+{
+  "configuration_activated": false,
+  "held_head": "bdb2ffe7a37d484a249ea030e22b2942487e201f",
+  "held_head_verdict": "allow",
+  "held_pr": 1636,
+  "probe": "Startup, two served pages, Bash fetch piped through jq -r .rule_boot.digest, then ordinary Read PreToolUse.",
+  "reverified_by_session": "01a12862-afea-7a60-ae78-86083532e126",
+  "schema": "rule-boot-held-gate-probe/v1",
+  "successor_verdict": "deny"
+}

@@ -45,6 +45,29 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
+## Build sessions: the four things that stalled the 2026-10-10 orchestrator
+
+Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
+224 Stop turns). Each item is the fix, not the story.
+
+1. **After a compaction, re-boot with the digest-only form.** The gate accepts it
+   on purpose and it costs ~200 characters a page instead of ~12,000:
+   `./run.sh call standing-context '{"detail":"boot","page":N}' | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'`
+   (exactly those two fields; an extra field is not accepted). Reading all 15
+   pages in full after every compaction was 23% of that session's context and
+   the main reason it compacted every one to three hours. Rules still reach the
+   action point through the per-call route hook.
+2. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
+   `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
+   142 and a claim left `held`). Declare `--writes` as the exact files, never a
+   whole `test/` folder: an overlap with any open non-held PR refuses the job.
+   A killed job leaves its claim held; `dispatch.py reconcile --claim <msg_id>`.
+3. **The progress board is one per checkout**, resolved from the main working
+   tree; a worktree no longer needs its own `init`.
+4. **A Stop gate that holds the turn open is answered with the delta only**, and
+   if the gate misread a compaction summary or a request for instructions as an
+   order, that is the gate's defect: fix the gate, do not reword the reply.
+
 ## Migration and release state
 Read current canonical migration/release state before naming frontier/blocker.
 Dated incidents/WRs are history; source/CI grants no live authority.
@@ -59,10 +82,6 @@ Surfaces in `evals/surfaces.json`: `/claude-api build-eval`, then
 For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb first. It returns the current doctrine and machine-contract pointer.
-
-The Stop gate only announces this now (Joe's 2026-08-23 gate rationing): a
-skip is recorded in `out/map-architecture-gate.jsonl` but does not block, so
-the session making the call enforces it.
 
 ## Dell migration trigger
 
@@ -80,3 +99,18 @@ Before operating a rule lifecycle, load
 ## PR design and debt
 
 Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-debt-pass).
+
+## Agent skills
+
+
+### Issue tracker
+
+Issues are CARR Work Requests in the record layer (`report-problem`, `work-request-card`), not GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five triage roles map to Work Request states and `review-and-triage` classes; triage itself is human-only. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.

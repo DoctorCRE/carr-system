@@ -3,22 +3,31 @@
 
 This is the default database-development lane.  It creates no persistent
 cluster, never accepts a caller DSN, strips cloud/provider credentials from the
-child environment, and always stops and removes the temporary cluster.
+child environment, and confirms teardown before removing the temporary cluster.
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
-import tempfile
+import time
+import signal
+import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.disposable_pg_fixture import DisposablePostgres
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from db_acceptance_shards import select_programs, make_report, write_report
 
 
 class LocalPGRefusal(RuntimeError):
@@ -52,6 +61,55 @@ class CommandRunner(Protocol):
 
 
 class SubprocessRunner:
+    def __init__(self):
+        self.cleanup_confirmed = True
+
+    @staticmethod
+    def _processes():
+        result = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid=,stat="],
+                                capture_output=True, text=True, check=True, timeout=5)
+        processes = {}
+        for line in result.stdout.splitlines():
+            pid, parent, group, state = line.split()
+            if not state.startswith("Z"):
+                processes[int(pid)] = (int(parent), int(group))
+        return processes
+
+    def _cancel(self, proc):
+        owned = {proc.pid}
+        for sig, grace in ((signal.SIGTERM, 1), (signal.SIGKILL, 5)):
+            deadline = time.monotonic() + grace
+            while True:
+                processes = self._processes()
+                # Keep escaped descendants after their parent exits, and also
+                # discover new children of any still-owned process.
+                while True:
+                    found = {pid for pid, (parent, group) in processes.items()
+                             if parent in owned or group == proc.pid}
+                    if found <= owned:
+                        break
+                    owned.update(found)
+                alive = owned & processes.keys()
+                if not alive:
+                    proc.wait(timeout=5)
+                    return
+                if proc.pid == os.getpgrp():
+                    raise LocalPGRefusal("refusing cancellation of the caller's process group")
+                if any(group == proc.pid for _, group in processes.values()):
+                    try:
+                        os.killpg(proc.pid, sig)
+                    except OSError:
+                        pass
+                for pid in alive:
+                    try:
+                        os.kill(pid, sig)
+                    except OSError:
+                        pass
+                proc.poll()
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(0.02)
+
     def run(
         self,
         command: Sequence[str | Path],
@@ -60,193 +118,38 @@ class SubprocessRunner:
         cwd: Path | None = None,
         capture: bool = False,
     ) -> CommandResult:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             [str(part) for part in command],
             env=None if env is None else dict(env),
             cwd=cwd,
             text=True,
-            capture_output=capture,
-            check=False,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.PIPE if capture else None,
+            start_new_session=True,
         )
-        return CommandResult(
-            completed.returncode, completed.stdout or "", completed.stderr or ""
-        )
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def export_snapshot_candidate(
-    *, repo: Path, port: int, artifact_dir: Path, runner: CommandRunner | None = None
-) -> int:
-    """Export from one hosted disposable PG17 cluster and prove a fresh restore.
-
-    This is a manual, explicitly opted-in workflow mode.  It never takes a DSN
-    or provider credential from its caller, and it publishes nothing unless the
-    candidate has restored and passed the canonical migration class.
-    """
-    validate_port(port)
-    validate_port(port + 1)
-    if (not hosted_execution_is_declared()
-            or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
-            or os.environ.get("GITHUB_WORKFLOW") != "DB acceptance"):
-        raise LocalPGRefusal("snapshot export requires the declared manual hosted DB-acceptance lane")
-    if not port_is_available(port) or not port_is_available(port + 1):
-        raise LocalPGRefusal("both disposable PostgreSQL loopback ports must be free")
-    if not artifact_dir.is_absolute() or artifact_dir.exists():
-        raise LocalPGRefusal("artifact directory must be a new absolute path")
-    resolved_repo = repo.resolve()
-    if artifact_dir.resolve().is_relative_to(resolved_repo):
-        raise LocalPGRefusal("artifact directory must be outside the repository")
-
-    binaries = find_postgres_binaries()
-    command_runner = runner or SubprocessRunner()
-    clean_env = scrub_cloud_environment(os.environ)
-    clean_env["LC_ALL"] = "C"
-    clean_env["PATH"] = f"{binaries.initdb.parent}{os.pathsep}{clean_env.get('PATH', '')}"
-    python = repo / ".venv/bin/python"
-    if not python.is_file() or not os.access(python, os.X_OK):
-        python = Path(sys.executable)
-
-    def checked(command: Sequence[str | Path], *, env: Mapping[str, str] | None = None) -> CommandResult:
-        result = command_runner.run(command, env=env or clean_env, cwd=repo, capture=True)
-        if result.returncode:
-            raise LocalPGRefusal(
-                f"snapshot export command failed ({Path(str(command[0])).name}): {_failure_detail(result)}"
-            )
-        return result
-
-    source_head = checked(["git", "rev-parse", "HEAD"]).stdout.strip()
-    source_tree = checked(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip()
-    if not all(len(value) == 40 and all(ch in "0123456789abcdef" for ch in value)
-               for value in (source_head, source_tree)):
-        raise LocalPGRefusal("snapshot export source binding is not a full git HEAD/tree")
-    if checked(["git", "status", "--porcelain"]).stdout.strip():
-        raise LocalPGRefusal("snapshot export requires a clean exact-source checkout")
-    pg_version = checked([binaries.initdb, "--version"]).stdout.strip()
-    if "PostgreSQL) 17." not in pg_version:
-        raise LocalPGRefusal("snapshot export requires PostgreSQL 17 binaries")
-    baseline_sha256 = _sha256(repo / "db/schema.sql")
-
-    root = Path(tempfile.mkdtemp(prefix="carr-local-pg-ci."))
-    clusters = [(root / "source-data", port), (root / "restore-data", port + 1)]
-    start_attempts: list[Path] = []
-    candidate = root / "candidate.sql"
-    baseline_copy = root / "baseline.sql"
-    source_dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
-    restore_dsn = f"postgres://carr_ci@127.0.0.1:{port + 1}/carr_ci"
-    try:
-        for data, cluster_port in clusters:
-            checked([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust",
-                     "--encoding=UTF8", "--no-locale"])
-            # pg_ctl can launch the postmaster and then time out waiting for
-            # readiness.  Such a cluster still needs teardown.
-            start_attempts.append(data)
-            checked([binaries.pg_ctl, "-D", data, "-l", root / f"postgres-{cluster_port}.log",
-                     "-o", f"-h 127.0.0.1 -p {cluster_port}", "-w", "start"])
-            checked([binaries.createdb, "-h", "127.0.0.1", "-p", str(cluster_port),
-                     "-U", "carr_ci", "carr_ci"])
-            checked([binaries.psql, "-h", "127.0.0.1", "-p", str(cluster_port),
-                     "-U", "carr_ci", "-d", "carr_ci", "-v", "ON_ERROR_STOP=1",
-                     "-c", "create role neondb_owner;"])
-
-        checked([binaries.psql, source_dsn, "-v", "ON_ERROR_STOP=1", "-q",
-                 "-f", repo / "db/schema.sql"])
-        source_env = dict(clean_env)
-        source_env["DATABASE_URL"] = source_dsn
-        checked([python, repo / "tools/migrate.py", "--apply", "--yes"], env=source_env)
-        checked([repo / "bin/schema-snapshot.sh", "--from-disposable-local", source_dsn,
-                 "--output-candidate", candidate])
-        if not candidate.is_file() or not candidate.stat().st_size:
-            raise LocalPGRefusal("snapshot exporter produced no candidate bytes")
-
-        checked([python, repo / "tools/test-schema-snapshot-grants.py", "--snapshot", candidate])
-
-        # The canonical migration class loads db/schema.sql into a fresh
-        # database itself, then checks its ledger and database-owned contracts.
-        # Point it at the second independently initialized cluster, and make
-        # its tracked-file input the candidate in this ephemeral checkout.
-        shutil.copyfile(repo / "db/schema.sql", baseline_copy)
-        shutil.copyfile(candidate, repo / "db/schema.sql")
-        ci_env = dict(clean_env)
-        ci_env["CARR_CI_DATABASE_URL"] = restore_dsn
-        checked([repo / "ops/ci.sh", "--only", "migration"], env=ci_env)
-        restored_roles = checked([
-            binaries.psql, restore_dsn, "-X", "-Atq", "-v", "ON_ERROR_STOP=1", "-c",
-            "select exists(select 1 from pg_roles where rolname='carr_ownership_issuer' "
-            "and not rolcanlogin and not rolinherit and not rolbypassrls) "
-            "and exists(select 1 from pg_roles where rolname='carr_ownership_issuer_g1' "
-            "and rolcanlogin and not rolinherit and not rolbypassrls) "
-            "and exists(select 1 from pg_roles where rolname='carr_ownership_issuer_g2' "
-            "and rolcanlogin and not rolinherit and not rolbypassrls) "
-            "and pg_has_role('carr_ownership_issuer_g1','carr_ownership_issuer','member') "
-            "and pg_has_role('carr_ownership_issuer_g2','carr_ownership_issuer','member') "
-            "and not pg_has_role('carr_writer','carr_ownership_issuer','member') "
-            "and not pg_has_role('carr_jobs','carr_ownership_issuer','member') "
-            "and (select count(*) from ops.canonical_ownership_issuer_generation)=2 "
-            "and (select count(*) from ops.engineering_stale_contract_fence)>=2;",
-        ]).stdout.strip()
-        if restored_roles != "t":
-            raise LocalPGRefusal("fresh restore failed issuer role, membership or seed proof")
-
-        migration_hashes = {
-            path.name: _sha256(path) for path in sorted((repo / "migrations").glob("*.sql"))
-        }
-        manifest = {
-            "schema_version": "carr-disposable-schema-candidate.v1",
-            "source_head": source_head,
-            "source_tree": source_tree,
-            "candidate_sha256": _sha256(candidate),
-            "candidate_bytes": candidate.stat().st_size,
-            "baseline_snapshot_sha256": baseline_sha256,
-            "postgres_version": pg_version,
-            "migration_sha256": migration_hashes,
-            "restore": {"fresh_cluster": True, "port_separate": True,
-                        "ledger_and_grants": "passed", "canonical_migration_class": "passed",
-                        "issuer_roles_membership_seeds": "passed"},
-        }
-        artifact_dir.mkdir(parents=False)
-        shutil.copyfile(candidate, artifact_dir / "schema.sql")
-        (artifact_dir / "manifest.json").write_text(
-            json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-        )
-        print(f"schema candidate: {manifest['candidate_sha256']} from {source_head}")
-        return 0
-    finally:
-        baseline_restore_error = None
-        if baseline_copy.is_file():
+        try:
+            stdout, stderr = proc.communicate()
+        except BaseException:
+            # A current ps tree cannot prove lifetime ownership. A descendant
+            # may have reparented and escaped its group before cancellation.
+            # Stop discoverable processes, but retain resources for recovery.
+            self.cleanup_confirmed = False
             try:
-                shutil.copyfile(baseline_copy, repo / "db/schema.sql")
-            except OSError as exc:
-                baseline_restore_error = exc
-        teardown_failures = []
-        for data in reversed(start_attempts):
-            result = command_runner.run(
-                [binaries.pg_ctl, "-D", data, "-m", "fast", "-w", "stop"],
-                env=clean_env, cwd=repo, capture=True,
-            )
-            if result.returncode:
-                status = command_runner.run(
-                    [binaries.pg_ctl, "-D", data, "status"],
-                    env=clean_env, cwd=repo, capture=True,
-                )
-                if status.returncode != 3:  # pg_ctl: 3 means no postmaster
-                    teardown_failures.append(str(data))
-        if not teardown_failures:
-            shutil.rmtree(root)
-        if baseline_restore_error is not None:
-            raise LocalPGRefusal(
-                f"snapshot export checkout restoration failed: {baseline_restore_error}"
-            )
-        if teardown_failures:
-            raise LocalPGRefusal(
-                f"snapshot export PostgreSQL teardown unconfirmed; retained {root}"
-            )
+                self._cancel(proc)
+            except Exception:
+                pass  # An unreadable process tree cannot acknowledge cleanup.
+            raise
+        finally:
+            if proc.stdout is not None:
+                proc.stdout.close()
+            if proc.stderr is not None:
+                proc.stderr.close()
+        return CommandResult(proc.returncode, stdout or "", stderr or "")
+
+
+def repository_python(repo: Path) -> Path:
+    candidate = repo / ".venv/bin/python"
+    return candidate if candidate.is_file() and os.access(candidate, os.X_OK) else Path(sys.executable)
 
 
 def validate_port(value: int) -> int:
@@ -388,7 +291,21 @@ def run_local_ci(
     port: int,
     runner: CommandRunner | None = None,
     integration_base: str | None = None,
+    shard: int = 0,
+    report_path: Path | None = None,
+    queued_at: float | None = None,
+    job_started_at: float | None = None,
 ) -> int:
+    programs = select_programs(shard)
+    if shard and integration_base is not None:
+        raise LocalPGRefusal("shard trial cannot replace the integration-base union proof")
+    if report_path is not None and (ci_class != "migration" or integration_base is not None):
+        raise LocalPGRefusal("shadow comparisons require the same migration setup without an integration-base overlay")
+    if any(value is not None and (type(value) not in (int, float) or not math.isfinite(value) or value < 0)
+           for value in (queued_at, job_started_at)):
+        raise LocalPGRefusal("shadow timing must be finite positive Unix timestamps")
+    if job_started_at is not None and (job_started_at > time.time() or (queued_at is not None and queued_at > job_started_at)):
+        raise LocalPGRefusal("shadow queue/setup timing order is invalid")
     validate_port(port)
     refuse_hosted_execution()
     if ci_class not in {"migration", "strict"}:
@@ -419,28 +336,50 @@ def run_local_ci(
             raise LocalPGRefusal(str(exc)) from exc
     binaries = find_postgres_binaries()
     command_runner = runner or SubprocessRunner()
-    root = Path(tempfile.mkdtemp(prefix="carr-local-pg-ci."))
-    data = root / "data"
-    integration_data = root / "integration-data"
-    integration_started = False
     clean_env = scrub_cloud_environment(os.environ)
     clean_env["LC_ALL"] = "C"
+    clean_env["PATH"] = f"{binaries.initdb.parent}{os.pathsep}{clean_env.get('PATH', '')}"
+    fixture = DisposablePostgres("carr-local-pg-ci.", binaries.pg_ctl, clean_env, runner=command_runner.run)
+    root = fixture.root
+    data = root / "data"
+    integration_data = root / "integration-data"
+    # Every shard owns its socket and temporary files as well as TCP/data.
+    # Ignore ambient TMPDIR so nested programs cannot share a caller namespace.
+    (root / "tmp").mkdir(parents=True)
+    (root / "socket").mkdir()
+    clean_env["TMPDIR"] = str(root / "tmp")
     dsn = f"postgres://carr_ci@127.0.0.1:{port}/carr_ci"
-    start_attempted = False
     exit_code = 0
+    test_results = []
+    started = time.time() if job_started_at is None else job_started_at
+    queued = started if queued_at is None else queued_at
+    setup_seconds = 0.0
+    report_source = None
+    report_tools = None
+    if report_path is not None:
+        if not report_path.is_absolute() or report_path.exists() or report_path.resolve().is_relative_to(repo.resolve()):
+            fixture.close()
+            raise LocalPGRefusal("shadow report needs a new absolute path outside the repository")
+        try:
+            report_source, report_tools = shadow_source_binding(repo, binaries)
+        except Exception:
+            fixture.close()
+            raise
+
+    def failure_detail(result: CommandResult) -> str:
+        return f"subprocess exit {result.returncode}" if report_path is not None else _failure_detail(result)
 
     def setup(command: Sequence[str | Path]) -> bool:
         nonlocal exit_code
-        result = command_runner.run(command, env=clean_env, cwd=repo, capture=True)
+        result = fixture.run(command, env=clean_env, cwd=repo, capture=True)
         if result.returncode:
-            print(f"local-db-ci setup failed: {_failure_detail(result)}", file=sys.stderr)
+            print(f"local-db-ci setup failed: {failure_detail(result)}", file=sys.stderr)
             exit_code = result.returncode
             return False
         return True
 
     try:
         print(f"local-db-ci: creating disposable PostgreSQL on 127.0.0.1:{port}")
-        start_attempted = True
         if not setup(
             [
                 binaries.initdb,
@@ -462,7 +401,7 @@ def run_local_ci(
                 "-l",
                 root / "postgres.log",
                 "-o",
-                f"-h 127.0.0.1 -p {port}",
+                f"-h 127.0.0.1 -p {port} -k {root / 'socket'}",
                 "-w",
                 "start",
             ]
@@ -490,12 +429,7 @@ def run_local_ci(
             ]
         ):
             return exit_code
-        repo_python = repo / ".venv/bin/python"
-        acceptance_python = (
-            repo_python
-            if repo_python.is_file() and os.access(repo_python, os.X_OK)
-            else Path(sys.executable)
-        )
+        acceptance_python = repository_python(repo)
         ownership_script = repo / "ops/canonical-ownership-lease-local-pg-gate.py"
         pre_database = "carr_ci_a2_pre"
         pre_dsn = f"postgres://carr_ci@127.0.0.1:{port}/{pre_database}"
@@ -512,7 +446,7 @@ def run_local_ci(
             return exit_code
         pre_env = dict(clean_env)
         pre_env["DATABASE_URL"] = pre_dsn
-        pre_apply = command_runner.run(
+        pre_apply = fixture.run(
             [acceptance_python, repo / "tools/migrate.py", "--apply", "--yes",
              "--through", "0431_completion_register_schema.sql"],
             env=pre_env,
@@ -522,10 +456,11 @@ def run_local_ci(
         if pre_apply.returncode:
             print(
                 "local-db-ci: pre-0450 baseline migration failed: "
-                f"{_failure_detail(pre_apply)}",
+                f"{failure_detail(pre_apply)}",
                 file=sys.stderr,
             )
-            return pre_apply.returncode
+            exit_code = pre_apply.returncode
+            return exit_code
         # The canonical ownership gate compares the current frontier against a
         # pre-0450 catalog fingerprint. Migration 0507a intentionally replaces
         # engineering_record_slice_receipt, so prepare that one reviewed seam
@@ -540,7 +475,7 @@ def run_local_ci(
             return exit_code
         fingerprint_env = dict(clean_env)
         fingerprint_env["CARR_LOCAL_PG_DSN"] = pre_dsn
-        pre_fingerprint = command_runner.run(
+        pre_fingerprint = fixture.run(
             [acceptance_python, ownership_script, "--fingerprint-only"],
             env=fingerprint_env,
             cwd=repo,
@@ -549,10 +484,11 @@ def run_local_ci(
         if pre_fingerprint.returncode:
             print(
                 "local-db-ci: pre-0450 catalog fingerprint failed: "
-                f"{_failure_detail(pre_fingerprint)}",
+                f"{failure_detail(pre_fingerprint)}",
                 file=sys.stderr,
             )
-            return pre_fingerprint.returncode
+            exit_code = pre_fingerprint.returncode
+            return exit_code
         try:
             ownership_baseline = json.dumps(
                 json.loads(pre_fingerprint.stdout), sort_keys=True, separators=(",", ":")
@@ -562,25 +498,24 @@ def run_local_ci(
                 "local-db-ci: pre-0450 catalog fingerprint was not exact JSON",
                 file=sys.stderr,
             )
-            return 78
+            exit_code = 78
+            return exit_code
         if integration_base is not None:
             # Cluster-global roles require an independent cluster, not just a
             # database name. Preserve the canonical lane's fresh-role baseline.
             # Restore current main, forward the candidate and prove consumers.
             from integration_candidate import git, validate_candidate
             # Keep one active cluster: macOS has a small shared-memory ID budget.
-            paused = command_runner.run(
+            paused = fixture.run(
                 [binaries.pg_ctl, "-D", data, "-m", "fast", "-w", "stop"],
                 env=clean_env, cwd=repo, capture=True,
             )
             if paused.returncode:
                 print("local-db-ci: canonical PostgreSQL pause failed", file=sys.stderr)
                 return paused.returncode
-            start_attempted = False
             schema = root / "integration-main-schema.sql"
             schema.write_bytes(git(repo, "show", f"{integration_base}:db/schema.sql"))
             integration_dsn = f"postgres://carr_ci@127.0.0.1:{integration_port}/carr_ci_integration"
-            integration_started = True
             integration_commands: tuple[tuple[str, list[str | Path]], ...] = (
                 ("init", [binaries.initdb, "-D", integration_data, "-U", "carr_ci", "--auth=trust", "--encoding=UTF8", "--no-locale"]),
                 ("start", [binaries.pg_ctl, "-D", integration_data, "-l", root / "integration-postgres.log", "-o", f"-h 127.0.0.1 -p {integration_port}", "-w", "start"]),
@@ -589,13 +524,13 @@ def run_local_ci(
                 ("restore", [binaries.psql, integration_dsn, "-v", "ON_ERROR_STOP=1", "-q", "-f", schema]),
             )
             for stage, command in integration_commands:
-                result = command_runner.run(command, env=clean_env, cwd=repo, capture=True)
+                result = fixture.run(command, env=clean_env, cwd=repo, capture=True)
                 if result.returncode:
                     print(f"local-db-ci: integrated {stage} failed (exit {result.returncode})", file=sys.stderr)
                     return result.returncode
             forward_env = dict(clean_env)
             forward_env["DATABASE_URL"] = integration_dsn
-            forward = command_runner.run([acceptance_python, repo / "tools/migrate.py", "--apply", "--yes"],
+            forward = fixture.run([acceptance_python, repo / "tools/migrate.py", "--apply", "--yes"],
                                          env=forward_env, cwd=repo, capture=True)
             if forward.returncode:
                 print("local-db-ci: current-main restore to candidate forward migration failed", file=sys.stderr)
@@ -606,25 +541,23 @@ def run_local_ci(
             ):
                 consumer_env = dict(clean_env)
                 consumer_env[dsn_key] = integration_dsn
-                proof = command_runner.run(["node", "--test", f"mcp-server/test/{test_file}"],
+                proof = fixture.run(["node", "--test", f"mcp-server/test/{test_file}"],
                                            env=consumer_env, cwd=repo, capture=True)
                 if proof.returncode:
                     print(f"local-db-ci: integrated consumer proof failed: {test_file}", file=sys.stderr)
                     return proof.returncode
             if validate_candidate(repo, integration_base) != integration_source:
                 raise LocalPGRefusal("integration source changed during restore/forward/consumer proof")
-            disposed = command_runner.run(
+            disposed = fixture.run(
                 [binaries.pg_ctl, "-D", integration_data, "-m", "fast", "-w", "stop"],
                 env=clean_env, cwd=repo, capture=True,
             )
             if disposed.returncode:
                 print("local-db-ci: integration PostgreSQL stop failed", file=sys.stderr)
                 return disposed.returncode
-            integration_started = False
-            start_attempted = True
-            resumed = command_runner.run(
+            resumed = fixture.run(
                 [binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
-                 "-o", f"-h 127.0.0.1 -p {port}", "-w", "start"],
+                 "-o", f"-h 127.0.0.1 -p {port} -k {root / 'socket'}", "-w", "start"],
                 env=clean_env, cwd=repo, capture=True,
             )
             if resumed.returncode:
@@ -638,343 +571,124 @@ def run_local_ci(
             ci_command.append("--strict")
         else:
             ci_command.extend(["--only", "migration"])
-        result = command_runner.run(ci_command, env=ci_env, cwd=repo)
+        result = fixture.run(ci_command, env=ci_env, cwd=repo, capture=report_path is not None)
         exit_code = result.returncode
         if exit_code:
             print("local-db-ci: canonical CI failed", file=sys.stderr)
-        else:
-            f03_env = dict(ci_env)
-            f03_env["CARR_F03_PSQL"] = str(binaries.psql)
-            f03_acceptance = command_runner.run(
-                [acceptance_python, repo / "tools/test-f03-production-migration.py"],
-                env=f03_env,
-                cwd=repo,
-                capture=True,
-            )
-            if f03_acceptance.returncode:
-                print(
-                    "local-db-ci: F03 production validator acceptance failed: "
-                    f"{_failure_detail(f03_acceptance)}",
-                    file=sys.stderr,
-                )
-                exit_code = f03_acceptance.returncode
-            else:
-                print(f03_acceptance.stdout, end="")
+        setup_seconds = time.time() - started
         if exit_code == 0:
-            # The continuity handler suite has a real PostgreSQL branch.  Run it
-            # on this same disposable cluster so its bounded integration proof
-            # cannot become a permanent skip in hosted migration CI.  Neon’s
-            # Pool is intentionally retained as the test default for external
-            # ephemeral databases; raw loopback PostgreSQL needs the pinned pg
-            # driver selected explicitly here.
-            continuity_env = dict(ci_env)
-            continuity_env["CARR_CONTINUITY_EPHEMERAL_DATABASE_URL"] = dsn
-            continuity_env["CARR_CONTINUITY_DATABASE_DRIVER_MODULE"] = "pg"
-            continuity = command_runner.run(
-                ["node", "--test", "mcp-server/test/codex-continuity.test.mjs"],
-                env=continuity_env,
-                cwd=repo,
-                capture=True,
-            )
-            if continuity.returncode:
-                print(
-                    "local-db-ci: Codex continuity real-PostgreSQL integration failed: "
-                    f"{_failure_detail(continuity)}",
-                    file=sys.stderr,
-                )
-                exit_code = continuity.returncode
-            else:
-                print("local-db-ci: Codex continuity real-PostgreSQL integration passed")
-        if exit_code == 0:
-            acceptance_script = repo / "ops/atomic-rule-approval-local-pg-acceptance.py"
-            if not acceptance_python.is_file() or not os.access(acceptance_python, os.X_OK):
-                print("local-db-ci: repository Python environment is unavailable", file=sys.stderr)
-                exit_code = 78
-            elif not acceptance_script.is_file():
-                print("local-db-ci: atomic rule authority acceptance is unavailable", file=sys.stderr)
-                exit_code = 78
-            else:
-                acceptance_env = dict(clean_env)
-                # Keep every disposable-database client on the same PostgreSQL toolchain
-                # as the server. Hosted runners expose several client majors on PATH.
-                acceptance_env["PATH"] = (
-                    f"{binaries.psql.parent}{os.pathsep}{acceptance_env.get('PATH', '')}"
-                )
-                acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
-                acceptance_env["CARR_OWNERSHIP_PRE_0450_FINGERPRINT"] = ownership_baseline
-                acceptance = command_runner.run(
-                    [acceptance_python, acceptance_script],
-                    env=acceptance_env,
-                    cwd=repo,
-                    capture=True,
-                )
-                exit_code = acceptance.returncode
-                if exit_code:
-                    print(
-                        f"local-db-ci: atomic rule authority acceptance failed: "
-                        f"{_failure_detail(acceptance)}",
-                        file=sys.stderr,
-                    )
+            acceptance_env = dict(clean_env)
+            acceptance_env["PATH"] = f"{binaries.psql.parent}{os.pathsep}{clean_env.get('PATH', '')}"
+            acceptance_env["CARR_LOCAL_PG_DSN"] = dsn
+            acceptance_env["CARR_OWNERSHIP_PRE_0450_FINGERPRINT"] = ownership_baseline
+            for program in programs:
+                print(f"local-db-ci: {program.id} acceptance starting")
+                env = dict(acceptance_env)
+                if program.kind == "f03":
+                    env = dict(ci_env)
+                    env["CARR_F03_PSQL"] = str(binaries.psql)
+                    command = [acceptance_python, repo / program.path]
+                elif program.kind == "node":
+                    env = dict(ci_env)
+                    if program.id == "leads":
+                        env["LEAD_WORKSPACE_TEST_DATABASE_URL"] = dsn
+                    else:
+                        env["CARR_CONTINUITY_EPHEMERAL_DATABASE_URL"] = dsn
+                        env["CARR_CONTINUITY_DATABASE_DRIVER_MODULE"] = "pg"
+                    command = ["node", "--test", program.path]
+                elif program.kind == "snapshot":
+                    command = [repo / program.path, "--from-disposable-local", dsn, "--verify-only"]
                 else:
-                    delivery_script = repo / "ops/rule-delivery-local-pg-acceptance.py"
-                    delivery = command_runner.run(
-                        [acceptance_python, delivery_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if delivery.returncode:
-                        print(
-                            f"local-db-ci: rule-delivery acceptance failed: "
-                            f"{_failure_detail(delivery)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = delivery.returncode
-                    else:
-                        print("local-db-ci: atomic rule-delivery cutover acceptance passed")
-                if exit_code == 0:
-                    engineering_claim_script = repo / "ops/engineering-claim-local-pg-gate.py"
-                    engineering_claim = command_runner.run(
-                        [acceptance_python, engineering_claim_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if engineering_claim.returncode:
-                        print(
-                            f"local-db-ci: engineering claim acceptance failed: "
-                            f"{_failure_detail(engineering_claim)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = engineering_claim.returncode
-                    else:
-                        print("local-db-ci: scoped engineering claim acceptance passed")
-                if exit_code == 0:
-                    engineering_race_script = repo / "ops/engineering-envelope-race-local-pg-gate.py"
-                    engineering_race = command_runner.run(
-                        [acceptance_python, engineering_race_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if engineering_race.returncode:
-                        print(
-                            f"local-db-ci: engineering envelope race acceptance failed: "
-                            f"{_failure_detail(engineering_race)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = engineering_race.returncode
-                    else:
-                        print("local-db-ci: Engineering envelope race acceptance passed")
-                if exit_code == 0:
-                    ownership = command_runner.run(
-                        [acceptance_python, ownership_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if ownership.returncode:
-                        print(
-                            f"local-db-ci: canonical ownership lease acceptance failed: "
-                            f"{_failure_detail(ownership)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = ownership.returncode
-                    else:
-                        print("local-db-ci: canonical ownership lease acceptance passed")
-                if exit_code == 0:
-                    assurance_script = repo / "ops/assurance-evidence-acceptance-local-pg-gate.py"
-                    assurance = run_required_local_gate(
-                        command_runner,
-                        acceptance_python,
-                        assurance_script,
-                        env=acceptance_env,
-                        cwd=repo,
-                    )
-                    if assurance.returncode:
-                        print(
-                            f"local-db-ci: assurance evidence/acceptance persistence failed: "
-                            f"{_failure_detail(assurance)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = assurance.returncode
-                    else:
-                        print("local-db-ci: assurance evidence/acceptance persistence passed")
-                if exit_code == 0:
-                    source_merge_script = repo / "ops/source-merge-authority-local-pg-gate.py"
-                    source_merge = run_required_local_gate(
-                        command_runner,
-                        acceptance_python,
-                        source_merge_script,
-                        env=acceptance_env,
-                        cwd=repo,
-                    )
-                    if source_merge.returncode:
-                        print(
-                            f"local-db-ci: source-merge authority projection failed: "
-                            f"{_failure_detail(source_merge)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = source_merge.returncode
-                    else:
-                        print("local-db-ci: source-merge authority projection passed")
-                if exit_code == 0:
-                    canary_script = repo / "ops/calendar-canary-local-pg-acceptance.py"
-                    canary = command_runner.run(
-                        [acceptance_python, canary_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if canary.returncode:
-                        print(
-                            f"local-db-ci: calendar canary acceptance failed: "
-                            f"{_failure_detail(canary)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = canary.returncode
-                    else:
-                        print("local-db-ci: calendar canary isolation acceptance passed")
-                if exit_code == 0:
-                    nightly_canary_script = repo / "ops/nightly-canary-local-pg-acceptance.py"
-                    nightly_canary = command_runner.run(
-                        [acceptance_python, nightly_canary_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if nightly_canary.returncode:
-                        print(
-                            f"local-db-ci: Nightly canary acceptance failed: "
-                            f"{_failure_detail(nightly_canary)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = nightly_canary.returncode
-                    else:
-                        print("local-db-ci: Nightly canary isolation acceptance passed")
-                if exit_code == 0:
-                    renewal_ingress_script = repo / "ops/renewal-signed-ingress-local-pg-acceptance.py"
-                    renewal_ingress = command_runner.run(
-                        [acceptance_python, renewal_ingress_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if renewal_ingress.returncode:
-                        print(
-                            f"local-db-ci: renewal signed ingress acceptance failed: "
-                            f"{_failure_detail(renewal_ingress)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = renewal_ingress.returncode
-                    else:
-                        print("local-db-ci: renewal signed ingress least-privilege acceptance passed")
-                if exit_code == 0:
-                    renewal_lease_script = repo / "ops/renewal-lease-ledger-local-pg-gate.py"
-                    renewal_lease = command_runner.run(
-                        [acceptance_python, renewal_lease_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if renewal_lease.returncode:
-                        print(
-                            f"local-db-ci: renewal lease ledger acceptance failed: "
-                            f"{_failure_detail(renewal_lease)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = renewal_lease.returncode
-                    else:
-                        print("local-db-ci: authenticated renewal lease ledger acceptance passed")
-                if exit_code == 0:
-                    incident_recovery_script = repo / "ops/incident-recovery-local-pg-acceptance.py"
-                    incident_recovery = command_runner.run(
-                        [acceptance_python, incident_recovery_script],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if incident_recovery.returncode:
-                        print(
-                            f"local-db-ci: incident fingerprint and recovery acceptance failed: "
-                            f"{_failure_detail(incident_recovery)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = incident_recovery.returncode
-                    else:
-                        print("local-db-ci: incident fingerprint and success-clears acceptance passed")
-                        completion_schema_script = (
-                            repo / "ops/completion-register-schema-local-pg-gate.py"
-                        )
-                        completion_schema = command_runner.run(
-                            [acceptance_python, completion_schema_script],
-                            env=acceptance_env,
-                            cwd=repo,
-                            capture=True,
-                        )
-                        if completion_schema.returncode:
-                            print(
-                                "local-db-ci: completion register schema fixture failed: "
-                                f"{_failure_detail(completion_schema)}",
-                                file=sys.stderr,
-                            )
-                            exit_code = completion_schema.returncode
+                    command = [acceptance_python, repo / program.path]
+                before = time.monotonic()
+                if not (repo / program.path).is_file():
+                    result = CommandResult(78, "", "required acceptance program is unavailable")
+                else:
+                    try:
+                        if program.kind == "python":
+                            result = run_required_local_gate(fixture, acceptance_python, repo / program.path,
+                                                             env=env, cwd=repo)
                         else:
-                            print(completion_schema.stdout, end="")
-                if exit_code == 0:
-                    snapshot = command_runner.run(
-                        [
-                            repo / "bin/schema-snapshot.sh",
-                            "--from-disposable-local",
-                            dsn,
-                            "--verify-only",
-                        ],
-                        env=acceptance_env,
-                        cwd=repo,
-                        capture=True,
-                    )
-                    if snapshot.returncode:
-                        print(
-                            f"local-db-ci: schema snapshot failed: {_failure_detail(snapshot)}",
-                            file=sys.stderr,
-                        )
-                        exit_code = snapshot.returncode
+                            result = fixture.run(command, env=env, cwd=repo, capture=True)
+                    except Exception:
+                        # Raw exception text can include DSNs, parameters or
+                        # identity data. It is never part of the shadow sink.
+                        result = CommandResult(78, "", "acceptance subprocess raised an exception")
+                test_results.append({"id": program.id, "returncode": result.returncode,
+                                     "seconds": time.monotonic() - before})
+                if result.returncode:
+                    if report_path is None:
+                        print(f"local-db-ci: {program.id} failed: {failure_detail(result)}", file=sys.stderr)
                     else:
-                        print(snapshot.stdout, end="")
-                if exit_code == 0 and integration_base is not None:
-                    if validate_candidate(repo, integration_base) != integration_source:
-                        raise LocalPGRefusal("integration source changed during canonical candidate proof")
-                if exit_code == 0:
-                    print(
-                        f"local-db-ci: {ci_class} proof and atomic Joe authority lifecycle "
-                        "passed on disposable PostgreSQL"
-                    )
-    finally:
-        if integration_started:
-            stopped_integration = command_runner.run(
-                [binaries.pg_ctl, "-D", integration_data, "-m", "fast", "-w", "stop"],
-                env=clean_env, cwd=repo, capture=True,
-            )
-            if stopped_integration.returncode and exit_code == 0:
-                print("local-db-ci: integration PostgreSQL teardown failed", file=sys.stderr)
-                exit_code = stopped_integration.returncode
-        if start_attempted:
-            stopped = command_runner.run(
-                [binaries.pg_ctl, "-D", data, "-m", "fast", "-w", "stop"],
-                env=clean_env,
-                cwd=repo,
-                capture=True,
-            )
-            if stopped.returncode and exit_code == 0:
-                print("local-db-ci: PostgreSQL teardown failed", file=sys.stderr)
-                exit_code = stopped.returncode
-        try:
-            shutil.rmtree(root)
-        except OSError as exc:
-            print(f"local-db-ci: temporary cluster cleanup failed: {exc}", file=sys.stderr)
+                        print(f"local-db-ci: {program.id} failed (exit {result.returncode}); no raw output in shadow reports", file=sys.stderr)
+                    exit_code = result.returncode
+                    break
+                print(f"local-db-ci: {program.id} acceptance passed ({time.monotonic() - before:.0f}s)")
+            if exit_code == 0 and integration_base is not None:
+                if validate_candidate(repo, integration_base) != integration_source:
+                    raise LocalPGRefusal("integration source changed during canonical candidate proof")
             if exit_code == 0:
-                exit_code = 70
+                print(f"local-db-ci: {ci_class} proof and acceptance manifest passed (shard {shard})")
+    except KeyboardInterrupt:
+        exit_code = 130
+    except LocalPGRefusal:
+        # Existing integration callers distinguish a source refusal from a
+        # child process exit. Preserve that contract after disposing resources.
+        exit_code = 78
+        raise
+    except Exception:
+        exit_code = 78
+        print("local-db-ci: execution refused; disposable cleanup follows", file=sys.stderr)
+    finally:
+        # A cancelled child may have escaped the process tree, so stop every
+        # owned postmaster but keep the root unless lifetime ownership held.
+        cleanup = getattr(command_runner, "cleanup_confirmed", True)
+        try:
+            fixture.close(remove_root=cleanup)
+        except Exception:
+            cleanup = False
+        if not cleanup:
+            print(f"local-db-ci: cleanup unconfirmed; retained {root}; confirm owned postmaster status before retry", file=sys.stderr)
+            exit_code = exit_code or 70
+        if report_path is not None:
+            try:
+                # Recheck exact source after tests, before writing evidence.
+                if shadow_source_binding(repo, binaries) != (report_source, report_tools):
+                    exit_code = exit_code or 78
+                finished = time.time()
+                write_report(report_path, make_report(
+                    shard=shard, source=report_source, toolchain=report_tools,
+                    started=started, finished=finished, queued=queued,
+                    setup_seconds=setup_seconds or finished-started, tests=test_results,
+                    cleanup=cleanup, returncode=exit_code, port=port, root=root,
+                ))
+            except Exception:
+                print("local-db-ci: shadow report refused; retain serial gate", file=sys.stderr)
+                exit_code = exit_code or 78
     return exit_code
+
+
+def shadow_source_binding(repo: Path, binaries: PostgresBinaries):
+    """Evidence is commit-bound, never a claim about uncommitted source."""
+    env = scrub_cloud_environment(os.environ)
+    runner = SubprocessRunner()
+    def read(command):
+        result = runner.run(command, env=env, cwd=repo, capture=True)
+        if result.returncode:
+            raise LocalPGRefusal("shadow source/toolchain readback failed")
+        return result.stdout.strip()
+    head = read(["git", "rev-parse", "HEAD"])
+    tree = read(["git", "rev-parse", "HEAD^{tree}"])
+    if read(["git", "status", "--porcelain"]):
+        raise LocalPGRefusal("shadow reports require clean committed source")
+    # PGDG appends its Ubuntu package build in parentheses. Compare the
+    # upstream version, rather than mistaking that suffix for the version.
+    observed = re.fullmatch(r"initdb \(PostgreSQL\) (17\.\d+)(?: \([^()\n]+\))?",
+                            read([binaries.initdb, "--version"]))
+    if observed is None:
+        raise LocalPGRefusal("shadow comparison requires PostgreSQL 17")
+    return ({"head": head, "tree": tree},
+            {"postgres": observed.group(1), "python": read([repository_python(repo), "--version"]).split()[-1], "node": read(["node", "--version"])})
 
 
 def main() -> int:
@@ -987,24 +701,32 @@ def main() -> int:
         help="migration is the fast DB lane; strict runs every canonical class locally",
     )
     parser.add_argument("--port", type=int, default=55432)
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument(
-        "--export-candidate",
-        type=Path,
-        metavar="ARTIFACT_DIR",
-        help="manual hosted-only PG17 candidate export and independent restore",
-    )
-    mode.add_argument("--integration-base", help="exact current-main SHA for restore/forward/consumer union proof")
+    parser.add_argument("--shard", type=int, choices=(0, 1, 2), default=0,
+                        help="default serial; 1/2 are opt-in shadow acceptance partitions")
+    parser.add_argument("--report", type=Path, help="new outside-repository shadow report")
+    parser.add_argument("--queued-at", type=float, help="workflow run creation Unix timestamp")
+    parser.add_argument("--job-started-at", type=float, help="runner setup start Unix timestamp")
+    parser.add_argument("--integration-base", help="exact current-main SHA for restore/forward/consumer union proof")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
+    if args.shard and (args.report is None or args.ci_class != "migration"):
+        parser.error("shadow shards require --class migration and --report")
+    if args.report is None and (args.queued_at is not None or args.job_started_at is not None):
+        parser.error("timing bindings require --report")
+    # Piped to a CI log, stdout is block-buffered, so every "acceptance passed"
+    # line below stayed invisible until exit: a slow acceptance loop looked
+    # like a finished-but-hung step (run 39058940694 on PR #1865).
+    sys.stdout = open(sys.stdout.fileno(), "w", buffering=1, closefd=False)
+    def cancelled(signum, frame):
+        raise KeyboardInterrupt
+    # Replace the fixture module's handlers: cancellation must reach the
+    # runner first, which decides whether teardown may delete the root.
+    signal.signal(signal.SIGINT, cancelled)
+    signal.signal(signal.SIGTERM, cancelled)
     try:
-        if args.export_candidate is not None:
-            return export_snapshot_candidate(
-                repo=repo, port=args.port, artifact_dir=args.export_candidate,
-                runner=SubprocessRunner(),
-            )
         return run_local_ci(
-            repo=repo, ci_class=args.ci_class, port=args.port, runner=SubprocessRunner(), integration_base=args.integration_base
+            repo=repo, ci_class=args.ci_class, port=args.port, runner=SubprocessRunner(), integration_base=args.integration_base,
+            shard=args.shard, report_path=args.report, queued_at=args.queued_at, job_started_at=args.job_started_at
         )
     except LocalPGRefusal as exc:
         print(f"local-db-ci refused: {exc}", file=sys.stderr)

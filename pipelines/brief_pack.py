@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.credential_file import credential  # noqa: E402
 from lib.local_principal import LocalPrincipalError, local_partner_principal
 
 REPO = Path(__file__).resolve().parent.parent
@@ -98,15 +99,7 @@ def db_url():
     url = os.environ.get("CARR_DB_EXPORTER_URL") or os.environ.get("DATABASE_URL")
     if url:
         return url
-    env = Path.home() / ".config/carr/db.env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            if line.startswith("CARR_DB_EXPORTER_URL="):
-                # .strip("\"'") — db.env values are shell-quoted so `set -a; . db.env`
-                # survives an `&` in the DSN; psycopg needs them unquoted. Full reasoning
-                # in exporters/common.py. Added 2026-08-02.
-                return line.split("=", 1)[1].strip().strip("\"'")
-    return None
+    return credential("CARR_DB_EXPORTER_URL", environ={})
 
 
 def q(cur, sql, args=()):

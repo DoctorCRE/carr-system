@@ -1,0 +1,27 @@
+name = "carr-uptime"
+main = "uptime-worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "uptime.doctorcre.com", custom_domain = true }]
+
+[triggers]
+crons = ["* * * * *"]
+
+[[durable_objects.bindings]]
+name = "UPTIME_LEDGER"
+class_name = "UptimeLedger"
+
+[[migrations]]
+tag = "uptime-v1"
+new_sqlite_classes = ["UptimeLedger"]
+
+[observability]
+enabled = true
+
+# Provision separately from carr-mcp. No Studio file or interactive login is read at runtime.
+# CARR_MCP_PROBE_TOKEN: existing long-lived read-only probe bearer.
+# UPTIME_RECORD_TOKEN: long-lived machine bearer accepted by CARR for add-loop/read-loop/close-loop.
+# UPTIME_HEALTHCHECKS_PING_URL: dedicated check, same existing Healthchecks notification channel.
+# Use 60-second period + 120-second grace, down/up notifications on, reminders off.
+# Keep it separate from HC_PING_MCP, whose nightly success must never clear this incident.

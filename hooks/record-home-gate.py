@@ -5,18 +5,6 @@ WHY THIS EXISTS. Joe, 2026-08-03: "you cant write a .md file you have to write t
 the database... it is one of the worst mistakes that can be made in this database
 system. writing a .md file creates a big issue. its undetectable to the system."
 
-He is right about undetectable, and that is the whole defect. Every OTHER control
-in this system that matters has a mechanism behind it: destructive Bash has
-guard-unattended.py, taught-rule shape has rule-shape-gate.py, prose quality has
-lint-gate.py, the ledger rules have ledger-sweep.py. Shared rule "findings and
-record updates go into the DATABASE, never into a markdown report" is the one
-major rule enforced ONLY by a session remembering it at the moment of writing.
-
-It failed twice in one sitting on 2026-08-03, in a session that had loaded the
-rule and recited it back at session start. That is the same failure ledger-sweep
-was built for, and its docstring already carries the finding: "The only control
-that worked unassisted all night was a hook."
-
 THE FOUR CAUSES, because a gate that treats only the symptom moves the leak:
 
   1. THE RULE'S OWN CARVE-OUT IS A TRAP. It ends "Narrative and doctrine files
@@ -86,8 +74,7 @@ import os
 import re
 import sys
 
-# Script-relative, NOT os.path.expanduser("~/carr-system") — see the same fix
-# in test-ledger-sweep.py and test-review-council.py. On a GitHub runner the
+# Script-relative: on a GitHub runner the
 # repo is checked out to /home/runner/work/carr-system/carr-system, outside
 # $HOME, so the four ~/carr-system-literal paths below silently pointed at
 # files that do not exist there: generated_paths() raising FileNotFoundError
@@ -481,13 +468,18 @@ def check_apply_patch(ti, cwd):
     return None
 
 
-def main():
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+@decision(failure="raise")
+def decide(payload):
     tool = ""
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:                          # fail OPEN
-        log(f"ALLOW(parse-error) {exc}")
-        sys.exit(0)
 
     try:
         tool = payload.get("tool_name") or payload.get("toolName") or ""
@@ -531,5 +523,9 @@ def main():
         sys.exit(0)
 
 
+def main():
+    sys.exit(run(decide, parse_error=_parse_error))
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

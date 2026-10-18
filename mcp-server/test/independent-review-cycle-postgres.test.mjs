@@ -9,7 +9,10 @@ import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import test from "node:test";
 
-import { V5_REVIEW_DIMENSIONS } from "../src/complete-set-review-a03.vocabulary.v5.js";
+const V5_REVIEW_DIMENSIONS = [
+  "architecture", "business", "context", "cost", "migration", "operations",
+  "product", "repository", "resilience", "security", "sequencing",
+];
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_V5_A03_DB_REQUIRED === "1";

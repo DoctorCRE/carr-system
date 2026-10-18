@@ -37,8 +37,6 @@ import os
 import subprocess
 import sys
 import socket
-import shutil
-import tempfile
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -48,7 +46,7 @@ from psycopg import sql
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
-from lib.disposable_pg_fixture import postgres_fixture_group
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 
 # The postgres CLIENT lookup, shared with ops/p1-rebuild-gate.py. Loading by path
 # is how every ops gate reaches tools/db-tap.py, whose hyphenated filename cannot
@@ -170,52 +168,26 @@ def isolated_ci_database(base_dsn: str) -> Iterator[str]:
     env = local_pg.scrub_cloud_environment(os.environ)
 
     def checked(args: list[str | Path]) -> None:
-        result = subprocess.run([str(arg) for arg in args], env=env,
+        result = fixture.run([str(arg) for arg in args], env=env,
                                 capture_output=True, text=True, timeout=60)
         if result.returncode:
             raise RuntimeError("release-abandon disposable PostgreSQL step failed: " + Path(str(args[0])).name)
 
-    with postgres_fixture_group():
-        directory = tempfile.mkdtemp(prefix="release-abandon-")
-        shutdown_verified = False
-        try:
-            root = Path(directory)
-            data = root / "data"
-            with socket.socket() as probe:
-                probe.bind(("127.0.0.1", 0))
-                port = probe.getsockname()[1]
-            checked([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust",
-                     "--encoding=UTF8", "--no-locale"])
-            try:
-                checked([binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
-                         "-o", f"-h 127.0.0.1 -p {port} -c unix_socket_directories= -c fsync=off", "-w", "start"])
-                dsn = psycopg.conninfo.make_conninfo(host="127.0.0.1", port=port,
-                                                    user="carr_ci", dbname="postgres")
-                with psycopg.connect(dsn, autocommit=True) as connection:
-                    connection.execute("create role neondb_owner")
-                yield dsn
-            finally:
-                try:
-                    if (data / "postmaster.pid").exists():
-                        checked([binaries.pg_ctl, "-D", data, "-m", "immediate", "-w", "stop"])
-                    status = subprocess.run([str(binaries.pg_ctl), "-D", str(data), "status"],
-                                            env=env, capture_output=True, text=True, timeout=60)
-                    # pg_ctl documents 3 as "server is not running". A successful
-                    # stop alone does not authorize deleting recovery/diagnostic files.
-                    if status.returncode != 3:
-                        raise RuntimeError("disposable PostgreSQL shutdown was not verified")
-                    shutdown_verified = True
-                except Exception as exc:
-                    message = (
-                        f"release-abandon teardown failed; cluster retained at {root}; "
-                        f"log: {root / 'postgres.log'}")
-                    # The CLI catches fixture exceptions. Emit only our owned paths,
-                    # so its generic refusal cannot hide the recovery location.
-                    print(message, file=sys.stderr)
-                    raise RuntimeError(message) from exc
-        finally:
-            if shutdown_verified:
-                shutil.rmtree(directory)
+    with postgres_fixture_group(), DisposablePostgres("release-abandon-", binaries.pg_ctl, env=env, directory=None) as fixture:
+        root = fixture.root
+        data = root / "data"
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        checked([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust",
+                 "--encoding=UTF8", "--no-locale"])
+        checked([binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
+                 "-o", f"-h 127.0.0.1 -p {port} -c unix_socket_directories= -c fsync=off", "-w", "start"])
+        dsn = psycopg.conninfo.make_conninfo(host="127.0.0.1", port=port,
+                                            user="carr_ci", dbname="postgres")
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute("create role neondb_owner")
+        yield dsn
 
 
 def _cases(dsn: str) -> None:
@@ -415,10 +387,7 @@ def _cases(dsn: str) -> None:
 
 
 def run_cases(dsn: str) -> None:
-    """Every assertion, against whatever Postgres was handed in."""
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("the schema loads so the rest can run", False)
-        return
+    """Run current release cases on the prepared pristine database."""
     mig = subprocess.run([sys.executable, str(REPO / "tools" / "migrate.py"),
                           "--apply", "--yes"], capture_output=True, text=True,
                          timeout=1800, env={**os.environ, "DATABASE_URL": dsn})
@@ -431,6 +400,22 @@ def run_cases(dsn: str) -> None:
     _cases(dsn)
 
 
+def clone_fixture_database(dsn: str, database: str) -> str:
+    """Copy the restored fixture without revalidating the entire snapshot.
+
+    Both databases stay in this test's owned cluster. WAL_LOG avoids the
+    forced checkpoint of FILE_COPY; rows and schema remain separate copies.
+    """
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
+    if str(params.get("host") or "") not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("release-abandon clone requires loopback PostgreSQL")
+    maintenance = psycopg.conninfo.make_conninfo(dsn, dbname="template1")
+    with psycopg.connect(maintenance, autocommit=True) as connection:
+        connection.execute(sql.SQL("create database {} with template {} strategy WAL_LOG").format(
+            sql.Identifier(database), sql.Identifier(str(params.get("dbname") or "postgres"))))
+    return psycopg.conninfo.make_conninfo(dsn, dbname=database)
+
+
 def legacy_approval_receipt_refusal(dsn: str) -> None:
     """Exercise 0205 against a populated 0202-shaped receipt table.
 
@@ -439,9 +424,6 @@ def legacy_approval_receipt_refusal(dsn: str) -> None:
     migration file directly; its schema_migrations ledger is intentionally not
     consulted, because raw file application is the behavior under test.
     """
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("0205 legacy-receipt fixture schema loads", False)
-        return
     receipt_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     receipt_columns = psql(dsn, "-At", "-c",
                            "select count(*) from information_schema.columns "
@@ -522,9 +504,13 @@ def main() -> int:
     if ci_dsn:
         print("release-abandon-selftest: using an owned disposable PostgreSQL cluster")
         try:
-            with isolated_ci_database(ci_dsn) as legacy_dsn:
-                legacy_approval_receipt_refusal(legacy_dsn)
             with isolated_ci_database(ci_dsn) as isolated_dsn:
+                loaded = psql(isolated_dsn, "-f", str(REPO / "db" / "schema.sql"))
+                check("the pristine schema loads for both release fixtures", loaded.returncode == 0)
+                if loaded.returncode:
+                    return 1
+                legacy_dsn = clone_fixture_database(isolated_dsn, "abandon_legacy")
+                legacy_approval_receipt_refusal(legacy_dsn)
                 run_cases(isolated_dsn)
         except Exception:
             print("release-abandon-selftest: disposable PostgreSQL fixture unavailable",

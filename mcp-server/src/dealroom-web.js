@@ -6,6 +6,7 @@
 // actor for the existing MCP and pipeline handlers. No identity or deal data
 // is stored in the cookie.
 
+import { USAGE_PATH, usageResponse } from './usage-signals.js';
 import {
   exchangeGoogleCode,
   googleAuthorizationUrl,
@@ -31,6 +32,7 @@ import { isTourInternalRequest } from "./tour-internal-web.js";
 import { executeRegisteredTool } from "./tools.js";
 import { readDealWithJev } from "./jev-deal-reading.js";
 import { callTool } from "./mcp.js";
+import { isStagingBrowserEnvironment } from "./staging-browser.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
 
@@ -43,6 +45,7 @@ const PENDING_TTL = 600;
 const SESSION_IDLE_TTL = 12 * 60 * 60;
 const SESSION_ABSOLUTE_TTL = 7 * 24 * 60 * 60;
 const SESSION_REFRESH_WINDOW = 60 * 60;
+const E2E_PRINCIPAL = "e2e-joe";
 const REAUTH_TTL = 10 * 60;
 const ACTION_CHALLENGE_TTL = 5 * 60;
 const SYSTEM_WORK_MAX_BODY = 16 * 1024;
@@ -356,8 +359,6 @@ async function completeLogin(request, env, dependencies) {
   if (!slug) return finish(await refusal(env, request));
 
   const now = dependencies.now();
-  const opaque = randomString(32);
-  const sessionKey = SESSION_PREFIX + await sha256(opaque);
   const props = dependencies.propsForSlugFn(slug, { email: claims.email, sub: claims.sub,
     via: "dealroom-cookie", client_id: "dealroom-pwa" });
   if (pending.purpose === "reauth") {
@@ -373,17 +374,45 @@ async function completeLogin(request, env, dependencies) {
     return finish(redirect(`${origin}${safeReturnTo(pending.returnTo, origin)}`));
   }
 
-  await env.OAUTH_KV.put(sessionKey, JSON.stringify({
+  const cookie = await issueBrowserSession(env, dependencies, props);
+  return finish(redirect(`${origin}${safeReturnTo(pending.returnTo, origin)}`, [cookie]));
+}
+
+async function issueBrowserSession(env, dependencies, props, e2ePrincipal = null) {
+  const now = dependencies.now();
+  const opaque = randomString(32);
+  await env.OAUTH_KV.put(SESSION_PREFIX + await sha256(opaque), JSON.stringify({
     props,
-    origin,
+    origin: dealroomOrigin(env),
     createdAt: now,
     expiresAt: now + SESSION_IDLE_TTL * 1000,
     csrfToken: randomString(32),
     reauthAt: now,
+    ...(e2ePrincipal ? { e2ePrincipal } : {}),
   }),
     { expirationTtl: SESSION_IDLE_TTL });
-  return finish(redirect(`${origin}${safeReturnTo(pending.returnTo, origin)}`,
-    [sessionCookie(opaque, SESSION_IDLE_TTL)]));
+  return sessionCookie(opaque, SESSION_IDLE_TTL);
+}
+
+async function e2eSession(request, env, dependencies) {
+  if (!isStagingBrowserEnvironment(env)) return json({ error: "not_found" }, 404);
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  const secret = env.E2E_SESSION_SECRET;
+  if (typeof secret !== "string" || secret.length < 32 || !env.OAUTH_KV) {
+    return json({ error: "e2e_session_not_configured" }, 503);
+  }
+  const bearer = request.headers.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
+  if (!bearer || !equalStrings(await sha256(bearer), await sha256(secret))) {
+    return json({ error: "unauthorized" }, 401);
+  }
+  const suppliedOrigin = request.headers.get("origin");
+  if (suppliedOrigin && suppliedOrigin !== dealroomOrigin(env)) return json({ error: "forbidden" }, 403);
+  if (new URL(request.url).search || await request.text() !== "") return json({ error: "invalid_request" }, 400);
+  // Staging's Joe row is synthetic. Keep its existing partner semantics and
+  // record the E2E principal separately so no read model needs an identity alias.
+  const props = dependencies.propsForSlugFn("joe", { via: "dealroom-cookie", client_id: "dealroom-pwa" });
+  const cookie = await issueBrowserSession(env, dependencies, props, E2E_PRINCIPAL);
+  return withHeaders(json({ ok: true }), { "set-cookie": cookie });
 }
 
 async function sessionFor(request, env, dependencies) {
@@ -392,8 +421,13 @@ async function sessionFor(request, env, dependencies) {
   const key = SESSION_PREFIX + await sha256(opaque);
   const session = await env.OAUTH_KV.get(key, { type: "json" });
   if (!session) return null;
+  if (session.e2ePrincipal && (session.e2ePrincipal !== E2E_PRINCIPAL || !isStagingBrowserEnvironment(env))) return null;
   const now = dependencies.now();
-  const actor = dependencies.actorFromPropsFn(session.props);
+  let actor = dependencies.actorFromPropsFn(session.props);
+  if (actor && session.e2ePrincipal) {
+    if (actor.slug !== "joe" || actor.human !== true) return null;
+    actor = { ...actor, display: "E2E Joe" };
+  }
   const currentOrigin = dealroomOrigin(env);
   const primaryHost = env?.PRIMARY_APP_HOST || env?.APP_HOST || env?.DEALROOM_HOST;
   const primaryOrigin = typeof primaryHost === "string" && DEALROOM_HOST_PATTERN.test(primaryHost)
@@ -712,6 +746,7 @@ async function systemWorkSession(session, dependencies) {
     reauth_required: !session.reauthAt || now - session.reauthAt > REAUTH_TTL * 1000,
     reauth_url: "/auth/reauth?return_to=/",
     challenge_ttl_seconds: ACTION_CHALLENGE_TTL,
+    ...(session.session.e2ePrincipal ? { e2e_principal: session.session.e2ePrincipal } : {}),
   });
 }
 
@@ -1139,6 +1174,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       const url = new URL(request.url);
       const publicResponse = await publicShellAsset(env, request, url.pathname);
       if (publicResponse) return publicResponse;
+      if (url.pathname === "/auth/e2e-session") return e2eSession(request, env, dependencies);
       if (url.pathname === "/auth/login" && request.method === "GET") return startLogin(request, env);
       if (url.pathname === "/auth/callback" && request.method === "GET") return completeLogin(request, env, dependencies);
       if (url.pathname === "/auth/reauth" && request.method === "GET") return startReauth(request, env, dependencies);
@@ -1147,6 +1183,7 @@ async function handleRequest(request, env, ctx, dependencies) {
       // The business read is the ONLY addition to that surface, and it is
       // admitted by an exact path parser rather than a prefix.
       if (url.pathname.startsWith("/api/v1/") && url.pathname !== COMMAND_CENTER_PATH &&
+          url.pathname !== USAGE_PATH && url.pathname !== `${USAGE_PATH}/session` &&
           url.pathname !== JEV_DEAL_READING_PATH &&
           url.pathname !== WORK_INVENTORY_PATH && url.pathname !== ATLAS_GRAPH_PATH &&
           url.pathname !== PROGRAM_CONTROLLER_PATH && url.pathname !== METERING_PATH &&
@@ -1176,7 +1213,8 @@ async function handleRequest(request, env, ctx, dependencies) {
 
       const session = await sessionFor(request, env, dependencies);
       if (!session) {
-        if (url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
+        if (url.pathname === "/auth/session") return json({ error: "unauthorized", state: "sign_in_required" }, 401);
+        if (url.pathname.startsWith(USAGE_PATH) || url.pathname === JEV_DEAL_READING_PATH || url.pathname === COMMAND_CENTER_PATH || url.pathname === WORK_INVENTORY_PATH ||
             url.pathname === ATLAS_GRAPH_PATH || url.pathname === PROGRAM_CONTROLLER_PATH ||
             url.pathname === METERING_PATH ||
             isBusinessApiPath(url.pathname)) {
@@ -1191,7 +1229,12 @@ async function handleRequest(request, env, ctx, dependencies) {
       }
 
       let response;
-      if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
+      if (url.pathname === "/auth/session") {
+        response = request.method === "GET" ? await systemWorkSession(session, dependencies)
+          : json({ error: "method_not_allowed" }, 405);
+      } else if (url.pathname === USAGE_PATH || url.pathname === `${USAGE_PATH}/session`) {
+        response = await usageResponse(request, env, session, dependencies, guardSystemWorkPost);
+      } else if (isTourInternalRequest(request) && dependencies.tourHandler?.fetch) {
         response = await dependencies.tourHandler.fetch(request, env, ctx, session.actor, session);
       } else if (url.pathname.startsWith(ROOM_PREFIX)) {
         response = await roomRequest(request, env, session, dependencies);

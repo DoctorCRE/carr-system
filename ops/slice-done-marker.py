@@ -82,6 +82,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.record_call import call_verb  # noqa: E402
+
 CATALOG_DOC = "doctorcre-v5-astra-integration-review"
 CATALOG_SECTION = "v5-reviewed-implementation-slice-catalog-and-parallel-groups-2026-09-09"
 # Commits before this cannot belong to the 2026-09-09 catalog's slices.
@@ -126,18 +129,11 @@ def attribute(subject: str, catalog_ids: set[str]) -> list[tuple[str, str]]:
 # ── adapters (replaced by fakes in ops/slice-done-marker-selftest.py) ─────────
 
 def run_sh_call(verb: str, args: dict) -> dict:
-    """The sanctioned Bash door, as ops/release-pipeline.py uses it."""
-    proc = subprocess.run([str(REPO / "run.sh"), "call", verb, json.dumps(args)], cwd=str(REPO),
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
-    text = (proc.stdout or "").strip()
-    try:
-        body = json.loads(text) if text else {}
-    except ValueError:
-        raise MarkerError(f"{verb}: unparseable reply (exit {proc.returncode}): {text[:300]}") from None
-    if proc.returncode != 0 or (isinstance(body, dict) and body.get("ok") is False) \
-            or (isinstance(body, dict) and body.get("error")):
-        raise MarkerError(f"{verb}: {json.dumps(body)[:600] if body else (proc.stderr or '')[-300:]}")
-    return body
+    """The sanctioned Bash door, through lib/record_call: anything but ok raises."""
+    result = call_verb(verb, args, timeout=300)
+    if not result.ok:
+        raise MarkerError(result.describe())
+    return result.reply
 
 
 def git(*args: str) -> str:

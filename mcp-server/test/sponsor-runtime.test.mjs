@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 // Sponsor/runtime separation tests. These are intentionally pure/mock based:
 // they prove that no caller argument selects a personal brain before a deploy.
 
@@ -294,7 +295,7 @@ test("tenant is server fixed and cannot be selected by an actor or tool payload"
 
 test("audit migration and both write paths preserve actor, sponsor, scope, and authority without rule bodies", async () => {
   const [migration, tools] = await Promise.all([
-    readFile(new URL("../../migrations/0095_sponsor_runtime_audit.sql", import.meta.url), "utf8"),
+    readMigration(new URL("../../migrations/0095_sponsor_runtime_audit.sql", import.meta.url)),
     readFile(new URL("../src/tools.js", import.meta.url), "utf8"),
   ]);
   for (const text of [migration, tools]) {

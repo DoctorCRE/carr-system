@@ -11,42 +11,31 @@ Exit 0 means every clause it can check read-only checks out; exit 1 names
 which did not. A missing receipt history ("no_receipt_on_record") is NOT a
 failure -- see checkable_done 1's own note below.
 
-Same call path ops/timebomb-audit.py and ops/delivery-cadence-a05-sweep.py use: a
+Same call path ops/delivery-cadence-a05-sweep.py use: a
 subprocess to `run.sh call <verb> '<json>'`, never the generic MCP call-verb
 passthrough.
 """
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
-RUN_SH = REPO / "run.sh"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib import record_call  # noqa: E402
 
 BOUND_SUBJECT = {"subject_type": "engineering_program", "subject_ref": "doctorcre-v5"}
 
 
 def call_verb(verb: str, args: dict) -> tuple[bool, Any]:
-    if not RUN_SH.exists():
-        return False, f"no such file: {RUN_SH}"
+    """Never raises -- a verb call that fails is a finding, not a crash. Only
+    an ok outcome is success: a refused write is reported, never accepted."""
     child_env = {"HOME": os.environ.get("HOME", ""), "PATH": os.environ.get("PATH", ""),
                  "LANG": os.environ.get("LANG", "C")}
-    try:
-        proc = subprocess.run([str(RUN_SH), "call", verb, json.dumps(args)],
-                               cwd=str(REPO), env=child_env, capture_output=True,
-                               text=True, timeout=120)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"subprocess failed: {type(exc).__name__}: {exc}"
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        return False, f"run.sh call {verb} exit {proc.returncode}: {tail[-1] if tail else '(no output)'}"
-    try:
-        return True, json.loads(proc.stdout)
-    except ValueError:
-        return False, f"non-JSON stdout from {verb}: {proc.stdout[:200]!r}"
+    result = record_call.call_verb(verb, args, env=child_env, timeout=120)
+    return (True, result.reply) if result.ok else (False, result.describe())
 
 
 def check_verbs_deployed() -> dict:
