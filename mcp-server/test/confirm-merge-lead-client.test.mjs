@@ -1,33 +1,3 @@
-// confirm-merge-lead-client.test.mjs — the gate for Joe's ruling that a lead
-// record and a client record for the same person are NOT a duplicate.
-//
-// HIS WORDS, and they are the whole rule: "Okafor is a client now duh. everyone
-// starts as a lead." Every party enters as a lead and converts to a client;
-// both refs coexist by design. An L- and a C- ref for one person is the system
-// working, not a mess to tidy up.
-//
-// WHY A GATE AND NOT A NOTE. `find` already returns lead_client_links and
-// explains link_basis, but explaining a taxonomy is not the same as refusing an
-// action — and the action here is destructive. confirm-merge sets merged_into on
-// the loser, which retires its ref permanently: a lost ref is never reissued, so
-// every piece of doctrine that quotes it goes dead and has to be repointed by
-// hand. Undoing a wrong merge is not a delete.
-//
-// WHAT IT MUST NOT BREAK. The legitimate case is real and this verb's own
-// comments record it: Whitfield was TWO party rows for one human, one carrying
-// the lead and one carrying the client, and merging them was right — the point
-// of that merge was one person holding BOTH roles. So the gate cannot be a flat
-// refusal. It refuses the merge whose only stated basis is that the names match,
-// and takes `same_person_because` as the human's evidence that it is the
-// Whitfield shape.
-//
-// THE SHAPE IT WATCHES FOR is narrow on purpose: one side holding ONLY a lead
-// row, the other holding ONLY a client row. Two leads, two clients, anything
-// touching a vendor row, or either side holding both roles already — none of
-// those is the pattern Joe ruled on, and none is gated here.
-//
-// Run with: node --test mcp-server/test/confirm-merge-lead-client.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,7 +11,6 @@ const ids = {
 const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
   via: "mcp", client_id: "claude" };
 
-// roles: { [partyId]: ["lead"] | ["client"] | ["lead","client"] | ["vendor"] … }
 class Fake {
   constructor(roles, metrics = null) {
     this.roles = roles;
@@ -58,12 +27,11 @@ class Fake {
 
     if (sql.startsWith("select request_hash, response")) return { rows: [] };
 
-    // ref resolution — both inputs arrive as uuids in these tests
+    if (sql.includes("merge_live_endpoints"))
+      return { rows: params[0].map(id => ({ id, merged_into: null })) };
+
     if (sql.includes("v_ref_index")) return { rows: [] };
 
-    // THE PRE-CHECK the gate depends on: which role rows does each party hold?
-    // Matches the real query by the marker comment it carries, so the fake
-    // cannot drift into answering a query the handler no longer sends.
     if (sql.includes("role_kinds_for_party")) {
       const held = this.roles[params[0]] || [];
       return { rows: held.map(k => ({ kind: k })) };
@@ -90,10 +58,6 @@ class Fake {
   }
 }
 
-// ToolError carries its detail on `.payload`. An earlier draft of this file read
-// `.body ?? .message` and the first test still went green — off the bare error
-// string, having never seen the explanation it claimed to be checking. Read the
-// field the error actually uses.
 const detail = (e) => JSON.stringify(e.payload ?? e.body ?? e.message ?? e);
 
 const verb = TOOLS["confirm-merge"];
@@ -205,7 +169,7 @@ test("the gate is symmetric — it does not depend on which side is the survivor
   const fake = new Fake({ [ids.leadSide]: ["lead"], [ids.clientSide]: ["client"] });
   await assert.rejects(() => verb.handler(fake, joe, {
     idempotency_key: "k-sym",
-    survivor_party: ids.leadSide,   // reversed
+    survivor_party: ids.leadSide,
     merged_party: ids.clientSide,
     match_basis: "exact email domain",
   }), /lead_client_pair|wrong_merge_survivor/,

@@ -1,0 +1,45 @@
+{
+  "tour_id": "tour-synthetic-1",
+  "projection_id": "proj-synthetic-1",
+  "route_version": 3,
+  "stops": [
+    {
+      "route_stop_id": "rs-a",
+      "property_id": "prop-a",
+      "route_sequence": 1,
+      "route_label": "A",
+      "locked_state": "locked",
+      "dwell_minutes": 30,
+      "buffer_minutes": 10,
+      "title": "Synthetic Clinic One",
+      "address_line": "100 Example Way",
+      "position": {
+        "latitude": 30.6001,
+        "longitude": -88.0001,
+        "coordinate_role": "entrance",
+        "precision_class": "entrance",
+        "review_state": "reviewed",
+        "human_approved": true
+      }
+    },
+    {
+      "route_stop_id": "rs-b",
+      "property_id": "prop-b",
+      "route_sequence": 2,
+      "route_label": "B",
+      "locked_state": "flexible",
+      "dwell_minutes": 20,
+      "buffer_minutes": 10,
+      "title": "Synthetic Clinic Two",
+      "address_line": "200 Example Way",
+      "position": {
+        "latitude": 30.6102,
+        "longitude": -88.0102,
+        "coordinate_role": "parcel_centroid",
+        "precision_class": "parcel",
+        "review_state": "reviewed",
+        "human_approved": true
+      }
+    }
+  ]
+}

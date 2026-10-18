@@ -9,6 +9,17 @@
     ? globalThis.__CARR_TOUR_TAKE_SHARE_TOKEN__() : "";
   let reportProperties = new globalThis.Map();
   let mapInstance = null;
+  // Client feedback (shortlist and comment). The projection ref comes only from
+  // the feedback read; a property gets controls only if that read lists it.
+  // feedbackState: loading | ready | none (link has no feedback scope) | unavailable.
+  const FEEDBACK_TIMEOUT_MS = 8000;
+  const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+  const feedbackStatus = document.querySelector("#feedback-status");
+  const retryButton = document.querySelector("#retry-feedback");
+  let feedback = null;
+  let feedbackState = "loading";
+  const rowsByRef = new globalThis.Map();
+  const wired = new globalThis.Set();
 
   function setStatus(message) { status.textContent = message; }
 
@@ -37,6 +48,126 @@
     return parts.length ? parts.join(" · ") : fallback;
   }
 
+  async function send(path, body) {
+    const response = await fetch(path, {
+      method: "POST", credentials: "same-origin",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await response.json(); } catch { /* an unreadable body is an unknown outcome */ }
+    return { status: response.status, saved: response.status === 200 && data?.data?.saved === true };
+  }
+
+  // A control owns one unsettled attempt. Re-sending the same value is an
+  // explicit retry and keeps the key; a different value is a new action and
+  // retires the old attempt. Only a read "saved" acknowledgement settles an
+  // attempt as saved; a 200 without one, a 5xx or a dropped connection leaves
+  // the outcome unknown and the key in place.
+  async function submitFeedback(control, kind, propertyRef, value) {
+    if (!feedback || !feedback.refs.has(propertyRef)) return "refused";
+    if (control.inFlight) return "busy";
+    if (!control.attempt || control.attempt.value !== value) control.attempt = { key: crypto.randomUUID(), value };
+    const body = kind === "shortlist"
+      ? { projection_ref: feedback.projectionRef, property_ref: propertyRef, shortlisted: value, idempotency_key: control.attempt.key }
+      : { projection_ref: feedback.projectionRef, property_ref: propertyRef, comment: value, idempotency_key: control.attempt.key };
+    control.inFlight = true;
+    try {
+      const result = await send(`/api/share/${kind}`, body);
+      if (result.saved) { control.attempt = null; return "saved"; }
+      if (result.status === 200 || result.status >= 500) return "retry";
+      control.attempt = null;
+      if (result.status === 401 || result.status === 403 || result.status === 404) { feedback = null; return "unavailable"; }
+      return "refused";
+    } catch { return "retry"; }
+    finally { control.inFlight = false; }
+  }
+
+  const OUTCOME = {
+    saved: "Saved.", retry: "Not confirmed yet. Try again.", busy: "Still saving…",
+    unavailable: "This link is no longer active. Ask your broker for a new one.", refused: "That could not be saved.",
+  };
+
+  function feedbackControls(propertyRef, note) {
+    const box = document.createElement("div");
+    box.className = "feedback";
+    const say = message => { note.textContent = message; };
+    if (feedback.scopes.has("shortlist")) {
+      const control = { inFlight: false, attempt: null };
+      let on = false;
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "shortlist-toggle";
+      const paint = () => {
+        pick.setAttribute("aria-pressed", String(on));
+        pick.textContent = on ? "Shortlisted" : "Add to shortlist";
+      };
+      paint();
+      pick.addEventListener("click", async () => {
+        const wanted = !on;
+        pick.disabled = true;
+        const result = await submitFeedback(control, "shortlist", propertyRef, wanted);
+        pick.disabled = false;
+        if (result === "saved") { on = wanted; paint(); }
+        say(OUTCOME[result]);
+        if (result === "unavailable") disableFeedback();
+      });
+      box.append(pick);
+    }
+    if (feedback.scopes.has("comment")) {
+      const control = { inFlight: false, attempt: null };
+      const field = document.createElement("input");
+      field.type = "text";
+      field.className = "comment-field";
+      field.maxLength = 1000;
+      field.setAttribute("aria-label", "One-line comment for your broker on this property");
+      const post = document.createElement("button");
+      post.type = "button";
+      post.className = "comment-send";
+      post.textContent = "Send comment";
+      const sendComment = async () => {
+        const snapshot = field.value.trim();
+        if (!snapshot) { say("Write a comment first."); return; }
+        if (CONTROL_CHARS.test(snapshot)) { say("Comments are one line. Remove line breaks and special characters."); return; }
+        post.disabled = true;
+        const result = await submitFeedback(control, "comment", propertyRef, snapshot);
+        post.disabled = false;
+        if (result === "saved") {
+          // Only clear what was sent; a newer draft typed meanwhile stays.
+          if (field.value.trim() === snapshot) { field.value = ""; say(OUTCOME.saved); }
+          else say("Saved. Your newer text is still in the box.");
+        } else say(OUTCOME[result]);
+        if (result === "unavailable") disableFeedback();
+      };
+      post.addEventListener("click", sendComment);
+      field.addEventListener("keydown", event => {
+        if (event?.key !== "Enter") return;
+        if (typeof event.preventDefault === "function") event.preventDefault();
+        return sendComment();
+      });
+      box.append(field, post);
+    }
+    return box;
+  }
+
+  function attachFeedback() {
+    if (feedbackState !== "ready") return;
+    for (const [ref, row] of rowsByRef) {
+      if (wired.has(ref) || !feedback.refs.has(ref)) continue;
+      wired.add(ref);
+      const note = document.createElement("p");
+      note.className = "status feedback-note";
+      note.setAttribute("role", "status");
+      row.append(feedbackControls(ref, note), note);
+    }
+  }
+
+  function disableFeedback() {
+    feedbackState = "none";
+    list.dataset.feedbackState = feedbackState;
+    wired.clear();
+    for (const control of list.querySelectorAll(".feedback")) control.remove();
+  }
+
   function render(report) {
     const items = Array.isArray(report?.stops) ? report.stops :
       (Array.isArray(report?.items) ? report.items : (Array.isArray(report?.properties) ? report.properties : []));
@@ -47,6 +178,8 @@
     document.querySelector("#report-title").textContent = "Tour report";
     summary.textContent = `${properties.length} ${properties.length === 1 ? "property" : "properties"} in this report.`;
     list.replaceChildren();
+    rowsByRef.clear();
+    wired.clear();
     for (const { item, index } of properties) {
       const row = document.createElement("li");
       row.className = "report-item";
@@ -58,10 +191,12 @@
       const detail = document.createElement("p");
       detail.textContent = text(item.summary, text(item.status, propertyAddress(item, "Details available in the packet.")));
       row.append(route, heading, detail);
+      rowsByRef.set(item.property_ref, row);
       list.append(row);
     }
     if (!properties.length) list.textContent = "No properties are available in this report.";
     list.setAttribute("aria-busy", "false");
+    attachFeedback();
   }
 
   function validMapPoint(point) {
@@ -119,11 +254,55 @@
     return payload.data || {};
   }
 
+  // Resolves with the feedback grant, or null when this link carries no
+  // feedback scope. Anything else (5xx, a malformed body) throws: unavailable.
+  async function fetchFeedback(signal) {
+    const response = await fetch("/api/share/feedback", { credentials: "same-origin", ...(signal ? { signal } : {}) });
+    if (response.status === 401 || response.status === 403 || response.status === 404) return null;
+    if (!response.ok) throw new Error("feedback_unavailable");
+    let payload = null;
+    try { payload = await response.json(); } catch { throw new Error("feedback_unavailable"); }
+    const data = payload?.data;
+    if (!data || typeof data !== "object" || !/^projection:public:[A-Za-z0-9_-]{16,128}$/.test(data.projection_ref || "") ||
+      !Array.isArray(data.permission_scopes) || !Array.isArray(data.items)) throw new Error("feedback_unavailable");
+    const scopes = new globalThis.Set(data.permission_scopes.filter(scope => scope === "shortlist" || scope === "comment"));
+    const refs = new globalThis.Set(data.items.map(item => item?.property_ref).filter(validPropertyRef));
+    if (!scopes.size || !refs.size) return null;
+    return { projectionRef: data.projection_ref, scopes, refs };
+  }
+
+  // Optional and independent: it has its own deadline and never gates the
+  // packet or map. A failure is reported and can be retried.
+  async function loadFeedback() {
+    feedbackState = "loading";
+    list.dataset.feedbackState = feedbackState;
+    feedbackStatus.textContent = "";
+    retryButton.hidden = true;
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    let timer = null;
+    try {
+      feedback = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => { if (controller) controller.abort(); reject(new Error("feedback_timeout")); }, FEEDBACK_TIMEOUT_MS);
+        fetchFeedback(controller?.signal).then(resolve, reject);
+      });
+      feedbackState = feedback ? "ready" : "none";
+    } catch {
+      feedback = null;
+      feedbackState = "unavailable";
+      feedbackStatus.textContent = "Shortlist and comments are unavailable right now.";
+      retryButton.hidden = false;
+    } finally { clearTimeout(timer); }
+    list.dataset.feedbackState = feedbackState;
+    attachFeedback();
+  }
+
   async function loadTour() {
     try {
+      const reports = Promise.allSettled([fetchReport(), fetchMap()]);
+      void loadFeedback();
       // Packet and map are independently scoped. Fetch both, then render in a
       // stable order so a valid map-only or packet-only grant still opens.
-      const [reportResult, mapResult] = await Promise.allSettled([fetchReport(), fetchMap()]);
+      const [reportResult, mapResult] = await reports;
       const reportLoaded = reportResult.status === "fulfilled";
       const mapLoaded = mapResult.status === "fulfilled";
       if (!reportLoaded && !mapLoaded) throw new Error("share_scope_unavailable");
@@ -173,5 +352,6 @@
   }
 
   openButton.addEventListener("click", () => { void openTour(); });
+  retryButton.addEventListener("click", () => { void loadFeedback(); });
   bootstrap();
 })();

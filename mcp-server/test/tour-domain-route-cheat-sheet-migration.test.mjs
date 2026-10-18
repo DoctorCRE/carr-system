@@ -1,10 +1,11 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
 const root = path.resolve(import.meta.dirname, "../..");
-const migration = fs.readFileSync(path.join(root, "migrations/0429_tour_domain_route_cheat_sheet.sql"), "utf8");
+const migration = readMigration(path.join(root, "migrations/0429_tour_domain_route_cheat_sheet.sql"));
 
 test("slice 4 is additive and binds new tours to an opaque client/work subject", () => {
   assert.match(migration, /^begin;/m);
@@ -76,4 +77,14 @@ test("slice 4 defaults neither revised route seam to public execution nor incomp
   assert.match(migration, /revoke all on function ops\.append_tour_route_version\(text,uuid,integer,uuid,jsonb,jsonb,text,text,uuid,jsonb,text,integer,text\),ops\.append_tour_route_stop\(text,uuid,uuid,integer,text,text,timestamp with time zone,timestamp with time zone,boolean,integer,integer,text,text\) from public,carr_reader,carr_writer,carr_jobs,carr_authority/i);
   assert.match(migration, /route acceptance requires at least one active stop/i);
   assert.match(migration, /route acceptance requires an explicit transition for every new route stop/i);
+});
+
+// The successor adds only the stored subject fields to the deployed projection.
+test("internal detail subject successor preserves the prior read and its authorization predicates", () => {
+  const prior = readMigration(path.join(root, "migrations/0759_tour_reviewed_route_digest.sql"));
+  const next = readMigration(path.join(root, "migrations/0813_tour_internal_subject_read.sql"));
+  const functionBody = text => text.slice(text.indexOf("create or replace function ops.read_tour_internal_detail")).split("$$;")[0];
+  assert.equal(functionBody(next).replace("'subject_type',t.subject_type,'subject_id',t.subject_id,\n    ", ""), functionBody(prior));
+  const contract = JSON.parse(fs.readFileSync(path.join(root, "workspace/contracts/tour-operations-foundation.v1.json")));
+  assert.deepEqual(contract.internal_detail_subject.fields, ["subject_type", "subject_id"]);
 });

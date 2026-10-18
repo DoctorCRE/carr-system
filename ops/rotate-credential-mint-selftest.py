@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import ast
 import importlib.util
+import io
 import os
 import stat
 import subprocess
@@ -18,6 +19,7 @@ import tempfile
 import types
 from pathlib import Path
 from typing import Any, cast
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("rotate_credential", REPO / "tools" / "rotate-credential.py")
@@ -74,7 +76,140 @@ class Connection:
         return Result(self.row)
 
 
+def verifier_rotation_cases() -> None:
+    role = "carr_program5_forward_fix_verifier"
+    key = "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"
+    existing = PEER.replace("carr_jobs", role)
+    password = "V" * 40
+    events: list[object] = []
+    identity: tuple[str, str, bool] | tuple[str] | None = (role, role, True)
+
+    class Statement:
+        def __init__(self, template):
+            self.template = template
+
+        def format(self, *args):
+            return (self.template, *args)
+
+    class RotationConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *unused):
+            return False
+
+        def execute(self, query):
+            events.append(("execute", query))
+            return Result((identity[1],) if query == "select current_user"
+                          and identity and len(identity) == 3 else identity)
+
+        def commit(self):
+            events.append("commit")
+
+    def connect(dsn):
+        events.append(("connect", dsn))
+        return RotationConnection()
+
+    def write(key, value):
+        events.append(("write", key, value))
+
+    fake_psycopg = types.ModuleType("psycopg")
+    fake_psycopg.connect = connect  # type: ignore[attr-defined]
+    fake_psycopg.sql = types.SimpleNamespace(  # type: ignore[attr-defined]
+        SQL=Statement, Identifier=lambda value: value, Literal=lambda value: value)
+    with patch.dict(os.environ, {"DATABASE_URL": OWNER}, clear=True), \
+            patch.dict(sys.modules, {"psycopg": fake_psycopg}), \
+            patch.object(rc, "credential_env_lock", contextlib.nullcontext), \
+            patch.object(rc, "read_env", return_value={key: existing}), \
+            patch.object(rc, "new_password", return_value=password), \
+            patch.object(rc, "write_env_key", write):
+        # Every rejected URI must stop before opening a connection or generating
+        # a password; the fake records mutations independently of its identity.
+        invalid = {
+            "malformed URI": "not-a-postgres-uri",
+            "wrong host": existing.replace("ep-x-123", "ep-other-456"),
+            "wrong port": existing.replace("/neondb", ":5433/neondb"),
+            "wrong database": existing.replace("/neondb", "/otherdb"),
+            "wrong login": PEER,
+            "query login override": existing + "&user=other",
+            "encoded startup role override": existing + "&options=-c%20role%3D" + role,
+            "duplicate TLS parameter": existing + "&sslmode=require",
+            "malformed port": existing.replace("/neondb", ":bad/neondb"),
+            "zero port": existing.replace("/neondb", ":0/neondb"),
+            "negative port": existing.replace("/neondb", ":-1/neondb"),
+            "out-of-range port": existing.replace("/neondb", ":65536/neondb"),
+        }
+        for label, dsn in invalid.items():
+            events.clear()
+            with patch.object(rc, "read_env", return_value={key: dsn}), \
+                    patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+                try:
+                    error = refused(lambda: rc.rotate_role(role, True))
+                except AssertionError:
+                    error = ""
+            check(label + " refuses before all database mutation", bool(error) and events == [])
+        for label, owner in {
+            "malformed owner": "malformed",
+            "zero owner port": OWNER.replace("/neondb", ":0/neondb"),
+            "negative owner port": OWNER.replace("/neondb", ":-1/neondb"),
+            "out-of-range owner port": OWNER.replace("/neondb", ":65536/neondb"),
+        }.items():
+            events.clear()
+            with patch.dict(os.environ, {"DATABASE_URL": owner}), \
+                    patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+                try:
+                    error = refused(lambda: rc.rotate_role(role, True))
+                except AssertionError:
+                    error = ""
+            check(label + " refuses before all database mutation", bool(error) and events == [])
+
+        for port in (1, 5432, 65535):
+            _, target = rc._postgres_parts(existing.replace("/neondb", f":{port}/neondb"), key)
+            check(f"valid explicit port {port} is preserved", target[1] == port)
+
+        for identity, label in [
+            (("other_login", role, True), "different session login"),
+            ((role, "other_role", True), "different effective role"),
+            ((role, role, False), "missing verifier membership"),
+            (None, "missing identity row"),
+        ]:
+            events.clear()
+            error = refused(lambda: rc.rotate_role(role, True))
+            check(label + " refuses without publishing", bool(error) and not any(
+                isinstance(event, tuple) and event[0] == "write" for event in events))
+
+        identity = (role, role, True)
+        events.clear()
+        result = rc.rotate_role(role, True)
+        check("verifier rotates and preserves URL options after exact identity verification",
+              result == 0 and events == [
+                  ("connect", OWNER),
+                  ("execute", ("alter role {} with password {}", role, password)),
+                  "commit",
+                  ("connect", existing.replace("oldpw", password)),
+                  ("execute", "select session_user,current_user,pg_has_role(session_user,'carr_program5_forward_fix_verifiers','member')"),
+                  ("write", key, existing.replace("oldpw", password)),
+              ])
+        for prior_role in ("carr_jobs", "app_exporter_local"):
+            events.clear()
+            identity = (prior_role,)
+            prior = PEER.replace("carr_jobs", prior_role)
+            with patch.object(rc, "read_env", return_value={rc.ROLE_ENV[prior_role]: prior}):
+                result = rc.rotate_role(prior_role, True)
+            check(prior_role + " retains rotation and current-user verification",
+                  result == 0 and events[-2:] == [
+                      ("execute", "select current_user"),
+                      ("write", rc.ROLE_ENV[prior_role], prior.replace("oldpw", password)),
+                  ])
+        events.clear()
+        with patch.object(rc, "read_env", return_value={}), \
+                patch.object(rc, "new_password", side_effect=AssertionError("generation reached")):
+            missing = refused(lambda: rc.rotate_role(role, True))
+        check("verifier cannot mint a missing connection", "nothing to rotate" in missing and events == [])
+
+
 def main() -> int:
+    verifier_rotation_cases()
     source = (REPO / "tools" / "rotate-credential.py").read_text(encoding="utf-8")
     workflow = (REPO / ".github" / "workflows" / "backup-nightly.yml").read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -117,10 +252,11 @@ def main() -> int:
     rc.read_env = lambda: (_ for _ in ()).throw(AssertionError("env reached"))
     rc.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError("subprocess reached"))
     try:
-        check("rotate_role backup refusal precedes all mutation primitives",
-              "disabled" in refused(lambda: rc.rotate_role("carr_backup", True, True)))
-        check("direct backup entrypoint refusal precedes all mutation primitives",
-              "disabled" in refused(lambda: rc.rotate_backup_role(True)))
+        with patch.dict(os.environ, {"CARR_BREAK_GLASS": "1"}, clear=True):
+            check("rotate_role backup refusal precedes all mutation primitives even with break-glass",
+                  "disabled" in refused(lambda: rc.rotate_role("carr_backup", True, True)))
+            check("direct backup entrypoint refusal precedes all mutation primitives even with break-glass",
+                  "disabled" in refused(lambda: rc.rotate_backup_role(True)))
         check("generic internal helper cannot bypass carr_backup refusal",
               "permitted only" in refused(lambda: rc._rotate_existing_role("carr_backup", True)))
         check("deepest ALTER ROLE helper cannot bypass carr_backup refusal",

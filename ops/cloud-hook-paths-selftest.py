@@ -104,6 +104,8 @@ def cloud_project(tmp: Path) -> Path:
     project = tmp / "repo"
     shutil.copytree(REPO / "hooks", project / "hooks",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    (project / "lib").mkdir()
+    shutil.copy2(REPO / "lib/hook_runtime.py", project / "lib/hook_runtime.py")
     (project / "ops").mkdir(parents=True)
     shutil.copy2(REPO / "ops" / "command_precheck.py", project / "ops" / "command_precheck.py")
     (project / ".claude").mkdir()

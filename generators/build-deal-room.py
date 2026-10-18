@@ -21,7 +21,8 @@ import json, os, sys
 # exporter wrote. The file keeps being generated, and `--files` still builds from
 # it byte for byte, so no other reader loses anything; this only stops the room
 # from deriving today's queue from an export that may have failed hours ago.
-# Parity between the two modes is proven by tools/parity-records.py, not assumed.
+# Both modes use the same template transforms; whole-output parity requires
+# comparing them on the same data.
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 from lib.drive_recovery import RecoveryArgumentError, parse_recovery_controls

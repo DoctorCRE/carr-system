@@ -46,6 +46,9 @@ def main() -> int:
                      where definition_key='engineering-slice' and state in ('queued','retry_wait')"""
             )
             job_id, envelope_id, session_id, _, _, _, _ = gate.fixture(cur)
+            # Deferred doctrine/epoch work belongs to fixture setup. Finish it
+            # before the scoped claim starts its bounded binding runway.
+            setup.commit()
             gate.set_local_role(cur, RUNTIME_ROLE)
             claimed = gate.one(cur, "select job_id,lease_token from ops.engineering_claim_slice(%s,1,960)",
                                ("engineering-envelope-race",))
@@ -70,6 +73,9 @@ def main() -> int:
                     binding = gate.one(cur, "select ops.engineering_controller_binding(%s,%s,%s)",
                                        (envelope_id, job_id, lease_token))[0]
                     if binding is None:
+                        # The explanatory predicate is private to owner/read
+                        # roles; keep the runtime binding attempt least-privilege.
+                        cur.execute("reset role")
                         currentness = gate.one(cur, "select ops.engineering_envelope_currentness(%s,%s)",
                                                (envelope_id, job_id))[0]
                         raise RuntimeError(f"live fixture unexpectedly had no controller binding: {currentness}")

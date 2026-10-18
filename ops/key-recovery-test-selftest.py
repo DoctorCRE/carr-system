@@ -40,9 +40,10 @@ hooks, chained:
       network/Neon-touching middle of THAT script is the one already-tested
       substitution — never a second, parallel stub written for this suite.
 
-NEVER THE REAL KEY, NEVER THE REAL BACKUPS. Every identity this suite ever
-types in is a throwaway keypair generated fresh, in a temp dir, by the real
-age-keygen, for this run only. The fixture public-key files it compares
+NEVER THE REAL KEY, NEVER THE REAL BACKUPS. The derivation scenarios use
+throwaway keypairs generated fresh, in a temp dir, by the real age-keygen,
+for this run only. The portable signal scenario uses a synthetic shape-valid
+value and interrupts before any derivation or comparison. The fixture public-key files it compares
 against are written to a temp dir too — backups-public-key.txt in the repo is
 never read and never touched.
 
@@ -244,10 +245,81 @@ def assert_no_leak(proc_or_output, secret: str, label: str) -> None:
           secret not in err)
 
 
+def interruptible_child(command: list[str], env: dict) -> subprocess.Popen:
+    # CI's background shell can pass SIG_IGN through Python and exec into zsh.
+    # A new session changes the process group, not that inherited disposition;
+    # zsh then cannot install the Ctrl-C trap this fixture is meant to exercise.
+    # Spawn with the terminal's default disposition and restore this single-
+    # threaded harness immediately, including when process creation fails.
+    previous = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        return subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True, env=env, cwd=REPO, start_new_session=True)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
 def tier1_portable() -> None:
     print("\nTIER 1a — portable checks that need no external tool")
     check("the script exists and is executable",
           os.access(SCRIPT, os.X_OK), SCRIPT)
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        probe = interruptible_child([
+            sys.executable, "-c",
+            "import signal; print(signal.getsignal(signal.SIGINT) == signal.SIG_IGN)",
+        ], os.environ.copy())
+        out, err = probe.communicate(timeout=10)
+        check("interrupt child handles SIGINT even when the CI parent ignores it",
+              probe.returncode == 0 and out.strip() == "False", out + err)
+        check("interrupt child launch preserves the parent's signal disposition",
+              signal.getsignal(signal.SIGINT) == signal.SIG_IGN)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+    # No key derivation is reached: a shape-valid synthetic value is enough
+    # to exercise readiness and teardown even on runners without age-keygen.
+    with tempfile.TemporaryDirectory(prefix="carr-ready-boundary.") as workdir:
+        secret = "AGE-SECRET-KEY-1" + "A" * 58
+        ready = Path(workdir) / "ready"
+        env = unreachable_env({
+            "TMPDIR": workdir,
+            "CARR_KEY_RECOVERY_TEST_SELFTEST": "1",
+            "CARR_KEY_RECOVERY_TEST_SELFTEST_TYPED_KEY": secret,
+            "CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE": str(PAUSE_SECONDS),
+            "CARR_KEY_RECOVERY_TEST_SELFTEST_READY_FILE": str(ready),
+        })
+        proc = interruptible_child([SCRIPT], env)
+        deadline = time.monotonic() + 90
+        while not ready.exists() and proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.0001)
+        pause_pid = ready.read_text().strip() if ready.exists() else ""
+        # Readiness must name an already-running member of the process group,
+        # so it cannot announce a foreground command that is still in future.
+        try:
+            pause_running = (pause_pid.isdigit() and int(pause_pid) != proc.pid
+                             and os.getpgid(int(pause_pid)) == proc.pid)
+        except ProcessLookupError:
+            pause_running = False
+        signalled = time.monotonic()
+        if proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGINT)
+        try:
+            out, err = proc.communicate(timeout=PAUSE_SECONDS - 5)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            out, err = proc.communicate()
+        check("ready boundary: pause is already running in the script's process group",
+              pause_running, f"readiness={pause_pid!r}")
+        check("ready boundary: SIGINT exits 130 promptly",
+              proc.returncode == 130 and time.monotonic() - signalled < 20,
+              f"got {proc.returncode}")
+        check("ready boundary: exactly one aborted receipt",
+              out.count("evidence: state=") == 1
+              and "state=failed exit_code=130 failure_class=aborted" in out, out)
+        check("ready boundary: no identity directory survives",
+              not glob.glob(os.path.join(workdir, "carr-key-recovery.*")))
+        assert_no_leak((out, err), secret, "ready boundary")
 
 
 def tier1_age(workdir: str) -> None:
@@ -387,14 +459,13 @@ def tier1_age(workdir: str) -> None:
         "CARR_KEY_RECOVERY_TEST_SELFTEST_TYPED_KEY": secret,
         "CARR_KEY_RECOVERY_TEST_SELFTEST_PUBKEY_FILE": match_pubkey_file,
         "CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE": str(PAUSE_SECONDS),
-        # The script touches this file the moment it reaches its pause, so the
+        # The paused process atomically publishes this file when interruptible, so the
         # signal below lands on the state under test no matter how loaded the
         # machine is. A fixed post-spawn sleep was the old guess and it flaked
         # under load: it could fire before the script reached the pause.
         "CARR_KEY_RECOVERY_TEST_SELFTEST_READY_FILE": ready_file,
     })
-    proc2 = subprocess.Popen([SCRIPT], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, env=env, cwd=REPO, start_new_session=True)
+    proc2 = interruptible_child([SCRIPT], env)
     # WAIT FOR THE READY MARKER, NOT FOR THE CLOCK. Poll up to 90s for the
     # script to arrive at its pause; under heavy load startup can take far
     # longer than any fixed sleep, and signalling early makes THIS suite red

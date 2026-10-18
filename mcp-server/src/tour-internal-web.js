@@ -3,24 +3,33 @@
 // gate: it owns no identity, authority selection, database, routing, or map
 // implementation.
 
+import { validRouteTimestamp, routeTimestampMicroseconds } from "./tour-route-timestamp.js";
+
 export const TOUR_INTERNAL_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current/tours";
 
 const MAX_BODY_BYTES = 32 * 1024;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
-const SHARE_SCOPES = new Set(["view_packet", "view_map"]);
+const SHARE_SCOPES = new Set(["view_packet", "view_map", "shortlist", "comment"]);
 const AUTHORITY_FIELDS = new Set(["actor", "actor_id", "tenant", "tenant_id", "organization_tenant_id", "authorization", "authorization_class", "identity", "reviewer", "sponsor", "human_slug"]);
 
 const STATIC = new Map([
   ["/tours", "/tours/index.html"],
   ["/tours/app.js", "/tours/app.js"],
   ["/tours/app.css", "/tours/app.css"],
+  ["/tours/property-panel.js", "/tours/property-panel.js"],
+  ["/tours/property-panel.css", "/tours/property-panel.css"],
 ]);
 const METHODS = new Map([
   ["/api/tours/library", "GET"],
   ["/api/tours/detail", "GET"],
+  ["/api/tours/property-evidence/v1", "GET"],
   ["/api/tours/properties/search", "POST"],
   ["/api/tours/selection-cart", "GET, POST"],
+  ["/api/tours/create", "POST"],
+  ["/api/tours/route-draft", "POST"],
+  ["/api/tours/route-stop", "POST"],
+  ["/api/tours/route-stop-transition", "POST"],
   ["/api/tours/route-version", "POST"],
   ["/api/tours/route-reorder", "POST"],
   ["/api/tours/route-accept", "POST"],
@@ -114,7 +123,9 @@ function validSearch(value) {
     Number.isInteger(value.limit) && value.limit >= 1 && value.limit <= 100;
 }
 function scopes(value) {
-  return Array.isArray(value) && value.length > 0 && value.length <= SHARE_SCOPES.size && new Set(value).size === value.length && value.every((scope) => SHARE_SCOPES.has(scope));
+  return Array.isArray(value) && value.length > 0 && value.length <= SHARE_SCOPES.size && new Set(value).size === value.length && value.every((scope) => SHARE_SCOPES.has(scope)) &&
+    // Client writes only make sense on a packet the client can read; the database enforces the same rule.
+    (!(value.includes("shortlist") || value.includes("comment")) || value.includes("view_packet"));
 }
 function iso(value) {
   if (typeof value !== "string" || value.length > 64 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
@@ -127,7 +138,66 @@ function validContent(value) {
   catch { return false; }
 }
 
+const SUBJECT_TYPES = new Set(["client", "work"]);
+const STOP_STATES = new Set(["active", "held", "excluded"]);
+const ACCESS_STATUS = new Set(["unknown", "candidate", "approved", "excluded"]);
+const DISPOSITIONS = new Set(["unchanged", "reordered", "removed", "held", "excluded", "merged", "added"]);
+const POINT_ROLES = new Set(["entrance", "driveway", "parking_access", "start", "end"]);
+const PRECISIONS = new Set(["unknown", "approximate", "parcel", "building", "address", "entrance", "surveyed"]);
+function text(value, max) { return typeof value === "string" && value.trim().length > 0 && value.trim().length <= max; }
+function boundedInt(value, min, max) { return Number.isInteger(value) && value >= min && value <= max; }
+// Same privacy-bearing reference policy as tour-domain.js point(); a reference the domain
+// will always refuse is a 400 here, never a retryable outage.
+const PRIVATE_REFERENCE = /(contact|phone|email|internal|client|@)/i;
+// The verb re-validates every field; this only stops malformed bodies at the door.
+function validPoint(value, role) {
+  return exact(value, ["latitude", "longitude", "position_role", "precision_class", "source_ref"]) && value.position_role === role && POINT_ROLES.has(role) &&
+    typeof value.latitude === "number" && Number.isFinite(value.latitude) && value.latitude >= -90 && value.latitude <= 90 &&
+    typeof value.longitude === "number" && Number.isFinite(value.longitude) && value.longitude >= -180 && value.longitude <= 180 &&
+    PRECISIONS.has(value.precision_class) && text(value.source_ref, 500) && !PRIVATE_REFERENCE.test(value.source_ref.trim());
+}
+function validCreate(v) {
+  return exact(v, ["idempotency_key", "tour_name", "subject_type", "subject_id", "canonical_dataset_version", "start_point", "end_point"]) &&
+    validId(v.idempotency_key) && text(v.tour_name, 240) && SUBJECT_TYPES.has(v.subject_type) &&
+    typeof v.subject_id === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(v.subject_id) && text(v.canonical_dataset_version, 240) &&
+    validPoint(v.start_point, "start") && validPoint(v.end_point, "end");
+}
+function validRouteDraft(v) {
+  return exact(v, ["idempotency_key", "tour_id", "route_version", "base_route_version_id", "expected_route_version", "start_point", "end_point"]) &&
+    validId(v.idempotency_key) && validId(v.tour_id) && boundedInt(v.route_version, 1, 2147483647) && validId(v.base_route_version_id) &&
+    boundedInt(v.expected_route_version, 0, 2147483647) && validPoint(v.start_point, "start") && validPoint(v.end_point, "end");
+}
+function validRouteStop(v) {
+  if (!exact(v, ["idempotency_key", "route_version_id", "property_id", "route_sequence", "route_label", "stop_state", "appointment_start", "appointment_end",
+    "locked_appointment", "dwell_minutes", "buffer_minutes", "access_coordinate_status", "assertion_set_digest"])) return false;
+  if (!validId(v.idempotency_key) || !validId(v.route_version_id) || !validId(v.property_id) || !STOP_STATES.has(v.stop_state)) return false;
+  const active = v.stop_state === "active";
+  // The label is presentation only; the property ID is never derived from or compared to it.
+  if (active ? !(boundedInt(v.route_sequence, 1, 2147483647) && typeof v.route_label === "string" && /^[A-Za-z0-9._ -]{1,80}$/.test(v.route_label.trim()))
+    : !(v.route_sequence === null && v.route_label === null)) return false;
+  const hasStart = v.appointment_start !== null, hasEnd = v.appointment_end !== null;
+  if (hasStart !== hasEnd || (hasStart && (!validRouteTimestamp(v.appointment_start) || !validRouteTimestamp(v.appointment_end) || routeTimestampMicroseconds(v.appointment_end) < routeTimestampMicroseconds(v.appointment_start)))) return false;
+  return typeof v.locked_appointment === "boolean" && (!v.locked_appointment || hasStart) &&
+    boundedInt(v.dwell_minutes, 0, 1440) && boundedInt(v.buffer_minutes, 0, 1440) &&
+    ACCESS_STATUS.has(v.access_coordinate_status) && validDigest(v.assertion_set_digest);
+}
+function validRouteStopTransition(v) {
+  if (!exact(v, ["idempotency_key", "old_route_version_id", "new_route_version_id", "old_route_stop_id", "new_route_stop_id", "disposition"]) ||
+    !validId(v.idempotency_key) || !validId(v.new_route_version_id) || !DISPOSITIONS.has(v.disposition)) return false;
+  const [ov, os, ns] = [v.old_route_version_id, v.old_route_stop_id, v.new_route_stop_id];
+  if (![ov, os, ns].every(item => item === null || validId(item))) return false;
+  const d = v.disposition;
+  if (d === "added") return ov === null && os === null && ns !== null;
+  if (d === "removed") return ov !== null && os !== null && ns === null;
+  if (d === "held" || d === "excluded") return ov !== null && os !== null;
+  return ov !== null && os !== null && ns !== null;
+}
+
 const VALID = {
+  "/api/tours/create": validCreate,
+  "/api/tours/route-draft": validRouteDraft,
+  "/api/tours/route-stop": validRouteStop,
+  "/api/tours/route-stop-transition": validRouteStopTransition,
   "/api/tours/properties/search": validSearch,
   "/api/tours/selection-cart": (v) => exact(v, ["tour_id", "base_selection_version_id", "expected_selection_version", "property_ids", "selection_digest", "idempotency_key"]) &&
     validId(v.tour_id) && (v.base_selection_version_id === null || validId(v.base_selection_version_id)) &&
@@ -152,6 +222,11 @@ const SEAMS = {
   "/api/tours/selection-cart": "readTourSelectionCartFn",
   "/api/tours/library": "listToursFn",
   "/api/tours/detail": "readTourFn",
+  "/api/tours/property-evidence/v1": "readPropertyEvidenceFn",
+  "/api/tours/create": "createTourFn",
+  "/api/tours/route-draft": "openRouteDraftFn",
+  "/api/tours/route-stop": "appendRouteStopFn",
+  "/api/tours/route-stop-transition": "appendRouteStopTransitionFn",
   "/api/tours/route-version": "createRouteVersionFn",
   "/api/tours/route-reorder": "reorderRouteStopsFn",
   "/api/tours/route-accept": "acceptRouteVersionFn",
@@ -201,22 +276,43 @@ export function tourFailureRecord(pathname, status, error, data) {
   return record;
 }
 function safeFailure(result, pathname, error, report) {
-  const status = [403, 404, 409].includes(result?.status) ? result.status : 503;
+  const status = [400, 403, 404, 409].includes(result?.status) ? result.status : 503;
   if (typeof report === "function") { try { report(tourFailureRecord(pathname, status, error, result?.data)); } catch {} }
+  if (status === 400) return json({ error: "invalid_request" }, 400);
   return json({ error: status === 403 ? "forbidden" : status === 404 ? "not_found" : status === 409 ? "conflict" : "tour_unavailable" }, status);
 }
 const CONFLICT_MESSAGES = new Set([
   "tour route preparation refuses stale state",
   "route version refuses concurrent or stale route state",
   "route acceptance refuses concurrent or stale route state",
+  "route acceptance refuses changed draft contents",
   "cheat sheet revision refuses concurrent or stale version",
   "cheat sheet restore refuses unavailable or stale revision",
   "tour selection refuses stale version",
+  "route stop cannot alter an accepted route version",
+  "route transition cannot alter an accepted route version",
+  // Precondition refusals: the editor's view of the route is out of date or incomplete, so reload.
+  "route version base is invalid",
+  "route acceptance requires at least one active stop",
+  "route acceptance requires an explicit transition for every new route stop",
+  "route acceptance requires an explicit disposition for every prior route stop",
+]);
+// Typed domain refusals raised before any write: retrying the same input can never succeed.
+const VALIDATION_CODES = new Set(["tour_input_invalid", "tour_input_unknown_field", "tour_point_invalid", "tour_stop_state_invalid",
+  "tour_appointment_invalid", "tour_transition_invalid", "tour_provider_tuple_invalid", "tour_routing_request_invalid",
+  "caller_authority_field_forbidden"]);
+// Deterministic SQL refusals of a transition's shape: the same input can never succeed.
+const VALIDATION_MESSAGES = new Set([
+  "reordered route transition requires a sequence change",
+  "unchanged route transition requires the same sequence",
+  "route transition property identity mismatch",
+  "merged route transition requires explicit property identity lineage",
 ]);
 function dependencyFailure(error) {
   const code = typeof error?.payload?.error === "string" ? error.payload.error : "";
   const message = typeof error?.message === "string" ? error.message : "";
-  return { status: code === "tour_selection_cart_not_found" ? 404 : code === "version_conflict" || CONFLICT_MESSAGES.has(message) ? 409 : 503 };
+  if (VALIDATION_CODES.has(code) || VALIDATION_MESSAGES.has(message)) return { status: 400 };
+  return { status: code === "tour_selection_cart_not_found" ? 404 : code === "version_conflict" || code === "key_reuse" || CONFLICT_MESSAGES.has(message) ? 409 : 503 };
 }
 async function staticAsset(env, request, pathname) {
   if (!env?.ASSETS?.fetch) return json({ error: "not_found" }, 404);
@@ -243,6 +339,11 @@ async function api(request, env, ctx, actor, session, dependencies, pathname) {
     if (pathname === "/api/tours/detail" || pathname === "/api/tours/selection-cart") {
       if ([...url.searchParams.keys()].length !== 1 || !validId(url.searchParams.get("tour_id"))) return json({ error: "invalid_request" }, 400);
       input = { tour_id: url.searchParams.get("tour_id") };
+    } else if (pathname === "/api/tours/property-evidence/v1") {
+      const keys = [...url.searchParams.keys()].sort();
+      if (keys.join(",") !== "as_of,property_id" || !validId(url.searchParams.get("property_id")) || !iso(url.searchParams.get("as_of")))
+        return json({ error: "invalid_request" }, 400);
+      input = { property_id: url.searchParams.get("property_id"), as_of: url.searchParams.get("as_of") };
     } else if (pathname === "/api/tours/projection/candidates" || pathname === "/api/tours/feedback") {
       if ([...url.searchParams.keys()].length !== 1 || !validId(url.searchParams.get("projection_id"))) return json({ error: "invalid_request" }, 400);
       input = { projection_id: url.searchParams.get("projection_id") };

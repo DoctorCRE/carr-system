@@ -39,3 +39,9 @@ button:focus-visible, .download-link:focus-visible, select:focus-visible, textar
   #tour-map { height: 340px; }
 }
 .maplibregl-marker { min-height: 2rem; padding: 0; border: 3px solid #fff; border-radius: 50%; background: #002F6C; }
+
+.feedback { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin-top: 8px; }
+.feedback .comment-field { flex: 1 1 100%; max-width: 100%; font: inherit; }
+.feedback button { min-height: 44px; }
+.shortlist-toggle[aria-pressed="true"] { background: #002F6C; color: #fff; }
+.feedback-note { margin: 4px 0 0; }

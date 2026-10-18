@@ -4,6 +4,33 @@ import { createDealroomHandler, isDealroomRequest } from "../src/dealroom-web.js
 import { parseBusinessQuery } from "../src/workspace-business-read.js";
 
 const HOST = "dealroom.doctorcre.com";
+
+test('relationship snapshot uses the authenticated read-only business route',async()=>{
+ const env=environment();let reads=0;
+ const handler=createDealroomHandler(overrides(async(_env,actor,request)=>{
+  reads++;assert.equal(actor.slug,'joe');assert.equal(new URL(request.url).pathname,'/api/v1/business/relationships');
+  return {schema:'carr-relationship-network.v1',nodes:[],edges:[],referrals:[],suggestions:[]};
+ }));
+ const path=`https://${HOST}/api/v1/business/relationships?contract=relationship-network.v1`;
+ assert.equal((await handler.fetch(new Request(path),env,{})).status,401);assert.equal(reads,0);
+ const session=await signIn(handler,env);
+ const response=await handler.fetch(new Request(path,{headers:{cookie:session}}),env,{});
+ assert.equal(response.status,200);assert.equal((await response.json()).schema,'carr-relationship-network.v1');assert.equal(reads,1);
+ assert.equal((await handler.fetch(new Request(path,{method:'POST',headers:{cookie:session}}),env,{})).status,405);assert.equal(reads,1);
+});
+
+test('clients refuse vendor-only territory filtering and sorting through the authenticated route', async () => {
+ const env=environment();
+ const handler=createDealroomHandler(overrides(async (_env,actor,request)=>{
+  parseBusinessQuery('clients',new URL(request.url).searchParams,actor.slug);
+  return payloadFor('clients',actor);
+ }));
+ const session=await signIn(handler,env);
+ for(const query of ['contract=vendor-directory.v1&territory=Synthetic%20North','contract=vendor-directory.v1&sort=territory']) {
+  const response=await handler.fetch(new Request(`https://${HOST}/api/v1/business/clients?${query}`,{headers:{cookie:session}}),env,{});
+  assert.equal(response.status,400);assert.equal((await response.json()).error,'QUERY_INVALID');
+ }
+});
 const ID = "3f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8";
 const JOE_EMAIL = "joe.bookout.carr.us@gmail.com";
 
@@ -107,10 +134,8 @@ test("the read is bound to the session actor and the caller cannot name another 
   assert.equal(response.status, 403);
   assert.equal((await response.json()).error, "AUTHORIZATION_REFUSED");
   response = await strict.fetch(new Request(`https://${HOST}/api/v1/business/clients?owner=dell`, { headers: { cookie: strictSession } }), env, {});
-  assert.equal(response.status, 400);
-  const refusal = await response.json();
-  assert.equal(refusal.error, "QUERY_INVALID");
-  assert.deepEqual(refusal.detail, { parameter: "owner", reason: "unsupported" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).viewer, "joe", "owner is a list filter, never an actor selector");
   response = await strict.fetch(new Request(`https://${HOST}/api/v1/business/clients?viewer=joe`, { headers: { cookie: strictSession } }), env, {});
   assert.equal(response.status, 200);
 });

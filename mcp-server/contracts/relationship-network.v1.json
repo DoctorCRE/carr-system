@@ -1,0 +1,91 @@
+{
+  "schema": "carr-relationship-network.v1",
+  "version": "1.0.0",
+  "transport": "authenticated GET /api/v1/business/relationships?contract=relationship-network.v1",
+  "audience": "verified carr-internal partners",
+  "freshness": {
+    "observed_at": "UTC timestamp of completed snapshot",
+    "valid_until": "observed_at plus 60 seconds"
+  },
+  "nodes": {
+    "id": "exact party:UUID or deal:UUID",
+    "kinds": [
+      "vendor",
+      "client",
+      "lead",
+      "deal",
+      "contact"
+    ],
+    "fields": [
+      "record_id",
+      "ref",
+      "name",
+      "kind",
+      "territory",
+      "verticals",
+      "owner",
+      "summary",
+      "contact_state",
+      "contact_state_until",
+      "restricted",
+      "outcome"
+    ]
+  },
+  "edges": {
+    "id": "stable exact link or association identity",
+    "fields": [
+      "from",
+      "to",
+      "via",
+      "kind",
+      "when",
+      "summary",
+      "detail"
+    ],
+    "kinds": [
+      "knows",
+      "works_with",
+      "can_introduce",
+      "intro_requested",
+      "introduced",
+      "intro",
+      "intro_received",
+      "referral",
+      "referred",
+      "worked",
+      "client_deal"
+    ]
+  },
+  "referrals": {
+    "fields": [
+      "node_id",
+      "deals",
+      "won",
+      "lost",
+      "win_rate"
+    ],
+    "counting": "distinct explicitly attributed deal UUIDs; no inference from a client relationship",
+    "win_rate": "won / (won + lost), null when no referred deal is resolved"
+  },
+  "suggestions": {
+    "fields": [
+      "id",
+      "from",
+      "to",
+      "via",
+      "reason",
+      "detail",
+      "when"
+    ],
+    "eligibility": "documented can_introduce edge with live endpoints and a reason; suppress contact holds, restrictions and existing requested or completed introductions; no estimated probability"
+  },
+  "limits": {
+    "nodes": 5000,
+    "edges": 20000,
+    "overflow": "DEPENDENCY_UNAVAILABLE; never silently truncated"
+  },
+  "write": {
+    "operation": "link-parties",
+    "field": "optional deal_id UUID for referred/referral; exact live destination client party; note required; envelope replay and duplicate deal association are idempotent"
+  }
+}

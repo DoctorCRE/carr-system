@@ -1,168 +1,13 @@
 #!/usr/bin/env python3
-"""release-pipeline.py — release what merged to main, by script, unattended.
+"""Release merged main commits with green CI through the existing deploy path.
 
-# doctrine: scripted-release-pipeline
+The detached release worktree binds deployment to the selected source SHA.
+Keep credential isolation, migration checks, staging recovery, manifest and
+provider identity, production smoke, rollback and live verification.
 
-WHY (decisions 17ef11fa and b729859d, 2026-09-24). Joe: CARR runs itself, and
-"even the review, merge, and release steps can be triggered by scripts too".
-A separate pipeline reviews and merges and appends a merge event (one JSON line)
-to out/merge-events.jsonl. This file is the RELEASE step that consumes merges to
-main. It is ticked by launchd (ops/launchd/com.carr.release-pipeline.plist,
-whose header carries the three install commands; installing it is a deliberate
-human act) through bin/run-scheduled.sh, like every other local job.
-
-IT IS A SCRIPT, NOT A MODEL SESSION. Production credentials stay where the
-manual release already reads them (~/.config/carr/db.env,
-~/.config/carr/mcp-tokens.env), plus CLOUDFLARE_API_TOKEN from
-~/.config/carr/tokens.env, which is loaded into the environment of the
-wrangler-running steps only (never argv, never a log), and each step is the SAME sanctioned command the
-manual release on 2026-09-23 and 2026-09-24 ran, in the same order, from a
-detached release worktree at the exact SHA. The only thing a model ever gets is
-a diagnosis task AFTER a failure, through the Model Room queue, with repo-write
-and nothing more: it fixes forward through a PR, and the next merge to main is
-what this pipeline releases next. Production is never routed through a session.
-
-TWO LANES, one tick:
-
-  worker  the CARR MCP Worker. Released when the batch (last released SHA ..
-          origin/main) touches a release path in ops/config/release-pipeline.v1.json
-          (mcp-server/, migrations/, dealroom/, the DoctorCRE artifact pin), less
-          test-only and doc-only files. Sequence, all non-interactive (stdin is
-          /dev/null for every child):
-            1 release worktree at S (+ .venv link, npm ci in mcp-server)
-            2 tools/staging-project-replacement.py prepare --apply --local-checks-green
-            3 tools/provision-staging-app-writer.py --apply
-            4 bin/migrate-prod.sh (dry) and, only when it lists pending, --apply
-            5 bin/deploy-worker.sh --upload-version  (verifier bound HERE; a pending
-              Durable Object migration is applied first: Production attachment
-              check, staging precheck, then a deploy of S whose own version
-              becomes the candidate, so Production has moved before steps 6-8
-              for that release only; see the do-migration block there. Its tag
-              lands in the run record)
-            6 bin/deploy-worker.sh --env staging --recovery-step forward_fix
-            7 bin/deploy-worker.sh --promote-version <id from step 5>
-            8 live /release reads back S, ./run.sh health
-            9 a db/schema.sql follow-up PR when step 4 applied anything; once
-              it exists, every older open release/schema-snapshot-* PR is
-              closed as superseded (close only, best-effort, never merged)
-           10 after SHIPPED, best-effort: ops/slice-done-marker.py --release-key K
-              marks the DoctorCRE v5 slices this release shipped (register from
-              the catalog, bind, gather server-resolved evidence, mark progress and
-              PROPOSE complete; only a partner confirms complete). It is
-              STARTED DETACHED, outside the pipeline's single-run lock: the run
-              records `slice_marker` (pid and log) and returns at once, so a slow
-              marker can never delay the next tick. It never fails, blocks or
-              retries the release it follows.
-  app     the DoctorCRE app (its own repository). Released when its origin/main
-          moves by anything other than docs/tests: `npm ci` and
-          `npm run release:production` from a clean detached origin/main
-          checkout, then /app-release reads the SHA back.
-
-BATCHING. Each lane releases the LATEST main SHA, never each merge separately.
-The last released SHA per lane lives in out/release-pipeline/state.json; when it
-is absent it is bootstrapped from what production serves (/release, /app-release).
-
-STOP, RECORD, DISPATCH. Any nonzero exit stops the lane at that step. The run
-record (out/release-pipeline/releases.jsonl) names the step, exit code and log
-path; the failing SHA is remembered and NEVER retried: only a new main SHA (the
-fix-forward merge) starts a new attempt. A Model Room diagnosis session is
-enqueued (`@queue enqueue target=claude-desktop cap=repo-write`,
-key=release-fix-<sha8>). Promotion is structurally unreachable unless the
-staging step of the SAME run returned 0.
-
-BLOCKED IS NOT FAILED. Missing review evidence, a pending or red main canary, or
-a missing unattended credential stops the lane WITHOUT marking the SHA failed,
-so the next tick re-evaluates it; any worktree the run created is removed. The
-Cloudflare deploy token is checked before any worktree exists, and it is the
-one credential that FAILS rather than holds: a missing tokens.env or key, or a
-token wrangler rejects, stops the lane at step `credential-missing` and
-dispatches, instead of wrangler falling back to its interactive OAuth login. An unexpected error before
-any step ran is recorded and dispatched without burning the SHA; after a step
-ran it is a failure like any other. A failure after migrate-apply records
-db_ahead_of_worker: true and says so to the fix session. A missing credential or capability files one
-CARR loop naming it exactly (once per name), because no retry can supply it.
-
-REVIEW EVIDENCE. Both repositories are public, so any comment is untrusted until
-proven otherwise. For EVERY commit in the batch: it came from a merged PR; the
-LATEST comment carrying a verdict (first line APPROVE-marker or BLOCK-marker,
-config review_markers/block_markers) from a trusted author (author_association
-OWNER/MEMBER/COLLABORATOR, or a configured login) decides; it must be APPROVE;
-and it must carry exactly one `Reviewed-SHA: <40-hex>` line equal to the PR's
-head SHA (no dates: an exact SHA is the only freshness proof).
-
-FIX-FORWARD, the one exception to "must be APPROVE", and only for a BLOCK
-verdict (never a missing or stale review). A merged PR B whose latest trusted
-verdict is BLOCK has defective code on main; a fresh APPROVE on B's defective
-head is exactly what must never be posted to get past it. Instead B may be in a
-released batch ONLY if ALL of these hold:
-  1. a LATER first-parent commit of the SAME batch, so at or before the release
-     target, is exactly PR F's merge commit (GitHub's merge_commit_sha for F),
-     and B is its ancestor in git;
-  2. F's DECIDING approval (the same exact or main-merge-only rule above, so a
-     marker on an older approval, on a non-verdict comment or on an untrusted
-     comment never counts) carries `Fixes-Forward: #<B's PR number>` in a
-     contiguous authority header immediately after first-line APPROVE and
-     second-line Reviewed-SHA. One number per line; multiple consecutive
-     lines can name multiple blocked PRs. Later prose and examples never count;
-  3. the release target is at or after F's merge commit (re-checked in git),
-     and every path F changed still has F's exact blob and mode at the target.
-     A later revert or rewrite of any F path fails this; a later PR that
-     carries the fix forward again needs its own marker and passes this check.
-A target between B and F therefore stays a review_blocked hold: the defective
-commit can never ship alone, only in the same atomic release as its fix. B's
-BLOCK verdict is left as it is, B is never listed as approved, and its release
-paths still need green CI. The run record (and the dry-run output) carries
-`fix_forwards`: the blocked PR and its commit on main, the BLOCK comment URL,
-the fixing PR and its merge commit, the fixing approval's Reviewed-SHA and URL.
-Both lanes read review evidence through the same code, so the rule is the same
-for the app lane. The reviewer of F is the one who attests
-that F fixes B, so the marker goes on F's independent approval, nowhere else.
-
-Worker lane also: every PR in the batch that touches a release path has a green `ops/ci.sh
---strict` (and secret-class) CI run. The Worker releases up to the NEWEST
-first-parent commit whose own main canary concluded success (plus any
-canary-ignored commits directly above it), not necessarily HEAD: commits whose
-canary is absent, in progress or cancelled are walked past and wait for a later
-green; a red verdict is never shipped nor anything above it until a newer green
-fix-forward; no green commit newer than the last release holds
-(Pipeline.release_target). Review evidence, CI, upload and live readback all
-name that target.
-
-THE TRUST BOUNDARY, stated plainly. Every CARR session posts to GitHub as
-jbookout, which GitHub reports as OWNER. Comment authorship therefore proves only
-"posted from inside CARR", NOT which agent reviewed. Maker ≠ verifier is
-enforced by (1) the reviewer identity in the merge event the local
-review-and-merge pipeline writes, which must differ from its author, and (2) the
-database, which refuses a verifier slug equal to the maker (carr_jobs). The
-comment is evidence of the verdict and the reviewed SHA, not of identity. App lane: the named required checks (`test`) are present
-and green; an empty check list is a hold.
-
-VERIFIER ≠ MAKER. The database derives the release maker from the filing login
-(carr_jobs) and refuses a verifier equal to it (ops.approve_program5_release,
-ops.record_program5_release_readiness). The verifier slug comes ONLY from the
-merge event (`reviewer`) the local review-and-merge pipeline wrote, else the
-configured default (`claude-review-agent`) — never from comment text. It is
-refused if it names the maker, a human partner (the review was not a human's and
-must never be booked as one), this pipeline, the GitHub account comments are
-posted through, or the merge event's author.
-
-CLEARING A FAILURE. A fix merged to main needs nothing: the new SHA is attempted.
-To retry the SAME failed SHA after a fix outside the repository (a restored
-credential, a provider outage), run
-  ops/release-pipeline.py clear-failed --lane worker --sha <sha> --reason "<why>"
-which records the clearance; never hand-edit state.json.
-
-KILL SWITCH. `enabled` in ops/config/release-pipeline.v1.json (a commit), or the
-file ~/.config/carr/release-pipeline.off (this machine, no commit). Per-lane
-`enabled` flags too. A single-run lock (flock on out/release-pipeline/lock)
-makes a second tick a no-op while one is running.
-
-  ops/release-pipeline.py                 # one tick, both lanes (launchd)
-  ops/release-pipeline.py --dry-run       # print the exact commands, run no deploy
-  ops/release-pipeline.py --lane worker   # one lane
-  ops/release-pipeline.py report [--date YYYY-MM-DD]   # what shipped, for a daily note
-
-Tested offline by ops/release-pipeline-selftest.py with fake runners.
+Run one tick with ops/release-pipeline.py, inspect commands with --dry-run,
+report shipped releases with report, or clear a failed SHA with clear-failed.
+The configured kill switches and single-run lock apply to both release lanes.
 """
 
 from __future__ import annotations
@@ -172,9 +17,11 @@ import contextlib
 import dataclasses
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -185,22 +32,36 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from lib.credential_file import SOURCE_BYTES as CREDENTIAL_FILE_SOURCE_BYTES, credential, read_env_file  # noqa: E402
+from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHubReader, GitHubUnreadable  # noqa: E402
+from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
+CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-SLUG_RE = re.compile(r"^[a-z][a-z0-9._:-]{1,63}$")
 ROOM_NAMESPACE = uuid.UUID("3d0e3c55-6a51-4c3e-9b8f-2b6c1f0a7e41")
 BREW_PATH = ("/opt/homebrew/opt/node@22/bin:/usr/local/opt/node@22/bin:/opt/homebrew/bin:"
              "/opt/homebrew/sbin:/opt/homebrew/opt/libpq/bin:/usr/local/bin:/usr/bin:/bin:"
              "/usr/sbin:/sbin")
 CHILD_ENV_NAMES = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHELL",
-                   "SSL_CERT_FILE", "SSL_CERT_DIR")
+                   "SSL_CERT_FILE", "SSL_CERT_DIR", "CARR_GITHUB_READ_BUDGET")
 
 # The Workers deploy credential. Loaded from its file into the environment of
 # the wrangler-running steps ONLY (never child_env, never argv, never a log
 # line), so no step can fall back to wrangler's interactive OAuth login.
 CLOUDFLARE_TOKEN_NAME = "CLOUDFLARE_API_TOKEN"
 CLOUDFLARE_TOKEN_FILE = "tokens.env"   # under credential_dir
+TOOLCHAIN_FILES = ("package.json", "package-lock.json")   # mcp-server files that key the token-check wrangler
+CREDENTIAL_INVENTORY_PATH = REPO / "ops/config/credential-inventory.v1.json"
+# Code this process loaded and disk inputs used by its subprocesses; all must
+# match origin/main before a lane can release.
+CONTROLLER_PATHS = ("ops/release-pipeline.py", "ops/config/release-pipeline.v1.json",
+                    "lib/credential_file.py", "lib/github_reader.py", "lib/secret_redaction.py",
+                    "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                    "mcp-server/package.json", "mcp-server/package-lock.json")
+CONTROLLER_STALE = "controller_stale"
+CONTROLLER_UNREADABLE = "controller_unreadable"
 
 
 # ── results and the command runner seam ───────────────────────────────────────
@@ -213,9 +74,13 @@ class Result:
 
 
 class StepFailed(Exception):
-    def __init__(self, step: str, rc: int, log: str, detail: str = ""):
+    """`capability` names a credential no fix-forward PR can supply; the lane
+    then also files one CARR loop naming it (once per name), like Blocked."""
+
+    def __init__(self, step: str, rc: int, log: str, detail: str = "", capability: str | None = None):
         super().__init__(f"{step} exited {rc}")
         self.step, self.rc, self.log, self.detail = step, rc, log, detail
+        self.capability = capability
 
 
 class Blocked(Exception):
@@ -242,29 +107,47 @@ def child_env(environ: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
-def read_env_value(path: Path, name: str) -> str | None:
-    """The value of NAME in a NAME=value file (optional `export `, optional
-    matching quotes), or None when the file or the key is absent or empty.
-    The value is returned to the caller only; nothing here prints it."""
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    value = None
-    for line in text.splitlines():
-        m = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$", line)
-        if not m or m.group(1) != name:
-            continue
-        v = m.group(2)
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
-            v = v[1:-1]
-        value = v or None
-    return value
-
-
 # Head-branch prefix of the PRs schema_followup opens; the newest one carries
 # the cumulative snapshot and supersedes every older open one.
 SCHEMA_SNAPSHOT_PREFIX = "release/schema-snapshot-"
+
+# Failures a baseline failure never excuses: after a release the lane must serve
+# its own SHA and every verb that SHA carries, whatever production did before.
+# A browser proof that names no failed test (it did not run, or its contract
+# broke) is attributed whole; a named failed test is the unit
+# `browser-journeys::<test id>` and is compared with the baseline per test.
+SMOKE_ALWAYS_ATTRIBUTED = frozenset({"release-identity", "verb-registry", "browser-journeys"})
+SMOKE_OUT = Path("out") / "release-smoke"
+_SMOKE = runpy.run_path(str(REPO / "ops/release-smoke.py"))
+SMOKE_LANE_JOURNEYS: dict[str, tuple[str, ...]] = _SMOKE["LANE_JOURNEYS"]
+SMOKE_SOURCE_BYTES: bytes = _SMOKE["SOURCE_BYTES"]
+DOCTOR_SMOKE_SOURCE_BYTES: bytes = _SMOKE["DOCTOR_SOURCE_BYTES"]
+served_version: Callable[[str, Any], str | None] = _SMOKE["served_version"]
+
+
+def smoke_failures(summary: dict) -> set[str]:
+    """The units a smoke summary failed: journey ids, except that a browser
+    proof naming its failed tests fails one unit per test."""
+    units: set[str] = set()
+    for probe in summary["probes"]:
+        if probe.get("status") != "fail":
+            continue
+        tests = (probe.get("evidence") or {}).get("failed_tests")
+        if (probe["id"] == "browser-journeys" and isinstance(tests, list) and tests
+                and all(isinstance(t, str) and t for t in tests)):
+            units |= {f"browser-journeys::{t}" for t in tests}
+        else:
+            units.add(probe["id"])
+    return units
+
+
+def retry_still_failing(post: set[str], retry: set[str]) -> tuple[set[str], set[str]]:
+    """The post failures and those the retry failed again, at one granularity:
+    a browser proof that named no failed tests on either run is compared as
+    the whole journey, so a failure seen twice is never read as a flake."""
+    if "browser-journeys" in post | retry:
+        post, retry = ({u.split("::", 1)[0] for u in units} for units in (post, retry))
+    return post, retry & post
 
 
 class Runner:
@@ -298,21 +181,18 @@ def http_json(url: str, timeout: int = 30) -> Any:
 
 
 class GitHub:
-    """Read-only GitHub lookups through the authenticated `gh` CLI."""
+    """Read-only GitHub lookups through lib/github_reader (the authenticated
+    `gh` CLI, transient failures retried, errors redacted)."""
 
     def __init__(self, repo: str, env: dict[str, str]):
         self.repo, self.env = repo, env
+        self.reader = GitHubReader(env=env, timeout=300)
 
     def api(self, path: str, paginate: bool = False) -> Any:
-        argv = ["gh", "api", *(["--paginate", "--slurp"] if paginate else []), path]
-        proc = subprocess.run(argv, env=self.env, stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=300)
-        if proc.returncode != 0:
-            raise Blocked("github_unreadable", f"gh api {path.split('?')[0]} exited {proc.returncode}")
-        data = json.loads(proc.stdout or "null")
-        if paginate:   # --slurp yields one list per page
-            return [item for page in (data or []) for item in (page or [])]
-        return data
+        try:
+            return self.reader.api(path, paginate=paginate)
+        except GitHubUnreadable as exc:
+            raise Blocked("github_unreadable", str(exc)) from exc
 
     def pr_for_commit(self, sha: str) -> dict | None:
         rows = self.api(f"repos/{self.repo}/commits/{sha}/pulls") or []
@@ -327,25 +207,88 @@ class GitHub:
         data = self.api(f"repos/{self.repo}/actions/runs/{run_id}/jobs?per_page=100") or {}
         return list(data.get("jobs") or [])
 
-    def comments(self, pr: int) -> list[dict]:
-        return list(self.api(f"repos/{self.repo}/issues/{pr}/comments?per_page=100", paginate=True) or [])
-
-    def comment(self, comment_id: int) -> dict:
-        return self.api(f"repos/{self.repo}/issues/comments/{comment_id}") or {}
 
     def check_runs(self, sha: str) -> list[dict]:
         data = self.api(f"repos/{self.repo}/commits/{sha}/check-runs?per_page=100") or {}
         return list(data.get("check_runs") or [])
 
 
+def evidence_digest(value: Any) -> str:
+    """Only digests cross the rejection sink; PR bodies and diagnostics do not."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+class ObservedGitHub:
+    """Remember the reads an existing release judgment actually consumed.
+
+    Reconciliation repeats those reads, not the release. Store descriptors and
+    digests only, including completed check jobs.
+    """
+    READS = frozenset({"pr_for_commit", "runs_for", "jobs", "check_runs"})
+
+    def __init__(self, client: Any, repo: str, observations: dict):
+        self.client, self.repo, self.observations = client, repo, observations
+
+    def __getattr__(self, name: str):
+        method = getattr(self.client, name)
+        if name not in self.READS:
+            return method
+
+        def read(*args):
+            value = method(*args)
+            descriptor = {"repo": self.repo, "method": name, "args": list(args)}
+            self.observations[evidence_digest(descriptor)] = {
+                **descriptor, "digest": evidence_digest(value)}
+            return value
+        return read
+
+
 # ── configuration, state, records ─────────────────────────────────────────────
 
 def load_config(path: Path = CONFIG_PATH) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    source = path.read_bytes()
+    cfg = LoadedConfig(json.loads(source))
+    cfg.source_blob = git_blob(source)
+    return cfg
+
+
+class LoadedConfig(dict):
+    """Parsed values with the provenance of the bytes that supplied them."""
+    source_blob: str
+
+
+def git_blob(source: bytes) -> str:
+    return hashlib.sha1(f"blob {len(source)}\0".encode() + source).hexdigest()
+
+
+def smoke_enabled(lane_cfg: dict) -> bool:
+    """The lane's `post_release_smoke` switch. Required: a missing or non-
+    boolean value must never default a lane into automatic production
+    rollback, nor silently out of its proof."""
+    value = lane_cfg.get("post_release_smoke")
+    if not isinstance(value, bool):
+        raise Blocked("config_invalid", "the lane's post_release_smoke must be true or false in "
+                      "ops/config/release-pipeline.v1.json")
+    return value
+
+
+def wrangler_toolchain(repo: Path, store_root: Path) -> Path:
+    """Where Pipeline.auth_wrangler installs wrangler for `repo`'s current
+    mcp-server lockfile."""
+    digest = hashlib.sha256()
+    for name in TOOLCHAIN_FILES:
+        digest.update((repo / "mcp-server" / name).read_bytes())
+    return store_root / "toolchain" / f"mcp-server-{digest.hexdigest()[:16]}"
 
 
 def expand(p: str) -> Path:
     return Path(os.path.expanduser(p))
+
+
+def lane_repo_dir(cfg: dict, lane: str, repo: Path) -> Path:
+    """The checkout a lane releases from: this repository for the worker,
+    the configured app checkout for the app."""
+    return repo if lane == "worker" else expand(cfg[lane]["repo_path"])
 
 
 def kill_switch(cfg: dict, lane: str | None = None) -> str | None:
@@ -366,6 +309,10 @@ class Store:
         self.state_path = root / "state.json"
         self.records_path = root / "releases.jsonl"
 
+    def release_worktree(self, lane: str, sha: str, attempt: str = "") -> Path:
+        """Where a lane's release of `sha` checks out; a failure keeps it."""
+        return self.root / "worktrees" / (f"{lane}-{sha[:12]}" + (f"-{attempt}" if attempt else ""))
+
     def load(self) -> dict:
         try:
             return json.loads(self.state_path.read_text(encoding="utf-8"))
@@ -375,14 +322,47 @@ class Store:
     def save(self, state: dict) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(state, indent=2, sort_keys=True) + "\n")
+            fh.flush(); os.fsync(fh.fileno())
         os.replace(tmp, self.state_path)
+        directory = os.open(self.root, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
     def record(self, row: dict) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         row = {"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), **row}
-        with open(self.records_path, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
+        with open(self.records_path, "a+b") as fh:
+            # An interrupted append leaves an unterminated tail. Terminate it so
+            # it stays its own unreadable line and never swallows this row.
+            if fh.seek(0, os.SEEK_END):
+                fh.seek(-1, os.SEEK_END)
+                if fh.read(1) != b"\n":
+                    fh.write(b"\n")
+            fh.write((json.dumps(row, sort_keys=True) + "\n").encode("utf-8"))
+            fh.flush(); os.fsync(fh.fileno())
+
+    def record_durable(self, row: dict) -> None:
+        recorded = {"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"), **row}
+        self.record(recorded)
+        self.readback_durable(recorded)
+
+    def recover_durable(self, row: dict) -> None:
+        with self.records_path.open("rb") as fh:
+            os.fsync(fh.fileno())
+        self.readback_durable(row)
+
+    def readback_durable(self, recorded: dict) -> None:
+        directory = os.open(self.root, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        if recorded not in self.records():
+            raise OSError("release proof journal readback did not match the written record")
 
     def records(self) -> list[dict]:
         try:
@@ -416,28 +396,6 @@ def single_run_lock(root: Path):
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
         fh.close()
-
-
-def read_merge_events(path: Path) -> dict[str, dict]:
-    """Index the merge-event file by merge SHA. The format belongs to the
-    review-and-merge pipeline; this reads it tolerantly and only takes review
-    evidence from it — main's SHA, not this file, is what decides a release."""
-    events: dict[str, dict] = {}
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return events
-    for line in lines:
-        try:
-            ev = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(ev, dict):
-            continue
-        sha = str(ev.get("merge_sha") or ev.get("merge_commit_sha") or ev.get("sha") or "").lower()
-        if SHA_RE.fullmatch(sha):
-            events[sha] = ev
-    return events
 
 
 # ── pure decisions (the selftest's main surface) ─────────────────────────────
@@ -493,27 +451,6 @@ def classify(paths: Iterable[str], lane_cfg: dict) -> tuple[bool, list[str]]:
     return bool(hits), hits
 
 
-def choose_verifier(cfg: dict, event: dict | None) -> str:
-    """The independent reviewer's slug, or Blocked. Never the maker.
-
-    Taken ONLY from the merge event the review-and-merge pipeline wrote on this
-    machine, else the configured default. Never from comment text: the
-    repositories are public, so a comment is not a place an identity can be
-    asserted from."""
-    event = event or {}
-    raw = str(event.get("reviewer") or event.get("verifier_actor") or cfg.get("default_verifier") or "")
-    slug = raw.strip().lower()
-    if not SLUG_RE.fullmatch(slug):
-        raise Blocked("verifier_invalid", f"verifier {raw!r} is not a lowercase actor slug")
-    forbidden = {str(x).lower() for x in cfg.get("forbidden_verifiers") or []}
-    makers = {str(event.get(k) or "").strip().lower()
-              for k in ("author_actor", "maker_actor", "author", "maker")} - {""}
-    if slug in forbidden or slug in makers:
-        raise Blocked("verifier_is_maker",
-                      f"verifier {slug!r} is the maker or not an independent reviewer")
-    return slug
-
-
 def verdict(body: str, cfg: dict) -> str | None:
     """'approve', 'block' or None, read from the comment's FIRST line only."""
     first = (body or "").strip().splitlines()[0].strip().lower() if (body or "").strip() else ""
@@ -539,7 +476,7 @@ REVIEWED_SHA_LINE_RE = re.compile(r"Reviewed-SHA: ([0-9a-f]{40})")
 
 
 def reviewed_header_sha(body: str) -> str | None:
-    """Only a literal first-line APPROVE and second-line SHA authorize release."""
+    """Parse the review header used by the independent review tools."""
     lines = [line.removesuffix("\r") for line in (body or "").split("\n")]
     if len(lines) < 2 or lines[0] != "APPROVE":
         return None
@@ -549,88 +486,13 @@ def reviewed_header_sha(body: str) -> str | None:
     return second.group(1)
 
 
-def approval_of(comments: list[dict], cfg: dict, head_sha: str,
-                covers: Callable[[str], str | None] | None = None) -> tuple[dict, str, str]:
-    """(comment, rule, reviewed_sha). The LATEST trusted comment that carries a
-    verdict decides. It must be APPROVE and carry exactly one
-    `Reviewed-SHA: <40-hex>` line R. No clocks: a committer date says when a
-    commit was made, not when it was pushed, so an approval of H1 posted
-    between H2's commit and its push would otherwise cover H2 unreviewed.
-
-    rule "exact": R is the merged PR head H.
-    rule "main-merge-only": R != H, but `covers(R)` returns None, i.e. H is R
-    plus nothing but merges of main (what `gh pr update-branch` adds after a
-    review); covers() returns the reason otherwise, and the approval is stale."""
-    last = _latest_approval(comments, cfg)
-    header_sha = reviewed_header_sha(str(last.get("body") or ""))
-    reviewed = [header_sha] if header_sha else []
-    if head_sha and reviewed == [head_sha]:
-        return last, "exact", head_sha
-    why = "no main-merge rule available"
-    if head_sha and len(reviewed) == 1 and covers is not None:
-        why = covers(reviewed[0]) or ""
-        if not why:
-            return last, "main-merge-only", reviewed[0]
-    raise Blocked("review_stale", f"the approval {last.get('html_url')} carries "
-                                  f"Reviewed-SHA {reviewed or 'none'}, not the merged head {head_sha}, "
-                                  f"and the main-merge-only rule does not apply: {why}")
-
-
-def latest_verdict(comments: list[dict], cfg: dict, head_sha: str) -> dict:
-    """The approval comment under the exact rule only (see approval_of)."""
-    return approval_of(comments, cfg, head_sha)[0]
-
-
 def deciding_verdict(comments: list[dict], cfg: dict) -> dict | None:
-    """The LATEST trusted comment that carries a verdict, or None."""
+    """Latest trusted review comment for the optional review displays."""
     carrying = [c for c in comments if trusted_commenter(c, cfg) and verdict(c.get("body", ""), cfg)]
     if not carrying:
         return None
     return max(carrying, key=lambda c: (str(c.get("created_at") or ""), int(c.get("id") or 0)))
 
-
-def _latest_approval(comments: list[dict], cfg: dict) -> dict:
-    last = deciding_verdict(comments, cfg)
-    if last is None:
-        raise Blocked("no_independent_review", "no trusted comment carries a review verdict")
-    if verdict(last.get("body", ""), cfg) != "approve":
-        raise Blocked("review_blocked", f"the latest review verdict is BLOCK ({last.get('html_url')})")
-    return last
-
-
-FIXES_FORWARD_RE = re.compile(r"^Fixes-Forward:[ \t]*#([1-9][0-9]*)[ \t]*$")
-
-
-def fixes_forward(approval: dict, reviewed_sha: str) -> set[int]:
-    """Read only consecutive authority-header markers after exact APPROVE and
-    Reviewed-SHA lines. The first prose, blank, or example line ends the
-    header. This narrow grammar makes Markdown/HTML rendering irrelevant:
-    a marker later in a quoted, fenced, code-span, or HTML example cannot
-    confer release authority. CRLF is tolerated. The caller passes only the
-    deciding approval returned by approval_of()."""
-    # Split on LF only. Python's splitlines() treats U+2028 and several other
-    # Unicode separators as line breaks even though approval_of()'s reviewed
-    # SHA matcher and GitHub's comment text do not. All authority lines must
-    # be literal LF/CRLF lines and line two must name the SHA that was accepted.
-    lines = [line.removesuffix("\r") for line in str(approval.get("body") or "").split("\n")]
-    if len(lines) < 3 or lines[0] != "APPROVE":
-        return set()
-    if reviewed_header_sha(str(approval.get("body") or "")) != reviewed_sha:
-        return set()
-    found: set[int] = set()
-    for line in lines[2:]:
-        m = FIXES_FORWARD_RE.match(line)
-        if not m:
-            break
-        found.add(int(m.group(1)))
-    return found
-
-
-def evidence_ref_from_url(url: str) -> str:
-    m = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)#issuecomment-(\d+)", url or "")
-    if not m:
-        raise Blocked("review_evidence_malformed", f"not a PR comment URL: {url!r}")
-    return f"github:{m.group(1)}/pull/{m.group(2)}#issuecomment-{m.group(3)}"
 
 
 def next_release_key(today: str, exists: Callable[[str], bool]) -> str:
@@ -649,8 +511,8 @@ def queue_turn(lane: str, sha: str, step: str, rc: int, log: str, record_path: s
     SHA must never share an id with the first. The queue key gains a suffix on
     later attempts for the same reason at the Hermes queue."""
     key = f"release-fix-{sha[:8]}" + (f"-{attempt}" if attempt > 1 else "")
-    ahead = ("PRODUCTION MIGRATIONS WERE APPLIED in this run before it stopped "
-             "(db_ahead_of_worker: true): the database is ahead of the serving Worker, so the fix "
+    ahead = ("PRODUCTION MIGRATIONS WERE ATTEMPTED in this run before it stopped "
+             "(db_ahead_of_worker: true): the database may be ahead of the serving Worker, so the fix "
              "must keep the new schema working with the currently deployed Worker.\n"
              if db_ahead_of_worker else "")
     if do_migration:
@@ -674,17 +536,43 @@ def queue_turn(lane: str, sha: str, step: str, rc: int, log: str, record_path: s
             "msg_id": str(uuid.uuid5(ROOM_NAMESPACE, f"{lane}:{sha}:{step}:{run_id}"))}
 
 
-def blocker_loop(capability: str, detail: str) -> dict:
-    return {"idempotency_key": str(uuid.uuid5(ROOM_NAMESPACE, "release-pipeline-blocker:" + capability)),
-            "kind": "open_loop", "owner": "Joe", "domain": "system", "marker": "none",
-            "blocker": "capability", "blocker_detail": detail,
+def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: str = "") -> dict:
+    """Route health repairs to their lane and credentials to their decider."""
+    continuation = recovery or ("It stops at that step every tick until this "
+                                "exists; nothing is released meanwhile.")
+    health_repair = capability in {"health_baseline_hard_error", "health_baseline_stalled"}
+    if health_repair:
+        blocker_detail = f"The authorized release-repair lane must restore and verify the health baseline: {detail}"
+    elif capability == CONTROLLER_STALE:
+        blocker_detail = ("The canonical checkout's owner must commit or move its local changes so fleet-sync "
+                          f"can fast-forward it to origin/main: {detail}")
+    else:
+        blocker_detail = f"Joe is the provisioning decider for the named unattended credential: {detail}; Joe grants it"
+    repair_lane = health_repair or capability == CONTROLLER_STALE
+    args = {"kind": "open_loop", "owner": "Claude" if repair_lane else "Joe", "domain": "system", "marker": "none",
+            "blocker": "other_lane" if repair_lane else "capability", "blocker_detail": blocker_detail,
+            **({} if repair_lane else {"residue_kind": "provider_login",
+                                       "residue_host": capability.split(":", 1)[0]}),
             "body": (f"The scripted release pipeline (ops/release-pipeline.py) cannot run "
-                     f"unattended: {detail}. It stops at that step every tick until this "
-                     f"exists; nothing is released meanwhile."),
+                     f"unattended: {detail}. {continuation} {remedy}".rstrip()),
             "unblocks": "unattended Worker/app release on every merge to main"}
+    # The record envelope refuses key reuse with different request bytes.
+    # Dedup by capability remains in filed_blockers; retries replay the pending
+    # payload verbatim, while a revised remedy gets its own operation key.
+    args["idempotency_key"] = str(uuid.uuid5(
+        ROOM_NAMESPACE, "release-pipeline-blocker:" + capability + ":" +
+        json.dumps(args, sort_keys=True, separators=(",", ":"))))
+    return args
 
 
 # ── the pipeline ──────────────────────────────────────────────────────────────
+
+# The candidate login profiles tools/provision-staging-app-writer.py knows (its
+# PROFILES labels, which are tools/staging_database_credential.py's profile()
+# keys). The selftest holds the two lists equal.
+ROTATABLE_STAGING_CREDENTIALS = ("reader", "writer", "gate_zero_producer",
+                                 "foundation_assurance_oracle")
+
 
 class Pipeline:
     def __init__(self, cfg: dict, *, repo: Path = REPO, runner: Runner | None = None,
@@ -692,12 +580,32 @@ class Pipeline:
                  http: Callable[[str], Any] = http_json,
                  call_verb: Callable[[str, dict], tuple[bool, Any]] | None = None,
                  slice_marker: Callable[[str, str], dict] | None = None,
+                 controller_blobs: dict[str, str | None] | None = None,
                  dry_run: bool = False, env: dict[str, str] | None = None,
-                 today: str | None = None, out: Callable[[str], None] = print):
+                 today: str | None = None, out: Callable[[str], None] = print,
+                 rotate_lost_staging_credentials: tuple[str, ...] = ()):
         self.cfg, self.repo, self.dry_run = cfg, repo, dry_run
+        # Joe's 2026-10-12 approval, carried for ONE operator-run tick: each
+        # label is forwarded to the staging-app-writer step as
+        # --rotate-lost-credential, and the provisioner alone decides whether
+        # that profile is really in the lost-file state. Never set by launchd.
+        self.rotate_lost_staging_credentials = tuple(rotate_lost_staging_credentials)
+        self.controller_blobs = dict(controller_blobs) if controller_blobs is not None else {
+            "ops/release-pipeline.py": git_blob(CONTROLLER_SOURCE_BYTES),
+            "lib/credential_file.py": git_blob(CREDENTIAL_FILE_SOURCE_BYTES),
+            "lib/github_reader.py": git_blob(GITHUB_READER_SOURCE_BYTES),
+            "lib/secret_redaction.py": git_blob(REDACTION_SOURCE_BYTES),
+            "ops/release-smoke.py": git_blob(SMOKE_SOURCE_BYTES),
+            "ops/doctorcre-production-smoke.py": git_blob(DOCTOR_SMOKE_SOURCE_BYTES),
+            "ops/config/release-pipeline.v1.json": getattr(cfg, "source_blob", None),
+        }
         self.runner = runner or Runner()
         self.env = env if env is not None else child_env()
-        self.github_factory = github or (lambda repo_name: GitHub(repo_name, self.env))
+        self._github = github or (lambda repo_name: GitHub(repo_name, self.env))
+        self.observations: dict[str, dict] = {}
+        self.dependency_evidence: dict[str, str] = {}
+        self.github_factory = lambda name: ObservedGitHub(self._github(name), name, self.observations)
+        self.now = time.time
         self.http = http
         self.sleep = time.sleep
         self.call_verb = call_verb or self._call_verb
@@ -713,11 +621,13 @@ class Pipeline:
         self.do_migration: dict | None = None   # a Durable Object migration the upload step applied
         self.mutated = False   # set when the first worktree is created; nothing before it writes
         self.schema_superseded_closed: list[int] = []   # older snapshot PRs closed this run
+        self.observed_main = ""   # the exact main SHA this lane fetched; origin/main may be stale
+        self.post_release: dict | None = None   # the post-release proof of a failed release
 
     # -- plumbing ---------------------------------------------------------
     def _call_verb(self, verb: str, args: dict) -> tuple[bool, Any]:
         """The sanctioned Bash door (run.sh call <verb>), same as
-        tools/cutover-watch.py; never the generic call-verb passthrough."""
+        the runtime verb client; never the generic call-verb passthrough."""
         env = {k: v for k, v in self.env.items() if k in ("HOME", "PATH", "LANG")}
         try:
             proc = subprocess.run([str(self.repo / "run.sh"), "call", verb, json.dumps(args)],
@@ -726,8 +636,11 @@ class Pipeline:
         except Exception as exc:  # noqa: BLE001 — a failed filing is reported, not raised
             return False, f"{type(exc).__name__}: {exc}"
         if proc.returncode != 0:
-            tail = (proc.stderr or proc.stdout or "").strip().splitlines()
-            return False, f"run.sh call {verb} exit {proc.returncode}: {tail[-1] if tail else ''}"
+            # TOOL ERROR is multiline JSON; its last line is only `}`.
+            # Keep both streams so a stderr identity banner cannot hide stdout.
+            detail = "\n".join(part.strip() for part in (proc.stderr, proc.stdout) if part and part.strip())
+            detail = redact_text(detail, known_secrets=sensitive_env_values(self.env))
+            return False, f"run.sh call {verb} exit {proc.returncode}: {detail[:4000]}"
         try:
             return True, json.loads(proc.stdout)
         except ValueError:
@@ -746,6 +659,9 @@ class Pipeline:
         log.parent.mkdir(parents=True, exist_ok=True)
         venv = self.repo / ".venv" / "bin" / "python"
         env = {k: v for k, v in self.env.items() if k in ("HOME", "PATH", "LANG")}
+        # Its Jev calls are attributed to this job (ops/config/jev-call-sites.v1.json);
+        # with the stripped environment they would otherwise be refused as unattributed.
+        env["CARR_JEV_JOB"] = "release-pipeline.slice-marker"
         with open(log, "ab") as sink:
             proc = subprocess.Popen([str(venv if venv.exists() else sys.executable),
                                      str(self.repo / "ops" / "slice-done-marker.py"), "--release-key", release_key],
@@ -764,13 +680,19 @@ class Pipeline:
         return outcome
 
     def git(self, *args: str, cwd: Path | None = None, trim_output: bool = True) -> str:
+        if args and args[0] == "fetch":
+            # Ordinary fetches keep the shared remote-tracking refs and
+            # FETCH_HEAD untouched. App publication has one explicit,
+            # verified ref refresh below because its unchanged release guard
+            # requires the detached candidate to equal refs/remotes/origin/main.
+            args = ("fetch", "--no-write-fetch-head", "--refmap=", *args[1:])
         proc = subprocess.run(["git", "-C", str(cwd or self.repo), *args], env=self.env,
                               stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
         if proc.returncode != 0:
             raise StepFailed(f"git {args[0]}", proc.returncode, "", os.fsdecode(proc.stderr).strip()[:300])
         # fsdecode preserves filename bytes via surrogateescape. text=True
         # applies universal-newline conversion and would corrupt CR/CRLF names
-        # in the NUL-delimited path list used by change_present().
+        # in the NUL-delimited path list used by changed_paths().
         output = os.fsdecode(proc.stdout)
         return output.strip() if trim_output else output
 
@@ -820,6 +742,7 @@ class Pipeline:
                               cwd=cwd, log=log, env=self.env, timeout=900)
         res.log = str(log)
         findings, complete = read_health_findings(res.out, findings_path)
+        self.dependency_evidence[name] = evidence_digest({"rc": res.rc, "complete": complete, "findings": findings})
         return res, findings, complete
 
     HEALTH_BASELINE_ESCALATE_AFTER = 3
@@ -1012,14 +935,13 @@ class Pipeline:
         src_venv = self.repo / ".venv"
         src_python = src_venv / "bin" / "python"
         if not self.dry_run and not src_python.exists():
-            raise StepFailed("venv-link", 1, "",
+            raise StepFailed("venv-source-missing", 1, "",
                              f"{src_venv} has no bin/python — this pipeline checkout's own venv "
                              f"is missing or incomplete, so linking it into the release worktree "
                              f"would only produce a dangling symlink whose health read then "
                              f"reports psycopg/openpyxl as MISSING, reading like a code bug when "
                              f"it is really this machine's environment. Fix the venv at "
-                             f"{self.repo} (a missing venv never heals itself; retrying the same "
-                             f"SHA will not help).")
+                             f"{self.repo}; the next scheduled run checks for its repair before retrying.")
         self.step("venv-link", ["ln", "-s", str(src_venv), str(wt / ".venv")], self.repo)
         self.step("npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], mcp, timeout=1800)
 
@@ -1059,8 +981,10 @@ class Pipeline:
             return 1
         finally:
             self.remove_worktrees()
-        ok = baseline_complete and live_complete and not any(
-            f.get("hard_error") for f in baseline_findings)
+        ok = (baseline_complete and live_complete
+              and (baseline_res.rc == 0 or (baseline_res.rc == 1 and baseline_findings))
+              and (live_res.rc == 0 or (live_res.rc == 1 and live_findings)) and not any(
+                  f.get("hard_error") for f in baseline_findings + live_findings))
         self.out("  health-preflight: " + ("OK" if ok else "FAILED — see rc/findings above"))
         return 0 if ok else 1
 
@@ -1068,205 +992,6 @@ class Pipeline:
     def batch_commits(self, repo_dir: Path, base: str, sha: str) -> list[str]:
         return self.git("rev-list", "--first-parent", f"{base}..{sha}", cwd=repo_dir).split()
 
-    def review_evidence(self, gh: Any, lane_cfg: dict, repo_dir: Path, base: str, sha: str) -> dict:
-        """Every commit in the batch came from a merged PR whose latest trusted
-        review verdict is a fresh APPROVE. Returns the head PR's evidence and
-        the PRs that touched a release path (each must have green CI)."""
-        events = read_merge_events(self.repo / self.cfg.get("merge_event_file", "out/merge-events.jsonl"))
-        reviewed: list[int] = []
-        reviews: list[dict] = []
-        pre_pipeline: list[int] = []
-        release_prs: list[dict] = []
-        head: dict | None = None
-        # FIX-FORWARD. A PR whose latest trusted verdict is BLOCK is not a hold
-        # by itself if a LATER commit of THIS batch fixes it (see
-        # resolve_fix_forwards); it is parked here and decided after the walk.
-        blocked: list[dict] = []
-        fixers: list[dict] = []
-        commits = self.batch_commits(repo_dir, base, sha)   # newest first
-        for position, commit in enumerate(commits):
-            pr = gh.pr_for_commit(commit)
-            if pr is None:
-                raise Blocked("no_pull_request", f"{commit[:12]} reached main without a merged pull request")
-            number, head_sha = int(pr["number"]), str(pr["head"]["sha"])
-            parent = self.git("rev-parse", f"{commit}^1", cwd=repo_dir)
-            touches, _ = classify(self.changed_paths(parent, commit, cwd=repo_dir), lane_cfg)
-            approval: dict | None
-            rule = reviewed_sha = ""
-            comments = gh.comments(number)   # read ONCE: the verdict and the BLOCK link come from one snapshot
-            try:
-                approval, rule, reviewed_sha = approval_of(
-                    comments, lane_cfg, head_sha,
-                    # called synchronously inside this iteration, so the closure sees this commit's values
-                    covers=lambda r: self.main_merge_only(repo_dir, number, r, head_sha, commit))
-            except Blocked as b:
-                cutover = str(lane_cfg.get("review_required_after") or "")
-                if (b.reason == "no_independent_review" and commit != sha and cutover
-                        and str(pr.get("merged_at") or "") < cutover):
-                    pre_pipeline.append(number)
-                    approval = None
-                elif b.reason == "review_blocked":
-                    block = deciding_verdict(comments, lane_cfg) or {}
-                    blocked.append({"pr": number, "commit": commit, "position": position,
-                                    "url": str(block.get("html_url") or ""), "detail": b.detail})
-                    approval = None
-                else:
-                    raise Blocked(b.reason, f"PR #{number} ({commit[:12]}): {b.detail}")
-            if approval is not None:
-                reviewed.append(number)
-                reviews.append({"pr": number, "rule": rule, "reviewed_sha": reviewed_sha, "head_sha": head_sha})
-                fixers.append({"pr": number, "commit": commit, "position": position,
-                               "merge_commit_sha": str(pr.get("merge_commit_sha") or ""),
-                               "fixes": fixes_forward(approval, reviewed_sha), "reviewed_sha": reviewed_sha,
-                               "url": str(approval.get("html_url") or "")})
-            if touches:
-                release_prs.append({"pr": number, "head_sha": head_sha})
-            if commit == sha and approval is not None:
-                head = {"pr": number, "head_sha": head_sha, "url": str(approval.get("html_url") or ""),
-                        "event": events.get(commit) or {}, "rule": rule, "reviewed_sha": reviewed_sha}
-        fix_forwards = self.resolve_fix_forwards(repo_dir, sha, blocked, fixers)
-        if head is None:
-            raise Blocked("no_independent_review", f"the head commit {sha[:12]} has no approval")
-        return {"head": head, "prs": reviewed, "pre_pipeline_prs": pre_pipeline, "release_prs": release_prs,
-                "reviews": reviews, "fix_forwards": fix_forwards,
-                "verifier": choose_verifier(lane_cfg, head["event"]),
-                "verifier_evidence": evidence_ref_from_url(head["url"])}
-
-    def resolve_fix_forwards(self, repo_dir: Path, sha: str, blocked: list[dict],
-                             fixers: list[dict]) -> list[dict]:
-        """Each BLOCKED commit B of the batch base..sha ships only with its fix,
-        else the whole batch is a review_blocked hold. ALL of these must hold:
-          1. a LATER first-parent commit of the SAME batch (so at or before the
-             release target `sha`) is EXACTLY PR F's merge_commit_sha as
-             GitHub reports it; `blocked`/`fixers` carry each commit's
-             position in the newest-first batch, so "later" is a smaller
-             position, never a date, and git re-checks that B is an ancestor
-             of F's merge commit;
-          2. F's DECIDING approval, the one approval_of() accepted under the
-             exact or main-merge-only rule, carries the line
-             `Fixes-Forward: #<B's PR number>` (fixes_forward());
-          3. the target is at or after F's merge commit (re-checked in git),
-             and F's change is still PRESENT at the target (change_present):
-             a later revert of F, or a later rewrite of F's lines, drops F as
-             the fixer unless that later PR carries its own marker.
-        B is bound by its commit on main and the PR GitHub maps it to; F by
-        its merge_commit_sha, its PR number and its approval's Reviewed-SHA.
-        The first unfixed B raises; nothing is shipped partially.
-        A target between B and F never contains F, so it holds: the defective
-        commit can never ship alone. B's BLOCK verdict is never rewritten or
-        re-approved; B is not added to the approved PR list."""
-        out: list[dict] = []
-        for b in blocked:
-            candidates = [f for f in sorted(fixers, key=lambda f: -f["position"])
-                          if f["position"] < b["position"] and b["pr"] in f["fixes"]
-                          and f["merge_commit_sha"] == f["commit"]]
-            fix = None
-            for cand in candidates:
-                try:
-                    self.git("merge-base", "--is-ancestor", cand["commit"], sha, cwd=repo_dir)
-                    self.git("merge-base", "--is-ancestor", b["commit"], cand["commit"], cwd=repo_dir)
-                except StepFailed:
-                    continue
-                if self.change_present(repo_dir, cand["commit"], sha):
-                    fix = cand
-                    break
-            if fix is None:
-                why = (f"the change of fixing PR(s) {', '.join('#' + str(c['pr']) for c in candidates)} "
-                       f"is no longer present at the target (reverted or rewritten since); a later PR "
-                       f"that carries the fix needs its own `Fixes-Forward: #{b['pr']}`"
-                       if candidates else
-                       f"no later PR in this batch at or before the target {sha[:12]} has a deciding "
-                       f"approval carrying `Fixes-Forward: #{b['pr']}`")
-                raise Blocked("review_blocked", f"PR #{b['pr']} ({b['commit'][:12]}): {b['detail']}; {why}")
-            out.append({"blocked_pr": b["pr"], "blocked_commit": b["commit"], "block_url": b["url"],
-                        "fixing_pr": fix["pr"], "fixing_commit": fix["commit"],
-                        "fixing_reviewed_sha": fix["reviewed_sha"], "fixing_approval_url": fix["url"]})
-            self.out(f"  fix-forward: PR #{b['pr']} ({b['commit'][:12]}) is BLOCKED and ships only with "
-                     f"its fix PR #{fix['pr']} ({fix['commit'][:12]}), approval {fix['url']}")
-        return out
-
-    def change_present(self, repo_dir: Path, fix: str, target: str) -> bool:
-        """Require every path touched by the attested fix to match its blob
-        and mode at the target. A partial revert or later edit needs a fresh
-        reviewed Fixes-Forward marker, even if another fix path remains."""
-        try:
-            # Keep -z output intact: trimming would corrupt a leading-space
-            # filename. The later diff must treat every name literally, since
-            # a filename may itself begin with Git's pathspec-magic syntax.
-            paths = self.changed_paths(f"{fix}^1", fix, cwd=repo_dir)
-            if not paths:
-                return False
-            self.git("--literal-pathspecs", "diff", "--quiet", fix, target, "--", *paths,
-                     cwd=repo_dir)
-            return True
-        except StepFailed:
-            return False
-
-    def main_merge_only(self, repo_dir: Path, number: int, reviewed: str, head: str,
-                        merged: str) -> str | None:
-        """None when merged PR head H is reviewed head R plus ONLY merges of
-        main (the commits `gh pr update-branch` adds after a review);
-        otherwise the reason. `merged` is the PR's commit on main, so
-        `merged^1` is main as it stood when the PR landed.
-          (a) R is an ancestor of H, and every commit in R..H that is not on
-              main (main's own commits arrive through the merges) is a two-parent
-              merge whose second parent is on main at that time and which,
-              against that parent, changes nothing but the PR's own files
-              (no content of its own smuggled in through a merge);
-          (b) none of the PR's own files, the paths changed between
-              merge-base(R, main-at-merge) and R, differ between R and H.
-        main-at-merge, not today's main: today's main contains the PR, so its
-        merge-base with R is R itself and the PR's file set would be empty."""
-        if not SHA_RE.fullmatch(reviewed or "") or not SHA_RE.fullmatch(head or ""):
-            return "Reviewed-SHA or PR head is not a full SHA"
-
-        def have(obj: str) -> bool:
-            try:
-                self.git("cat-file", "-e", f"{obj}^{{commit}}", cwd=repo_dir)
-                return True
-            except StepFailed:
-                return False
-
-        def ancestor(a: str, b: str) -> bool:
-            try:
-                self.git("merge-base", "--is-ancestor", a, b, cwd=repo_dir)
-                return True
-            except StepFailed:
-                return False
-
-        def names(a: str, b: str) -> set[str]:
-            return set(self.changed_paths(a, b, cwd=repo_dir))
-
-        if not (have(reviewed) and have(head)):
-            with contextlib.suppress(StepFailed):   # squash merges leave H off main: fetch the PR head
-                self.git("fetch", "--quiet", "origin", f"refs/pull/{number}/head", cwd=repo_dir)
-        if not have(head):
-            return f"PR head {head[:12]} is not fetchable"
-        if not have(reviewed):
-            return f"Reviewed-SHA {reviewed[:12]} is not in the PR's history"
-        if not ancestor(reviewed, head):
-            return f"Reviewed-SHA {reviewed[:12]} is not an ancestor of the PR head {head[:12]}"
-        main_then = self.git("rev-parse", f"{merged}^1", cwd=repo_dir)
-        pr_files = names(self.git("merge-base", reviewed, main_then, cwd=repo_dir), reviewed)
-        # The PR-side commits of R..H: main's own commits arrive through the
-        # merges and are excluded (they were reviewed as their own PRs).
-        added = self.git("rev-list", head, f"^{reviewed}", f"^{main_then}", cwd=repo_dir).split()
-        parents_of = {c: self.git("rev-list", "--parents", "-n", "1", c, cwd=repo_dir).split()[1:]
-                      for c in added}
-        for c in added:
-            if len(parents_of[c]) != 2:
-                return f"{c[:12]} in R..H is not a two-parent merge"
-        for c in added:
-            second = parents_of[c][1]
-            if not ancestor(second, main_then):
-                return f"merge {c[:12]}'s second parent {second[:12]} is not on main"
-            extra = sorted(names(second, c) - pr_files)
-            if extra:
-                return f"merge {c[:12]} changes non-PR file(s) against main: {', '.join(extra[:5])}"
-        touched = sorted(names(reviewed, head) & pr_files)
-        if touched:
-            return f"PR file(s) changed after review: {', '.join(touched[:5])}"
-        return None
 
     def canary_ignored(self, commit: str, lane_cfg: dict) -> bool:
         """True when EVERY path this commit changed matches main-canary's
@@ -1360,11 +1085,16 @@ class Pipeline:
 
     def ci_run(self, gh: Any, lane_cfg: dict, pr: int, head_sha: str) -> int:
         ci = [r for r in gh.runs_for(head_sha)
-              if r.get("name") == lane_cfg["ci_workflow_name"] and r.get("event") == "pull_request"
-              and r.get("conclusion") == "success"]
+              if r.get("name") == lane_cfg["ci_workflow_name"] and r.get("event") == "pull_request"]
+        # A cancelled or skipped run carries no verdict on the code; a newer
+        # failure (or any other non-success) still blocks.
+        ci = [r for r in ci if r.get("conclusion") not in ("cancelled", "skipped")]
         if not ci:
             raise Blocked("ci_not_green", f"PR #{pr} has no successful {lane_cfg['ci_workflow_name']} run")
-        run_id = max(int(r["id"]) for r in ci)
+        newest = max(ci, key=lambda r: (int(r["id"]), int(r.get("run_attempt", 1))))
+        run_id = int(newest["id"])
+        if newest.get("conclusion") != "success":
+            raise Blocked("ci_not_green", f"PR #{pr} newest CI run {run_id} is not successful")
         jobs = gh.jobs(run_id)
         if not any(j.get("name") == lane_cfg["ci_required_job"] and j.get("conclusion") == "success" for j in jobs):
             raise Blocked("ci_not_green", f"PR #{pr} run {run_id} lacks a green `{lane_cfg['ci_required_job']}`")
@@ -1372,20 +1102,31 @@ class Pipeline:
             raise Blocked("ci_not_green", f"PR #{pr} run {run_id} lacks a green secret-class job")
         return run_id
 
+    def merged_source(self, gh: Any, lane_cfg: dict, repo_dir: Path, base: str, sha: str) -> list[dict]:
+        prs = []
+        for commit in self.batch_commits(repo_dir, base, sha):
+            pr = gh.pr_for_commit(commit)
+            if pr is None:
+                raise Blocked("no_pull_request", f"{commit[:12]} reached main without a merged pull request")
+            prs.append({"pr": int(pr["number"]), "head_sha": str(pr["head"]["sha"]), "commit": commit})
+        return prs
+
     def worker_evidence(self, lane_cfg: dict, base: str, sha: str) -> dict:
-        """Review and CI evidence for the batch base..sha. `sha` is already the
-        canary-chosen release target (run_lane), never a later HEAD."""
         gh = self.github_factory(lane_cfg["github_repo"])
-        rev = self.review_evidence(gh, lane_cfg, self.repo, base, sha)
-        head = rev["head"]
-        for item in rev["release_prs"]:   # EVERY release-path PR in the batch, not only the newest
-            self.ci_run(gh, lane_cfg, item["pr"], item["head_sha"])
-        run_id = self.ci_run(gh, lane_cfg, head["pr"], head["head_sha"])
+        prs = self.merged_source(gh, lane_cfg, self.repo, base, sha)
+        run_id = None
+        for item in prs:
+            parent = self.git("rev-parse", f"{item['commit']}^1")
+            touches, _ = classify(self.changed_paths(parent, item["commit"]), lane_cfg)
+            if touches or item["commit"] == sha:
+                checked = self.ci_run(gh, lane_cfg, item["pr"], item["head_sha"])
+                if item["commit"] == sha:
+                    run_id = checked
+        if run_id is None:
+            raise Blocked("ci_not_green", f"no CI run for release target {sha[:12]}")
         repo_name = lane_cfg["github_repo"]
-        return {"pr": head["pr"], "prs": rev["prs"], "pre_pipeline_prs": rev["pre_pipeline_prs"],
-                "reviews": rev["reviews"], "fix_forwards": rev["fix_forwards"], "review_rule": head["rule"],
-                "reviewed_sha": head["reviewed_sha"], "pr_head_sha": head["head_sha"],
-                "verifier": rev["verifier"], "verifier_evidence": rev["verifier_evidence"],
+        return {"pr": prs[0]["pr"], "prs": [p["pr"] for p in prs],
+                "pr_head_sha": prs[0]["head_sha"],
                 "test_evidence": f"github-actions:{repo_name}/runs/{run_id}#{lane_cfg['test_evidence_label']}",
                 "security_evidence": f"github-actions:{repo_name}/runs/{run_id}#{lane_cfg['security_evidence_label']}"}
 
@@ -1396,7 +1137,7 @@ class Pipeline:
         wrangler fall back to its interactive OAuth login. Only the NAME and
         the file path ever appear in output."""
         path = expand(self.cfg.get("credential_dir", "~/.config/carr")) / CLOUDFLARE_TOKEN_FILE
-        token = read_env_value(path, CLOUDFLARE_TOKEN_NAME)
+        token = credential(CLOUDFLARE_TOKEN_NAME, path=path, environ={})
         if not token:
             detail = (f"credential missing: {CLOUDFLARE_TOKEN_NAME} is absent from {path}; "
                       "refusing to fall back to wrangler's interactive OAuth login")
@@ -1404,20 +1145,82 @@ class Pipeline:
                 self.out(f"  [dry-run] a real run would FAIL here: {detail}")
                 return dict(self.env)
             self.out(f"  !! {detail}")
-            raise StepFailed("credential-missing", 1, "", detail)
+            raise StepFailed("credential-missing", 1, "", detail, capability=CLOUDFLARE_TOKEN_NAME)
         env = dict(self.env)
         env[CLOUDFLARE_TOKEN_NAME] = token
         return env
 
-    def wrangler_auth(self, wrangler: Path, cwd: Path) -> None:
+    def auth_wrangler(self) -> Path:
+        """The wrangler binary that checks the deploy token: the pipeline's
+        own install under <store>/toolchain, keyed by this checkout's
+        mcp-server package.json + package-lock.json and reused until they
+        change. Never this checkout's mcp-server/node_modules: any session
+        running `npm ci` there can leave it empty, and on 2026-10-05 one did,
+        so `wrangler whoami` exited 127 on both lanes. Installed into a
+        `.partial` sibling and renamed into place, so an existing directory
+        is always a finished install."""
+        home = wrangler_toolchain(self.repo, self.store.root)
+        wrangler = home / "node_modules/.bin/wrangler"
+        if wrangler.exists():
+            return wrangler
+        if self.dry_run:
+            self.out(f"  [dry-run] would install the token-check wrangler into {home}")
+            return wrangler
+        partial = home.with_name(home.name + ".partial")
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.mkdir(parents=True)
+        for name in TOOLCHAIN_FILES:
+            shutil.copy2(self.repo / "mcp-server" / name, partial / name)
+        res = self.step("wrangler-install", ["npm", "ci", "--no-audit", "--no-fund"], partial, timeout=1800)
+        if not (partial / "node_modules/.bin/wrangler").exists():
+            raise StepFailed("wrangler-install", 127, res.log,
+                             f"npm ci in {partial} finished without installing node_modules/.bin/wrangler")
+        shutil.rmtree(home, ignore_errors=True)
+        partial.rename(home)
+        for stale in home.parent.iterdir():
+            if stale != home:
+                shutil.rmtree(stale, ignore_errors=True)
+        return wrangler
+
+    def wrangler_auth(self) -> None:
         """Before any worktree exists: the deploy token must be present and
         accepted. Either failure stops the lane and dispatches; neither is a
-        silent hold, because a missing token never heals itself."""
-        who = self.step("wrangler-auth", [str(wrangler), "whoami"], cwd, timeout=120,
-                        env=self.deploy_env())
-        if not self.dry_run and "not authenticated" in who.out.lower():
-            raise StepFailed("credential-missing", 1, who.log,
-                             f"credential rejected: wrangler whoami does not accept {CLOUDFLARE_TOKEN_NAME}")
+        silent hold, because a missing token never heals itself. The token is
+        read before the token-check wrangler is installed, so a missing token
+        still fails with no subprocess run at all."""
+        env = self.deploy_env()
+        wrangler = self.auth_wrangler()
+        try:
+            who = self.step("wrangler-auth", [str(wrangler), "whoami"], self.repo / "mcp-server",
+                            timeout=120, env=env)
+        except StepFailed as failure:
+            if failure.step != "wrangler-auth":
+                raise
+            # Only recognized auth or transport failures may recover without
+            # a source change. Unknown process failures need their own diagnosis.
+            try:
+                output = Path(failure.log).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                output = ""
+            who = Result(failure.rc, output, failure.log)
+            if not self._auth_rejected(who.out):
+                if re.search(r"fetch failed|network unavailable|network error|Cloudflare API unavailable|"
+                             r"\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|"
+                             r"UND_ERR_CONNECT_TIMEOUT|UND_ERR_SOCKET)\b|socket hang up",
+                             who.out, re.IGNORECASE):
+                    raise
+                raise StepFailed("wrangler-execution", failure.rc, failure.log,
+                                 "wrangler whoami failed without a recognized authentication "
+                                 "or transport error") from failure
+        if not self.dry_run and self._auth_rejected(who.out):
+            raise StepFailed("credential-missing", who.rc or 1, who.log,
+                             f"credential rejected: wrangler whoami does not accept {CLOUDFLARE_TOKEN_NAME}",
+                             capability=f"{CLOUDFLARE_TOKEN_NAME}:rejected")
+
+    @staticmethod
+    def _auth_rejected(output: str) -> bool:
+        return bool(re.search(r"not authenticated|authentication error|invalid access token|"
+                              r"\[code:\s*(?:9106|9109|10000)\]", output, re.IGNORECASE))
 
     def add_worktree(self, name: str, repo_dir: Path, wt: Path, sha: str, *, mark_mutated: bool = True) -> None:
         """`mark_mutated=False` is for the worker lane's health baseline: the
@@ -1455,10 +1258,9 @@ class Pipeline:
         capability, which files one loop naming it."""
         def names(path: Path) -> set[str]:
             try:
-                text = path.read_text(encoding="utf-8")
+                return {name for name, value in read_env_file(path).items() if value}
             except OSError:
                 return set()
-            return {m.group(2) for m in re.finditer(r"^(export\s+)?([A-Z0-9_]+)=\S", text, re.M)}
         cred = expand(self.cfg.get("credential_dir", "~/.config/carr"))
         db = names(cred / "db.env")
         for name in lane_cfg.get("required_db_env_names") or []:
@@ -1471,7 +1273,45 @@ class Pipeline:
                 raise Blocked("credential_missing", f"{name} is absent from ~/.config/carr/mcp-tokens.env",
                               capability=name)
 
+
     # -- lanes --------------------------------------------------------------
+    def controller_current(self, state: dict) -> None:
+        """Compare loaded code and current on-disk inputs to immutable main.
+        Unreadable evidence is a retryable hold, never a deployment failure.
+        Recovery state is only cleared in a real tick."""
+        try:
+            remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main").split()
+            if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
+                raise Blocked(CONTROLLER_UNREADABLE, "controller main has no exact SHA acknowledgement")
+            main = remote[0]
+            self.git("fetch", "--quiet", "origin", main)
+            stale = []
+            for path in CONTROLLER_PATHS:
+                entry = self.git("ls-tree", main, "--", path)
+                committed = entry.split()[2] if entry else None
+                loaded = self.controller_blobs.get(path, committed)
+                disk = self.git("hash-object", "--", path) if (self.repo / path).is_file() else None
+                if loaded != committed or disk != committed:
+                    stale.append(path)
+        except (StepFailed, OSError) as exc:
+            raise Blocked(CONTROLLER_UNREADABLE, f"controller freshness read unavailable: {exc}") from exc
+        if stale:
+            raise Blocked(CONTROLLER_STALE,
+                          f"loaded controller or helpers in {self.repo} differ from origin/main "
+                          f"{main[:12]} in {', '.join(stale)}; "
+                          "fleet-sync must fast-forward the checkout and a fresh tick must load it",
+                          capability=CONTROLLER_STALE)
+        if self.dry_run:
+            return
+        changed = bool(state.get("filed_blockers", {}).pop(CONTROLLER_STALE, None))
+        for lane in ("worker", "app"):
+            lane_state = state.get(lane, {})
+            if (lane_state.get("rejection") or {}).get("reason") in (CONTROLLER_STALE, CONTROLLER_UNREADABLE):
+                lane_state.pop("rejection")
+                changed = True
+        if changed:
+            self.store.save(state)
+
     def _at_or_before(self, a: str, b: str, repo_dir: Path) -> bool:
         """True when commit `a` is `b` or an ancestor of it."""
         try:
@@ -1480,16 +1320,46 @@ class Pipeline:
         except StepFailed:
             return False
 
-    def last_released(self, state: dict, lane: str, lane_cfg: dict) -> str:
+    def last_released(self, state: dict, lane: str, lane_cfg: dict, live: dict | None = None) -> str:
         sha = (state.get(lane) or {}).get("last_released_sha")
         if sha:
             return sha
-        live = self.http(lane_cfg["live_release_url"])
+        live = live if live is not None else self.http(lane_cfg["live_release_url"])
         value = ((live.get("git_sha") or {}).get("value") if lane == "worker"
                  else live.get("source_commit"))
         if not isinstance(value, str) or not SHA_RE.fullmatch(value):
             raise Blocked("bootstrap_unknown", f"{lane_cfg['live_release_url']} names no full SHA")
         return value
+
+    def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
+        url = lane_cfg["live_release_url"]
+        try:
+            live = self.http(url)
+            sha = live["git_sha"]["value"]
+            version = live["worker_version"]["id"]
+            if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
+                    or not isinstance(version, str) or not UUID_RE.fullmatch(version)):
+                raise ValueError("invalid identity")
+        except Exception as exc:
+            raise Blocked("live_identity_unreadable", f"{url} names no readable full Worker identity") from exc
+        lane_state = state["worker"]
+        previous = lane_state.get("last_released_sha")
+        if not previous or previous == sha:
+            return live
+        if lane_state.get("failed_sha") == sha:
+            raise Blocked("live_target_unreceipted", "failed release source identity has no durable shipped checkpoint")
+        self.controller_current(state)
+        if not self._at_or_before(sha, main, self.repo):
+            raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
+        self.out(f"release-pipeline[worker]: recorded {previous[:12]} differs from live {sha[:12]}")
+        if not self.dry_run:
+            self.store.record_durable({"lane": "worker", "status": "live_identity_reconciled",
+                "from_sha": previous, "sha": sha, "provider_version_id": version,
+                "release_endpoint": url, "run_id": self.run_id})
+        lane_state["last_released_sha"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+        return live
 
     def tick(self, lanes: Iterable[str]) -> int:
         why = kill_switch(self.cfg)
@@ -1501,11 +1371,230 @@ class Pipeline:
                 self.out("release-pipeline: another run holds the lock; this tick is a no-op")
                 return 0
             rc = 0
+            if not self.dry_run:
+                # Notification delivery is independent of failed-SHA release
+                # suppression, including when main has not changed.
+                state = self.store.load()
+                for capability, pending in list(state.get("pending_blockers", {}).items()):
+                    row = {"status": "blocker_notification", "lane": pending["lane"],
+                           "capability": capability, "run_id": self.run_id}
+                    self.deliver_blocker(state, capability, row)
+                    self.store.record(row)
+                for capability, pending in list(state.get("pending_diagnoses", {}).items()):
+                    row = {"status": "capability_diagnosis", "lane": pending["lane"],
+                           "sha": pending["sha"], "capability": capability, "run_id": self.run_id}
+                    self.deliver_diagnosis(state, capability, row)
+                    self.store.record(row)
             for lane in lanes:
                 rc = max(rc, self.run_lane(lane))
             return rc
 
+    REJECTION_RECHECK_SECONDS = 900
+    # These prerequisites depend on live state without a cheap GitHub change
+    # signal. An elapsed interval permits a fresh judgment, never a promotion.
+    LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown",
+        "live_identity_unreadable", "credential_missing", "health_baseline_unavailable", "health_baseline_stalled",
+        "health_baseline_hard_error"})
+
+    def rejection_inputs(self, lane: str, base: str, sha: str) -> str:
+        return evidence_digest({"candidate": sha, "base": base, "config": self.cfg,
+            "lane": lane,
+            "reader_source": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
+
+    def rejection_waits(self, lane_state: dict, lane: str, base: str, sha: str) -> bool:
+        rejection = lane_state.get("rejection")
+        if lane_state.get("failed_sha"):
+            return False
+        if not rejection or rejection["inputs"] != self.rejection_inputs(lane, base, sha):
+            return False
+        try:
+            for observed in rejection["evidence"]:
+                method = observed["method"]
+                if method not in ObservedGitHub.READS or observed["repo"] != self.cfg[lane]["github_repo"]:
+                    raise ValueError("invalid rejection read")
+                current = getattr(self.github_factory(observed["repo"]), method)(*observed["args"])
+                if evidence_digest(current) != observed["digest"]:
+                    return False
+        except Exception:  # an unknown read never authorizes release or dispatch
+            self.out(f"release-pipeline[{lane}]: reconciliation unreadable; retained refusal")
+            return True
+        if rejection["reason"] in self.LIVE_REJECTIONS and self.now() >= rejection["recheck_after"]:
+            return False
+        self.out(f"release-pipeline[{lane}]: unchanged rejection {rejection['fingerprint'][:12]}; "
+                 f"repair owner {rejection['repair']['owner']}")
+        return True
+
+    def staging_ledger(self) -> dict:
+        """Read the exact configured candidate through the existing scope and
+        ledger authorities. No provider write, SQL write or record-layer call.
+        DSNs and row values never cross the persisted evidence sink.
+        """
+        module = runpy.run_path(str(self.repo / "tools/staging-project-replacement.py"))
+        operation = uuid.UUID(self.cfg["worker"]["staging_candidate_operation_id"])
+        _, _, candidate = module["resolve_existing_scopes"](
+            operation, run=subprocess.run, environ=self.env)
+        if candidate is None:
+            return {"candidate_operation": str(operation), "candidate": None}
+        dsn = module["derive_dsn"](candidate, module["OWNER_ROLE"],
+                                   run=subprocess.run, environ=self.env)
+        with module["psycopg"].connect(dsn.value, connect_timeout=15,
+                options="-c default_transaction_read_only=on -c statement_timeout=15000") as conn, conn.cursor() as cur:
+            cur.execute("select to_regclass('public.schema_migrations')")
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError("missing ledger acknowledgement")
+            ledger = module["exact_ledger"](cur) if row[0] is not None else None
+        return {"candidate": {key: getattr(candidate, key) for key in
+                ("project_id", "branch_id", "endpoint_id", "endpoint_host")}, "ledger": ledger}
+
+    def reconcile_staging_failure(self, state: dict, lane: str, base: str, repo_dir: Path) -> None:
+        """Reconcile the exact failed release target, which may sit behind main
+        HEAD (an older green canary). Target selection and every release guard
+        still run after a recovery clears it."""
+        sha = state[lane].get("failed_sha")
+        if not sha or state[lane].get("failed_step") != "staging-prepare":
+            return
+        rejection = state[lane].get("rejection")
+        if rejection is None:
+            # A failure persisted before rejections existed: adopt one now so the
+            # first observation below is kept as the baseline, never as recovery.
+            rejection = self.remember_rejection(state, lane, base, sha, "staging-prepare")
+            rejection["recheck_after"] = 0
+        if self.now() < rejection.get("recheck_after", 0):
+            return
+        rejection["recheck_after"] = self.now() + self.REJECTION_RECHECK_SECONDS
+        try:
+            digest = evidence_digest(self.staging_ledger())
+        except Exception:
+            self.store.save(state)
+            self.out(f"release-pipeline[{lane}]: staging ledger unreadable; retained failure")
+            return
+        previous = rejection.get("staging_ledger_digest")
+        rejection["staging_ledger_digest"] = digest
+        self.store.save(state)
+        # An unknown observation is never recovery. A changed authenticated
+        # ledger permits ONE retry of the existing resumable prepare command.
+        # Every CI, health and promotion guard still runs on that retry.
+        if previous is not None and digest != previous:
+            rejection["staging_recovery_pending"] = True
+            self.store.save(state)
+        if rejection.get("staging_recovery_pending"):
+            try:
+                _clear_failed_locked(self.store, lane, sha, "staging ledger evidence changed", repo_dir=repo_dir)
+            except (SystemExit, OSError, subprocess.SubprocessError):
+                self.out(f"release-pipeline[{lane}]: retirement incomplete; resume on bounded reconciliation")
+                return
+            state.clear(); state.update(self.store.load())
+
+    def remember_rejection(self, state: dict, lane: str, base: str, sha: str, reason: str) -> dict:
+        evidence = sorted(self.observations.values(), key=lambda row: evidence_digest(row))
+        inputs = self.rejection_inputs(lane, base, sha)
+        owner = ("tools/health-check.py" if reason.startswith("health_baseline") else
+                 "tools/staging-project-replacement.py" if reason == "staging-prepare" else
+                 "release-readiness")
+        rejection = {"inputs": inputs, "reason": reason, "evidence": evidence,
+            "dependencies": dict(self.dependency_evidence),
+            "fingerprint": evidence_digest({"inputs": inputs, "reason": reason, "evidence": evidence,
+                                            "dependencies": self.dependency_evidence}),
+            "recheck_after": self.now() + self.REJECTION_RECHECK_SECONDS,
+            "repair": {"owner": owner, "source": str(self.store.records_path),
+                       "next_action": "repair prerequisite, then reconcile its evidence"}}
+        state[lane]["rejection"] = rejection
+        self.store.save(state)
+        return rejection
+
+    def release_proof_payload(self, row: dict) -> dict:
+        return {key: value for key, value in row.items()
+                if key not in {"ts", "status", "proof_digest", "slice_marker"}}
+
+    def finish_release_proof(self, proof: dict, state: dict, lane: str) -> None:
+        family = [row for row in self.store.records() if isinstance(row, dict)
+                  and row.get("status") in {"release_verified", "slice_marker_claimed", "shipped"}
+                  and (row.get("proof_digest") == proof["proof_digest"]
+                       or all(row.get(key) == proof[key] for key in ("lane", "sha", "run_id")))]
+        if any(row.get("proof_digest") != proof["proof_digest"]
+               or self.release_proof_payload(row) != self.release_proof_payload(proof) for row in family):
+            raise Blocked("journal_proof_mismatch", "a release journal phase changed its original proof binding")
+        shipped = next((row for row in reversed(family) if row["status"] == "shipped"), None)
+        if shipped:
+            self.store.recover_durable(shipped)
+        else:
+            result = {}
+            if lane == "worker" and proof.get("release_key"):
+                claim = next((row for row in family if row["status"] == "slice_marker_claimed"), None)
+                if claim:
+                    self.store.recover_durable(claim)
+                    result["slice_marker"] = {"started": None, "launch_outcome": "unknown",
+                                              "claim_run_id": proof["run_id"]}
+                else:
+                    self.store.record_durable({**proof, "status": "slice_marker_claimed"})
+                    result["slice_marker"] = self.mark_slices(proof["release_key"], proof["sha"])
+            self.store.record_durable({**proof, **result, "status": "shipped"})
+            shipped = next(row for row in reversed(self.store.records())
+                           if row.get("proof_digest") == proof["proof_digest"] and row.get("status") == "shipped")
+        lane_state = state.setdefault(lane, {})
+        lane_state.pop("rejection", None)
+        lane_state.update({"last_released_sha": proof["sha"], "failed_sha": None, "failed_step": None,
+                           "last_shipped_at": shipped["ts"], "last_shipped_proof": proof["proof_digest"]})
+        self.store.save(state)
+
+    def reconcile_release_proof(self, state: dict, lane: str, lane_cfg: dict, main: str) -> None:
+        checkpoint = state.get(lane, {}).get("last_released_sha")
+        candidates = [row for row in self.store.records() if isinstance(row, dict)
+                      and row.get("status") == "release_verified" and row.get("lane") == lane
+                      and row.get("sha") != checkpoint
+                      and (not checkpoint or row.get("from_sha") == checkpoint or row.get("sha") == main)]
+        if not candidates:
+            return
+        proof = candidates[-1]
+        payload = self.release_proof_payload(proof)
+        if (not SHA_RE.fullmatch(str(proof.get("sha") or ""))
+                or not SHA_RE.fullmatch(str(proof.get("from_sha") or ""))
+                or not proof.get("run_id") or proof.get("proof_digest") != evidence_digest(payload)
+                or proof.get("release_endpoint") != lane_cfg["live_release_url"]
+                or (checkpoint and proof["from_sha"] != checkpoint)):
+            raise Blocked("journal_proof_invalid", "pending release proof does not match its original source and lane binding")
+        live = self.http(lane_cfg["live_release_url"])
+        if lane == "worker":
+            matches = ((live.get("git_sha") or {}).get("value") == proof["sha"]
+                       and UUID_RE.fullmatch(str(proof.get("provider_version_id") or "")) is not None
+                       and (live.get("worker_version") or {}).get("id") == proof["provider_version_id"])
+        else:
+            identity = proof.get("live_identity") or {}
+            matches = (UUID_RE.fullmatch(str(identity.get("provider_version_id") or "")) is not None
+                       and all(live.get(key) == value for key, value in identity.items())
+                       and identity.get("source_commit") == proof["sha"]
+                       and identity.get("environment") == "production")
+        if not matches:
+            raise Blocked("journal_identity_mismatch", "served identity differs from the original pending release proof")
+        repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
+        self.git("merge-base", "--is-ancestor", proof["sha"], main, cwd=repo_dir)
+        self.store.recover_durable(proof)
+        self.finish_release_proof(proof, state, lane)
+        self.out(f"release-pipeline[{lane}]: reconciled durable release {proof['sha'][:12]}")
+
+    def failed_prerequisite_ready(self, step: str) -> bool:
+        """Probe environment failures without replaying a release or its diagnosis."""
+        if step == "venv-source-missing":
+            return (self.repo / ".venv/bin/python").exists()
+        if step not in {"credential-missing", "wrangler-auth"}:
+            return False
+        try:
+            self.wrangler_auth()
+        except StepFailed as failure:
+            if failure.step not in {"credential-missing", "wrangler-auth"}:
+                raise
+            self.out(f"  prerequisite still unavailable: {failure.step}; log {failure.log or '-'}")
+            return False
+        return True
+
     def run_lane(self, lane: str) -> int:
+        self.observations.clear()
+        self.dependency_evidence.clear()
+        self.mutated = False
+        self.db_ahead_of_worker = False
+        self.do_migration = None
+        self.post_release = None
         lane_cfg = self.cfg[lane]
         why = kill_switch(self.cfg, lane)
         if why:
@@ -1514,28 +1603,59 @@ class Pipeline:
         state = self.store.load()
         lane_state = state.setdefault(lane, {})
         sha = base = ""
+        self.observed_main = ""
+        recovered_failure = ""
         try:
-            if lane == "worker":
-                repo_dir = self.repo
-            else:
-                repo_dir = expand(lane_cfg["repo_path"])
-            self.git("fetch", "--quiet", "origin", "main", cwd=repo_dir)
-            sha = self.git("rev-parse", "origin/main", cwd=repo_dir)
-            base = self.last_released(state, lane, lane_cfg)
+            repo_dir = lane_repo_dir(self.cfg, lane, self.repo)
+            # Read and fetch an immutable main object without writing any
+            # remote-tracking ref or another session's FETCH_HEAD. The app
+            # lane's unchanged exact-main guard needs origin/main refreshed
+            # later, after build and directly before publication; that one
+            # explicit ref update is verified and leaves every HEAD untouched.
+            remote = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+            if len(remote) != 2 or not SHA_RE.fullmatch(remote[0]) or remote[1] != "refs/heads/main":
+                raise Blocked("github_unreadable", "remote main has no exact SHA acknowledgement")
+            sha = remote[0]
+            self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
+            self.observed_main = sha
+            if sha != lane_state.get("last_released_sha"):
+                self.controller_current(state)
+                if not self.dry_run:
+                    self.reconcile_release_proof(state, lane, lane_cfg, sha)
+                    lane_state = state.setdefault(lane, {})
+            live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
+                    None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
+            base = self.last_released(state, lane, lane_cfg, live)
+            if (not self.dry_run and not lane_state.get("last_released_sha")
+                    and lane_state.get("failed_sha") == base):
+                raise Blocked("bootstrap_unreceipted", "failed release source identity has no durable shipped checkpoint")
             if sha == base:
+                if not lane_state.get("last_released_sha") and not self.dry_run:
+                    raise Blocked("bootstrap_unreceipted", "live source identity has no durable shipped checkpoint")
                 self.out(f"release-pipeline[{lane}]: main {sha[:12]} is already released")
                 return 0
-            if sha == lane_state.get("failed_sha"):
-                self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
-                         f"{lane_state.get('failed_step')}; waiting for a fix-forward merge")
+            if not self.dry_run and live is not None:
+                live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
+                if live_sha == sha:
+                    raise Blocked("live_target_unreceipted", "target already serves without a reconciled durable release proof")
+            if not self.dry_run and self.rejection_waits(lane_state, lane, base, sha):
                 return 0
+            if not self.dry_run:
+                self.reconcile_staging_failure(state, lane, base, repo_dir)
+                lane_state = state.setdefault(lane, {})
+            if sha == lane_state.get("failed_sha"):
+                if not self.failed_prerequisite_ready(lane_state.get("failed_step", "")):
+                    self.out(f"release-pipeline[{lane}]: {sha[:12]} failed at "
+                             f"{lane_state.get('failed_step')}; waiting for prerequisite repair or a fix-forward merge")
+                    return 0
+                recovered_failure = sha
             try:
                 self.git("merge-base", "--is-ancestor", base, sha, cwd=repo_dir)
             except StepFailed:
                 raise Blocked("history_diverged", f"released {base[:12]} is not an ancestor of main {sha[:12]}")
             if lane == "worker" and classify(self.changed_paths(base, sha, cwd=repo_dir), lane_cfg)[0]:
                 # From here on `sha` is the RELEASE TARGET, the newest green
-                # canary commit, not HEAD: review, CI, upload, live readback and
+                # canary commit, not HEAD: CI, upload, live readback and
                 # the state/record rows all name it. A doc/test-only batch needs
                 # no canary and still advances to HEAD below.
                 head = sha
@@ -1545,16 +1665,27 @@ class Pipeline:
                     self.out(f"release-pipeline[{lane}]: main is {head[:12]}; newest green canary "
                              f"target is {sha[:12]}")
                 failed = lane_state.get("failed_sha")
-                if failed and self._at_or_before(sha, failed, repo_dir):
+                recovered = sha == failed and (recovered_failure == sha
+                    or self.failed_prerequisite_ready(lane_state.get("failed_step", "")))
+                if failed and self._at_or_before(sha, failed, repo_dir) and not recovered:
                     self.out(f"release-pipeline[{lane}]: target {sha[:12]} is at or before the failed "
                              f"{failed[:12]} ({lane_state.get('failed_step')}); waiting for a green "
                              "fix-forward")
                     return 0
+            if not self.dry_run and live is not None:
+                live_sha = (live.get("git_sha") or {}).get("value") if lane == "worker" else live.get("source_commit")
+                if live_sha == sha:
+                    raise Blocked("live_target_unreceipted", "selected release target already serves without a reconciled durable release proof")
+            if lane == "worker" and (sha == base or not self._at_or_before(base, sha, repo_dir)):
+                raise Blocked("history_diverged",
+                              f"selected target {sha[:12]} is not a strict descendant of live Worker {base[:12]}")
             changed = self.changed_paths(base, sha, cwd=repo_dir)
             needed, hits = classify(changed, lane_cfg)
             self.out(f"release-pipeline[{lane}]: batch {base[:12]}..{sha[:12]}: "
                      f"{len(changed)} path(s), {len(hits)} release path(s)")
             if not needed:
+                if not self.dry_run and not lane_state.get("last_released_sha"):
+                    raise Blocked("bootstrap_unreceipted", "source-only advancement has no durable prior release checkpoint")
                 self.out(f"release-pipeline[{lane}]: doc/test-only batch; nothing to release")
                 if not self.dry_run:
                     lane_state["last_released_sha"] = sha
@@ -1569,13 +1700,11 @@ class Pipeline:
             if self.dry_run:
                 self.out(f"release-pipeline[{lane}]: dry run complete; nothing executed")
                 return 0
-            lane_state.update({"last_released_sha": sha, "failed_sha": None, "failed_step": None,
-                               "last_shipped_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
-            self.store.save(state)
-            if lane == "worker" and result.get("release_key"):
-                result["slice_marker"] = self.mark_slices(result["release_key"], sha)
-            self.store.record({"lane": lane, "sha": sha, "from_sha": base, "status": "shipped",
-                               "run_id": self.run_id, "paths": hits[:50], **result})
+            proof = {"lane": lane, "sha": sha, "from_sha": base, "run_id": self.run_id,
+                     "release_endpoint": lane_cfg["live_release_url"], "paths": hits[:50], **result}
+            proof["proof_digest"] = evidence_digest(proof)
+            self.store.record_durable({**proof, "status": "release_verified"})
+            self.finish_release_proof(proof, state, lane)
             self.out(f"release-pipeline[{lane}]: SHIPPED {sha[:12]}")
             return 0
         except Blocked as b:
@@ -1587,22 +1716,17 @@ class Pipeline:
                 # production migration): this is no longer a clean hold.
                 return self.fail(lane, state, sha, base, f"blocked:{b.reason}", 1, "-", b.detail)
             self.remove_worktrees()
+            rejection = self.remember_rejection(state, lane, base, self.observed_main, b.reason)
             row: dict[str, Any] = {"lane": lane, "sha": sha, "from_sha": base, "status": "blocked",
-                   "reason": b.reason, "detail": b.detail, "run_id": self.run_id}
+                   "reason": b.reason, "detail": b.detail, "run_id": self.run_id,
+                   "rejection_fingerprint": rejection["fingerprint"], "repair": rejection["repair"]}
             if b.capability:
-                filed = state.setdefault("filed_blockers", {})
-                if b.capability not in filed:
-                    ok, res = self.call_verb("add-loop", blocker_loop(b.capability, b.detail))
-                    row["loop_filed"] = ok
-                    if ok:
-                        filed[b.capability] = self.today
-                    else:
-                        self.out(f"release-pipeline[{lane}]: could not file the loop: {res}")
-                self.store.save(state)
+                self.file_blocker(state, lane, b.capability, b.detail, row)
             self.store.record(row)
             return 3 if b.capability else 0
         except StepFailed as f:
-            return self.fail(lane, state, sha, base, f.step, f.rc, f.log, f.detail)
+            return self.fail(lane, state, sha, base, f.step, f.rc, f.log, f.detail,
+                             capability=f.capability)
         except Exception as exc:  # noqa: BLE001 — an unexpected error is recorded and dispatched, never lost
             detail = f"{type(exc).__name__}: {str(exc)[:300]}"
             self.out(f"release-pipeline[{lane}]: UNEXPECTED {detail}")
@@ -1622,6 +1746,46 @@ class Pipeline:
                 return 1
             return self.fail(lane, state, sha, base, "unexpected", 1, "-", detail)
 
+    def file_blocker(self, state: dict, lane: str, capability: str, detail: str, row: dict,
+                     *, failed_sha: str = "") -> None:
+        """One CARR loop per capability name, ever (state.filed_blockers);
+        persist the complete notification before trying the record endpoint."""
+        filed = state.setdefault("filed_blockers", {})
+        if capability not in filed:
+            pending = state.setdefault("pending_blockers", {})
+            if capability not in pending:
+                remedy = ""
+                if capability.split(":", 1)[0] == CLOUDFLARE_TOKEN_NAME:
+                    inventory = json.loads(CREDENTIAL_INVENTORY_PATH.read_text(encoding="utf-8"))
+                    entry = next(c for c in inventory["credentials"] if c["name"] == "cloudflare-deploy-token")
+                    checked_path = expand(self.cfg.get("credential_dir", "~/.config/carr")) / CLOUDFLARE_TOKEN_FILE
+                    remedy = entry["replacement_plan"].replace(entry["probe"]["path"], str(checked_path))
+                recovery = (f"The {lane} lane failed for SHA {failed_sha}. "
+                            "The next scheduled run probes the credential and automatically retries "
+                            "once it is accepted. While the probe fails, no release is attempted. "
+                            "Use ops/release-pipeline.py report to read every currently failed lane "
+                            "and its full SHA. Other lanes may fail on this same credential after "
+                            "this notification."
+                            if failed_sha else "")
+                pending[capability] = {"lane": lane, "args": blocker_loop(
+                    capability, detail, remedy=remedy, recovery=recovery)}
+                self.store.save(state)
+            self.deliver_blocker(state, capability, row)
+
+    def deliver_blocker(self, state: dict, capability: str, row: dict) -> None:
+        pending = state["pending_blockers"][capability]
+        try:
+            ok, res = self.call_verb("add-loop", pending["args"])
+        except Exception as exc:  # noqa: BLE001 — retain notification for the next tick
+            ok, res = False, type(exc).__name__
+        row["loop_filed"] = ok
+        if ok:
+            state.setdefault("filed_blockers", {})[capability] = self.today
+            del state["pending_blockers"][capability]
+        else:
+            self.out(f"release-pipeline[{pending['lane']}]: could not file the loop: {res}")
+        self.store.save(state)
+
     def dispatch(self, state: dict, lane: str, sha: str, turn: dict, *, allow_dedup: bool = False
                  ) -> tuple[bool, Any]:
         """Post the fix-session turn. A `deduplicated: true` answer means the
@@ -1637,28 +1801,88 @@ class Pipeline:
             self.store.save(state)
         return ok, res
 
+    def deliver_diagnosis(self, state: dict, capability: str, row: dict) -> None:
+        """Replay the saved first turn until acknowledged, then suppress by capability."""
+        pending = state["pending_diagnoses"][capability]
+        try:
+            # Unlike a newly composed failure turn, this is an exact replay of
+            # the same msg_id and operation key. A lost acknowledgement may
+            # therefore return deduplicated without losing any turn content.
+            ok, res = self.dispatch(state, pending["lane"], pending["sha"],
+                                    pending["args"], allow_dedup=True)
+        except Exception as exc:  # noqa: BLE001 — preserve the request for a later tick
+            ok, res = False, type(exc).__name__
+        row["dispatched"] = ok
+        if ok:
+            state.setdefault("diagnosed_capabilities", {})[capability] = self.today
+            del state["pending_diagnoses"][capability]
+            self.store.save(state)
+        else:
+            self.out(f"release-pipeline[{pending['lane']}]: diagnosis dispatch FAILED: {res}")
+
     def fail(self, lane: str, state: dict, sha: str, base: str, step: str, rc: int, log: str,
-             detail: str) -> int:
+             detail: str, *, capability: str | None = None) -> int:
         self.out(f"release-pipeline[{lane}]: FAILED at {step} (exit {rc}); log {log or '-'}")
         if self.dry_run:
             return 1
         state.setdefault(lane, {}).update({
             "failed_sha": sha, "failed_step": step,
             "failed_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
-        self.store.save(state)
+        owned = [wt for _, wt in self.worktrees if wt.name.startswith(f"{lane}-{sha[:12]}-")]
+        if owned:
+            state[lane]["failed_worktree"] = str(owned[-1])
+        else:
+            state[lane].pop("failed_worktree", None)
+        if step == "staging-prepare":
+            digest = None
+            try:
+                digest = evidence_digest(self.staging_ledger())
+                self.dependency_evidence["staging-ledger"] = digest
+            except Exception:
+                self.dependency_evidence["staging-ledger"] = "unknown"
+            rejection = self.remember_rejection(state, lane, base, sha, step)
+            if digest is not None:
+                rejection["staging_ledger_digest"] = digest
+            self.store.save(state)
         attempt = int((state[lane].get("dispatches") or {}).get(sha, 0)) + 1
-        ok, res = (False, "no SHA") if not sha else self.dispatch(
-            state, lane, sha, queue_turn(lane, sha, step, rc, log, str(self.store.records_path),
-                                         db_ahead_of_worker=self.db_ahead_of_worker,
-                                         do_migration=self.do_migration,
-                                         run_id=self.run_id, attempt=attempt))
+        extra: dict[str, Any] = {}
+        diagnosis_key = capability or (f"wrangler-auth:{lane}:{sha}" if step == "wrangler-auth" else None)
+        if diagnosis_key:
+            pending = state.setdefault("pending_diagnoses", {})
+            diagnosed = diagnosis_key in state.get("diagnosed_capabilities", {})
+            if not diagnosed and diagnosis_key not in pending and sha:
+                pending[diagnosis_key] = {"lane": lane, "sha": sha, "args": queue_turn(
+                    lane, sha, step, rc, log, str(self.store.records_path),
+                    db_ahead_of_worker=self.db_ahead_of_worker, do_migration=self.do_migration,
+                    run_id=self.run_id, attempt=attempt)}
+            # Save the failed SHA and first turn together, before even filing
+            # the loop: a crash after its acknowledgement cannot lose diagnosis.
+            self.store.save(state)
+            if capability:
+                self.file_blocker(state, lane, capability, detail, extra, failed_sha=sha)
+            if diagnosed:
+                extra["dispatch_skipped"] = "capability_already_diagnosed" if capability else "prerequisite_already_diagnosed"
+                extra["dispatched"] = False
+                self.out(f"release-pipeline[{lane}]: no fix session dispatched; "
+                         "the prerequisite's first diagnosis was already delivered")
+            elif diagnosis_key in pending:
+                self.deliver_diagnosis(state, diagnosis_key, extra)
+            ok = extra.get("dispatched", False)
+        else:
+            self.store.save(state)
+            ok, res = (False, "no SHA") if not sha else self.dispatch(
+                state, lane, sha, queue_turn(lane, sha, step, rc, log, str(self.store.records_path),
+                                             db_ahead_of_worker=self.db_ahead_of_worker,
+                                             do_migration=self.do_migration,
+                                             run_id=self.run_id, attempt=attempt))
         self.store.record({"lane": lane, "sha": sha, "from_sha": base, "status": "failed",
                            "step": step, "rc": rc, "log": log, "detail": detail,
                            "db_ahead_of_worker": self.db_ahead_of_worker,
                            "do_migration": self.do_migration,
                            "run_dir": str(self.run_dir), "executed": list(self.executed),
-                           "dispatched": ok, "run_id": self.run_id})
-        if not ok:
+                           "dispatched": ok, "run_id": self.run_id,
+                           **({"post_release": self.post_release} if self.post_release else {}), **extra})
+        if not diagnosis_key and not ok:
             self.out(f"release-pipeline[{lane}]: diagnosis dispatch FAILED: {res}")
         return 1
 
@@ -1674,16 +1898,15 @@ class Pipeline:
             return placeholder
 
     def release_worker(self, lane_cfg: dict, base: str, sha: str, state: dict, lane: str) -> dict:
+        smoke_on = smoke_enabled(lane_cfg)
         ev = self.dry_tolerant("evidence", lambda: self.worker_evidence(lane_cfg, base, sha), {
-            "pr": "<PR>", "prs": [], "verifier": "<independent reviewer slug>",
-            "verifier_evidence": "github:<repo>/pull/<N>#issuecomment-<X>",
+            "pr": "<PR>", "prs": [],
             "test_evidence": f"github-actions:{lane_cfg['github_repo']}/runs/<CI run id>#{lane_cfg['test_evidence_label']}",
             "security_evidence": f"github-actions:{lane_cfg['github_repo']}/runs/<CI run id>#{lane_cfg['security_evidence_label']}"})
-        self.out(f"  evidence: PR #{ev['pr']} verifier={ev['verifier']} "
-                 f"({ev['verifier_evidence']}); test={ev['test_evidence']}")
+        self.out(f"  evidence: PR #{ev['pr']}; test={ev['test_evidence']}")
         self.dry_tolerant("unattended credentials", lambda: self.unattended_preflight(lane_cfg), None)
 
-        wt = self.store.root / "worktrees" / f"worker-{sha[:12]}"
+        wt = self.store.release_worktree("worker", sha, self.run_id)
         mcp = wt / "mcp-server"
         py = str(wt / ".venv/bin/python")
         budget = ["--performance-budget-ref", lane_cfg["performance_budget_ref"],
@@ -1698,7 +1921,7 @@ class Pipeline:
         # before the release worktree for that failure to stay a clean,
         # zero-subprocess failure (existing DeployCredential selftests pin
         # `runner.calls == []` for it).
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
+        self.wrangler_auth()
 
         # 1. the release worktree at exactly S, venv-linked, `npm ci`'d — a
         # checkout and install only, no --apply yet, created BEFORE the
@@ -1735,14 +1958,28 @@ class Pipeline:
             # yet"; treat it like every other real failure.
             self.mutated = True
 
+        # Post-release proof, part 1: what production serves and how its
+        # journeys fare BEFORE this release changes anything.
+        prior_version = smoke_baseline = None
+        if smoke_on:
+            prior_version = self.live_value(lane_cfg, lambda live: served_version("worker", live))
+            smoke_baseline = self.smoke_run("worker", sha, "baseline", worker_dir=mcp)
+
         # 2-3. staging replacement and app writer
         op = str(uuid.uuid4())
         prep = self.step("staging-prepare", [py, "tools/staging-project-replacement.py", "prepare", "--apply",
                                              "--local-checks-green", "--sha", sha, "--operation-id", op,
                                              "--candidate-operation-id", cand], wt)
         receipt = "<receipt_id from staging-prepare>" if self.dry_run else parse_json_field(prep.out, "receipt_id", "staging-prepare")
+        rotate: list[str] = []
+        for label in self.rotate_lost_staging_credentials:
+            rotate += ["--rotate-lost-credential", label]
+        if rotate:
+            self.out(f"  {'[dry-run] ' if self.dry_run else ''}staging-app-writer will DELIBERATELY ROTATE "
+                     f"the lost staging credential(s) {', '.join(self.rotate_lost_staging_credentials)} "
+                     "(refused by the provisioner unless the role holds a password and no local file exists)")
         self.step("staging-app-writer", [py, "tools/provision-staging-app-writer.py", "--candidate-operation-id",
-                                         cand, "--receipt-id", receipt, "--sha", sha, "--apply"], wt)
+                                         cand, "--receipt-id", receipt, "--sha", sha, "--apply", *rotate], wt)
 
         # 4. production migrations, only when something is pending
         plan = self.step("migrate-plan", ["bin/migrate-prod.sh"], wt)
@@ -1755,11 +1992,13 @@ class Pipeline:
         if pending or self.dry_run:
             if self.dry_run:
                 self.out("  [dry-run] next line runs only when migrate-plan lists pending > 0")
-            self.step("migrate-apply", ["bin/migrate-prod.sh", "--apply"], wt)
             if not self.dry_run:
+                # Batches commit separately. Once apply starts, a failure can
+                # leave production changed; retain the warning on every exit.
                 self.db_ahead_of_worker = True
+            self.step("migrate-apply", ["bin/migrate-prod.sh", "--apply"], wt)
 
-        # 5. upload the immutable candidate, verifier bound at upload time
+        # 5. upload the immutable candidate
         key = ("<next free r-%s-NN>" % self.today) if self.dry_run else next_release_key(
             self.today, lambda k: self._release_exists(wt, py, k))
         #    A pending Durable Object migration is applied INSIDE this step
@@ -1780,7 +2019,7 @@ class Pipeline:
             up = self.step("upload", ["bin/deploy-worker.sh", "--upload-version", "--release-sha", sha,
                                       "--release-key", key, "--test-evidence", ev["test_evidence"],
                                       "--security-evidence", ev["security_evidence"],
-                                      "--verifier", ev["verifier"], "--verifier-evidence", ev["verifier_evidence"],
+                                      "--verifier", "github-actions", "--verifier-evidence", ev["test_evidence"],
                                       *budget], wt, env=self.deploy_env())
         except StepFailed as failed:
             self.do_migration = parse_do_migration(read_log(failed.log))
@@ -1809,27 +2048,30 @@ class Pipeline:
             if (live.get("git_sha") or {}).get("value") != sha:
                 raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA")
         health_excused = self.health_gate(wt, health_baseline)
+        post_release = self.post_release_proof(
+            "worker", sha, smoke_baseline, worker_dir=mcp,
+            rollback=lambda: self.rollback_worker(lane_cfg, wt, prior_version,
+                                                  migrated=bool(pending) or bool(self.do_migration))
+        ) if smoke_on else None
 
         # 9. the schema snapshot goes back to main through its own PR
         schema_pr = None
         if self.dry_run:
-            self.out("  [dry-run] when migrate-apply ran and db/schema.sql changed: branch from origin/main, "
+            self.out("  [dry-run] when migrate-apply ran and db/schema.sql changed: branch from the fetched main SHA, "
                      "commit db/schema.sql, push, gh pr create, then gh pr close every older open "
                      "release/schema-snapshot-* PR as superseded (close only, never merge)")
         elif pending and self.git("status", "--porcelain", "db/schema.sql", cwd=wt):
-            schema_pr = self.schema_followup(wt, sha)
+            schema_pr = self.schema_followup(wt, sha, self.observed_main)
         if not self.dry_run:
             self.remove_worktrees()
         return {"release_key": key, "provider_version_id": version, "migrations_applied": pending,
                 "do_migration": self.do_migration,
-                "pr": ev["pr"], "prs": ev["prs"], "reviews": ev.get("reviews", []),
-                "fix_forwards": ev.get("fix_forwards", []),
-                "review_rule": ev.get("review_rule"), "reviewed_sha": ev.get("reviewed_sha"),
-                "pr_head_sha": ev.get("pr_head_sha"), "verifier": ev["verifier"],
-                "verifier_evidence": ev["verifier_evidence"], "test_evidence": ev["test_evidence"],
+                "pr": ev["pr"], "prs": ev["prs"], "pr_head_sha": ev.get("pr_head_sha"),
+                "test_evidence": ev["test_evidence"],
+                "verifier": "github-actions", "verifier_evidence": ev["test_evidence"],
                 "health_time_rolling_not_attributed": health_excused,
                 "schema_pr": schema_pr, "schema_prs_superseded_closed": self.schema_superseded_closed,
-                "run_dir": str(self.run_dir)}
+                "post_release": post_release, "run_dir": str(self.run_dir)}
 
     def _release_exists(self, wt: Path, py: str, key: str) -> bool:
         res = self.runner.run([py, "tools/ops-record.py", "release", "show", "--key", key], cwd=wt,
@@ -1840,11 +2082,15 @@ class Pipeline:
             return False
         raise StepFailed("release-key", res.rc, str(self.run_dir / "release-key.log"))
 
-    def schema_followup(self, wt: Path, sha: str) -> str:
+    def schema_followup(self, wt: Path, sha: str, main_sha: str) -> str:
+        """Branch from `main_sha`, the main object run_lane fetched by SHA. The
+        fetch never advances origin/main, so that ref can be stale."""
+        if not SHA_RE.fullmatch(main_sha):
+            raise StepFailed("schema-worktree", 1, "", "no observed main SHA to branch the schema snapshot from")
         branch = f"{SCHEMA_SNAPSHOT_PREFIX}{sha[:8]}"
         fwt = self.store.root / "worktrees" / f"schema-{sha[:12]}"
         self.step("schema-worktree", ["git", "-C", str(self.repo), "worktree", "add", "-b", branch, str(fwt),
-                                      "origin/main"], self.repo)
+                                      main_sha], self.repo)
         shutil.copyfile(wt / "db/schema.sql", fwt / "db/schema.sql")
         self.step("schema-commit", ["git", "commit", "-m",
                                     f"Refresh db/schema.sql after the scripted release of {sha[:12]}\n\n"
@@ -1912,48 +2158,56 @@ class Pipeline:
         self.out(f"  -> schema-supersede: closed {closed} as superseded by #{new_num}")
         return closed
 
-    def verify_app_live(self, lane_cfg: dict, sha: str, *, attempts: int = 12) -> None:
-        """Read the configured public endpoint until it serves the promoted SHA.
-
-        Keep every observed payload: a failed release must show what the
-        verifier actually received, including any transient read failure.
-        """
+    def await_live(self, lane_cfg: dict, name: str, matches: Callable[[dict], bool], *,
+                   attempts: int = 12) -> tuple[bool, dict, str | None, Path]:
+        """Read the lane's identity endpoint until `matches` accepts it, at
+        most `attempts` times 5 s apart. Returns (matched, last payload read,
+        last read error, log). Every observed payload or read error goes to
+        <run>/<name>.jsonl: a failed readback must show what production
+        actually answered."""
         url = lane_cfg["live_release_url"]
-        log = self.run_dir / "app-verify-live.jsonl"
+        log = self.run_dir / f"{name}.jsonl"
         log.parent.mkdir(parents=True, exist_ok=True)
-        last_response = None
-        last_error = None
+        last: dict = {}
+        error: str | None = None
         with log.open("w", encoding="utf-8") as output:
             for attempt in range(1, attempts + 1):
-                row = {"attempt": attempt, "request": {"method": "GET", "url": url,
-                       "user_agent": "carr-release-pipeline"}}
+                row: dict[str, Any] = {"attempt": attempt, "request": {"method": "GET", "url": url,
+                                       "user_agent": "carr-release-pipeline"}}
                 try:
                     response = self.http(url)
-                    last_response = response
-                    last_error = None
+                    last, error = (response if isinstance(response, dict) else {}), None
                     row["response"] = response
                 except Exception as exc:  # noqa: BLE001 — record and retry a transient endpoint read
-                    response = None
-                    last_error = type(exc).__name__
+                    response, error = None, type(exc).__name__
                     row["error"] = f"{type(exc).__name__}: {exc}"
                 output.write(json.dumps(row, sort_keys=True) + "\n")
                 output.flush()
-                if isinstance(response, dict) and response.get("source_commit") == sha \
-                        and response.get("environment") == "production":
-                    self.out(f"  -> app-verify-live: matched {sha} on read {attempt}; log {log}")
-                    return
+                if isinstance(response, dict) and matches(response):
+                    self.out(f"  -> {name}: matched on read {attempt}; log {log}")
+                    return True, response, None, log
                 if attempt < attempts:
                     self.sleep(5)
-        source = last_response.get("source_commit") if isinstance(last_response, dict) else None
-        environment = last_response.get("environment") if isinstance(last_response, dict) else None
-        error = f" last_read_error={last_error}" if last_error else ""
+        return False, last, error, log
+
+    def verify_app_live(self, lane_cfg: dict, sha: str, *, attempts: int = 12) -> dict:
+        """Read the configured public endpoint until it serves the promoted SHA."""
+        matched, last, error, log = self.await_live(
+            lane_cfg, "app-verify-live",
+            lambda live: live.get("source_commit") == sha and live.get("environment") == "production",
+            attempts=attempts)
+        if matched:
+            return {key: last.get(key) for key in ("source_commit", "environment", "provider_version_id")}
+        read_error = f" last_read_error={error}" if error else ""
         raise StepFailed("app-verify-live", 1, str(log),
                          f"/app-release did not serve {sha} after {attempts} reads; "
-                         f"source_commit={source} environment={environment}{error}; log {log}")
+                         f"source_commit={last.get('source_commit')} environment={last.get('environment')}"
+                         f"{read_error}; log {log}")
 
     def release_app(self, lane_cfg: dict, repo_dir: Path, base: str, sha: str) -> dict:
-        """Same review evidence as the Worker lane; the named required checks
+        """The named required checks
         must be PRESENT and green (an empty check list is not a pass)."""
+        smoke_on = smoke_enabled(lane_cfg)
         gh = self.github_factory(lane_cfg["github_repo"])
 
         def checks_green() -> None:
@@ -1967,26 +2221,286 @@ class Pipeline:
                 if any(c.get("conclusion") != "success" for c in runs):
                     raise Blocked("checks_red", f"`{name}` is not green on {sha[:12]}")
         self.dry_tolerant("app checks", checks_green, None)
-        rev = self.dry_tolerant("app review", lambda: self.review_evidence(gh, lane_cfg, repo_dir, base, sha),
-                                {"prs": [], "pre_pipeline_prs": [], "verifier_evidence": "<approval>"})
-        self.out(f"  evidence: PRs {rev['prs']} approved; head approval {rev['verifier_evidence']}")
-        self.wrangler_auth(self.repo / "mcp-server/node_modules/.bin/wrangler", self.repo / "mcp-server")
-        wt = self.store.root / "worktrees" / f"app-{sha[:12]}"
+        prs = self.dry_tolerant("app source", lambda: self.merged_source(gh, lane_cfg, repo_dir, base, sha), [])
+        self.wrangler_auth()
+        wt = self.store.release_worktree("app", sha, self.run_id)
         self.add_worktree("app-worktree", repo_dir, wt, sha)
         self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800)
-        self.step("app-release", ["npm", "run", "release:production"], wt, timeout=3600,
+        # Keep package hooks/tests outside the deploy environment. Invoke the
+        # publisher directly so npm pre/post-release hooks cannot inherit it.
+        self.step("app-build", ["npm", "run", "build"], wt, timeout=3600,
+                  env={**self.env, "DOCTORCRE_SOURCE_COMMIT": sha})
+        prior_app = smoke_baseline = None
+        if smoke_on:
+            prior_app = self.live_value(lane_cfg, lambda live: served_version("app", live))
+            smoke_baseline = self.smoke_run("app", sha, "baseline", app_dir=wt)
+        self.refresh_app_main_ref(repo_dir, wt, sha)
+        self.step("app-release", ["node", "scripts/release-production.mjs"], wt, timeout=900,
                   env=self.deploy_env())
+        live_identity = None
         if self.dry_run:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require source_commit == {sha}")
         else:
-            self.verify_app_live(lane_cfg, sha)
+            live_identity = self.verify_app_live(lane_cfg, sha)
+        post_release = self.post_release_proof(
+            "app", sha, smoke_baseline, app_dir=wt,
+            rollback=lambda: self.rollback_app(lane_cfg, wt, prior_app)) if smoke_on else None
+        if not self.dry_run:
             self.remove_worktrees()
-        head = rev.get("head") or {}
-        return {"run_dir": str(self.run_dir), "prs": rev["prs"], "pre_pipeline_prs": rev["pre_pipeline_prs"],
-                "reviews": rev.get("reviews", []), "fix_forwards": rev.get("fix_forwards", []),
-                "review_rule": head.get("rule"),
-                "reviewed_sha": head.get("reviewed_sha"), "pr_head_sha": head.get("head_sha"),
-                "review_evidence": rev["verifier_evidence"]}
+        return {"run_dir": str(self.run_dir), "live_identity": live_identity,
+                "prs": [p["pr"] for p in prs], "post_release": post_release}
+
+    def refresh_app_main_ref(self, repo_dir: Path, wt: Path, sha: str) -> None:
+        """Refresh the shared origin/main ref only after confirming it is sha.
+
+        App's release script deliberately requires HEAD == origin/main. The
+        immutable-SHA fetch earlier in run_lane avoids moving tracking refs,
+        so an app checkout can retain a stale origin/main. This explicit fetch
+        updates that one shared ref for linked worktrees; it never checks out
+        or advances any worktree's HEAD, and publication is refused unless the
+        detached HEAD, fetched ref, and remote main still agree on sha.
+        """
+        if not SHA_RE.fullmatch(sha):
+            raise Blocked("app_main_unverified", "release target is not an exact commit SHA")
+        if self.dry_run:
+            self.step("app-main-ref-refresh", [
+                "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+                "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+            self.out(f"  [dry-run] verify remote main, origin/main, and detached HEAD all equal {sha}")
+            return
+
+        def remote_main() -> str:
+            rows = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+            if len(rows) != 2 or not SHA_RE.fullmatch(rows[0]) or rows[1] != "refs/heads/main":
+                raise Blocked("app_main_unreadable", "remote main has no exact SHA acknowledgement before app release")
+            return rows[0]
+
+        observed = remote_main()
+        if observed != sha:
+            raise Blocked("app_main_advanced", f"remote main advanced from target {sha[:12]} to {observed[:12]} before app release")
+
+        self.step("app-main-ref-refresh", [
+            "git", "-C", str(repo_dir), "fetch", "--no-write-fetch-head", "--refmap=",
+            "origin", "refs/heads/main:refs/remotes/origin/main"], repo_dir)
+        tracking = self.git("rev-parse", "refs/remotes/origin/main", cwd=repo_dir)
+        head = self.git("rev-parse", "HEAD", cwd=wt)
+        after = remote_main()
+        if tracking != sha or head != sha or after != sha:
+            raise Blocked("app_main_changed", "app release requires remote main, refreshed origin/main, and detached HEAD to match the release target")
+
+    # -- post-release proof ------------------------------------------------
+    def live_value(self, lane_cfg: dict, pick: Callable[[dict], Any]) -> Any:
+        """One field of the lane's live identity endpoint, or None: a value a
+        rollback may need later, never a reason to stop the release now."""
+        if self.dry_run:
+            return None
+        try:
+            live = self.http(lane_cfg["live_release_url"])
+            return pick(live) if isinstance(live, dict) else None
+        except Exception:  # noqa: BLE001 — an unknown prior only means no rollback target
+            return None
+
+    def smoke_run(self, lane: str, sha: str, name: str, *, worker_dir: Path | None = None,
+                  app_dir: Path | None = None, only: list[str] | None = None) -> dict | None:
+        """One ops/release-smoke.py run, logged like a step, never raising: the
+        caller reads its summary.json. None when no summary was written."""
+        invocation = uuid.uuid4().hex
+        phase = "baseline" if name == "baseline" else "post"
+        out = self.repo / SMOKE_OUT / sha / f"{name}-{invocation}"
+        venv = self.repo / ".venv" / "bin" / "python"
+        argv = [str(venv) if venv.exists() else sys.executable, "ops/release-smoke.py",
+                "--lane", lane, "--sha", sha, "--phase", phase, "--invocation-id", invocation,
+                "--out", str(out), "--credential-dir", str(expand(self.cfg.get("credential_dir", "~/.config/carr")))]
+        if worker_dir is not None:
+            argv += ["--worker-dir", str(worker_dir)]
+        if app_dir is not None:
+            argv += ["--app-dir", str(app_dir)]
+        if only:
+            argv += ["--only", ",".join(only)]
+        step = f"smoke-{name}"
+        if self.dry_run:
+            self.out(f"  [dry-run] (cd {self.repo}) {' '.join(argv)}")
+            return {"failed": [], "probes": []}
+        n = len(self.executed) + 1
+        log = self.run_dir / f"{n:02d}-{step}.log"
+        self.out(f"  -> {step}: {' '.join(argv)}")
+        self.executed.append(step)
+        result = self.runner.run(argv, cwd=self.repo, log=log, env=self.env, timeout=1800)
+        try:
+            summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        if not isinstance(summary, dict):
+            return None
+        expected = set(only) if only else set(SMOKE_LANE_JOURNEYS[lane])
+        if (summary.get("schema") != "carr-release-smoke.v1" or summary.get("invocation_id") != invocation
+                or summary.get("lane") != lane or summary.get("sha") != sha or summary.get("phase") != phase
+                or not isinstance(summary.get("probes"), list) or not isinstance(summary.get("failed"), list)):
+            return None
+        probes = summary["probes"]
+        if (not all(isinstance(p, dict) and p.get("id") in expected and p.get("status") in ("pass", "fail") for p in probes)
+                or len(probes) != len(expected) or {p["id"] for p in probes} != expected):
+            return None
+        failed = [p["id"] for p in probes if p["status"] == "fail"]
+        if (summary["failed"] != failed or summary.get("ok") is not (not failed)
+                or result.rc != (1 if failed else 0)):
+            return None
+        summary["path"], summary["log"] = str(out / "summary.json"), str(log)
+        return summary
+
+    def post_release_proof(self, lane: str, sha: str, baseline: dict | None, *,
+                           rollback: Callable[[], dict], worker_dir: Path | None = None,
+                           app_dir: Path | None = None) -> dict:
+        """The live system works after this release, or the release FAILED,
+        the lane is rolled back and one loop names the broken journey."""
+        if self.dry_run:
+            self.smoke_run(lane, sha, "post", worker_dir=worker_dir, app_dir=app_dir)
+            self.out("  [dry-run] failed journeys retry once; a regression rolls the lane back and files a loop")
+            return {}
+        post = self.smoke_run(lane, sha, "post", worker_dir=worker_dir, app_dir=app_dir)
+        failed = None if post is None else smoke_failures(post)
+        final = post
+        if failed is None or failed:
+            final = self.smoke_run(lane, sha, "retry", worker_dir=worker_dir, app_dir=app_dir,
+                                   only=sorted({u.split("::", 1)[0] for u in failed}) if failed else None)
+        if final is None:
+            still = None
+        elif failed is None:
+            still = smoke_failures(final)
+        else:
+            failed, still = retry_still_failing(failed, smoke_failures(final))
+        # An unreadable baseline excuses nothing: every failure after the
+        # release is then attributed to it.
+        before = smoke_failures(baseline) if baseline else set()
+        preexisting = sorted((before - SMOKE_ALWAYS_ATTRIBUTED) & (still or set()))
+        outcome: dict[str, Any] = {
+            "evidence_dir": str(self.repo / SMOKE_OUT / sha),
+            "baseline_failed": sorted(before) if baseline else None,
+            "post_failed": sorted(failed) if failed is not None else None,
+            "flaky": sorted(failed - still) if failed and still is not None else [],
+            "preexisting": preexisting,
+            "regressions": sorted((still or set()) - set(preexisting)),
+        }
+        if still is None:
+            outcome["rollback"] = {"attempted": False, "reason": "the smoke run wrote no summary twice; "
+                                   "production is not proven broken, so it is not rolled back"}
+            detail = "post-release smoke unreadable (no summary.json after one retry)"
+        elif outcome["regressions"]:
+            outcome["rollback"] = rollback()
+            detail = f"post-release journeys failed: {', '.join(outcome['regressions'])}"
+        else:
+            if outcome["flaky"] or preexisting:
+                self.out(f"  -> post-release proof: flaky {outcome['flaky']}, pre-existing {preexisting}")
+            self.surface_persistent_preexisting(lane, outcome)
+            return outcome
+        outcome["loop_filed"] = self.file_smoke_loop(lane, sha, final, outcome)
+        self.post_release = outcome
+        raise StepFailed("post-release-smoke", 1, (final or {}).get("log") or str(self.run_dir), detail)
+
+    def surface_persistent_preexisting(self, lane: str, outcome: dict) -> None:
+        """A failure excused as pre-existing in this release AND the lane's
+        previous proved release is coverage that proves nothing: file one loop
+        naming it, so a journey that can never pass is seen and fixed."""
+        previous = next((r["post_release"] for r in reversed(self.store.records())
+                         if r.get("lane") == lane and isinstance(r.get("post_release"), dict)
+                         and isinstance(r["post_release"].get("preexisting"), list)), None)
+        repeated = sorted(set(outcome["preexisting"]) & set((previous or {}).get("preexisting") or []))
+        outcome["persistent_preexisting"] = repeated
+        if not repeated:
+            return
+        body = (f"These {lane} post-release journeys failed before and after two consecutive {lane} "
+                "releases, so ops/release-pipeline.py excuses them as pre-existing every time and they "
+                "prove nothing: " + ", ".join(repeated) + ". Fix the journey or the system it reads, or "
+                "move it to ops/release-smoke.py NOT_EXERCISED with the reason it cannot run. Evidence: "
+                f"{outcome['evidence_dir']} (summary.json per invocation).")
+        args = {"kind": "open_loop", "owner": "Claude", "domain": "system", "marker": "none",
+                "blocker": "other_lane",
+                "blocker_detail": "The release-fix lane repairs or retires the journey through a PR",
+                "body": body, "unblocks": f"post-release proof coverage for the {lane} lane",
+                "idempotency_key": str(uuid.uuid5(ROOM_NAMESPACE,
+                                                  f"post-release-preexisting:{lane}:{','.join(repeated)}"))}
+        try:
+            ok, res = self.call_verb("add-loop", args)
+        except Exception as exc:  # noqa: BLE001 — a failed filing is reported, never raised
+            ok, res = False, type(exc).__name__
+        if not ok:
+            self.out(f"release-pipeline[{lane}]: could not file the pre-existing coverage loop: {res}")
+        outcome["coverage_loop_filed"] = bool(ok)
+
+    def rollback_worker(self, lane_cfg: dict, wt: Path, prior: str | None, *, migrated: bool) -> dict:
+        """runbooks/rollback-worker.md steps 2 and 3: promote the version that
+        served before this release through the sanctioned wrapper, then read it
+        back from the Worker. Never after a migration (forward fix only)."""
+        if migrated:
+            return {"attempted": False, "reason": "this release applied a database or Durable Object "
+                    "migration; runbooks/rollback-worker.md allows forward fix only"}
+        if not prior:
+            return {"attempted": False, "reason": "the Worker version serving before the release was not read"}
+        try:
+            res = self.step("rollback", ["bin/deploy-worker.sh", "--promote-version", prior,
+                                         "--performance-budget-ref", lane_cfg["performance_budget_ref"],
+                                         "--performance-budget-ms", str(lane_cfg["performance_budget_ms"]),
+                                         "--recovery-strategy", "rollback",
+                                         "--rollback-plan-ref", lane_cfg["rollback_plan_ref"]], wt,
+                            env=self.deploy_env())
+        except StepFailed as failed:
+            return {"attempted": True, "ok": False, "to_version": prior, "rc": failed.rc, "log": failed.log}
+        matched, live, _, _ = self.await_live(lane_cfg, "rollback-verify-live",
+                                              lambda live: served_version("worker", live) == prior)
+        return {"attempted": True, "ok": matched, "to_version": prior,
+                "served_version": served_version("worker", live), "log": res.log}
+
+    def rollback_app(self, lane_cfg: dict, wt: Path, prior: str | None) -> dict:
+        """The app's own rollback script, then /app-release must name the prior version."""
+        if not prior:
+            return {"attempted": False, "reason": "the app version serving before the release was not read"}
+        try:
+            res = self.step("app-rollback", ["node", "scripts/rollback-production.mjs", prior], wt,
+                            timeout=900, env=self.deploy_env())
+        except StepFailed as failed:
+            return {"attempted": True, "ok": False, "to_version": prior, "rc": failed.rc, "log": failed.log}
+        matched, live, _, _ = self.await_live(lane_cfg, "app-rollback-verify-live",
+                                              lambda live: served_version("app", live) == prior)
+        return {"attempted": True, "ok": matched, "to_version": prior,
+                "served_version": served_version("app", live), "log": res.log}
+
+    def file_smoke_loop(self, lane: str, sha: str, summary: dict | None, outcome: dict) -> bool:
+        """One open loop per failed release: each journey, what it said, its
+        screenshot/trace paths, and what happened to production."""
+        lines = []
+        for probe in (summary or {}).get("probes", []):
+            if probe.get("id") not in outcome["regressions"]:
+                continue
+            artifacts = [a for t in (probe.get("evidence") or {}).get("tests", []) for a in t.get("artifacts", [])]
+            lines.append(f"- {probe['id']}: {probe.get('detail', '')}"
+                         + (f" (evidence: {', '.join(artifacts[:6])})" if artifacts else ""))
+        if summary is None:
+            lines.append("- the smoke run itself wrote no summary, twice")
+        rb = outcome["rollback"]
+        if not rb.get("attempted"):
+            production = f"Production was NOT rolled back: {rb.get('reason')}."
+        elif rb.get("ok"):
+            production = f"Production was rolled back to {rb['to_version']} and reads it back."
+        else:
+            production = (f"The rollback FAILED (to {rb.get('to_version')}, served {rb.get('served_version')}, "
+                          f"log {rb.get('log')}): production may still serve {sha[:12]}.")
+        body = (f"Post-release proof failed for the {lane} release of {sha} "
+                "(ops/release-pipeline.py step post-release-smoke). The release is marked FAILED and "
+                "is never retried; a fix-forward merge releases next.\n"
+                + "\n".join(lines) + f"\n{production}\nEvidence: {outcome['evidence_dir']} "
+                "(each invocation: summary.json, probes.jsonl, synthetic browser screenshots and traces).")
+        args = {"kind": "open_loop", "owner": "Claude", "domain": "system", "marker": "none",
+                "blocker": "other_lane",
+                "blocker_detail": f"The release-fix lane fixes {lane} release {sha[:12]} forward through a PR",
+                "body": body, "unblocks": f"the next {lane} release to production",
+                "idempotency_key": str(uuid.uuid5(ROOM_NAMESPACE, f"post-release-smoke:{lane}:{sha}"))}
+        try:
+            ok, res = self.call_verb("add-loop", args)
+        except Exception as exc:  # noqa: BLE001 — a failed filing is reported, never raised
+            ok, res = False, type(exc).__name__
+        if not ok:
+            self.out(f"release-pipeline[{lane}]: could not file the post-release loop: {res}")
+        return bool(ok)
 
 
 # The line tools/health-check.py's _canonical_health() prints last, on every
@@ -2299,9 +2813,8 @@ def parse_provider_version(res: Result) -> str:
 
 def report(store: Store, day: str) -> str:
     rows = [r for r in store.records() if str(r.get("ts", "")).startswith(day)]
-    if not rows:
-        return f"release-pipeline {day}: nothing shipped, failed or blocked."
-    lines = [f"release-pipeline {day}:"]
+    lines = ([f"release-pipeline {day}:"] if rows else
+             [f"release-pipeline {day}: nothing shipped, failed or blocked."])
     for r in rows:
         if r.get("status") == "shipped":
             extra = f" release {r.get('release_key')}" if r.get("release_key") else ""
@@ -2311,26 +2824,131 @@ def report(store: Store, day: str) -> str:
                          f"(exit {r.get('rc')}; log {r.get('log')}; dispatched={r.get('dispatched')})")
         elif r.get("status") == "blocked":
             lines.append(f"  BLOCKED {r['lane']} {str(r.get('sha'))[:12]}: {r.get('reason')} — {r.get('detail')}")
+    # Daily history can be empty or old; recovery must read the current lane
+    # state, including failures suppressed by the credential's single loop.
+    state = store.load()
+    for lane in ("worker", "app"):
+        failed = state.get(lane) or {}
+        sha = failed.get("failed_sha")
+        if sha:
+            lines.append(f"  CURRENT FAILED {lane} {sha} at {failed.get('failed_step')}")
+            lines.append("  After repairing and verifying this lane's failure, clear it with:")
+            lines.append(f"  ops/release-pipeline.py clear-failed --lane {lane} --sha {sha} "
+                         '--reason "external repair verified"')
     return "\n".join(lines)
 
 
-def clear_failed(store: Store, lane: str, sha: str, reason: str) -> str:
+def worktree_registration(repo_dir: Path, path: Path) -> list[str] | None:
+    """Read one exact registration, including any Git lock, without path quoting."""
+    proc = subprocess.run(["git", "-C", str(repo_dir), "worktree", "list", "--porcelain", "-z"],
+                          env=child_env(), stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=300)
+    if proc.returncode != 0:
+        raise SystemExit(f"release-pipeline: cannot inspect worktree registrations in {repo_dir}: "
+                         f"exit {proc.returncode}; failure NOT cleared")
+    entries = [entry.split("\0") for entry in proc.stdout.split("\0\0") if entry]
+    if not entries or any(not fields[0].startswith("worktree ") or
+            not any(field.startswith("HEAD ") and SHA_RE.fullmatch(field[5:])
+                    for field in fields) for fields in entries):
+        raise SystemExit("release-pipeline: incomplete registration read; failure NOT cleared")
+    for entry in proc.stdout.split("\0\0"):
+        fields = entry.split("\0")
+        if fields[0] == f"worktree {path.resolve()}":
+            return fields
+    return None
+
+
+def clear_failed(store: Store, lane: str, sha: str, reason: str, *, repo_dir: Path) -> str:
     """The one sanctioned way to let a failed SHA be attempted again (after a
     fix outside the repository, such as a restored credential). A fix merged to
-    main needs none of this: the new SHA is attempted on its own."""
+    main needs none of this: the new SHA is attempted on its own.
+
+    The failed run kept its worktree for diagnosis, and add_worktree refuses
+    an existing one, so the retry would burn the SHA again. The kept worktree
+    is moved aside (never deleted), with resumable retirement intent bound to
+    the full SHA. The tick lock covers state, filesystem, Git and receipt; a
+    lock or a retained registration refuses clearance before retry is allowed."""
+    with single_run_lock(store.root) as got:
+        if not got:
+            raise SystemExit(f"release-pipeline[{lane}]: another run holds the lock; failure NOT cleared")
+        return _clear_failed_locked(store, lane, sha, reason, repo_dir=repo_dir)
+
+
+def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo_dir: Path) -> str:
+    """Caller holds the store lock; both CLI clearance and ledger recovery use this path."""
     state = store.load()
     lane_state = state.get(lane) or {}
     if not lane_state.get("failed_sha"):
         return f"release-pipeline[{lane}]: nothing to clear"
     if lane_state["failed_sha"] != sha:
         raise SystemExit(f"release-pipeline[{lane}]: failed SHA is {lane_state['failed_sha']}, not {sha}")
-    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at")}
-    lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
-    state[lane] = lane_state
+    kept = Path(lane_state.get("failed_worktree") or store.release_worktree(lane, sha))
+    if kept.parent.resolve() != (store.root / "worktrees").resolve() or kept.is_symlink() or not (
+            kept.name == f"{lane}-{sha[:12]}" or
+            re.fullmatch(rf"{lane}-{sha[:12]}-[0-9]{{8}}T[0-9]{{6}}Z-[0-9a-f]{{6}}", kept.name)):
+        raise SystemExit("release-pipeline: failed worktree identity mismatch; failure NOT cleared")
+    registration = worktree_registration(repo_dir, kept)
+    if registration and any(f == "locked" or f.startswith("locked ") for f in registration):
+        raise SystemExit(f"release-pipeline[{lane}]: {kept} is locked; failure NOT cleared")
+    if (registration and (f"HEAD {sha}" not in registration or "detached" not in registration)) or (
+            kept.exists() and registration is None):
+        raise SystemExit("release-pipeline: worktree identity mismatch; failure NOT cleared")
+    retirement = lane_state.get("failed_worktree_retirement")
+    if retirement and retirement["sha"] != sha:
+        retirement = None  # retain the older archive; this failure owns a new intent
+    moved = Path(retirement["path"]) if retirement and retirement.get("path") else None
+    if moved is not None and (moved.parent.resolve() != (store.root / "worktrees-cleared").resolve()
+                             or moved.is_symlink() or not moved.name.startswith(kept.name + "-")):
+        raise SystemExit("release-pipeline: retirement identity mismatch; failure NOT cleared")
+    if retirement is None:
+        stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        moved = (store.root / "worktrees-cleared" / f"{kept.name}-{stamp}-{uuid.uuid4().hex}") if kept.exists() else None
+        retirement = {"sha": sha, "path": str(moved) if moved else None,
+                      "id": uuid.uuid4().hex, "phase": "intent"}
+        lane_state["failed_worktree_retirement"] = retirement
+        state[lane] = lane_state
+        store.save(state)  # durable intent BEFORE rename or registration removal
+    if kept.exists():
+        if moved is None or moved.exists():
+            raise SystemExit("release-pipeline: archive collision; failure NOT cleared")
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(kept, moved)
+    if moved is not None and not moved.is_dir():
+        raise SystemExit("release-pipeline: retained diagnosis missing; failure NOT cleared")
+    retirement["phase"] = "renamed"
     store.save(state)
-    store.record({"lane": lane, "sha": sha, "status": "failure_cleared", "reason": reason, **{
-        "cleared_" + k: v for k, v in previous.items()}})
-    return f"release-pipeline[{lane}]: cleared failed {sha[:12]} ({previous['failed_step']}); next tick retries it"
+    if registration is not None:
+        # The original directory is absent now. Git removes ONLY this exact
+        # registration, leaving the archive and unrelated missing trees intact.
+        proc = subprocess.run(["git", "-C", str(repo_dir), "worktree", "remove", str(kept)], env=child_env(),
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
+        if proc.returncode != 0:
+            raise SystemExit(f"release-pipeline[{lane}]: registration removal failed (exit {proc.returncode}); "
+                             "failure NOT cleared")
+    if worktree_registration(repo_dir, kept) is not None:
+        raise SystemExit(f"release-pipeline[{lane}]: {kept} is still registered; failure NOT cleared")
+    retirement["phase"] = "registration_removed"
+    retirement.setdefault("id", uuid.uuid4().hex)
+    store.save(state)
+    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at")}
+    receipt_id = retirement.setdefault("id", uuid.uuid4().hex)
+
+    def receipted() -> bool:
+        return any(row.get("retirement_id") == receipt_id and row.get("status") == "failure_cleared"
+                   and row.get("lane") == lane and row.get("sha") == sha for row in store.records())
+    if not receipted():
+        store.record({"lane": lane, "sha": sha, "status": "failure_cleared", "reason": reason,
+            "retirement_id": receipt_id, **{"cleared_" + k: v for k, v in previous.items()},
+            **({"cleared_worktree": str(moved)} if moved else {})})
+    if not receipted():  # only a durable, readable receipt authorizes clearing
+        raise SystemExit(f"release-pipeline[{lane}]: clearance receipt unreadable; failure NOT cleared")
+    lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
+    for field in ("failed_worktree_retirement", "failed_worktree", "rejection"):
+        lane_state.pop(field, None)
+    store.save(state)
+    retired = f"; kept worktree moved to {moved}" if moved else ""
+    return (f"release-pipeline[{lane}]: cleared failed {sha[:12]} ({previous['failed_step']}){retired}; "
+            "next tick retries it")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2343,13 +2961,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="print the exact commands; execute no deploy")
     ap.add_argument("--lane", choices=("worker", "app"), action="append")
     ap.add_argument("--date", default=dt.date.today().isoformat())
+    ap.add_argument("--rotate-lost-staging-credential", action="append", default=[], metavar="LABEL",
+                    choices=ROTATABLE_STAGING_CREDENTIALS,
+                    help="tick --lane worker only: forward --rotate-lost-credential LABEL to the "
+                         "staging-app-writer step (repeatable), to deliberately rotate a staging "
+                         "candidate login whose local credential file is lost")
     args = ap.parse_args(argv)
+    if args.rotate_lost_staging_credential and (args.command != "tick" or args.lane != ["worker"]):
+        ap.error("--rotate-lost-staging-credential needs `tick --lane worker` and no other lane")
+    if len(set(args.rotate_lost_staging_credential)) != len(args.rotate_lost_staging_credential):
+        ap.error("--rotate-lost-staging-credential names each profile at most once")
     cfg = load_config()
     if args.command == "clear-failed":
         if not args.lane or len(args.lane) != 1 or not args.sha or not args.reason:
             ap.error("clear-failed needs exactly one --lane, --sha and --reason")
         print(clear_failed(Store(REPO / cfg.get("state_dir", "out/release-pipeline")),
-                           args.lane[0], args.sha, args.reason))
+                           args.lane[0], args.sha, args.reason, repo_dir=lane_repo_dir(cfg, args.lane[0], REPO)))
         return 0
     if args.command == "report":
         print(report(Store(REPO / cfg.get("state_dir", "out/release-pipeline")), args.date))
@@ -2362,7 +2989,8 @@ def main(argv: list[str] | None = None) -> int:
         pipe = Pipeline(cfg, dry_run=False)
         sha = args.sha or pipe.git("rev-parse", "origin/main", cwd=pipe.repo)
         return pipe.health_preflight(sha)
-    pipe = Pipeline(cfg, dry_run=args.dry_run)
+    pipe = Pipeline(cfg, dry_run=args.dry_run,
+                    rotate_lost_staging_credentials=tuple(args.rotate_lost_staging_credential))
     return pipe.tick(args.lane or ["worker", "app"])
 
 

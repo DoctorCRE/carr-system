@@ -47,79 +47,51 @@ def check_provider_wait(tmp: Path) -> None:
     slept: list[float] = []
 
     check("a ready provider returns nothing cold",
-          common.wait_for_provider([target]) == [])
+          common.wait_for_provider([target]).cold == [])
 
     check("a path that does not exist is not waited for",
-          common.wait_for_provider([tmp / "absent.xlsx"]) == [])
+          common.wait_for_provider([tmp / "absent.xlsx"]).cold == [])
 
     # A provider that refuses twice and then serves must PASS, because the
     # 02:05 outage is transient and giving up early is the whole bug.
-    state = {"calls": 0}
-    real_open = Path.open
+    state = {"calls": 0, "now": 0.0}
 
-    def flaky(self, *args, **kwargs):
-        if self == target:
-            state["calls"] += 1
-            if state["calls"] <= 2:
-                raise OSError(errno.EDEADLK, "Resource deadlock avoided")
-        return real_open(self, *args, **kwargs)
+    def advance(interval):
+        slept.append(interval)
+        state["now"] += interval
 
-    Path.open = flaky  # type: ignore[method-assign]
-    try:
-        cold = common.wait_for_provider([target], poll_seconds=0, sleep=slept.append)
-        check("a transient refusal that clears returns ready", cold == [])
-        check("it actually waited rather than passing blind", state["calls"] >= 3,
-              f"{state['calls']} probe(s)")
+    def flaky(paths, *, timeout):
+        state["calls"] += 1
+        if state["calls"] <= 2:
+            return [(target, OSError(errno.EDEADLK, "Resource deadlock avoided"))]
+        return common.probe_provider_files(paths, timeout=timeout)
 
-        # One that never clears must give the caller the list, not hang and not
-        # raise: each target still runs and records its own receipt.
-        def never(self, *args, **kwargs):
-            if self == target:
-                raise OSError(errno.EDEADLK, "Resource deadlock avoided")
-            return real_open(self, *args, **kwargs)
+    def wait(probe, budget=600):
+        return common.wait_for_provider(
+            [target], budget_seconds=budget, poll_seconds=0, sleep=advance,
+            monotonic=lambda: state["now"], running=lambda **kw: True,
+            probe=probe).cold
 
-        Path.open = never  # type: ignore[method-assign]
-        slept.clear()
+    cold = wait(flaky)
+    check("a transient refusal that clears returns ready", cold == [])
+    check("it actually waited rather than passing blind", state["calls"] >= 3,
+          f"{state['calls']} probe(s)")
 
-        # This records the interval AND actually elapses it. A recording-only
-        # stub would advance no clock, so the deadline could only ever be
-        # reached by the probe's own runtime and the loop would spin — which is
-        # what this stub did on its first draft, at 19,307 iterations. The
-        # floor's guarantee is that a poll takes real time; a fake sleep tests
-        # the opposite of the thing under test.
-        def timed_sleep(interval):
-            slept.append(interval)
-            time.sleep(interval)
+    # A permanently cold file still returns so each target can run. Both
+    # sleep and monotonic advance the same fake clock; no wall-time spinning.
+    slept.clear()
+    cold = wait(lambda paths, **kw: [(target, OSError(errno.EDEADLK, "cold"))], .05)
+    check("an exhausted budget reports the cold file", len(cold) == 1)
+    check("an exhausted budget does not raise", True)
+    check("a zero poll cannot busy-spin",
+          len(slept) <= int(.05 / .01) + 2,
+          f"{len(slept)} sleep(s): {[round(i, 4) for i in slept]}")
 
-        cold = common.wait_for_provider([target], budget_seconds=0.05, poll_seconds=0,
-                                        sleep=timed_sleep)
-        check("an exhausted budget reports the cold file", len(cold) == 1)
-        check("an exhausted budget does not raise", True)
-
-        # A floor stops a zero poll becoming a busy loop against the provider
-        # the wait exists to give room to. The BOUND is the property, not the
-        # size of any one interval: the final sleep is deliberately clipped to
-        # whatever budget is left, so it can be shorter than the floor without
-        # anything being wrong. Asserting every interval met the floor failed
-        # here for exactly that reason.
-        check("a zero poll cannot busy-spin",
-              len(slept) <= int(0.05 / 0.01) + 2,
-              f"{len(slept)} sleep(s): {[round(i, 4) for i in slept]}")
-
-        # A permission failure reads the same on the last attempt as the first.
-        def denied(self, *args, **kwargs):
-            if self == target:
-                raise OSError(errno.EACCES, "Permission denied")
-            return real_open(self, *args, **kwargs)
-
-        Path.open = denied  # type: ignore[method-assign]
-        slept.clear()
-        cold = common.wait_for_provider([target], budget_seconds=600, poll_seconds=0,
-                                        sleep=slept.append)
-        check("a hard error is reported at once", len(cold) == 1)
-        check("a hard error is not waited out", slept == [], f"{len(slept)} sleep(s)")
-    finally:
-        Path.open = real_open  # type: ignore[method-assign]
+    # A permission failure reads the same on the last attempt as the first.
+    slept.clear()
+    cold = wait(lambda paths, **kw: [(target, OSError(errno.EACCES, "Permission denied"))])
+    check("a hard error is reported at once", len(cold) == 1)
+    check("a hard error is not waited out", slept == [], f"{len(slept)} sleep(s)")
 
 
 def main():

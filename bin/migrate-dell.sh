@@ -134,8 +134,8 @@ if [ "${1:-}" = "--preflight" ]; then
 
   say ""
   say "  gates, as Dell will run them:"
-  for t in guard conduct-gate escalation-gate gate-edit-gate git-writer-gate \
-           context-handoff-gate corpus-render-gate config-as-code migrate-dell; do
+  for t in guard git-writer-gate \
+           corpus-render-gate config-as-code migrate-dell; do
     F="$TMP/home/carr-system/ops/$t-selftest.py"
     [ -f "$F" ] || { print -r -- "    note  $t — not in the clone"; continue; }
     # CARR_VAULT is passed through deliberately. The scratch HOME has no Drive
@@ -158,9 +158,6 @@ if [ "${1:-}" = "--preflight" ]; then
     if (cd "$TMP/home/carr-system" && HOME="$PF_HOME" CARR_VAULT="$REAL_VAULT" \
          python3 "$F" </dev/null >/tmp/pf.log 2>&1); then
       print -r -- "    ok    $t"
-    elif [ "$t" = "gate-edit-gate" ] && grep -q "FAILURES: sh-destructive" /tmp/pf.log \
-         && [ "$(grep -c FAILURES /tmp/pf.log)" = "1" ]; then
-      print -r -- "    ok    $t (sh-destructive waived: scratch is inside a SAFE_ZONE)"
     else
       print -r -- "    FAIL  $t — $(tail -1 /tmp/pf.log | tr -s ' ')"
       PFAIL=$((PFAIL+1))
@@ -250,7 +247,7 @@ receipt = {
 }
 with open(path, "w", encoding="utf-8") as handle:
     json.dump(receipt, handle, indent=2, sort_keys=True)
-    handle.write("\\n")
+    handle.write("\n")
 ' "$tmp" "$receipt_status" "$commit" "$branch" "$rc" "$ok" "$warn" "$fail" \
     && mv -f "$tmp" "$RECEIPT" \
     && say "receipt: $RECEIPT" \
@@ -508,14 +505,10 @@ run_check() {
   fi
 }
 run_check "egress guard"     "ops/guard-selftest.py"
-run_check "conduct gate"     "ops/conduct-gate-selftest.py"
-run_check "escalation gate"  "ops/escalation-gate-selftest.py"
-run_check "gate-edit gate"   "ops/gate-edit-gate-selftest.py"
 run_check "git-writer gate"  "ops/git-writer-gate-selftest.py"
-# Added after the two gates below shipped (2026-08-10), later than this script.
+# Added after the gate below shipped (2026-08-10), later than this script.
 # Step 3 installs every gate in the repo's hooks block, so a verify list that
 # lags the hooks block certifies a machine it has not fully checked.
-run_check "context-handoff"  "ops/context-handoff-gate-selftest.py"
 run_check "corpus-render"    "ops/corpus-render-gate-selftest.py"
 
 if $PY "$REPO/ops/config-as-code.py" check </dev/null >/tmp/mig-drift.log 2>&1; then

@@ -7,6 +7,7 @@ import { ToolError } from "./tool-error.js";
 import { trustedTourRendererResult } from "./tour-artifacts.js";
 import { tourSharingBrowserAccess } from "./tour-sharing.js";
 import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
+import { readPropertyEvidence } from "./tour-property-evidence.js";
 
 const sharing = tourSharingBrowserAccess({ ToolError });
 
@@ -79,6 +80,7 @@ export function projectTourDetail(raw) {
     name: raw.tour_name,
     status: raw.tour_status,
     route_version_id: latestRoute?.id || null,
+    route_acceptance_digest: latestRoute?.acceptance_digest || null,
     route_version_label: latestRoute ? `Version ${latestRoute.route_version}${latestRoute.accepted ? " · accepted" : " · draft"}` : null,
     route_version_state: latestRoute?.accepted ? "accepted" : latestRoute ? "draft" : "missing",
     accepted_route_version: Number.isInteger(acceptedRoute?.route_version) ? acceptedRoute.route_version : 0,
@@ -267,6 +269,17 @@ export function createTourRuntimeAdapters(renderDependencies = {}) {
     readTourFn: async context => ({ ok: true, data: projectTourDetail(await internalRead(context,
       "select ops.read_tour_internal_detail($1::text,$2::uuid,$3::text) as data",
       [organizationTenantForActor(context.actor), context.input.tour_id])) }),
+    readPropertyEvidenceFn: async context => ({ ok: true, data: await withPool(
+      context.env.DATABASE_URL_WRITER, "begin read only", client => readPropertyEvidence(
+        client, organizationTenantForActor(context.actor), context.input.property_id, context.input.as_of)) }),
+    createTourFn: context => invoke(context, "create-tour-domain", context.input),
+    // A draft version is always manual: provider routing needs a rights receipt this surface never holds.
+    openRouteDraftFn: context => invoke(context, "append-tour-route-version", {
+      ...context.input, routing_source: "manual", routing_provider: null, routing_policy_key: null,
+      routing_rights_receipt_id: null, routing_request: {}, routing_response_digest: null,
+    }),
+    appendRouteStopFn: context => invoke(context, "append-tour-route-stop", context.input),
+    appendRouteStopTransitionFn: context => invoke(context, "append-tour-route-stop-transition", context.input),
     createRouteVersionFn: context => invoke(context, "prepare-tour-route-version", {
       ...context.input, base_route_version_id: null,
     }),

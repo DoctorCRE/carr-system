@@ -179,7 +179,7 @@ test("callTool read branch: never throws when DATABASE_URL_WRITER is absent, and
 test("mcp.js: both read connection routes record metadata, while write verbs do not", async () => {
   const { readFile } = await import("node:fs/promises");
   const src = await readFile(new URL("../src/mcp.js", import.meta.url), "utf8");
-  const writerBranch = src.slice(src.indexOf("const connectionString = tool.authorityOnly"),
+  const writerBranch = src.slice(src.indexOf("const needsAuthority = requiresAuthorityConnection"),
     src.indexOf("export async function dispatch("));
   assert.match(src, /if \(connectionRouteForTool\(tool\) === "reader"\)[\s\S]*?waitUntil\?\.\(recordReadCall\(/,
     "ordinary reader calls must still be recorded");

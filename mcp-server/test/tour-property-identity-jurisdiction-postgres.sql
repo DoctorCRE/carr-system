@@ -136,6 +136,56 @@ begin
     v_evidence,v_rights,'2026-08-27T10:00:00Z','reviewed'
   );
 
+  -- The property read preserves the source-backed county at a selected time,
+  -- then shows a later reviewed change without inferring a spatial ruling.
+  if exists (select 1 from jsonb_array_elements(ops.read_tour_property_evidence(
+      v_tenant,v_property_one,'2026-08-27T08:30:00Z')) row) then
+    raise exception 'property evidence appeared before its source was retrieved';
+  end if;
+  if not exists (select 1 from jsonb_array_elements(ops.read_tour_property_evidence(
+      v_tenant,v_property_one,'2026-08-28T00:00:00Z')) row
+      where row->>'field'='county' and row->>'value'='Escambia'
+        and row->>'source_crs'='EPSG:4326'
+        and row->>'geometry_precision'='unknown'
+        and row->>'geometry_method'='authoritative_identifier'
+        and row->'source'->>'evidence_class'='direct_source') then
+    raise exception 'reviewed Escambia county evidence was absent';
+  end if;
+  insert into ops.tour_jurisdiction_dataset (
+    organization_tenant_id,jurisdiction_type,state_code,county_name,
+    authoritative_source_locator,dataset_version,source_crs,dataset_digest,
+    source_evidence_id,rights_receipt_id,as_of,review_state
+  ) values (
+    v_tenant,'county','FL','Walton','https://example.invalid/walton',
+    '2026-09','EPSG:4326','sha256:' || repeat('8',64),v_evidence,v_rights,
+    '2026-09-01T00:00:00Z','reviewed'
+  ) returning id into v_dataset;
+  insert into ops.tour_property_jurisdiction_assertion (
+    organization_tenant_id,property_id,jurisdiction_dataset_id,jurisdiction_name,
+    assertion_method,source_evidence_id,rights_receipt_id,as_of,review_state
+  ) values (
+    v_tenant,v_property_one,v_dataset,'Walton','manual_review',
+    v_evidence,v_rights,'2026-09-01T00:00:00Z','reviewed'
+  );
+  if not exists (select 1 from jsonb_array_elements(ops.read_tour_property_evidence(
+      v_tenant,v_property_one,'2026-09-02T00:00:00Z')) row
+      where row->>'field'='county' and row->>'value'='Walton') then
+    raise exception 'later reviewed Walton county evidence was absent';
+  end if;
+  begin
+    insert into ops.tour_jurisdiction_dataset (
+      organization_tenant_id,jurisdiction_type,state_code,county_name,
+      authoritative_source_locator,dataset_version,dataset_digest,
+      source_evidence_id,rights_receipt_id,as_of,review_state
+    ) values (
+      v_tenant,'county','AL','Baldwin','https://example.invalid/outside',
+      '2026-09','sha256:' || repeat('7',64),v_evidence,v_rights,
+      '2026-09-01T00:00:00Z','reviewed'
+    );
+    raise exception 'out-of-area jurisdiction was accepted';
+  exception when check_violation then null;
+  end;
+
   v_coordinate := ops.append_tour_coordinate_candidate(jsonb_build_object(
     'organization_tenant_id',v_tenant,'property_id',v_property_one,
     'coordinate_role','entrance','latitude',30.4156,'longitude',-87.2169,

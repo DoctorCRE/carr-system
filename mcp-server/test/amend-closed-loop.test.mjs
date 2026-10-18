@@ -1,17 +1,3 @@
-// amend-closed-loop.test.mjs — unit coverage for the append-only correction
-// door onto a CLOSED loop's outcome.
-//
-// THE GAP THIS CLOSES. close-loop refuses with loop_not_open on anything
-// already closed, by design. That rule never had an answer for the outcome
-// text itself being wrong: loop c7265238-effe-4166-bc9a-eccc5f389763 was
-// closed with outcome "x" by mistake (defect a2c04ffa-92d0-4428-b175-
-// 32fa3cfb0802), and nothing could fix it short of a raw table UPDATE. This
-// suite proves amend-closed-loop's refusals fire on the right conditions and
-// that a successful amend appends a loop_amendment row before touching the
-// loop_item projection — never the reverse, and never neither.
-//
-// Run with: node --test mcp-server/test/amend-closed-loop.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -42,8 +28,6 @@ const SUCCESSOR = {
 const GOOD_OUTCOME = "The card visual system shipped in PR #900, not the bio-header reminder.";
 const GOOD_REASON = "Original close mistakenly recorded outcome 'x' — defect a2c04ffa.";
 
-/** Answers the reads/writes amend-closed-loop makes, and records every write
- * so a test can assert ORDER (append before projection) and CONTENT. */
 class Fake {
   constructor({ row = CLOSED, version = 3 } = {}) {
     this.row = row;
@@ -114,7 +98,6 @@ test("a successful amend appends loop_amendment BEFORE it updates loop_item's pr
 test("the amendment row carries the prior outcome, the new outcome, the reason and the SERVER actor", async () => {
   const { fake } = await call(args());
   const insert = fake.writes.find((w) => w.sql.startsWith("insert into loop_amendment"));
-  // loop_id, prior_outcome, new_outcome, prior_resolution, new_resolution, reason, actor_id, idempotency_key
   assert.equal(insert.params[0], CLOSED.id);
   assert.equal(insert.params[1], "x");
   assert.equal(insert.params[2], GOOD_OUTCOME);
@@ -166,8 +149,8 @@ test("loop_open: an OPEN loop is refused and points to update-loop / close-loop"
 });
 
 test("version_conflict: a stale base_version is refused and never auto-retried", async () => {
-  const fake = new Fake({ row: CLOSED, version: 5 }); // live version is 5
-  const { error } = await call({ ...args(), base_version: 2 }, fake); // caller read version 2
+  const fake = new Fake({ row: CLOSED, version: 5 });
+  const { error } = await call({ ...args(), base_version: 2 }, fake);
   assert.equal(error?.error, "version_conflict");
   assert.equal(fake.writes.length, 0);
 });
@@ -195,7 +178,7 @@ test("bookkeeping correction: RENUMBERED/SUPERSEDED wording requires resolution 
 test("successor_loop_not_open: the named successor must be a different, currently open loop", async () => {
   const bookkeepingOutcome = "Superseded by #723, carried forward.";
   const { error } = await call(args({
-    outcome: bookkeepingOutcome, resolution: "dropped", successor_loop: "723" })); // names itself, closed
+    outcome: bookkeepingOutcome, resolution: "dropped", successor_loop: "723" }));
   assert.equal(error?.error, "successor_loop_not_open");
 });
 

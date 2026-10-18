@@ -42,6 +42,7 @@ ROSTER_BASENAME = os.path.join("exporters", "dossier-roster.local.json")
 TOKEN = re.compile(r"[a-z0-9]+")
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 MAX_REPORTED = 40
+GIT_TIMEOUT_SECONDS = 20
 
 
 def tokens(text: str) -> list[str]:
@@ -85,9 +86,13 @@ def load_names() -> dict[str, str]:
 
 
 def added_lines(repo: str, rng: str) -> list[tuple[str, int, str]]:
+    # --no-textconv: a repository's diff.<driver>.textconv is arbitrary code
+    # that can take any amount of time, and this note reads raw added lines.
+    # The timeout bounds everything else: a note must never hold a push.
     diff = subprocess.run(
-        ["git", "diff", "--no-color", "--no-ext-diff", "-U0", rng],
-        cwd=repo, capture_output=True, check=True).stdout.decode("utf-8", "replace")
+        ["git", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U0", rng],
+        cwd=repo, capture_output=True, check=True,
+        timeout=GIT_TIMEOUT_SECONDS).stdout.decode("utf-8", "replace")
     out, path, ln = [], None, 0
     for line in diff.split("\n"):
         if line.startswith("+++ "):

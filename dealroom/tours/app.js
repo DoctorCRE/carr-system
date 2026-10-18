@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = (selector) => document.querySelector(selector);
-  const state = { csrf: "", tours: [], tour: null, rawShareToken: "", shareGrantId: "", shareStatus: "missing", shareGrants: [], projectionId: "", projectionDraftId: "", candidateDigest: "", renderJobId: "", pdfQcRunDigest: "", cheatDirty: false, cheatDraftTourId: "" };
+  const state = { csrf: "", tours: [], tour: null, rawShareToken: "", shareGrantId: "", shareStatus: "missing", shareGrants: [], projectionId: "", projectionDraftId: "", candidateDigest: "", renderJobId: "", pdfQcRunDigest: "", cheatDirty: false, cheatDraftTourId: "", feedbackToken: 0, tourGeneration: 0 };
   const uuid = () => crypto.randomUUID();
   const status = (message) => { $("#status").textContent = message; };
   const text = (value, fallback = "") => typeof value === "string" && value ? value : fallback;
@@ -59,13 +59,52 @@
   }
   async function loadLibrary() { status("Loading tours…"); const data = await request("/api/tours/library"); state.tours = Array.isArray(data.tours) ? data.tours.filter((tour) => id(tour?.id)) : []; renderLibrary(); status("Tour library ready."); }
   async function loadProjectionPreview() { const preview = $("#projection-preview"); state.candidateDigest = ""; preview.hidden = true; preview.textContent = ""; if (!id(state.projectionDraftId)) return; const data = await request(`/api/tours/projection/candidates?projection_id=${encodeURIComponent(state.projectionDraftId)}`); state.candidateDigest = text(data.candidate_digest); const rows = Array.isArray(data.preview) ? data.preview : []; preview.textContent = rows.map(row => { const facts = row?.facts && typeof row.facts === "object" ? row.facts : {}; return `${text(row.route_label, `Stop ${row.route_sequence || ""}`)} · ${text(facts["display.name"], "Unnamed property")}\n${text(facts["display.address"], "Address unavailable")}\n${Object.keys(facts).sort().join(", ")}`; }).join("\n\n"); preview.hidden = false; }
-  async function loadTour(tourId) { status("Loading tour…"); if (state.tour?.id !== tourId) { state.cheatDirty = false; state.cheatDraftTourId = tourId; } state.tour = await request(`/api/tours/detail?tour_id=${encodeURIComponent(tourId)}`); renderTour(); await loadProjectionPreview(); status("Tour ready."); }
+  async function loadTour(tourId) { status("Loading tour…"); const generation = ++state.tourGeneration; state.feedbackToken += 1; feedbackMessage("Loading client feedback…"); if (state.tour?.id !== tourId) { state.cheatDirty = false; state.cheatDraftTourId = tourId; } const detail = await request(`/api/tours/detail?tour_id=${encodeURIComponent(tourId)}`); if (generation !== state.tourGeneration) return; state.tour = detail; renderTour(); const feedbackLoad = loadFeedback(); await loadProjectionPreview(); await feedbackLoad; if (generation === state.tourGeneration) status("Tour ready."); }
   function moveStop(stopId, delta) { const list = stops(); const index = list.findIndex((stop) => stop.id === stopId); const destination = index + delta; if (index < 0 || destination < 0 || destination >= list.length) return; [list[index], list[destination]] = [list[destination], list[index]]; renderTour(); }
   async function saveRoute(reorder = false) { if (!state.tour) return; const stopIds = stops().filter((stop) => stop.stop_state === "active").map((stop) => stop.id).filter(id); const path = reorder ? "/api/tours/route-reorder" : "/api/tours/route-version"; const payload = reorder ? { tour_id: state.tour.id, route_version_id: state.tour.route_version_id, expected_route_version: Number(state.tour.route_version || 0), stop_ids: stopIds, idempotency_key: uuid() } : { tour_id: state.tour.id, expected_route_version: Number(state.tour.route_version || 0), stop_ids: stopIds, idempotency_key: uuid() }; await post(path, payload); await loadTour(state.tour.id); status("Route version saved."); }
   async function saveSheet() { if (!state.tour) return; let content; try { content = JSON.parse($("#cheat-content").value || "{}"); } catch { content = { notes: $("#cheat-content").value }; } await post("/api/tours/cheat-sheet/autosave", { tour_id: state.tour.id, content, expected_revision_number: Number(state.tour.cheat_sheet?.revision_number || 0), idempotency_key: uuid() }); state.cheatDirty = false; await loadTour(state.tour.id); status("Internal cheat sheet saved."); }
+  // Broker view of client feedback for the approved projection. Text only:
+  // client comments are untrusted, so they are never parsed as markup.
+  // feedbackToken names the one read whose result may still be shown: any newer
+  // selection or refresh retires older reads, and a result is also checked
+  // against the projection it was requested for.
+  function feedbackMessage(message) { const list = $("#feedback-list"); list.replaceChildren(); list.textContent = message; }
+  function renderFeedback(feedback) {
+    const list = $("#feedback-list"); list.replaceChildren();
+    const items = Array.isArray(feedback?.items) ? feedback.items : [];
+    for (const item of items) {
+      const row = document.createElement("li"); row.className = "feedback-item";
+      const head = document.createElement("div"); head.className = "feedback-head";
+      const label = document.createElement("strong"); label.textContent = text(item.route_label, "Stop");
+      const answer = document.createElement("span"); answer.className = "feedback-answer";
+      answer.textContent = item.shortlisted === true ? "Shortlisted" : item.shortlisted === false ? "Not shortlisted" : "No answer";
+      head.append(label, answer); row.append(head);
+      const comments = document.createElement("div"); comments.className = "feedback-comments";
+      for (const comment of Array.isArray(item.comments) ? item.comments : []) {
+        const line = document.createElement("p"); line.className = "feedback-comment";
+        const when = document.createElement("time"); when.textContent = text(comment.created_at);
+        const body = document.createElement("span"); body.textContent = text(comment.comment);
+        line.append(when, body); comments.append(line);
+      }
+      row.append(comments); list.append(row);
+    }
+    if (!items.length) list.textContent = "No client feedback yet.";
+  }
+  async function loadFeedback() {
+    const token = ++state.feedbackToken; const projectionId = state.projectionId;
+    if (!id(projectionId)) { feedbackMessage("Approve a projection to collect client feedback."); return; }
+    feedbackMessage("Loading client feedback…");
+    let data;
+    try { data = await request(`/api/tours/feedback?projection_id=${encodeURIComponent(projectionId)}`); }
+    catch { if (token === state.feedbackToken && projectionId === state.projectionId) feedbackMessage("Client feedback could not be loaded. Refresh to try again."); return; }
+    if (token !== state.feedbackToken || projectionId !== state.projectionId) return;
+    if (data.feedback?.projection_id !== projectionId) { feedbackMessage("Client feedback could not be loaded. Refresh to try again."); return; }
+    renderFeedback(data.feedback);
+  }
   async function issueShare(rotate = false) { if (!state.projectionId) throw new Error("projection_required"); const raw = newShareToken(); const tokenDigest = await sha256(raw); const scopes = [...document.querySelectorAll('input[name="scope"]:checked')].map((box) => box.value); const expires = new Date($("#share-expiry").value).toISOString(); const receipt = $("#receipt-digest").value.trim(); if (!digest(receipt) || !scopes.length || !Number.isFinite(Date.parse(expires))) throw new Error("share_details_invalid"); const payload = { projection_id: state.projectionId, token_digest: tokenDigest, permission_scopes: scopes, expires_at: expires, receipt_digest: receipt, idempotency_key: uuid() }; const data = await post(rotate ? "/api/tours/share/rotate" : "/api/tours/share/issue", rotate ? { share_grant_id: state.shareGrantId, ...payload } : payload); state.rawShareToken = raw; state.shareGrantId = text(data.share_grant_id, state.shareGrantId); const url = `https://reports.doctorcre.com/share#token=${raw}`; $("#share-url").value = url; $("#share-link").hidden = false; $("#share-state").textContent = "Active"; status("Confidential link generated. Copy it now."); }
   async function revokeShare(grantId) { if (!id(grantId)) return; const receipt = $("#receipt-digest").value.trim(); if (!digest(receipt)) throw new Error("receipt_digest_required"); await post("/api/tours/share/revoke", { share_grant_id: grantId, reason: "Internal operator revoked link", revoked_at: new Date().toISOString(), receipt_digest: receipt, idempotency_key: uuid() }); state.rawShareToken = ""; $("#share-link").hidden = true; await loadTour(state.tour.id); status("Share link revoked."); }
   async function action(work) { try { await work(); } catch { status("That change could not be saved."); } }
+  $("#refresh-feedback").addEventListener("click", () => void loadFeedback());
   $("#refresh").addEventListener("click", () => void action(loadLibrary)); $("#save-route").addEventListener("click", () => void action(() => saveRoute(false))); $("#reorder-route").addEventListener("click", () => void action(() => saveRoute(true)));
   $("#accept-route").addEventListener("click", () => void action(async () => { if (!state.tour?.route_version_id) return; const prior = Number(state.tour.accepted_route_version || 0); await post("/api/tours/route-accept", { route_version_id: state.tour.route_version_id, expected_prior_route_version: prior, acceptance_digest: await sha256(`${state.tour.route_version_id}:${prior}`), idempotency_key: uuid() }); await loadTour(state.tour.id); status("Route version accepted."); }));
   $("#cheat-content").addEventListener("input", () => { state.cheatDirty = true; state.cheatDraftTourId = state.tour?.id || ""; $("#sheet-state").textContent = "Unsaved changes"; });

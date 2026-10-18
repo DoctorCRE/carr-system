@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Umask</key><integer>63</integer>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.carr.headless.radar-weekly</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{REPO}}/bin/headless-task</string>
+		<string>radar-weekly</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>{{REPO}}/out/headless/radar-weekly/launchd.log</string>
+	<key>StandardOutPath</key>
+	<string>{{REPO}}/out/headless/radar-weekly/launchd.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Hour</key>
+			<integer>8</integer>
+			<key>Minute</key>
+			<integer>15</integer>
+			<key>Weekday</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>{{REPO}}</string>
+</dict>
+</plist>

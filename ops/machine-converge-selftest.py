@@ -35,42 +35,27 @@ SELF_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # selftest — the 2026-08-13 incident ops/git_env.py documents. __file__'s
 # directory is ops/, so this reaches the one scrub definition directly.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from git_env import fixture_env  # noqa: E402
+from git_env import fixture_env, FIXTURE_GIT_CONFIG  # noqa: E402
 sys.path.insert(0, SELF_REPO)
 from lib import launchd_calendar  # noqa: E402
-
-
-def fixture_git_env():
-    """Keep Git's automatic maintenance inside the fixture command lifetime.
-
-    Porcelain commands may start `git maintenance run --auto` or `git gc
-    --auto`. Both detach controls default to true, which lets a maintenance
-    child keep writing `.git/objects` after subprocess.run() has returned and
-    race TemporaryDirectory cleanup. The fixture still exercises automatic
-    maintenance; it merely waits for that child like every other subprocess.
-    """
-    env = fixture_env()
-    env.update({
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "maintenance.autoDetach",
-        "GIT_CONFIG_VALUE_0": "false",
-        "GIT_CONFIG_KEY_1": "gc.autoDetach",
-        "GIT_CONFIG_VALUE_1": "false",
-    })
-    return env
 
 # The checkout under test supplies the real hook, the real installer and the
 # real tracked template — a hand-copied template here would let the template
 # and the test drift apart, which is the two-homes disease.
 COPIES = [
     "hooks/machine-converge.py",
+    "hooks/grok_invocation.py",
     "lib/claude_continuity_config.py",
     "lib/machine_prerequisites.py",
     "lib/launchd_calendar.py",
     "lib/machine_role.py",
+    "lib/launchd_scope.py",
+    "ops/config/services.json",
+    "lib/launchd_hold.py",
     "mcp-server/continuity-stdio-proxy.mjs",
     "ops/claude-continuity-hook.py",
     "ops/config-as-code.py",
+    "ops/install-claude-continuity.py",
     "ops/config/claude-continuity-hooks.json",
     "ops/git_env.py",
     "ops/githooks/pre-push",
@@ -104,7 +89,7 @@ def sh(args, cwd=None, env=None):
     # stray fixture git call can never fall through to ambient identity or
     # leave maintenance behind. Callers needing something specific build on
     # the same environment rather than passing os.environ straight through.
-    return subprocess.run(args, cwd=cwd, env=fixture_git_env() if env is None else env,
+    return subprocess.run(args, cwd=cwd, env=fixture_env() if env is None else env,
                           capture_output=True, text=True)
 
 
@@ -117,8 +102,8 @@ def git(repo, *args, env=None):
 
 def keep_maintenance_joined(repo):
     """Persist the fixture-only lifetime rule for nested Git subprocesses."""
-    git(repo, "config", "maintenance.autoDetach", "false")
-    git(repo, "config", "gc.autoDetach", "false")
+    for key, value in FIXTURE_GIT_CONFIG:
+        git(repo, "config", key, value)
 
 
 def owner_email():
@@ -206,21 +191,49 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
                   "w", encoding="utf-8") as fh:
             fh.write(DRIFTED_PLIST.format(repo=repo))
 
-    write_exec(os.path.join(stubs, "launchctl"),
-               "#!/bin/zsh\necho \"$@\" >> \"$LAUNCHCTL_LOG\"\nexit 0\n")
+    installed = os.path.join(agents, "com.carr.dictation-consent.plist")
+    with open(os.path.join(root, "launchctl-state.json"), "w", encoding="utf-8") as fh:
+        json.dump({"com.carr.dictation-consent": installed} if seed_drifted_plist else {}, fh)
+    write_exec(os.path.join(stubs, "launchctl"), """#!/usr/bin/env python3
+import json, os, plistlib, sys
+from pathlib import Path
+args = sys.argv[1:]
+state_path = Path(os.environ['LAUNCHCTL_STATE'])
+state = json.loads(state_path.read_text())
+with open(os.environ['LAUNCHCTL_LOG'], 'a', encoding='utf-8') as log:
+    log.write(' '.join(args) + '\\n')
+if args[0] == 'print':
+    label = args[1].rsplit('/', 1)[-1]
+    if label in state:
+        print(f'path = {state[label]}')
+        sys.exit(0)
+    print(f'Could not find service "{label}" in domain for user gui: 501', file=sys.stderr)
+    sys.exit(113)
+if args[0] in ('load', 'unload'):
+    dest = args[-1]
+    label = plistlib.loads(Path(dest).read_bytes())['Label']
+    if args[0] == 'load':
+        state[label] = dest
+    else:
+        state.pop(label, None)
+    state_path.write_text(json.dumps(state))
+    sys.exit(0)
+sys.exit(64)
+""")
     return repo, home, stubs
 
 
 def run_hook(repo, home, stubs, root):
-    # fixture_git_env() is the base rather than a hand-rolled `for var in
+    # fixture_env() is the base rather than a hand-rolled `for var in
     # list(env): if var.startswith("GIT_") ...` loop, so this can't drift
     # from ops/git_env.py's list the way the sync-enforcement-map copies did
     # (see the git_env.py docstring). CLAUDE_PROJECT_DIR still has to go by
     # hand — it isn't a git variable, but it's another pointer back at the
     # real checkout that the hook must not be able to discover.
-    env = dict(fixture_git_env(), HOME=home,
+    env = dict(fixture_env(), HOME=home,
                PATH=stubs + os.pathsep + os.environ.get("PATH", ""),
-               LAUNCHCTL_LOG=os.path.join(root, "launchctl.log"))
+               LAUNCHCTL_LOG=os.path.join(root, "launchctl.log"),
+               LAUNCHCTL_STATE=os.path.join(root, "launchctl-state.json"))
     env.pop("CLAUDE_PROJECT_DIR", None)
     return sh([sys.executable, os.path.join(repo, "hooks", "machine-converge.py")],
               cwd=root, env=env)
@@ -270,6 +283,39 @@ def case_secondary_converges(tmp):
         "brief line reports the apply": "re-applied" in r.stdout,
     }
     return checks
+
+
+def case_stale_continuity_receipt_self_heals(tmp):
+    """A machine that opted into Claude continuity, then pulled a merge that
+    changed the continuity adapter: its mode receipt no longer matches the
+    contract digest, config-as-code refuses to install ANYTHING, and the whole
+    hook set drifts. 2026-10-10 to 10-12 on the MacBook that was 224 Stop
+    turns crashing on a deleted gate. The hook must re-stamp the receipt with
+    the sanctioned installer and finish the install."""
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
+    receipt = os.path.join(home, ".config", "carr", "claude-continuity-mode.json")
+    os.makedirs(os.path.dirname(receipt), exist_ok=True)
+    with open(receipt, "w", encoding="utf-8") as fh:
+        json.dump({"schema_version": 1, "mode": "shadow",
+                   "config_digest": "sha256:" + "0" * 64}, fh)
+    r = run_hook(repo, home, stubs, tmp)
+    with open(receipt, encoding="utf-8") as fh:
+        after = json.load(fh)
+    settings = os.path.join(home, ".claude", "settings.json")
+    installed = json.load(open(settings, encoding="utf-8")) if os.path.isfile(settings) else {}
+    commands = " ".join(
+        hook.get("command", "")
+        for entries in (installed.get("hooks") or {}).values()
+        for entry in entries for hook in entry.get("hooks", []))
+    return {
+        "hook exits 0": r.returncode == 0,
+        "brief line names the re-stamp": "re-stamped mode 'shadow'" in r.stdout,
+        "install completed after the re-stamp": "re-applied" in r.stdout,
+        "receipt keeps the machine's mode": after.get("mode") == "shadow",
+        "receipt digest was refreshed": after.get("config_digest") not in (None, "sha256:" + "0" * 64),
+        "Claude settings rendered": os.path.isfile(settings),
+        "continuity overlay installed with the base hooks": "claude-continuity-hook.py" in commands,
+    }
 
 
 def case_primary_noop(tmp):
@@ -355,6 +401,8 @@ def case_marker_primary_noop(tmp):
 def main():
     cases = [
         ("secondary machine converges", case_secondary_converges),
+        ("stale continuity receipt is re-stamped and the install completes",
+         case_stale_continuity_receipt_self_heals),
         ("primary machine (actor slug) is a no-op", case_primary_noop),
         ("primary machine (owner-email fallback) is a no-op", case_owner_fallback_noop),
         ("dirty tree refuses ff, keeps the edit, still applies", case_dirty_tree_refuses_ff_but_still_applies),

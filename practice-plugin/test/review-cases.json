@@ -1,0 +1,553 @@
+[
+  {
+    "name": "positive dental room-by-room plan",
+    "tool": "plan_practice_space",
+    "input": {
+      "practice_type": "dental",
+      "providers": 2,
+      "operatories": 4,
+      "exam_rooms": 0
+    },
+    "error": false,
+    "expected": {
+      "schema_version": "practice-planning/v1",
+      "calculation_version": "verticals-1.0.0",
+      "inputs_used": {
+        "practice_type": "dental",
+        "providers": 2,
+        "operatories": 4,
+        "exam_rooms": 0
+      },
+      "input_classification": "owner_input",
+      "assumptions": [
+        "Whole-office training estimates already include support and circulation; do not add a room grossing factor again.",
+        "Derived parking and rentable-area numbers are calculated examples; the parking ratio is a CARR estimate. No code minima are inferred.",
+        "All input counts are owner inputs. Listed functions must be programmed; the area heuristic does not prove they fit.",
+        "HVAC tonnage is an unverified budget assumption, never a sizing or pass/fail rule."
+      ],
+      "warnings": [],
+      "missing_inputs": [
+        "Equipment clearances and complete room program",
+        "Project-specific MEP and adopted code review",
+        "Peak parking demand and legal rights",
+        "Verified rentable-to-usable area factor"
+      ],
+      "sources": [
+        {
+          "id": "owner-input",
+          "source_class": "owner input",
+          "publisher": "Owner-supplied inputs",
+          "document": "Declared tool inputs",
+          "url": null,
+          "jurisdiction": "As supplied; no independent authentication",
+          "publication_date": null,
+          "retrieved_at": null,
+          "units": "Explicit field units; SF, USD, calendar dates, months and equipment capacity as applicable",
+          "reuse_status": "Returned for this calculation only; no application storage."
+        },
+        {
+          "id": "dental-vertical-guide",
+          "source_class": "CARR agent training",
+          "publisher": "CARR",
+          "document": "dental-vertical-guide",
+          "url": null,
+          "jurisdiction": "Industry heuristic; local adoption unverified",
+          "publication_date": "2026-07-07",
+          "retrieved_at": "2026-10-01",
+          "units": "Usable SF and labeled planning quantities",
+          "reuse_status": "Owner-useful industry facts only; internal material excluded."
+        }
+      ],
+      "limitations": [
+        "Specialty bands are single-provider starting ranges; extrapolation requires a separate clinical program."
+      ],
+      "notice": "Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.",
+      "results": {
+        "practice_type": "dental",
+        "source_class": "CARR agent training",
+        "sizing_rule": "Operatories × 400 usable SF; whole-office heuristic already includes support/circulation.",
+        "usable_square_feet": {
+          "low": 1600,
+          "high": 1600
+        },
+        "usable_area_type": "CARR estimate",
+        "usable_area_classification": "planning_assumption",
+        "net_room_square_feet": null,
+        "rentable_square_feet": null,
+        "number_types": {
+          "usable_square_feet": "CARR estimate",
+          "net_room_square_feet": "calculated example",
+          "rentable_square_feet": "calculated example",
+          "parking_ratio": "CARR estimate",
+          "parking_spaces": "calculated example"
+        },
+        "public_benchmarks": [],
+        "rooms": [
+          {
+            "room": "Treatment and hygiene operatories",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Sterilization with dirty-to-clean workflow",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Reception and waiting",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Private checkout",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Imaging if selected",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Lab or CAD/CAM if selected",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Compressor/vacuum equipment",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Clean supplies",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Staff/admin",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Toilets",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "Housekeeping",
+            "source_class": "CARR agent training"
+          },
+          {
+            "room": "IT",
+            "source_class": "CARR agent training"
+          }
+        ],
+        "parking": {
+          "ratio": 5,
+          "spaces_needed": {
+            "low": 8,
+            "high": 8
+          },
+          "type": "CARR estimate",
+          "source_class": "CARR agent training",
+          "area_basis": "Usable SF for heuristic only; confirm local denominator",
+          "status": "preliminary; local requirement unverified"
+        },
+        "due_diligence": {
+          "power": [
+            "Ask for documented service voltage, phase, panel capacity and spare circuits; have the engineer compare the selected equipment schedules.",
+            "Confirm chair, vacuum, compressor, autoclave and imaging circuits from manufacturer sheets; single-phase CBCT does not establish a need for three-phase service."
+          ],
+          "plumbing": [
+            "Ask for water, waste connections, permitted slab penetrations and accessible toilet routes; verify fixtures and workflow with the designer.",
+            "Confirm sinks near treatment positions, vacuum, compressed air, water and medical-gas routes if used."
+          ],
+          "hvac": [
+            "Ask for a project-specific commercial load and outdoor-air calculation, humidity control, zoning and after-hours operation. Mechanical capacity unverified.",
+            "Confirm clinical/business/sterilization zones. NOT COVERED: a universal independent steam-sterilization exhaust requirement is not established; identify the sterilizer/process and design heat, moisture and airflow accordingly."
+          ],
+          "parking": [
+            "Ask which spaces the practice can legally use, shared-parking restrictions, accessible routes and peak staff/patient/companion demand. Confirm the adopted ratio and its area denominator locally."
+          ],
+          "code": [
+            "Ask the permitting authority about intended use, occupancy, accessibility, egress, fire protection and licensing before committing to the site.",
+            "If nitrous is used, confirm scavenging with outdoor discharge away from air intakes, equipment compatibility, measured flow, leaks and exposure monitoring.",
+            "DISAGREE with automatic sprinkler determination from sedation alone. Sedation and recovery are an early fire-review trigger; confirm patient self-preservation, floor/exit conditions and adopted codes with the fire authority."
+          ]
+        },
+        "mechanical_capacity": "unverified"
+      }
+    }
+  },
+  {
+    "name": "positive dated Mobile occupancy estimate",
+    "tool": "estimate_occupancy_cost",
+    "input": {
+      "square_feet": 2000,
+      "market": "mobile_downtown",
+      "lease_type": "full_service"
+    },
+    "error": false,
+    "expected": {
+      "schema_version": "practice-planning/v1",
+      "calculation_version": "1.0.0",
+      "inputs_used": {
+        "square_feet": 2000,
+        "market": "mobile_downtown",
+        "lease_type": "full_service"
+      },
+      "input_classification": "owner_input",
+      "assumptions": [
+        "Every range is an estimate in USD per rentable square foot per year, or USD for the stated period.",
+        "The report is mixed general-office asking rent; 81.22% of reported asking rates are full service.",
+        "Lease-type offsets and utilities are scenario assumptions, not observed healthcare expense data."
+      ],
+      "warnings": [],
+      "missing_inputs": [],
+      "sources": [
+        {
+          "id": "owner-input",
+          "source_class": "owner input",
+          "publisher": "Owner-supplied inputs",
+          "document": "Declared tool inputs",
+          "url": null,
+          "jurisdiction": "As supplied; no independent authentication",
+          "publication_date": null,
+          "retrieved_at": null,
+          "units": "Explicit field units; SF, USD, calendar dates, months and equipment capacity as applicable",
+          "reuse_status": "Returned for this calculation only; no application storage."
+        },
+        {
+          "id": "office-rent",
+          "source_class": "published public benchmark",
+          "publisher": "Downtown Mobile Alliance",
+          "document": "Downtown Mobile Alliance Office Market Overview, year end 2024",
+          "url": "https://www.downtownmobile.org/uploads/pdf/OfficeMarketReport20247.1.2025.pdf",
+          "jurisdiction": "Design reference; local adoption unverified",
+          "publication_date": "2025-07-01",
+          "retrieved_at": "2026-10-01",
+          "units": "USD/rentable SF/year",
+          "reuse_status": "Factual citation and link only; no source prose, floorplans, or bulk dataset redistributed."
+        },
+        {
+          "id": "planning-allowances",
+          "source_class": "proposed planning allowance",
+          "publisher": "Practice Owner Planning",
+          "document": "Preliminary allowances",
+          "url": null,
+          "jurisdiction": "No code status",
+          "publication_date": "2026-10-01",
+          "retrieved_at": null,
+          "units": "As labeled per value",
+          "reuse_status": "Original planning assumptions."
+        }
+      ],
+      "limitations": [
+        "Source data are dated 2024-12-31; this is not a current quote or a medical-office market survey.",
+        "Only Downtown Mobile is supported; other Gulf Coast markets need authorized dated sources.",
+        "Excludes build-out, TI financing, equipment, deposits, moving costs, parking and practice operations; confirm lease inclusions."
+      ],
+      "notice": "Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.",
+      "results": {
+        "square_feet": 2000,
+        "market": "mobile_downtown",
+        "lease_type": "full_service",
+        "currency": "USD",
+        "value_type": "calculated example",
+        "evidence_classification": "planning_assumption",
+        "components": [
+          {
+            "component": "Base rent",
+            "annual_rate": {
+              "low": 16.88,
+              "high": 25.32
+            },
+            "annual_cost": {
+              "low": 33760,
+              "high": 50640
+            },
+            "basis": "Estimate: survey anchor times 0.8 to 1.2; source data 2024-12-31, assumptions 2026-10-01."
+          },
+          {
+            "component": "Pass-through operating costs",
+            "annual_rate": {
+              "low": 0,
+              "high": 0
+            },
+            "annual_cost": {
+              "low": 0,
+              "high": 0
+            },
+            "basis": "Estimate: bundled with base rent in this full-service scenario; verify actual inclusions. Assumption 2026-10-01."
+          },
+          {
+            "component": "Unbundled utilities",
+            "annual_rate": {
+              "low": 1,
+              "high": 3
+            },
+            "annual_cost": {
+              "low": 2000,
+              "high": 6000
+            },
+            "basis": "Estimate: original unbundled utilities allowance, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31."
+          }
+        ],
+        "annual_cost": {
+          "low": 35760,
+          "high": 56640
+        },
+        "monthly_cost": {
+          "low": 2980,
+          "high": 4720
+        },
+        "source": {
+          "title": "Downtown Mobile Alliance Office Market Overview, year end 2024",
+          "data_date": "2024-12-31",
+          "retrieved_date": "2026-10-01",
+          "observed_annual_rate": 21.1,
+          "method": "General-office mixed-service survey anchor; estimated sensitivity of minus/plus 20%. Lease allocations and utilities are original assumptions dated 2026-10-01, not observed quotes."
+        }
+      }
+    }
+  },
+  {
+    "name": "positive five-year lease versus buy assumptions",
+    "tool": "compare_lease_buy",
+    "input": {
+      "square_feet": 2000,
+      "annual_lease_rate": 25,
+      "purchase_price": 600000,
+      "down_payment_percent": 20,
+      "interest_rate_percent": 6,
+      "loan_term_years": 20,
+      "holding_years": 5,
+      "annual_owner_cost": 12000,
+      "closing_cost_percent": 3,
+      "sale_cost_percent": 6
+    },
+    "error": false,
+    "expected": {
+      "schema_version": "practice-planning/v1",
+      "calculation_version": "1.0.0",
+      "inputs_used": {
+        "square_feet": 2000,
+        "annual_lease_rate": 25,
+        "purchase_price": 600000,
+        "down_payment_percent": 20,
+        "interest_rate_percent": 6,
+        "loan_term_years": 20,
+        "holding_years": 5,
+        "annual_owner_cost": 12000,
+        "closing_cost_percent": 3,
+        "sale_cost_percent": 6
+      },
+      "input_classification": "owner_input",
+      "assumptions": [
+        "All numeric values supplied by owner; no hidden market defaults."
+      ],
+      "warnings": [],
+      "missing_inputs": [],
+      "sources": [
+        {
+          "id": "owner-input",
+          "source_class": "owner input",
+          "publisher": "Owner-supplied inputs",
+          "document": "Declared tool inputs",
+          "url": null,
+          "jurisdiction": "As supplied; no independent authentication",
+          "publication_date": null,
+          "retrieved_at": null,
+          "units": "Explicit field units; SF, USD, calendar dates, months and equipment capacity as applicable",
+          "reuse_status": "Returned for this calculation only; no application storage."
+        }
+      ],
+      "limitations": [
+        "Scenario comparison only; neither option is recommended automatically.",
+        "Assumes level lease rent, fixed-rate fully amortizing debt, no appreciation and sale at the input purchase price.",
+        "Ignores tax effects, opportunity cost, inflation, major repairs, build-out and financing eligibility; compare equivalent lease/owner cost inclusions."
+      ],
+      "notice": "Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.",
+      "results": {
+        "currency": "USD",
+        "value_type": "calculated example",
+        "evidence_classification": "planning_assumption",
+        "monthly_loan_payment": 3438.87,
+        "upfront_buy_cash": 138000,
+        "lease_total_cash": 250000,
+        "buy_total_cash_before_sale": 404332.14,
+        "remaining_loan_balance": 407518.07,
+        "net_sale_proceeds": 156481.93,
+        "buy_net_cost_after_sale": 247850.22
+      }
+    }
+  },
+  {
+    "name": "positive dental negotiable lease checklist",
+    "tool": "get_healthcare_lease_checklist",
+    "input": {
+      "practice_type": "dental"
+    },
+    "error": false,
+    "expected": {
+      "schema_version": "practice-planning/v1",
+      "calculation_version": "1.0.0",
+      "inputs_used": {
+        "practice_type": "dental"
+      },
+      "input_classification": "owner_input",
+      "assumptions": [],
+      "warnings": [],
+      "missing_inputs": [],
+      "sources": [
+        {
+          "id": "owner-input",
+          "source_class": "owner input",
+          "publisher": "Owner-supplied inputs",
+          "document": "Declared tool inputs",
+          "url": null,
+          "jurisdiction": "As supplied; no independent authentication",
+          "publication_date": null,
+          "retrieved_at": null,
+          "units": "Explicit field units; SF, USD, calendar dates, months and equipment capacity as applicable",
+          "reuse_status": "Returned for this calculation only; no application storage."
+        }
+      ],
+      "limitations": [
+        "Every term is negotiable; the checklist does not determine enforceability or replace a qualified attorney.",
+        "Verify zoning, permits, licensing and physical suitability with the relevant professionals."
+      ],
+      "notice": "Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.",
+      "results": {
+        "practice_type": "dental",
+        "items": [
+          {
+            "topic": "Tenant improvements",
+            "questions": [
+              "What TI allowance is available, when is it paid, and who covers overruns?",
+              "Who approves plans, owns improvements and handles restoration at lease end?"
+            ]
+          },
+          {
+            "topic": "Exclusivity",
+            "questions": [
+              "Can the landlord agree to a defined healthcare-use exclusivity, and what are its exceptions and remedies?"
+            ]
+          },
+          {
+            "topic": "Permitted use",
+            "questions": [
+              "Does the use clause cover the intended services and future practice changes, subject to zoning and licensing?"
+            ]
+          },
+          {
+            "topic": "Assignment and practice sale",
+            "questions": [
+              "Can the lease transfer with a practice sale or ownership change, and when is consent required?",
+              "Is the original tenant or guarantor released after an approved assignment?"
+            ]
+          },
+          {
+            "topic": "HVAC and plumbing",
+            "questions": [
+              "Can HVAC capacity, after-hours service, plumbing, electrical loads and equipment connections support the proposed medical use?",
+              "Who pays for upgrades, maintenance, repairs and replacement?"
+            ]
+          },
+          {
+            "topic": "Timing and recurring costs",
+            "questions": [
+              "When does rent start relative to delivery, permits and build-out?",
+              "Which operating costs, tax increases, utilities and capital expenses can pass through, with what caps and audit rights?"
+            ]
+          },
+          {
+            "topic": "Access and exit",
+            "questions": [
+              "What parking, accessibility, signage, renewal, casualty and early-exit terms are negotiable?"
+            ]
+          },
+          {
+            "topic": "Dental equipment",
+            "questions": [
+              "Can suction, compressed air, sterilization and chair plumbing be installed with required permits?"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "positive explicit actual-search help",
+    "tool": "get_broker_search_help",
+    "input": {
+      "request": "actual_search_help"
+    },
+    "error": false,
+    "expected": {
+      "schema_version": "practice-planning/v1",
+      "calculation_version": "1.0.0",
+      "inputs_used": {
+        "request": "actual_search_help"
+      },
+      "input_classification": "owner_input",
+      "assumptions": [],
+      "warnings": [],
+      "missing_inputs": [
+        "Verified informational page URL is not configured"
+      ],
+      "sources": [
+        {
+          "id": "owner-input",
+          "source_class": "owner input",
+          "publisher": "Owner-supplied inputs",
+          "document": "Declared tool inputs",
+          "url": null,
+          "jurisdiction": "As supplied; no independent authentication",
+          "publication_date": null,
+          "retrieved_at": null,
+          "units": "Explicit field units; SF, USD, calendar dates, months and equipment capacity as applicable",
+          "reuse_status": "Returned for this calculation only; no application storage."
+        }
+      ],
+      "limitations": [
+        "No property search, contact capture or message is performed by this tool."
+      ],
+      "notice": "Preliminary screening only. A qualified designer and the permitting authority must confirm the program and applicable requirements. Not legal, financial, or design advice.",
+      "results": {
+        "description": "CARR is a commercial real estate brokerage that represents healthcare tenants and buyers.",
+        "informational_page": null
+      }
+    }
+  },
+  {
+    "name": "negative unsolicited broker suggestion",
+    "tool": "get_broker_search_help",
+    "input": {
+      "request": "general_education"
+    },
+    "error": true,
+    "expected": {
+      "error": "Use this informational tool only after an explicit request for help with an actual property search."
+    }
+  },
+  {
+    "name": "negative unsupported market",
+    "tool": "estimate_occupancy_cost",
+    "input": {
+      "square_feet": 2000,
+      "market": "pensacola",
+      "lease_type": "full_service"
+    },
+    "error": true,
+    "expected": {
+      "error": "Unsupported planning input. Only the dated Downtown Mobile table is available; do not supply contact or listing data."
+    }
+  },
+  {
+    "name": "negative contact and licensed-listing payload",
+    "tool": "get_healthcare_lease_checklist",
+    "input": {
+      "practice_type": "medical",
+      "contact": "synthetic-forbidden-field",
+      "listing_data": "synthetic-restricted-fixture"
+    },
+    "error": true,
+    "expected": {
+      "error": "Invalid planning input. Use only the declared fields and supported numeric ranges; do not supply personal or listing data.",
+      "invalid_fields": [
+        "declared_fields"
+      ]
+    }
+  }
+]

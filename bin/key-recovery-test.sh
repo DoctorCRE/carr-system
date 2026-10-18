@@ -34,12 +34,13 @@
 # recover anything — the same class of value backups-public-key.txt already
 # carries in the repo. --set-x is never used; no key value is ever echoed.
 #
-# THE EXIT TRAP TERMINATES EXPLICITLY. A zsh trap registered on INT/TERM runs its
+# THE SIGNAL TRAPS TERMINATE EXPLICITLY. A zsh trap registered on INT/TERM runs its
 # handler and then, unless the handler calls exit itself, RESUMES the script
 # where the signal landed — it does not stop the script on its own. Verified
 # empirically while building this: a trap with no explicit exit let a script
 # finish an interrupted `sleep` and carry on to its next statement, printing a
-# second line and firing the trap a second time. cleanup() below calls
+# second line and firing the trap a second time. INT/TERM exit with their
+# signal codes and invoke cleanup() through EXIT. cleanup() below calls
 # `exit "$rc"` at its own end for exactly that reason, guarded by an idempotency
 # flag so the EXIT trap that call itself triggers cannot shred a second time or
 # write a second ops.run row.
@@ -146,7 +147,9 @@ cleanup() {
   record_run "$rc"
   exit "$rc"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ── record_run: the ONE ops.run row (Program 4). Same shape as
 # bin/restore-rehearse.sh's record_rehearsal(), a DISTINCT run_key
@@ -231,9 +234,6 @@ TYPED_KEY=""
 if [ -n "${CARR_KEY_RECOVERY_TEST_SELFTEST:-}" ]; then
   TYPED_KEY="$SELFTEST_TYPED_KEY"
   say "  (selftest hook active — reading the typed key from the test harness, not the terminal)"
-  if [ -n "${CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE:-}" ]; then
-    : # placeholder; the actual pause happens after the file is written, below
-  fi
 else
   print -n "  paper key (AGE-SECRET-KEY-...): "
   if ! read -s TYPED_KEY; then
@@ -270,18 +270,26 @@ unset TYPED_KEY
 say "  ok    written to a 600 file in a 700 dir; shredded on every exit path"
 
 if [ -n "${CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE:-}" ]; then
-  # TEST HOOK ONLY: gives a selftest a reliable window to send SIGINT and
-  # prove the identity file is gone afterward, before this script would
-  # otherwise have raced ahead into the comparison below.
-  #
-  # READY MARKER (2026-08-23 load-flake sweep). The selftest used to guess the
-  # window with a fixed sleep after spawn; under machine load that guess fired
-  # before this line was even reached and the signal landed on a script still
-  # mid-startup. The marker file is written HERE, at the pause itself, so the
-  # test signals only after the moment it is trying to interrupt actually
-  # exists — wall-clock independent by construction.
-  : > "${CARR_KEY_RECOVERY_TEST_SELFTEST_READY_FILE:-/dev/null}"
-  sleep "${CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE}"
+  # TEST HOOK ONLY. The foreground process installs its signal disposition
+  # before publishing readiness. SIGINT therefore terminates it even between
+  # publication and sleep; no future command can miss the process-group signal.
+  # Atomic publication lets callers read the pause PID as soon as the marker
+  # exists. The shell's signal trap supplies the exit code independently of
+  # whichever command was running when the signal arrived.
+  python3 - <<'PY'
+import os
+import signal
+import time
+
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+ready = os.environ.get("CARR_KEY_RECOVERY_TEST_SELFTEST_READY_FILE")
+if ready:
+    pending = ready + ".tmp"
+    with open(pending, "w", encoding="utf-8") as marker:
+        marker.write(str(os.getpid()) + "\n")
+    os.replace(pending, ready)
+time.sleep(float(os.environ["CARR_KEY_RECOVERY_TEST_SELFTEST_PAUSE_AFTER_WRITE"]))
+PY
 fi
 
 # ── PHASE 1: the decisive comparison. Does the paper key match the key that

@@ -96,7 +96,7 @@ def referenced_paths(command, repo=REPO):
     """
     facts = []
     for match in dict.fromkeys(PATH_TOKEN.findall(command)):
-        cleaned = match.lstrip("./")
+        cleaned = match[2:] if match.startswith("./") else match
         # ONE guard, not two. An earlier version also rejected anything holding
         # ".." before this line, and mutation testing showed that check could be
         # deleted with every test still green — because abspath() normalises the
@@ -104,7 +104,7 @@ def referenced_paths(command, repo=REPO):
         # defence is not free: it reads as the thing doing the work, so the line
         # that IS doing the work stops being tested by anyone's attention.
         full = os.path.join(repo, cleaned)
-        if not os.path.abspath(full).startswith(repo):
+        if os.path.commonpath((os.path.abspath(full), os.path.abspath(repo))) != os.path.abspath(repo):
             continue
         looks_like_repo_path = os.path.exists(full) or cleaned.split("/")[0] in (
             "ops", "hooks", "bin", "tools", "pipelines", "evals", "migrations",

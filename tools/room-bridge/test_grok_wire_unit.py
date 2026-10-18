@@ -33,14 +33,260 @@ def output(end=None, text="Safe Methods", before=None):
 
 
 class GrokTests(unittest.TestCase):
-    def _run_queued_grok(self, *, fail_post=False, recover_transition=False):
+    def test_default_desk_refuses_unsafe_urls_without_provider_invocation(self):
+        for url in ("https://fixture-user:fixture-secret@example.com/post",
+                    "https://example.com/post?access_token=fixture-secret",
+                    "http://127.0.0.1/source", "http://[::1]/source",
+                    "http://service.internal/source"):
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as td:
+                reg = desks.Registry(Path(td) / "desks.json")
+                grok_desk.install(reg, td)
+                provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0, output(), ""))
+                execute = grok_wire.run_task
+                with mock.patch.object(grok_wire, "run_task", side_effect=
+                        lambda e, t: execute(e, t, run=provider)):
+                    result = dispatch.dispatch("grok-desk", "Explain " + url,
+                        registry=reg, results_path=Path(td) / "results.jsonl")
+                self.assertEqual((result["status"], result["code"], result.get("detail")),
+                                 ("failed", 6, "invalid_retrieval_url"))
+                provider.assert_not_called()
+                self.assertNotIn("fixture-user", json.dumps(result["receipt"]))
+                self.assertNotIn("fixture-secret", json.dumps(result["receipt"]))
+
+    def test_linked_explanation_remains_prose_through_model_room(self):
+        with tempfile.TemporaryDirectory() as td:
+            reg = desks.Registry(Path(td) / "desks.json")
+            entry = grok_desk.install(reg, td)
+            provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0,
+                output(text="409 means conflict."), ""))
+            turns = []
+            execute = grok_wire.run_task
+            with mock.patch.object(grok_wire, "run_task", side_effect=
+                    lambda e, t: execute(e, t, run=provider)):
+                result = bridge.deliver("grok-desk", entry, "grok", {
+                    "body": "Explain HTTP 409; see https://www.rfc-editor.org/rfc/rfc9110",
+                    "seat": "claude", "msg_id": "explanation", "seq": 43}, state={},
+                    registry=reg, results_path=Path(td) / "results.jsonl",
+                    add_room_turn=lambda **kw: turns.append(kw))
+            self.assertEqual(result["outcome"], "replied_sync")
+            self.assertEqual(turns[-1]["body"], "409 means conflict.")
+
+    def test_markdown_and_uppercase_urls_preserve_balanced_path(self):
+        self.assertEqual(grok_wire.requested_urls(
+            "Read `https://example.com/post` and **https://example.com/a**! "
+            "and https://en.wikipedia.org/wiki/Foo_(bar) and HTTPS://EXAMPLE.COM/x"),
+            ["https://example.com/post", "https://example.com/a",
+             "https://en.wikipedia.org/wiki/Foo_(bar)", "HTTPS://EXAMPLE.COM/x"])
+
+    def test_fenced_and_normalized_source_evidence_is_accepted(self):
+        url = "https://example.com"
+        for fence in (False, True):
+            text = json.dumps({"retrieval": {"requested_urls": [url + "/"],
+                "source_urls": [url + "/"], "sources": [{"url": url + "/", "text": "Source"}],
+                "unresolved_portions": [], "status": "complete"}})
+            if fence:
+                text = "```json\n" + text + "\n```"
+            result = grok_wire.parse_result(output(text=text), 0, urls=[url])
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["retrieval"]["status"], "complete")
+
+    def test_unrelated_or_self_written_artifact_never_counts_as_source(self):
+        url = "https://example.com/source"
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "README.md").write_text("unrelated repo readme")
+            text = json.dumps({"retrieval": {"requested_urls": [url], "source_urls": [url],
+                "sources": [{"url": url, "artifact": "README.md"}],
+                "unresolved_portions": [], "status": "complete"}})
+            result = grok_wire.parse_result(output(text=text), 0, urls=[url])
+            self.assertEqual(result["detail"], "unusable_retrieval")
+
+    def test_query_credentials_and_nonpublic_hosts_are_refused(self):
+        for url in ("https://example.com/?access_token=SECRET",
+                    "https://bucket.s3.amazonaws.com/f?X-Amz-Signature=abc",
+                    "https://example.com/?api%5fkey=SECRET", "http://localhost/source",
+                    "http://127.0.0.1/x", "http://169.254.169.254/latest/meta-data",
+                    "http://[::1]/x", "http://10.0.0.1/x"):
+            with self.subTest(url=url):
+                self.assertFalse(grok_wire.public_url(url))
+                self.assertEqual(grok_wire.retrieval_request_error([url])["detail"],
+                                 "invalid_retrieval_url")
+
+    def test_parser_retains_exit_code_for_every_failure(self):
+        for raw, expected in ((output(), 0), (output(end={**END, "stopReason": "cancelled"}), 4),
+                (output(end={**END, "modelUsage": {"wrong": {"modelCalls": 1}}}), 5),
+                (output(text="Acknowledged"), 6)):
+            result = grok_wire.parse_result(raw, 0, urls=["https://example.com"] if expected == 6 else None)
+            self.assertEqual(result["code"], expected)
+
+    def test_dispatch_explicitly_opts_into_retrieval_without_receipt_env_coupling(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                "HOME": td, "GROK_RUN_RECEIPT": str(Path(td) / "runner.json")}):
+            reg = desks.Registry(Path(td) / "desks.json")
+            grok_desk.install(reg, td)
+            provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0,
+                output(text=self.source_result()), ""))
+            execute = grok_wire.run_task
+            with mock.patch.object(grok_wire, "run_task", side_effect=
+                    lambda e, t, **kw: execute(e, t, run=provider, **kw)):
+                result = dispatch.dispatch("grok-desk", "Read https://example.com/post",
+                    registry=reg, results_path=Path(td) / "results.jsonl", retrieval=True)
+            self.assertEqual(result["retrieval"]["status"], "complete")
+            self.assertFalse((Path(td) / "runner.json").exists())
+            self.assertTrue(Path(result["diagnostic_path"]).is_file())
+
+    def test_receipt_never_copies_structured_provider_diagnostics(self):
+        private = {"diagnostic": "fixture-private-token"}
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {"HOME": td}):
+            result = grok_wire.run_task(ENTRY, "Read https://example.com/post", retrieval=True,
+                run=lambda *a, **kw: subprocess.CompletedProcess([], 0,
+                    output(end={**END, "total_cost_usd": private, "num_turns": private},
+                           text=self.source_result()), ""))
+            receipt = Path(result["diagnostic_path"]).read_text()
+            self.assertNotIn("fixture-private-token", receipt)
+            self.assertIsNone(json.loads(receipt)["cost_usd"])
+
+
+    def test_credential_url_is_refused_without_invocation_or_secret_diagnostics(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                "HOME": td}):
+            provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0,
+                output(text="No further action."), ""))
+            result = grok_wire.run_task(ENTRY,
+                "Retrieve https://fixture-user:fixture-secret@example.com/post", retrieval=True, run=provider)
+            self.assertEqual(result["detail"], "invalid_retrieval_url")
+            provider.assert_not_called()
+            diagnostics = json.dumps(result) + Path(result["diagnostic_path"]).read_text()
+            self.assertNotIn("fixture-user", diagnostics)
+            self.assertNotIn("fixture-secret", diagnostics)
+
+    def retrieval(self, text, *, end=None):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                "HOME": td}):
+            (Path(td) / "post.txt").write_text("Original post text")
+            result = grok_wire.run_task({**ENTRY, "cwd": td}, "Retrieve post, thread and quoted source: https://example.com/post",
+                run=lambda *a, **k: subprocess.CompletedProcess([], 0, output(end=end, text=text),
+                    "Authorization: Bearer private-token"), retrieval=True)
+            receipt = json.loads(Path(result["diagnostic_path"]).read_text())
+            self.assertEqual(Path(result["diagnostic_path"]).stat().st_mode & 0o777, 0o600)
+        self.assertNotIn("private-token", json.dumps(receipt))
+        self.assertEqual(receipt["sandbox"], "read-only")
+        self.assertEqual(receipt["effort"], "high")
+        self.assertEqual(len(receipt["task_sha256"]), 64)
+        return result, receipt
+
+    def source_result(self, **changes):
+        url = "https://example.com/post"
+        return json.dumps({"retrieval": {"requested_urls": [url], "source_urls": [url],
+            "sources": [{"url": url, "text": "Original post text", "artifact": "post.txt"}],
+            "unresolved_portions": [], "status": "complete", **changes}})
+
+    def test_completed_acknowledgment_is_unusable_retrieval(self):
+        result, receipt = self.retrieval("No further action.")
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["detail"], "unusable_retrieval")
+        self.assertEqual(result["retrieval"]["status"], "unusable_retrieval")
+        self.assertIn("canonical", result["next_route"])
+        self.assertEqual(result["provider_metadata"]["actual_model"], "grok-4.7-build")
+        self.assertEqual(receipt["detail"], "unusable_retrieval")
+
+    def test_partial_thread_stays_partial_and_retains_evidence(self):
+        result, receipt = self.retrieval(self.source_result(unresolved_portions=["quoted source unavailable"]))
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["retrieval"]["status"], "partial")
+        self.assertEqual(result["retrieval"]["unresolved_portions"], ["quoted source unavailable"])
+        self.assertEqual(receipt["retrieval_status"], "partial")
+
+    def test_valid_source_identifies_artifacts_and_urls(self):
+        result, _ = self.retrieval(self.source_result())
+        self.assertEqual(result["retrieval"]["status"], "complete")
+        self.assertEqual(result["retrieval"]["sources"][0]["text"], "Original post text")
+        self.assertNotIn("artifact", result["retrieval"]["sources"][0])
+        self.assertEqual(result["retrieval"]["source_urls"], ["https://example.com/post"])
+
+    def test_nonempty_prose_unrelated_source_and_bad_shape_are_unusable(self):
+        for text in ("I retrieved everything at https://example.com/post", self.source_result(sources=[]),
+                self.source_result(requested_urls=["https://example.com"]),
+                self.source_result(sources=[{"url": "https://example.com", "text": "Other source"}]),
+                self.source_result(sources=[{"url": "https://example.com/post"}]),
+                self.source_result(source_urls="https://example.com/post"),
+                self.source_result(status=[])):
+            with self.subTest(text=text):
+                result, _ = self.retrieval(text)
+                self.assertEqual(result["detail"], "unusable_retrieval")
+
+    def test_receipt_write_failure_refuses_completion_without_echoing_error(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                "HOME": td}), mock.patch.object(grok_wire, "write_receipt", side_effect=OSError("private-token")):
+            result = grok_wire.run_task(ENTRY, "Retrieve https://example.com/post",
+                run=lambda *a, **k: subprocess.CompletedProcess([], 0, output(text=self.source_result()), ""), retrieval=True)
+        self.assertEqual(result["detail"], "grok_receipt_unavailable")
+        self.assertEqual(result["status"], "failed")
+
+    def test_retrieval_contract_never_overrides_provider_failure(self):
+        result, _ = self.retrieval(self.source_result(), end={**END, "modelUsage": {"grok-4.6": {"modelCalls": 1}}})
+        self.assertEqual(result["detail"], "grok_provider_model_mismatch")
+        self.assertEqual(result["status"], "failed")
+
+    def test_artifact_only_source_is_always_refused(self):
+        url = "https://example.com/post"
+        result, _ = self.retrieval(self.source_result(sources=[{"url": url, "artifact": "post.txt"}]))
+        self.assertEqual(result["detail"], "unusable_retrieval")
+        for artifact in ("missing.txt", "../outside.txt", "/etc/hosts"):
+            result, _ = self.retrieval(self.source_result(sources=[{"url": url, "artifact": artifact}]))
+            self.assertEqual(result["detail"], "unusable_retrieval")
+
+    def test_partial_multiple_urls_marks_unretrieved_requested_source(self):
+        urls = ["https://example.com/post", "https://example.com/article"]
+        text = self.source_result(requested_urls=urls, sources=[{"url": urls[0], "text": "Source"}])
+        result = grok_wire.parse_result(output(text=text), 0, urls=urls)
+        self.assertEqual(result["retrieval"]["status"], "partial")
+        self.assertEqual(result["retrieval"]["unresolved_portions"], [urls[1]])
+
+    def test_transport_failures_preserve_safe_receipts(self):
+        for error, detail in ((FileNotFoundError("private-token"), "grok_cli_unavailable"),
+                (subprocess.TimeoutExpired("private-token", 180), "grok_cli_timeout")):
+            with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                    "HOME": td}):
+                provider = mock.Mock(side_effect=error)
+                result = grok_wire.run_task(ENTRY, "Retrieve https://example.com/source", retrieval=True, run=provider)
+                receipt = Path(result["diagnostic_path"]).read_text()
+            self.assertEqual(result["detail"], detail)
+            self.assertNotIn("private-token", receipt)
+
+    def test_model_room_failure_publishes_repair_route_and_diagnostic_path(self):
+        with tempfile.TemporaryDirectory() as td, mock.patch.dict(os.environ, {
+                "HOME": td}):
+            reg = desks.Registry(Path(td) / "desks.json")
+            entry = grok_desk.install(reg, td)
+            provider = mock.Mock(return_value=subprocess.CompletedProcess([], 0,
+                output(text="No further action."), "private-token"))
+            execute = grok_wire.run_task
+            turns = []
+            with mock.patch.object(grok_wire, "run_task", side_effect=lambda e, t: execute(e, t, retrieval=True, run=provider)):
+                result = bridge.deliver("grok-desk", entry, "grok", {
+                    "body": "Retrieve https://example.com/post", "seat": "claude",
+                    "msg_id": "source-message", "seq": 42}, state={}, registry=reg,
+                    results_path=Path(td) / "results.jsonl", add_room_turn=lambda **kw: turns.append(kw))
+            self.assertEqual(result["outcome"], "failed:failed")
+            receipt = json.loads(turns[-1]["body"])
+            self.assertEqual(receipt["detail"], "unusable_retrieval")
+            self.assertIn("canonical", receipt["next_route"])
+            self.assertTrue(Path(receipt["diagnostic_path"]).is_file())
+            self.assertNotIn("private-token", json.dumps(turns))
+
+    def _run_queued_grok(self, *, fail_post=False, recover_transition=False, retrieval=False):
         answer = "Safe methods: https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.1"
+        url = "https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.1"
+        if retrieval:
+            answer = json.dumps({"retrieval": {"requested_urls": [url],
+                "sources": [{"url": url, "text": "Safe Methods"}], "source_urls": [url],
+                "unresolved_portions": [], "status": "complete"}})
         protocol = 'CARR_QUEUE_RESULT {"v":1,"task_id":"t_grok0001","outcome":"success","summary":"Retrieved RFC."}'
         meta = {"v": 1, "target": "grok", "cap": "read", "finish": "done",
                 "source_seq": 42, "source_msg_id": "source-message"}
         card = {"id": "t_grok0001", "status": "ready", "assignee": "desk:grok-desk",
                 "created_at": 1, "title": "Retrieve RFC",
-                "body": f"[CARR_QUEUE_META {json.dumps(meta)}]\nRetrieve safe methods."}
+                "body": f"[CARR_QUEUE_META {json.dumps(meta)}]\nRetrieve safe methods." + (" " + url if retrieval else "")}
         catalog = kanban_adapter.load_catalog()
         adapter = FakeAdapter([card])
         adapter.reconcile_disabled_targets = lambda _catalog: {
@@ -85,7 +331,8 @@ class GrokTests(unittest.TestCase):
                     lambda entry, task: run_task(entry, task, run=provider)), \
                     mock.patch.object(subprocess, "Popen", side_effect=AssertionError("live process denied")), \
                     mock.patch.object(socket.socket, "connect", side_effect=AssertionError("live network denied")), \
-                    mock.patch.dict(os.environ, {"CARR_ENGINEERING_DISPATCH_ENABLED": "false"}):
+                    mock.patch.dict(os.environ, {"CARR_ENGINEERING_DISPATCH_ENABLED": "false",
+                        "GROK_RUN_RECEIPT": str(root / "retrieval-receipt.json")}):
                 def cycle(executor):
                     return bridge.run_once(
                         registry=reg, state_path=root / "state.json", results_path=root / "results.jsonl",
@@ -124,6 +371,14 @@ class GrokTests(unittest.TestCase):
         self.assertEqual(completions[0]["idempotency_key"], "queue-completion:t_grok0001")
         self.assertEqual(adapter.status["t_grok0001"], "done")
 
+    def test_queued_url_retrieval_preserves_existing_completion_protocol(self):
+        summary, _row, adapter, posted, _answer = self._run_queued_grok(retrieval=True)
+        self.assertEqual(summary["errors"], [])
+        self.assertEqual(adapter.status["t_grok0001"], "done")
+        callback = next(json.loads(p["body"])["queue_completion"] for p in posted
+            if "queue_completion" in json.loads(p["body"]))
+        self.assertEqual(json.loads(callback["reply"])["retrieval"]["status"], "complete")
+
     def test_queued_publication_failure_keeps_the_claim_nonterminal(self):
         summary, _row, adapter, posted, _answer = self._run_queued_grok(fail_post=True)
         self.assertEqual(summary["errors"], [{
@@ -151,6 +406,54 @@ class GrokTests(unittest.TestCase):
         self.assertEqual(result["provider_metadata"]["actual_model"], "grok-4.7-build")
         self.assertEqual(result["provider_metadata"]["request_id"], "provider-request")
 
+    def test_recorded_turns_return_only_the_final_assistant_message(self):
+        fixture = Path(__file__).resolve().parents[2] / "ops/fixtures/grok-run/live-ok.ndjson"
+        result = grok_wire.parse_result(fixture.read_text(), 0)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["result"], "OK")
+
+    def test_final_message_keeps_chunks_and_intentional_repeated_text(self):
+        raw = output(text="Final Final", before=[
+            {"type": "text", "data": "Earlier answer"},
+            {"type": "usage", "usage": {"output_tokens": 2}},
+            {"type": "available_commands", "tools": []},
+            {"type": "thought", "data": "Private reasoning"},
+            {"type": "text", "data": "Final chunk: "},
+        ])
+        result = grok_wire.parse_result(raw, 0)
+        self.assertEqual(result["result"], "Final chunk: Final Final")
+
+    def test_usage_after_final_text_does_not_erase_the_answer(self):
+        raw = "\n".join(json.dumps(e) for e in [
+            {"type": "text", "data": "Final answer"},
+            {"type": "usage", "usage": {"output_tokens": 2}}, END])
+        self.assertEqual(grok_wire.parse_result(raw, 0)["result"], "Final answer")
+
+    def test_accounting_after_response_boundary_preserves_completed_answer(self):
+        for boundary in ({"messageId": "response", "stopReason": "end_turn"}, {}):
+            with self.subTest(boundary=boundary):
+                raw = "\n".join(json.dumps(e) for e in [
+                    {"type": "text", "data": "Final answer"},
+                    {"type": "usage", **boundary, "usage": {"output_tokens": 2}},
+                    {"type": "usage", "usage": {"output_tokens": 2}},
+                    {"type": "usage", "usage": {"output_tokens": 2}}, END])
+                parsed = grok_wire.parse_stream(raw.splitlines())
+                self.assertEqual(parsed["code"], 0)
+                self.assertEqual(parsed["text"], "Final answer")
+                result = grok_wire.parse_result(raw, 0)
+                self.assertEqual(result["status"], "completed")
+                self.assertEqual(result["result"], "Final answer")
+
+    def test_explicit_empty_response_does_not_reuse_an_earlier_answer(self):
+        raw = "\n".join(json.dumps(e) for e in [
+            {"type": "text", "data": "Earlier answer"},
+            {"type": "usage", "messageId": "earlier"},
+            {"type": "usage", "messageId": "empty-final", "stopReason": "end_turn"},
+            {"type": "usage", "usage": {"output_tokens": 0}}, END])
+        result = grok_wire.parse_result(raw, 0)
+        self.assertEqual((result["status"], result["detail"], result["code"]),
+                         ("failed", "grok_empty_result", 4))
+
     def test_refuses_absent_mismatched_mixed_and_incomplete_metadata(self):
         for models in (None, {}, {"grok-4.6": {"modelCalls": 1}},
                        {**END["modelUsage"], "grok-4.7-build-fast": {"modelCalls": 1}}):
@@ -176,7 +479,7 @@ class GrokTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--output-format")+1], "streaming-json")
         self.assertEqual(options["stdin"], subprocess.DEVNULL)
         self.assertEqual(options["timeout"], 180)
-        self.assertNotIn("diagnostic", json.dumps(result))
+        self.assertNotIn("private-token", json.dumps(result))
         for error, status in ((FileNotFoundError(), "failed"), (subprocess.TimeoutExpired("grok", 180), "timed_out")):
             def fail(*a, **k):
                 raise error

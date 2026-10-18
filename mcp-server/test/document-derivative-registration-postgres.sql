@@ -617,6 +617,15 @@ SELECT pg_temp.f01ds_assert(
 -- starts requiring a registry, this fixture fails and says so.
 -- ===========================================================================
 
+-- The production creator now revokes the ambient PUBLIC EXECUTE default.
+-- These disposable assertion helpers have two explicit fixture callers.
+DO $fixture_helper_grants$
+BEGIN
+  EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO carr_writer, carr_reader',
+                 pg_my_temp_schema()::regnamespace::text);
+END;
+$fixture_helper_grants$;
+
 SET SESSION AUTHORIZATION carr_writer;
 SELECT set_config('carr.acting_actor_slug', 'codex', false);
 

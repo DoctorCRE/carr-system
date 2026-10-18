@@ -46,6 +46,82 @@ const issueBody = { projection_id: projectionId, token_digest: digest, permissio
 const searchBody = { query: null, counties: ["Escambia"], property_types: [], min_square_feet: null,
   max_square_feet: null, availability: [], entrance_verified: null, public_projection_ready: null,
   photos_available: null, sort: "updated_desc", cursor: null, limit: 25 };
+const appointmentBody = (start, end) => ({ idempotency_key: routeId, route_version_id: routeId, property_id: stopA,
+  route_sequence: 1, route_label: "A", stop_state: "active", appointment_start: start, appointment_end: end,
+  locked_appointment: true, dwell_minutes: 20, buffer_minutes: 5,
+  access_coordinate_status: "approved", assertion_set_digest: digest });
+
+test("HTTP rejects reversed microsecond windows before writes and preserves valid windows", async t => {
+  for (const [name, start, end, valid] of [
+    ["reversed", "2026-10-01T14:00:00.123999Z", "2026-10-01T14:00:00.123001Z", false],
+    ["equal across offsets", "2026-10-01T09:00:00.123456-05:00", "2026-10-01T14:00:00.123456Z", true],
+    ["increasing", "2026-10-01T14:00:00.123001Z", "2026-10-01T14:00:00.123002Z", true],
+    ["reversed across offsets", "2026-10-01T09:00:00.123999-05:00", "2026-10-01T14:00:00.123001Z", false],
+    ["reversed before epoch", "1969-12-31T23:59:59.999999Z", "1969-12-31T23:59:59.999998Z", false],
+    ["increasing across epoch", "1969-12-31T23:59:59.999999Z", "1970-01-01T00:00:00.000001Z", true],
+    ["reversed distant date", "9999-10-01T14:00:00.123999Z", "9999-10-01T14:00:00.123998Z", false],
+  ]) await t.test(name, async () => {
+    const calls = [], body = appointmentBody(start, end);
+    const surface = handler({ appendRouteStopFn: async context => {
+      calls.push(context.input); return { ok: true, data: { route_stop_id: stopA } };
+    } });
+    const response = await surface.fetch(request("/api/tours/route-stop", {
+      method: "POST", headers: postHeaders, body: JSON.stringify(body),
+    }), { APP_HOST: "app.doctorcre.com" }, {}, ACTOR, SESSION);
+    assert.equal(response.status, valid ? 200 : 400, await response.text());
+    assert.deepEqual(calls, valid ? [body] : []);
+  });
+});
+
+test("HTTP appointment timestamps respect PostgreSQL offset and year boundaries", async t => {
+  for (const [name, start, end, valid] of [
+    ["positive offset boundary", "2026-10-01T14:00:00.123456+15:59", "2026-10-01T14:00:00.123457+15:59", true],
+    ["negative offset boundary", "2026-10-01T14:00:00.123456-15:59", "2026-10-01T14:00:00.123457-15:59", true],
+    ["first AD year", "0001-10-01T14:00:00Z", "0001-10-01T14:30:00Z", true],
+    ["last four-digit year", "9999-10-01T14:00:00Z", "9999-10-01T14:30:00Z", true],
+    ["positive offset overflow", "2026-10-01T14:00:00+16:00", "2026-10-01T14:30:00+16:00", false],
+    ["negative offset overflow", "2026-10-01T14:00:00-16:00", "2026-10-01T14:30:00-16:00", false],
+    ["minute overflow", "2026-10-01T14:00:00+15:60", "2026-10-01T14:30:00+15:60", false],
+    ["year zero", "0000-10-01T14:00:00Z", "0000-10-01T14:30:00Z", false],
+    ["extended year", "+010000-10-01T14:00:00Z", "+010000-10-01T14:30:00Z", false],
+  ]) await t.test(name, async () => {
+    const calls = [], body = appointmentBody(start, end);
+    const surface = handler({ appendRouteStopFn: async context => {
+      calls.push(context.input); return { ok: true, data: { route_stop_id: stopA } };
+    } });
+    const inputs = valid ? [body] : ["appointment_start", "appointment_end"].map(field =>
+      ({ ...appointmentBody("2026-10-01T14:00:00Z", "2026-10-01T14:30:00Z"), [field]: body[field] }));
+    for (const input of inputs) {
+      const response = await surface.fetch(request("/api/tours/route-stop", {
+        method: "POST", headers: postHeaders, body: JSON.stringify(input),
+      }), { APP_HOST: "app.doctorcre.com" }, {}, ACTOR, SESSION);
+      assert.equal(response.status, valid ? 200 : 400, await response.text());
+      assert.deepEqual(calls, valid ? [body] : []);
+    }
+  });
+});
+
+test("revised route save accepts unchanged PostgreSQL appointment timestamps", async () => {
+  const calls = [];
+  const surface = handler({ appendRouteStopFn: async context => {
+    calls.push(context.input); return { ok: true, data: { route_stop_id: stopA } };
+  } });
+  for (const [start, end] of [
+    ["2026-10-01T14:00:00+00:00", "2026-10-01T14:30:00+00:00"],
+    ["2026-10-01T09:00:00.123456-05:00", "2026-10-01T09:30:00.123456-05:00"],
+    ["2026-10-02T00:00:00+10:00", "2026-10-02T00:30:00+10:00"],
+  ]) {
+    const body = { idempotency_key: routeId, route_version_id: routeId, property_id: stopA,
+      route_sequence: 1, route_label: "A", stop_state: "active", appointment_start: start,
+      appointment_end: end, locked_appointment: true, dwell_minutes: 20, buffer_minutes: 5,
+      access_coordinate_status: "approved", assertion_set_digest: digest };
+    const response = await surface.fetch(request("/api/tours/route-stop", {
+      method: "POST", headers: postHeaders, body: JSON.stringify(body),
+    }), { APP_HOST: "app.doctorcre.com" }, {}, ACTOR, SESSION);
+    assert.equal(response.status, 200, await response.text());
+    assert.deepEqual(calls.at(-1), body, "preserve the instant and PostgreSQL microseconds");
+  }
+});
 
 test("authenticated property search and versioned cart keep exact tenant-safe contracts", async () => {
   const calls = [];
@@ -79,6 +155,33 @@ test("authenticated property search and versioned cart keep exact tenant-safe co
   assert.equal((await surface.fetch(request("/api/tours/properties/search", { method: "POST", headers: { ...postHeaders, "x-carr-csrf": "wrong" }, body: JSON.stringify(searchBody) }), env, {}, ACTOR, SESSION)).status, 403);
 });
 
+test("property evidence, property search, and selection cart coexist behind the authenticated Tour adapter", async () => {
+  const seen = [];
+  const capture = seam => async context => {
+    seen.push({ seam, ...context });
+    return { ok: true, data: { available: true } };
+  };
+  const surface = handler({
+    readPropertyEvidenceFn: capture("evidence"), searchTourPropertiesFn: capture("search"),
+    readTourSelectionCartFn: capture("cart-read"), appendTourSelectionCartVersionFn: capture("cart-write"),
+  });
+  const env = { APP_HOST: "app.doctorcre.com" };
+  const calls = [
+    ["evidence", `/api/tours/property-evidence/v1?property_id=${tourId}&as_of=2026-09-29T12%3A00%3A00.000Z`, {}],
+    ["search", "/api/tours/properties/search", { method: "POST", headers: postHeaders, body: JSON.stringify({ query: "medical", counties: [], property_types: [], min_square_feet: null, max_square_feet: null, availability: [], entrance_verified: null, public_projection_ready: null, photos_available: null, sort: "address_asc", cursor: null, limit: 20 }) }],
+    ["cart-read", `/api/tours/selection-cart?tour_id=${tourId}`, {}],
+    ["cart-write", "/api/tours/selection-cart", { method: "POST", headers: postHeaders, body: JSON.stringify({ tour_id: tourId, base_selection_version_id: null, expected_selection_version: 0, property_ids: [stopA], selection_digest: digest, idempotency_key: grantId }) }],
+  ];
+  for (const [seam, path, options] of calls) {
+    assert.equal(isTourInternalRequest(request(path, options)), true, seam);
+    assert.equal((await surface.fetch(request(path, options), env, {}, ACTOR, SESSION)).status, 200, seam);
+    assert.equal(seen.at(-1).seam, seam);
+    assert.deepEqual(seen.at(-1).actor, ACTOR);
+    assert.equal((await surface.fetch(request(path, options), env, {}, undefined, undefined)).status, 401, seam);
+  }
+  assert.deepEqual(seen.map(call => call.seam), calls.map(([seam]) => seam));
+});
+
 test("internal Tour surface requires an injected authenticated actor and CSRF session", async () => {
   const surface = handler(); const assets = new Assets();
   for (const args of [[undefined, undefined], [ACTOR, undefined], [{}, SESSION]]) {
@@ -87,6 +190,39 @@ test("internal Tour surface requires an injected authenticated actor and CSRF se
   }
   assert.equal((await surface.fetch(request("/tours"), { APP_HOST: "app.doctorcre.com", ASSETS: assets }, {}, ACTOR, SESSION)).status, 200);
   assert.deepEqual(assets.paths, ["/tours/index.html"]);
+});
+
+test("versioned property evidence read accepts only a property and as-of time in the authenticated session", async () => {
+  const seen = [];
+  const surface = handler({ readPropertyEvidenceFn: async context => {
+    seen.push(context);
+    return { ok: true, data: { schema: "tour-property-evidence.v1", property_id: tourId, facts: {} } };
+  } });
+  const env = { APP_HOST: "app.doctorcre.com", ASSETS: new Assets() };
+  const asOf = "2026-09-29T12:00:00.000Z";
+  const path = `/api/tours/property-evidence/v1?property_id=${tourId}&as_of=${encodeURIComponent(asOf)}`;
+  assert.equal((await surface.fetch(request(path), env, {}, ACTOR, SESSION)).status, 200);
+  assert.deepEqual(seen[0].input, { property_id: tourId, as_of: asOf });
+  assert.deepEqual(seen[0].actor, ACTOR);
+  assert.equal((await surface.fetch(request(`${path}&tenant=other`), env, {}, ACTOR, SESSION)).status, 400);
+  assert.equal((await surface.fetch(request(`/api/tours/property-evidence/v1?property_id=${tourId}&as_of=bad`), env, {}, ACTOR, SESSION)).status, 400);
+  assert.equal((await surface.fetch(request(path), env, {}, undefined, undefined)).status, 401);
+  assert.equal((await surface.fetch(request(path, { method: "POST" }), env, {}, ACTOR, SESSION)).status, 405);
+});
+
+test("property panel module and stylesheet are served through the authenticated Tour asset gate", async () => {
+  const paths = [];
+  const env = { APP_HOST: "app.doctorcre.com", ASSETS: { async fetch(assetRequest) {
+    paths.push(new URL(assetRequest.url).pathname);
+    return new Response("panel asset", { status: 200 });
+  } } };
+  const surface = handler();
+  for (const path of ["/tours/property-panel.js", "/tours/property-panel.css"]) {
+    assert.equal(isTourInternalRequest(request(path)), true);
+    assert.equal((await surface.fetch(request(path), env, {}, ACTOR, SESSION)).status, 200);
+    assert.equal((await surface.fetch(request(path), env, {}, undefined, undefined)).status, 401);
+  }
+  assert.deepEqual(paths, ["/tours/property-panel.js", "/tours/property-panel.css"]);
 });
 
 test("exact routes, methods, CSRF, and JSON bodies remain bounded", async () => {
@@ -137,8 +273,8 @@ test("static shell has no raw-token persistence/logging and stays in dealroom/to
   assert.match(js, /state\.cheatDirty \? "Unsaved changes"/);
   assert.match(js, /#cheat-content"\)\.addEventListener\("input"/);
   assert.match(js, /if \(!state\.cheatDirty \|\| state\.cheatDraftTourId !== tour\.id\)/);
-  assert.doesNotMatch(html, /value="(?:download_pdf|comment|react)"/);
-  assert.match(html, /future governed scope amendment/);
+  assert.doesNotMatch(html, /value="(?:download_pdf|react)"/);
+  assert.match(html, /Shortlist and Comment let the client mark preferred properties/);
   assert.match(css, /#002F6C/); assert.match(css, /#F57F29/);
   for (const source of [js, handlerSource]) { assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|console\.(?:log|warn|error)/); }
   assert.doesNotMatch(handlerSource, /\/api\/v1/);
@@ -162,6 +298,7 @@ test("known optimistic races remain conflicts rather than service outages", asyn
     "tour route preparation refuses stale state",
     "route version refuses concurrent or stale route state",
     "route acceptance refuses concurrent or stale route state",
+    "route acceptance refuses changed draft contents",
     "cheat sheet revision refuses concurrent or stale version",
     "cheat sheet restore refuses unavailable or stale revision",
     "tour selection refuses stale version",

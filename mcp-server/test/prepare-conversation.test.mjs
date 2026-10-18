@@ -37,6 +37,7 @@ class ConversationFake {
         ? [{ subject_id: "deal-uuid", display_name: this.deals[0].name }]
         : [] };
     if (sql.includes("from v_subject_timeline")) return { rows: this.timeline };
+    if (sql.includes("from tool_call t join activity a")) return { rows: [] };
 
     if (sql.startsWith("with n as (")) return { rows: this.graphNodes };
     if (sql.includes("where (from_ref is null or to_ref is null)")) return { rows: [] };

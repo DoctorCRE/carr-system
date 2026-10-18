@@ -1,0 +1,88 @@
+{
+  "comments": [],
+  "commits": [
+    {
+      "authoredDate": "2026-10-04T03:13:01Z",
+      "authors": [
+        {
+          "email": "fixture-author-0@example.invalid",
+          "id": "MDQ6VXNlcjY0MjA3Mzc0",
+          "login": "jbookout",
+          "name": "jbookout"
+        },
+        {
+          "email": "fixture-author-1@example.invalid",
+          "id": "MDQ6VXNlcjgxODQ3",
+          "login": "claude",
+          "name": "Claude Opus 5.5"
+        }
+      ],
+      "committedDate": "2026-10-04T05:34:54Z",
+      "messageBody": "\u2026edger stays a prefix\n\nPR #1498 merged 0783_deal_timeline_lease_read.sql after the 6c346181 worker\nrelease (run 20261003T220008Z-fc609c) had already applied 0785, 0786 and 0787\nto staging and production. The applied ledger (..., 0782, 0785, 0786, 0787)\nwas then no longer a prefix of the source tree (..., 0782, 0783, 0785, ...),\nso the 98080b3c release stopped at staging-prepare with \"partial candidate\nledger is not an exact source prefix\". tools/migrate.py's applied-ledger\ncheck would refuse the same reorder in production. 0783 applied nowhere.\n\nSame shape and fix as #1464 (0757 -> 0763) and #1500 (0769/0770 -> 0785/0786).\n0798 reserved via tools/reserve-migration.py. The file moves unchanged (same\nbytes); the only other edit repoints the local-deals-store test at the new\npath.\n\nCo-Authored-By: Claude Opus 5.5 <fixture-author@example.invalid>",
+      "messageHeadline": "Renumber the deal-timeline lease read migration 0783 -> 0798 so the l\u2026",
+      "oid": "2dcc0fd51c5139dca1d2e648a7e7392e5e1c1a6e"
+    }
+  ],
+  "headRefName": "worktree-fix-0783-ledger-prefix",
+  "headRefOid": "2dcc0fd51c5139dca1d2e648a7e7392e5e1c1a6e",
+  "isDraft": false,
+  "mergeStateStatus": "DIRTY",
+  "mergeable": "CONFLICTING",
+  "number": 1510,
+  "reviews": [],
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-04T06:50:37Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jbookout/carr-system/actions/runs/37183744906/job/111381305303",
+      "name": "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
+      "startedAt": "2026-10-04T06:45:42Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-04T07:04:17Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jbookout/carr-system/actions/runs/37183744898/job/111381305293",
+      "name": "local-db-ci --class migration",
+      "startedAt": "2026-10-04T06:45:42Z",
+      "status": "COMPLETED",
+      "workflowName": "DB acceptance"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-04T06:57:40Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jbookout/carr-system/actions/runs/37183744906/job/111381305423",
+      "name": "ops/ci.sh --strict --only gates",
+      "startedAt": "2026-10-04T06:45:42Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-04T07:06:03Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jbookout/carr-system/actions/runs/37183744906/job/111381305395",
+      "name": "ops/ci.sh --strict --only migration",
+      "startedAt": "2026-10-04T06:45:42Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    },
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-10-04T07:06:07Z",
+      "conclusion": "SUCCESS",
+      "detailsUrl": "https://github.com/jbookout/carr-system/actions/runs/37183744906/job/111384295862",
+      "name": "ops/ci.sh --strict",
+      "startedAt": "2026-10-04T07:06:05Z",
+      "status": "COMPLETED",
+      "workflowName": "CI"
+    }
+  ],
+  "updatedAt": "2026-10-04T06:45:36Z",
+  "repo": "jbookout/carr-system",
+  "mergeQueueEntry": null
+}

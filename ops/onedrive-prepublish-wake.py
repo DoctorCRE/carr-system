@@ -11,12 +11,12 @@ exporters.common.wait_for_provider() already waits up to
 PROVIDER_WAIT_BUDGET_SECONDS (1200s) for the provider before the exports
 begin, and bin/nightly.sh's "exports" step already runs under an 1800s
 EXTERNAL wall-clock (bin/with-timeout.py, which kills the whole process
-group). That external wrapper is what actually bounds a genuinely wedged
-read — a Python-level deadline check inside wait_for_provider's loop can
-only run BETWEEN probes, and a single probe against a File Provider that has
-gone fully dark can block past any internal budget with no error at all,
-which is consistent with the 9/24 run producing zero "[provider] ... cold"
-lines before it was killed at exactly 1800s.
+group). On 9/24, only that external wrapper bounded a wedged read: the
+warm-up then read in-process, where a Python deadline could run only between
+probes. That is consistent with zero poll lines before the 1800s kill.
+The warm-up now isolates file reads in bounded child processes, so a wedged
+read returns a cold-file observation and cannot prevent provider recovery.
+This earlier nudge still gives hydration a head start before exports begin.
 
 THIS STEP DOES NOT REPLACE wait_for_provider(). It buys it a head start: one
 plain stat + small read per live export path, single attempt, no internal

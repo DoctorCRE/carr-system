@@ -43,6 +43,15 @@ lint = load("lint_gate_task_test", REPO / "hooks/lint-gate.py")
 TASK = "Add a retry to the invoice upload and keep the existing error log."
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class FakeClient:
     def __init__(self, task_value=0.1, other_value=0.1, error=None):
         self.task_value, self.other_value, self.error = task_value, other_value, error
@@ -53,11 +62,11 @@ class FakeClient:
         return {"type": "noul", "instructions": instructions,
                 "criteria": {"true": true, "false": false}}
 
-    def ask(self, state, questions, timeout=None, api_key=None):
+    def ask(self, state, questions, timeout=None, api_key=None, **kwargs):
         self.calls.append((state, questions))
         if self.error:
             raise self.error
-        return {"model": "jev-fake", "usage": {},
+        return {"model": "jev-1.13.0", "usage": {},
                 "answers": {qid: {"type": "noul",
                                   "noul": self.task_value if qid in review.TASK_QUESTIONS
                                   else self.other_value}
@@ -86,7 +95,7 @@ def rows(log):
     return [json.loads(line) for line in Path(log).read_text().splitlines()]
 
 
-class ShadowTests(unittest.TestCase):
+class ShadowTests(SemanticTestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.log = os.path.join(self.tmp.name, "shadow.jsonl")
@@ -115,24 +124,24 @@ class ShadowTests(unittest.TestCase):
             criteria = questions[qid]["criteria"]
             self.assertTrue(criteria["true"] and criteria["false"])
 
-    def test_confident_yes_records_would_block_and_marks_the_scores(self):
+    def test_confident_yes_records_review_task_fit_and_marks_the_scores(self):
         scores = review.review_for_edit(REGION, self.payload,
                                         client=FakeClient(task_value=0.93),
                                         log_path=self.log)
-        self.assertEqual(scores["_would_block"], 0.93)
+        self.assertEqual(scores["_review_task_fit"], 0.93)
         self.assertFalse(set(review.TASK_QUESTIONS) & set(scores))
         [row] = rows(self.log)
         self.assertEqual(row["kind"], review.TASK_FIT_KIND)
         self.assertTrue(row["subject_ref"]["would_block"])
         self.assertEqual(row["existing_decision"],
-                         {"advisory_findings": [], "effect": "required"})
+                         {"advisory_findings": [], "effect": "advisory"})
         self.assertEqual(row["note"], "disagreed")
 
     def test_low_score_records_no_block(self):
         scores = review.review_for_edit(REGION, self.payload,
                                         client=FakeClient(task_value=0.84),
                                         log_path=self.log)
-        self.assertNotIn("_would_block", scores)
+        self.assertNotIn("_review_task_fit", scores)
         [row] = rows(self.log)
         self.assertFalse(row["subject_ref"]["would_block"])
         self.assertEqual(row["note"], "agreed")
@@ -151,7 +160,7 @@ class ShadowTests(unittest.TestCase):
                                         client=client, log_path=self.log)
         self.assertEqual(set(client.calls[0][1]), set(review.QUESTIONS))
         self.assertNotIn("task", client.calls[0][0])
-        self.assertNotIn("_would_block", scores)
+        self.assertNotIn("_review_task_fit", scores)
         self.assertFalse(os.path.exists(self.log))
         self.assertEqual(scores, review.review_one(REGION, client=FakeClient(task_value=0.99)))
 
@@ -160,17 +169,17 @@ FAKE_CLIENT_SOURCE = '''
 import json, os
 def noul(instructions, true=None, false=None):
     return {"type": "noul", "instructions": instructions}
-def ask(state, questions, timeout=None, api_key=None):
+def ask(state, questions, timeout=None, api_key=None, **kwargs):
     cfg = json.loads(os.environ["FAKE_JEV"])
     if cfg.get("error"):
         raise TimeoutError("fake outage")
-    return {"model": "jev-fake", "answers": {
+    return {"model": "jev-1.13.0", "answers": {
         q: {"type": "noul", "noul": cfg["task"] if q.startswith("task_") else cfg["other"]}
         for q in questions}}
 '''
 
 
-class HookOutputTests(unittest.TestCase):
+class HookOutputTests(SemanticTestCase):
     """hooks/lint-gate.py code_review(): the printed receipt is unchanged.
 
     The hook loads the reviewer, the vendor client and jev_judge by path, so
@@ -182,6 +191,7 @@ class HookOutputTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.env = fixture_env()
+        self.env["CARR_JEV_WORKER"] = ""
         self.repo = self.root / "repo"
         (self.repo / "src").mkdir(parents=True)
         self.target = self.repo / "src/a.py"
@@ -198,7 +208,35 @@ class HookOutputTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_worker_postwrite_hook_skips_jev_without_loading_reviewer(self):
+        out = io.StringIO()
+        with patch.dict(os.environ, CARR_JEV_WORKER="off"), \
+                patch.object(lint, "_changed_code_paths") as paths, \
+                contextlib.redirect_stdout(out):
+            lint.code_review({"tool_name": "apply_patch", "tool_input": {"patch": "fixture"}})
+        paths.assert_not_called()
+        self.assertEqual(out.getvalue(), "", "no paid review or claimed Jev receipt")
+
+    def test_worker_keeps_deterministic_writing_lint(self):
+        payload = {"tool_name": "Write", "tool_input": {"file_path": str(self.target)}}
+        response = subprocess.CompletedProcess([], 0, stdout="hard-ban fixture", stderr="")
+        out = io.StringIO()
+        with patch.dict(os.environ, CARR_JEV_WORKER="off"), \
+                patch.object(lint.sys, "stdin", io.StringIO(json.dumps(payload))), \
+                patch.object(lint, "_changed_code_paths") as paths, \
+                patch.object(lint, "surface_for", return_value="email"), \
+                patch.object(lint.os.path, "exists", return_value=True), \
+                patch.object(lint.subprocess, "run", return_value=response) as runner, \
+                patch.object(lint, "log"), contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as exited:
+                lint.main()
+        self.assertEqual(exited.exception.code, 0)
+        paths.assert_not_called()
+        runner.assert_called_once()
+        self.assertIn("WRITING-LINT", out.getvalue())
+
     def run_hook(self, cfg, transcript_path):
+        Path(os.environ["CARR_JEV_SEMANTIC_CACHE"]).unlink(missing_ok=True)
         payload = {"tool_name": "Write", "cwd": str(self.repo),
                    "session_id": "s", "tool_use_id": "t",
                    "tool_input": {"file_path": str(self.target)}}
@@ -228,12 +266,12 @@ class HookOutputTests(unittest.TestCase):
     def strip(self, receipt):
         return {k: v for k, v in receipt.items() if k != "receipt_id"}
 
-    def test_output_unchanged_unless_would_block_adds_one_finding(self):
+    def test_output_unchanged_unless_review_task_fit_adds_one_finding(self):
         low = {"task": 0.1, "other": 0.9}
         baseline = self.run_hook(low, None)
         self.assertEqual(baseline["status"], "reviewed")
         self.assertTrue(baseline["findings"])
-        self.assertTrue(all(f["effect"] == "required" for f in baseline["findings"]))
+        self.assertTrue(all(f["effect"] == "advisory" for f in baseline["findings"]))
         self.assertEqual(self.strip(self.run_hook(low, self.transcript)),
                          self.strip(baseline))
         high = self.run_hook({"task": 0.95, "other": 0.9}, self.transcript)
@@ -241,7 +279,7 @@ class HookOutputTests(unittest.TestCase):
         self.assertEqual(high["findings"][:len(baseline["findings"])],
                          baseline["findings"])
         self.assertEqual(len(extra), 1)
-        self.assertEqual(extra[0]["effect"], "must_address")
+        self.assertEqual(extra[0]["effect"], "advisory")
         kinds = [row["kind"] for row in rows(self.log)]
         self.assertEqual(kinds, [review.TASK_FIT_KIND] * 2)
 

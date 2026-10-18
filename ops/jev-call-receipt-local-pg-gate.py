@@ -167,20 +167,33 @@ def main() -> int:
             set_local_role(cur, "carr_writer")
             attempt_key = f"jev-attempt:{uuid.uuid4()}"
             attempt_receipt = record(cur, me, idempotency_key=attempt_key,
+                                     session_id=SESSION + "-attempt",
                                      model_answered="jev-attempt-pending", answers=Jsonb({}), usage=None)
-            cur.execute("reset role")
-            pending = integrity(cur)["daily_usage"]
-            if pending["unknown"] != baseline["daily_usage"]["unknown"] + 1 or \
-                    pending["pending_attempts"] != baseline["daily_usage"]["pending_attempts"] + 1:
-                raise RuntimeError(f"unsettled Jev attempt was not visible as unknown spend: {pending}")
-            set_local_role(cur, "carr_writer")
-            completed_receipt = record(cur, me)
             cur.execute("""insert into public.tool_call
                  (idempotency_key, verb, actor_id, request_hash, response)
                  values (%s, 'ask-jev-attempt', %s, %s, %s)""",
                 (attempt_key, me[0], H_STATE,
-                 Jsonb({"receipt_id": str(attempt_receipt[0]), "cache_hit": True,
-                        "settled_by": str(completed_receipt[0])})))
+                 Jsonb({"receipt_id": str(attempt_receipt[0]), "cache_hit": False})))
+            cur.execute("reset role")
+            pending_audit = integrity(cur)
+            if pending_audit["receipts_without_tool_call"] != baseline["receipts_without_tool_call"]:
+                raise RuntimeError("linked pending attempt was flagged as an integrity defect")
+            pending = pending_audit["daily_usage"]
+            if pending["unknown"] != baseline["daily_usage"]["unknown"] + 1 or \
+                    pending["pending_attempts"] != baseline["daily_usage"]["pending_attempts"] + 1:
+                raise RuntimeError(f"unsettled Jev attempt was not visible as unknown spend: {pending}")
+            set_local_role(cur, "carr_writer")
+            completed_receipt = record(cur, me, session_id=SESSION + "-attempt")
+            ledger(cur, me[0], completed_receipt[3], completed_receipt[0])
+            cur.execute("""update public.tool_call set response = %s
+                 where idempotency_key = %s and verb = 'ask-jev-attempt'
+                   and actor_id = %s and response->>'receipt_id' = %s
+                   and response->>'cache_hit' = 'false' returning idempotency_key""",
+                (Jsonb({"receipt_id": str(attempt_receipt[0]), "cache_hit": True,
+                        "settled_by": str(completed_receipt[0])}),
+                 attempt_key, me[0], str(attempt_receipt[0])))
+            if cur.fetchone() != (attempt_key,):
+                raise RuntimeError("pending attempt did not settle through the writer ledger")
             cur.execute("reset role")
             settled = integrity(cur)["daily_usage"]
             if settled["unknown"] != baseline["daily_usage"]["unknown"] or \

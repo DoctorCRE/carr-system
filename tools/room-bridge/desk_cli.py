@@ -37,6 +37,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import codex_models
 import desks  # noqa: E402
 import registry_ext  # noqa: E402
 from desks import DeskError  # noqa: E402
@@ -45,8 +46,9 @@ from desks import DeskError  # noqa: E402
 def cmd_register(reg: desks.Registry, args) -> int:
     entry = reg.register(
         args.name, args.kind, socket=args.socket, model=args.model, cwd=args.cwd,
-        effort=getattr(args, "effort", None), sandbox=args.sandbox, add_dirs=args.add_dirs,
+        family=getattr(args, "family", None), effort=getattr(args, "effort", None), sandbox=args.sandbox, add_dirs=args.add_dirs,
         permission_mode=getattr(args, "permission_mode", None),
+        network_access=getattr(args, "network_access", False),
     )
     if args.seat:
         entry = registry_ext.set_seat(args.name, args.seat, path=reg.path)
@@ -68,15 +70,9 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
         return 2
     entry = entries[args.name]
     if args.cwd and entry.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli"):
-        # desks.Registry.register() always starts a codex-session entry with
-        # thread_id=None (untouched, on purpose — see desks.py). Re-pointing a
-        # stale cwd through it therefore also drops any old thread_id, which is
-        # the right call here: a thread bound to a cwd that no longer exists
-        # (e.g. a deleted worktree) cannot be resumed anyway, and the next
-        # dispatch starts a fresh thread in the corrected directory.
         entry = reg.register(
             args.name, entry["kind"], socket=entry.get("socket"), model=entry.get("model"),
-            effort=entry.get("effort"), cwd=args.cwd, sandbox=entry.get("sandbox"),
+            family=entry.get("family"), effort=entry.get("effort"), cwd=args.cwd, sandbox=entry.get("sandbox"),
             add_dirs=entry.get("add_dirs"), permission_mode=entry.get("permission_mode"),
         )
         if entry.get("room_seat") is None:
@@ -91,7 +87,7 @@ def cmd_refresh(reg: desks.Registry, args) -> int:
     try:
         live = True
         if entry.get("kind") in ("claude-session", "codex-live"):
-            reg.resolve(args.name)  # raises DeskError if the socket is dead
+            reg.resolve(args.name)
             live = True
     except DeskError as e:
         registry_ext.stamp_heartbeat(args.name, live=False, path=reg.path)
@@ -113,7 +109,11 @@ def cmd_list(reg: desks.Registry, args) -> int:
         seat = e.get("room_seat", "(no room seat — bridge will not route to it)")
         last_seen = e.get("last_seen", "never")
         last_live = e.get("last_live")
-        if e.get("kind") in ("claude-desktop", "codex-session", "codex-live", "grok-cli") and e.get("model"):
+        if kind in codex_models.CODEX_KINDS:
+            family = e.get("family")
+            model = codex_models.resolve_model(family) if family else "job family required"
+            where = f"family={family} model={model} effort={e.get('effort')}"
+        elif e.get("kind") in ("claude-desktop", "grok-cli") and e.get("model"):
             where = f"{e.get('model')} (effort={e.get('effort')})"
         else:
             where = e.get("socket") or "?"
@@ -147,10 +147,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--kind", required=True, choices=list(desks.KINDS))
     r.add_argument("--socket", default=None)
     r.add_argument("--model", default=None)
+    r.add_argument("--family", choices=codex_models.FAMILIES)
     r.add_argument("--effort", default=None, choices=list(desks.EFFORT_CHOICES))
+    r.add_argument("--network-access", action="store_true",
+                   help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--cwd", default=None)
     r.add_argument("--permission-mode", default=None,
-                   choices=["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"])
+                   help="dispatched desks use dontAsk only; other modes are refused and "
+                        "permission needs go to the orchestrator")
     r.add_argument("--seat", default=None, help="the room seat this desk speaks for")
     r.add_argument("--room-listen", default=None, choices=list(registry_ext.ROOM_LISTEN_MODES),
                    help="'mention': hear people's turns, and other desks only when @seat-mentioned")

@@ -1,0 +1,24 @@
+{
+  "number": 2,
+  "headRefOid": "0000000000000000000000000000000000000002",
+  "updatedAt": "2020-01-01T00:00:00Z",
+  "comments": [
+    {
+      "body": "REVIEW: BLOCKED\nReviewed-SHA: 0000000000000000000000000000000000000002",
+      "createdAt": "2020-01-01T00:01:00Z"
+    }
+  ],
+  "commits": [
+    {
+      "committedDate": "2020-01-01T00:00:00Z"
+    }
+  ],
+  "isDraft": false,
+  "mergeable": "CONFLICTING",
+  "statusCheckRollup": [
+    {
+      "conclusion": "SUCCESS",
+      "status": "COMPLETED"
+    }
+  ]
+}

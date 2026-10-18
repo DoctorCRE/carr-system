@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+import sys
+import argparse
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import flashlib
+parser = argparse.ArgumentParser(description="Ensure local Flash is ready within 180 seconds.")
+parser.add_argument("--timeout", type=float, default=flashlib.ENSURE_TIMEOUT)
+args = parser.parse_args()
+if not 0 < args.timeout <= flashlib.ENSURE_TIMEOUT:
+    parser.error("timeout must be greater than zero and at most 180 seconds")
+raise SystemExit(flashlib.main("ensure", timeout=args.timeout))

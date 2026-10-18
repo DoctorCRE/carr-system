@@ -82,8 +82,9 @@ EXPECTED_A3A_FUNCTIONS = sorted([
     "ops.record_assurance_review_extension(uuid,uuid,uuid,jsonb,text,uuid)",
     "ops.refuse_assurance_persistence_rewrite()",
 ])
+# 0790 explicitly searches pg_temp last on definers; invoker paths stay pinned.
 EXPECTED_A3A_FUNCTION_POSTURE = {
-    "ops.assurance_all_tokens_absent(jsonb)": (True, "s", "search_path=pg_catalog, ops"),
+    "ops.assurance_all_tokens_absent(jsonb)": (True, "s", "search_path=pg_catalog, ops, pg_temp"),
     "ops.assurance_digest(jsonb)": (False, "i", "search_path=pg_catalog, ops, public"),
     "ops.assurance_exact_object(jsonb,text[])": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_health_basis(text)": (False, "i", "search_path=pg_catalog"),
@@ -96,15 +97,15 @@ EXPECTED_A3A_FUNCTION_POSTURE = {
     "ops.assurance_health_stage(text[])": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_identifier_valid(text)": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_lease_lineage_current(uuid,timestamp with time zone)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_append_lineage_current(uuid,uuid,timestamp with time zone,uuid,bigint)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_terminal_evidence_lineage_current(uuid,uuid,timestamp with time zone,uuid,bigint)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_terminal_receipt_lineage_current(uuid,uuid,timestamp with time zone)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_manifest_currentness(uuid,text,text,text,text,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_normalized_set(jsonb)":
         (False, "i", "search_path=pg_catalog, ops, public"),
     "ops.assurance_pinned_pointer(text)": (False, "i", "search_path=pg_catalog"),
@@ -118,15 +119,15 @@ EXPECTED_A3A_FUNCTION_POSTURE = {
         (False, "i", "search_path=pg_catalog, ops"),
     "ops.assurance_unique_array(jsonb)": (False, "i", "search_path=pg_catalog, ops"),
     "ops.assurance_validate_compiler_input(uuid,jsonb,jsonb)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_evidence_extension(uuid,uuid,uuid,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_execution_manifest(uuid,uuid,bigint,text,jsonb,jsonb,jsonb,jsonb,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_owner_acceptance(uuid,uuid,text,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_review_extension(uuid,uuid,uuid,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.refuse_assurance_persistence_rewrite()":
         (False, "v", "search_path=pg_catalog, ops"),
 }
@@ -1387,12 +1388,20 @@ def main() -> int:
             # The append records start only after the exact 0532a transition.
             # Their evidence timestamp is captured before release and must not
             # extend the old live authority window.
+            # Cross a second boundary so transaction-start review timestamps fail reliably.
+            one(cur, "select pg_sleep(1.1)")
             terminal_evidence_time = one(
                 cur, "select date_trunc('second',clock_timestamp())")[0]
             cc.set_jobs(cur)
             receipt_id = cc.receipt(cur, fixture, claim, "claimed_complete")
             cc.reset_role(cur)
+            # The review's default now() must start after terminal evidence completion.
+            conn.commit()
             a2.insert_review(cur, fixture, receipt_id)
+            check("review fact timestamp follows terminal evidence in a long transaction",
+                  one(cur, """select date_trunc('second',created_at)>=%s
+                    from ops.engineering_reviewer_fact where receipt_id=%s""",
+                      (terminal_evidence_time, receipt_id))[0])
             released_at = one(cur, "select released_at from ops.canonical_ownership_lease where id=%s",
                               (lease["lease_id"],))[0]
             check("0532a releases the A2 lease before terminal assurance append",
@@ -1730,6 +1739,8 @@ def main() -> int:
                 """select id,reviewer_session_ref,fact,date_trunc('second',created_at)
                    from ops.engineering_reviewer_fact where receipt_id=%s""",
                 (receipt_id,))
+            check("independent review timestamp follows terminal evidence after transaction delay",
+                  reviewer_created_at >= terminal_evidence_time)
             check("Passport engineering-review.v1 fact is exact", one(cur, """select
               contract_version='engineering-review.v1'
               and (select array_agg(key order by key) from jsonb_object_keys(fact) key)=array[
@@ -2183,7 +2194,11 @@ def main() -> int:
                 join pg_namespace n on n.oid=c.relnamespace cross join lateral
                 aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) acl
                 where n.nspname='ops' and c.relname like 'assurance_%%'
-                  and c.relkind='r' and acl.grantee<>c.relowner)
+                  and c.relkind='r' and acl.grantee<>c.relowner
+                  -- The dedicated review login reads all business tables.
+                  -- Only its non-grantable SELECT is authorized here.
+                  and not coalesce((acl.grantee=to_regrole('dot_reader')
+                    and acl.privilege_type='SELECT' and not acl.is_grantable),false))
               and not exists(select 1 from pg_proc p
                 join pg_namespace n on n.oid=p.pronamespace cross join lateral
                 aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
@@ -2196,7 +2211,7 @@ def main() -> int:
                     'ops.record_assurance_execution_manifest(uuid,uuid,bigint,text,jsonb,jsonb,jsonb,jsonb,uuid)'::regprocedure,
                     'ops.assurance_manifest_currentness(uuid,text,text,text,text,text,uuid)'::regprocedure])
                     and acl.grantee='carr_ownership_issuer'::regrole))""")[0]
-            check("A3a tables and non-approved functions have owner-only ACLs", no_external_acl)
+            check("A3a tables allow only owner authority and Dot SELECT; functions retain exact callers", no_external_acl)
             issuer_functions = one(cur, """select coalesce(array_agg(p.oid::regprocedure::text
               order by p.oid::regprocedure::text),'{}'::text[]) from pg_proc p cross join lateral
               aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl

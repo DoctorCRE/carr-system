@@ -1,4 +1,6 @@
-import test from 'node:test';
+import {clearSemanticCache} from "../src/jev-semantic.js";
+beforeEach(clearSemanticCache);
+import test, {beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import { dealReadingState, readDealWithJev } from '../src/jev-deal-reading.js';
 
@@ -9,6 +11,28 @@ const record = (text) => ({
 const eligible = (text) => ({ ...record(text),
   next_step: 'The tenant must decide whether to accept the landlord counter and reply to CARR.',
   next_actions: [{ status: 'open', description: 'Ask the tenant to review the revised rent and approve a response to the landlord.' }],
+});
+
+test('all legal rejection values abstain at the public deal interface', async()=>{
+  for(const rejection of [null,undefined,'synthetic',{reason:'synthetic'}]) {
+    clearSemanticCache();
+    const result=await readDealWithJev(eligible('The landlord sent a counter and the tenant must respond. '.repeat(4)),
+      {askJev:async()=>{throw rejection;}});
+    assert.equal(result.reason,'jev_unavailable');
+    assert.equal(result.judged,false);
+  }
+});
+test('date-only deadlines use the CARR calendar day, including invalid dates',()=>{
+  // CARR business dates use America/Chicago, including the UTC day boundary.
+  for(const now of ['2026-10-04T12:00:00Z','2026-10-05T01:00:00Z']) {
+    for(const [day,relative,expired] of [['2026-10-03','past',true],['2026-10-04','future_or_today',false],
+      ['2026-10-05','future_or_today',false],['bad','unknown',null],['2026-02-30','unknown',null]]) {
+      const state=dealReadingState({...record(''),critical_dates:[{due_on:day,status:'open'}],
+        negotiation_rounds:[{expires_on:day}]},new Date(now)).state.deal;
+      assert.equal(state.active_dates[0].due_relative_to_today,relative,`${day} at ${now}`);
+      assert.equal(state.latest_negotiation.expired,expired,`${day} at ${now}`);
+    }
+  }
 });
 
 test('thin Deal Room evidence abstains without a vendor call', async () => {
@@ -34,7 +58,7 @@ test('one bounded request returns typed advice without source text', async () =>
       } };
     },
   });
-  assert.equal(payload.model, 'jev-latest');
+  assert.equal(payload.model, 'jev-1.13.0');
   assert.equal(Object.keys(payload.questions).length, 3);
   assert.equal(answer.judged, true);
   assert.equal(answer.movement_rung, 4);
@@ -57,7 +81,7 @@ test('eligible Deal Room advice uses the receipt-backed Jev door', async () => {
     },
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].model, 'jev-latest');
+  assert.equal(calls[0].model, 'jev-1.13.0');
   assert.equal(answer.judged, true);
 });
 
@@ -116,16 +140,17 @@ test('current structured deal facts can support a short explicit next step', asy
   };
   let payload;
   const answer = await readDealWithJev(deal, {
+    now: new Date("2026-09-21"),
     askJev: async request => {
       payload = request;
-      return { model: 'jev-test', answers: {
+      return { model: 'jev-1.13.0', answers: {
         movement: { score: 3 }, waiting_on: { choice: 'client' }, silence_is_bad: { noul: 0.2 },
       } };
     },
   });
   assert.equal(answer.judged, true);
   assert.equal(payload.state.deal.latest_negotiation.side, 'landlord');
-  assert.equal(payload.state.deal.active_dates[0].due_on, '2026-09-25');
+  assert.equal(payload.state.deal.active_dates[0].due_relative_to_today, 'future_or_today');
   assert.equal(payload.state.deal.sent_documents_recorded, 1);
   assert.equal(JSON.stringify(payload).includes('Private address'), false);
   assert.equal(JSON.stringify(payload).includes('999'), false);
@@ -141,7 +166,7 @@ test('old completed dates cannot hide a current open deadline', () => {
         note: 'The current offer expires unless the tenant replies.' },
     ],
   }, new Date('2026-09-21'));
-  assert.deepEqual(found.state.deal.active_dates.map(d => d.due_on), ['2026-09-25']);
+  assert.deepEqual(found.state.deal.active_dates.map(d => d.due_relative_to_today), ['future_or_today']);
   assert.match(found.state.deal.history.join('\n'), /current offer expires/);
   assert.doesNotMatch(found.state.deal.history.join('\n'), /Historic deadline/);
 });

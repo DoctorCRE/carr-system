@@ -11,12 +11,17 @@ visible when PostgreSQL executes the claim CTE.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import hashlib
+from itertools import count
 import json
 import os
-from pathlib import Path
 import re
-import sys
 import uuid
 
 import psycopg
@@ -26,6 +31,9 @@ from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connec
 
 
 RUNTIME_ROLE = "carr_jobs"
+# A transaction shares now(); random UUID prefixes can pick the same due slot.
+# Every fixture in this interpreter instead receives its own microsecond offset.
+_FIXTURE_SCHEDULE_OFFSETS = count()
 STALE_PLAN_REF = "PLAN-954b03dd464d-v1"
 STALE_PLAN_HASH = "sha256:954b03dd464dab9986bc705d01fdb197edd29b23ad10ca673da53ad0ac03c27d"
 
@@ -286,7 +294,7 @@ def fixture(cur, mutate_envelope=None, *, session_state: str = "claimed", lease_
              (definition_key,definition_version,idempotency_key,scheduled_for,max_attempts,timeout_seconds,mode,payload)
              values ('engineering-slice',1,%s,now()-interval '10 minutes'+%s*interval '1 microsecond',2,300,'shadow',%s)
              returning id""",
-        (f"engineering-claim:{token}", int(token[:8], 16) % 1_000_000, Jsonb({"work_request": f"WR-ENGINEERING-CLAIM-{token}",
+        (f"engineering-claim:{token}", next(_FIXTURE_SCHEDULE_OFFSETS), Jsonb({"work_request": f"WR-ENGINEERING-CLAIM-{token}",
                                                    "slice_ref": slice_ref, "plan_digest": plan_digest, "generation": 1})),
     )[0]
     envelope_digest = "sha256:" + token * 2
@@ -411,8 +419,8 @@ def successor_fixture(cur, prior_job_id, prior_envelope_id):
 def assert_static_lock_contract():
     """Pin the two production lock paths to the same lineage/session contract."""
     repo = Path(__file__).resolve().parents[1]
-    currentness = (repo / "migrations/0335_engineering_controller_currentness.sql").read_text()
-    successor = (repo / "migrations/0319_engineering_envelope_writer_successor.sql").read_text()
+    currentness = read_migration(repo, "0335_engineering_controller_currentness.sql")
+    successor = read_migration(repo, "0319_engineering_envelope_writer_successor.sql")
     runtime = (repo / "mcp-server/src/engineering-runtime.js").read_text()
     compact_currentness = re.sub(r"\s+", " ", currentness)
     compact_successor = re.sub(r"\s+", " ", successor)

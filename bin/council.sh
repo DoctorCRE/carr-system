@@ -5,6 +5,8 @@
 # good work and it ran GROK AT DEFAULT EFFORT, because nothing said otherwise and
 # nothing checked. Joe's instruction that session: councils always run Sol 5.6 at
 # high and Grok 4.5 at its top effort.
+# (Historical: the pinned ids have since moved, to gpt-6.1-sol and grok-4.7 per
+# Joe's 2026-09-29 ruling. bin/council-lib.sh is the only place they live.)
 #
 # That requirement is NOT written here as an instruction. Rules 14e0408b,
 # e313a3ca and 179be4b8 were all ACTIVE, all recited at session start, and all

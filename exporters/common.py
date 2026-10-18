@@ -19,11 +19,17 @@ import errno
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from lib.credential_file import credential  # noqa: E402
 
 import psycopg
 
@@ -107,25 +113,138 @@ PROVIDER_WAIT_POLL_SECONDS = float(os.environ.get("CARR_PROVIDER_POLL_SECONDS", 
 # read proves at a fraction of the cost on a 9320-row workbook.
 PROVIDER_PROBE_BYTES = 1 << 16
 
+# WAITING FOR A PROVIDER THAT IS NOT RUNNING, measured 2026-09-22. The 09-22
+# nightly is the first that reached the end of the budget above instead of being
+# killed by the step timeout, and what it proved is that the wait itself was
+# never the binding constraint: 60 poll lines over the full 1200s, no file ever
+# warming, then EDEADLK on all six targets. The cause was not a slow provider.
+# `ps -Ao lstart` that afternoon put OneDrive.app's start at 08:55:58 local,
+# three seconds after the session's "Display is turned on" event and nearly
+# SEVEN HOURS after the exports step ran at 02:05:29 local. OneDrive is a GUI
+# login item, so nothing had it running in the 02:05 window; every read of a
+# dehydrated placeholder answers EDEADLK forever when no provider exists to
+# service it. The same six files read in ~2s each once the client was up.
+#
+# After a bounded file read finds a hydration failure, the wait asks whether
+# anything is there to wait for and records the observation. When absent it makes ONE
+# attempt to start it (`open -gj -a OneDrive`, background and hidden: a no-op
+# when it is already running) and keeps waiting, so a night that would have lost
+# six targets can recover on its own. When the launch does not take, the budget
+# is not burned in silence: the message records the census and launch result
+# alongside the read errors, without asserting the cause of those errors.
+#
+# The check is a process probe, not an API call, because there is no supported
+# way to ask a File Provider extension whether it is up, and because a probe
+# that needs the provider in order to test the provider cannot report its
+# absence. Both names are matched: the appex services the reads, the app is
+# what `open` starts.
+# Match executable basenames, including the end delimiter: OneDriveUpdater is
+# an updater, not a process that can service file reads.
+PROVIDER_PROCESS_PATTERNS = (
+    r"^/Applications/OneDrive\.app/Contents/PlugIns/OneDrive File Provider\.appex/Contents/MacOS/OneDrive File Provider($| )",
+    r"^/Applications/OneDrive\.app/Contents/MacOS/OneDrive($| )",
+)
+PROVIDER_LAUNCH_COMMAND = ("open", "-gj", "-a", "OneDrive")
+PROVIDER_LAUNCH_TIMEOUT_SECONDS = 30.0
+PROVIDER_PROCESS_TIMEOUT_SECONDS = 2.0
+PROVIDER_FILE_TIMEOUT_SECONDS = 5.0
+
+
+def provider_running(run=subprocess.run, *, timeout=PROVIDER_PROCESS_TIMEOUT_SECONDS):
+    """Return observed presence, absence, or None for an unsuccessful census.
+
+    Both pgrep invocations share one timeout. Only status 1 proves no match;
+    missing tools, errors and timeouts cannot establish absence.
+    """
+    if timeout <= 0 or shutil.which("pgrep") is None:
+        return None
+    deadline = time.monotonic() + min(timeout, PROVIDER_PROCESS_TIMEOUT_SECONDS)
+    unknown = False
+    for pattern in PROVIDER_PROCESS_PATTERNS:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            done = run(["pgrep", "-f", pattern], capture_output=True, text=True,
+                       timeout=remaining)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode == 0 and done.stdout.strip():
+            return True
+        if done.returncode != 1:
+            unknown = True
+    return None if unknown else False
+
+
+def start_provider(run=subprocess.run, *, timeout=PROVIDER_LAUNCH_TIMEOUT_SECONDS):
+    """Request a background launch within available time; never raise."""
+    if timeout <= 0:
+        return False
+    try:
+        done = run(list(PROVIDER_LAUNCH_COMMAND), capture_output=True, text=True,
+                   timeout=min(timeout, PROVIDER_LAUNCH_TIMEOUT_SECONDS))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+# Isolate existence checks as well as open/read: any of them can wedge inside
+# FileProvider. subprocess.run kills and reaps the child on timeout, leaving no
+# blocked threads or file handles in the exporter process.
+_PROVIDER_FILE_PROBE = """
+import json, sys
+from pathlib import Path
+cold = []
+for index, name in enumerate(json.loads(sys.argv[1])):
+    try:
+        with Path(name).open('rb') as stream:
+            stream.read(int(sys.argv[2]))
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        cold.append([index, error.errno, str(error)])
+print(json.dumps(cold))
+"""
+
+
+def probe_provider_files(paths, *, timeout):
+    """Return unreadable files from a bounded batch; missing files need no warm-up."""
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", _PROVIDER_FILE_PROBE,
+             json.dumps([str(p) for p in paths]), str(PROVIDER_PROBE_BYTES)],
+            capture_output=True, text=True, timeout=timeout)
+        if done.returncode != 0:
+            raise OSError(errno.EIO, "file probe failed")
+        return [(paths[i], OSError(code, message))
+                for i, code, message in json.loads(done.stdout)]
+    except subprocess.TimeoutExpired:
+        return [(p, OSError(errno.ETIMEDOUT, "file probe exceeded its deadline")) for p in paths]
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, TypeError) as error:
+        return [(p, OSError(errno.EIO, f"file probe failed: {error}")) for p in paths]
+
+
+@dataclass
+class ProviderWaitResult:
+    """Errors and observations from one wait, without a later process census."""
+    cold: list[tuple[Path, OSError]]
+    provider_state: bool | None = None
+    launch_succeeded: bool | None = None
+
+    def diagnostic(self):
+        errors = ", ".join(sorted({errno.errorcode.get(e.errno, str(e.errno)) for _, e in self.cold}))
+        state = {True: "last observed up", False: "last observed absent", None: "state unknown"}[self.provider_state]
+        launch = {True: "launch attempt issued", False: "launch attempt failed",
+                  None: "no launch attempted"}[self.launch_succeeded]
+        return f"read errors: {errors}; provider {state}; {launch}"
+
 
 def connect():
-    url = os.environ.get("CARR_DB_EXPORTER_URL")
-    if not url:
-        env = Path.home() / ".config/carr/db.env"
-        if env.exists():
-            for line in env.read_text().splitlines():
-                if line.startswith("CARR_DB_EXPORTER_URL="):
-                    # .strip("\"'") IS LOAD-BEARING, added 2026-08-02. db.env has TWO
-                    # parsers with OPPOSITE requirements. `set -a; . db.env` (the exact
-                    # line bin/nightly.sh uses) needs values QUOTED: an unquoted `&` in
-                    # the jobs URL killed that line for two days and the cadence engine
-                    # and availability matcher reported NOT CONFIGURED the whole time.
-                    # Quoting the file fixed the shell and broke THIS parser, which fed
-                    # psycopg a DSN with a literal apostrophe on the front and died with
-                    # `invalid connection option` — blinding the export register, the one
-                    # check that would report exports having stopped. Do not remove either
-                    # half. Same fix in pipelines/brief_pack.py and lib/record_sources.py.
-                    url = line.split("=", 1)[1].strip().strip("\"'")
+    # db.env is read through lib/credential_file, the one Python reader of it.
+    # Its values are shell-quoted so `set -a; . db.env` survives an `&` in the
+    # DSN; on 2026-08-02 a hand-rolled parser here fed psycopg the quotes and
+    # blinded the export register. The shared reader unquotes as the shell does.
+    url = credential("CARR_DB_EXPORTER_URL")
     if not url:
         sys.exit("no CARR_DB_EXPORTER_URL (see ~/.config/carr/db.env)")
     return psycopg.connect(url)
@@ -264,66 +383,53 @@ def _generation_destinations(gen_dir: Path, final_path: Path, stamp: str):
         yield gen_dir / f"{stamp}-{sequence:02d}-{final_path.name}"
 
 
-def wait_for_provider(paths, budget_seconds=None, poll_seconds=None, sleep=time.sleep):
-    """Block until the cloud file provider can actually serve `paths`.
+def wait_for_provider(paths, budget_seconds=None, poll_seconds=None, sleep=time.sleep,
+                      running=provider_running, launch=start_provider,
+                      probe=probe_provider_files, monotonic=time.monotonic):
+    """Warm existing files within one deadline, returning errors and observations.
 
-    WHY A WAIT AND NOT A LONGER RETRY, measured 2026-09-17. The nightly chain
-    failed 26 of its last 27 launchd runs, every time with EDEADLK out of
-    keep_generation() reading the previous OneDrive copy. The per-target budget
-    above is 23.5s, and the outage it is up against lasts eight to ten minutes:
-    `pmset repeat wakeorpoweron` wakes this Mac at 01:55 and launchd fires the
-    chain at 02:05, so the first export lands ten minutes into a scheduled dark
-    wake while OneDrive's File Provider is still coming up. Every file in the
-    tree is cloud-only — Files On-Demand evicted 687 of 861 files because the
-    volume is 97% full — so each read is a fetch request, not a disk read, and
-    the provider answers EDEADLK until it is ready. Running the identical export
-    by hand at 06:08 the same morning published all six targets clean.
-
-    So the six budgets are spent SEQUENTIALLY on a condition that is shared:
-    target one waits 23.5s and fails, target two waits its own 23.5s and fails
-    the same way, six times over, and the step reports six unrelated-looking
-    tracebacks for one provider that was not up. This waits ONCE for the thing
-    they all need, before any of them starts.
-
-    IT IS NOT A REPAIR. Nothing here stops OneDrive evicting the tree; pinning
-    the folder or freeing disk does that. This only stops the chain starting
-    work that cannot succeed yet, and says plainly which files are still cold.
-
-    A non-transient errno is returned immediately rather than waited out: a
-    permission or path failure reads the same on the last attempt as the first,
-    so spending the budget on it only delays the report.
-
-    Returns the list of (path, error) still unreadable, empty when ready. The
-    caller decides what an exhausted budget means; this never raises.
+    Warm or missing files never trigger a launch. Non-transient read errors
+    return immediately. Cold reads, process census, launch and sleep all spend
+    the same budget; failures remain observations so every export target runs.
     """
     budget = PROVIDER_WAIT_BUDGET_SECONDS if budget_seconds is None else budget_seconds
-    poll = PROVIDER_WAIT_POLL_SECONDS if poll_seconds is None else poll_seconds
-    # A floor, so a zero poll cannot turn the wait into a busy loop that
-    # competes for the very provider it is waiting on.
-    poll = max(poll, 0.01)
-    probes = [path for path in paths if path.exists()]
-    if not probes:
-        return []
-
-    deadline = time.monotonic() + budget
+    poll = max(PROVIDER_WAIT_POLL_SECONDS if poll_seconds is None else poll_seconds, 0.01)
+    paths = list(paths)
+    result = ProviderWaitResult([])
+    if not paths:
+        return result
+    deadline = monotonic() + max(budget, 0)
+    # Reserve time for recovery even when the first file probe consumes its
+    # entire allowance. This preserves the warm-file no-launch path.
     while True:
-        cold = []
-        for path in probes:
-            try:
-                with path.open("rb") as stream:
-                    stream.read(PROVIDER_PROBE_BYTES)
-            except OSError as error:
-                cold.append((path, error))
-        if not cold:
-            return []
-        if any(error.errno not in GENERATION_COPY_RETRY_ERRNOS for _p, error in cold):
-            return cold
-        remaining = deadline - time.monotonic()
+        remaining = deadline - monotonic()
         if remaining <= 0:
-            return cold
-        names = ", ".join(sorted(path.name for path, _e in cold))
-        print(f"[provider] {len(cold)} file(s) still cold ({names}); "
-              f"{remaining:.0f}s left before the exports start anyway",
+            if not result.cold:
+                result.cold = [(p, OSError(errno.ETIMEDOUT, "warm-up budget exhausted")) for p in paths]
+            return result
+        result.cold = probe(paths, timeout=min(PROVIDER_FILE_TIMEOUT_SECONDS, remaining / 2))
+        if not result.cold or any(e.errno not in GENERATION_COPY_RETRY_ERRNOS for _, e in result.cold):
+            return result
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return result
+        try:
+            result.provider_state = running(timeout=min(PROVIDER_PROCESS_TIMEOUT_SECONDS, remaining))
+        except (OSError, subprocess.SubprocessError):
+            result.provider_state = None
+        remaining = deadline - monotonic()
+        if result.provider_state is False and result.launch_succeeded is None and remaining > 0:
+            try:
+                result.launch_succeeded = launch(timeout=min(PROVIDER_LAUNCH_TIMEOUT_SECONDS, remaining))
+            except (OSError, subprocess.SubprocessError):
+                result.launch_succeeded = False
+            print(f"[provider] {result.diagnostic()}", file=sys.stderr, flush=True)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return result
+        names = ", ".join(sorted(path.name for path, _e in result.cold))
+        print(f"[provider] {len(result.cold)} unreadable file(s) ({names}); "
+              f"{result.diagnostic()}; {remaining:.0f}s left before exports start anyway",
               file=sys.stderr, flush=True)
         sleep(min(poll, remaining))
 

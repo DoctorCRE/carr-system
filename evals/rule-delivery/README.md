@@ -29,7 +29,14 @@ Nothing is written to production logs or caches. `selftest.py` checks that.
    misses (trigger vocabulary without the action), 13 positives.
 
 `split.json` freezes every case id to train or test before any edit;
-`selftest.py` fails if it moves.
+`selftest.py` fails if it moves. `expectations.v4.json` freezes each case's
+grading labels (expected and allowed rules, envelope or human cohort, input
+hash). A change to the routes cannot move its own denominator: grading reads
+the frozen labels, and a relabel is a new expectations version.
+`pending_gold.v1.json` names rules admitted after the gold was labelled; a
+delivery of one of those is ungraded (neither hit nor false) until the gold is
+extended and the id leaves that file, so a newly approved rule does not read
+as a precision regression before anyone has judged it.
 
 ## Grader (programmatic)
 
@@ -50,18 +57,5 @@ python3 evals/rule-delivery/run_eval.py --compare baseline v3
 python3 evals/rule-delivery/run_eval.py --verdict baseline v3 recall
 python3 evals/rule-delivery/noise.py baseline
 python3 evals/rule-delivery/explain.py                        # train split only
-python3 evals/rule-delivery/make_report.py                    # report.html + receipt.json
+python3 evals/rule-delivery/run_eval.py --freeze-expectations # only for a new expectations version
 ```
-
-The current round command and candidate verdict read the train split only.
-Historical rounds v1-v3 used the test split to decide keep/revert; those test
-intervals are descriptive, not untouched-holdout evidence. The frozen split
-still protects future rounds. `explain.py` reads train only. The system is
-deterministic, so run-to-run noise is zero; paired bootstrap intervals measure
-case-sampling variation only.
-
-## Not covered here
-
-The Jev half (ranking and single-rule binding at `UserPromptSubmit`) needs a
-live TypeSafe binding. `tools/rule-delivery-eval.py ... --jev live` measures it;
-this eval leaves it alone.

@@ -75,6 +75,7 @@
     "ops.work_request": "CARRIED IN PART, SIEP program rows only: the ops.work_request rows that ops.siep_package_contract.work_request_id points at, restored by the SIEP manifest block in bin/schema-snapshot.sh with the insert guards and seals disabled for the restore and the manifest digest asserted afterwards. Those rows are internal program configuration created by 0324's own literal package list: requester and owner 'joe', no client, party, deal, event, doctrine or credential reference, and their only outbound foreign key is public.actor, which this snapshot already carries. NEVER the sourced captures (WR-000001 onward) - those are operational history."
   },
   "excluded": {
+    "ops.rule_insert_provenance": "rule INSERT transaction identities — runtime provenance local to one live database; xid8 values must never be restored into a new database",
     "agent_profile_assignment": "A RULING LEDGER, append-only, and the earlier reason here was wrong on the facts. It said 0284's immutability probe was the only migration-time insert; 0300 also seeds EIGHT permanent rows - the Hermes operational roster, with fixed idempotency keys, ruling_basis 'human', and its own assertion that all eight exist. So this table IS seeded, and the exclusion has to stand on what the rows are FOR rather than on a claim that they do not exist. Nothing selects it: mcp-server/src/agent-profiles.js only INSERTs (the assign-profile verb), and no gate, verb or view reads it back. A rebuild without these rows therefore loses the recorded history of who assigned which model to which desk, and breaks nothing at runtime - unlike agent_profile, which is carried because bot-brief THROWS profile_not_found without it. Read before excluding: profile_id, model, desk, status, who ruled and on what basis. Excluded as history, not as absence.",
     "campaign": "marketing campaign records — business data",
     "client": "client records — the business data this snapshot exists to keep out of git",
@@ -91,6 +92,7 @@
     "ops.capability_agent_session": "capability session records — runtime evidence",
     "ops.capability_verification": "capability verification receipts — runtime evidence",
     "ops.deployment": "deployment history — runtime records",
+    "ops.doc_whats_new_lead_creation": "per-lead creation evidence (lead UUID, creation timestamp and original transaction ID) — business data. Migration 0766 backfills existing leads, and future inserts populate it through the lead trigger. A structure-only rebuild excludes leads and their watermark history, so this ledger must also start empty; business-data backups retain it with the leads.",
     "ops.guidance_intake": "guidance intake records — runtime history",
     "ops.incident": "incident records — runtime history",
     "ops.incident_fact": "per-incident evidence — runtime history",
@@ -127,6 +129,7 @@
     "party_link": "party relationship records — business data",
     "prospect_pool": "prospect records — business data",
     "record_flag": "flags raised against business rows — per-row history",
+    "research_site": "the research-site index: useful sources tagged by topic, added and removed at runtime by any caller through add-research-site and remove-research-site, with per-row history. 0849 seeds a starting set of public source hosts; a rebuild without them loses only suggestions (no access depends on this table), so it is runtime data, not configuration",
     "system_config": "operational settings, not vocabulary, and the kind of table where a value that should never be committed can appear; staging sets its own",
     "tool_call": "the verb call ledger — runtime history"
   },

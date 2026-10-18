@@ -22,6 +22,8 @@ never writes inside the repository.
 """
 
 import importlib.util
+import hashlib
+import subprocess
 import json
 import os
 import pathlib
@@ -30,8 +32,16 @@ import sys
 import tempfile
 import contextlib
 import io
+import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
+
+from git_env import fixture_env
+
+# INSERT provenance belongs to one live database's transactions. A rebuild
+# carries schema, never old xid8 values that could collide with its own xids.
+coverage = json.loads((REPO / "ops/config/snapshot-seed-coverage.json").read_text())
+assert "ops.rule_insert_provenance" in coverage["excluded"]
 
 
 def load_module():
@@ -114,6 +124,35 @@ def main():
     module = load_module()
     print("ops/snapshot-seed-coverage-selftest.py")
 
+    # The classifier must retain seeds after their covered SQL leaves the tree.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(build_repo(tmp, {
+            "0001_seed.sql": "insert into ops.widget values ('seed');\n",
+        }, {"excluded": {"ops.widget": "fixture runtime data"}}))
+        git_env = dict(fixture_env(), GIT_AUTHOR_NAME="Fixture", GIT_AUTHOR_EMAIL="fixture@example.invalid",
+                       GIT_COMMITTER_NAME="Fixture", GIT_COMMITTER_EMAIL="fixture@example.invalid")
+        def git(*args):
+            return subprocess.check_output(["git", "-C", str(root), *args], env=git_env, text=True)
+        git("init", "-q")
+        git("add", "migrations/0001_seed.sql")
+        git("commit", "-qm", "Historical seed")
+        source = git("rev-parse", "HEAD").strip()
+        before = module.check(str(root), artifact(["0001_seed.sql"]))
+        (root / "db").mkdir()
+        manifest = {
+            "schema": "carr-migration-baseline/v1", "source_revision": source,
+            "snapshot": {"path": "db/schema.sql", "sha256": "0" * 64},
+            "cutoff": "0001_seed.sql", "migrations": [{"filename": "0001_seed.sql",
+                "sha256": hashlib.sha256(b"insert into ops.widget values ('seed');\n").hexdigest()}],
+        }
+        (root / "db/migration-baseline.json").write_text(json.dumps(manifest))
+        (root / "migrations/0001_seed.sql").unlink()
+        case("covered seeds retain exactly their full-file classification result",
+             before == [] and module.check(str(root), artifact(["0001_seed.sql"])) == before)
+        case("covered excluded seed rows still refuse when present in the snapshot",
+             "EXCLUDED" in summarise(module.check(str(root),
+                 artifact(["0001_seed.sql"]) + copy_block("ops.widget"))))
+
     seeding = ("create table ops.widget (k text);\n"
                "insert into ops.widget (k) values ('alpha'),('beta');\n")
     # A migration whose ONLY migration-time insert is a self-test probe inside a DO
@@ -127,6 +166,19 @@ def main():
                     "begin\n  insert into ops.never_seeded (k) values ('r');\nend $$;\n")
 
     with tempfile.TemporaryDirectory() as tmp:
+        # Lead UUIDs and creation transactions are business evidence, never
+        # reference vocabulary in a structure-only rebuild.
+        lead_table = "ops.doc_whats_new_lead_creation"
+        classification = json.loads((REPO / "ops/config/snapshot-seed-coverage.json").read_text())
+        reason = classification["excluded"].get(lead_table)
+        lead_repo = build_repo(tmp + "/catchup", {
+            "0766_doc_whats_new_repair.sql": (REPO / "migrations/0766_doc_whats_new_repair.sql").read_text(),
+        }, {"carried": {}, "excluded": {lead_table: reason} if reason else {}})
+        lead_artifact = artifact(["0766_doc_whats_new_repair.sql"])
+        case("catch-up creation evidence is classified and omitted from a rebuild",
+             module.check(lead_repo, lead_artifact) == [])
+        case("catch-up creation evidence refuses if copied into the snapshot",
+             "EXCLUDED" in summarise(module.check(lead_repo, lead_artifact + copy_block(lead_table))))
         # ---------------------------------------------------------------- 1
         repo = build_repo(tmp + "/a", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {}})
@@ -581,6 +633,21 @@ def main():
                           {"carried": {}, "excluded": {}})
         case("an E-string with a backslash-escaped quote does not silence the migration",
              any("ops.new_registry" in f for f in module.check(repo, artifact(["0100_e.sql"]))))
+        tail_calls = [0]
+        original_tail = module._tail
+
+        def count_tail_calls(parts, count):
+            tail_calls[0] += 1
+            return original_tail(parts, count)
+
+        module._tail = count_tail_calls
+        try:
+            scanned, do_bodies, routines = module.scan_sql("select 'x';\n" * 1000)
+        finally:
+            module._tail = original_tail
+        case("ordinary string scanning does not rebuild the accumulated output tail",
+             tail_calls[0] == 0 and scanned.count("select") == 1000
+             and not do_bodies and not routines)
         # A backslash in an ORDINARY literal is a plain character, not an escape.
         repo = build_repo(tmp + "/r6esc2",
                           {"0100_p.sql": "comment on table t is 'a plain \\ backslash';\n"
@@ -817,6 +884,152 @@ def main():
         case("the data region starts at the ledger COPY header, so its rows are excised",
              module.data_region(artifact(["0100_x.sql"])).startswith("COPY public.schema_migrations"))
 
+        # Pad each whitespace position independently and all of them together.
+        # Both literal spellings and bare/format EXECUTE use the same contract.
+        for quote in ("'insert into ops.compound_exec values (1)'",
+                      "$q$insert into ops.compound_exec values (1)$q$"):
+            for tokens in (("execute",), ("execute", "format", "(")):
+                for padded_gap in (*range(len(tokens)), None):
+                    prefix = "".join(token + (" " * 5000 if padded_gap in (gap, None) else " ")
+                                     for gap, token in enumerate(tokens))
+                    sql = "do $$ begin " + prefix + quote + (");" if "format" in tokens else ";") + " end $$;"
+                    case(f"EXECUTE prefix gaps {tokens}/{padded_gap}/{quote[0]} preserve seeds",
+                         "ops.compound_exec" in module.written_tables(sql))
+                    repo_gap = build_repo(tmp + "/prefix-gap", {"0100_gap.sql": sql},
+                                          {"carried": {}, "excluded": {}})
+                    case("compound EXECUTE padding cannot bypass classification",
+                         any("UNCLASSIFIED" in f for f in module.check(repo_gap, artifact(["0100_gap.sql"]))))
+        for tokens in (("do",), ("do", "language", "plpgsql")):
+            for padded_gap in (*range(len(tokens)), None):
+                prefix = "".join(token + ("\n\t" * 2500 if padded_gap in (gap, None) else " ")
+                                 for gap, token in enumerate(tokens))
+                sql = prefix + "$$ begin insert into ops.compound_do values (1); end $$;"
+                case(f"DO prefix gaps {tokens}/{padded_gap} preserve seeds",
+                     "ops.compound_do" in module.written_tables(sql))
+
+        for newline in ("\n", "\r\n"):
+            for suffix in ("suffix", " ", "\t"):
+                block = newline.join(["COPY public.review_data (value) FROM stdin;",
+                                      "\\." + suffix, "a'b", "\\.", "",
+                                      "insert into party values (1);", ""])
+                repo_marker = build_repo(tmp + "/marker", {"0100_marker.sql": "insert into party values (1);"},
+                                         {"carried": {}, "excluded": {"party": "runtime data"}})
+                found = module.check(repo_marker, artifact(["0100_marker.sql"], [block]))
+                case(f"COPY marker suffix {suffix!r} with {newline!r} is row data",
+                     any("DECLARED EXCLUDED BUT PRESENT" in f and "party" in f for f in found))
+
+        # THE TAIL BOUND IS COUNTED IN SIGNIFICANT CHARACTERS. Every consumer looks
+        # back past optional whitespace, so a raw-character bound measures the
+        # whitespace rather than the token, and a long enough run loses the seed.
+        # 4200 spaces missed where 4000 detected, which is the missed-seed
+        # direction this file is not allowed to fail in.
+        pad = " " * 9000
+        padded = ("do $$ begin execute" + pad + "'insert into ops.padded_exec values (1)'; end $$;\n"
+                  "create function ops.padded_fn() returns void language plpgsql as" + pad +
+                  "$$ begin insert into ops.padded_body values (1); end $$;\n"
+                  "select ops.padded_fn();\n")
+        repo = build_repo(tmp + "/r6pad", {"0100_pad.sql": padded}, {"carried": {}, "excluded": {}})
+        found = module.check(repo, artifact(["0100_pad.sql"]))
+        case("whitespace between EXECUTE and its literal cannot push the seed out of the window",
+             any("ops.padded_exec" in f for f in found))
+        case("whitespace between AS and a routine body cannot push the seed out of the window",
+             any("ops.padded_body" in f for f in found))
+
+        # N5. The boundary refusal names the EARLIEST data statement in the segment,
+        # not the first pattern in WRITES_ANYWHERE that happens to match. #803 fixed
+        # the ordering ACROSS segments and left this half with no case. The two must
+        # disagree to be worth testing: MERGE comes first in the text and second in
+        # the pattern list, so min() names it and hits[0] names the INSERT.
+        two_stmts = ("merge into ops.earliest_merge t using (select 1) s on true "
+                     "when not matched then insert values (1);\n"
+                     "insert into ops.later_insert (k) values (1);\n\n")
+        repo_ord = build_repo(tmp + "/r6ord",
+                              {"0100_ord.sql": "insert into deal_phase (name) values ('x');\n"},
+                              {"carried": {}, "excluded": {}})
+        art = artifact(["0100_ord.sql"])
+        art = art.replace("COPY public.schema_migrations", two_stmts + "COPY public.schema_migrations", 1)
+        found = module.check(repo_ord, art)
+        case("the boundary refusal names the earliest statement, not the first pattern to match",
+             any("ops.earliest_merge" in f for f in found))
+
+        # N20. The COPY block's TERMINATOR is newline-anchored, the twin of the
+        # header anchor T49 pinned. A backslash-dot inside a data row would end
+        # the block early and expose its tail to the SQL scanner.
+        early_end = ("COPY public.deal_phase (name) FROM stdin;\n"
+                     "a\\.b\n"
+                     "O'Brien\n"
+                     "\\.\n\ninsert into party (name) values ('acme');\n\n")
+        repo_t = build_repo(tmp + "/r6term",
+                            {"0100_t.sql": "insert into deal_phase (name) values ('x');\n"},
+                            {"carried": {"deal_phase": "closed vocabulary"},
+                             "excluded": {"party": "business data"}})
+        found = module.check(repo_t, artifact(["0100_t.sql"], [early_end]))
+        case("a backslash-dot inside a data row does not end the COPY block early",
+             any("DECLARED EXCLUDED BUT PRESENT" in f and "party" in f for f in found))
+
+        # N3. EXECUTE_ARGUMENT needs its leading word boundary. Without it an
+        # identifier merely ENDING in execute -- last_execute, pre_execute -- turns
+        # the literal beside it into statements, which is the false-alarm direction.
+        false_exec = "select last_execute 'insert into ops.ghost_exec values (1)' from ops.real_one;\n"
+        repo_fe = build_repo(tmp + "/r6fe", {"0100_fe.sql": false_exec}, {"carried": {}, "excluded": {}})
+        case("a word merely ENDING in execute does not make its literal into statements",
+             not any("ops.ghost_exec" in f for f in module.check(repo_fe, artifact(["0100_fe.sql"]))))
+
+        # Doubled quotes decode to one quoted value containing SQL-looking text.
+        doubled = ("do $$ begin execute "
+                   "'insert into ops.dq_first values (''; insert into ops.dq_phantom values (1)'')'; "
+                   "end $$;\n")
+        repo_dq = build_repo(tmp + "/r6dq", {"0100_dq.sql": doubled}, {"carried": {}, "excluded": {}})
+        found = module.check(repo_dq, artifact(["0100_dq.sql"]))
+        case("a dynamic literal's doubled quotes are undoubled before it is scanned",
+             any("ops.dq_first" in f for f in found)
+             and not any("ops.dq_phantom" in f for f in found))
+
+        # CTAS column lists contain names, never typed definitions. Exercise a
+        # valid wide header beyond the former cutoff, plus a smaller control.
+        for width in (60, 400):
+            cols = [f"col_{i:04}_long_name" for i in range(width)]
+            wide_ctas = ("create table ops.wide_ctas (" + ", ".join(cols)
+                         + ") as select " + ", ".join("1 as " + c for c in cols) + ";")
+            repo_ct = build_repo(tmp + f"/r6ct{width}", {"0100_ct.sql": wide_ctas},
+                                 {"carried": {}, "excluded": {}})
+            case(f"a valid {width}-column CREATE TABLE AS is still a seed",
+                 any("UNCLASSIFIED" in f and "ops.wide_ctas" in f
+                     for f in module.check(repo_ct, artifact(["0100_ct.sql"]))))
+
+        # N16. SECURITY LABEL ON FUNCTION names a routine without calling it, the
+        # same shape as GRANT and REVOKE. Losing that alternative makes a defined
+        # but never-called routine look invoked, and its body a seed.
+        seclabel = ("create function ops.labelled() returns void language plpgsql as $$\n"
+                    "begin\n  insert into ops.seclabel_ghost (k) values (1);\nend $$;\n"
+                    "security label on function ops.labelled() is 'classified';\n")
+        repo_sl = build_repo(tmp + "/r6sl", {"0100_sl.sql": seclabel}, {"carried": {}, "excluded": {}})
+        case("SECURITY LABEL ON FUNCTION names a routine, it does not call it",
+             not any("ops.seclabel_ghost" in f for f in module.check(repo_sl, artifact(["0100_sl.sql"]))))
+
+        # A header inside COPY data is a row of the outer table. It must not
+        # fabricate row evidence for a carried table that is absent.
+        nested_copy = ("COPY public.outer_tbl (a) FROM stdin;\n"
+                       "COPY public.inner_tbl (b) FROM stdin;\n"
+                       "datarow\n\\.\n\n"
+                       "insert into party (name) values ('acme');\n")
+        blocks, _rest = module.copy_blocks(nested_copy)
+        case("a COPY header in row data produces only the outer block",
+             len(blocks) == 1 and blocks[0][0] == "outer_tbl")
+        repo_nested = build_repo(tmp + "/r6nested",
+                                 {"0100_nested.sql": "insert into inner_tbl values (1);"},
+                                 {"carried": {"inner_tbl": "required vocabulary"},
+                                  "excluded": {"party": "runtime data"}})
+        found = module.check(repo_nested, artifact(["0100_nested.sql"], [nested_copy]))
+        case("a nested COPY header cannot mint carried rows",
+             any("DECLARED CARRIED BUT ABSENT" in f and "inner_tbl" in f for f in found))
+        case("SQL after an outer COPY block remains visible",
+             any("DECLARED EXCLUDED BUT PRESENT" in f and "party" in f for f in found))
+        case("blanking COPY spans preserves artifact length",
+             len(module._blank(nested_copy, [(b[2], b[3]) for b in blocks])) == len(nested_copy))
+        case("blanking overlapping spans preserves length independently of COPY parsing",
+             len(module._blank("abcdefghij", [(1, 6), (3, 8)])) == 10)
+
         # Whitespace is legal around the schema separator.
         repo = build_repo(tmp + "/r6sp",
                           {"0100_sp.sql": "insert into ops . spaced_table (k) values (1);\n"},
@@ -865,6 +1078,20 @@ def main():
         # payload, pass all 34 cases while the guard refused nothing.
         repo = build_repo(tmp + "/mainok", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {"ops.widget": "runtime"}})
+        seed_artifact = artifact(["0100_seed.sql"])
+        seed_analysis = module.analyze_seeds(repo, seed_artifact)
+        original_written_tables = module.written_tables
+
+        def reject_migration_rescan(sql):
+            raise AssertionError("precomputed seed analysis was not reused")
+
+        module.written_tables = reject_migration_rescan
+        try:
+            reused_findings = module.check(repo, seed_artifact, seed_analysis)
+        finally:
+            module.written_tables = original_written_tables
+        case("check reuses precomputed migration seed analysis",
+             reused_findings == [])
         path_clean = os.path.join(tmp, "clean.sql")
         open(path_clean, "w").write(artifact(["0100_seed.sql"]))
         err = io.StringIO()
@@ -918,8 +1145,8 @@ def main():
         # ---------------------------------------------------------------- G6
         repo = build_repo(tmp + "/g6", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {"ops.widget": "runtime"}})
-        case("a ledger entry with no file on disk is reported, not silently skipped",
-             any("NOT ON DISK" in f for f in
+        case("a ledger entry with no source is reported, not silently skipped",
+             any("HAS NO SOURCE" in f for f in
                  module.check(repo, artifact(["0100_seed.sql", "0999_renamed_away.sql"]))))
 
         # ---------------------------------------------------------------- G3
@@ -1112,6 +1339,21 @@ def main():
                         "select ops.h();\n")
         case("an E-string with a backslash-escaped quote still leaves the call visible",
              "ops.landed" in module.written_tables(escaped_call))
+
+    # PostgreSQL concatenates newline-separated adjacent literals. Doubling
+    # their count must stay below quadratic growth; use best-of-two to reduce
+    # scheduling noise, plus a small allowance for timer resolution.
+    timings = []
+    for count in (16000, 32000):
+        sql = "select " + "'x'\n" * count + ";"
+        samples = []
+        for _ in range(2):
+            start = time.perf_counter()
+            module.scan_sql(sql)
+            samples.append(time.perf_counter() - start)
+        timings.append(min(samples))
+    case(f"adjacent literal scanning scales below quadratic ({timings})",
+         timings[1] < timings[0] * 3.2 + 0.03)
 
     # -------------------------------------------------------------------- 9d
     # A COPY WITH NO TERMINATOR used to blank the region to end of file, so a

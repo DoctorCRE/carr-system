@@ -10,7 +10,8 @@
 # ── WHAT "VERIFIED" CAN AND CANNOT MEAN FOR THESE PINS ───────────────────────
 # ASKING A MODEL ITS OWN NAME OR EFFORT IS CONFABULATION, NOT TELEMETRY.
 # Measured live 2026-08-09, one sitting, this machine:
-#   - Codex invoked with model=gpt-5.6-sol, effort=high self-reported
+#   - Codex invoked with model=gpt-5.6-sol (the Sol id then; today's is
+#     gpt-6.1-sol), effort=high self-reported
 #     "GPT-5.4 effort=xhigh". Neither value was sent; xhigh cannot even be sent.
 #     An earlier probe self-reported "GPT-5.4" while running on the Sol config,
 #     and that wrong answer was briefly reported to Joe as fact.
@@ -30,25 +31,26 @@
 # assumed normal.
 
 # ── COUNCIL TIER — a panel reasoning about an open design question ───────────
-# Joe, 2026-08-09: "council meetings are always held with the Sol 5.6 model on
-# 'high' effort. And Supergrok 4.5 Expert."
+# Joe, 2026-08-09: council meetings are always held with the Sol model on 'high'
+# effort and SuperGrok Expert. Joe, 2026-09-29: any Sol model call uses
+# gpt-6.1-sol (never gpt-6-sol or gpt-5.6-sol).
 #
-# CODEX / "Sol 5.6" -> gpt-5.6-sol. `gpt-5.6` and `sol-5.6` both 400 on a
-# ChatGPT account. Flags passed explicitly even though ~/.codex/config.toml sets
+# CODEX / "Sol" -> gpt-6.1-sol. Bare `gpt-6.1` or `sol-6.1` style names are not
+# valid ids; use the full id. Flags passed explicitly even though ~/.codex/config.toml sets
 # them, because that file is machine-local and untracked — Dell's machine has
 # none, and a council that silently downgrades elsewhere is the failure this
 # file exists to prevent.
-CODEX_MODEL="gpt-5.6-sol"
+CODEX_MODEL="gpt-6.1-sol"
 CODEX_EFFORT="high"
 
-# GROK / "SuperGrok 4.6" -> grok-4.6 at high. Joe named 4.6 on 2026-08-23 and
-# `grok models` now lists grok-4.6 as the CLI default (grok-4.5 still offered).
+# GROK / "SuperGrok" -> grok-4.7 at high. Joe ruled 2026-09-29 that Grok calls
+# use grok-4.7; Grok CLI 1.0.44 lists grok-4.7 as its only model (4.6 is gone).
 # IMPORTANT: the CLI accepts ONLY high | medium | low; `expert` is rejected
 # outright. "SuperGrok Expert" is the grok.com ACCOUNT TIER that entitles the
 # session, not a per-call setting. So `high` is the top of the CLI's scale and
 # is what Joe's instruction resolves to. If xAI ever exposes an expert effort
 # or a newer model id, change it here.
-GROK_MODEL="grok-4.6"
+GROK_MODEL="grok-4.7"
 GROK_EFFORT="high"
 
 # ── PRECHECK TIER — deliberately NOT the council tier ────────────────────────
@@ -65,9 +67,9 @@ GROK_EFFORT="high"
 #
 # Mirrors rule fb110a39 (Fable reserved for its best use cases) and the cost-tier
 # half of 185013c6 (outside models are a delegation pool; tier is chosen per
-# job). Model stays gpt-5.6-sol because it is what this account supports; EFFORT
-# is the dial.
-PRECHECK_MODEL="gpt-5.6-sol"
+# job). Model is the same gpt-6.1-sol as the council tier (the one Sol id Joe
+# allows); EFFORT is the dial.
+PRECHECK_MODEL="gpt-6.1-sol"
 PRECHECK_EFFORT="low"
 
 
@@ -101,10 +103,18 @@ run_codex() {
 }
 
 # run_grok <brief> <out>           — council tier
+# Goes through the sanctioned runner (bin/grok-run.sh), never `grok` directly:
+# it pins the model, returns the final assistant message, and verifies the end
+# event (stopReason and modelUsage). A cancelled or wrong-model run exits
+# nonzero, and its text is moved to <out>.rejected so it can never be read as
+# a chair's answer. The runner's receipt lands in the .err file.
 run_grok() {
-  grok --sandbox read-only \
-    --model "$GROK_MODEL" --reasoning-effort "$GROK_EFFORT" --print \
-    "$(cat "$1")" < /dev/null > "$2" 2>"${2:r}.err"
+  [ "$GROK_MODEL" = "grok-4.7" ] || { print -r -- "run_grok: runner is pinned to grok-4.7, GROK_MODEL=$GROK_MODEL" > "${2:r}.err"; return 4; }
+  "${GROK_RUN:-$REPO/bin/grok-run.sh}" --effort "$GROK_EFFORT" --prompt-file "$1" \
+    < /dev/null > "$2" 2>"${2:r}.err"
+  local rc=$?
+  [ $rc -eq 0 ] || { [ -e "$2" ] && mv -f "$2" "${2:r}.rejected"; }
+  return $rc
 }
 
 # run_precheck <brief> <out>       — triage tier, NOT the council tier

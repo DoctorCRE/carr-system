@@ -8,7 +8,75 @@ const ids = { tour: "10000000-0000-4000-8000-000000000001", route: "20000000-000
 const key = "c0000000-0000-4000-8000-000000000001", digest = x => `sha256:${x.repeat(64)}`;
 const point = role => ({ latitude: 30.4451, longitude: -87.1893, position_role: role, source_ref: "asset:public:abcdefghijklmnoq", precision_class: "entrance" });
 const providerRequest = { travel_mode: "driving", optimize_waypoint_order: true, waypoint_count: 2, departure_at: null, request_digest: digest("a") };
+const appointmentStop = (start, end) => ({ idempotency_key: key, route_version_id: ids.route, property_id: ids.property,
+  route_sequence: 1, route_label: "A", stop_state: "active", appointment_start: start, appointment_end: end,
+  locked_appointment: true, dwell_minutes: 20, buffer_minutes: 5,
+  access_coordinate_status: "approved", assertion_set_digest: digest("c") });
 function harness() { const calls=[],events=[],envelopes=[]; const c={async query(sql,params){calls.push({sql,params});if(sql.includes("create_tour_domain"))return{rows:[{tour_id:ids.tour}]};if(sql.includes("prepare_tour_route_version"))return{rows:[{route_version_id:ids.route}]};if(sql.includes("append_tour_route_version"))return{rows:[{route_version_id:ids.route}]};if(sql.includes("append_tour_route_stop_transition"))return{rows:[{route_stop_transition_id:ids.transition}]};if(sql.includes("append_tour_route_stop"))return{rows:[{route_stop_id:ids.stop}]};if(sql.includes("accept_tour_route_version"))return{rows:[{route_version_acceptance_id:ids.acceptance}]};if(sql.includes("append_tour_cheat_sheet_revision"))return{rows:[{cheat_sheet_revision_id:ids.cheat}]};if(sql.includes("restore_tour_cheat_sheet_revision"))return{rows:[{cheat_sheet_revision_id:ids.restore}]};throw new Error(sql)}};const withEnvelope=async(client,a,verb,args,fn)=>{assert.equal(client,c);assert.equal(a,actor);assert.equal(args.idempotency_key,key);envelopes.push({verb,args});return fn()};return {c,calls,events,envelopes,tools:tourDomainTools({withEnvelope,writeEvent:async(...e)=>events.push(e),ToolError})}; }
+
+test("domain rejects reversed microsecond windows before writes and preserves valid windows", async t => {
+  for (const [name, start, end, valid] of [
+    ["reversed", "2026-10-01T14:00:00.123999Z", "2026-10-01T14:00:00.123001Z", false],
+    ["equal across offsets", "2026-10-01T09:00:00.123456-05:00", "2026-10-01T14:00:00.123456Z", true],
+    ["increasing", "2026-10-01T14:00:00.123001Z", "2026-10-01T14:00:00.123002Z", true],
+    ["reversed across offsets", "2026-10-01T09:00:00.123999-05:00", "2026-10-01T14:00:00.123001Z", false],
+    ["reversed before epoch", "1969-12-31T23:59:59.999999Z", "1969-12-31T23:59:59.999998Z", false],
+    ["increasing across epoch", "1969-12-31T23:59:59.999999Z", "1970-01-01T00:00:00.000001Z", true],
+    ["reversed distant date", "9999-10-01T14:00:00.123999Z", "9999-10-01T14:00:00.123998Z", false],
+  ]) await t.test(name, async () => {
+    const h = harness(), stop = appointmentStop(start, end);
+    if (valid) {
+      await h.tools["append-tour-route-stop"].handler(h.c, actor, stop);
+      assert.deepEqual(h.calls[0].params.slice(6, 8), [start, end]);
+    } else {
+      await assert.rejects(h.tools["append-tour-route-stop"].handler(h.c, actor, stop),
+        e => e.payload?.error === "tour_appointment_invalid");
+      assert.deepEqual([h.calls, h.envelopes, h.events], [[], [], []]);
+    }
+  });
+});
+
+test("domain appointment timestamps respect PostgreSQL offset and year boundaries", async t => {
+  for (const [name, start, end, valid] of [
+    ["positive offset boundary", "2026-10-01T14:00:00.123456+15:59", "2026-10-01T14:00:00.123457+15:59", true],
+    ["negative offset boundary", "2026-10-01T14:00:00.123456-15:59", "2026-10-01T14:00:00.123457-15:59", true],
+    ["first AD year", "0001-10-01T14:00:00Z", "0001-10-01T14:30:00Z", true],
+    ["last four-digit year", "9999-10-01T14:00:00Z", "9999-10-01T14:30:00Z", true],
+    ["positive offset overflow", "2026-10-01T14:00:00+16:00", "2026-10-01T14:30:00+16:00", false],
+    ["negative offset overflow", "2026-10-01T14:00:00-16:00", "2026-10-01T14:30:00-16:00", false],
+    ["minute overflow", "2026-10-01T14:00:00+15:60", "2026-10-01T14:30:00+15:60", false],
+    ["year zero", "0000-10-01T14:00:00Z", "0000-10-01T14:30:00Z", false],
+    ["extended year", "+010000-10-01T14:00:00Z", "+010000-10-01T14:30:00Z", false],
+  ]) await t.test(name, async () => {
+    const h = harness(), stop = appointmentStop(start, end);
+    if (valid) {
+      await h.tools["append-tour-route-stop"].handler(h.c, actor, stop);
+      assert.deepEqual(h.calls[0].params.slice(6, 8), [start, end]);
+    } else {
+      for (const field of ["appointment_start", "appointment_end"]) {
+        await assert.rejects(h.tools["append-tour-route-stop"].handler(h.c, actor,
+          { ...appointmentStop("2026-10-01T14:00:00Z", "2026-10-01T14:30:00Z"), [field]: stop[field] }),
+          e => e.payload?.error === "tour_input_invalid" && e.payload.field === field);
+        assert.deepEqual([h.calls, h.envelopes, h.events], [[], [], []]);
+      }
+    }
+  });
+});
+
+test("route appointment offsets round-trip through the domain without losing microseconds", async () => {
+  const h = harness();
+  const stop = { idempotency_key: key, route_version_id: ids.route, property_id: ids.property,
+    route_sequence: 1, route_label: "A", stop_state: "active",
+    appointment_start: "2026-10-01T09:00:00.123456-05:00", appointment_end: "2026-10-01T09:30:00.123456-05:00",
+    locked_appointment: true, dwell_minutes: 20, buffer_minutes: 5,
+    access_coordinate_status: "approved", assertion_set_digest: digest("c") };
+  await h.tools["append-tour-route-stop"].handler(h.c, actor, stop);
+  assert.deepEqual(h.calls.at(-1).params.slice(6, 8), [stop.appointment_start, stop.appointment_end]);
+  for (const value of ["2026-02-30T14:00:00+00:00", "2026-10-01T14:00:00", "2026-10-01T14:00:00+24:00", "2026-10-01T14:00:00-05:60"]) {
+    await assert.rejects(h.tools["append-tour-route-stop"].handler(h.c, actor,
+      { ...stop, appointment_start: value }), e => e.payload?.error === "tour_input_invalid");
+  }
+});
 
 test("writes use all exact revised SQL seams, derived tenancy, and never leak internal request or cheat-sheet content", async () => {
   const h=harness();

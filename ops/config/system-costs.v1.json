@@ -1,0 +1,35 @@
+{
+  "schema": "carr-system-cost-config.v1",
+  "currency": "USD",
+  "budget_usd": 500,
+  "budget_basis": "Initial alert threshold; reporting only, grants no spending authority",
+  "providers": {
+    "cloudflare": {"label": "Cloudflare", "plan": "Unconfirmed Workers/KV/R2", "monthly_usd": null, "budget_usd": 25},
+    "neon": {"label": "Neon", "plan": "Launch", "monthly_usd": 0, "budget_usd": 10},
+    "claude": {"label": "Claude", "plan": "Max, tier unconfirmed", "monthly_usd": null, "budget_usd": 250},
+    "openai": {"label": "ChatGPT / Codex", "plan": "Subscription, tier unconfirmed", "monthly_usd": null, "budget_usd": 250},
+    "grok": {"label": "Grok", "plan": "Subscription, tier unconfirmed", "monthly_usd": null, "budget_usd": 50},
+    "jev": {"label": "Jev", "plan": "Per input token", "monthly_usd": 0, "budget_usd": 15.5},
+    "github": {"label": "GitHub", "plan": "Pro", "monthly_usd": 4, "budget_usd": 4, "price_source": "https://github.com/pricing", "plan_source": "ops/config/platform-metering.v1.json"},
+    "domains": {"label": "Domains", "plan": "Annual renewals, registrar/price unconfirmed", "annual_usd": null, "budget_usd": 10}
+  },
+  "missing_subscription_data": ["Cloudflare plan/price", "Claude Max tier/price", "ChatGPT/Codex tier/price", "Grok tier/price", "domain renewal annual prices"],
+  "fixed_fee_accounting": "Monthly fees accrue evenly per calendar day; annual renewal totals accrue at annual_usd/12 per month. Null is unknown, never free. Config prices exclude tax and purchased credits.",
+  "github_user": "jbookout",
+  "neon": {
+    "org_id": "org-dry-dew-75906281",
+    "plan": "launch",
+    "price_source": "https://neon.com/pricing",
+    "estimate_note": "Meter estimate after configured per-project monthly egress allowance, before taxes, credits and contractual minimums; not an invoice",
+    "rates": {
+      "compute_unit_seconds": {"usd": 0.106, "units": 3600},
+      "root_branch_bytes_month": {"usd": 0.35, "units": 1000000000},
+      "child_branch_bytes_month": {"usd": 0.35, "units": 1000000000},
+      "instant_restore_bytes_month": {"usd": 0.2, "units": 1000000000},
+      "public_network_transfer_bytes": {"usd": 0.1, "units": 1000000000, "included_units_per_month": 100000000000},
+      "private_network_transfer_bytes": {"usd": 0.01, "units": 1000000000},
+      "extra_branches_month": {"usd": 0.002, "units": 1, "meter_unit": "branch-hour", "unit_evidence": "ops/config/platform-metering.v1.json live_evidence: 372 meter units cost 0.744 USD; https://neon.com/blog/new-usage-based-pricing"},
+      "snapshot_storage_bytes_month": {"usd": 0.35, "units": 1000000000}
+    }
+  }
+}

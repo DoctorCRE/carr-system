@@ -57,6 +57,7 @@ class ShadowCase(unittest.TestCase):
         self.env = patch.dict(os.environ, {}, clear=False)
         self.env.start()
         os.environ.pop("DOC_ROUTE_SHADOW", None)
+        os.environ["CARR_JEV_SEMANTIC_CACHE"] = str(Path(self.tmp.name)/"cache.json")
         self.brain = patch.object(convo_core, "_BRAIN", FakeBrain())
         self.brain.start()
 
@@ -264,11 +265,11 @@ class RealPolicyRouter(ShadowCase):
         def _client(self):
             return RealPolicyRouter.FakeClient
 
-        def judge(self, subject, questions, timeout=None, client=None):
+        def judge(self, subject, questions, timeout=None, client=None, **kwargs):
             self.subjects.append(subject)
             if self.error:
                 raise self.error
-            return {"answers": {k: {"noul": self.scores.get(k, 0.0)} for k in questions}}
+            return {"model":"jev-1.13.0", "answers": {k: {"type":"noul","noul": self.scores.get(k, 0.0)} for k in questions}}
 
     def test_route_and_target_come_from_the_policy_file(self):
         judge = self.FakeJudge({"direct": 0.9})
@@ -278,12 +279,12 @@ class RealPolicyRouter(ShadowCase):
         row = self.rows()[0]
         policy_bytes = (REPO / "ops" / "config" / "model-routes.v1.json").read_bytes()
         policy = json.loads(policy_bytes)
-        self.assertEqual(row["route"], "direct")
-        self.assertEqual(row["target"], policy["queue_targets"]["direct"])
+        self.assertEqual(row["route"], policy["abstain_route"])
+        self.assertEqual(row["target"], policy["queue_targets"]["fallback"])
         self.assertEqual(row["would_model"], policy["dispatch_targets"][row["target"]]["subagent_model"])
         self.assertEqual(row["policy_version"], policy["version"])
         self.assertEqual(row["policy_sha256"], hashlib.sha256(policy_bytes).hexdigest())
-        self.assertFalse(row["abstained"])
+        self.assertTrue(row["abstained"])
         self.assertEqual(judge.subjects[0]["task"], UTTERANCE, "Jev scores the utterance itself")
 
     def test_jev_down_is_the_policy_abstain_route(self):
@@ -324,7 +325,8 @@ class RealPolicyRouter(ShadowCase):
         router = convo_core.jev_router(judge=judge)
         with patch("builtins.open", wraps=open) as opened:
             router(UTTERANCE)
-        written = [c for c in opened.call_args_list if len(c.args) > 1 and "a" in str(c.args[1])]
+        written = [c for c in opened.call_args_list if len(c.args) > 1 and "a" in str(c.args[1])
+                   and str(c.args[0]).endswith("model-routes.jsonl")]
         self.assertEqual(written, [], "dispatch() must run with log_path=None: its rows carry task text")
 
 

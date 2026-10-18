@@ -3,21 +3,42 @@ R03 stage-5 settlement-sweep runner
 Entrypoint: tools/r03-settlement-sweep-runner.py
 Fixture acceptance: tools/test-r03-settlement-sweep.py
 
-The runner accepts only three read-only descriptor inputs supplied by the
+Execution accepts only three read-only descriptor inputs supplied by the
 settlement capability: an approved JSON manifest, the bound command/pathspec
 allowlist, and its redemption receipt.  There are no live manifest or receipt
 paths to substitute after admission.
 
-The manifest schema is carr.r03-stage5-settlement-sweep.v1.  It carries the
+Authoring uses --author-template <path> with repeated --approve-restore-path
+<literal-name> arguments. The template must have approved=false and restore=[].
+Only explicitly approved tracked dirt is enrolled; any unapproved tracked path,
+rename/copy, unsupported pinned object, changing state or Git timeout refuses
+the entire authoring run without publishing partial JSON. The resulting v2
+JSON remains unapproved and must be admitted through the settlement capability.
+Authoring cannot execute or accept capability descriptors.
+
+The manifest schema is carr.r03-stage5-settlement-sweep.v2.  It carries the
 origin/main pin, clean pathspecs and expected dry-run candidates, the full
-never-cleanable register, restore blob expectations, PARK archive data,
+never-cleanable register, restore entries with literal path, pinned blob_oid
+and observed_state SHA-256 binding the approved index stages, filesystem type/
+mode and worktree bytes, PARK archive data,
 classified branches, closing readback expectations, and two recorded gates:
 capability denial tests passed and a fresh verified production backup.  The
 receipt binds the exact manifest bytes to the admitted capability.
+Admission recomputes the state-bound restore set; older unbound records refuse.
 
 Default mode is dry-run.  It performs only git clean -nd against the approved
 pathspecs, compares that candidate set to the manifest, rejects any
 never-cleanable result, prints the planned stages, and makes no mutation.
+A nonempty restore set is displayed with an execution precondition failure:
+enforced writer exclusion is unavailable.
+
+Restore execution is HELD (exit 75), even with an approved manifest and matching
+observed state. The runner cannot exclude a writer between its final state
+verification and destructive checkout. It therefore refuses every nonempty
+restore set before stage 3 writes any refs or archives. No bypass, cooperative
+lock assertion or capability approval enables restoration. Authoring/dry-run
+remain available; empty-restore fixture settlements can still execute. Enforced
+writer exclusion spanning verification and disposal requires a separate repair.
 
 Execute mode is deliberately fixture-only in this build: it refuses the
 canonical checkout and every child of it.  In a disposable repository it does:
@@ -26,10 +47,10 @@ under refs/backup/<run-id>/, atomically pushes branch backup refs to origin and
 reads their object ids back, then age-encrypts PARK data in a 0700 directory
 with 0600 artifacts and verifies every archived path after decrypt/extract;
 stage 4 fingerprints tracked and untracked-nonignored content; stage 5 repeats
-the capability, approval, and production-backup gates, restores only manifest
-paths, runs git clean -fd only after its matching -nd diff, and removes PARK
+the capability, approval, and production-backup gates, requires an empty restore
+set, runs git clean -fd only after its matching -nd diff, and removes PARK
 paths only after archive verification; stage 6 re-reads pinned HEAD, status,
-and branch count.
+and branch sets (count differences are advisory).
 
 Branch law is encoded per branch: an ancestry-merged tip is safe-deleted only
 after its backup ref exists; a squash-merged tip needs GitHub MERGED-to-main

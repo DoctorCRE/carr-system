@@ -17,10 +17,12 @@ scoped to one database and does not expire. Rotation was the remedy, and doing
 it by hand would have meant a password on a command line, which is the same
 class of mistake one step further along.
 
-THE THREE THINGS IT ROTATES (AND ONE DISABLED BACKUP PATH)
+SUPPORTED ROTATIONS (AND ONE DISABLED BACKUP PATH)
 
   --role carr_jobs             ALTER ROLE, then rewrite CARR_DB_JOBS_URL
   --role app_exporter_local    ALTER ROLE, then rewrite CARR_DB_EXPORTER_URL
+  --role carr_program5_forward_fix_verifier
+                              ALTER ROLE, then rewrite CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL
   --role carr_backup           DISABLED: refuses before local or provider work
                                until a canonical server-validated receipt exists
   --neon-api-key               mint a new Neon API key, then revoke the old one
@@ -90,7 +92,15 @@ ROLE_ENV = {
     "carr_jobs": "CARR_DB_JOBS_URL",
     "app_exporter_local": "CARR_DB_EXPORTER_URL",
     "carr_backup": "CARR_DB_BACKUP_URL",
+    "carr_program5_forward_fix_verifier": "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL",
 }
+
+# Both generic rotation entrypoints share this allowlist. Backup stays disabled.
+ROTATABLE_ROLES = frozenset({
+    "carr_jobs",
+    "app_exporter_local",
+    "carr_program5_forward_fix_verifier",
+})
 
 # No role may mint a connection while the backup provider mutation is disabled.
 #
@@ -209,6 +219,8 @@ def _postgres_parts(url: str, label: str):
         if "@" in parts.netloc.rsplit("@", 1)[0]:
             raise ValueError("multiple at signs")
         port = parts.port  # force urlsplit to reject a non-numeric port
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("invalid port")
     except ValueError:
         sys.exit(f"rotate-credential: {label} is not a strict PostgreSQL URI")
     # A libpq query parameter can replace the URI's authority, database,
@@ -222,7 +234,7 @@ def _postgres_parts(url: str, label: str):
             or not parts.hostname or not parts.username or parts.password is None
             or not database or "/" in database):
         sys.exit(f"rotate-credential: {label} is not a strict PostgreSQL URI")
-    return parts, (parts.hostname.lower(), port or 5432, database)
+    return parts, (parts.hostname.lower(), 5432 if port is None else port, database)
 
 
 def _url_for_role(parts, role: str, password: str, query: str) -> str:
@@ -644,8 +656,9 @@ def _rotate_existing_role(role: str, generate: bool) -> int:
     # This private helper is intentionally an allowlist too: callers importing
     # it must not bypass the public carr_backup refusal before any lock, import,
     # environment read, password generation, or database work.
-    if role not in {"carr_jobs", "app_exporter_local"}:
-        sys.exit("rotate-credential: generic rotation is permitted only for carr_jobs or app_exporter_local")
+    if role not in ROTATABLE_ROLES:
+        sys.exit("rotate-credential: generic rotation is permitted only for "
+                 + ", ".join(sorted(ROTATABLE_ROLES)))
     with credential_env_lock():
         return _rotate_existing_role_locked(role, generate)
 
@@ -653,8 +666,9 @@ def _rotate_existing_role(role: str, generate: bool) -> int:
 def _rotate_existing_role_locked(role: str, generate: bool) -> int:
     # Defense in depth for imported/private callers: this is the deepest helper
     # that holds ALTER ROLE, so it carries the same closed non-backup allowlist.
-    if role not in {"carr_jobs", "app_exporter_local"}:
-        sys.exit("rotate-credential: generic rotation is permitted only for carr_jobs or app_exporter_local")
+    if role not in ROTATABLE_ROLES:
+        sys.exit("rotate-credential: generic rotation is permitted only for "
+                 + ", ".join(sorted(ROTATABLE_ROLES)))
     import psycopg
     from psycopg import sql
 
@@ -666,21 +680,19 @@ def _rotate_existing_role_locked(role: str, generate: bool) -> int:
     env_key = ROLE_ENV[role]
     env = read_env()
     existing = env.get(env_key)
-    minting = False
     if not existing:
-        if role not in MINTABLE:
-            sys.exit(f"rotate-credential: {env_key} is not in {ENV_PATH} — nothing to rotate. "
-                     f"Add the line first; this tool changes a password, it does not mint a "
-                     f"connection.")
-        minting = True
-        if not generate:
-            # A first provision has no old value to preserve compatibility with,
-            # so there is nothing a typed password buys and one thing it costs:
-            # a human-chosen secret for an unattended role, typed twice, at the
-            # keyboard. Generated is strictly better here.
-            sys.exit(f"rotate-credential: {env_key} does not exist yet, so this run would MINT "
-                     f"it. Pass --generate: a credential no human ever needs to type should not "
-                     f"be one a human chooses.")
+        sys.exit(f"rotate-credential: {env_key} is not in {ENV_PATH} — nothing to rotate. "
+                 "Add the line first; this tool changes a password, it does not mint a connection.")
+
+    # Validate the effective libpq target before generating a password or
+    # opening the owner connection. The narrow parser rejects query overrides
+    # of the host, login, database, or startup role as well as malformed URIs.
+    _, owner_target = _postgres_parts(owner, "owner connection")
+    parts, target = _postgres_parts(existing, env_key)
+    if unquote(parts.username) != role:
+        sys.exit(f"rotate-credential: {env_key} has the wrong login — nothing changed")
+    if target != owner_target:
+        sys.exit(f"rotate-credential: {env_key} and owner target differ — nothing changed")
 
     if generate:
         pw = new_password()
@@ -693,29 +705,30 @@ def _rotate_existing_role_locked(role: str, generate: bool) -> int:
         if any(c in pw for c in " '\"@/:?#"):
             sys.exit("avoid spaces, quotes, and @ / : ? # (they break the URL form) — nothing changed")
 
+    new_url = swap_password(existing, pw)
     with psycopg.connect(owner) as conn:
         conn.execute(sql.SQL("alter role {} with password {}").format(
             sql.Identifier(role), sql.Literal(pw)))
         conn.commit()
-
-    # carr_backup is disabled. The two permitted roles retain their historical
-    # behavior: replace only the password in an existing URL.
-    assert existing is not None
-    new_url = swap_password(existing, pw)
 
     # PROVE IT BEFORE WRITING IT. If the new credential does not connect, the old
     # line stays in db.env and the only damage is a role whose password no longer
     # matches a file — recoverable by re-running. Writing first and verifying
     # after would leave an unusable file if the connection failed.
     with psycopg.connect(new_url) as conn:
-        row = conn.execute("select current_user").fetchone()
-        if not row or row[0] != role:
-            sys.exit(f"rotate-credential: verification connected as {row[0] if row else 'nobody'}, "
-                     f"expected {role} — db.env NOT written")
+        expected: tuple[str, str, bool] | tuple[str]
+        if role == "carr_program5_forward_fix_verifier":
+            row = conn.execute("select session_user,current_user,pg_has_role(session_user,'carr_program5_forward_fix_verifiers','member')").fetchone()
+            expected = (role, role, True)
+        else:
+            row = conn.execute("select current_user").fetchone()
+            expected = (role,)
+        if row != expected:
+            sys.exit(f"rotate-credential: verification is not the exact scoped identity "
+                     f"expected for {role} — db.env NOT written")
 
     write_env_key(env_key, new_url)
-    print(f"{role}: password {'set' if minting else 'rotated'} · {env_key} "
-          f"{'created' if minting else 'rewritten'} · verified connection as {role}")
+    print(f"{role}: password rotated · {env_key} rewritten · verified connection as {role}")
 
     return 0
 

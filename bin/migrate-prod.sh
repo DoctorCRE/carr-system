@@ -180,7 +180,7 @@ done
 stamp() { print -r -- "$(date -u +%FT%TZ) migrate-prod $*" >> "$LOG" }
 
 if (( APPLY )); then
-  dirty=$(cd "$REPO" && git status --porcelain migrations/)
+  dirty=$(cd "$REPO" && git status --porcelain migrations/ db/migration-baseline.json)
   if [[ -n "$dirty" ]]; then
     stamp "REFUSED uncommitted migrations: ${dirty//$'\n'/ · }"
     LAST_REASON_CLASS="uncommitted_migrations"
@@ -250,25 +250,27 @@ fi
 # because it is rebuilt often; production is never rebuilt.
 NEON_PROJECT_PRODUCTION="steep-field-48688294"
 
-DSN="$(neonctl connection-string production \
-        --project-id "$NEON_PROJECT_PRODUCTION" \
-        --role-name neondb_owner 2>/tmp/migrate-prod-neonctl.err)"
-if [[ -z "$DSN" ]]; then
-  # SAY WHY. The old version swallowed neonctl's own explanation, which is how a
-  # one-word fix ("--project-id") stayed invisible. stderr is captured to a file
-  # rather than passed through because a connection string can appear in
-  # neonctl's output, and this script's contract is that no DSN ever reaches a
-  # terminal or a transcript.
-  reason="$(head -1 /tmp/migrate-prod-neonctl.err 2>/dev/null)"
-  rm -f /tmp/migrate-prod-neonctl.err
-  stamp "FAIL no DSN from neonctl: ${reason:-no error text}"
+# Capture failure inside a conditional so set -e cannot skip the named cause.
+# The helper redacts stderr in memory before any diagnostic file is written.
+NEON_ERR="$(mktemp "${TMPDIR:-/tmp}/carr-neonctl.XXXXXX")"
+NEON_RC=0
+if DSN="$("$MP_PY" "$REPO/tools/migrate-prod-support.py" neon-dsn \
+        --project-id "$NEON_PROJECT_PRODUCTION" 2>"$NEON_ERR")"; then
+  :
+else
+  NEON_RC=$?
+fi
+if [[ "$NEON_RC" -ne 0 || -z "$DSN" ]]; then
+  reason="$(cat "$NEON_ERR" 2>/dev/null)"
+  rm -f "$NEON_ERR"
+  stamp "FAIL no DSN from neonctl rc=$NEON_RC: ${reason:-no error text}"
   LAST_REASON_CLASS="dsn_unavailable"
-  LAST_DETAIL="FAIL no DSN from neonctl: ${reason:-no error text}"
+  LAST_DETAIL="FAIL no DSN from neonctl rc=$NEON_RC: ${reason:-no error text}"
   print -u2 "could not derive the production owner DSN from neonctl (logged)."
   print -u2 "neonctl said: ${reason:-nothing at all}"
   exit 1
 fi
-rm -f /tmp/migrate-prod-neonctl.err
+rm -f "$NEON_ERR"
 
 migrate_args=()
 if [[ -n "$THROUGH" ]]; then

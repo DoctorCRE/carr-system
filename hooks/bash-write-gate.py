@@ -73,6 +73,7 @@ import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(REPO)
@@ -188,7 +189,7 @@ def extract_targets(command):
     """Every path this command plausibly WRITES. Order is not significant."""
     targets = []
     try:
-        tokens = shlex.split(command, comments=False, posix=True)
+        tokens = shell_tokens(command)
     except ValueError:
         # Unbalanced quotes — usually a heredoc body. Fall back to line-wise
         # parsing so `cat > f <<EOF` is still seen, and accept that a heredoc
@@ -196,10 +197,15 @@ def extract_targets(command):
         tokens = []
         for line in command.splitlines():
             try:
-                tokens.extend(shlex.split(line, comments=False, posix=True))
+                tokens.extend(shell_tokens(line))
             except ValueError:
                 continue
 
+    try:
+        tokens, redirect_targets = shell_operands(tokens)
+        targets.extend(redirect_targets)
+    except ValueError:
+        pass  # retain the conservative scan of malformed redirection tokens
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -216,9 +222,12 @@ def extract_targets(command):
                 index += 1
                 continue
 
+        end = next((j for j in range(index + 1, len(tokens))
+                    if tokens[j] in SHELL_BOUNDARIES), len(tokens))
+        remainder = tokens[index + 1:end]
         base = os.path.basename(token)
         if base == "tee":
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if candidate.startswith("-"):
                     continue
                 if REDIRECT.match(candidate) or candidate in ("|", "&&", ";"):
@@ -226,17 +235,17 @@ def extract_targets(command):
                 targets.append(candidate)
         elif base == "sed" and any(t == "-i" or t.startswith("-i") for t in
                                    tokens[index + 1:index + 4]):
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if candidate.startswith("-") or REDIRECT.match(candidate):
                     continue
                 targets.append(candidate)
         elif base in ("cp", "mv", "install", "rsync"):
-            tail = [t for t in tokens[index + 1:]
+            tail = [t for t in remainder
                     if not t.startswith("-") and not REDIRECT.match(t)]
             if len(tail) >= 2:
                 targets.append(tail[-1])
         elif base in ("truncate", "touch"):
-            for candidate in tokens[index + 1:]:
+            for candidate in remainder:
                 if not candidate.startswith("-"):
                     targets.append(candidate)
         elif token.startswith("of="):
@@ -306,71 +315,81 @@ def warn_jev_calls_write(hits):
     }))
 
 
-def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    if tool not in ("Bash", "functions.exec"):
         sys.exit(0)
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        if tool not in ("Bash", "functions.exec"):
-            sys.exit(0)
-        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-        command = (tool_input or {}).get("command") or ""
-        if not command.strip():
-            sys.exit(0)
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    command = (tool_input or {}).get("command") or ""
+    if not command.strip():
+        sys.exit(0)
 
-        targets = extract_targets(command)
-        jev_hits = jev_calls_write_targets(command, targets)
-        if not targets:
-            if jev_hits:
-                warn_jev_calls_write(jev_hits)
-            sys.exit(0)
-
-        cwd = payload.get("cwd") or os.getcwd()
-        record_home = load("carr_record_home_policy", "record-home-gate.py")
-        one_repo = load("carr_one_repo_policy", "one-repo-gate.py")
-
-        for raw in targets:
-            path = os.path.expanduser(raw)
-            if not os.path.isabs(path):
-                path = os.path.join(cwd, path)
-            path = os.path.abspath(path)
-
-            reason = None
-            if record_home is not None:
-                try:
-                    reason = record_home.check("Write", {"file_path": path})
-                except Exception as exc:
-                    log(f"record-home policy errored on {path}: {exc}")
-            if reason is None and one_repo is not None:
-                try:
-                    reason = one_repo.check({"file_path": path}, cwd)
-                except Exception as exc:
-                    log(f"one-repo policy errored on {path}: {exc}")
-
-            if reason:
-                text = (
-                    f"BLOCKED by the CARR bash-write gate: {path}\n"
-                    f"{reason}\n"
-                    "This came through Bash rather than Write or Edit, and the "
-                    "answer is the same either way — that is the point of this "
-                    "gate. The same content must not be refused or allowed "
-                    "purely by which tool carries it.\n"
-                    "Re-route the content through the record verbs rather than "
-                    "around the gate (rule 76a53dfe)."
-                )
-                log(f"DENY {path} :: {reason[:160]}")
-                print(text, file=sys.stderr)
-                sys.exit(2)
+    targets = extract_targets(command)
+    jev_hits = jev_calls_write_targets(command, targets)
+    if not targets:
         if jev_hits:
             warn_jev_calls_write(jev_hits)
         sys.exit(0)
-    except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+
+    cwd = payload.get("cwd") or os.getcwd()
+    record_home = load("carr_record_home_policy", "record-home-gate.py")
+    one_repo = load("carr_one_repo_policy", "one-repo-gate.py")
+
+    for raw in targets:
+        path = os.path.expanduser(raw)
+        if not os.path.isabs(path):
+            path = os.path.join(cwd, path)
+        path = os.path.abspath(path)
+
+        reason = None
+        if record_home is not None:
+            try:
+                reason = record_home.check("Write", {"file_path": path})
+            except Exception as exc:
+                log(f"record-home policy errored on {path}: {exc}")
+        if reason is None and one_repo is not None:
+            try:
+                reason = one_repo.check({"file_path": path}, cwd)
+            except Exception as exc:
+                log(f"one-repo policy errored on {path}: {exc}")
+
+        if reason:
+            text = (
+                f"BLOCKED by the CARR bash-write gate: {path}\n"
+                f"{reason}\n"
+                "This came through Bash rather than Write or Edit, and the "
+                "answer is the same either way — that is the point of this "
+                "gate. The same content must not be refused or allowed "
+                "purely by which tool carries it.\n"
+                "Re-route the content through the record verbs rather than "
+                "around the gate (rule 76a53dfe)."
+            )
+            log(f"DENY {path} :: {reason[:160]}")
+            print(text, file=sys.stderr)
+            sys.exit(2)
+    if jev_hits:
+        warn_jev_calls_write(jev_hits)
+    sys.exit(0)
+
+
+def main():
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

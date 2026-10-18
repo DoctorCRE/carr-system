@@ -31,6 +31,9 @@ COMMAND_SPEC.loader.exec_module(command_precheck)
 
 
 class CodexCommandReachabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, CARR_JEV_WORKER=""))
+
     def test_codex_wrapper_sends_the_literal_command_to_the_judgment(self):
         payload = {"tool_name": "functions.exec", "cwd": str(OPS.parent),
                    "tool_input": 'const r=await tools.exec_command({cmd:"python3 ops/missing.py"}); text(r);'}

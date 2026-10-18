@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from pathlib import Path
+
+# Retain import-time provenance; a later checkout update does not reload code.
+SOURCE_BYTES = Path(__file__).read_bytes()
 
 MASK = "[REDACTED]"
 
@@ -30,14 +34,35 @@ _URI_WITH_CREDENTIALS = re.compile(
 _PREFIXED_TOKEN = re.compile(
     r"\bsk-[A-Za-z0-9_\-]{16,}"
     r"|\bgh[pousr]_[A-Za-z0-9_\-]{16,}"
+    r"|\bgithub_pat_[A-Za-z0-9_\-]{16,}"
     r"|\bxox[baprs]-[A-Za-z0-9_\-]{10,}"
     r"|\bAKIA[A-Z0-9]{12,}")
 
 # A long hex/base64-shaped run immediately after ':' or '=' -- e.g.
-# "token: abcd1234...", "PASSWORD=deadbeef...". Past ~32 characters this is
-# exceedingly unlikely to be ordinary diagnostic prose.
+# "token: abcd1234...", "PASSWORD=deadbeef...". Explicit diagnostic
+# identifier fields are exempted below only when the value has the right shape.
 _ASSIGNED_SECRET = re.compile(
     r"(?<=[:=])\s*[A-Za-z0-9+/_\-]{32,}={0,2}(?=[\s'\",;]|$)")
+
+# Field boundaries keep "token source_sha=..." from masquerading as a
+# public identifier. Shape alone is insufficient: a password may be a SHA or UUID.
+_PUBLIC_IDENTIFIER_LABEL = re.compile(
+    r"(?:^|[\n;,])\s*(?:(?P<sha>(?:source[ _-])?sha(?: mismatch)?)"
+    r"|(?P<receipt>receipt[ _-]id))\s*[:=]$", re.IGNORECASE)
+_SHA_IDENTIFIER = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", re.IGNORECASE)
+_RECEIPT_IDENTIFIER = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE)
+
+
+def _redact_assigned_value(match: re.Match[str]) -> str:
+    label = _PUBLIC_IDENTIFIER_LABEL.search(match.string[:match.start()])
+    if label:
+        shape = _SHA_IDENTIFIER if label.group("sha") else _RECEIPT_IDENTIFIER
+        if shape.fullmatch(match.group().strip()):
+            return match.group()
+    return MASK
+
 
 # Env-var NAMES the runner treats as credential-shaped -- the same words that
 # already keep a deterministic child's environment free of ledger, provider,
@@ -78,7 +103,8 @@ def redact_text(text: str, *, known_secrets: Iterable[str] = ()) -> str:
             out = out.replace(secret, MASK)
     out = _URI_WITH_CREDENTIALS.sub(MASK, out)
     out = _PREFIXED_TOKEN.sub(MASK, out)
-    out = _ASSIGNED_SECRET.sub(MASK, out)
+    # Known secrets and credential shapes take precedence over public labels.
+    out = _ASSIGNED_SECRET.sub(_redact_assigned_value, out)
     return out
 
 

@@ -39,6 +39,15 @@ PROPOSED = {"claimed": "Told the partner the dashboard was live.",
             "actual": "The dashboard had never been opened by a human."}
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class _FakeJudge:
     """Reproduces the REAL response shape: answers nested under "answers", and
     a Choice answer carrying a probabilities mapping over its options.
@@ -56,8 +65,9 @@ class _FakeJudge:
         self.calls.append((state, questions))
         if self.fail:
             raise RuntimeError("service did not answer")
-        return {"answers": {"pick": {"type": "choice",
-                                     "probabilities": dict(self.probabilities)}}}
+        return {"model":"jev-1.13.0", "answers": {"pick": {"type": "choice",
+            "choice":max(questions["pick"]["criteria"],key=lambda k:self.probabilities.get(k,0)),
+            "probabilities": dict(self.probabilities)}}}
 
 
 class _FakeClient:
@@ -75,7 +85,7 @@ def run(probabilities, corpus=None, **kwargs):
     return got, fake
 
 
-class OneRequestTests(unittest.TestCase):
+class OneRequestTests(SemanticTestCase):
     """The classes compete for one slot, so they belong in one Choice."""
 
     def test_the_whole_roster_goes_out_in_a_single_request(self):
@@ -94,7 +104,7 @@ class OneRequestTests(unittest.TestCase):
                          PROPOSED["actual"])
 
 
-class CapAndTrimTests(unittest.TestCase):
+class CapAndTrimTests(SemanticTestCase):
     """A Choice carries 255 options and the ledger holds 320 classes."""
 
     def test_a_roster_over_the_cap_is_trimmed_not_split(self):
@@ -140,7 +150,7 @@ class CapAndTrimTests(unittest.TestCase):
         self.assertIn("superseded in September", rubric)
 
 
-class NewKindOfMistakeTests(unittest.TestCase):
+class NewKindOfMistakeTests(SemanticTestCase):
     """A Choice must return something unless it is given a way to decline, and
     a genuinely new mistake is exactly what deserves a new class name."""
 
@@ -167,7 +177,7 @@ class NewKindOfMistakeTests(unittest.TestCase):
         self.assertIn("0.70", note)
 
 
-class RankingTests(unittest.TestCase):
+class RankingTests(SemanticTestCase):
     def test_best_first(self):
         (got, _), _ = run({"dated-artifact-read-as-present-state": 0.2,
                            "silent_failure": 0.6,
@@ -199,7 +209,7 @@ class RankingTests(unittest.TestCase):
         self.assertEqual([name for name, _, _ in got], ["silent_failure"])
 
 
-class SurvivesFailureTests(unittest.TestCase):
+class SurvivesFailureTests(SemanticTestCase):
     def test_a_failed_request_yields_no_shortlist(self):
         got = sel.shortlist(PROPOSED, CORPUS, judge=_FakeJudge({}, fail=True),
                             client=_FakeClient())
@@ -236,7 +246,7 @@ class SurvivesFailureTests(unittest.TestCase):
                                      client=_FakeClient()))
 
 
-class NeverPicksTests(unittest.TestCase):
+class NeverPicksTests(SemanticTestCase):
     """69% top-1 is a good reading list and a bad autopilot."""
 
     def test_the_advice_says_it_is_not_a_decision(self):
@@ -259,7 +269,7 @@ class NeverPicksTests(unittest.TestCase):
                              f"{forbidden} outside the docstring would make this act")
 
 
-class ShapeTests(unittest.TestCase):
+class ShapeTests(SemanticTestCase):
     def test_the_module_is_not_a_script_entrypoint(self):
         import re as _re
         source = MODULE_PATH.read_text(encoding="utf-8")

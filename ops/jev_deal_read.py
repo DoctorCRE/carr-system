@@ -285,6 +285,11 @@ def state_for(bundle):
     detail unrelated to the decision, so the identifiers, the evidence counter
     and the bookkeeping stay out of the request.
     """
+    try:
+        due = datetime.date.fromisoformat(str(bundle.get("next_step_due"))[:10])
+        due_relation = "past" if due < datetime.date.today() else "future_or_today"
+    except (TypeError, ValueError):
+        due_relation = "unknown"
     return {
         "deal": {
             "name": bundle["name"],
@@ -295,13 +300,12 @@ def state_for(bundle):
             "city": bundle["city"],
             "carr_agent": bundle["owner"],
             "next_step_on_file": bundle["next_step"] or None,
-            "next_step_due": bundle["next_step_due"],
+            "next_step_due_relation": due_relation,
             "status_narrative": bundle["status_narrative"] or None,
             "history": bundle["history"],
             "days_since_the_record_was_touched":
                 bundle["days_since_record_touched"],
         },
-        "today": str(datetime.date.today()),
     }
 
 
@@ -385,8 +389,8 @@ def read_deal(bundle, *, api_key=None, timeout=20.0, opener=None):
     # wearing a service outage's clothes, in the one place nobody would look.
     state, asked = state_for(bundle), questions(bundle)
     try:
-        answer = ts.ask(state, asked, timeout=timeout, api_key=api_key,
-                        opener=opener)
+        answer = _semantic().ask(state, asked, caller="jev_deal_read", version="vendor-v1", client=ts, timeout=timeout, api_key=api_key,
+                        opener=opener, work_class="app_runtime")
     except Exception as exc:  # the room must build whatever the service does
         return dict(bundle, judged=False, reason=f"the judgment did not run: {exc}")
     answers = answer.get("answers") or {}
@@ -454,3 +458,11 @@ def _tally(rows, field):
 
 def as_json(results):
     return json.dumps(results, indent=2, sort_keys=True, default=str)
+
+
+def _semantic():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

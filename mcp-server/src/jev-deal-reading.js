@@ -1,3 +1,4 @@
+import {cachedSemanticAsk} from "./jev-semantic.js";
 // Bounded, read-only Jev advisory for one authenticated Deal Room record.
 // The record is fetched by the caller through the existing get-deal-room verb.
 // No model answer changes a deal, its ordering, or a partner's next action.
@@ -30,6 +31,17 @@ function items(value) {
 function usefulText(value) {
   const words = clip(value).toLowerCase().match(/[a-z0-9]{3,}/g) || [];
   return new Set(words).size >= 5;
+}
+
+// Record deadlines are DATE fields, interpreted on the CARR business calendar.
+function calendarDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value ? value : null;
+}
+
+function businessToday(now) {
+  return new Intl.DateTimeFormat("en-CA", {timeZone: "America/Chicago", year: "numeric", month: "2-digit", day: "2-digit"}).format(now);
 }
 
 function activeCriticalDates(record, now) {
@@ -69,6 +81,8 @@ function evidenceLines(record, now) {
 }
 
 export function dealReadingState(record, now = new Date()) {
+  const today = businessToday(now);
+  const expired = value => calendarDate(value) === null ? null : value < today;
   const { lines, kinds } = evidenceLines(record, now);
   const nextStep = clip(record.next_step);
   if (usefulText(nextStep)) kinds.add("next_step");
@@ -107,11 +121,11 @@ export function dealReadingState(record, now = new Date()) {
           round_no: Number.isInteger(negotiations[0].round_no) ? negotiations[0].round_no : null,
           side: clip(negotiations[0].side, 40) || null,
           proposed_on: clip(negotiations[0].proposed_on, 24) || null,
-          expires_on: clip(negotiations[0].expires_on, 24) || null,
+          expired: expired(negotiations[0].expires_on),
         } : null,
         active_dates: criticalDates.map(d => ({
           kind: clip(d.kind, 40) || null,
-          due_on: clip(d.due_on, 24) || null,
+          due_relative_to_today: expired(d.due_on) === null ? "unknown" : expired(d.due_on) ? "past" : "future_or_today",
           status: clip(d.status, 40) || null,
         })),
         sent_documents_recorded: sentDocuments,
@@ -141,7 +155,7 @@ export async function readDealWithJev(record, { askJev, now = new Date() } = {})
     return { ...base, judged: false, reason: "insufficient_recorded_evidence" };
   if (typeof askJev !== "function") return { ...base, judged: false, reason: "jev_unavailable" };
   try {
-    const result = await askJev({ model: "jev-latest", state, questions: dealReadingQuestions() });
+    const result = await cachedSemanticAsk(askJev, { model: "jev-1.13.0", state, questions: dealReadingQuestions() }, "deal-reading-v1");
     const answers = result?.answers;
     const movement = answers?.movement?.score;
     const waiting = answers?.waiting_on?.choice;
@@ -155,7 +169,7 @@ export async function readDealWithJev(record, { askJev, now = new Date() } = {})
       movement_label: LEVELS[rung], waiting_on: waiting,
       waiting_on_confidence: probability(answers.waiting_on.confidence) ? answers.waiting_on.confidence : null,
       silence_is_bad: silence };
-  } catch {
-    return { ...base, judged: false, reason: "jev_unavailable" };
+  } catch (error) {
+    return { ...base, judged: false, reason: /semantic answer|resolved model/.test(error?.message ?? "") ? "invalid_jev_answer" : "jev_unavailable" };
   }
 }

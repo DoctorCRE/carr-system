@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Pure lexical ranking used by both retrieval and its golden-query evaluator."""
 
 from __future__ import annotations
 

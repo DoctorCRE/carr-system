@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+python="$repo/.venv/bin/python"
+[ -x "$python" ] || python=python3
+exec "$python" "$repo/ops/brief-check.py" "$@"

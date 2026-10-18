@@ -195,84 +195,93 @@ def deny(reason):
     sys.exit(0)
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    if (payload.get("hook_event_name") or "") != "PreToolUse":
+        sys.exit(0)
+
+    transcript = payload.get("transcript_path") or ""
+    session_id = payload.get("session_id") or ""
+    if not transcript or not os.path.exists(transcript):
+        sys.exit(0)
+
+    # Cached verdict: this session was already found not to be floor-bound.
+    cp = cache_path(session_id)
+    if session_id and os.path.exists(cp):
+        sys.exit(0)
+
+    cfg = load_config()
+    ranks = cfg.get("tier_rank") or {}
+    floors = cfg.get("floors") or []
+
+    task = launched_task(transcript)
+    bound = None
+    if task:
+        low = task.lower()
+        for floor in floors:
+            names = [str(n).lower() for n in (floor.get("match") or [])]
+            if low in names or low == str(floor.get("name", "")).lower():
+                bound = floor
+                break
+
+    if not bound:
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(cp, "w") as fh:
+                fh.write("unbound\n")
+        except Exception:
+            pass
+        sys.exit(0)
+
+    model = newest_model(transcript)
+    name, rank = tier_of(model, ranks)
+    floor_name = bound.get("min_tier") or "opus"
+    floor_rank = ranks.get(floor_name, 3)
+
+    # Unknown model string: do NOT block. A gate that cannot read the fact
+    # it gates on must not guess, and blocking a whole run on an unparsed
+    # string would be the expensive direction to be wrong in.
+    if rank == 0:
+        log(f"ALLOW(unknown-model) run={bound.get('name')} model={model!r}")
+        sys.exit(0)
+
+    if rank >= floor_rank:
+        sys.exit(0)
+
+    log(f"DENY run={bound.get('name')} model={model} tier={name} floor={floor_name}")
+    deny(
+        f"MODEL FLOOR — THIS RUN LANDED ON {name.upper()} AND REQUIRES {floor_name.upper()} OR BETTER.\n\n"
+        f"Run: {bound.get('name')}\n"
+        f"Model actually running: {model}\n"
+        f"Floor: {floor_name} (taught by {bound.get('taught') or 'Joe'})\n\n"
+        f"WHY: {bound.get('reason') or 'output quality is the point of this run.'}\n\n"
+        "STOP NOW. Draft nothing, publish nothing, file no loop. Tell Joe the run landed on "
+        f"{name} and that the app model needs to be switched to {floor_name.capitalize()}, then either wait "
+        "for him to switch it or skip this run.\n\n"
+        "You are being TOLD this rather than asked to check it: the model name above was read from the "
+        "harness's own transcript record, not from the run's self-assessment, because a model introspecting "
+        "its own identity is the least reliable way to learn the one fact this floor depends on. A session "
+        "cannot switch its own model, so there is nothing to retry here."
+    )
+
+
 def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
-        sys.exit(0)
-
-    try:
-        if (payload.get("hook_event_name") or "") != "PreToolUse":
-            sys.exit(0)
-
-        transcript = payload.get("transcript_path") or ""
-        session_id = payload.get("session_id") or ""
-        if not transcript or not os.path.exists(transcript):
-            sys.exit(0)
-
-        # Cached verdict: this session was already found not to be floor-bound.
-        cp = cache_path(session_id)
-        if session_id and os.path.exists(cp):
-            sys.exit(0)
-
-        cfg = load_config()
-        ranks = cfg.get("tier_rank") or {}
-        floors = cfg.get("floors") or []
-
-        task = launched_task(transcript)
-        bound = None
-        if task:
-            low = task.lower()
-            for floor in floors:
-                names = [str(n).lower() for n in (floor.get("match") or [])]
-                if low in names or low == str(floor.get("name", "")).lower():
-                    bound = floor
-                    break
-
-        if not bound:
-            try:
-                os.makedirs(CACHE_DIR, exist_ok=True)
-                with open(cp, "w") as fh:
-                    fh.write("unbound\n")
-            except Exception:
-                pass
-            sys.exit(0)
-
-        model = newest_model(transcript)
-        name, rank = tier_of(model, ranks)
-        floor_name = bound.get("min_tier") or "opus"
-        floor_rank = ranks.get(floor_name, 3)
-
-        # Unknown model string: do NOT block. A gate that cannot read the fact
-        # it gates on must not guess, and blocking a whole run on an unparsed
-        # string would be the expensive direction to be wrong in.
-        if rank == 0:
-            log(f"ALLOW(unknown-model) run={bound.get('name')} model={model!r}")
-            sys.exit(0)
-
-        if rank >= floor_rank:
-            sys.exit(0)
-
-        log(f"DENY run={bound.get('name')} model={model} tier={name} floor={floor_name}")
-        deny(
-            f"MODEL FLOOR — THIS RUN LANDED ON {name.upper()} AND REQUIRES {floor_name.upper()} OR BETTER.\n\n"
-            f"Run: {bound.get('name')}\n"
-            f"Model actually running: {model}\n"
-            f"Floor: {floor_name} (taught by {bound.get('taught') or 'Joe'})\n\n"
-            f"WHY: {bound.get('reason') or 'output quality is the point of this run.'}\n\n"
-            "STOP NOW. Draft nothing, publish nothing, file no loop. Tell Joe the run landed on "
-            f"{name} and that the app model needs to be switched to {floor_name.capitalize()}, then either wait "
-            "for him to switch it or skip this run.\n\n"
-            "You are being TOLD this rather than asked to check it: the model name above was read from the "
-            "harness's own transcript record, not from the run's self-assessment, because a model introspecting "
-            "its own identity is the least reliable way to learn the one fact this floor depends on. A session "
-            "cannot switch its own model, so there is nothing to retry here."
-        )
-    except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

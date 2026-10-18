@@ -147,7 +147,8 @@ if (cliArgs.length > 2) {
   );
   process.exit(2);
 }
-const args = JSON.parse(rawArgs);
+// '-' keeps multi-page record content off argv and avoids the OS argument cap.
+const args = JSON.parse(rawArgs === "-" ? fs.readFileSync(0, "utf8") : rawArgs);
 
 // ---------------------------------------------------------------------------
 // DEFAULT PATH — HTTPS client of the deployed Worker.

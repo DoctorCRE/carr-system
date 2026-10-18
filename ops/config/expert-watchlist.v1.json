@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "entries": [
+    {"handle": "@ihurricanez", "topics": ["postgres/data-modelling"], "why": "Store stable fields as columns and changing parts in JSONB.", "trust": "high", "added_on": "2026-10-06", "source": "Joe's screenshot 2026-10-06; JSONB stable-columns reply"},
+    {"handle": "@FranckPachot", "topics": ["postgres/data-modelling"], "why": "Microsoft Postgres advocate; work_mem, bloat, pooling and 3NF versus documents replies.", "trust": "high", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"},
+    {"handle": "@AntonMartyniuk", "topics": ["postgres/data-modelling"], "why": "Event sourcing and UUID ordering techniques to verify.", "trust": "verify", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"},
+    {"handle": "@hecodesforme", "topics": ["postgres/data-modelling"], "why": "EXPLAIN ANALYZE and JSONB versus Mongo techniques to verify.", "trust": "verify", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"},
+    {"handle": "@reallevelbrook", "topics": ["postgres/data-modelling"], "why": "Frequent documentation-citing replies; pattern may be automated, verify claims.", "trust": "verify", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"},
+    {"handle": "@josepollman82", "topics": ["postgres/data-modelling"], "why": "Frequent documentation-citing replies; pattern may be automated, verify claims.", "trust": "verify", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"},
+    {"handle": "@shahidcodes", "topics": ["postgres/data-modelling"], "why": "Frequent documentation-citing replies; pattern may be automated, verify claims.", "trust": "verify", "added_on": "2026-10-06", "source": "X Radar reply sweep 2026-10-06 (out/orch/dbresearch/radar-reply-nuggets.md)"}
+  ]
+}

@@ -1,73 +1,13 @@
-"""jev_requirements.py — a requirement checklist for a turn that changed code.
-
-WHY (Joe, 2026-09-23, decision a98c2832: Jev supervision checks). A session can
-finish a turn with a green diff that quietly drops one of the things the human
-asked for. This module asks, once per such turn: for each requirement in the
-human's last request, is it satisfied by what the turn actually changed?
-
-ACTS BELOW LOW_AT (Joe, 2026-09-24, decision 5ec806a4: "every jev check in the
-system too is not a shadow"). hooks/completion-evidence-gate.py is one of the
-three hooks Stop-gate reopening is rationed to, so it is allowed to reopen a
-turn on this module's word: when check() reports a requirement whose
-probability of being met is below LOW_AT, the gate treats it as an unaccounted
-clause and reopens, UNLESS the close already names that requirement as not
-done. The 0.30-0.5 band stays advisory only, returned as one line the gate
-shows when it is not already blocking. Every judgment, acted on or merely
-advised, is recorded to out/jev-judge.jsonl through ops/jev_judge.record()
-under KIND, so the log is the audit trail rather than a waiting room.
-
-THE LIMITATION, STATED PLAINLY. Jev cannot write text: it answers noul (a yes/no
-probability), choice and score. So Jev cannot split a request into requirements.
-The split here is deterministic and crude: bullets and lines, then sentences and
-semicolons, dropping greetings, filler and questions put to the assistant. It
-will sometimes keep a sentence that is context rather than an order, and it
-will miss a requirement buried mid-sentence. Optionally, when a local
-OpenAI-compatible server answers at LOCAL_LLM_URL inside LOCAL_LLM_SECONDS, its
-list is used instead; that is best-effort, never required, and any failure or
-slowness silently falls back to the deterministic split.
-
-WHAT "CHANGED CODE" MEANS. Paths written by Write/Edit/MultiEdit/NotebookEdit in
-the turn since the last human prompt, and their git diff against HEAD (or, when
-the turn already committed them, the commits made since the turn began). A file
-changed only through Bash is not seen. No changed path, or an empty diff, means
-no call at all.
-
-ONE REQUEST. All requirements ride in one Jev call as one noul each, against
-named fields {task, diff, test_output}; the vendor measured batching about 12x
-cheaper, and each question is scored on its own.
-
-A LIBRARY. No shebang and no main guard, for the reason ops/jev_judge.py gives.
-Fail open: a total budget of BUDGET_SECONDS, every exception swallowed, an
-unavailable Jev recorded as an error row and returning None, and session
-"selftest" skipped outright.
-"""
-
+"""Requirements from explicit acceptance contracts; semantic clauses need review."""
 import importlib.util
-import json
 import os
 import re
-import subprocess
-import time
-import urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-KIND = "requirement_checklist"
-LOW_AT = 0.30           # below this: unaccounted, the gate reopens the turn
-ADVISORY_AT = 0.50       # [LOW_AT, ADVISORY_AT): reported, never reopens on its own
-BUDGET_SECONDS = 6.0
 MAX_REQUIREMENTS = 12
 MAX_REQUIREMENT_CHARS = 300
-MAX_TASK_CHARS = 4000
-MAX_DIFF_CHARS = 12000
-MAX_TEST_CHARS = 2000
-MAX_FILES = 20
 
-LOCAL_LLM_URL = "http://127.0.0.1:8000/v1/chat/completions"
-LOCAL_LLM_SECONDS = 1.0
-
-MUTATION_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
-TEST_COMMAND = re.compile(r"pytest|selftest|\btest\b|ci\.sh|npm\s+(?:run\s+)?test|node\s+--test", re.I)
 
 GREETING = re.compile(
     r"^(?:hi|hey|hello|yo|good\s+(?:morning|afternoon|evening)|thanks|thank\s+you|thx|cheers)\b", re.I)
@@ -84,17 +24,6 @@ FENCE = re.compile(r"```.*?```", re.S)
 HARNESS_MARKERS = ("<system-reminder>", "<task-notification>", "[SYSTEM NOTIFICATION",
                    "<local-command", "<command-name>", "Caveat:", "<user-prompt-submit-hook>")
 
-
-def _sibling(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(REPO, "ops", f"{name}.py"))
-    if spec is None or spec.loader is None:
-        raise ImportError(name)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-# ---------------------------------------------------------------- the split
 
 def _keep(sentence):
     text = sentence.strip().strip("-*• ").strip()
@@ -133,40 +62,6 @@ def split_requirements(prompt):
     return out[:MAX_REQUIREMENTS]
 
 
-def local_llm_requirements(prompt, *, url=LOCAL_LLM_URL, timeout=LOCAL_LLM_SECONDS, opener=None):
-    """Best-effort list from a local OpenAI-compatible server, or None. Never raises."""
-    if os.environ.get("CARR_JEV_REQ_LOCAL_LLM", "1") == "0":
-        return None
-    try:
-        body = json.dumps({
-            "model": os.environ.get("CARR_JEV_REQ_LOCAL_MODEL", "local"),
-            "temperature": 0,
-            "max_tokens": 400,
-            "messages": [
-                {"role": "system", "content":
-                    "List every distinct requirement the user's request asks for, one per "
-                    "line, each starting with '- '. Omit greetings, filler and questions. "
-                    "Output only the list."},
-                {"role": "user", "content": prompt[:MAX_TASK_CHARS]},
-            ],
-        }).encode()
-        request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-        with (opener or urllib.request.urlopen)(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8", "replace"))
-        content = data["choices"][0]["message"]["content"]
-        items = []
-        for line in str(content).splitlines():
-            if BULLET.match(line):
-                item = BULLET.sub("", line).strip()[:MAX_REQUIREMENT_CHARS]
-                if item and item not in items:
-                    items.append(item)
-        return items[:MAX_REQUIREMENTS] or None
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------- the transcript
-
 def _content(rec):
     message = rec.get("message") if isinstance(rec.get("message"), dict) else {}
     return message.get("content", rec.get("content"))
@@ -182,7 +77,7 @@ def _human_text(rec):
     # would act on now, send a PushNotification" was read as Joe's request and
     # held a turn open (2026-09-24, the first day it acted).
     origin = rec.get("origin") if isinstance(rec.get("origin"), dict) else {}
-    if origin.get("kind") not in (None, "", "user", "keyboard") or rec.get("isCompactSummary"):
+    if origin.get("kind") not in (None, "", "user", "keyboard", "human") or rec.get("isCompactSummary"):
         return None
     content = _content(rec)
     if isinstance(content, str):
@@ -200,205 +95,42 @@ def _human_text(rec):
     return stripped or None
 
 
-def last_turn(recs):
-    """(prompt, records after it, turn start timestamp) for the last human prompt."""
-    for idx in range(len(recs) - 1, -1, -1):
-        text = _human_text(recs[idx])
+def last_request(recs):
+    """The text of the last human prompt, or None."""
+    for rec in reversed(recs):
+        text = _human_text(rec)
         if text:
-            return text, recs[idx + 1:], recs[idx].get("timestamp")
-    return None, [], None
+            return text
+    return None
 
 
-def _tool_uses(recs):
-    for rec in recs:
-        if rec.get("type") != "assistant":
-            continue
-        content = _content(rec)
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    yield block
+def _acceptance():
+    spec = importlib.util.spec_from_file_location("acceptance_checks",os.path.join(REPO,"lib","acceptance_checks.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def changed_paths(turn):
-    paths = []
-    for block in _tool_uses(turn):
-        if block.get("name") in MUTATION_TOOLS:
-            data = block.get("input") or {}
-            path = data.get("file_path") or data.get("notebook_path")
-            if path and path not in paths:
-                paths.append(path)
-    return paths[:MAX_FILES]
+def check(payload, recs):
+    """Evaluate the last human request's explicit contract; prose needs review.
 
-
-def test_output(turn):
-    """Tail of the last Bash result whose command looks like a test run, or None."""
-    wanted = {b.get("id") for b in _tool_uses(turn)
-              if b.get("name") == "Bash" and TEST_COMMAND.search(str((b.get("input") or {}).get("command", "")))}
-    found = None
-    for rec in turn:
-        content = _content(rec)
-        if rec.get("type") != "user" or not isinstance(content, list):
-            continue
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id") in wanted:
-                body = block.get("content")
-                if isinstance(body, list):
-                    body = "\n".join(b.get("text", "") for b in body if isinstance(b, dict))
-                found = str(body or "")
-    return found[-MAX_TEST_CHARS:] if found else None
-
-
-def _git(args, cwd, deadline):
-    remaining = deadline - time.monotonic()
-    if remaining <= 0.2:
-        return ""
-    try:
-        run = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True,
-                             timeout=min(remaining, 2.0), env=_GIT_ENV.get("env"))
-        return run.stdout if run.returncode == 0 else ""
-    except Exception:
-        return ""
-
-
-# A GIT_DIR or GIT_INDEX_FILE inherited from a caller overrides -C, so every
-# call runs under ops/git_env.py's scrubbed environment when it loads.
-_GIT_ENV: dict = {}
-
-
-def turn_diff(paths, since, deadline):
-    chunks = []
-    try:
-        _GIT_ENV["env"] = _sibling("git_env").scrubbed_env()
-    except Exception:
-        _GIT_ENV["env"] = None
-    for path in paths:
-        folder = os.path.dirname(path) or "."
-        if not os.path.isdir(folder):
-            continue
-        piece = _git(["diff", "--no-color", "HEAD", "--", path], folder, deadline)
-        if not piece and os.path.exists(path) and not _git(["ls-files", "--", path], folder, deadline):
-            # --no-index exits 1 when the files differ, so read the file itself.
-            piece = ""
-            if not piece:
-                try:
-                    with open(path, errors="replace") as handle:
-                        piece = f"new file {path}\n" + handle.read(4000)
-                except OSError:
-                    piece = ""
-        if not piece and since:
-            piece = _git(["log", "-p", "--no-color", "-n", "3", f"--since={since}", "--", path],
-                         folder, deadline)
-        if piece:
-            chunks.append(piece)
-    return "\n".join(chunks)[:MAX_DIFF_CHARS]
-
-
-# ------------------------------------------------------------------ the ask
-
-def _question_text(n, requirement):
-    return (f"Is requirement {n} satisfied by `diff`? Requirement {n}: \"{requirement}\" "
-            f"(from the human's request in `task`; `test_output`, when present, is the "
-            f"last test run of the turn).")
-
-
-def advisory_line(requirements, probs):
-    """One line for the mid band [LOW_AT, ADVISORY_AT) — reported, never acted
-    on by itself. A probability under LOW_AT is `unmet`, not this."""
-    mid = sorted((p, i) for i, p in enumerate(probs)
-                if p is not None and LOW_AT <= p < ADVISORY_AT)
-    if not mid:
-        return None
-    p, i = mid[0]
-    text = requirements[i]
-    text = text if len(text) <= 90 else text[:87] + "..."
-    more = f" (+{len(mid) - 1} more under {ADVISORY_AT:.1f})" if len(mid) > 1 else ""
-    return f"Jev (advisory): requirement {i + 1} may be unmet (p={p:.2f}): \"{text}\"{more}"
-
-
-def unmet_requirements(requirements, probs):
-    """Requirements whose probability of being met is below LOW_AT, worst
-    first — the caller's candidates for reopening the turn."""
-    return sorted(
-        ({"index": i + 1, "text": requirements[i], "probability": p}
-         for i, p in enumerate(probs) if p is not None and p < LOW_AT),
-        key=lambda item: item["probability"])
-
-
-def check(payload, recs, *, judge_module=None, llm=local_llm_requirements, budget=BUDGET_SECONDS):
-    """Requirement checklist for the last turn.
-
-    Never raises. Returns None when there is nothing to report, or a dict:
-
-        {"advisory": <str or None>,   # the [LOW_AT, ADVISORY_AT) line, if any
-         "unmet": [{"index", "text", "probability"}, ...]}  # < LOW_AT, worst first
-
-    This module decides nothing by itself: hooks/completion-evidence-gate.py
-    is the one place `unmet` is allowed to reopen a turn (it is one of the
-    three hooks Stop-gate reopening is rationed to), and only when the close
-    does not already name that requirement as not done.
+    The contract's artifacts are read from the session's working directory.
+    Nothing in the hook payload or the assistant's close counts as evidence.
+    Only an explicit contract carries an advisory: prose clauses name nothing
+    to act on, so they go to receipts as needs_review and announce nothing.
     """
-    try:
-        deadline = time.monotonic() + budget
-        session = (payload or {}).get("session_id") or (payload or {}).get("sessionId")
-        if session == "selftest":
-            return None
-        prompt, turn, since = last_turn(recs or [])
-        if not prompt:
-            return None
-        paths = changed_paths(turn)
-        if not paths:
-            return None
-        diff = turn_diff(paths, since, deadline)
-        if not diff.strip():
-            return None
-
-        source = "split"
-        requirements = None
-        if llm is not None:
-            requirements = llm(prompt)
-            if requirements:
-                source = "local_llm"
-        if not requirements:
-            requirements = split_requirements(prompt)
-        if not requirements:
-            return None
-
-        jj = judge_module or _sibling("jev_judge")
-        note = {"source": source, "requirements": requirements, "paths": paths}
-        remaining = deadline - time.monotonic()
-        try:
-            if remaining < 0.5:
-                raise TimeoutError("requirement checklist budget spent before the Jev call")
-            tsc = jj._client()
-            questions = {
-                f"req_{n}": tsc.noul(_question_text(n, text),
-                                     true=f"The diff carries out requirement {n}.",
-                                     false=f"The diff does not carry out requirement {n}, or only part of it.")
-                for n, text in enumerate(requirements, 1)}
-            state = {"task": prompt[-MAX_TASK_CHARS:], "diff": diff}
-            tests = test_output(turn)
-            if tests:
-                state["test_output"] = tests
-            answer = jj.judge(state, questions, timeout=remaining)
-        except Exception as exc:
-            try:
-                jj.record(KIND, session, None, None, note=note, error=exc)
-            except Exception:
-                pass
-            return None
-        jj.record(KIND, session, answer, None, note=note)
-        probs = []
-        for n in range(1, len(requirements) + 1):
-            try:
-                prob = float(answer["answers"][f"req_{n}"]["noul"])
-                probs.append(prob if 0.0 <= prob <= 1.0 else None)
-            except Exception:
-                probs.append(None)
-        unmet = unmet_requirements(requirements, probs)
-        advisory = advisory_line(requirements, probs)
-        if not unmet and not advisory:
-            return None
-        return {"advisory": advisory, "unmet": unmet}
-    except Exception:
+    prompt = last_request(recs or [])
+    if not prompt:
         return None
+    acceptance = _acceptance()
+    explicit_contract = acceptance.contract(prompt)
+    criteria = explicit_contract.get("criteria")
+    if not explicit_contract:
+        requirements = split_requirements(prompt)
+        if not requirements:
+            return None
+        return {"status":"needs_review","unmet":[],"needs_review":requirements}
+    result = acceptance.evaluate(criteria,root=(payload or {}).get("cwd") or REPO)
+    unmet = [{"index":i+1,"text":str(criteria[i].get("id",i)),"reason":row["reason"]}
+             for i,row in enumerate(result["criteria"]) if row["status"] == "failed"]
+    return {**result,"unmet":unmet,"advisory":"Acceptance needs review." if result["status"] == "needs_review" else None}

@@ -18,6 +18,7 @@ import {
 } from "../../dealroom/js/change-receipts.mjs";
 import { createLiveClient } from "../../dealroom/js/live-client.js";
 import { PHASES } from "../../dealroom/js/client.js";
+import { DEAL_ROOM_FIELDS } from "../src/dealroom.js";
 
 const file = (relative) => readFile(new URL(`../../${relative}`, import.meta.url), "utf8");
 
@@ -702,10 +703,7 @@ test("only what arrived is announced — one change never reads back the whole l
 
 test("client Undo eligibility mirrors the server's revertible field list", async () => {
   const tools = await file("mcp-server/src/tools.js");
-  const declared = tools.match(/const DEAL_ROOM_FIELDS = Object\.freeze\(\[([^\]]+)\]\)/);
-  assert.ok(declared, "DEAL_ROOM_FIELDS must still be the server's list");
-  const serverFields = [...declared[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
-  assert.deepEqual([...REVERTIBLE_FIELDS].sort(), serverFields.sort(),
+  assert.deepEqual([...REVERTIBLE_FIELDS].sort(), [...DEAL_ROOM_FIELDS].sort(),
     "an extra client field would offer an Undo the server refuses");
   assert.match(tools, /if \(latest\?\.id !== row\.id\)\s+throw new ToolError\(\{ error: "newer_change_exists"/,
     "the latest-event gate is the server's, not this panel's");

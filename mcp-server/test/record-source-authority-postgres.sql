@@ -212,6 +212,16 @@ GRANT SELECT, INSERT, UPDATE ON f01_fixture_log, f01_fixture_state TO PUBLIC;
 -- 1. Fixture helpers.
 -- ===========================================================================
 
+-- Grant only disposable helpers to the fixture's callers. Production creator
+-- defaults no longer grant EXECUTE to PUBLIC; later helper definitions need
+-- the same explicit caller scope as the helpers defined here.
+DO $fixture_helper_defaults$
+BEGIN
+  EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT EXECUTE ON FUNCTIONS TO carr_reader, carr_writer, carr_authority_joe, carr_authority_dell',
+                 pg_my_temp_schema()::regnamespace::text);
+END;
+$fixture_helper_defaults$;
+
 CREATE FUNCTION pg_temp.f01_note(p_section text, p_label text, p_outcome text,
                                  p_detail text DEFAULT NULL)
 RETURNS void LANGUAGE sql AS $$

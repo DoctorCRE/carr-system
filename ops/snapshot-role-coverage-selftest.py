@@ -125,6 +125,15 @@ def main() -> int:
             ))
     if "'create role %I login password %L', 'carr_jobs'" in script:
         active_roles.add("carr_jobs")
+    dot_conditional = re.search(
+        r"cat >> \"\$TMP\" <<'DOT_READER_ROLES'\n(?P<body>.*?)\nDOT_READER_ROLES",
+        script, re.DOTALL,
+    )
+    if dot_conditional and (
+        'if [ "$DOT_READER_APPLIED" = t ]; then\n'
+        'cat >> "$TMP" <<\'DOT_READER_ROLES\''
+    ) in script and "filename='0756_dot_reader.sql'" in script:
+        active_roles.update(role.lower() for role in CREATE_ROLE.findall(dot_conditional.group("body")))
     results: list[bool] = []
 
     for role, migration in sorted(created.items()):

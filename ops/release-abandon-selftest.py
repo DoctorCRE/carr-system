@@ -25,9 +25,10 @@ after the fact, which is the opposite of what a release ledger is for.
 
 WHERE THESE RUN. They need a Postgres carrying the schema and nothing more —
 NOT Neon specifically. CI supplies a disposable loopback PostgreSQL service via
-CARR_CI_DATABASE_URL. A developer push without that explicit fixture DSN does
-not substitute a metered Neon branch: it reports the database cases as not run,
-while hosted CI executes them against its already-running local service.
+CARR_CI_DATABASE_URL admits this fixture, which owns a separate local cluster
+so roles cannot leak into later CI classes. A developer push without that
+explicit fixture DSN reports the database cases as not run. No metered Neon
+branch substitutes for the disposable fixture.
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ import importlib.util
 import os
 import subprocess
 import sys
-import time
+import socket
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -44,6 +45,8 @@ import psycopg
 from psycopg import sql
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.disposable_pg_fixture import DisposablePostgres, postgres_fixture_group
 
 # The postgres CLIENT lookup, shared with ops/p1-rebuild-gate.py. Loading by path
 # is how every ops gate reaches tools/db-tap.py, whose hyphenated filename cannot
@@ -145,41 +148,46 @@ def provision_authority_principal(dsn: str) -> None:
 
 @contextmanager
 def isolated_ci_database(base_dsn: str) -> Iterator[str]:
-    """Give this stateful fixture its own database on CI's loopback cluster.
+    """Own a fresh cluster: databases alone do not isolate PostgreSQL roles.
 
-    The gates class and migration class intentionally share a PostgreSQL
-    server, but the migration class must receive a *fresh* database.  Loading
-    db/schema.sql directly into CARR_CI_DATABASE_URL contaminated that database
-    before the migration class ran.  A sibling database preserves the cheap
-    local/CI execution path without weakening either test.
+    The gate fixture applies pending role migrations before the migration class.
+    A sibling database leaves those cluster-global roles behind when dropped,
+    causing a later role-creation migration to refuse the unknown login.
+    Keep the CI loopback admission check, but never connect to its shared server.
     """
     params = psycopg.conninfo.conninfo_to_dict(base_dsn)
-    host = str(params.get("host") or "")
-    if host not in {"127.0.0.1", "localhost", "::1"}:
+    if str(params.get("host") or "") not in {"127.0.0.1", "localhost", "::1"}:
         raise RuntimeError("release-abandon isolation requires loopback PostgreSQL")
-    database = f"release_abandon_{os.getpid()}_{time.time_ns()}"[:63]
-    admin = psycopg.conninfo.make_conninfo(base_dsn, dbname="postgres")
-    with psycopg.connect(admin, autocommit=True) as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL("create database {} template template0").format(
-                    sql.Identifier(database)
-                )
-            )
-    isolated = psycopg.conninfo.make_conninfo(base_dsn, dbname=database)
-    try:
-        yield isolated
-    finally:
-        with psycopg.connect(admin, autocommit=True) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "select pg_terminate_backend(pid) from pg_stat_activity "
-                    "where datname=%s and pid <> pg_backend_pid()",
-                    (database,),
-                )
-                cursor.execute(
-                    sql.SQL("drop database {}").format(sql.Identifier(database))
-                )
+    spec = importlib.util.spec_from_file_location("release_abandon_local_pg", REPO / "ops/local-pg-ci.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("release-abandon local PostgreSQL helper unavailable")
+    local_pg = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = local_pg
+    spec.loader.exec_module(local_pg)
+    binaries = local_pg.find_postgres_binaries()
+    env = local_pg.scrub_cloud_environment(os.environ)
+
+    def checked(args: list[str | Path]) -> None:
+        result = fixture.run([str(arg) for arg in args], env=env,
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode:
+            raise RuntimeError("release-abandon disposable PostgreSQL step failed: " + Path(str(args[0])).name)
+
+    with postgres_fixture_group(), DisposablePostgres("release-abandon-", binaries.pg_ctl, env=env, directory=None) as fixture:
+        root = fixture.root
+        data = root / "data"
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        checked([binaries.initdb, "-D", data, "-U", "carr_ci", "--auth=trust",
+                 "--encoding=UTF8", "--no-locale"])
+        checked([binaries.pg_ctl, "-D", data, "-l", root / "postgres.log",
+                 "-o", f"-h 127.0.0.1 -p {port} -c unix_socket_directories= -c fsync=off", "-w", "start"])
+        dsn = psycopg.conninfo.make_conninfo(host="127.0.0.1", port=port,
+                                            user="carr_ci", dbname="postgres")
+        with psycopg.connect(dsn, autocommit=True) as connection:
+            connection.execute("create role neondb_owner")
+        yield dsn
 
 
 def _cases(dsn: str) -> None:
@@ -379,10 +387,7 @@ def _cases(dsn: str) -> None:
 
 
 def run_cases(dsn: str) -> None:
-    """Every assertion, against whatever Postgres was handed in."""
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("the schema loads so the rest can run", False)
-        return
+    """Run current release cases on the prepared pristine database."""
     mig = subprocess.run([sys.executable, str(REPO / "tools" / "migrate.py"),
                           "--apply", "--yes"], capture_output=True, text=True,
                          timeout=1800, env={**os.environ, "DATABASE_URL": dsn})
@@ -395,17 +400,30 @@ def run_cases(dsn: str) -> None:
     _cases(dsn)
 
 
+def clone_fixture_database(dsn: str, database: str) -> str:
+    """Copy the restored fixture without revalidating the entire snapshot.
+
+    Both databases stay in this test's owned cluster. WAL_LOG avoids the
+    forced checkpoint of FILE_COPY; rows and schema remain separate copies.
+    """
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
+    if str(params.get("host") or "") not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("release-abandon clone requires loopback PostgreSQL")
+    maintenance = psycopg.conninfo.make_conninfo(dsn, dbname="template1")
+    with psycopg.connect(maintenance, autocommit=True) as connection:
+        connection.execute(sql.SQL("create database {} with template {} strategy WAL_LOG").format(
+            sql.Identifier(database), sql.Identifier(str(params.get("dbname") or "postgres"))))
+    return psycopg.conninfo.make_conninfo(dsn, dbname=database)
+
+
 def legacy_approval_receipt_refusal(dsn: str) -> None:
     """Exercise 0205 against a populated 0202-shaped receipt table.
 
-    A regenerated snapshot may already contain 0205.  This disposable sibling
+    A regenerated snapshot may already contain 0205.  This disposable cluster
     explicitly restores only 0205's receipt-table additions before applying the
     migration file directly; its schema_migrations ledger is intentionally not
     consulted, because raw file application is the behavior under test.
     """
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("0205 legacy-receipt fixture schema loads", False)
-        return
     receipt_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     receipt_columns = psql(dsn, "-At", "-c",
                            "select count(*) from information_schema.columns "
@@ -484,14 +502,18 @@ def main() -> int:
     # fixtures actually run on the surface that gates the merge.
     ci_dsn = os.environ.get("CARR_CI_DATABASE_URL")
     if ci_dsn:
-        print("release-abandon-selftest: using an isolated database on CI Postgres")
+        print("release-abandon-selftest: using an owned disposable PostgreSQL cluster")
         try:
-            with isolated_ci_database(ci_dsn) as legacy_dsn:
-                legacy_approval_receipt_refusal(legacy_dsn)
             with isolated_ci_database(ci_dsn) as isolated_dsn:
+                loaded = psql(isolated_dsn, "-f", str(REPO / "db" / "schema.sql"))
+                check("the pristine schema loads for both release fixtures", loaded.returncode == 0)
+                if loaded.returncode:
+                    return 1
+                legacy_dsn = clone_fixture_database(isolated_dsn, "abandon_legacy")
+                legacy_approval_receipt_refusal(legacy_dsn)
                 run_cases(isolated_dsn)
         except Exception:
-            print("release-abandon-selftest: isolated CI database unavailable",
+            print("release-abandon-selftest: disposable PostgreSQL fixture unavailable",
                   file=sys.stderr)
             return 1
         print(f"\nrelease-abandon-selftest: {PASSED}/{PASSED + len(FAILED)} passed")

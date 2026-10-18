@@ -1,3 +1,5 @@
+import INGEST_TRANSPORT from "./ingest-transport.v1.json" with { type: "json" };
+
 // CARR MCP server — Worker entrypoint.
 //
 // The Worker's fetch IS an OAuthProvider (Cloudflare's workers-oauth-provider).
@@ -35,6 +37,9 @@
 //               minus humanOnly, same as the agent-token door, never a wider
 //               grant than that.
 //   /pipeline/changes  OAuth-protected Deal Room event cursor + live presence.
+//   /doc/mcp    Partner-only Doc brokerage tools, behind the same OAuth
+//               provider. The resource path pins a closed capability profile;
+//               request parameters cannot expand it. No machine-token door.
 //   /authorize  Google sign-in starts (our code — see google-oidc.js)
 //   /callback   Google returns; identity verified; allow-list applied; issue
 //   /token      implemented by the provider
@@ -76,18 +81,20 @@
 // (mcpApiHandler's/protectedApiHandler's own actor-unresolved 401) is recorded
 // at its own call site below, since a 401 is invisible to a >=500 check.
 
-import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import { OAuthProvider, getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import { neon, Pool } from "@neondatabase/serverless";
 import { mcpApiHandler, dispatch, dispatchEngineeringController, canonicalOwnershipExecutionHost } from "./mcp.js";
 import { engineeringControllerActorForToken } from "./authenticated-canonical-ownership.js";
-import { handleAuthorize, handleCallback } from "./google-oidc.js";
+import { handleAuthorize, handleCallback, handleConsent } from "./google-oidc.js";
+export { OAuthConsentState } from "./oauth-consent-state.js";
+import { sharedOAuthFetch, mcpOriginRefusal, isSharedOAuthPath } from "./oauth-policy.js";
 import { agentActorForToken, authenticatedIdentity, continuityActorForTokenMaps,
-         serveReviewRequest,
+         serveReviewRequest, unattendedActorForToken,
          hermesActorForTokenMaps, hermesCosActorForToken } from "./identity.js";
 import { pipelineChanges } from "./dealroom.js";
 import { authorizeProgram6Action, createDealroomHandler, isDealroomRequest, isLegacyDealroomRequest } from "./dealroom-web.js";
 import { createProgram6RoutineController } from "./program6-routine-controller.js";
-import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomQueue, readRoomTurns } from "./partner-room.js";
+import { appendRoomTurn, DEFAULT_ROOM, OBSERVATORY_ROOM, readRoomLatest, readRoomQueue, readRoomTurns } from "./partner-room.js";
 import { createCaptureHandler } from "./capture.js";
 import { TOOLS } from "./tools.js";
 import { buildRelease } from "./release.js";
@@ -166,7 +173,7 @@ async function ingest(request, env) {
   const source = Object.keys(tokens).find((s) => tokens[s] && tokens[s] === token);
   if (!source) return json({ error: "unauthorized" }, 401);
   const len = parseInt(request.headers.get("content-length") || "0", 10);
-  if (len > 1048576) return json({ error: "payload_too_large" }, 413);
+  if (len > INGEST_TRANSPORT.max_body_bytes) return json({ error: "payload_too_large" }, 413);
   let payload;
   try {
     payload = await request.json();
@@ -205,11 +212,12 @@ const defaultHandler = {
     if (url.pathname === "/ingest" && request.method === "POST") return ingest(request, env);
     if (url.pathname === "/authorize") return handleAuthorize(request, env);
     if (url.pathname === "/callback") return handleCallback(request, env);
+    if (url.pathname === "/consent") return handleConsent(request, env);
     return json({ service: "carr-mcp", surfaces: ["/healthz", "/health", "/release", "/ingest", "/mcp", "/pipeline/changes", "/authorize", "/callback"] }, 404);
   },
 };
 
-// Both protected routes receive the same provider-verified ctx.props. The
+// Protected routes receive the same provider-verified ctx.props. The
 // pipeline function itself accepts an actor and query client, so the Deal Room
 // session-cookie gate mounts it without changing its contract.
 async function pipelineApi(request, env, actor) {
@@ -248,7 +256,7 @@ function captureHandler(env) {
 const protectedApiHandler = {
   async fetch(request, env, ctx) {
     const pathname = new URL(request.url).pathname;
-    if (pathname === "/mcp") return mcpApiHandler.fetch(request, env, ctx);
+    if (pathname === "/mcp" || pathname === "/doc/mcp") return mcpApiHandler.fetch(request, env, ctx);
     if (pathname !== "/pipeline/changes") return json({ error: "not_found" }, 404);
     // THE GRANT DOOR, WITH THE SERVER'S WITNESS. `actorFromProps` is no longer
     // exported (amendment 8, fourth correction round): a grant's props are an
@@ -386,12 +394,6 @@ function probeActorFor(request, env) {
 // this file uses for every other door. No bearer match answers null and the next
 // door gets its turn.
 //
-// IT ESTABLISHES NO AUTHENTICATED CALL (sixth correction round, 2026-09-15). The
-// previous shape passed this file's dispatch INTO identity.js as a callback so
-// the whole request ran inside a receipt context, and a callback parameter on an
-// exported door is an exported context entry — which is what amendment 8
-// forbids. The context is now reached only by NAME, through
-// `serveAuthenticatedCall`, over a frozen map of the server's own entries.
 // ---------- hermes token (R0 runtime evaluation, 2026-08-16) ----------
 //
 // The fifth door, built on the PROBE_TOKENS/REVIEW_TOKENS pattern above and
@@ -527,16 +529,13 @@ function engineeringControllerActorFor(request, env) {
 // job (agentActorForToken, extended rather than duplicated — see its own
 // comment); nothing about it lives in this file.
 //
-// EVERY VERB EXCEPT partner-authority FALLS OUT OF EXISTING MECHANISMS, ON PURPOSE.
-// No profile lock here (unlike probe/reviewer): full parity minus partner authority
-// IS the grant, exactly like the agent-token door above, because joe-local and
-// dell-local are not approved native Codex/Claude runtime identities and therefore refuse
-// teach / retire-rule / confirm-merge / reassign-deal / new-deal / … by
-// construction — never a list this file has to maintain. A credential sitting
-// in a 600 file on a Mac must not be able to teach a rule that binds both
-// partners, retire one, confirm a merge, or reassign a deal; if that is ever
-// truly needed with no interactive session available, it is a deliberate,
-// receipted break-glass act (mcp-server/local-verb.mjs), never this door.
+// EVERY VERB FALLS OUT OF EXISTING MECHANISMS, ON PURPOSE. No profile lock here
+// (unlike probe/reviewer). Partner authority is not decided in this file either:
+// since Joe's 2026-08-26 ruling (decision dc57f62d) partner-authority.js admits
+// joe-local and dell-local under their server-derived sponsors, so humanOnly and
+// authorityOnly verbs pass on the sponsor's authority login, while the verbs
+// tools.js flags humanCallerOnly (confirm-merge) refuse every machine however it
+// is sponsored. Never a list this file has to maintain.
 //
 // NOT A REBUILT PARTNER_TOKENS (retired 2026-08-03, see the note above
 // agentActorForToken in identity.js): that secret authenticated as a full
@@ -571,6 +570,19 @@ function localActorFor(request, env) {
     : actor;
 }
 
+// THE UNATTENDED DOOR (Joe's ruling 2026-10-12, decision cbe91287). The
+// launchd/nightly runner and the Model Room desks run with nobody beside them,
+// so they held no sponsor and every partner-authority act waited for an
+// attended session. UNATTENDED_TOKENS is its own Worker secret (sponsor ->
+// token, the continuity maps' shape) whose `joe` bearer resolves to the
+// joe-local actor marked `via: "unattended-token"`. identity.js owns the whole
+// derivation; this file only checks the door, before the local-token door so
+// the provenance an unattended run records is never the attended one.
+function unattendedActorFor(request, env) {
+  return unattendedActorForToken(
+    request.headers.get("authorization"), env.UNATTENDED_TOKENS);
+}
+
 function continuityActorFor(request, env) {
   return continuityActorForTokenMaps(
     request.headers.get("authorization"),
@@ -581,8 +593,8 @@ function continuityActorFor(request, env) {
 
 // ---------- the provider ----------
 
-const oauthProvider = new OAuthProvider({
-  apiRoute: ["/mcp", "/pipeline/changes"],
+const oauthOptions = {
+  apiRoute: ["/mcp", "/doc/mcp", "/pipeline/changes"],
   apiHandler: protectedApiHandler,
   defaultHandler,
 
@@ -617,7 +629,8 @@ const oauthProvider = new OAuthProvider({
   onError({ code, description, status }) {
     console.warn(`OAuth error response: ${status} ${code} - ${description}`);
   },
-});
+};
+const oauthProvider = new OAuthProvider(oauthOptions);
 
 // Same verb and cursor implementations as the bearer-token surface; only the
 // authentication adapter differs. The cookie session already resolved to the
@@ -648,6 +661,11 @@ const dealroomHandler = createDealroomHandler({
     const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
     return readRoomTurns(client, { room: OBSERVATORY_ROOM, ...params });
   },
+  roomLatestFn: (env, params) => {
+    const sql = neon(env.DATABASE_URL_READER);
+    const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
+    return readRoomLatest(client, { room: OBSERVATORY_ROOM, ...params });
+  },
   queueReadFn: (env, params) => {
     const sql = neon(env.DATABASE_URL_READER);
     const client = { query: async (text, values = []) => ({ rows: await sql.query(text, values) }) };
@@ -672,9 +690,14 @@ const dealroomHandler = createDealroomHandler({
 // owned by OAuthProvider/defaultHandler.
 async function routeRequest(request, env, ctx) {
   const url = new URL(request.url);
-  // The confidential reports host is an isolated leaf. Unknown paths close as
-  // report-surface 404s and can never alias MCP, OAuth, capture, or Deal Room.
-  if (isReportsHostRequest(request)) return reportsHandler.fetch(request, env, ctx);
+  // Validate before machine-token, browser-cookie and provider routes alike.
+  if (isSharedOAuthPath(url.pathname)) {
+    const refused = mcpOriginRefusal(request, env);
+    if (refused) return refused;
+  }
+  // The production reports host isolates all paths. Staging browser hosts
+  // select only existing reports routes so their auth and MCP doors coexist.
+  if (isReportsHostRequest(request, env)) return reportsHandler.fetch(request, env, ctx);
   // The old Deal Room hostname is a browser bookmark bridge only. Keep it
   // ahead of machine-token doors so /mcp and other API paths fail closed on
   // that hostname instead of reaching an unrelated machine surface.
@@ -707,11 +730,15 @@ async function routeRequest(request, env, ctx) {
     if (agentActor) return dispatch(request, env, ctx, agentActor);
     const continuityActor = continuityActorFor(request, env);
     if (continuityActor) return dispatch(request, env, ctx, continuityActor);
+    const unattendedActor = unattendedActorFor(request, env);
+    if (unattendedActor) return dispatch(request, env, ctx, unattendedActor);
     const localActor = localActorFor(request, env);
     if (localActor) return dispatch(request, env, ctx, localActor);
   }
   if (isDealroomRequest(request, env)) return dealroomHandler.fetch(request, env, ctx);
-  return oauthProvider.fetch(request, env, ctx);
+  return sharedOAuthFetch(oauthProvider, request, {
+    ...env, OAUTH_PROVIDER: getOAuthApi(oauthOptions, env),
+  }, ctx);
 }
 
 // Top-level export. wrapWithCorrelation covers every route above in one

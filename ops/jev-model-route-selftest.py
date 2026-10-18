@@ -30,6 +30,15 @@ checks = _load("flash_answer_checks")
 POLICY = route.load_policy()
 
 
+import os as _sem_os
+import tempfile as _sem_tmp
+from unittest.mock import patch as _sem_patch
+class SemanticTestCase(unittest.TestCase):
+    def run(self, result=None):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+            return super().run(result)
+
+
 class FakeClient:
     @staticmethod
     def noul(instructions, true=None, false=None):
@@ -43,7 +52,7 @@ class FakeJudge:
     def _client(self):
         return FakeClient
 
-    def judge(self, subject, questions, timeout=None, client=None):
+    def judge(self, subject, questions, timeout=None, client=None, **kwargs):
         self.subjects.append((subject, questions))
         if self.error:
             raise self.error
@@ -55,7 +64,7 @@ def decide(scores=None, error=None, **kw):
                         log_path=None, **kw)
 
 
-class PolicyFile(unittest.TestCase):
+class PolicyFile(SemanticTestCase):
     def test_every_ordered_question_names_a_route_in_the_roster(self):
         for name in POLICY["order"]:
             self.assertIn(POLICY["questions"][name]["route"], POLICY["routes"])
@@ -73,148 +82,62 @@ class PolicyFile(unittest.TestCase):
                 self.assertTrue(entry.get("then", {}).get("desk"), name)
 
 
-class Routing(unittest.TestCase):
-    def test_code_wins_over_everything_after_it(self):
-        row = decide({"code": 0.9, "beyond": 0.9, "script": 0.9, "direct": 0.9})
-        self.assertEqual((row["route"], row["model"], row["protocol"]), ("code", "flash", "flash-run"))
-        self.assertEqual(row["then"]["desk"], "sol-fixer")
-
-    def test_judgment_goes_to_opus_and_never_to_flash(self):
-        row = decide({"beyond": 0.56, "script": 0.9, "direct": 0.9})
-        self.assertEqual((row["route"], row["model"], row["desk"]), ("escalate", "opus", "claude-desktop"))
-
-    def test_cutoff_is_inclusive_and_below_it_falls_through(self):
-        self.assertEqual(decide({"script": 0.45})["route"], "script")
-        self.assertEqual(decide({"script": 0.44, "direct": 0.40})["route"], "direct")
-
-    def test_nothing_clears_means_logged_fallback(self):
-        row = decide({"code": 0.1, "beyond": 0.1, "script": 0.1, "direct": 0.1})
-        self.assertEqual(row["route"], POLICY["abstain_route"])
+class Routing(SemanticTestCase):
+    def test_proposed_policy_priority_and_cutoffs(self):
+        for scores, expected in [({"code": .9,"beyond": .9}, "code"),
+                                 ({"beyond": .56,"direct": .9}, "escalate"),
+                                 ({"script": .45}, "script"),
+                                 ({"script": .44,"direct": .4}, "direct")]:
+            self.assertEqual(route.pick_route(scores, POLICY), expected)
+            Path(os.environ["CARR_JEV_SEMANTIC_CACHE"]).unlink(missing_ok=True)
+            row = decide(scores)
+            self.assertEqual(row["advisory_route"], expected)
+            self.assertEqual(row["route"], POLICY["abstain_route"])
+            self.assertTrue(row["review_required"])
+            self.assertTrue(row["fallback"])
+    def test_repeat_uses_one_complete_batch_and_changed_context_invalidates(self):
+        judge = FakeJudge({"direct": .99})
+        for context in ["one", "one", "two"]:
+            route.decide("a task", context, judge=judge, policy=POLICY, log_path=None)
+        self.assertEqual(len(judge.subjects), 2)
+        self.assertEqual(set(judge.subjects[0][1]), set(POLICY["questions"]))
+    def test_unavailable_retains_policy_fallback(self):
+        row = decide(error=TimeoutError("no route"))
         self.assertTrue(row["fallback"])
-        self.assertIsNone(row["jev_error"])
-
-    def test_flash_busy_moves_a_flash_route_to_overflow(self):
-        row = decide({"direct": 0.9}, flash_free=False)
-        self.assertTrue(row["overflow"])
-        self.assertEqual(row["model"], POLICY["overflow"]["model"])
-
-    def test_flash_busy_leaves_an_opus_route_alone(self):
-        row = decide({"beyond": 0.9}, flash_free=False)
-        self.assertFalse(row["overflow"])
-        self.assertEqual(row["model"], "opus")
-
-    def test_jev_down_fails_open_to_the_fallback(self):
-        row = decide(error=RuntimeError("no credential"))
-        self.assertTrue(row["fallback"])
-        self.assertIn("no credential", row["jev_error"])
-
-    def test_jev_sees_the_task_and_every_policy_question(self):
-        judge = FakeJudge({"direct": 0.9})
-        route.decide("sum these", "1, 2", policy=POLICY, judge=judge, log_path=None)
-        subject, questions = judge.subjects[0]
-        self.assertEqual(subject, {"task": "sum these", "context": "1, 2"})
-        self.assertEqual(set(questions), set(POLICY["questions"]))
-
-    def test_the_decision_is_logged(self):
+        self.assertIn("no route", row["jev_error"])
+    def test_logs_advice_separately_from_executable_route(self):
         with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "routes.jsonl")
-            route.decide("t", policy=POLICY, judge=FakeJudge({"direct": 0.9}), log_path=path)
-            row = json.loads(open(path).read())
-            self.assertEqual((row["task"], row["route"]), ("t", "direct"))
+            path = os.path.join(d,"routes.jsonl")
+            route.decide("t", judge=FakeJudge({"direct": .99}), log_path=path)
+            row = json.loads(Path(path).read_text())
+            self.assertEqual(row["advisory_route"], "direct")
+            self.assertEqual(row["route"], POLICY["abstain_route"])
 
-    def test_desk_for_reads_the_policy(self):
-        self.assertEqual(route.desk_for("code", POLICY), "sol-fixer")
-        self.assertEqual(route.desk_for("judgment", POLICY), "claude-desktop")
-
-
-def dispatch(scores=None, error=None, **kw):
-    return route.dispatch("a task", "ctx", policy=POLICY, judge=FakeJudge(scores, error), rng=lambda: 0.99,
-                          log_path=None, **kw)
-
-
-class Dispatch(unittest.TestCase):
-    """What an orchestrator gets back for one spawn: the route, or the pin that overrode it and why."""
-
-    def test_every_queue_target_and_pin_resolves(self):
-        targets = {v for k, v in POLICY["queue_targets"].items() if not k.startswith("_")}
-        pinned = {v["target"] for k, v in POLICY["pins"].items() if not k.startswith("_")}
-        for t in targets | pinned:
-            self.assertIn(t, POLICY["dispatch_targets"], t)
-            self.assertIn(t, route.load_catalog()["targets"], t)
-
-    def test_direct_task_spawns_on_the_flash_stand_in(self):
-        out = dispatch({"direct": 0.9})
-        self.assertEqual((out["route"], out["target"], out["desk"]), ("direct", "flash", "flash-model"))
-        self.assertEqual(out["subagent_model"], "haiku")
-        self.assertIsNone(out["pin"])
-
-    def test_judgment_task_spawns_on_opus(self):
-        out = dispatch({"beyond": 0.9})
-        self.assertEqual((out["route"], out["target"], out["subagent_model"]), ("escalate", "claude-desktop", "opus"))
-
-    def test_pin_overrides_the_route_and_says_why(self):
-        out = dispatch({"direct": 0.9}, pin="merge_review")
-        self.assertEqual((out["target"], out["subagent_model"], out["pin"]), ("claude-desktop", "opus", "merge_review"))
-        self.assertIn("merge", out["pin_reason"])
-        self.assertEqual(out["routed"], {"route": "direct", "target": "flash", "subagent_model": "haiku"})
-
-    def test_sol_pin_is_a_desk_only(self):
-        out = dispatch({"beyond": 0.9}, pin="sol_allowance")
-        self.assertEqual((out["target"], out["desk"], out["subagent_model"]), ("sol", "codex-desk", None))
-
-    def test_unknown_pin_is_refused_never_routed(self):
-        with self.assertRaises(ValueError):
-            dispatch({"direct": 0.9}, pin="just_because")
-
-    def test_jev_down_still_honours_a_pin(self):
-        out = dispatch(error=TimeoutError("down"), pin="gate_authority_code")
-        self.assertEqual((out["target"], out["subagent_model"]), ("claude-desktop", "opus"))
-        self.assertIn("TimeoutError", out["jev_error"])
-
-    def test_flash_busy_spawns_on_overflow_and_queues_to_fallback(self):
-        out = dispatch({"direct": 0.9}, flash_free=False)
-        self.assertEqual((out["target"], out["subagent_model"]), (POLICY["queue_targets"]["fallback"], "haiku"))
-        self.assertTrue(out["overflow"])
-        self.assertEqual(out["effort"], POLICY["overflow"]["effort"])
-
-    def test_flash_busy_never_lowers_a_code_task_off_opus(self):
-        # Code and script spawns go to the Opus desk; Flash being busy has nothing to do with them.
-        out = dispatch({"code": 0.9}, flash_free=False)
-        self.assertEqual((out["target"], out["subagent_model"], out["effort"]), ("claude-desktop", "opus", "high"))
-        self.assertFalse(out["overflow"])
-
-    def test_a_script_spawn_stays_on_opus_though_script_queues_to_flash(self):
-        # Flash runs script tasks only from the queue, with named data; a spawn has none to give it.
-        self.assertEqual(POLICY["queue_targets"]["script"], "flash")
-        out = dispatch({"script": 0.9}, flash_free=True)
-        self.assertEqual((out["target"], out["subagent_model"]), ("claude-desktop", "opus"))
-
-    def test_a_code_spawn_stays_on_opus_though_code_queues_to_flash(self):
-        # Flash runs code tasks only from the queue, with a named project and test; a spawn has neither to give it.
-        self.assertEqual(POLICY["queue_targets"]["code"], "flash")
-        for free in (True, False):
-            out = dispatch({"code": 0.9}, flash_free=free)
-            self.assertEqual((out["route"], out["target"], out["subagent_model"], out["effort"]),
-                             ("code", "claude-desktop", "opus", "high"))
-            self.assertFalse(out["overflow"])
-            self.assertEqual(out["routed"]["target"], "claude-desktop")
-
-    def test_flash_busy_with_jev_down_stays_on_opus(self):
-        out = dispatch(error=TimeoutError("down"), flash_free=False)
-        self.assertEqual((out["route"], out["subagent_model"]), (POLICY["abstain_route"], "opus"))
-        self.assertFalse(out["overflow"])
-
-    def test_one_dispatch_logs_one_row_with_the_pin(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = os.path.join(d, "routes.jsonl")
-            route.dispatch("t", policy=POLICY, judge=FakeJudge({"direct": 0.9}), pin="merge_review", log_path=path)
-            rows = [json.loads(line) for line in open(path)]
-            self.assertEqual(len(rows), 1)
-            self.assertEqual((rows[0]["kind"], rows[0]["pin"], rows[0]["routed"]["route"]),
-                             ("dispatch", "merge_review", "direct"))
+class Dispatch(SemanticTestCase):
+    def test_pins_skip_judgment_and_unknown_pin_refuses(self):
+        for pin, config in POLICY["pins"].items():
+            if pin.startswith("_"): continue
+            judge = FakeJudge(error=AssertionError("must not ask"))
+            out = route.dispatch("task", pin=pin, judge=judge, policy=POLICY, log_path=None)
+            self.assertEqual(out["target"], config["target"])
+            self.assertEqual(judge.subjects, [])
+        with self.assertRaises(ValueError): route.dispatch("task", pin="unknown", log_path=None)
+    def test_semantic_advice_never_changes_executable_target(self):
+        for scores in ({"direct": .99},{"code": .99},{"beyond": .99},{"script": .99}):
+            for free in (True, False):
+                out = route.dispatch("task", judge=FakeJudge(scores), flash_free=free, log_path=None)
+                self.assertEqual(out["route"], POLICY["abstain_route"])
+                self.assertEqual(out["target"], POLICY["queue_targets"]["fallback"])
+                self.assertTrue(out["review_required"])
+    def test_explicit_pin_audit_retains_advisory_route(self):
+        judge = FakeJudge({"direct": .99})
+        out = route.dispatch("review", pin="merge_review", audit_pin=True, judge=judge, log_path=None)
+        self.assertEqual(out["advisory_route"], "direct")
+        self.assertEqual(out["target"], POLICY["pins"]["merge_review"]["target"])
+        self.assertEqual(len(judge.subjects), 1)
 
 
-class Handoff(unittest.TestCase):
+class Handoff(SemanticTestCase):
     def test_no_answer(self):
         self.assertEqual(route.handoff_reason("", []), "no_answer")
 
@@ -230,7 +153,7 @@ class Handoff(unittest.TestCase):
         self.assertIsNone(route.handoff_reason("7", [{"support": "printed"}]))
 
 
-class AnswerChecks(unittest.TestCase):
+class AnswerChecks(SemanticTestCase):
     def test_rounded_printed_average_is_printed(self):
         # messy averages: the script printed avg 29.7393 and Flash answered 29.74, the truth
         self.assertEqual(checks.answer_support("29.74", ["parsed 3330\navg 29.7393"]), "printed")

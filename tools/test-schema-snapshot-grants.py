@@ -74,6 +74,7 @@ GENERATOR = os.path.join(REPO, "bin", "schema-snapshot.sh")
 # Keep this mapping explicit so a production-truth pre-release snapshot does not
 # pretend a pending bundle already has privileges.
 ROLE_GRANT_MIGRATIONS = {
+    "dot_reader": "0756_dot_reader.sql",
     "carr_calendar_prebrief_jobs": "0229_calendar_prebrief_projection.sql",
     "carr_calendar_prebrief_canary_jobs": "0229_calendar_prebrief_projection.sql",
     "carr_calendar_prebrief_attestors": "0229_calendar_prebrief_projection.sql",
@@ -91,7 +92,7 @@ APP_ROLES = ["carr_reader", "carr_writer", "carr_jobs", "carr_exporter",
              "carr_program5_forward_fix_verifiers",
              "carr_renewal_source_attestors",
              "carr_gate_zero_producer", "carr_foundation_assurance_oracle",
-             "carr_ownership_issuer"]
+             "carr_ownership_issuer", "dot_reader"]
 MEMBERSHIP_ONLY = ["neondb_owner", "carr_ownership_issuer_g1",
                    "carr_ownership_issuer_g2"]
 
@@ -359,10 +360,16 @@ def main(argv):
     # or neondb_owner, on membership lines only. Anything else means some
     # other principal's production ACLs were swept into a tracked file.
     allowed = set(APP_ROLES)
+    dot_applied = bool(re.search(r"^0756_dot_reader\.sql\t", sql, re.M))
+    # This administrative membership is part of the released role preamble,
+    # never an object ACL or a generally permitted option-bearing membership.
+    dot_admin = "grant dot_reader to neondb_owner with admin true, inherit false, set false;"
     membership = re.compile(
         rf"grant ({'|'.join(APP_ROLES)}) to ({'|'.join(APP_ROLES + MEMBERSHIP_ONLY)});")
     strays = []
     for _, ln in grant_lines:
+        if dot_applied and ln == dot_admin:
+            continue
         if membership.fullmatch(ln):
             continue
         m = re.search(r"\bto ([a-z0-9_, ]+);", ln)
@@ -377,7 +384,9 @@ def main(argv):
     last_create = max((i for i, ln in enumerate(lines)
                        if re.match(r"\s*CREATE (TABLE|.*VIEW|SEQUENCE|FUNCTION)\b", ln)),
                       default=None)
-    first_grant = grant_lines[0][0] if grant_lines else None
+    object_grants = [(i, ln) for i, ln in grant_lines
+                     if not (dot_applied and ln == dot_admin)]
+    first_grant = object_grants[0][0] if object_grants else None
     check("every grant follows the structure it attaches to",
           first_grant is not None and last_create is not None
           and first_grant > last_create,

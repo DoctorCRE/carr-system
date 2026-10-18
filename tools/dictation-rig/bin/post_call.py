@@ -15,6 +15,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import time
 import urllib.request
 import urllib.parse
@@ -24,6 +25,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 import post_call_jev
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+import flashlib
 
 SCHEMA_VERSION = 1
 CONTEXT_FILE = "call-context.json"
@@ -39,11 +42,10 @@ LLAMA_MODEL = Path.home() / ".cache" / "llama.cpp" / "models" / "qwen2.5-1.5b-in
 LLAMA_PORT = 8598
 OUTLOOK_URL_LIMIT = 1900
 
-# The already-running Flash Next server (ds4-serve, launchd label
-# local.ds4-flash-next), shared with the Model Room flash desk. This module
-# never starts, stops, or restarts it: it is a fixed loopback endpoint the
-# distiller calls like any other resident service, and requests here may
-# queue behind other callers. It is a much stronger model than the bundled
+# Flash Next (launchd label local.ds4-flash-next) shares its loopback endpoint
+# with the Model Room flash desk. flashlib loads it on demand and protects
+# requests from idle shutdown. Requests may queue behind other callers.
+# It is a much stronger model than the bundled
 # 1.5B llama.cpp model and, unlike it, reliably produces a usable review pack
 # (2026-09-23 feasibility check against a real and a synthetic transcript).
 FLASH_SERVER_URL = "http://127.0.0.1:8000"
@@ -386,25 +388,74 @@ def command_distiller(request: dict[str, Any], command: str | None = None, runne
     return parsed
 
 
-def transcript_chunks(transcript: dict[str, Any], limit: int = 24000) -> list[dict[str, Any]]:
-    """Split only at transcript segments, never in the middle of a speaker turn."""
+# A judged cut may land anywhere in the last quarter of a full chunk, so a
+# chunk never shrinks below three quarters of the limit to follow a topic.
+CUT_WINDOW_FRACTION = 0.75
+MAX_CUT_CANDIDATES = 4
+
+
+def _spread_cut_options(options: list[int], limit: int) -> list[int]:
+    """At most `limit` evenly spaced options, always keeping the last one --
+    the size-limit cut the splitter would have made anyway."""
+    if len(options) <= limit:
+        return options
+    step = (len(options) - 1) / (limit - 1)
+    return sorted({options[round(i * step)] for i in range(limit)})
+
+
+def transcript_chunks(transcript: dict[str, Any], limit: int = 24000,
+                      choose_cut: Callable[[list[Any], list[int]], int | None] | None = None) -> list[dict[str, Any]]:
+    """Split only at transcript segments, never in the middle of a speaker turn.
+
+    Without `choose_cut` a chunk ends wherever the size limit falls, which can
+    cut one discussion in half: the second chunk then lacks the setup (which
+    deal "it" is), and the same item can be distilled from both halves.
+
+    `choose_cut(segments, options)` may instead pick where the topic changes.
+    `options` are segment indexes to cut before, all inside the last quarter of
+    the full chunk and always including the size-limit cut. Anything it returns
+    outside `options`, None, or an exception keeps the size-limit cut, so a
+    judge can move a boundary but can never fail the split.
+    """
     segments = transcript.get("segments")
     if not isinstance(segments, list):
         raise ContractError("transcript segments must be an array")
+
+    def size(lo: int, hi: int) -> int:
+        return len(json.dumps({"segments": segments[lo:hi]}, ensure_ascii=False))
+
     chunks: list[dict[str, Any]] = []
-    current: list[Any] = []
-    for segment in segments:
-        candidate = {"segments": current + [segment]}
-        if len(json.dumps(candidate, ensure_ascii=False)) > limit:
-            if not current:
-                raise RuntimeError("a transcript segment exceeds bounded local distiller context")
-            chunks.append({"segments": current})
-            current = [segment]
-        else:
-            current.append(segment)
-    if current or not chunks:
-        chunks.append({"segments": current})
+    start = end = 0
+    while end < len(segments):
+        if size(start, end + 1) <= limit:
+            end += 1
+            continue
+        if end == start:
+            raise RuntimeError("a transcript segment exceeds bounded local distiller context")
+        cut = end
+        if choose_cut is not None:
+            floor = limit * CUT_WINDOW_FRACTION
+            options = _spread_cut_options(
+                [k for k in range(start + 1, end + 1) if size(start, k) >= floor],
+                MAX_CUT_CANDIDATES,
+            )
+            if len(options) > 1:
+                try:
+                    picked = choose_cut(segments, options)
+                except Exception:
+                    picked = None
+                if picked in options:
+                    cut = picked
+        chunks.append({"segments": segments[start:cut]})
+        start = cut
+    if start < len(segments) or not chunks:
+        chunks.append({"segments": segments[start:]})
     return chunks
+
+
+def _topic_chunks(transcript: dict[str, Any]) -> list[dict[str, Any]]:
+    """Use deterministic size cuts while semantic topic effects are disabled."""
+    return transcript_chunks(transcript)
 
 
 def merge_chunk_outputs(outputs: list[dict[str, Any]]) -> dict[str, Any]:
@@ -538,7 +589,7 @@ def llama_distiller(request: dict[str, Any], popen: Callable[..., Any] = subproc
     context_json = json.dumps(request["context"], ensure_ascii=False)
     if len(context_json) > 28000:
         raise RuntimeError("call-context index exceeds bounded local distiller context")
-    chunks = transcript_chunks(request["transcript"])
+    chunks = _topic_chunks(request["transcript"])
     child = popen([
         LLAMA_SERVER, "-m", str(LLAMA_MODEL), "--host", "127.0.0.1",
         "--port", str(LLAMA_PORT), "-c", "16384", "--threads", "4",
@@ -588,30 +639,20 @@ class DistillerUnavailable(RuntimeError):
 
 def flash_server_available(opener: Callable[..., Any] = urllib.request.urlopen, timeout: float = FLASH_SERVER_HEALTH_TIMEOUT) -> bool:
     try:
-        with opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout):
+        with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(f"{FLASH_SERVER_URL}/v1/models", timeout=timeout):
             return True
     except Exception:
         return False
 
 
 def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
-    """Call the already-running Flash Next server; never spawns or kills it.
-
-    That server (127.0.0.1:8000, ds4-serve / local.ds4-flash-next) is shared
-    with the Model Room flash desk, so requests may queue behind other
-    callers. This function owns no lifecycle over it: if it cannot be
-    reached, that is reported as ``DistillerUnavailable`` (a RuntimeError
-    subclass) rather than started, retried past a short bound, or silently
-    swallowed.
-    """
+    """Ensure Flash through the shared lifecycle helper; retain DistillerUnavailable on failure."""
     context_json = json.dumps(request["context"], ensure_ascii=False)
     if len(context_json) > 28000:
         raise RuntimeError("call-context index exceeds bounded local distiller context")
     if not flash_server_available(opener=opener):
-        raise DistillerUnavailable(
-            f"the resident local model server at {FLASH_SERVER_URL} is unreachable"
-        )
-    chunks = transcript_chunks(request["transcript"])
+        raise DistillerUnavailable(f"the local model server at {FLASH_SERVER_URL} is unreachable")
+    chunks = _topic_chunks(request["transcript"])
     outputs: list[dict[str, Any]] = []
     try:
         for chunk in chunks:
@@ -621,7 +662,7 @@ def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any]
             )
             req = urllib.request.Request(f"{FLASH_SERVER_URL}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"}, method="POST")
             try:
-                with opener(req, timeout=150) as response:
+                with flashlib.request_scope(FLASH_SERVER_URL, opener=opener), opener(req, timeout=150) as response:
                     outer = json.loads(response.read().decode("utf-8"))
             except (OSError, TimeoutError) as exc:
                 raise DistillerUnavailable(
@@ -652,6 +693,8 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
     command = os.environ.get("CARR_POST_CALL_DISTILLER_COMMAND")
     if command:
         return command_distiller(request, command=command)
+    if flashlib.is_switched_off():
+        raise DistillerUnavailable(flashlib.OFF_REASON)
     try:
         return resident_flash_distiller(request)
     except DistillerUnavailable as exc:

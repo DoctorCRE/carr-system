@@ -12,8 +12,9 @@ has NO discriminating power: twenty-six failures and twenty-six successes both
 scored a median of 0.44, and at a 0.8 threshold the question raised more false
 alarms than it caught real failures. Attach the one environment fact that
 decides the command and the same set separates at 0.94 against 0.17. So
-ops/jev_precheck.py collects the facts first, deterministically, and a judgment
-is asked only when there is something to judge.
+ops/jev_precheck.py collects the facts first, deterministically. Since the
+2026-10-04 Jev audit the facts that ever produced a warning are decided by
+predicate here and no judgment is asked at all (see REASONS below).
 
 IT IS A LIBRARY, AND THAT IS NOT A STYLE CHOICE. A file under hooks/ with a
 shebang is a NEW sealed ingress, and admitting one means a mutation-registry
@@ -41,7 +42,7 @@ payload, unreadable repository — every one of those returns zero silently. A
 pre-check that turns somebody else's outage into this repository's outage has
 cost more than it will ever save.
 
-THREE FILTERS BEFORE THE GENERAL COMMAND JUDGMENT, in order, and each one is free:
+THREE FILTERS BEFORE THE FACT PREDICATES, in order, and each one is free:
 
   1. No literal shell command in Bash or Codex's exec wrapper: return.
   2. Every statement in the command is a known pure read: return. About two
@@ -51,16 +52,17 @@ THREE FILTERS BEFORE THE GENERAL COMMAND JUDGMENT, in order, and each one is fre
      disk contradicting it, there is nothing to ask about, and asking anyway is
      what produced the 0.44 median.
 
-Only what survives all three reaches a judgment, measured at roughly half a
-second. On the traffic this was built from that is about a third of commands,
-some eighty seconds and a fifth of a cent across an entire session.
+Only what survives all three reaches the predicates, which cost no request.
 
 A separate, narrow preflight for an actual model CLI invocation reads Joe's
-Model Room route from AGENTS.md and gives it to Jev before that command runs.
+Model Room route from AGENTS.md and shows it before that command runs.
 It never sees ordinary text searches or authentication readback as model work.
 
 KILL SWITCH: set CARR_PRECHECK=0. Anything in front of every shell call needs
 one, and that is engineering rather than caution.
+
+UNATTENDED WORKERS get the same check: it is deterministic and makes no paid
+call, so CARR_JEV_WORKER=off no longer changes anything here.
 """
 
 import json
@@ -75,10 +77,6 @@ LOG_MAX_BYTES = 4 * 1024 * 1024  # a count cap is not a size cap; this is a size
 # every command trains a session to ignore warnings, which is worse than none.
 # Re-derive it from LOG once real traffic has accumulated.
 WARN_AT = 0.80
-
-# Short on purpose. This sits in somebody's way, and a judgment that has not
-# arrived in five seconds has already cost more than the command it is about.
-TIMEOUT_SECONDS = 5.0
 
 # Every statement is one of these and none of the writers below: pure read.
 READS = re.compile(
@@ -99,8 +97,7 @@ def is_pure_read(command):
     return bool(statements) and all(READS.match(s) for s in statements)
 
 
-# The precheck sends a command to TypeSafe. A command carrying a credential
-# stays local even when its file facts would otherwise make it eligible.
+# A command carrying a credential is never inspected or logged.
 SENSITIVE_COMMAND = re.compile(
     r"(?i)(?:\b(?:api[_-]?key|access[_-]?token|password|passwd|secret|"
     r"authorization|bearer|pgpassword|database_url)\b\s*(?:=|:|\s+)"
@@ -138,33 +135,18 @@ def model_room_rule(repo=REPO):
 
 
 def model_room_advisory(command, repo=REPO):
-    """Jev reads the route before a direct model CLI is attempted. Never deny."""
+    """The route, read before a direct model CLI is attempted. Never deny.
+
+    The executable position is found deterministically, which is all the
+    route needs. The paid "direct-work score" this used to append changed
+    nothing the rule did not already say (2026-10-04 audit)."""
     match = MODEL_CLI.search(command) or MODEL_PACKAGE_CLI.search(command)
     if not match or MODEL_CLI_AUTH.match(command[match.end():]):
         return None
     rule = model_room_rule(repo)
     if not rule:
         return None
-    confidence = None
-    if not SENSITIVE_COMMAND.search(command):
-        try:
-            judge = _sibling("jev_judge")
-            client = _sibling("typesafe_client")
-            answer = judge.judge(
-                {"command": command[:500], "model_room_rule": rule},
-                {"direct_model_work": client.noul(
-                    "This command starts model work directly through a model CLI, "
-                    "rather than through the Model Room.",
-                    true="A model CLI is invoked to perform work.",
-                    false="The CLI use is only an authentication, health, or help read.")},
-                timeout=1.5)
-            confidence = float(answer["answers"]["direct_model_work"]["noul"])
-        except Exception:
-            pass
-    # The executable position is known deterministically. Jev's judgment is
-    # advisory context, not authority to override Joe's route or expose a key.
-    readback = f" Jev direct-work score {confidence:.2f}." if confidence is not None else ""
-    return "MODEL ROOM ROUTE — read the current rule before this CLI call: " + rule + readback
+    return "MODEL ROOM ROUTE — read the current rule before this CLI call: " + rule
 
 
 def _sibling(name):
@@ -228,95 +210,68 @@ def repo_root(cwd):
     return REPO
 
 
-# One narrow question per KIND of fact, asked together in one request.
+# DETERMINISTIC SINCE THE 2026-10-04 JEV AUDIT. This precheck used to send the
+# gathered facts to Jev on every non-read shell call: 35,357 paid attempts in
+# the seven days to 2026-10-04, the largest single site. Its own log showed
+# what earned a warning. Of 3,170 judged commands 348 warned; 287 of those were
+# a missing path, 57 a module interface (2% of the 2,518 times that fact was
+# present), 6 a guard refusal, and 0 of 394 an undeclared option. A missing
+# path is a fact, not a judgment (rule 5e89c211), so it is decided here by
+# predicate. A guard refusal is left to the guard: jev_precheck's list is a
+# regex copy that over-reads it (sudo, scratch-zone rm -rf), and where the
+# guard does refuse, its own PreToolUse denial already says so. Replayed over the same log, the missing-path
+# predicate below warns on 263 commands against Jev's 287, and the commands it
+# alone flags are real failures (an rg or git add of a file that is not there).
+# The interface, import and option facts alone no longer produce a warning.
 #
-# The first version asked a single broad question — "is this command likely to
-# fail?" — which is the thing the vendor's build guide names as the mistake to
-# avoid: a broad question hides several judgments behind one number, and a
-# blended 0.84 cannot tell a session WHICH of its facts is the problem. Their
-# worked example decomposes one spam question into six independent checks.
-#
-# Decomposing costs nothing here. Independent questions about one state ride in
-# ONE request, run in parallel, and each is scored on its own against the state
-# — measured by the vendor at 12.2 times cheaper and 10 times faster than
-# asking them separately. So this is the same one request it always was, and it
-# now comes back with a probability per reason instead of one blended number.
-#
-# Each entry is (question id, the facts key it needs, how to phrase it). A
-# question is only asked when its fact is actually present, so a command with
-# one kind of problem costs one question rather than five.
-QUESTIONS = (
-    ("undeclared_option", "undeclared_options",
-     ("This command passes an option the script does not accept, so the script "
-      "will exit on an unrecognised argument.",
-      "The option named in `state.environment.undeclared_options` is genuinely "
-      "not accepted by the script this command runs, and the script rejects "
-      "unknown arguments rather than ignoring them.",
-      "The option is accepted after all, or it belongs to a different command "
-      "in the line, or the script passes its arguments through to something "
-      "that does accept it.")),
-    ("bad_import", "import_notes",
-     ("This command runs an import that the directory layout does not support.",
-      "The import named in `state.environment.import_notes` will raise, because "
-      "the directory it imports from is not a package.",
-      "The import is written in a form that works anyway, such as an absolute "
-      "import or a path-based load, or the command never reaches it.")),
-    ("missing_path", "paths_that_do_not_exist",
-     ("This command names a repository path that is not there, and needs it to "
-      "exist.",
-      "A path in `state.environment.paths_that_do_not_exist` is one the command "
-      "READS or executes, so its absence stops the command.",
-      "The command CREATES or writes that path, or names it only as an "
-      "argument to something that tolerates it being absent — a path being "
-      "absent is not a problem when the command's job is to make it.")),
-    ("guard_refusal", "guard_refusals",
-     ("A guard refuses this command before it runs.",
-      "The refusal in `state.environment.guard_refusals` applies to this "
-      "command as written.",
-      "The pattern matched something that is not actually the refused action, "
-      "such as the phrase appearing inside a quoted string or a comment.")),
-    ("wrong_interface", "module_interfaces",
-     ("This command uses a module in a shape that module does not expose.",
-      "The command calls a name, or reads a result, that is not in the "
-      "interface listed under `state.environment.module_interfaces`.",
-      "Everything the command touches is present in the listed interface, or "
-      "the command does not call into that module at all. A module merely "
-      "being NAMED is not evidence of misuse.")),
+# (facts key, reason id, label)
+REASONS = (
+    ("paths_that_do_not_exist", "missing_path", "the command reads a path that does not exist"),
 )
+
+# A command that makes a path is not stopped by its absence. Any creating
+# operation anywhere in the command silences the missing-path warning: silence
+# is safer than a confident warning about a path the command is about to make.
+CREATES = re.compile(
+    r"(?:>{1,2}|\bmkdir\b|\btouch\b|\btee\b|\bcp\b|\bmv\b|\bln\b|--output\b|\s-o\s|"
+    r"\bgit\s+(?:checkout|clone|worktree|switch|restore|mv|apply|am|stash)\b)")
+HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2\b", re.S)
+
+
+def missing_operands(command, missing):
+    """The missing paths that appear as whole shell words outside heredoc bodies.
+
+    A glob such as tools/jev* is not the missing prefix tools/jev, and a path
+    inside a heredoc is text the shell never opens. Unparseable shell is silent.
+    """
+    import shlex
+    try:
+        words = shlex.split(HEREDOC.sub(" ", command), comments=True)
+    except ValueError:
+        return []
+    words = {w[2:] if w.startswith("./") else w for w in words}
+    return [path for path in missing if path in words]
 
 
 def check(command, repo=REPO):
-    """(probability, facts, reasons) — or (None, {}, {}) when nothing was asked.
+    """(probability, facts, reasons) — or (None, facts, {}) when nothing warns.
 
-    `reasons` maps each asked question to its probability, so a caller can say
-    which fact is the problem rather than quoting one blended number.
+    No model is asked. A reason is present only when its predicate holds, with
+    probability 1.0, so the caller's WARN_AT floor and output format still apply.
     """
     precheck = _sibling("jev_precheck")
     facts = precheck.environment_facts(command, repo)
     if not facts:
         return None, {}, {}
-    judge = _sibling("jev_judge")
-    client = _sibling("typesafe_client")
-    questions = {}
-    for key, needs, (instruction, yes, no) in QUESTIONS:
-        if facts.get(needs):
-            questions[key] = client.noul(instruction, true=yes, false=no)
-    if not questions:
-        return None, facts, {}
-    answer = judge.judge({"command": command[:1500], "environment": facts},
-                         questions, timeout=TIMEOUT_SECONDS)
     reasons = {}
-    for key in questions:
-        try:
-            reasons[key] = float(answer["answers"][key]["noul"])
-        except (KeyError, TypeError, ValueError):
-            continue
+    missing = facts.get("paths_that_do_not_exist") or []
+    operands = missing_operands(command, missing) if missing and not CREATES.search(command) else []
+    if operands:
+        facts = dict(facts, paths_that_do_not_exist=operands)
+        reasons["missing_path"] = 1.0
     if not reasons:
         return None, facts, {}
-    # Combined in code, not by the model. Any ONE of these being true is enough
-    # to sink the command, so the highest is the command's probability — a
-    # weighted average would let four confident "no"s bury one confident "yes".
-    return max(reasons.values()), facts, reasons
+    return 1.0, facts, reasons
 
 
 def _commands(payload):
@@ -403,10 +358,10 @@ def advisory(payload):
             _log({"command": command[:400], "p": probability, "facts": facts,
                   "reasons": reasons, "repo": repo, "warned": probability >= WARN_AT})
             if probability < WARN_AT:
-                break  # one model call per hook; the installed door has a 3s budget
+                break
             lines = [f"PRE-CHECK {probability:.2f} — this command looks likely to fail. "
                      "It has NOT been blocked; run it anyway if you disagree."]
-            needs = {key: fact for key, fact, _ in QUESTIONS}
+            needs = {key: fact for fact, key, _ in REASONS}
             for key, reason in sorted(reasons.items(), key=lambda item: -item[1]):
                 if reason < WARN_AT:
                     continue

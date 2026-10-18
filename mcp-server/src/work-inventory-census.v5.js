@@ -20,6 +20,7 @@
 // matches on PLAIN TEXT, so even naming those constructs in a comment here
 // would turn this library into an ingress. That cost one verdict to learn.
 
+import { readSystemWorkCensus } from "./system-work-census.v5.js";
 import { organizationTenantForActor } from "./identity.js";
 
 export const WORK_INVENTORY_PATH = "/api/v1/work-inventory";
@@ -307,8 +308,9 @@ function normalizeLimit(value) {
  */
 export async function readWorkInventoryCensus({
   client, actor, tenant = organizationTenantForActor(actor), correlationId,
-  now = () => new Date(), cursor = null, limit, kinds, statuses,
+  now = () => new Date(), cursor = null, limit, kinds, statuses, system = false, ...filters
 }) {
+  if (system === true || system === "true") return readSystemWorkCensus({client,actor,correlationId,now,cursor,limit,kinds,...filters});
   if (!correlationId || typeof correlationId !== "string") throw typedError("INTERNAL_ERROR");
   const boundTenant = organizationTenantForActor(actor);
   if (tenant !== boundTenant || tenant !== TENANT) throw typedError("TENANT_SCOPE_REFUSED");

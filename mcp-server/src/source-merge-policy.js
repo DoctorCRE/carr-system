@@ -7,6 +7,7 @@
 // and the live protected-main ruleset all reconcile.
 
 import { sha256 } from "./sha256.js";
+import { MERGE_REFUSAL_TIER, reviewTierForPath } from "./review-tiers.js";
 
 export const NO_CEREMONIAL_MERGE_DECISION =
   "decision:4eaae0e1-f3b0-4e5d-af93-c44f39adc687";
@@ -29,36 +30,6 @@ const SHA = /^[0-9a-f]{40}$/;
 const BLOCKING_LABEL_TOKENS = Object.freeze([
   "do-not-merge", "security", "privacy", "incident", "migration",
   "decision", "council", "release", "deployment",
-]);
-const PROTECTED_SOURCE_PREFIXES = Object.freeze([
-  ".github/actions/",
-  ".github/workflows/",
-  "migrations/",
-  "ops/",
-]);
-const PROTECTED_SOURCE_PATHS = new Set([
-  ".github/CODEOWNERS",
-  ".nvmrc",
-  "AGENTS.md",
-  "CLAUDE.md",
-  "control-room/package.json",
-  "db/schema.sql",
-  "mcp-server/package-lock.json",
-  "mcp-server/package.json",
-  "mcp-server/bin/run-source-merge.mjs",
-  "mcp-server/src/engineering-runtime.js",
-  "mcp-server/src/identity.js",
-  "mcp-server/src/index.js",
-  "mcp-server/src/mcp.js",
-  "mcp-server/src/sha256.js",
-  "mcp-server/src/source-merge-policy.js",
-  "mcp-server/src/tools.js",
-  "mcp-server/src/work-request-intake.js",
-  "mcp-server/wrangler.toml",
-  "requirements.lock",
-  "requirements.txt",
-  "tools/migrate.py",
-  "workspace/package.json",
 ]);
 
 function canonicalize(value) {
@@ -227,9 +198,13 @@ function claimCoversAcceptedPath(claim) {
     : claim.claim_path === claim.path || claim.path.startsWith(`${claim.claim_path}/`);
 }
 
+// Protected paths come from the one review-tier map
+// (ops/config/review-tiers.v1.json, engineering-workflow-sop section 15): a
+// tier-3 path is never auto-merged, so a human presses merge. The map replaced
+// this module's own list without dropping any path it held
+// (ops/fixtures/review-tiers/pre-change-baseline.v1.json).
 function protectedSourcePath(filename) {
-  return PROTECTED_SOURCE_PATHS.has(filename) ||
-    PROTECTED_SOURCE_PREFIXES.some(prefix => filename.startsWith(prefix));
+  return reviewTierForPath(filename) >= MERGE_REFUSAL_TIER;
 }
 
 function authorizationReasons(authorization, passport, pullRequest, reasons) {

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/carr-before.py",
+      "expect": "fail"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/app-before.mjs",
+      "expect": "fail"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/digest-before.py",
+      "expect": "fail"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/digest-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "ops/fixtures/jevlint/judge-invariant-good.py",
+      "expect": "pass"
+    }
+  ]
+}

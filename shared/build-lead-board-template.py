@@ -19,11 +19,9 @@ TWO SOURCE MODES (ORDER 26(b), the ORDER 29a pattern).
 
 The two modes share every transform. What changes is only where the RAW row came
 from — an xlsx cell, a JSON object, or the `source_row` jsonb that stored that
-same object verbatim. That is what makes byte-identical output provable rather
-than hoped for: tools/parity-lead-board.py runs both and diffs the payload the
-template consumes. Records mode falls back to files, loudly, when the record path
-is unreachable; a board that quietly dropped its radar rows would be worse than
-one that admits it read the files.
+same object verbatim. Both modes feed the same template transforms. Records mode
+falls back to files, loudly, when the record path is unreachable; a board that
+quietly dropped its radar rows would be worse than one that admits it read the files.
 
 CARR_ROOT defaults to the folder two levels up from this script (…/CARR AI).
 Sources:
@@ -64,15 +62,10 @@ except ImportError:
     MODE_FILES, MODE_RECORDS, _HAVE_RECORDS = "files", "records", False
 
 if _HAVE_RECORDS:
-    # ORDER 26(c)'s two conditions, both met 2026-08-04, which is why the default
-    # is RECORDS and no longer FILES:
-    #   parity proven — tools/parity-lead-board.py under the EXPORTER credential
-    #     (not an elevated DSN): 9,859 rows, 16 segments, full row equality EXACT.
-    #   pool reachable unattended — run.sh drives this with $REPO/.venv/bin/python,
-    #     which imports psycopg, and pool_reach now finds all six sources through
-    #     v_export_pool_all (migration 0025, applied 2026-07-31). Until today this
-    #     file's records mode was unreachable in the chain: the view existed and
-    #     lib/record_sources.py had never been taught to look for it.
+    # Records mode reads all pool sources through v_export_pool_all. The
+    # canonical runner uses the repository interpreter with psycopg; pool_reach
+    # verifies availability before rendering. Both modes share transforms, but
+    # whole-payload parity requires comparing them on the same input data.
     # The fallback below stays exactly as it was — a board that cannot reach the
     # pool still says so loudly and derives from files rather than failing.
     MODE, _ = resolve_mode(sys.argv[1:], default=MODE_RECORDS)
@@ -401,11 +394,9 @@ counties_n = len({str(x["co"]).strip() for x in L if str(x.get("co","")).strip()
 segmeta = [[m[0],m[1],m[2],m[3],segPlay.get(m[0],"")] for m in SEG_ORDER]
 queue_n = len([r for r in registry if r["stage"] != "Nurture (Drip)"])
 
-# ── the parity payload ───────────────────────────────────────────────────────
-# Everything the template is driven by, before a single byte of HTML exists.
-# tools/parity-lead-board.py diffs THIS, per ORDER 26(c)'s "diff the data
-# structure the template consumes, not the HTML". Writing it is opt-in so the
-# normal build is unchanged.
+# ── the diagnostic payload ───────────────────────────────────────────────────
+# Everything the template consumes, before HTML rendering. CARR_BOARD_PAYLOAD
+# opts into writing this data for inspection; normal builds leave it unwritten.
 _payload_to = os.environ.get("CARR_BOARD_PAYLOAD")
 if _payload_to:
     json.dump({"leads": L, "registry": registry, "unowned": unowned,

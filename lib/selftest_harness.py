@@ -33,13 +33,25 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import json
 import os
+from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 from types import ModuleType
-from typing import Iterator, List, Optional
+from typing import TYPE_CHECKING, Iterator, List, Optional
 
-__all__ = ["Checker", "load_module", "fixture_dir", "hook_env"]
+if TYPE_CHECKING:
+    from lib.hook_runtime import Verdict
+elif __package__:
+    from .hook_runtime import Verdict
+else:
+    from hook_runtime import Verdict
+
+__all__ = ["Checker", "load_module", "load_hook", "fixture_dir", "hook_env",
+           "HookSandbox", "HookResult"]
 
 OK_LINE = "OK all checks passed"
 
@@ -142,3 +154,124 @@ def hook_env(tmp: str, **extra: str) -> dict[str, str]:
     env["CARR_HOOK_GUARD_LOG"] = os.path.join(tmp, "guard.log")
     env.update(extra)
     return env
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def load_hook(name: str, *, repo=REPO) -> ModuleType:
+    return load_module(Path(repo) / "hooks" / (name.removesuffix(".py") + ".py"))
+
+
+class HookResult(Verdict):
+    """The hook's exit code, original streams and parsed verdict."""
+
+    @property
+    def envelopes(self):
+        envelopes = []
+        for line in self.stdout.splitlines():
+            try:
+                envelope = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(envelope, dict):
+                envelopes.append(envelope)
+        return envelopes
+
+
+class HookSandbox:
+    """Own the source tree, home, command replies and state used by a hook."""
+
+    def __init__(self, *, repo=REPO, prefix="gate-selftest-"):
+        self.source = Path(repo).resolve()
+        self._temporary = tempfile.TemporaryDirectory(prefix=prefix)
+        self.root = Path(self._temporary.name).resolve()
+        self.repo = self.root / "carr-system"
+        git_env = load_module(self.source / "ops" / "git_env.py")
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--stage", "--",
+             "hooks", "lib", "ops", "tools"],
+            cwd=self.source, env=git_env.scrubbed_env(),
+            capture_output=True, check=True).stdout.decode().split("\0")
+        for entry in sorted(set(tracked) - {""}):
+            metadata, name = entry.split("\t", 1)
+            path = Path(name)
+            if any(part in {"__pycache__", "out", "runtime"} for part in path.parts):
+                raise ValueError(f"runtime state is not fixture source: {name}")
+            source = self.source / path
+            if source.is_symlink():
+                raise ValueError(f"fixture source must be a regular file: {name}")
+            target = self.repo / path
+            if metadata.split()[0] == "160000":
+                # A gitlink records a separate checkout, not public source bytes
+                # in this repository. Keep its location without following it.
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        self.home = self.root / "home"
+        self.carr = self.root / "carr"
+        self.home.mkdir()
+        self.carr.mkdir()
+        self.run_sh = self.carr / "run.sh"
+        self.run_sh.write_text('#!/bin/sh\necho "$@" >> "$CARR_ROOT/calls"\n'
+                               'cat "$CARR_ROOT/reply"\n')
+        self.run_sh.chmod(0o755)
+        self.reply("")
+        self.guard_log = self.root / "hook-guard.log"
+        self.env = git_env.fixture_env(hook_env(str(self.root),
+            HOME=str(self.home), CARR_ROOT=str(self.carr),
+            CARR_REPO_ROOT=str(self.repo),
+            CARR_HOOK_GUARD_LOG=str(self.guard_log),
+            CARR_JEV_WORKER="off",
+            CARR_STOP_LATCH_STATE=str(self.root / "stop-latch")))
+        configured = {key: value for key, value in self.env.items()
+                      if key.startswith("CARR_") and key in {
+                          "CARR_HOOK_FIXTURE", "CARR_HOOK_TELEMETRY", "CARR_ROOT",
+                          "CARR_REPO_ROOT", "CARR_HOOK_GUARD_LOG", "CARR_JEV_WORKER",
+                          "CARR_STOP_LATCH_STATE"}}
+        self.env = {key: value for key, value in self.env.items()
+                    if not key.startswith("CARR_")}
+        self.env.update(configured)
+        self.env["CARR_JEV_OFFLINE"] = "1"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self._temporary.cleanup()
+
+    def reply(self, text):
+        (self.carr / "reply").write_text(text)
+
+    def calls(self):
+        path = self.carr / "calls"
+        return path.read_text().splitlines() if path.exists() else []
+
+    def transcript(self, turns):
+        records = []
+        for turn in turns:
+            if isinstance(turn, dict):
+                records.append(turn)
+            else:
+                role, content = turn
+                records.append({"type": role,
+                                "message": {"role": role, "content": content}})
+        path = self.root / "transcript.jsonl"
+        path.write_text("".join(json.dumps(record) + "\n" for record in records))
+        return path
+
+    def fire(self, name, event, *, turns=None, env=None, timeout=30, argv=None):
+        command = argv or [sys.executable, str(self.repo / "hooks" /
+                                              (name.removesuffix(".py") + ".py"))]
+        command = [str(self.repo / Path(arg).relative_to(self.source))
+                   if arg != sys.executable and Path(arg).is_absolute() and Path(arg).is_relative_to(self.source)
+                   else arg for arg in command]
+        if turns is not None:
+            event = {**event, "transcript_path": str(self.transcript(turns))}
+        stdin = event if isinstance(event, str) else json.dumps(event)
+        process = subprocess.run(command, input=stdin, text=True,
+                                 capture_output=True, timeout=timeout,
+                                 cwd=self.repo,
+                                 env={**self.env, **(env or {})})
+        return HookResult(process.returncode, process.stdout, process.stderr)

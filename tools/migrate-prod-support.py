@@ -42,6 +42,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+from secret_redaction import redact_text, sensitive_env_values
+
 SCHEMA = "migrate-prod-refusal-receipt.v1"
 SERVICE = "migrate-prod"
 ENVIRONMENT = "production"
@@ -307,9 +310,30 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     return 0 if (incident_landed and room_landed) else 1
 
 
+def cmd_neon_dsn(args: argparse.Namespace) -> int:
+    """Keep raw provider stderr in memory; emit only redacted diagnostics."""
+    try:
+        result = subprocess.run(['neonctl', 'connection-string', 'production',
+            '--project-id', args.project_id, '--role-name', 'neondb_owner'],
+            capture_output=True, text=True, timeout=90)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"neonctl unavailable ({type(exc).__name__})", file=sys.stderr)
+        return 1
+    if result.stderr:
+        safe = redact_text(result.stderr, known_secrets=sensitive_env_values(os.environ))
+        print(safe[:DETAIL_MAX].replace('\n', ' · '), file=sys.stderr)
+    if result.returncode == 0:
+        print(result.stdout.strip())
+    return result.returncode if result.returncode > 0 else (1 if result.returncode < 0 else 0)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    neon = sub.add_parser("neon-dsn")
+    neon.add_argument("--project-id", required=True)
+    neon.set_defaults(func=cmd_neon_dsn)
 
     wr = sub.add_parser("write-receipt")
     wr.add_argument("--reason-class", required=True)

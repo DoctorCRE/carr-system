@@ -91,6 +91,7 @@ interface below:
 import json
 import math
 import os
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -127,6 +128,10 @@ class JudgeUnavailable(RuntimeError):
     is visible in the log rather than silently reducing coverage.
     """
 
+    def __init__(self, message, *, reason="inspection_error"):
+        super().__init__(message)
+        self.reason = reason
+
 
 def _client():
     """Import the vendor client lazily, so importing this module costs nothing."""
@@ -140,8 +145,16 @@ def _client():
     return module
 
 
+def _calling_module():
+    """The file name (no extension) of the code that called judge()."""
+    try:
+        return os.path.splitext(os.path.basename(sys._getframe(2).f_code.co_filename))[0]
+    except (AttributeError, ValueError):
+        return "unknown"
+
+
 def judge(subject, questions, *, timeout=20.0, client=None, api_key=None,
-          retries=None, deadline=None):
+          retries=None, deadline=None, model=None, caller=None):
     """Ask every question in `questions` about ONE subject, in one request.
 
     `subject` is a mapping describing the single thing being judged — a diff, a
@@ -162,6 +175,7 @@ def judge(subject, questions, *, timeout=20.0, client=None, api_key=None,
     retry-after is otherwise unbounded.
     """
     started = time.monotonic()
+    tsc = None
     try:
         tsc = client or _client()
         extra = {}
@@ -169,11 +183,19 @@ def judge(subject, questions, *, timeout=20.0, client=None, api_key=None,
             extra["retries"] = retries
         if deadline is not None:
             extra["deadline"] = deadline
+        if model is not None:
+            extra["model"] = model
         if hasattr(tsc, "JUDGE_CACHE_TTL_SECONDS"):
-            extra.update(caller="jev_judge", cache_ttl_seconds=tsc.JUDGE_CACHE_TTL_SECONDS)
+            # The call site is the module that asked, not this wrapper: every
+            # judge() caller used to log as "jev_judge", which hid 95% of paid
+            # calls behind one name. ops/config/jev-call-sites.v1.json keys on it.
+            extra.update(caller=caller or _calling_module(),
+                         cache_ttl_seconds=tsc.JUDGE_CACHE_TTL_SECONDS)
         answer = tsc.ask(subject, questions, timeout=timeout, api_key=api_key, **extra)
     except Exception as exc:  # deliberately broad: see JudgeUnavailable
-        raise JudgeUnavailable(f"{type(exc).__name__}: {exc}") from None
+        reason = (getattr(exc, "code", None) or "vendor_unavailable"
+                  if isinstance(exc, getattr(tsc, "TypeSafeError", ())) else "inspection_error")
+        raise JudgeUnavailable(f"{type(exc).__name__}: {exc}", reason=reason) from None
     answer["elapsed_ms"] = int((time.monotonic() - started) * 1000)
     return answer
 

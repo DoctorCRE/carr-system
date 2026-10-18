@@ -7,12 +7,14 @@
 //   GET /authorize  — the Claude client lands here; we park the request and
 //                     bounce the human to Google.
 //   GET /callback   — Google returns; we verify the identity token, apply the
-//                     allow-list, and only then ask the library to issue.
+//                     allow-list, and show client-specific approval.
+//   POST /consent — browser-bound approval, then ask the library to issue.
 //
-// There is no consent screen. Identity IS the gate (A10). A non-allow-listed
-// Google account gets a plain refusal and nothing is issued.
+// Google identity and downstream-client consent are separate gates.
 
 import { slugForEmail, propsForSlug, agentSlugForClient, verifiedAgentSlugForClient } from "./identity.js";
+import { validateAuthorizationRequest, requireApprovedClient } from "./oauth-policy.js";
+import { consentState } from "./oauth-consent-state.js";
 
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -21,6 +23,11 @@ const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
 
 const PENDING_PREFIX = "pending_auth:"; // our keys; library owns client:/grant:/token:
 const PENDING_TTL = 600; // 10 minutes to finish a sign-in
+const cookieName = state => `__Host-carr-oauth-${state}`;
+const cookieValue = (request, name) => (request.headers.get("cookie") || "").split(";")
+  .map(part => part.trim()).find(part => part.startsWith(`${name}=`))?.slice(name.length + 1);
+const browserCookie = (state, value, maxAge = PENDING_TTL) =>
+  `${cookieName(state)}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 const JWKS_CACHE_KEY = "google_jwks_cache";
 const JWKS_CACHE_TTL = 3600;
 
@@ -55,6 +62,19 @@ function bytesToB64url(bytes) {
 export async function s256(verifier) {
   const digest = await crypto.subtle.digest("SHA-256", enc.encode(verifier));
   return bytesToB64url(new Uint8Array(digest));
+}
+
+// The random HttpOnly browser cookie is the key material; stores retain only
+// its hash. AES-GCM binds the ciphertext to this unique consent id. No new
+// standing secret or plaintext identity is required for a pending connection.
+async function consentCipher(browser, id, value, decrypt = false) {
+  const key = await crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", enc.encode(`carr-oauth-consent-encryption-v1:${browser}`)),
+    "AES-GCM", false, [decrypt ? "decrypt" : "encrypt"]);
+  const iv = decrypt ? b64urlToBytes(value.iv) : crypto.getRandomValues(new Uint8Array(12));
+  const algorithm = { name: "AES-GCM", iv, additionalData: enc.encode(`carr-oauth-consent-v1:${id}`) };
+  if (decrypt) return JSON.parse(dec.decode(await crypto.subtle.decrypt(algorithm, key, b64urlToBytes(value.ciphertext))));
+  const ciphertext = await crypto.subtle.encrypt(algorithm, key, enc.encode(JSON.stringify(value)));
+  return { iv: bytesToB64url(iv), ciphertext: bytesToB64url(new Uint8Array(ciphertext)) };
 }
 
 // Must match the redirect URI registered in the Google Cloud console EXACTLY,
@@ -102,21 +122,23 @@ export async function exchangeGoogleCode({ code, clientId, clientSecret, redirec
 
 // ---------- pages (plain, no theater) ----------
 
-function page(title, lines, status) {
+function page(title, lines, status, refreshUrl) {
   const body = lines.map((l) => `    <p>${l}</p>`).join("\n");
   const html = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    ${refreshUrl ? `<meta http-equiv="refresh" content="0;url=${escapeHtml(refreshUrl)}" />` : ""}
     <title>${title}</title>
     <style>
       body { font: 16px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 3rem 1.25rem;
-             color: #1a1a1a; background: #fafafa; }
+             color: #e7edf4; background: #101722; }
       main { max-width: 32rem; margin: 0 auto; }
       h1 { font-size: 1.25rem; margin: 0 0 1rem; }
       p { margin: 0 0 0.85rem; }
-      code { background: #eee; padding: 0.1em 0.35em; border-radius: 3px; }
+      code { background: #202b3a; padding: 0.1em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+      button { font: inherit; padding: .55rem 1rem; margin-right: .6rem; cursor: pointer; }
     </style>
   </head>
   <body>
@@ -128,7 +150,12 @@ ${body}
 </html>`;
   return new Response(html, {
     status,
-    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+      // same-origin, not no-referrer: a form POST from a no-referrer page sends
+      // `Origin: null`, which handleConsent's Origin check refuses. Cross-origin
+      // navigations (Google, the client handoff) still carry no Referer.
+      "referrer-policy": "same-origin", "x-frame-options": "DENY",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" },
   });
 }
 
@@ -136,6 +163,15 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
   );
+}
+
+function clientHandoff(redirectTo, state, title) {
+  // End the form submission with a document. A document navigation (and the
+  // accessible fallback link) is not a form redirect chain, so form-action
+  // stays restricted to this origin without blocking the verified client.
+  const response = page(title, [`<a href="${escapeHtml(redirectTo)}">Continue to the requesting app</a>`], 200, redirectTo);
+  response.headers.set("set-cookie", browserCookie(state, "", 0));
+  return response;
 }
 
 function refusalPage(email, why) {
@@ -248,15 +284,18 @@ export async function handleAuthorize(request, env) {
   try {
     // Also validates the client and its registered redirect_uri, and throws if either is wrong.
     oauthReq = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+    validateAuthorizationRequest(request, oauthReq);
+    requireApprovedClient(oauthReq.clientId, env);
   } catch (e) {
     return page("Bad authorization request", [escapeHtml(String(e.message || e)), "Nothing was issued."], 400);
   }
 
   const state = randomString(24);
   const verifier = randomString(48);
+  const browser = randomString(32);
   await env.OAUTH_KV.put(
     PENDING_PREFIX + state,
-    JSON.stringify({ req: oauthReq, verifier, at: new Date().toISOString() }),
+    JSON.stringify({ req: oauthReq, verifier, browser: await s256(browser), expiresAt: Date.now() + PENDING_TTL * 1000 }),
     { expirationTtl: PENDING_TTL },
   );
 
@@ -265,7 +304,8 @@ export async function handleAuthorize(request, env) {
   const u = await googleAuthorizationUrl({ clientId: env.GOOGLE_CLIENT_ID,
     redirectUri: callbackUri(request), state, verifier });
 
-  return Response.redirect(u.toString(), 302);
+  return new Response(null, { status: 302, headers: {
+    location: u.toString(), "set-cookie": browserCookie(state, browser), "cache-control": "no-store" } });
 }
 
 // ---------- /callback ----------
@@ -288,17 +328,19 @@ export async function handleCallback(request, env) {
     return page("Sign-in did not complete", ["The response from Google was missing its code or state.", "Nothing was issued."], 400);
   }
 
-  // Single use: the parked request is consumed whether or not the rest succeeds.
   const key = PENDING_PREFIX + state;
   const pending = await env.OAUTH_KV.get(key, { type: "json" });
-  await env.OAUTH_KV.delete(key);
-  if (!pending || !pending.req) {
+  if (!pending || !pending.req || pending.expiresAt < Date.now()) {
     return page(
       "That sign-in link has expired",
-      ["Sign-in links are good for ten minutes and can only be used once.", "Start the connection again from your Claude app."],
+      ["Sign-in links are good for ten minutes and can only be used once.", "Start the connection again from the requesting app."],
       400,
     );
   }
+  const browser = cookieValue(request, cookieName(state)) || "";
+  if (!pending.browser || await s256(browser) !== pending.browser)
+    return page("Sign-in browser did not match", ["Start the connection again in this browser. Nothing was issued."], 403);
+  await env.OAUTH_KV.delete(key);
 
   let tok;
   try {
@@ -332,12 +374,11 @@ export async function handleCallback(request, env) {
   // is a recognized outside-model CLI (Codex, Grok — identity.js's
   // AGENT_CLIENT_NAMES), writes attribute to that tool's own actor row
   // instead, so "who actually wrote this" survives even when Joe or Dell is
-  // the one driving the CLI. lookupClient is best-effort: if it throws (KV
-  // hiccup, client since deregistered) this silently falls back to the human
-  // slug, which is the existing, already-safe behavior — never a hard failure
-  // on sign-in for an attribution nicety.
+  // the one driving the CLI. Consent requires client lookup: null means
+  // deregistered, while operational failures propagate
+  // to the server-failure boundary rather than claiming deregistration.
   const clientInfo = pending.req?.clientId
-    ? await env.OAUTH_PROVIDER.lookupClient(pending.req.clientId).catch(() => null)
+    ? await env.OAUTH_PROVIDER.lookupClient(pending.req.clientId)
     : null;
   const agentSlug = agentSlugForClient(clientInfo?.clientName);
   const verifiedAgentSlug = verifiedAgentSlugForClient(
@@ -371,7 +412,7 @@ export async function handleCallback(request, env) {
     if (verifiedAgentSlug === agentSlug) props.native_agent_verified = true;
   }
 
-  const { redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization({
+  const grant = {
     request: pending.req,
     // Grant OWNERSHIP always stays with the verified human, regardless of the
     // attribution override above: Joe/Dell list and revoke this grant from
@@ -385,7 +426,77 @@ export async function handleCallback(request, env) {
     // Grant exactly what was requested. Never widen on our own judgment.
     scope: Array.isArray(pending.req.scope) ? pending.req.scope : [],
     props: propsForSlug(slug, props),
-  });
+    // Preserve independently approved connections when a CIMD ID is shared
+    // across resources. Existing grants remain individually revocable.
+    revokeExistingGrants: false,
+  };
+  try { requireApprovedClient(pending.req.clientId, env); }
+  catch { return refusalPage(null, "This client is not approved by the server."); }
+  if (!clientInfo) return refusalPage(null, "The requesting client is no longer registered.");
+  const id = randomString(24);
+  const csrf = randomString(32);
+  const stored = await consentState(env, id, "create", { encryptedGrant: await consentCipher(browser, id, grant), state,
+    browser: pending.browser, csrf, expiresAt: Date.now() + PENDING_TTL * 1000 });
+  if (!stored.ok) throw new Error("Consent storage failed");
+  const scope = pending.req.scope.length ? pending.req.scope.join(" ") : "none requested";
+  const permissions = new URL(pending.req.resource).pathname === "/pipeline/changes"
+    ? "Read pipeline changes" : "Read and write CARR records";
+  const response = page("Approve this connection", [
+    `Registered client name (provided by the client): <strong>${escapeHtml(clientInfo.clientName || pending.req.clientId)}</strong>`,
+    `Client ID: <code>${escapeHtml(pending.req.clientId)}</code>`,
+    `Verified registered redirect URI: <code>${escapeHtml(pending.req.redirectUri)}</code>`,
+    `Resource: <code>${escapeHtml(pending.req.resource)}</code>`,
+    `Permissions: <strong>${permissions}</strong>. Requested OAuth scopes: <code>${escapeHtml(scope)}</code>.`,
+    "OAuth scope labels do not reduce tool authority. The resource's server policy determines available reads and writes.",
+    `<form method="post" action="/consent"><input type="hidden" name="id" value="${id}"><input type="hidden" name="state" value="${state}"><input type="hidden" name="csrf" value="${csrf}"><button name="decision" value="approve">Approve connection</button><button name="decision" value="deny">Deny</button></form>`,
+  ], 200);
+  response.headers.set("set-cookie", browserCookie(state, browser));
+  return response;
+}
 
-  return Response.redirect(redirectTo, 302);
+export async function handleConsent(request, env) {
+  if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
+  if (request.headers.get("origin") !== new URL(request.url).origin)
+    return page("Approval was refused", ["The approval must come from this server's page. Nothing was issued."], 403);
+  let form;
+  try { form = await request.formData(); } catch { return page("Invalid approval", ["Nothing was issued."], 400); }
+  if (["id", "state", "csrf", "decision"].some(key => form.getAll(key).length !== 1) || !/^[a-f0-9]{48}$/.test(form.get("id") || "") || !/^[a-f0-9]{48}$/.test(form.get("state") || ""))
+    return page("Invalid approval", ["Nothing was issued."], 400);
+  const decision = form.get("decision");
+  if (!["approve", "deny"].includes(decision)) return page("Invalid approval", ["Nothing was issued."], 400);
+  const browser = cookieValue(request, cookieName(form.get("state"))) || "";
+  const consumed = await consentState(env, form.get("id"), "consume", { state: form.get("state"),
+    browser: await s256(browser), csrf: form.get("csrf") });
+  if (consumed.status === 400) return page("Approval expired", ["Start the connection again. Nothing was issued."], 400);
+  if (consumed.status === 403) return page("Approval was refused", ["The approval did not match this browser. Nothing was issued."], 403);
+  if (!consumed.ok) throw new Error("Consent consumption failed");
+  const pending = await consumed.json();
+  pending.grant = await consentCipher(browser, form.get("id"), pending.encryptedGrant, true);
+  try { requireApprovedClient(pending.grant.request.clientId, env); }
+  catch { return refusalPage(null, "This client is no longer approved by the server."); }
+  if (decision === "deny") {
+    const auth = pending.grant.request;
+    // Use the provider's registration/loopback rules, without issuing a grant.
+    const params = new URLSearchParams({ response_type: "code", client_id: auth.clientId,
+      redirect_uri: auth.redirectUri, code_challenge: auth.codeChallenge, code_challenge_method: "S256" });
+    try { await env.OAUTH_PROVIDER.parseAuthRequest(new Request(`${new URL(request.url).origin}/authorize?${params}`)); }
+    catch (error) {
+      if (!["Invalid client. The clientId provided does not match to this client.",
+        "Invalid redirect URI. The redirect URI provided does not match any registered URI for this client."].includes(error.message)) throw error;
+      return page("Client registration changed", ["Start the connection again. Nothing was issued."], 400);
+    }
+    const redirect = new URL(auth.redirectUri);
+    redirect.searchParams.set("error", "access_denied");
+    if (auth.state) redirect.searchParams.set("state", auth.state);
+    return clientHandoff(redirect.toString(), pending.state, "Connection denied");
+  }
+  // completeAuthorization revalidates the client's registered redirect URI.
+  let redirectTo;
+  try { ({ redirectTo } = await env.OAUTH_PROVIDER.completeAuthorization(pending.grant)); }
+  catch (error) {
+    if (error.message !== "Invalid redirect URI. The redirect URI provided does not match any registered URI for this client.") throw error;
+    return page("Client registration changed", ["Start the connection again. Nothing was issued."], 400);
+  }
+
+  return clientHandoff(redirectTo, pending.state, "Connection approved");
 }

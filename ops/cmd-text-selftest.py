@@ -148,3 +148,7 @@ if failures:
     sys.exit(1)
 print("CMD TEXT SELFTEST PASSED: prose the shell hands over as bytes is "
       "invisible, and everything the shell actually runs is still scanned.")
+
+# Independently reproduced Dot cases share the offline behavioral fixtures.
+import runpy as _dot_runpy
+_dot_runpy.run_path(str(__import__("pathlib").Path(__file__).with_name("dot-review-selftest.py")))["run_regressions"](['test_b01', 'test_control_single'])

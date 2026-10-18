@@ -1,0 +1,31 @@
+{
+  "table_date": "2026-10-01",
+  "market": "mobile_downtown",
+  "source": {
+    "title": "Downtown Mobile Alliance Office Market Overview, year end 2024",
+    "url": "https://www.downtownmobile.org/uploads/pdf/OfficeMarketReport20247.1.2025.pdf",
+    "data_date": "2024-12-31",
+    "publication_date": "2025-07-01",
+    "retrieved_date": "2026-10-01",
+    "observed_annual_rate": 21.1,
+    "authorization": "Manually cited aggregate factual rate from an original publicly released survey; no report prose, listings, addresses, identities or underlying dataset redistributed. No permission claimed to reproduce the report or its survey.",
+    "method": "General-office mixed-service survey anchor; estimated sensitivity of minus/plus 20%. Lease allocations and utilities are original assumptions dated 2026-10-01, not observed quotes."
+  },
+  "lease_types": {
+    "full_service": [
+      { "component": "Base rent", "annual_rate": { "low": 16.88, "high": 25.32 }, "basis": "Estimate: survey anchor times 0.8 to 1.2; source data 2024-12-31, assumptions 2026-10-01." },
+      { "component": "Pass-through operating costs", "annual_rate": { "low": 0, "high": 0 }, "basis": "Estimate: bundled with base rent in this full-service scenario; verify actual inclusions. Assumption 2026-10-01." },
+      { "component": "Unbundled utilities", "annual_rate": { "low": 1, "high": 3 }, "basis": "Estimate: original unbundled utilities allowance, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31." }
+    ],
+    "modified_gross": [
+      { "component": "Base rent", "annual_rate": { "low": 13.88, "high": 22.32 }, "basis": "Estimate: survey sensitivity less an assumed 3/SF expense allocation; source data 2024-12-31, assumptions 2026-10-01." },
+      { "component": "Pass-through operating costs", "annual_rate": { "low": 3, "high": 6 }, "basis": "Estimate: original expense allocation and sensitivity, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31." },
+      { "component": "Unbundled utilities", "annual_rate": { "low": 1, "high": 3 }, "basis": "Estimate: original unbundled utilities allowance, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31." }
+    ],
+    "triple_net": [
+      { "component": "Base rent", "annual_rate": { "low": 10.88, "high": 19.32 }, "basis": "Estimate: survey sensitivity less an assumed 6/SF expense allocation; source data 2024-12-31, assumptions 2026-10-01." },
+      { "component": "Pass-through operating costs", "annual_rate": { "low": 6, "high": 9 }, "basis": "Estimate: original tax, insurance and common-area expense allowance, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31." },
+      { "component": "Unbundled utilities", "annual_rate": { "low": 1, "high": 3 }, "basis": "Estimate: original unbundled utilities allowance, not a measured market rate. Assumption 2026-10-01; survey context 2024-12-31." }
+    ]
+  }
+}

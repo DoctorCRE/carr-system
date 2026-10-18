@@ -31,6 +31,18 @@ calendar=cp._workflow_fact_collector(by['calendar-fetch-daily'],weekday_payload,
 check('calendar shadow derives weekday+registered EventKit bundle routing without payload facts',evaluate_stage(by['calendar-fetch-daily'],'routing',calendar))
 notes=cp._workflow_fact_collector(by['notes-sweep-hourly'],weekday_payload,execution={'entrypoint':'bin/notes-sweep-post.sh','mode':'shadow','args':['--dry-run'],'exit_code':0,'stdout_tail':'notes-sweep shadow: scanned=1 unposted=1 writes=0 posts=0'},mode='shadow')
 check('notes filtering derives from subprocess evidence',evaluate_stage(by['notes-sweep-hourly'],'filtering',notes))
+# Regression for loop 568: cron is "0 8-18 * * 1-5" (America/Chicago), which
+# fires a run AT 18:00 on purpose -- bin/notes-sweep-post.sh's own
+# --scheduled guard already tolerates hour 18 (`-gt 18`, not `-ge 18`). The
+# routing fact used to require `hour < 18`, so every 6pm weekday dispatch
+# routed straight to a dead-letter with zero chance of ever succeeding.
+# Measured against Production: every 'notes-sweep-hourly.routing predicate
+# was not satisfied' dead-letter from 2026-08-26 through 2026-09-01 landed
+# on hour==18, no exceptions.
+notes_6pm=cp._workflow_fact_collector(by['notes-sweep-hourly'],{'scheduled_for':'2026-08-17T23:00:00+00:00'},mode='shadow') # Monday 18:00 Chicago
+check('notes routing admits the cron-registered 18:00 weekday run',evaluate_stage(by['notes-sweep-hourly'],'routing',notes_6pm))
+notes_7pm=cp._workflow_fact_collector(by['notes-sweep-hourly'],{'scheduled_for':'2026-08-18T00:00:00+00:00'},mode='shadow') # Monday 19:00 Chicago
+check('notes routing still refuses a genuinely after-hours 19:00 run',not evaluate_stage(by['notes-sweep-hourly'],'routing',notes_7pm))
 # Priority 7 with no 1..6 ahead of it: a real queue slice is contiguous from 1,
 # so this is precisely the unproved ordering filtering must still refuse. It used
 # to be expressed as 'fewer than 40 rows', which stopped meaning that once a short

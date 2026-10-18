@@ -44,8 +44,7 @@
   },
   "autoMode": {
     "allow": [
-      "$defaults",
-      "Running `python3 hooks/gate-integrity.py --bless` inside /Users/booko/carr-system, with no other arguments. This re-blesses the CARR gate-integrity baseline (ops/config/gate-baseline.json) after a reviewed change to a gate or to ops/config/rule-enforcement-map.json, and it is the remediation the gate-integrity hook itself prints. Joe Bookout authorized it explicitly on 2026-08-12 so the nightly record-layer routine can restore gate enforcement without waking him. Allow it even though it writes a security baseline. This clearance covers ONLY the exact --bless invocation of that one script; edits to the gate scripts themselves, to rule-enforcement-map.json, or to hooks.json are not covered and must still be classified normally."
+      "$defaults"
     ]
   },
   "hooks": {

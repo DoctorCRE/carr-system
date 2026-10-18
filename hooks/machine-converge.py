@@ -195,6 +195,32 @@ def converge():
 
     # `install --apply`, never `pull` — see the docstring for decision #442.
     r = config_as_code("install", "--apply")
+    if r.returncode != 0 and "continuity" in (r.stderr or r.stdout).lower():
+        # The Claude continuity receipt (~/.config/carr/claude-continuity-mode.json)
+        # pins a digest of the continuity adapter, hook config and proxy. Any
+        # merge that touches one of them (#1677, 2026-10-09) makes every
+        # machine's receipt "stale or noncanonical" — by design, so continuity
+        # fails safe — and config-as-code then refuses to install ANYTHING, so
+        # the whole hook set drifts until a human runs the installer by hand.
+        # Measured cost on the MacBook, 2026-10-10 to 10-12: a deleted Stop
+        # gate (stale-claim-gate.py) crashed with a traceback on all 224 turns
+        # and three new hooks never installed. ops/install-claude-continuity.py
+        # is the sanctioned repair ("an explicit install IS the repair", its
+        # docstring), so run it with the mode already on this machine, then
+        # install once more. No new mode is chosen here: absent a receipt, the
+        # machine was never opted in and this path does nothing.
+        mode = installed_continuity_mode()
+        if mode:
+            fix = subprocess.run(
+                [python_bin(), os.path.join(REPO, "ops", "install-claude-continuity.py"),
+                 "install", "--mode", mode, "--apply"],
+                capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            if fix.returncode == 0:
+                say(f"continuity receipt was stale; re-stamped mode '{mode}' and retrying install")
+                r = config_as_code("install", "--apply")
+            else:
+                tail = (fix.stderr or fix.stdout).strip().splitlines()
+                say("continuity re-stamp FAILED: " + (tail[-1] if tail else "(no output)"))
     if r.returncode == 0:
         rev = git("rev-parse", "--short", "HEAD").stdout.strip()
         say(f"machine config re-applied from {rev or 'local checkout'}")
@@ -203,7 +229,29 @@ def converge():
         say("config-as-code install FAILED: " + (tail[-1] if tail else "(no output)"))
 
 
+CONTINUITY_MODE_FILE = os.path.join(HOME, ".config", "carr", "claude-continuity-mode.json")
+
+
+def installed_continuity_mode():
+    """The mode this machine opted into, read off the receipt WITHOUT checking
+    its digest (that check is what went stale). None when never installed."""
+    try:
+        with open(CONTINUITY_MODE_FILE, encoding="utf-8") as fh:
+            mode = json.load(fh).get("mode")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return mode if isinstance(mode, str) and re.fullmatch(r"[a-z]+", mode) else None
+
+
 def main():
+    sys.path.insert(0, REPO)
+    if os.environ.get("CARR_GROK_RUN_READ_ONLY") == "1":
+        try:
+            from hooks.grok_invocation import bounded_grok_read_only
+            if bounded_grok_read_only():
+                return 0
+        except ImportError:
+            pass  # an unavailable optional probe retains ordinary processing
     try:
         if scrubbed_env is None:
             return 0  # cannot pin which repository git would hit — see above

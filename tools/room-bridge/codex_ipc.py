@@ -45,8 +45,6 @@ DEFAULT_SOCKET = os.environ.get(
     "CARR_CODEX_IPC_SOCKET", str(Path.home() / ".codex" / "ipc" / "ipc.sock"))
 CLIENT_TYPE = "carr-room-bridge"
 INITIALIZING = "initializing-client"
-# Per-method versions from the Desktop build's IPC table. Local requests carry
-# no hostId, so the plain table value applies.
 VERSIONS = {
     "initialize": 0,
     "thread-owner-discovery": 1,
@@ -112,7 +110,6 @@ class _Client:
                 self._send({"type": "client-discovery-response",
                             "requestId": reply.get("requestId"),
                             "response": {"canHandle": False}})
-            # broadcasts and anything else addressed to other clients: ignore
 
     def initialize(self) -> None:
         reply = self.request("initialize", {"clientType": CLIENT_TYPE})
@@ -167,14 +164,18 @@ def _text_input(text: str) -> list[dict]:
 
 
 def start_turn(thread_id: str, text: str, *, socket_path: str | None = None,
-               timeout: float = 15.0) -> dict:
+               timeout: float = 15.0, approval_policy: str | None = None,
+               model: str | None = None, effort: str | None = None) -> dict:
     """Start one turn carrying `text` in the Desktop window that owns the thread.
 
     Returns {"status": "delivered"|"not_live"|"failed", "thread_id", "mode",
     "detail"}. When the owner refuses a new turn because one is already running,
     the text is steered into the running turn instead, which is what a person
-    typing into that window mid-turn gets.
+    typing into that window mid-turn gets. Desk calls requiring never refuse
+    instead: steering cannot override the active turn's approval policy.
     """
+    if approval_policy not in (None, "never"):
+        raise ValueError("desk approval policy must be never; ask the orchestrator")
     base = {"thread_id": thread_id}
     client = _open(socket_path, timeout)
     if client is None:
@@ -185,13 +186,20 @@ def start_turn(thread_id: str, text: str, *, socket_path: str | None = None,
             return {**base, "status": "not_live", "detail": "no Codex Desktop window holds this thread"}
         started = client.request("thread-follower-start-turn", {
             "conversationId": thread_id,
-            "turnStart": {"request": {"threadId": thread_id, "input": _text_input(text)},
+            "turnStart": {"request": {"threadId": thread_id, "input": _text_input(text),
+                                      **({"approvalPolicy": "never"} if approval_policy else {}),
+                                      **({"model": model} if model else {}),
+                                      **({"effort": effort} if effort else {})},
                           "context": {}},
         }, target=owner)
         if started.get("resultType") == "success":
             return {**base, "status": "delivered", "mode": "start",
                     "detail": "turn started in the Codex Desktop window that owns the thread"}
         start_error = str(started.get("error") or "start refused")
+        if approval_policy == "never":
+            return {**base, "status": "failed",
+                    "detail": "desk turn refused; cannot bind never by steering an existing turn. "
+                              "Permission needs go to the orchestrator. " + start_error[:200]}
         steered = client.request("thread-follower-steer-turn", {
             "conversationId": thread_id, "input": _text_input(text),
         }, target=owner)

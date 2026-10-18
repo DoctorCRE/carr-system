@@ -57,6 +57,10 @@ assert _spec and _spec.loader
 judge_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(judge_mod)
 
+BOOT_DENIAL = 'RULE BOOT: this context must read the CARR rules before any other tool. Fetch each missing page'
+check('rule-boot denial is not hook_skipped', judge_mod.diagnose(BOOT_DENIAL) == 'boot_gate')
+check('boot denial alone never proves guard fired', judge_mod.judge(BOOT_DENIAL) == 'FAIL')
+
 print("judge()")
 
 DENIAL = judge_mod.DENIAL_TEXT
@@ -166,6 +170,11 @@ check("builds the prompt into a file rather than inlining it on a command line",
 # smoke would match a denial for a host it never sent to.
 check("reads the probe host from the judge module rather than hardcoding it",
       "codex_hook_smoke_judge" in smoke_src and "PROBE_HOST" in smoke_src)
+
+check('probe instructions fetch every boot page before issuing probe',
+      '"detail":"boot","page":1' in smoke_src and 'pages_total' in smoke_src
+      and smoke_src.index('First satisfy the CARR rule-boot gate') < smoke_src.index('After boot is complete, run exactly'))
+check('shell reports boot_gate separately', 'boot_gate)' in smoke_src)
 
 # Before spending a live Codex run the smoke asks the guard whether it still
 # refuses the probe. Without this, adding the host to KNOWN_HOSTS would turn

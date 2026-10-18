@@ -1,0 +1,39 @@
+{
+  "languages": {
+    "python": {},
+    "javascript": {},
+    "typescript": {},
+    "tsx": {}
+  },
+  "rules": [
+    {
+      "id": "wrapper-without-value",
+      "description": "Fail a project-local helper whose complete implementation only calls another helper with the same caller-supplied arguments and returns its result, adding no policy, validation, transformation or error translation. Calling a canonical validator through a new alias is still forwarding. A function that directly implements a data lookup or validation is implementation, not forwarding, even if short.",
+      "severity": "warning",
+      "kinds": [
+        "function"
+      ],
+      "include": [
+        "**/*"
+      ],
+      "exclude": [
+        "**/test/**",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*-selftest.py",
+        "**/test-*.py",
+        "**/test_*.py",
+        "**/*.test.*",
+        "**/vendor/**",
+        "**/node_modules/**",
+        "**/corpus/**"
+      ],
+      "minConfidence": 0.93,
+      "exceptions": [
+        "Fixing a domain option (such as identifier=True or judge=True) adds policy and passes.",
+        "Injected transport adapters, required framework hooks, and an explicitly documented external compatibility interface pass. Project-local aliases are not automatically compatibility interfaces.",
+        "Direct lookup, field access and validation implement behavior and pass; length alone never proves a wrapper."
+      ]
+    }
+  ]
+}

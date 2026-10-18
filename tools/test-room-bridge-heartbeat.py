@@ -214,6 +214,35 @@ def post_heartbeat_carries_the_roster_through():
     assert body["heartbeat"]["profiles"] == PROFILES, body
 
 
+def stale_pid_shared_sessions_do_not_grow_heartbeat_forever():
+    from pathlib import Path
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent / "room-bridge"))
+    import session_directory
+    now = "2026-09-29T12:00:00+00:00"
+    old = "2026-09-29T11:00:00+00:00"
+    data = session_directory.empty()
+    data["sessions"] = {f"codex-{n:08x}": {
+        "runtime": "codex", "surface": "codex-cli", "host": "mac-studio", "pid": 49715,
+        "beat_at": old, "seen_at": old, "last_live_at": old, "title": "x" * 100,
+        "address": {"kind": "codex-thread", "value": str(n)},
+    } for n in range(100)}
+    expired = session_directory.refresh(data, now=now, host="mac-studio", probe=lambda _: True)
+    assert len(expired) == 100, len(expired)
+    assert session_directory.roster(data) == []
+
+
+def heartbeat_stays_within_the_room_contract_for_a_large_live_roster():
+    sessions = [{"handle": f"codex-{n:08x}", "title": "Review " + "x" * 140,
+                 "runtime": "codex", "surface": "codex-cli", "model": "gpt-6-sol",
+                 "live": True, "last_live_at": "2026-09-29T12:00:00Z"} for n in range(150)]
+    body = bridge.heartbeat_body(DESKS, 68, "2026-09-29T12:00:00Z", sessions=sessions)
+    assert len(body) <= 20000, len(body)
+    payload = json.loads(body)["heartbeat"]
+    assert payload["sessions_total"] == 150
+    assert payload["sessions_truncated"] > 0
+
+
 def main() -> int:
     check("a bridge that has never spoken posts its first heartbeat at once",
           a_bridge_that_has_never_spoken_posts_its_first_heartbeat_at_once)
@@ -233,6 +262,10 @@ def main() -> int:
           a_desk_bound_to_a_profile_carries_the_binding_on_the_wire)
     check("post_heartbeat carries the roster through",
           post_heartbeat_carries_the_roster_through)
+    check("stale shared pid sessions expire from heartbeat",
+          stale_pid_shared_sessions_do_not_grow_heartbeat_forever)
+    check("large live roster stays within room body contract",
+          heartbeat_stays_within_the_room_contract_for_a_large_live_roster)
     check("the receipt body carries every registered desk, unwired ones included",
           the_body_carries_every_registered_desk_including_the_unwired_one)
 

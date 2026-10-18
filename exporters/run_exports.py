@@ -73,18 +73,17 @@ def main():
     # cloud-only, so every target needs the File Provider to be up. Waiting per
     # target spends six sequential 23.5s budgets on one shared outage and
     # reports six tracebacks for a single cause; waiting here spends one budget
-    # and names the cause. An exhausted budget does NOT abort the sweep: each
+    # and reports its observations. An exhausted budget does NOT abort the sweep: each
     # target still runs and records its own receipt, so a provider that never
     # wakes produces the same honest per-target failures it does today rather
     # than a new way for the step to die before it starts.
     if LIVE:
-        cold = wait_for_provider(EXPORT_HOME / rel for rel, _fn in targets.values())
-        if cold:
-            names = ", ".join(sorted(path.name for path, _e in cold))
-            print(f"[provider] giving up the wait; {len(cold)} file(s) still "
-                  f"unreadable ({names}). Each target will now try and report "
-                  f"for itself. If this is EDEADLK, the tree is cloud-only: pin "
-                  f"the OneDrive CARR folder or free disk.", file=sys.stderr)
+        result = wait_for_provider(EXPORT_HOME / rel for rel, _fn in targets.values())
+        if result.cold:
+            names = ", ".join(sorted(path.name for path, _e in result.cold))
+            print(f"[provider] giving up the wait; {len(result.cold)} file(s) still "
+                  f"unreadable ({names}). {result.diagnostic()}. Each target will "
+                  f"now try and report for itself.", file=sys.stderr)
 
     # NOT `all(...)`: it short-circuits, so ONE failing target silently cancels every
     # target after it in dict order. That is exactly what bit on 2026-08-02 — an

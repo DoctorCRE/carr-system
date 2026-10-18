@@ -18,20 +18,21 @@
       "5e896ed6",
       "98e74e7c",
       "466a545a",
-      "113b3833",
       "faae6748",
       "30a189fb",
-      "9b081605",
       "25fab860",
       "57d13061",
-      "bbffc139",
       "c66dc739",
       "0156e9fa",
       "49533583",
       "557838a5",
       "b3ea627f",
       "11b2b73b",
-      "6172e7d5"
+      "6172e7d5",
+      "a3da3d39",
+      "76fcbed6",
+      "67e48aaf",
+      "486584d6"
     ],
     "shared": [
       "9310827b",
@@ -49,7 +50,6 @@
       "6901cc3b",
       "c6f69dee",
       "e313a3ca",
-      "fb110a39",
       "8c1e6057",
       "5be2f462",
       "c315befa",
@@ -67,7 +67,6 @@
       "97326357",
       "5d44d3f3",
       "d26d63b0",
-      "d5dcfe26",
       "2b889e80",
       "81709f57",
       "c20dc3d5",
@@ -98,23 +97,18 @@
       "17ffd587",
       "6a4e6283",
       "b1521526",
-      "c1547ed1",
       "f04a05aa",
       "b587f6c2",
       "590b11e1",
       "f0f9156e",
       "0e22e34a",
-      "1fddcffb",
-      "99e951b9",
       "a3f6c7f9",
       "b01edd26",
-      "fb2b263d",
       "fc4d7753",
       "14181e60",
       "b42f11a0",
       "f5d97b4a",
       "8aefcdce",
-      "4f7c348f",
       "4a9188f3",
       "f47a8fe9",
       "73381d78",
@@ -123,7 +117,6 @@
       "015183f5",
       "4e104d4c",
       "2a3ff869",
-      "0f38532e",
       "61c64d91",
       "def3e84e",
       "388cc81e",
@@ -132,7 +125,6 @@
       "9e3fb6d0",
       "3578d799",
       "9ff56260",
-      "5697071b",
       "c4a284b2",
       "d9ce2b08",
       "2e8b4840",
@@ -140,7 +132,6 @@
       "a9ecd5b4",
       "23ea0607",
       "76a53dfe",
-      "308ef1de",
       "179be4b8",
       "43e2ef76",
       "fc21a431",
@@ -151,7 +142,6 @@
       "1f3a7372",
       "af7de070",
       "647f843d",
-      "e8868cbe",
       "d9874334",
       "740bb505",
       "9530fb1c",
@@ -168,15 +158,12 @@
       "c0b38d80",
       "38b15dc6",
       "5e89c211",
-      "4402973a",
       "24e10ee8",
       "cd84d22a",
       "614c1209",
-      "58b44ccb",
       "152ceb65",
       "e65efc68",
       "1c21263c",
-      "1d50a3bb",
       "67580c28",
       "a8f159ad",
       "9293d609",
@@ -206,12 +193,20 @@
       "893aeec5",
       "7b4ba3aa",
       "1f750181",
-      "1fcaa63a",
       "737a68d6",
       "a7784a18",
-      "204391be",
-      "a2e78f48",
-      "b7ec8f3b"
+      "b7ec8f3b",
+      "19ebbeb3",
+      "661d7757",
+      "f673326b",
+      "08c4eda2",
+      "a9fc3f0e",
+      "ac0a6579",
+      "578fdd91",
+      "07dde434",
+      "cfe6b5c6",
+      "c363bd8b",
+      "8400cd3d"
     ]
   },
   "categories": {
@@ -255,8 +250,7 @@
       "friction": "No prompt-time ceremony for ordinary work.",
       "implementation": [
         "session-brief.py",
-        "delegation-gate.py",
-        "context-handoff-gate.py"
+        "delegation-gate.py"
       ],
       "meaning": "A task-start or phase-boundary rail supplies state, routing, or reminders; it is not a universal operation denial.",
       "test": [
@@ -279,101 +273,52 @@
   "category_overrides": {
     "hard_pre_action": [
       "236ca227",
-      "e313a3ca",
       "57d83b75",
       "ca841807",
       "4c21d86b",
       "4dd44fd7",
       "f92dfab2",
       "0e22e34a",
-      "99e951b9",
       "14181e60",
       "f5d97b4a",
       "2a3ff869",
       "9ff56260",
       "2e8b4840",
       "76a53dfe",
-      "308ef1de",
       "647f843d",
       "6cfb67f5",
-      "eaa31ac5",
       "cff429f5",
       "d7c69aa6",
-      "88e9b5eb",
-      "c0b38d80",
       "5e89c211",
-      "24e10ee8",
-      "58b44ccb",
       "4a53ff82",
-      "ab814a26",
       "faae6748",
-      "9b081605",
       "25fab860"
     ],
     "post_action_verification": [
-      "2271e684",
-      "fa217e48",
-      "8c1e6057",
-      "5be2f462",
-      "c315befa",
-      "767f9b41",
-      "97326357",
       "17ffd587",
-      "6a4e6283",
-      "f04a05aa",
-      "590b11e1",
       "b01edd26",
-      "f47a8fe9",
-      "73381d78",
-      "4e104d4c",
-      "a9ecd5b4",
-      "43e2ef76",
-      "a6e6ab4e",
-      "8cddc6ad",
-      "1f3a7372",
-      "e8868cbe",
-      "3a9dbafd",
-      "847f9995",
-      "bc9188b4",
-      "38b15dc6",
-      "4402973a",
-      "1d50a3bb",
-      "d7f74c93",
-      "dcf98880"
+      "8cddc6ad"
     ],
     "session_task_rail": [
+      "173119a8",
+      "185013c6",
       "25fcddee",
       "2b66211d",
-      "3fa17fa0",
-      "72e06bdf",
-      "9730f565",
-      "c6f69dee",
-      "5d44d3f3",
-      "d5dcfe26",
-      "faf1b643",
-      "ede4c735",
-      "412d37d3",
-      "725dff46",
-      "4f7c348f",
-      "4a9188f3",
-      "015183f5",
-      "185013c6",
-      "fc21a431",
-      "df55c398",
-      "d9874334",
-      "173119a8",
-      "c864b8cb",
-      "113b3833",
       "30a189fb",
-      "57d13061",
-      "bbffc139",
-      "c66dc739",
-      "0156e9fa",
+      "3fa17fa0",
       "49533583",
       "557838a5",
-      "fb110a39",
+      "57d13061",
+      "5d44d3f3",
+      "72e06bdf",
       "737a68d6",
-      "a7784a18"
+      "9730f565",
+      "a7784a18",
+      "c66dc739",
+      "c6f69dee",
+      "d9874334",
+      "df55c398",
+      "faf1b643"
     ],
     "transactional_schema": [
       "b42e217e",
@@ -389,24 +334,6 @@
     ]
   },
   "control_catalog": {
-    "artifact_read": {
-      "failure_mode": "Stop block, once per claim, when a behavioural claim names a file the session never opened",
-      "implementation": [
-        "hooks/unread-artifact-gate.py"
-      ],
-      "test": [
-        "ops/unread-artifact-gate-selftest.py"
-      ]
-    },
-    "blocker_decider": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/blocker-decider-gate.py"
-      ],
-      "test": [
-        "ops/blocker-decider-gate-selftest.py"
-      ]
-    },
     "calendar_intake": {
       "failure_mode": "calendar intake refuses completion without mail, research and record receipts",
       "implementation": [
@@ -436,17 +363,6 @@
         "ops/canonical-edit-gate-selftest.py"
       ]
     },
-    "chat_lint": {
-      "failure_mode": "deferred surfacing \u2014 the finding is parked and injected as context before the NEXT reply (UserPromptSubmit); it does not block the Stop, because the offending text has already reached the partner and a block would only buy a paid-for restatement (rule 1d50a3bb)",
-      "implementation": [
-        "hooks/chat-lint-gate.py",
-        "hooks/chat-lint-carryover.py"
-      ],
-      "test": [
-        "ops/chat-lint-gate-selftest.py",
-        "ops/unlinked-file-ask-selftest.py"
-      ]
-    },
     "client_asset_packet": {
       "failure_mode": "renderer refusal",
       "implementation": [
@@ -455,57 +371,6 @@
       ],
       "test": [
         "ops/client-asset-controls-selftest.py"
-      ]
-    },
-    "close_before_open": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/close-before-open-gate.py",
-        "hooks/session-brief.py",
-        "ops/built_unclosed.py"
-      ],
-      "test": [
-        "ops/close-before-open-gate-selftest.py",
-        "ops/built-unclosed-selftest.py",
-        "ops/session-brief-selftest.py"
-      ]
-    },
-    "commit_claims": {
-      "failure_mode": "commit-msg refusal",
-      "implementation": [
-        "ops/githooks/commit-claims-check.py",
-        "ops/githooks/commit-msg"
-      ],
-      "test": [
-        "ops/commit-claims-selftest.py"
-      ]
-    },
-    "completion_evidence": {
-      "failure_mode": "Stop block",
-      "implementation": [
-        "hooks/completion-evidence-gate.py"
-      ],
-      "test": [
-        "ops/completion-evidence-gate-selftest.py"
-      ]
-    },
-    "conduct_stop": {
-      "failure_mode": "Stop block",
-      "implementation": [
-        "hooks/conduct-stop-gate.py"
-      ],
-      "test": [
-        "ops/conduct-gate-selftest.py",
-        "ops/delta-resend-selftest.py"
-      ]
-    },
-    "context_rail": {
-      "failure_mode": "Stop block",
-      "implementation": [
-        "hooks/context-handoff-gate.py"
-      ],
-      "test": [
-        "ops/context-handoff-gate-selftest.py"
       ]
     },
     "control-plane-workflow-manifest": {
@@ -566,18 +431,6 @@
         "ops/draft-export-gate-selftest.py"
       ]
     },
-    "drift_claim": {
-      "failure_mode": "fixed-interpreter launcher fails closed if the canonical drift runtime is unavailable; otherwise surfaces the governing ruling and the Stop door reopens the turn once",
-      "implementation": [
-        "hooks/drift-claim-gate.py",
-        "hooks/drift-assertion-gate.py",
-        "hooks/run-record-gate.py"
-      ],
-      "test": [
-        "ops/drift-assertion-gate-selftest.py",
-        "ops/drive-runtime-hooks-selftest.py"
-      ]
-    },
     "egress_guard": {
       "failure_mode": "PreToolUse deny",
       "implementation": [
@@ -585,15 +438,6 @@
       ],
       "test": [
         "ops/guard-selftest.py"
-      ]
-    },
-    "escalation": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/escalation-gate.py"
-      ],
-      "test": [
-        "ops/escalation-gate-selftest.py"
       ]
     },
     "executor_tier": {
@@ -605,15 +449,6 @@
         "external:no dedicated suite yet"
       ]
     },
-    "gate_edit": {
-      "failure_mode": "PreToolUse announce (WR-000019 S3, 2026-08-27: no longer a deny \u2014 a gate edit rides a worktree PR under CODEOWNERS + required CI instead of an in-session sign-off; the gate-admission card for a brand-new BLOCKING gate still denies)",
-      "implementation": [
-        "hooks/gate-edit-gate.py"
-      ],
-      "test": [
-        "ops/gate-edit-gate-selftest.py"
-      ]
-    },
     "gate_integrity": {
       "failure_mode": "SessionStart attestation",
       "implementation": [
@@ -621,6 +456,15 @@
       ],
       "test": [
         "command:python3 hooks/gate-integrity.py --selftest"
+      ]
+    },
+    "github-burst-guard": {
+      "failure_mode": "PreToolUse deny on Bash",
+      "implementation": [
+        "hooks/github-burst-guard.py"
+      ],
+      "test": [
+        "ops/github-burst-guard-selftest.py"
       ]
     },
     "glanceable_lead": {
@@ -651,15 +495,6 @@
         "mcp-server/test/confirm-merge-lead-client.test.mjs"
       ]
     },
-    "ledger_capture": {
-      "failure_mode": "Stop reminder",
-      "implementation": [
-        "hooks/ledger-sweep.py"
-      ],
-      "test": [
-        "external:ledger scope regressions"
-      ]
-    },
     "loop_guard": {
       "failure_mode": "transaction refusal",
       "implementation": [
@@ -667,7 +502,7 @@
         "mcp-server/src/tools.js"
       ],
       "test": [
-        "external:migration probes"
+        "ops/loop-guard-selftest.py"
       ]
     },
     "loop_successor": {
@@ -677,26 +512,6 @@
       ],
       "test": [
         "mcp-server/test/loop-version-and-marker.test.mjs"
-      ]
-    },
-    "loose_work": {
-      "failure_mode": "Stop block",
-      "implementation": [
-        "hooks/loose-work-gate.py",
-        "hooks/staging-observation-tracker.py"
-      ],
-      "test": [
-        "ops/loose-work-gate-selftest.py"
-      ]
-    },
-    "map_architecture": {
-      "failure_mode": "Stop block until the current governed map task loads the validated live doctrine and machine contract",
-      "implementation": [
-        "hooks/map-architecture-gate.py"
-      ],
-      "test": [
-        "ops/map-architecture-gate-selftest.py",
-        "mcp-server/test/map-architecture.test.mjs"
       ]
     },
     "merge_survivor": {
@@ -747,14 +562,11 @@
       ]
     },
     "pack_delivery": {
-      "_note": "NOT YET CLAIMED BY ANY RULE, and that is deliberate. Nine rules whose control is `session_boot` move to this one at the enforcement flip (see load_layer_flip_owed). While shadow mode leaves recitation intact, session_boot is still what carries them, and naming a control that is not yet carrying the rule is what rule ab814a26 forbids.",
-      "failure_mode": "Stop block naming the pack the turn's own work needed, once ops.rule_delivery_policy says enforced; a recorded observation until then",
+      "failure_mode": "PreToolUse delivers the binding rule text before the action",
       "implementation": [
-        "hooks/rule-pack-drift-gate.py",
         "hooks/rule-pack-preuse-reselection.py"
       ],
       "test": [
-        "ops/rule-pack-drift-gate-selftest.py",
         "ops/rule-load-layer-check-selftest.py",
         "ops/rule-pack-preuse-reselection-selftest.py"
       ]
@@ -767,15 +579,6 @@
       ],
       "test": [
         "ops/path-index-hygiene-selftest.py"
-      ]
-    },
-    "peer_broadcast": {
-      "failure_mode": "PreToolUse deny",
-      "implementation": [
-        "hooks/peer-broadcast-gate.py"
-      ],
-      "test": [
-        "ops/peer-broadcast-gate-selftest.py"
       ]
     },
     "pr_only_main_ruleset": {
@@ -814,20 +617,6 @@
         "mcp-server/test/intake-research-gates.test.mjs"
       ]
     },
-    "rule_shape": {
-      "failure_mode": "approval succeeds only when exact registered enforcement is installed and bound to that rule id plus statement hash, then atomically activates it; missing or unrelated enforcement refuses approval and direct activation is retired",
-      "implementation": [
-        "hooks/rule-shape-gate.py",
-        "migrations/0194_atomic_rule_approval.sql",
-        "migrations/0228_atomic_rule_lifecycle_forward_upgrade.sql",
-        "mcp-server/src/tools.js"
-      ],
-      "test": [
-        "ops/rule-shape-gate-selftest.py",
-        "ops/atomic-rule-approval-selftest.py",
-        "mcp-server/test/rule-admission.test.mjs"
-      ]
-    },
     "scheduled_run_record": {
       "failure_mode": "Stop block",
       "implementation": [
@@ -845,16 +634,8 @@
         "mcp-server/src/mcp.js"
       ],
       "test": [
-        "command:python3 hooks/gate-integrity.py --selftest"
-      ]
-    },
-    "settings_change": {
-      "failure_mode": "PreToolUse announce + PostToolUse record (WR-000019 S3, 2026-08-27: the PreToolUse half no longer denies an unreasoned settings change \u2014 it announces, and the reason's durable home moved to the PR-description convention; PostToolUse still records the outcome unconditionally)",
-      "implementation": [
-        "hooks/settings-change-gate.py"
-      ],
-      "test": [
-        "ops/settings-change-gate-selftest.py"
+        "ops/session-brief-selftest.py",
+        "ops/machine-converge-selftest.py"
       ]
     },
     "shared_rename_absence": {
@@ -864,25 +645,6 @@
       ],
       "test": [
         "mcp-server/test/shared-row-rename-registry.test.mjs"
-      ]
-    },
-    "staged_gate_bless": {
-      "failure_mode": "pre-commit refusal",
-      "implementation": [
-        "ops/githooks/staged-gate-bless-check.py",
-        "ops/githooks/pre-commit"
-      ],
-      "test": [
-        "ops/gate-baseline-cochange-selftest.py"
-      ]
-    },
-    "stale_claim": {
-      "failure_mode": "Stop block; names the recent commit that already fixed what the reply calls broken",
-      "implementation": [
-        "hooks/stale-claim-gate.py"
-      ],
-      "test": [
-        "ops/stale-claim-gate-selftest.py"
       ]
     },
     "stale_count": {
@@ -974,38 +736,21 @@
       "test": [
         "ops/whose-work-selftest.py"
       ]
-    },
-    "writing_lint": {
-      "failure_mode": "advisory surfacing at write time \u2014 HARD findings are reported, not refused",
-      "implementation": [
-        "tools/writing-lint.py",
-        "hooks/lint-gate.py",
-        "hooks/chat-lint-gate.py"
-      ],
-      "test": [
-        "ops/chat-lint-gate-selftest.py",
-        "baselines/writing-lint.txt"
-      ]
     }
   },
   "default_category": "judgment_advisory",
   "layer0_shared_cap": 35,
-  "load_layer_flip_owed": "AT THE ENFORCEMENT FLIP, NOT BEFORE: eight rules whose `control` is session_boot move to a pack, so their delivery stops being the boot recitation \u2014 25fcddee, 3fa17fa0, 72e06bdf, 113b3833, 57d13061, c66dc739, 49533583, 557838a5. Their control must change to the pack compiler in the SAME change that flips the mode, and not while shadow mode leaves recitation intact: claiming a control that is not yet carrying the rule is exactly what rule ab814a26 forbids.",
   "load_layer_note": "THE DELIVERY HALF of the enforcement recategorization (2026-08-23 rules council, both chairs unanimous). `rule_controls` above says HOW a rule is enforced; this says WHEN its text is delivered to a session. layer0 = recited at every boot, and nothing task-specific belongs here (rule 1fddcffb). control = an installed deny/stop/schema control prints the rule at the moment it binds, so boot recitation is belt-and-suspenders; ops/rule-load-layer-check.py REFUSES this value for any rule whose enforcement_class is not built, which is what stops 'scoped' from meaning 'silently dropped'. pack = delivered when the observed work matches a pack's triggers. A wildcard pack is refused by the same check: grok's warning was that shipping wildcard tags and calling it scoping is how rules go silent on an undeclared session.",
   "rule_controls": {
     "015183f5": {
-      "binding_moment": "message close",
-      "category": "session_task_rail",
-      "control": "conduct_stop",
-      "enforcement_class": "surfacing",
-      "exceptions": "genuine irreversible fork"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "0156e9fa": {
-      "binding_moment": "message close",
-      "category": "session_task_rail",
-      "control": "conduct_stop",
-      "enforcement_class": "surfacing",
-      "exceptions": "genuine material fork"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "018ce972": {
       "category": "judgment_advisory",
@@ -1024,22 +769,10 @@
       "enforcement_class": "deny_gate",
       "exceptions": "existing legacy paths are not retroactively renamed"
     },
-    "0f38532e": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Architecture judgment (what counts as 'the one home')."
-    },
     "1021fa84": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Interpretive/historical-framing judgment."
-    },
-    "113b3833": {
-      "binding_moment": "file lookup",
-      "category": "session_task_rail",
-      "control": "session_boot",
-      "enforcement_class": "surfacing",
-      "exceptions": "connector/cloud fallback"
     },
     "11b2b73b": {
       "category": "judgment_advisory",
@@ -1092,6 +825,11 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Same as above."
     },
+    "19ebbeb3": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate unfiled_bug removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
+    },
     "1b8e7f43": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
@@ -1107,19 +845,10 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Requires judging whether a given move fixes the cause or routes around it, which no predicate can decide: reshaping a command to get through a false refusal and writing a different correct command are the same keystrokes. The rule works by being recited at the moment friction appears, and its own text names the tell \u2014 the system still does the wrong thing and only this session knows the trick."
     },
-    "1d50a3bb": {
-      "binding_moment": "a Stop-blocked turn being re-sent",
-      "category": "post_action_verification",
-      "control": "conduct_stop",
-      "enforcement_class": "stop_gate",
-      "exceptions": "the resend carries only the delta plus a pointer"
-    },
     "1f3a7372": {
-      "binding_moment": "scheduled finding completion",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "clean/no-finding run"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "1f750181": {
       "category": "judgment_advisory",
@@ -1128,27 +857,15 @@
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. Guest lists are assembled outside any tool call, and the rule hands the exception to Joe explicitly for a given event."
     },
-    "1fcaa63a": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The admission validators already refuse a heavy proposal lacking shape, manifest, typed master plan and a resolving runbook section. The half THIS rule adds -- the upfront research fleet, cheapest-qualified routing per slice, genuinely fresh review seats, and dispatcher-managed execution -- is the half doctrine heavy-build-protocol marks as binding by law with no mechanical gate behind it."
-    },
-    "1fddcffb": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Judgment on what counts as 'needed regardless of task'."
-    },
     "20d106f1": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Personal-coaching judgment (what counts as his oldest open decision, a significant prediction)."
     },
     "2271e684": {
-      "binding_moment": "terminal technical claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "explicit uncertainty"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "236ca227": {
       "binding_moment": "before a partner-facing send",
@@ -1165,11 +882,9 @@
       "exceptions": "Deal Room close state wins"
     },
     "24e10ee8": {
-      "binding_moment": "a commit message naming an act",
-      "category": "hard_pre_action",
-      "control": "commit_claims",
-      "enforcement_class": "deny_gate",
-      "exceptions": "CARR_ALLOW_CLAIM_MISMATCH for a partial amend that legitimately describes files outside the delta"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate commit_claims removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "25fab860": {
       "binding_moment": "weekly social cognition proposal validation",
@@ -1228,14 +943,6 @@
       "exceptions": "the Petersen shape \u2014 two party rows for one human \u2014 passes `same_person_because` with what establishes it; two leads, two clients, a party already holding both roles, and anything touching a vendor row are all out of scope",
       "note": "Built 2026-08-15 after the Ramsey false positive showed the same confusion from the other direction. Joe's ruling: everyone starts as a lead, so an L- and a C- ref for one person is the system working. The gate refuses a merge whose only basis is a name match, is symmetric so swapping the arguments does not slip past, writes nothing when it refuses, and records the stated basis on the event because a merge is permanent and a retired ref is never reissued."
     },
-    "308ef1de": {
-      "binding_moment": "before a change reaches main",
-      "category": "hard_pre_action",
-      "control": "pr_only_main_ruleset",
-      "enforcement_class": "deny_gate",
-      "exceptions": "named writer/claimed work",
-      "note": "Reassigned 2026-08-27 (WR-000019 slice S3): hooks/git-writer-gate.py retired, the edit-time catch of a shared-tree git write is gone, and what remains BUILT is the server-side backstop -- a change swept or mis-committed locally still cannot reach main without a reviewed PR under the PR-only ruleset with required CI. That is a later, coarser binding moment than the retired gate's (after the fact, at merge, rather than at the git command itself), which is a real reduction in how early the mistake is caught; recovery of any locally-lost work also still depends on git's own reflog/object retention rather than a gate-issued warning. The retired gate's finer-grained, earlier catch has no replacement as of this slice."
-    },
     "30a189fb": {
       "binding_moment": "non-CARR task",
       "category": "session_task_rail",
@@ -1261,19 +968,14 @@
       "exceptions": "name-only candidates remain visible for human review; exact email is a stable suppression key"
     },
     "38b15dc6": {
-      "binding_moment": "before an outgoing multi-clause partner instruction can end",
-      "category": "post_action_verification",
-      "control": "chat_lint",
-      "enforcement_class": "stop_gate",
-      "exceptions": "single-clause requests and already numbered or explicitly marked clauses"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate chat_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "3a9dbafd": {
-      "binding_moment": "a reply to a partner carrying a bare id, caught at Stop before the turn ends -- the block holds the turn open until the id is explained",
-      "category": "post_action_verification",
-      "control": "conduct_stop",
-      "enforcement_class": "stop_gate",
-      "exceptions": "code fences, where an id is the literal thing being run",
-      "note": "Reassigned 2026-08-27 (map correction, found during WR-000019 S8): bare-id detection moved OUT of chat_lint and INTO conduct-stop-gate.py's bare_id_hits() (hooks/conduct_patterns.py BARE_ID patterns, ID_EXPLAINED exemption) on 2026-08-22 -- chat-lint-gate.py's own docstring records the retirement and keeps bare_id_findings() only as a dead import shim. The live path is a blocking {\"decision\":\"block\"} at Stop, so this entry's old chat_lint pointer (whose failure mode is deferred, non-blocking surfacing) understated the enforcement that actually runs."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "3b0cd546": {
       "category": "judgment_advisory",
@@ -1302,11 +1004,9 @@
       "exceptions": "none \u2014 base_version and the humanOnly boundary both apply"
     },
     "412d37d3": {
-      "binding_moment": "writing HIPAA in any surface",
-      "category": "session_task_rail",
-      "control": "writing_lint",
-      "enforcement_class": "surfacing",
-      "exceptions": "none \u2014 HARD findings are reported at write time, not refused"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate writing_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "424ba0cc": {
       "category": "judgment_advisory",
@@ -1319,18 +1019,9 @@
       "why_unenforceable": "Requires judging what is 'common' vs policy, and the sample size behind that judgment."
     },
     "43e2ef76": {
-      "binding_moment": "non-trivial build completion",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "simple mechanical work"
-    },
-    "4402973a": {
-      "binding_moment": "after drift detection and before any regeneration or overwrite",
-      "category": "post_action_verification",
-      "control": "vault_salvage",
-      "enforcement_class": "stop_gate",
-      "exceptions": "none \u2014 the evidence is created even when healing continues"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "466a545a": {
       "category": "judgment_advisory",
@@ -1363,11 +1054,9 @@
       "note": "Reassigned 2026-08-27 (WR-000019 slice S3) to pr_only_main_ruleset when hooks/canonical-edit-gate.py retired, then RETURNED to canonical_edit on 2026-09-01 by Joe's ruling 7f48abf6 (Repo Hygiene Program R02) when that gate was reinstated. The 2026-08-27 reassignment reasoned that the server-side backstop carried the same property later; that reasoning is now void because the earlier control exists again. BOTH controls really do bind this rule now, at different moments -- canonical_edit at the edit, pr_only_main_ruleset at merge -- and this field holds ONE control key, so it names the EARLIEST binding moment, which is the one this rule is about. pr_only_main_ruleset is unchanged and still carries 308ef1de. HISTORY: this read unbuilt on 2026-08-15, with a planned_control describing a hook that had already been built the day before as hooks/canonical-edit-gate.py, blessed in the gate baseline and live in the PreToolUse set. A session working the unbuilt list came one step from building a second gate for an already-enforced rule. ops/enforcement-coverage-check.py now fails on any blessed gate no control names."
     },
     "4a9188f3": {
-      "binding_moment": "partner correction",
-      "category": "session_task_rail",
-      "control": "ledger_capture",
-      "enforcement_class": "surfacing",
-      "exceptions": "one-off nonrecurring correction"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate ledger_capture removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "4c21d86b": {
       "binding_moment": "confirm-merge before either party row changes",
@@ -1385,18 +1074,9 @@
       "note": "Built 2026-08-15. Binds at update-document-status, the only place a human states a document went out. An LOI or letter marked sent with no Word file recorded is refused; a spreadsheet marked sent with no PDF is refused. Not about whether the file was produced \u2014 output_kinds {working,pdf} names roles, not formats, and both exist by then \u2014 but about which one was handed over. Overridable by `format_exception` with a stated reason, because Joe's rule ends 'unless the partner says otherwise'; the exception rides the event. An unreadable template kind is not treated as a violation."
     },
     "4e104d4c": {
-      "binding_moment": "new-verb deployment claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "undeployed local code"
-    },
-    "4f7c348f": {
-      "binding_moment": "session start",
-      "category": "session_task_rail",
-      "control": "session_boot",
-      "enforcement_class": "surfacing",
-      "exceptions": "store unavailable stop rail"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "4fae20f4": {
       "category": "judgment_advisory",
@@ -1429,11 +1109,6 @@
       "enforcement_class": "surfacing",
       "exceptions": "no quoted/link layer"
     },
-    "5697071b": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Legal/business-fact judgment with a stated expiry condition Joe must confirm."
-    },
     "57d13061": {
       "binding_moment": "X retrieval",
       "category": "session_task_rail",
@@ -1448,24 +1123,15 @@
       "enforcement_class": "deny_gate",
       "exceptions": "none \u2014 sourced evidence is recorded before the client row"
     },
-    "58b44ccb": {
-      "binding_moment": "creating a code file outside the repo",
-      "category": "hard_pre_action",
-      "control": "one_repo",
-      "enforcement_class": "deny_gate",
-      "exceptions": "editing a file that already exists; non-code extensions; anything outside a git working tree"
-    },
     "58cef3a1": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Interpretive judgment (charitable referent first)."
     },
     "590b11e1": {
-      "binding_moment": "metric completion claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "not a changed build"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "596f7549": {
       "category": "judgment_advisory",
@@ -1473,11 +1139,9 @@
       "why_unenforceable": "Diagnostic judgment overall (was the subsystem claim actually checked against its data); the narrow 'required-arg missing' slice is closer to a schema check."
     },
     "5be2f462": {
-      "binding_moment": "before an assistant reply with a banned contrast-reframe or hard AI-tell construction can end",
-      "category": "post_action_verification",
-      "control": "chat_lint",
-      "enforcement_class": "stop_gate",
-      "exceptions": "the inherently contextual deletion test remains advisory; the built gate covers the rule's explicit hard construction and vocabulary set"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate chat_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "5cd8d0f6": {
       "category": "judgment_advisory",
@@ -1599,11 +1263,9 @@
       "why_unenforceable": "Aspirational quality bar; 'would a busy partner resent this gap' is a judgment test."
     },
     "6a4e6283": {
-      "binding_moment": "shipping claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no deploy/build occurred"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "6cfb67f5": {
       "binding_moment": "at dispatch of a delegated task to another seat",
@@ -1628,7 +1290,7 @@
       "category": "session_task_rail",
       "control": "session_boot",
       "enforcement_class": "surfacing",
-      "exceptions": "none — create and register the missing verb in the same work"
+      "exceptions": "none \u2014 create and register the missing verb in the same work"
     },
     "7105955b": {
       "binding_moment": "close-loop for a renumbered, superseded, merged or split row",
@@ -1638,11 +1300,9 @@
       "exceptions": "ordinary completed or genuinely dropped work"
     },
     "725dff46": {
-      "binding_moment": "at each prospect-visible write",
-      "category": "session_task_rail",
-      "control": "writing_lint",
-      "enforcement_class": "surfacing",
-      "exceptions": "internal surfaces, where the attribution rule does not bind"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate writing_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "72e06bdf": {
       "binding_moment": "lead board presentation",
@@ -1652,11 +1312,9 @@
       "exceptions": "confirmed artifact/collision"
     },
     "73381d78": {
-      "binding_moment": "config change completion",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "one-file mechanical change"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "740bb505": {
       "category": "judgment_advisory",
@@ -1664,11 +1322,9 @@
       "why_unenforceable": "Estimation-methodology judgment specific to each job's supervisor/retry design."
     },
     "767f9b41": {
-      "binding_moment": "confirmation response",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no mutation in task"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "76a1ae2b": {
       "category": "judgment_advisory",
@@ -1717,11 +1373,9 @@
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. The binding instruction is to suggest each pairing WITH a caveat until a partner rules on it; whether a caveat was actually carried in the prose is a reading judgment."
     },
     "847f9995": {
-      "binding_moment": "unattended-path verification",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "interactive workflow"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "86647daf": {
       "category": "judgment_advisory",
@@ -1729,12 +1383,9 @@
       "why_unenforceable": "Judging whether the (a)-(d) test is met."
     },
     "88e9b5eb": {
-      "binding_moment": "before filing a capability blocker",
-      "category": "hard_pre_action",
-      "control": "blocker_decider",
-      "enforcement_class": "deny_gate",
-      "exceptions": "a blocker that names a decider passes; the gate refuses only an unattributed one",
-      "planned_control": "Loop-filing check: when blocker=capability and text reads as a bare refusal, require it name the specific action refused and the decider, else refuse the row."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate blocker_decider removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "893aeec5": {
       "category": "judgment_advisory",
@@ -1749,11 +1400,9 @@
       "why_unenforceable": "Division-of-labor judgment, not a single detectable action."
     },
     "8c1e6057": {
-      "binding_moment": "a reply asking a partner to open, edit or review a file",
-      "category": "post_action_verification",
-      "control": "chat_lint",
-      "enforcement_class": "stop_gate",
-      "exceptions": "a mention with no ask, the session narrating its own reads, and code fences"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate chat_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "8c812bed": {
       "category": "judgment_advisory",
@@ -1800,11 +1449,9 @@
       "exceptions": "tool timestamp unavailable"
     },
     "97326357": {
-      "binding_moment": "surface capability claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "claim includes failed/unverified state"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "9873a0d2": {
       "category": "judgment_advisory",
@@ -1815,20 +1462,6 @@
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Creative cross-domain judgment; not mechanically testable."
-    },
-    "99e951b9": {
-      "binding_moment": "pre-commit when content is added under an indexed multi-folder category",
-      "category": "hard_pre_action",
-      "control": "index_upkeep",
-      "enforcement_class": "deny_gate",
-      "exceptions": "categories without an existing INDEX.md"
-    },
-    "9b081605": {
-      "binding_moment": "before outbound send",
-      "category": "hard_pre_action",
-      "control": "no_send_worker",
-      "enforcement_class": "deny_gate",
-      "exceptions": "draft creation only"
     },
     "9d80fd2d": {
       "category": "judgment_advisory",
@@ -1860,11 +1493,9 @@
       "why_unenforceable": "Requires evaluating whether a cited task was genuinely slow."
     },
     "a6e6ab4e": {
-      "binding_moment": "changed-system completion",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no preexisting baseline"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "a7784a18": {
       "binding_moment": "before the first repository edit and through delivery completion",
@@ -1884,19 +1515,14 @@
       "why_unenforceable": "Design-completeness judgment (does this content have a shape, was a real diagram built vs a decorated table)."
     },
     "a9ecd5b4": {
-      "binding_moment": "check result report",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no tracked change"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "ab814a26": {
-      "binding_moment": "at explicit human approve-rule",
-      "category": "hard_pre_action",
-      "control": "rule_shape",
-      "enforcement_class": "deny_gate",
-      "exceptions": "capture remains proposed and non-binding until a human approves; the system must build and verify exact enforcement before presenting approval, because no approved-but-inactive or active-but-pending rule state exists",
-      "note": "Corrected 2026-08-17. The old three-step teach -> admit -> activate workflow made the partner repeat one decision; the first atomic replacement still wrongly allowed active rules with pending coverage. approve-rule now has one meaning only: exact registered controls bound to the rule id and statement hash are verified and the rule becomes active in the same transaction. Missing or unrelated coverage refuses approval, direct activate-rule is retired, and advisory prose cannot masquerade as an unbreakable rule."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate rule_shape removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "af7de070": {
       "category": "judgment_advisory",
@@ -1945,25 +1571,15 @@
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. The rule is explicitly conditional \u2014 'good sometimes, not by default' \u2014 and the conditions (live or likely shared project, complementary territory, no existing loyalty) are situational judgments."
     },
-    "bbffc139": {
-      "binding_moment": "ledger trigger",
-      "category": "session_task_rail",
-      "control": "ledger_capture",
-      "enforcement_class": "surfacing",
-      "exceptions": "non-CARR conversation"
-    },
     "bc4145f6": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Judgment on what pattern recurred and what fits it."
     },
     "bc9188b4": {
-      "binding_moment": "session Stop",
-      "category": "post_action_verification",
-      "control": "loose_work",
-      "enforcement_class": "stop_gate",
-      "exceptions": "CARR_ALLOW_LOOSE_WORK=1 for a deliberate hand-off or mid-investigation park",
-      "note": "Both halves now hold at Stop: loose-work-gate.py refuses a session that leaves its OWN edits uncommitted, and as of 2026-08-15 also one that committed and never pushed (reachability from any remote ref, so a push under a different branch name still counts as landed). The sweep half of this rule stays with git-writer-gate.py, which bans -A/-a/. when the tree is shared; that narrower scope is deliberate and argued in its own docstring."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate loose_work removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "bd4a6d22": {
       "category": "judgment_advisory",
@@ -1977,16 +1593,9 @@
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. The rule states its own softness \u2014 these overlaps are defaults, not blocks, and it requires confirming the specific pairing before acting."
     },
     "c0b38d80": {
-      "binding_moment": "committing a change to a gate",
-      "category": "hard_pre_action",
-      "control": "staged_gate_bless",
-      "enforcement_class": "deny_gate",
-      "exceptions": "CARR_ALLOW_GATE_BLESS_SKIP, same idiom as its neighbours"
-    },
-    "c1547ed1": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Architecture judgment for every new workflow/system/asset."
+      "why_unenforceable": "Automated gate staged_gate_bless removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "c1db316c": {
       "category": "judgment_advisory",
@@ -1999,11 +1608,9 @@
       "why_unenforceable": "Requires judging materiality (would acting on this write/spend/send/change a decision)."
     },
     "c315befa": {
-      "binding_moment": "before a question, interview box, draft or status ask can end without naming its deal",
-      "category": "post_action_verification",
-      "control": "chat_lint",
-      "enforcement_class": "stop_gate",
-      "exceptions": "code fences and messages that already name the deal"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate chat_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "c4a284b2": {
       "category": "judgment_advisory",
@@ -2032,11 +1639,9 @@
       "exceptions": "main retains final call"
     },
     "c864b8cb": {
-      "binding_moment": "multi-question request",
-      "category": "session_task_rail",
-      "control": "conduct_stop",
-      "enforcement_class": "surfacing",
-      "exceptions": "one protected question"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "c8ebeb5b": {
       "category": "judgment_advisory",
@@ -2083,14 +1688,6 @@
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Judgment on when the conceptual model and file reality actually diverge."
     },
-    "d5dcfe26": {
-      "binding_moment": "asserting a present state is wrong",
-      "category": "session_task_rail",
-      "control": "drift_claim",
-      "enforcement_class": "surfacing",
-      "exceptions": "a drift claim with no matching ruling is usually a real finding, and passes",
-      "second_control": "stale_claim"
-    },
     "d7c69aa6": {
       "binding_moment": "live calendar capture completion for an unmatched attendee",
       "category": "hard_pre_action",
@@ -2106,11 +1703,9 @@
       "exceptions": "placeholder Salesforce fields remain labelled"
     },
     "d7f74c93": {
-      "binding_moment": "before an outgoing assistant reply justifies denying a model, provider, or agent access to CARR material because it is confidential, private, or sensitive",
-      "category": "post_action_verification",
-      "control": "chat_lint",
-      "enforcement_class": "stop_gate",
-      "exceptions": "explicit corrections that confidentiality is not the boundary, historical or quoted rule text, and real credential/autonomous-execution boundary explanations"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate chat_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "d8c9b1f0": {
       "category": "judgment_advisory",
@@ -2130,11 +1725,9 @@
       "why_unenforceable": "Diagnostic-effort judgment (was the fix actually checked before declaring blocked)."
     },
     "dcf98880": {
-      "binding_moment": "human verification instruction",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no changed deliverable"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "def3e84e": {
       "category": "judgment_advisory",
@@ -2161,11 +1754,9 @@
       "why_unenforceable": "Requires reading whether 'what do you think' was rhetorical or an order."
     },
     "e313a3ca": {
-      "binding_moment": "before command handoff",
-      "category": "hard_pre_action",
-      "control": "conduct_stop",
-      "enforcement_class": "deny_gate",
-      "exceptions": "human explicitly asks for a command"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "e4d965d9": {
       "category": "judgment_advisory",
@@ -2184,26 +1775,15 @@
       "rule_surface": "intro_politics",
       "why_unenforceable": "No tool call represents 'introduce' or 'co-invite' \u2014 the pairing is chosen inside prose a human sends, and the vendor attributes these rules key on (Category, Stage, Vertical, Territory, Links, delivery tier) live in vendors.xlsx and deals.md rather than on a gated write path. Judging whether two vendors are 'the same category' at the relationship level is the rule's whole content."
     },
-    "e8868cbe": {
-      "binding_moment": "system acceptance claim",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "acceptance not claimed"
-    },
     "eaa31ac5": {
-      "binding_moment": "before delivery claim",
-      "category": "hard_pre_action",
-      "control": "completion_evidence",
-      "enforcement_class": "deny_gate",
-      "exceptions": "explicitly unverified/failed disclosure"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "ede4c735": {
-      "binding_moment": "at each write, when the surface is classified",
-      "category": "session_task_rail",
-      "control": "writing_lint",
-      "enforcement_class": "surfacing",
-      "exceptions": "paths on the INTERNAL BY CONSTRUCTION list are out of scope by design"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate writing_lint removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "eeb3d106": {
       "category": "judgment_advisory",
@@ -2216,11 +1796,9 @@
       "why_unenforceable": "Self-reflection judgment (is a materially simpler shape now visible); explicitly skipped for trivial work by the rule's own text."
     },
     "f04a05aa": {
-      "binding_moment": "autonomous-run completion",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "no findings/change"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "f0f9156e": {
       "category": "judgment_advisory",
@@ -2233,11 +1811,9 @@
       "why_unenforceable": "Whether an arbitrary client-facing artifact is a recommendation is a content judgment. Structured search packets now refuse an empty declined_and_why block through client_asset_controls; unstructured recommendations require task-level review until they share that schema."
     },
     "f47a8fe9": {
-      "binding_moment": "verification report",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "explicitly incomplete"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "f5bac101": {
       "category": "judgment_advisory",
@@ -2264,13 +1840,9 @@
       "exceptions": "none \u2014 both sourced findings and confirmations are required"
     },
     "fa217e48": {
-      "binding_moment": "completion after changed work, and any claim about what a file does",
-      "category": "post_action_verification",
-      "control": "completion_evidence",
-      "enforcement_class": "stop_gate",
-      "exceptions": "simple one-file edit; naming a path without describing its behaviour",
-      "second_control": "artifact_read",
-      "third_control": "draft_export_read"
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate completion_evidence removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "faae6748": {
       "binding_moment": "before destructive filesystem action",
@@ -2287,45 +1859,90 @@
       "exceptions": "the level stays a HUMAN JUDGMENT and is stored, not computed \u2014 the rule says so itself, because a relationship can matter for reasons no event count can see. The check reports and never writes.",
       "note": "CORRECTED 2026-08-15. This rule was mapped transactional_schema/versioned_record with the claim 'countable evidence required by verb'. That claim was false: `relationship_level` appears exactly once in the whole MCP server, inside merge-vendor-rows' survivorship field list. No verb exposes it as an editable field, so no verb could have been requiring evidence for it. What actually exists is the mechanism the rule names itself, v_vendor_level_suggestion \u2014 present since migration 0052, refined 0053/0065, rebuilt 0069 to exclude merged rows, and read by NOTHING outside the migrations until now. It is read nightly and reports only the view's own `disagrees` rows, which require both sides known: 16 of 301 active vendors on the first live run, where a crude recorded<>suggested comparison returns 239. Twelve of the sixteen sit at Established or Core with no introduction or referral recorded in either direction, which usually means the edges were never written down rather than the level being wrong."
     },
-    "fb110a39": {
-      "binding_moment": "fan-out brief",
-      "category": "session_task_rail",
-      "control": "delegation_tripwire",
-      "enforcement_class": "surfacing",
-      "exceptions": "one initial lookup; qualified peer allowed",
-      "note": "Reassigned 2026-08-27 (WR-000019 slice S4): hooks/delegation-gate.py stopped denying anything -- it now only records a per-session ledger and speaks an ANNOUNCE at Stop when a session materially under-delegated, never a block. Unlike slice S3's reassignment (which moved two rules to a DIFFERENT installed deny_gate control that already carried the same property server-side), no replacement deny mechanism exists here for THIS rule's property (reclaiming a delegated sweep is no longer refused by anything); the honest move is the same one the map's other five delegation_tripwire rules (2b66211d, c6f69dee, 2dbb0ad8, 185013c6, df55c398) already made before this slice -- category session_task_rail, enforcement_class surfacing, matching BUILT_CLASS_BY_CATEGORY's own mapping. hooks/executor-tier-gate.py (control executor_tier, unchanged by this slice) still denies a subagent spawn naming no model or reasoning effort, but that is a different rule's property, not this one's."
-    },
-    "fb2b263d": {
+    "fc21a431": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "Requires knowing what other files reference the changed content."
-    },
-    "fc21a431": {
-      "binding_moment": "partner correction",
-      "category": "session_task_rail",
-      "control": "ledger_capture",
-      "enforcement_class": "surfacing",
-      "exceptions": "not every correction becomes a rule"
+      "why_unenforceable": "Automated gate ledger_capture removed in PR 1801 under Joe's 2026-10-15 purge ruling; the rule stays in force as prose guidance."
     },
     "fc4d7753": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "Structural-design judgment."
     },
-    "204391be": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
-    },
-    "a2e78f48": {
-      "category": "judgment_advisory",
-      "enforcement_class": "judgment_ambient",
-      "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
-    },
     "b7ec8f3b": {
       "category": "judgment_advisory",
       "enforcement_class": "judgment_ambient",
       "why_unenforceable": "The task-specific instruction is delivered by its rule pack; no deterministic predicate can decide every application."
+    },
+    "661d7757": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a bounded review judgment from Jev would be useful is a judgment about the work in hand. The half that must not blur is that Jev's result stays evidence: source checks, authenticated authority, hosted CI and any reviewer-of-record gate keep their own controls, and nothing can tell from a call whether a session treated Jev's answer as a substitute for them."
+    },
+    "f673326b": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a restriction, fence or protective step is one Joe asked for is a reading of his grant, and a fence a session invents lives in its own prose and plans rather than in a tool call. The one boundary the rule keeps, custody of a live credential raised once, is itself a judgment about what the session holds."
+    },
+    "a3da3d39": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Recognising that something is left waiting on Joe's approval, and that a passing mention of a proposed or pending item stands in for the direct question, is a reading of the session's own prose. hooks/escalation-gate.py lets such an approval question through to Joe; nothing refuses the reply that mentions a proposed rule without asking."
+    },
+    "76fcbed6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Requires judging why Joe picked a source, whether every concept and linked source was read in full, and whether a decline names a property test the source genuinely failed. No predicate can tell a full study from a summary that looks like one."
+    },
+    "08c4eda2": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Legal and business-fact judgment with a stated amendment condition: whether Joe's Alabama licence has actually issued, and whether a given act is representation or only prospecting, research and outreach, cannot be read off any write the record layer receives."
+    },
+    "67e48aaf": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a reply warns Joe about transcript exposure, or suggests rotating on that ground, is a reading of the session's prose; nothing in a tool call carries it."
+    },
+    "a9fc3f0e": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a session searched beyond the research-site index, and whether a new source proved useful enough to index, are research-quality judgments. The egress guard that blocks sending data to unlisted hosts is a separate exfiltration control and does not decide where a session may read."
+    },
+    "ac0a6579": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The rule forbids proposing or raising something: a stronger password, extra sign-in steps or a guessable-password finding. That lives in a session's recommendations and review prose. The half still binding, one client page never showing another client's data or internal notes, is a content judgment per page."
+    },
+    "578fdd91": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The decision to apply rests on a judgment the rule spells out: whether identity is confirmed at high or medium confidence with a second corroborating field, and whether the corrected value is one clean value. The correct-party-identity verb refuses name and firm changes without independent matching evidence, which guards the apply step; nothing makes a session apply rather than park."
+    },
+    "486584d6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "The test the rule sets before asking Joe, whether finishing a console step needs something only he can supply right now, is a judgment about the step. A handoff of click-by-click steps is prose, not a refusable action."
+    },
+    "07dde434": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a prospect- or client-facing build gives the person a reason to contact Joe or Dell, or gives them the answer instead, is a product judgment about each design."
+    },
+    "cfe6b5c6": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Whether a mechanism replaces a human step Joe already ruled on, and whether its first live run would be irreversible with checks never run on real inputs, are design judgments. A null live_from or an enabled:false default is legitimate in the narrow case the rule keeps, so no config scan can tell the two apart."
+    },
+    "c363bd8b": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Grouping open PRs by shared files and building one combined branch is an orchestrator's merge-planning act across many PRs. No single merge or push call shows whether an overlapping PR should have joined a batch."
+    },
+    "8400cd3d": {
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Sizing work and selecting the pstack and Pocock procedure require judgment before building; there is no admission gate."
     }
   },
   "rule_load_layers": {
@@ -2359,22 +1976,10 @@
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "0f38532e": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git"
-      ]
-    },
     "1021fa84": {
       "load_layer": "layer0",
       "packs": [],
       "why": "Corrects a standing misreading of Joe that every session inherits from its context."
-    },
-    "113b3833": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ]
     },
     "11b2b73b": {
       "load_layer": "pack",
@@ -2425,6 +2030,13 @@
         "joe-development"
       ]
     },
+    "19ebbeb3": {
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
+    },
     "1b8e7f43": {
       "load_layer": "layer0",
       "packs": [],
@@ -2441,35 +2053,18 @@
       "packs": [],
       "why": "Fires on unexpected friction, which is by definition unpredicted."
     },
-    "1d50a3bb": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
     "1f3a7372": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "scheduled-automation"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "1f750181": {
       "load_layer": "pack",
       "packs": [
         "vendor-intros"
       ]
-    },
-    "1fcaa63a": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "Joe's ruling 554db63d, overruling a layer0 call: \"i would argue its triggered by me calling for a heavy build.\" Nothing task-specific belongs in layer0 (rule 1fddcffb), and the boot cap is 24 of 35 used; this rule fires on an occasion, not at every boot."
-    },
-    "1fddcffb": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The core-routing law this whole scoping change enforces; it must survive an undeclared boot."
     },
     "20d106f1": {
       "load_layer": "pack",
@@ -2478,9 +2073,11 @@
       ]
     },
     "2271e684": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "236ca227": {
       "load_layer": "control",
@@ -2495,11 +2092,11 @@
       "why": "An installed schema delivers this at its binding moment."
     },
     "24e10ee8": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "25fab860": {
       "load_layer": "control",
@@ -2556,13 +2153,6 @@
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "308ef1de": {
-      "load_layer": "control",
-      "packs": [
-        "engineering-git"
-      ],
-      "why": "An installed deny gate delivered this at its binding moment; WR-000019 S3 (2026-08-27) reassigned the control from the retired hooks/git-writer-gate.py to the server-side PR-only main ruleset (control pr_only_main_ruleset), which is still an installed control that delivers this rule at ITS binding moment (merge, not the git command itself)."
-    },
     "30a189fb": {
       "load_layer": "layer0",
       "packs": [],
@@ -2587,14 +2177,18 @@
       "why": "An installed schema delivers this at its binding moment."
     },
     "38b15dc6": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "3a9dbafd": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "3b0cd546": {
       "load_layer": "pack",
@@ -2640,18 +2234,11 @@
       ]
     },
     "43e2ef76": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
-    "4402973a": {
-      "load_layer": "control",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "466a545a": {
       "load_layer": "pack",
@@ -2704,16 +2291,11 @@
       "why": "An installed deny gate delivers this at its binding moment."
     },
     "4e104d4c": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
-    "4f7c348f": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The boot recitation contract itself. Layer 0 until the amendment batch replaces its wording."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "4fae20f4": {
       "load_layer": "layer0",
@@ -2746,12 +2328,6 @@
         "joe-comms"
       ]
     },
-    "5697071b": {
-      "load_layer": "pack",
-      "packs": [
-        "client-deal"
-      ]
-    },
     "57d13061": {
       "load_layer": "pack",
       "packs": [
@@ -2765,24 +2341,17 @@
       ],
       "why": "An installed deny gate delivers this at its binding moment."
     },
-    "58b44ccb": {
-      "load_layer": "control",
-      "packs": [
-        "engineering-git"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
     "58cef3a1": {
       "load_layer": "layer0",
       "packs": [],
       "why": "Steelmanning a mislabel binds whenever Joe states something slightly off."
     },
     "590b11e1": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "scheduled-automation"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "596f7549": {
       "load_layer": "layer0",
@@ -2790,9 +2359,11 @@
       "why": "Tool errors that blame a subsystem occur in every lane."
     },
     "5be2f462": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "5cd8d0f6": {
       "load_layer": "layer0",
@@ -2873,11 +2444,11 @@
       ]
     },
     "6a4e6283": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "surface-doctrine"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "6cfb67f5": {
       "load_layer": "control",
@@ -2923,11 +2494,11 @@
       ]
     },
     "73381d78": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "740bb505": {
       "load_layer": "pack",
@@ -2936,9 +2507,11 @@
       ]
     },
     "767f9b41": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "76a1ae2b": {
       "load_layer": "pack",
@@ -2989,11 +2562,11 @@
       ]
     },
     "847f9995": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "scheduled-automation"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "86647daf": {
       "load_layer": "pack",
@@ -3002,9 +2575,11 @@
       ]
     },
     "88e9b5eb": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "893aeec5": {
       "load_layer": "pack",
@@ -3019,9 +2594,11 @@
       ]
     },
     "8c1e6057": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "8c812bed": {
       "load_layer": "pack",
@@ -3068,11 +2645,11 @@
       "why": "Dates are computed in every session and its only bind today is boot recitation."
     },
     "97326357": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "9873a0d2": {
       "load_layer": "pack",
@@ -3085,20 +2662,6 @@
       "packs": [
         "source-study"
       ]
-    },
-    "99e951b9": {
-      "load_layer": "control",
-      "packs": [
-        "governance-rules"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
-    "9b081605": {
-      "load_layer": "control",
-      "packs": [
-        "joe-comms"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
     },
     "9d80fd2d": {
       "load_layer": "pack",
@@ -3131,11 +2694,11 @@
       ]
     },
     "a6e6ab4e": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "a7784a18": {
       "load_layer": "layer0",
@@ -3155,16 +2718,18 @@
       ]
     },
     "a9ecd5b4": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
-    "ab814a26": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "governance-rules"
       ],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
+    },
+    "ab814a26": {
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "af7de070": {
       "load_layer": "layer0",
@@ -3212,12 +2777,6 @@
         "vendor-intros"
       ]
     },
-    "bbffc139": {
-      "load_layer": "pack",
-      "packs": [
-        "joe-development"
-      ]
-    },
     "bc4145f6": {
       "load_layer": "pack",
       "packs": [
@@ -3225,11 +2784,11 @@
       ]
     },
     "bc9188b4": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "engineering-git"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "bd4a6d22": {
       "load_layer": "pack",
@@ -3244,17 +2803,11 @@
       ]
     },
     "c0b38d80": {
-      "load_layer": "control",
-      "packs": [
-        "engineering-git"
-      ],
-      "why": "An installed deny gate delivers this at its binding moment."
-    },
-    "c1547ed1": {
       "load_layer": "pack",
       "packs": [
         "engineering-git"
-      ]
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "c1db316c": {
       "load_layer": "pack",
@@ -3269,11 +2822,11 @@
       ]
     },
     "c315befa": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "client-deal"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "c4a284b2": {
       "load_layer": "pack",
@@ -3352,11 +2905,6 @@
         "joe-development"
       ]
     },
-    "d5dcfe26": {
-      "load_layer": "layer0",
-      "packs": [],
-      "why": "The most frequent failure class on record (standing-context returns the live ledger); fires on any present-tense claim."
-    },
     "d7c69aa6": {
       "load_layer": "control",
       "packs": [
@@ -3372,11 +2920,11 @@
       "why": "An installed schema delivers this at its binding moment."
     },
     "d7f74c93": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "delegation-council"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "d8c9b1f0": {
       "load_layer": "layer0",
@@ -3395,9 +2943,11 @@
       ]
     },
     "dcf98880": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "def3e84e": {
       "load_layer": "pack",
@@ -3423,9 +2973,11 @@
       "why": "Decides whether work is authorised at all, before any pack could be chosen."
     },
     "e313a3ca": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "e4d965d9": {
       "load_layer": "layer0",
@@ -3444,17 +2996,12 @@
         "vendor-intros"
       ]
     },
-    "e8868cbe": {
-      "load_layer": "control",
-      "packs": [
-        "scheduled-automation"
-      ],
-      "why": "An installed stop gate delivers this at its binding moment."
-    },
     "eaa31ac5": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed deny gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "ede4c735": {
       "load_layer": "pack",
@@ -3475,11 +3022,11 @@
       ]
     },
     "f04a05aa": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "scheduled-automation"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "f0f9156e": {
       "load_layer": "pack",
@@ -3494,9 +3041,11 @@
       ]
     },
     "f47a8fe9": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "f5bac101": {
       "load_layer": "pack",
@@ -3525,9 +3074,11 @@
       "why": "An installed deny gate delivers this at its binding moment."
     },
     "fa217e48": {
-      "load_layer": "control",
-      "packs": [],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ],
+      "why": "PR #1801 retires the automatic gate; deliver the retained prose rule through its pack."
     },
     "faae6748": {
       "load_layer": "control",
@@ -3538,18 +3089,6 @@
       "load_layer": "pack",
       "packs": [
         "records-intake"
-      ]
-    },
-    "fb110a39": {
-      "load_layer": "pack",
-      "packs": [
-        "delegation-council"
-      ]
-    },
-    "fb2b263d": {
-      "load_layer": "pack",
-      "packs": [
-        "governance-rules"
       ]
     },
     "fc21a431": {
@@ -3564,24 +3103,100 @@
         "governance-rules"
       ]
     },
-    "204391be": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git",
-        "governance-rules"
-      ]
-    },
-    "a2e78f48": {
-      "load_layer": "pack",
-      "packs": [
-        "engineering-git"
-      ]
-    },
     "b7ec8f3b": {
       "load_layer": "pack",
       "packs": [
         "surface-doctrine"
       ]
+    },
+    "661d7757": {
+      "load_layer": "pack",
+      "packs": [
+        "delegation-council"
+      ]
+    },
+    "f673326b": {
+      "load_layer": "pack",
+      "packs": [
+        "delegation-council"
+      ]
+    },
+    "a3da3d39": {
+      "load_layer": "pack",
+      "packs": [
+        "governance-rules"
+      ]
+    },
+    "76fcbed6": {
+      "load_layer": "pack",
+      "packs": [
+        "source-study"
+      ]
+    },
+    "08c4eda2": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "67e48aaf": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git",
+        "scheduled-automation"
+      ],
+      "why": "A credential Joe pastes arrives while wiring a connector, deploy or scheduled job, not at every boot. engineering-git and scheduled-automation (which already triggers on 'credential') are the packs whose work brings the paste."
+    },
+    "a9fc3f0e": {
+      "load_layer": "pack",
+      "packs": [
+        "records-intake",
+        "source-study"
+      ],
+      "why": "Research runs both as contact and deal enrichment (records-intake) and as source and market research (source-study); the rule binds on either."
+    },
+    "ac0a6579": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "578fdd91": {
+      "load_layer": "pack",
+      "packs": [
+        "records-intake"
+      ]
+    },
+    "486584d6": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ]
+    },
+    "07dde434": {
+      "load_layer": "pack",
+      "packs": [
+        "client-deal"
+      ]
+    },
+    "cfe6b5c6": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ]
+    },
+    "c363bd8b": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ]
+    },
+    "8400cd3d": {
+      "load_layer": "pack",
+      "packs": [
+        "engineering-git"
+      ],
+      "why": "Deliver the sizing procedure when starting engineering work."
     }
   },
   "rule_packs": {
