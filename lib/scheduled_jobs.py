@@ -220,7 +220,8 @@ def report(manifest, snapshot, now):
         cron.setdefault(entry["label"], []).append(entry)
     roots = snapshot.get("checkout_roots", {})
     role = snapshot["machine_role"]
-    observed = set(snapshot["plists"]) | {k for k in live.keys() | overrides.keys() if k.startswith(prefixes)} | cron.keys()
+    # launchd keeps an override entry forever after a job is gone; alone it is not an installed job.
+    observed = set(snapshot["plists"]) | {k for k in live if k.startswith(prefixes)} | cron.keys()
     for label in sorted(observed - registry.keys()):
         emit(label, "unknown_job", "job has no declared expectation", "review the job and declare its purpose/state or retire it through its owner")
     for error in snapshot.get("errors", []):
