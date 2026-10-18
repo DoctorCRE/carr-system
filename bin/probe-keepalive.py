@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""probe-keepalive.py — ask the four long-running servers whether they are up,
+"""probe-keepalive.py — ask the three long-running servers whether they are up,
 and write the answer to the ledger.
 
-THE GAP THIS CLOSES. call-mode, doc-engine, canary-ingest-sink and quill-dictate
+THE GAP THIS CLOSES. call-mode, doc-engine and quill-dictate
 are launchd KeepAlive agents. Everything else on this Mac answers "did it fire recently";
-these four need "is it up", and nothing could ask it. They are deliberately not
+these three need "is it up", and nothing could ask it. They are deliberately not
 wrapped by bin/run-scheduled.sh — the wrapper records when its child EXITS, and
 a KeepAlive child exiting means launchd restarted it, so wrapping would file a
 row per restart and read as repeated failures of a service working exactly as
@@ -19,16 +19,15 @@ mechanisms work on them for free:
   * a server that is DOWN records state=failed, and `ops-record assess` turns
     that into an incident on the same path every other failure takes;
   * if the probe itself stops — the Mac is off, asleep, or logged out — the
-    four services go stale on their newly-registered cadence and
+    three services go stale on their newly-registered cadence and
     ops/edge-liveness.py alarms from GitHub.
 Nothing new had to be invented for either. The probe only had to make them
 speak.
 
-── THE FOUR ARE NOT PROBED EQUALLY, AND THAT IS STATED RATHER THAN SMOOTHED ──
+── THE THREE ARE NOT PROBED EQUALLY, AND THAT IS STATED RATHER THAN SMOOTHED ──
 
     call-mode          TCP 127.0.0.1:4682   a connect proves it is ACCEPTING
     doc-engine         TCP 127.0.0.1:4680   a connect proves it is ACCEPTING
-    canary-ingest-sink TCP 127.0.0.1:4684   a connect proves it is ACCEPTING
     quill-dictate      (no socket)          process liveness ONLY
 
 A TCP connect is a real answer: something is listening and completed a
@@ -66,7 +65,6 @@ from lib.launchd_scope import allowed_on_machine
 TARGETS = [
     ("call-mode", "com.carr.call-mode", 4682),
     ("doc-engine", "com.carr.doc-engine", 4680),
-    ("canary-ingest-sink", "com.carr.canary-ingest-sink", 4684),
     ("quill-dictate", "com.carr.quill-dictate", None),
 ]
 
@@ -187,7 +185,7 @@ def main() -> int:
     # minutes on any Mac whose credential has not loaded, and an alarm that
     # fires every cycle until someone pastes a token is exactly how the smoke
     # suite was lost the first time. The honest consequence of an unreachable
-    # ledger is that these four services go stale on their cadence and read
+    # ledger is that these three services go stale on their cadence and read
     # `unknown` — Program 3's load-bearing decision, that health derives from
     # the latest observation and its freshness, already handles this correctly
     # without any help from an alarm.
