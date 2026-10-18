@@ -21,8 +21,7 @@ mistake shows up as a failed case rather than a self-fulfilling label:
   lacks the attribution its site requires, or ran in an unattended worker at a
   site whose verdict nobody consumes.
 
-`--report` runs both arms over expectations.v1.json and writes the cohorts and
-receipt. No model is called and nothing is sent anywhere.
+`--report` runs both arms over expectations.v2.json and prints the measured comparison. No model is called and nothing is sent anywhere.
 """
 
 import argparse
@@ -42,11 +41,12 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools" / "room-bridge"))
 import evaluation_kernel as kernel
 
-EXPECTATIONS = HERE / "expectations.v1.json"
-VERSION = "jev-judgments-expectations/v1"
+EXPECTATIONS = HERE / "expectations.v2.json"
+VERSION = "jev-judgments-expectations/v2"
 WINDOW = ("2026-09-28", "2026-10-05")
 PER_SITE = 14
 SEED = 11
@@ -70,15 +70,16 @@ PREFIX_SITES = (("bind_", "rule_trigger_delivery"), ("req_", "jev_requirements")
                 ("risk_", "jev_done_checks"), ("test_", "jev_session_watch"))
 DIRECT_CALLERS = {"jev_change_tolls", "jev_code_review", "jev_build_advisory", "jev_deal_read"}
 
-# The audit's decisions (PR body table), restated as labels.
-REMOVED = {"command_precheck", "jev_build_advisory"}
-JOB_ATTRIBUTED = {"jev_change_tolls", "jev_code_review", "headless_tasks", "jev_model_route",
-                  "jev_deal_read", "post_call_jev", "slice-done-marker"}
-UNATTENDED_OK = {"jev_requirements", "jev_change_tolls", "headless_tasks", "jev_model_route",
-                 "jev_deal_read", "post_call_jev", "slice-done-marker", "adhoc:"}
-KNOWN = {"rule_trigger_delivery", "jev_rule_select", "jev_session_watch", "jev_done_checks",
-         "jev_requirements", "jev_handoff", "stale_claim_judge", "jev_defect_class",
-         "jev_executor_tier"} | JOB_ATTRIBUTED | REMOVED
+# Independent policy oracle: mechanical callers were disabled by #1529;
+# retained callers were reviewed in #1531, #1543, #1545 and #1576. Do not
+# derive these labels from the registry being tested. The v1 labels stay frozen.
+REMOVED = {"command_precheck", "jev_build_advisory", "rule_trigger_delivery", "rule_trigger_compile",
+           "jev_session_watch", "jev_defect_class", "jev_executor_tier", "jev_code_review"}
+JOB_ATTRIBUTED = {"seat_health", "jev_model_route", "jev_deal_read", "post_call_jev"}
+UNATTENDED_OK = JOB_ATTRIBUTED | {"adhoc:", "jevlint_review"}
+KNOWN = {"jev_fact_boundary", "jev_intake", "jev_scorecard", "jev_best_of", "flash-script",
+         "rule_gold_label", "rule_delivery_eval", "judge_paired_eval", "rule_trigger_compile", "rule_scope_lookup",
+         "timebomb-audit", "jevlint_review"} | JOB_ATTRIBUTED
 
 HARD_CASES = (  # (tag, input), judged during the audit
     ("adhoc", {"site": "adhoc:review-brief", "session": True, "worker": True}),
@@ -96,7 +97,8 @@ HARD_CASES = (  # (tag, input), judged during the audit
     ("rule_trigger_delivery", {"site": "rule_trigger_delivery", "session": True, "worker": True}),
     ("jev_build_advisory", {"site": "jev_build_advisory", "session": True}),
     ("jev_executor_tier", {"site": "jev_executor_tier", "session": True}),
-)
+) + tuple((site, {"site": site, "session": True, "worker": worker})
+          for site in sorted(KNOWN) for worker in (False, True))
 
 
 def label(case):
@@ -209,7 +211,7 @@ class _Response:
     status = 200
 
     def __init__(self):
-        self.body = json.dumps({"model": "jev-eval", "answers": {"q": {"type": "noul", "noul": 0.5}},
+        self.body = json.dumps({"model": "jev-1.13.0", "answers": {"q": {"type": "noul", "noul": 0.5}},
                                 "usage": {"input_tokens": 600, "output_tokens": 10}}).encode()
 
     def read(self, *a):
@@ -224,6 +226,9 @@ class _Response:
 
 
 def observe(client, case, scratch):
+    import ops.jev_semantic as semantic
+    state = "eval state"
+    questions = {"q": client.noul("Eval judgment")}
     sent = []
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CARR_JEV", "CARR_HOOK"))
            and k not in ("XPC_SERVICE_NAME", "CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID",
@@ -240,13 +245,15 @@ def observe(client, case, scratch):
         env["CARR_JEV_JOB"] = case["carr_job"]
     log = scratch / "calls.jsonl"
     refusal = None
-    with mock.patch.dict(os.environ, env, clear=True), \
+    with tempfile.TemporaryDirectory(dir=scratch, prefix="cold-") as cache, \
+            mock.patch.dict(os.environ, env, clear=True), \
             mock.patch.object(client, "JEV_DAILY_CAP_LOG", str(log)), \
             mock.patch.object(client, "_launch_spend_alert_worker", lambda *a: None, create=True), \
             mock.patch.object(client.urllib.request, "urlopen",
                               lambda request, timeout=None: sent.append(1) or _Response()):
         try:
-            client.ask("eval state", {"q": client.noul("Eval judgment")}, api_key="eval-fixture",
+            semantic.ask(state, questions, client=client, api_key="eval-fixture",
+                       version="admission-eval-v1", cache_path=str(Path(cache) / "semantic.json"),
                        calls_log=str(log), cache_ttl_seconds=0, retries=0, caller=case["site"],
                        session_id="eval-session" if case.get("session") else None)
         except Exception as exc:  # a refusal is the observation, not a crash
@@ -273,112 +280,15 @@ def report(base_ref):
                 rows.append({"case_id": cid, "split": cases[cid]["split"],
                              "input_sha256": cases[cid]["input_sha256"], **seen})
             cohorts[arm] = rows
-            path = HERE / "evidence" / f"{arm}.jsonl"
+            path = HERE / "runs" / f"{arm}.jsonl"
             path.parent.mkdir(exist_ok=True)
             path.write_text("".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
     spec = importlib.util.spec_from_file_location("jev_judgments_score", HERE / "score.py")
     scorer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(scorer)
     first = scorer.score(expectations, cohorts["baseline"], cohorts["candidate"])
-    second = scorer.score(expectations, cohorts["baseline"], cohorts["candidate"])
-    agreement = 1.0 if first == second else 0.0
-    test = [c for c, e in cases.items() if e["split"] == "test"]
-    paid = {arm: sum(1 for r in rows if r["paid"]) / len(rows) for arm, rows in cohorts.items()}
-    dims = []
-    for did, m in first["dimensions"].items():
-        lo, hi = m["delta"]["ci_low"], m["delta"]["ci_high"]
-        direction = "improved" if lo > 0 else "regressed" if hi < 0 else "equivalent"
-        status = "passed" if m["candidate"]["score"] == 1.0 and direction != "regressed" else "failed"
-        dims.append({"dimension_id": did, "critical": True, "status": status,
-                     "direction_vs_baseline": direction,
-                     "evidence_refs": ["evals/jev-judgments/evidence/baseline.jsonl",
-                                       "evals/jev-judgments/evidence/candidate.jsonl"], **m})
-    policy_files = [f"tools/room-bridge/{name}.py" for name in
-                    ("evaluation_kernel", "execution_contract", "design_kernel", "policy_learning")]
-    deps = [p for p in ARM_FILES if (REPO / p).exists()] + policy_files + ["evals/jev-judgments/expectations.v1.json"]
-    fingerprint = hashlib.sha256("".join(_sha(REPO / p) for p in ARM_FILES if (REPO / p).exists())
-                                 .encode()).hexdigest()
-    harness = _sha(HERE / "run_eval.py")
-    receipt = {
-        "schema_version": 2, "surface": "jev-judgments",
-        "change": "Admit a paid Jev call only from a registered call site with its declared attribution, "
-                  "outside fixtures/CI and unattended workers its site excludes, within per-site and "
-                  "global hourly budgets.",
-        "measured_on": date.today().isoformat(), "rung": "regression",
-        "adapter": {"surface": "offline_programmatic", "adapter_id": "jev-judgments-admission-replay",
-                    "adapter_version": "1", "harness_id": "evals/jev-judgments/run_eval.py",
-                    "harness_version": harness, "provider_id": "none", "model_id": "deterministic-no-model",
-                    "native_session_ref": os.environ.get("CLAUDE_CODE_SESSION_ID") or "local",
-                    "configuration_fingerprint": f"sha256:{fingerprint}"},
-        "cases": {"total": len(cases), "train": len(cases) - len(test), "test": len(test),
-                  "should_not_fire": sum(1 for e in cases.values() if e["should_not_fire"]),
-                  "sources": sorted({e["source"] for e in cases.values()})},
-        "split": {"method": "random, stratified by first tag (call site)", "seed": SEED, "sealed_test": True},
-        "repeats": 1,
-        "grader": {"kind": "programmatic", "validation": {
-            "graded_twice": True, "agreement": agreement, "result": "pass" if agreement == 1.0 and
-            first["controls"]["oracle_pass_rate"] == 1.0 and first["controls"]["null_pass_rate"] == 0.0 else "fail",
-            **first["controls"]}},
-        "noise_floor": round(1 / len(test) ** 0.5, 4), "min_useful_gain": 0.5,
-        "primary_dimension": "wasted-call-refusal", "dimensions": dims,
-        "stage_results": [{"stage_id": "paid-call-admission", "status": "passed",
-                           "dimension_ids": [d["dimension_id"] for d in dims],
-                           "evidence_refs": ["evals/jev-judgments/evidence/candidate.jsonl"]}],
-        "cost": {"baseline_usd_per_case": round(paid["baseline"] * PRICE_PER_CALL_USD, 10),
-                 "candidate_usd_per_case": round(paid["candidate"] * PRICE_PER_CALL_USD, 10)},
-        "verdict": {"decision": "ship", "statement": ""},
-        "notes": [
-            "Production cases replay the call site, session presence and fixture provenance of real "
-            "out/jev-calls.jsonl rows; a fixture row is replayed under CARR_HOOK_FIXTURE=1, which is how "
-            "ops/ci.sh's gates class ran it (other classes now export CARR_JEV_OFFLINE).",
-            "Fixture provenance is inferred: a prompt hash seen in three or more sessions. Ad-hoc explicit "
-            "callers are excluded from the trace sample and covered by hand-written hard cases.",
-            "Budgets (site hourly/daily, global hourly) do not bind at this sample size; "
-            "ops/jev-call-sites-selftest.py exercises them.",
-            "Native /claude-api slash commands are unavailable in this runtime; the replay runs the real "
-            "client functions with the vendor transport recorded, no model call.",
-        ],
-        "evidence": {
-            "scorer": {"path": "evals/jev-judgments/score.py", "function": "score"},
-            "source": {"evals/jev-judgments/score.py": _sha(HERE / "score.py"),
-                       "evals/jev-judgments/run_eval.py": harness},
-            "dependencies": {p: _sha(REPO / p) for p in deps},
-            "expectations": {"path": "evals/jev-judgments/expectations.v1.json", "version": VERSION,
-                             "sha256": _sha(EXPECTATIONS)},
-            "cohorts": {arm: {"path": f"evals/jev-judgments/evidence/{arm}.jsonl",
-                              "sha256": _sha(HERE / "evidence" / f"{arm}.jsonl")} for arm in cohorts}},
-    }
-    refusal, retention = first["dimensions"]["wasted-call-refusal"], first["dimensions"]["judgment-point-retention"]
-    receipt["verdict"]["statement"] = (
-        f"Test split: wasted calls refused {refusal['baseline']['score']:.2f} -> {refusal['candidate']['score']:.2f} "
-        f"(delta {refusal['delta']['value']:+.2f}, 95% [{refusal['delta']['ci_low']:+.2f}, {refusal['delta']['ci_high']:+.2f}]); "
-        f"judgment points still paid {retention['baseline']['score']:.2f} -> {retention['candidate']['score']:.2f}. "
-        f"Paid share of all cases {paid['baseline']:.2f} -> {paid['candidate']:.2f}.")
-    blockers = kernel.critical_dimension_blockers(
-        [{field: d[field] for field in kernel.DIMENSION_FIELDS} for d in dims])
-    grader_ok = receipt["grader"]["validation"]["result"] == "pass"
-    stage_ok = not blockers and grader_ok
-    receipt["stage_results"][0]["status"] = "passed" if stage_ok else "failed"
-    primary = next(d for d in dims if d["dimension_id"] == receipt["primary_dimension"])
-    cheaper = receipt["cost"]["candidate_usd_per_case"] < receipt["cost"]["baseline_usd_per_case"]
-    resolved = receipt["noise_floor"] < receipt["min_useful_gain"]
-    if not stage_ok:
-        decision = "do_not_merge"
-        reason = "Blocked by " + ", ".join(blockers + ([] if grader_ok else ["grader controls"])) + "."
-    elif not resolved:
-        decision, reason = "inconclusive", "Noise floor exceeds the useful gain."
-    elif primary["direction_vs_baseline"] == "improved":
-        decision, reason = "ship", "Measured improvement with passing critical dimensions and controls."
-    else:
-        decision = "ship_cost_at_parity" if cheaper else "inconclusive"
-        reason = "Do not merge on quality grounds; primary gain is inside the noise."
-    if primary["direction_vs_baseline"] == "equivalent" and "do not merge on quality grounds" not in reason.lower():
-        reason += " Do not merge on quality grounds; primary gain is inside the noise."
-    receipt["verdict"]["decision"] = decision
-    receipt["verdict"]["statement"] += " " + reason
-    (HERE / "receipt.json").write_text(json.dumps(receipt, indent=1, sort_keys=True) + "\n")
-    print(receipt["verdict"]["statement"])
-    return 0 if decision in {"ship", "ship_cost_at_parity"} else 1
+    print(json.dumps(first, indent=2))
+    return 0
 
 
 def main(argv=None):

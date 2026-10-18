@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Pin the doctrine generation singleton in both rebuild and upgrade paths."""
 
-import re
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +17,7 @@ DB_GATE = ROOT / "ops" / "staging-retrieval-doctrine-seed-gate.py"
 
 
 def main() -> int:
-    migration = MIGRATION.read_text(encoding="utf-8")
+    migration = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     snapshotter = SNAPSHOTTER.read_text(encoding="utf-8")
     db_gate = DB_GATE.read_text(encoding="utf-8")
     vocab_tables = re.search(r'^VOCAB_TABLES="(.*?)"$', snapshotter, re.MULTILINE | re.DOTALL)

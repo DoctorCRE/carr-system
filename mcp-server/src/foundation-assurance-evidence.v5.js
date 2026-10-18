@@ -27,7 +27,7 @@ export const FOUNDATION_ASSURANCE_COMPARATORS = Object.freeze([
 ]);
 export const FOUNDATION_ASSURANCE_GITHUB_CHECKS = Object.freeze([
   "local-db-ci --class migration",
-  "main canary (gates, migration, types, freshness)",
+  "main canary",
   "ops/ci.sh --strict",
 ].sort());
 

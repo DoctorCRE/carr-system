@@ -128,3 +128,37 @@ carr_routine_exec() {
   fi
   env -i "${routine_env[@]}" "$@"
 }
+
+# carr_routine_credential_check KEY [KEY ...]
+# CHECK-ONLY: can every named key be loaded by carr_load_routine_db_env?
+# Exit 0 if so, 1 if not.  Prints nothing: stdout and stderr are discarded, the
+# load runs in a subshell so no value reaches the caller's environment, and the
+# key is tested for non-empty without ever being expanded into output.  Fails
+# closed: a missing file, loose permissions, a malformed file, an absent or
+# empty key and a missing key name all return 1.
+#
+# The control plane's restore.non_interactive_credential preflight asks this
+# instead of looking at the dispatcher's own environment, because
+# bin/restore-rehearse.sh loads its key through this file itself.
+carr_routine_credential_check() {
+  (( $# > 0 )) || return 1
+  local key
+  (
+    carr_clear_routine_db_env
+    for key in "$@"; do unset "$key"; done
+    carr_load_routine_db_env "$@" || exit 1
+    for key in "$@"; do
+      [[ -n "${(P)key:-}" ]] || exit 1
+    done
+    exit 0
+  ) >/dev/null 2>&1
+}
+
+# Executed directly (not sourced): `zsh bin/routine-credential-env.sh --check KEY...`.
+# Sourcing leaves ZSH_EVAL_CONTEXT ending in ":file" and falls straight through,
+# so every existing `source` caller is unaffected.
+if [[ "${ZSH_EVAL_CONTEXT:-}" != *:file* && "${1:-}" == --check ]]; then
+  shift
+  carr_routine_credential_check "$@"
+  exit $?
+fi

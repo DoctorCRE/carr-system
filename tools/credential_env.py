@@ -14,6 +14,7 @@ mode without touching how any interactive session authenticates.
 
 THE CONTRACT, held on every read:
   * only the NAMED keys are returned — nothing else in the file leaks out;
+  * values are read by lib/credential_file, the same way the shell reads them;
   * the file is refused outright if its permission bits are looser than
     600 (any group/other bit set) — a credential file the OS will let other
     local accounts read is not trusted, full stop;
@@ -29,7 +30,11 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib.credential_file import read_env_file  # noqa: E402
 
 DEFAULT_TOKENS_PATH = Path.home() / ".config" / "carr" / "tokens.env"
 
@@ -44,25 +49,6 @@ class TokensFilePermissionError(RuntimeError):
     The message names the path and the offending mode; it never includes
     file contents.
     """
-
-
-def _parse_env_lines(text: str) -> dict[str, str]:
-    """Parse plain NAME=value lines. Blank lines and '#' comments are skipped.
-    A surrounding matched pair of single or double quotes is stripped."""
-    values: dict[str, str] = {}
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        name, _, value = line.partition("=")
-        name = name.strip()
-        value = value.strip()
-        if not name:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        values[name] = value
-    return values
 
 
 def load_carr_tokens(names, *, path: "Path | str | None" = None) -> dict[str, str]:
@@ -93,11 +79,9 @@ def load_carr_tokens(names, *, path: "Path | str | None" = None) -> dict[str, st
         )
 
     try:
-        text = token_path.read_text(encoding="utf-8")
+        parsed = read_env_file(token_path)
     except OSError:
         return {}
-
-    parsed = _parse_env_lines(text)
     return {name: parsed[name] for name in wanted if name in parsed}
 
 

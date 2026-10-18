@@ -1,11 +1,3 @@
-// A multi-column CHECK reports `column: null`, and 219 of this database's
-// constraints span more than one column. Until 2026-09-18 a caller who broke
-// one was told a rule name and nothing else -- and in fact was told far less
-// than that, because pgConstraintError had no production caller at all and the
-// violation reached them as `unhandled_verb_failure` with a stack string.
-//
-// These tests hold both halves: that the translator is actually reached, and
-// that when it is reached on a multi-column rule it names the fields.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { pgConstraintError, describeConstraint, ToolError } from "../src/tools.js";
@@ -14,9 +6,6 @@ const violation = () => Object.assign(new Error("new row violates check constrai
   code: "23514", constraint: "deal_dates_ordered", table: "deal", column: undefined,
 });
 
-// A client that answers the catalog lookup the way Postgres would for a rule
-// spanning two columns. Named columns out of alphabetical order on purpose:
-// the query sorts, so a caller reading the answer gets a stable list.
 const catalogClient = (rows) => ({ query: async () => ({ rows }) });
 
 test("a multi-column refusal names the fields the rule is actually about", async () => {
@@ -54,9 +43,6 @@ test("a single-column refusal keeps its own hint, which is the better one", asyn
 });
 
 test("a catalog lookup that fails returns the refusal untouched", async () => {
-  // The refusal is already correct without enrichment. Trading a precise
-  // refusal for a database error ABOUT THE ENRICHMENT would be a strictly
-  // worse answer, and is the obvious way to get this wrong.
   const refusal = pgConstraintError(violation());
   const broken = { query: async () => { throw new Error("connection is gone"); } };
   const described = await describeConstraint(broken, refusal);
@@ -75,10 +61,6 @@ test("no client, no constraint name, and an empty catalog answer are all surviva
 });
 
 test("the server actually calls the translator -- the whole point", async () => {
-  // pgConstraintError was written, exported and tested on 2026-08-21 and had
-  // ZERO production callers until this change: the tests passed the entire
-  // time. This asserts the wiring, not the function, because the function was
-  // never the thing that was broken.
   const { readFileSync } = await import("node:fs");
   const server = readFileSync(new URL("../src/mcp.js", import.meta.url), "utf8");
   assert.match(server, /pgConstraintError\(e\)/,
@@ -87,10 +69,6 @@ test("the server actually calls the translator -- the whole point", async () => 
   assert.match(server, /await describeConstraint\(client, refusal\)/,
     "the enrichment must run on the still-open client inside callTool -- by " +
     "the time the RPC handler's catch runs, the pool is closed");
-  // mcp.js has another rollback in the closed engineering-controller route.
-  // Anchor on callTool before selecting the transaction rollback, or this
-  // wiring assertion can inspect an unrelated catch block and pass/fail on
-  // the wrong control flow.
   const callToolStart = server.indexOf("export async function callTool");
   assert.ok(callToolStart >= 0, "mcp.js must export callTool");
   const callToolBody = server.slice(callToolStart);

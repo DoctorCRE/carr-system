@@ -10,7 +10,7 @@ await c.connect();
 let checks=0;
 const equal=(a,b)=>{assert.deepEqual(a,b);checks++;};
 const events=[];
-const tools=leadAutomationTools({withEnvelope:async(_c,_a,_v,_args,f)=>f(),
+const tools=leadAutomationTools({invoices:{preview:async()=>[],apply:async()=>[]},withEnvelope:async(_c,_a,_v,_args,f)=>f(),
   writeEvent:async(db,actor,verb,type,id,change)=>{
     events.push(change);
     await db.query(`insert into event(occurred_at,actor_id,verb,subject_type,subject_id,field,old_value,new_value,cause)
@@ -91,7 +91,7 @@ try {
   equal(freshDryRun.moves.filter(m=>m.lead_id===lead),freshPreview);
   equal((await c.query('select stage from lead where id=$1',[lead])).rows[0].stage,'new');
   const freshAdvance=await tools['advance-leads'].handler(c,actor,{});
-  equal(freshAdvance.moves.filter(m=>m.lead_id===lead),freshPreview);
+  equal(freshAdvance.moves.filter(m=>m.lead_id===lead).map(({move_id,...m})=>m),freshPreview);
   equal((await c.query('select stage from lead where id=$1',[lead])).rows[0].stage,'qualified');
   equal((await c.query("select count(*)::int n from lead_stage_move where lead_id=$1 and from_stage='new' and to_stage='qualified' and status='applied'",[lead])).rows[0].n,2);
   await c.query("update lead set stage='new' where id=$1",[lead]);
@@ -128,3 +128,6 @@ try {
   console.log(`db-gate-proof: lead automation — ${checks} synthetic assertions; stage provenance, draft-only approval, replay, suppression, dry-run and search SQL`);
 } finally {await c.query('rollback');await c.end();}
 await import('./lead-automation-concurrency.postgres.mjs');
+
+await import('./automation-undo-archive-invoice.postgres.mjs');
+await import('./invoice-review-regressions.postgres.mjs');

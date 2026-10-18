@@ -285,15 +285,88 @@ class CallModeHttpTests(SemanticTestCase):
 
     def test_app_doctorcre_origin_is_allowed_alongside_dealroom(self) -> None:
         # Partners open the Deal Room at app.doctorcre.com; the record layer's
-        # own host keeps working. Both are exact entries, nothing wider.
+        # own host keeps working. The explicitly bound staging Worker origin
+        # also needs the same exact-origin browser bridge for V1 qualification.
         self.assertIn("https://app.doctorcre.com", call_mode.ALLOWED_ORIGINS)
         self.assertIn("https://dealroom.doctorcre.com", call_mode.ALLOWED_ORIGINS)
-        for origin in ("https://app.doctorcre.com", "https://dealroom.doctorcre.com"):
+        self.assertIn(
+            "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
+            call_mode.ALLOWED_ORIGINS,
+        )
+        for origin in (
+            "https://app.doctorcre.com",
+            "https://dealroom.doctorcre.com",
+            "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
+        ):
             handler = self.handler("/api/stop", b"{}", origin)
             with patch.object(call_mode, "stop_recording", return_value={"state": "idle"}) as stop:
                 handler.do_POST()
             handler.send_json.assert_called_once_with({"state": "idle"})
             stop.assert_called_once_with()
+
+    def test_staging_origin_preflight_and_state_read_carry_exact_cors_headers(self) -> None:
+        origin = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+        headers: list[tuple[str, str]] = []
+        handler = object.__new__(call_mode.CallModeHandler)
+        message = Message()
+        message["Origin"] = origin
+        message["Access-Control-Request-Method"] = "POST"
+        message["Access-Control-Request-Headers"] = "content-type, x-carr-call-mode"
+        handler.headers = message
+        handler.path = "/api/state"
+        handler.send_response = Mock()
+        handler.send_header = lambda name, value: headers.append((name, value))
+        handler.end_headers = Mock()
+
+        handler.do_OPTIONS()
+
+        handler.send_response.assert_called_once_with(204)
+        self.assertIn(("Access-Control-Allow-Origin", origin), headers)
+        self.assertIn(("Access-Control-Allow-Methods", "GET, POST, OPTIONS"), headers)
+        self.assertIn(("Access-Control-Allow-Headers", "Content-Type, X-CARR-Call-Mode"), headers)
+        self.assertIn(("Access-Control-Allow-Private-Network", "true"), headers)
+
+        headers.clear()
+        handler.wfile = io.BytesIO()
+        with patch.object(call_mode, "current_state", return_value={"state": "idle"}):
+            handler.do_GET()
+        self.assertIn(("Access-Control-Allow-Origin", origin), headers)
+        self.assertIn(("Access-Control-Allow-Private-Network", "true"), headers)
+
+    def test_unapproved_staging_lookalikes_and_arbitrary_origins_fail_preflight(self) -> None:
+        for origin in (
+            "http://doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
+            "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev:8443",
+            "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev.evil.test",
+            "https://elsewhere.test",
+        ):
+            handler = object.__new__(call_mode.CallModeHandler)
+            headers = Message()
+            headers["Origin"] = origin
+            handler.headers = headers
+            handler.path = "/api/state"
+            handler.send_json = Mock()
+            handler.wfile = io.BytesIO()
+            handler.do_OPTIONS()
+            handler.send_json.assert_called_once_with({"error": "origin_not_allowed"}, 403)
+
+    def test_staging_origin_does_not_bypass_call_mode_header_or_consent(self) -> None:
+        origin = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev"
+        body = b'{"mode":"weekly_deal_call","consent_confirmed":true}'
+        handler = self.handler("/api/start", body, origin)
+        handler.headers.replace_header(call_mode.POST_HEADER, "wrong")
+        with patch.object(call_mode, "start_recording") as start:
+            handler.do_POST()
+        handler.send_json.assert_called_once_with({"error": "call_mode_header_required"}, 403)
+        start.assert_not_called()
+
+        handler = self.handler("/api/start", b'{"mode":"weekly_deal_call"}', origin)
+        with patch.object(call_mode, "start_recording") as start:
+            handler.do_POST()
+        handler.send_json.assert_called_once_with(
+            {"error": "confirm that everyone has been told before recording"}, 409
+        )
+        start.assert_not_called()
 
     def test_lookalike_origins_are_refused(self) -> None:
         for origin in (
@@ -647,6 +720,19 @@ class PostCallTests(SemanticTestCase):
                 post_call.default_distiller({"session": self.session.name, "context": self.context, "transcript": {"segments": []}})
         resident.assert_called_once()
         llama.assert_not_called()
+
+    def test_switched_off_distiller_defers_without_dropping_call_data(self) -> None:
+        post_call.store_context(self.session, self.context)
+        state = Path(self.tmp.name) / "flash-state"
+        state.mkdir()
+        (state / "flash.off").touch()
+        with patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(state)}), \
+             patch.object(post_call, "resident_flash_distiller", side_effect=AssertionError("Flash was invoked")):
+            status = post_call.process_session(self.session)
+        self.assertEqual(status["state"], "blocked")
+        self.assertEqual(status["reason"], "flash is switched off")
+        self.assertTrue((self.session / "transcript.json").exists())
+        self.assertIsNotNone(post_call.read_json(self.session / post_call.CONTEXT_FILE))
 
     def test_default_distiller_prefers_the_resident_server_and_never_falls_back_on_a_content_failure(self) -> None:
         with patch.object(post_call, "resident_flash_distiller", return_value=self.output()) as resident, \

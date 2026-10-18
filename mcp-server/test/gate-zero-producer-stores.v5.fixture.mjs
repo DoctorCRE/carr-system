@@ -219,7 +219,7 @@ function unfinished(headSha) {
 
 const CI = "ops/ci.sh --strict";
 const DB = "local-db-ci --class migration";
-const CANARY_CHECK = "main canary (gates, migration, types, freshness)";
+const CANARY_CHECK = "main canary";
 
 /**
  * Keyed by revision AND check name, because the fault is a property of the pair:

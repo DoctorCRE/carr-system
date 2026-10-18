@@ -15,6 +15,14 @@ from lib import claude_continuity_config as continuity_config  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 MODES = continuity_config.MODES
+# Exact command in 52496941a, cba693f88 and 5dc4e5529, before #1817.
+PRIOR_CANONICAL_COMMANDS = (
+    "CARR_MCP_CLIENT_PROFILE=claude-continuity /usr/bin/env python3 "
+    "{{REPO}}/ops/claude-continuity-hook.py",
+)
+PRIOR_CANONICAL_EVENTS = frozenset({
+    "UserPromptSubmit", "PostToolUse", "PreCompact", "SessionStart", "Stop",
+})
 
 
 def settings_path() -> pathlib.Path:
@@ -66,12 +74,33 @@ def desired_mcp_server() -> dict:
     return continuity_config.load(REPO).mcp_server
 
 
+def upgrade_prior_commands(current: dict) -> dict:
+    result = copy.deepcopy(current)
+    hooks = result.get("hooks")
+    if not isinstance(hooks, dict):
+        return result
+    command = desired_hooks()["PreCompact"][0]["hooks"][0]["command"]
+    for event in PRIOR_CANONICAL_EVENTS:
+        entries = hooks.get(event)
+        if not isinstance(entries, list):
+            continue
+        for template in PRIOR_CANONICAL_COMMANDS:
+            prior: dict = {"hooks": [{"type": "command", "command": template.replace("{{REPO}}", str(REPO)),
+                                "timeout": 10}]}
+            if event == "SessionStart":
+                prior["matcher"] = "^(startup|compact|resume)$"
+            for entry in entries:
+                if entry == prior:
+                    entry["hooks"][0]["command"] = command
+    return result
+
+
 def install_document(current: dict) -> dict:
-    return continuity_config.add_overlay(current, continuity_config.load(REPO))
+    return continuity_config.add_overlay(upgrade_prior_commands(current), continuity_config.load(REPO))
 
 
 def remove_document(current: dict) -> dict:
-    return continuity_config.remove_overlay(current, continuity_config.load(REPO))
+    return continuity_config.remove_overlay(upgrade_prior_commands(current), continuity_config.load(REPO))
 
 
 def install_mcp_document(current: dict) -> dict:
@@ -159,7 +188,7 @@ def verify() -> tuple[bool, str]:
         continuity_config.validate_mcp(_load_json(claude_config_path()), contract, required=True)
     except RuntimeError as exc:
         return False, str(exc)
-    return True, f"all five Claude continuity hooks and dedicated MCP server match; mode={mode_name}"
+    return True, f"Claude continuity hooks and dedicated MCP server match; mode={mode_name}"
 
 
 def main() -> int:

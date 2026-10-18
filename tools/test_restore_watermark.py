@@ -54,6 +54,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from lib import recovery_evidence  # noqa: E402
+from lib.disposable_pg_fixture import DisposablePostgres
 TOOL = REPO / "tools" / "restore-watermark.py"
 REHEARSE = REPO / "bin" / "restore-rehearse.sh"
 EVALUATOR = REPO / "mcp-server" / "bin" / "recovery-matrix-evaluate.mjs"
@@ -1442,24 +1443,21 @@ class EndToEndDisposableCluster(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bins = _pg_bins()
-        cls.tmp = Path(tempfile.mkdtemp(prefix="carr-f08-e2e-"))
+        # The postmaster requires a valid locale on macOS.
+        env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+        cls.fixture = DisposablePostgres("carr-f08-e2e-", cls.bins["pg_ctl"], env=env)
+        cls.addClassCleanup(cls.fixture.close)
+        cls.tmp = cls.fixture.root
         with socket.socket() as s:
             s.bind(("127.0.0.1", 0))
             cls.port = str(s.getsockname()[1])
         data = cls.tmp / "data"
-        # The postmaster refuses to start without a valid locale in its environment on macOS.
-        env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
-        subprocess.run([cls.bins["initdb"], "-D", str(data), "-U", "carr_ci", "--auth=trust", "-E", "UTF8",
+        cls.fixture.run([cls.bins["initdb"], "-D", str(data), "-U", "carr_ci", "--auth=trust", "-E", "UTF8",
                         "--locale=C"], check=True, capture_output=True, env=env)
-        subprocess.run([cls.bins["pg_ctl"], "-D", str(data), "-l", str(cls.tmp / "log"), "-w", "-o",
+        cls.fixture.run([cls.bins["pg_ctl"], "-D", str(data), "-l", str(cls.tmp / "log"), "-w", "-o",
                         f"-p {cls.port} -k {cls.tmp} -c listen_addresses='' -c timezone=UTC", "start"],
                        check=True, capture_output=True, env=env)
         cls.data = data
-
-    @classmethod
-    def tearDownClass(cls):
-        subprocess.run([cls.bins["pg_ctl"], "-D", str(cls.data), "-m", "immediate", "stop"], capture_output=True)
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def dsn(self, db):
         return f"host={self.tmp} port={self.port} user=carr_ci dbname={db}"

@@ -46,8 +46,7 @@
 // which only a sealed registry successor and its migration may do. This module
 // therefore has no shebang and no command-line main; the one thing that runs it
 // is bin/deploy-worker.sh, which imports `sealCandidateManifest` in a single
-// `node --input-type=module` evaluation and stamps what comes back. The same
-// shape lib/canonical_freshness.py already carries for the same reason.
+// `node --input-type=module` evaluation and stamps what comes back.
 
 import { execFileSync } from "node:child_process";
 import { canonicalJson, digest } from "../src/artifact-trust.js";

@@ -1,11 +1,3 @@
-// catch-me-up, find-and-catch-up and prepare-conversation run on the
-// read-only WRITER route (app_writer -> carr_writer) since #1476, because
-// catch-me-up reads the actor-bound tool_call ledger. carr_writer had never
-// been granted the reader views those handlers read (v_subject_timeline,
-// v_deal_board), so release r-2026-10-03-01's golden suite failed with 42501
-// on `catch-me-up V-CPA-006`. This drives the real handlers as carr_writer
-// against the migrated throwaway database, so a view grant that the route
-// depends on cannot go missing again unnoticed.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +5,6 @@ import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
 
 const dsn = process.env.CARR_WRITER_READ_TEST_DATABASE_URL;
-// Refuse unsafe configuration before any database test can construct a client.
 if (dsn) assert.match(dsn, /^postgres(?:ql)?:\/\/[^@/]*@(?:127\.0\.0\.1|localhost):/);
 
 const TIMELINE_VERBS = ['catch-me-up', 'find-and-catch-up', 'prepare-conversation'];

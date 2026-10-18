@@ -11,13 +11,18 @@ claim, completion/failure, or successor-trigger path rather than a proxy lock.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import fnmatch
+from migration_source import migration_names, read_migration
+
+
 import importlib.util
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
-import sys
 import time
 from threading import Event, Thread
 import uuid
@@ -465,9 +470,9 @@ def seed_malformed_dependency_refusal(cur, fixture_row, claim, dependent_slice_r
 
 
 def assert_static_contract():
-    migration = (ROOT / "migrations/0335_engineering_controller_currentness.sql").read_text()
+    migration = read_migration(ROOT, "0335_engineering_controller_currentness.sql")
     engineering_migrations = "\n".join(
-        path.read_text() for path in (ROOT / "migrations").glob("*_engineering*.sql")
+        read_migration(path.parent.parent, path.name) for path in ((ROOT / "migrations") / name for name in migration_names((ROOT / "migrations").parent) if fnmatch.fnmatchcase(name, "*_engineering*.sql"))
     )
     runtime = (ROOT / "mcp-server/src/engineering-runtime.js").read_text()
     raw_body = migration[migration.index("create or replace function ops.engineering_record_slice_receipt"):

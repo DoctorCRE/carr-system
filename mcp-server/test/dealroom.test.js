@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -120,9 +121,10 @@ class FakeClient {
         e.subject_id === params[1] && e.field === params[2]).map(e => ({ recorded_at: e.recorded_at, id: e.id })) };
     }
     if (sql.includes("dealroom:latest-field-event")) {
-      const [dealId, field, baseTime, baseId] = params;
+      const [dealId, field, baseId] = params;
+      const base = baseId ? this.events.find(e => e.id === baseId) : null;
       const rows = this.events.filter(e => e.subject_type === "deal" && e.subject_id === dealId && e.field === field)
-        .filter(e => !baseTime || this.tupleAfter(e, String(baseTime), String(baseId)))
+        .filter(e => !base || this.tupleAfter(e, base.recorded_at, base.id))
         .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at) || b.id.localeCompare(a.id));
       return { rows: rows.slice(0, 1).map(e => ({ event_id: e.id, actor_id: e.actor_id,
         actor: e.actor, value: e.new_value?.[field] ?? null })) };
@@ -654,8 +656,8 @@ test("the two base statements hold together as written, since no test can run th
   // reader cannot check by eye: the correlation, the parameter count, and the
   // distinct-on/order-by agreement Postgres requires.
   const tools = await readFile(new URL("../src/tools.js", import.meta.url), "utf8");
-  const dealRoomApi = await readFile(
-    new URL("../../migrations/0079_deal_room_api.sql", import.meta.url), "utf8");
+  const dealRoomApi = await readMigration(
+    new URL("../../migrations/0079_deal_room_api.sql", import.meta.url));
 
   const board = tools.slice(tools.indexOf('"deal-room-board": {'),
     tools.indexOf("dealroom:board-field-base") + 200);
@@ -1184,7 +1186,7 @@ test("accepted Call Mode actions appear in the normal Deal Room action payload w
   const page = await call("get-deal-room", db, actors.joe, { deal: "Deal Alpha" });
   assert.deepEqual(page.next_actions.map(action => action.description).sort(), ["Call Dr. Alpha", "Review survey"]);
   const migration = await import("node:fs/promises").then(fs =>
-    fs.readFile(new URL("../../migrations/0094_call_mode_post_call.sql", import.meta.url), "utf8"));
+    readMigration(new URL("../../migrations/0094_call_mode_post_call.sql", import.meta.url)));
   assert.match(migration, /create or replace view v_deal_room_action[\s\S]*capture_post_call_action/);
   assert.match(migration, /create or replace view v_today_triage[\s\S]*post_call_action/);
 });

@@ -312,28 +312,6 @@
       }
     },
     {
-      "id": "normal-drift-decision-history",
-      "class": "normal_runtime",
-      "sources": [
-        "hooks/drift-claim-gate.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "drift claim hook",
-      "consumers": [
-        "defect filing context"
-      ],
-      "canonicality": "canonical",
-      "replacement": {
-        "status": "accepted",
-        "target": "record-layer decision history; retirement acceptance remains outstanding",
-        "normal_path": "normal_path_repointed_to_record_view",
-        "accepted_by": "joe",
-        "accepted_on": "2026-08-22",
-        "evidence_ref": "decision 463295d5 — Joe approves Drive retirement across all dependency classes",
-        "verified": "hooks/drift-claim-gate.py reads the record-layer decision history; the named noncanonical path is test and recovery injection only."
-      }
-    },
-    {
       "id": "normal-routine-child-vault",
       "class": "recovery",
       "sources": [
@@ -465,8 +443,7 @@
       "id": "projection-rule-render-verifiers",
       "class": "projection",
       "sources": [
-        "ops/rule-render-markup-check.py",
-        "ops/rule-enforcement-map-check.py"
+        "ops/rule-render-markup-check.py"
       ],
       "path_pattern": "{{VAULT}}/**",
       "producer": "compiled-rule verification gates",
@@ -538,7 +515,6 @@
         "pipelines/import_brokers.py",
         "pipelines/import_candidate_pool.py",
         "pipelines/import_decision_history.py",
-        "pipelines/import_dossier_analysis.py",
         "pipelines/import_idea_bank.py",
         "pipelines/import_loops.py",
         "pipelines/import_source_captures.py",
@@ -653,7 +629,6 @@
         "ops/control-plane-runtime-selftest.py",
         "ops/learning-credential-boundary-selftest.py",
         "ops/learning-monthly-credential-selftest.py",
-        "ops/rule-enforcement-map-selftest.py",
         "workspace/test/**"
       ],
       "path_pattern": "{{VAULT}}/**",

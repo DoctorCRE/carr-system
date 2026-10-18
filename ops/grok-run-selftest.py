@@ -25,6 +25,161 @@ spec.loader.exec_module(runner)
 
 
 class GrokRunTests(unittest.TestCase):
+    def test_full_report_survives_a_later_empty_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "stream.ndjson"
+            fixture.write_text('\n'.join(map(json.dumps, [
+                {"type": "text", "data": "First report."},
+                {"type": "usage", "messageId": "one"},
+                {"type": "text", "data": "Second report."},
+                {"type": "usage", "messageId": "two"},
+                {"type": "usage", "messageId": "empty"},
+                {"type": "end", "stopReason": "end_turn", "modelUsage": {
+                    "grok-4.7-build": {"modelCalls": 3}}}])) + '\n')
+            proc = subprocess.run(["bash", str(RUNNER), "--prompt", "test"],
+                env={**os.environ, "GROK_RUN_FAKE_NDJSON": str(fixture)},
+                capture_output=True, text=True, timeout=10)
+            self.assertEqual(proc.returncode, 0)
+            self.assertEqual(proc.stdout, "First report.\n\nSecond report.\n")
+    def test_default_runner_refuses_unsafe_urls_before_preflight_or_invocation(self):
+        for writable in (False, True):
+            for url in ("https://fixture-user:fixture-secret@example.com/post",
+                        "https://example.com/post?access_token=fixture-secret",
+                        "http://127.0.0.1/source", "http://[::1]/source",
+                        "http://service.internal/source"):
+                with self.subTest(writable=writable, url=url), tempfile.TemporaryDirectory() as td:
+                    receipt_path = Path(td) / "receipt.json"
+                    argv = ["grok-run", "--prompt", "Explain " + url]
+                    if writable:
+                        argv.append("--writable")
+                    with mock.patch.object(sys, "argv", argv), \
+                            mock.patch.dict(os.environ, {"GROK_RUN_RECEIPT": str(receipt_path)}, clear=True), \
+                            mock.patch.object(runner, "preflight", return_value="1.0.0") as preflight, \
+                            mock.patch.object(runner, "invoke_cli", return_value=subprocess.CompletedProcess(
+                                [], 0, (FIXTURES / "good.ndjson").read_text(), "")) as provider, \
+                            mock.patch.object(sys, "stdout", io.StringIO()) as stdout, \
+                            mock.patch.object(sys, "stderr", io.StringIO()) as stderr:
+                        self.assertEqual(runner.main(), 6)
+                        preflight.assert_not_called()
+                        provider.assert_not_called()
+                        self.assertEqual(stdout.getvalue(), "")
+                        receipt = json.loads(receipt_path.read_text())
+                        self.assertEqual((receipt["status"], receipt["code"], receipt["detail"]),
+                                         ("failed", 6, "invalid_retrieval_url"))
+                        diagnostics = stdout.getvalue() + stderr.getvalue() + receipt_path.read_text()
+                        self.assertNotIn("fixture-user", diagnostics)
+                        self.assertNotIn("fixture-secret", diagnostics)
+
+    def test_link_in_prose_prompt_does_not_enable_retrieval_even_when_writable(self):
+        for writable in (False, True):
+            run, receipt = self.run_fixture("good.ndjson", "--prompt",
+                "Council brief: weigh https://github.com/example/repo/pull/1 and answer in prose.",
+                *(["--writable"] if writable else []))
+            self.assertEqual(run.returncode, 0)
+            self.assertEqual(run.stdout, "Hello world\n")
+            self.assertEqual(receipt["actual_models"], ["grok-4.7-build"])
+
+    def test_explicit_retrieval_outcomes_share_codes_and_receipt_schema(self):
+        url = "https://example.com/source"
+        end = json.loads((FIXTURES / "hook-turns.ndjson").read_text().splitlines()[-1])
+        source = json.dumps({"retrieval": {"requested_urls": [url], "source_urls": [url],
+            "sources": [{"url": url, "text": "Original source"}],
+            "unresolved_portions": [], "status": "complete"}})
+        schemas = []
+        for text, terminal, code in ((source, end, 0), ("Noted", end, 6),
+                (source, {**end, "stopReason": "cancelled"}, 4),
+                (source, {**end, "modelUsage": {"grok-4.6": {"modelCalls": 1}}}, 5)):
+            with tempfile.TemporaryDirectory() as td:
+                fixture = Path(td) / "stream.ndjson"
+                fixture.write_text(json.dumps({"type": "text", "data": text}) + "\n" + json.dumps(terminal))
+                receipt_path = Path(td) / "receipt.json"
+                env = dict(os.environ, GROK_RUN_FAKE_NDJSON=str(fixture), GROK_RUN_RECEIPT=str(receipt_path))
+                run = subprocess.run(["bash", str(RUNNER), "--retrieve", "--prompt", "Read " + url],
+                    env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(run.returncode, code, run.stderr)
+                outcome = json.loads(run.stdout)
+                self.assertEqual(outcome["code"], code)
+                receipt = json.loads(receipt_path.read_text())
+                self.assertIn("cli_version", receipt)
+                self.assertIn("actual_models", receipt)
+                self.assertIn("num_turns", receipt)
+                schemas.append(set(receipt))
+                self.assertNotIn("Original source", receipt_path.read_text())
+        self.assertTrue(all(schema == schemas[0] for schema in schemas))
+
+    def test_explicit_retrieval_sign_in_refusal_retains_code_three(self):
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(sys, "argv", ["grok-run", "--retrieve", "--prompt", "Read https://example.com"]), \
+                mock.patch.dict(os.environ, {"GROK_RUN_RECEIPT": str(Path(td) / "receipt.json")}, clear=True), \
+                mock.patch.object(runner, "preflight", side_effect=runner.PreflightError("Sign in", 3)), \
+                mock.patch.object(runner, "sign_in_alert") as alert, \
+                mock.patch.object(sys, "stdout", io.StringIO()) as stdout, \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(runner.main(), 3)
+            self.assertEqual(json.loads(stdout.getvalue())["detail"], "grok_sign_in_required")
+            self.assertEqual(json.loads((Path(td) / "receipt.json").read_text())["code"], 3)
+            alert.assert_called_once()
+
+    def test_credential_url_is_refused_before_preflight_without_secret_diagnostics(self):
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(sys, "argv", ["grok-run", "--retrieve", "--prompt",
+                    "Retrieve https://fixture-user:fixture-secret@example.com/post"]), \
+                mock.patch.dict(os.environ, {"GROK_RUN_RECEIPT": str(Path(td) / "receipt.json")}, clear=True), \
+                mock.patch.object(runner, "preflight", side_effect=runner.PreflightError("fixture")) as preflight, \
+                mock.patch.object(sys, "stdout", io.StringIO()) as stdout, \
+                mock.patch.object(sys, "stderr", io.StringIO()) as stderr:
+            self.assertEqual(runner.main(), 6)
+            preflight.assert_not_called()
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["detail"], "invalid_retrieval_url")
+            diagnostics = stdout.getvalue() + stderr.getvalue() + Path(result["diagnostic_path"]).read_text()
+            self.assertNotIn("fixture-user", diagnostics)
+            self.assertNotIn("fixture-secret", diagnostics)
+
+    def test_retrieval_default_receipt_survives_stderr_redirection(self):
+        with tempfile.TemporaryDirectory() as td:
+            env = dict(os.environ, HOME=td, GROK_RUN_FAKE_NDJSON=str(FIXTURES / "hook-turns.ndjson"))
+            env.pop("GROK_RUN_RECEIPT", None)
+            run = subprocess.run(["bash", str(RUNNER), "--effort", "low", "--max-turns", "2",
+                "--timeout-seconds", "10", "--retrieve", "--prompt", "Retrieve https://example.com/source"],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10)
+            self.assertEqual(run.returncode, 6)
+            result = json.loads(run.stdout)
+            self.assertEqual(result["provider_metadata"]["effort"], "low")
+            path = Path(result["diagnostic_path"])
+            self.assertTrue(path.is_relative_to(Path(td) / ".local/state/carr/grok-runs"))
+            receipt = json.loads(path.read_text())
+            self.assertEqual((receipt["effort"], receipt["max_turns"], receipt["timeout_seconds"]), ("low", 2, 10))
+            self.assertNotIn("Hello world", path.read_text())
+
+    def test_retrieval_preflight_failure_has_sanitized_file_receipt(self):
+        with tempfile.TemporaryDirectory() as td, \
+                mock.patch.object(sys, "argv", ["grok-run", "--retrieve", "--prompt", "Retrieve https://example.com/source"]), \
+                mock.patch.dict(os.environ, {"GROK_RUN_RECEIPT": str(Path(td) / "receipt.json")}, clear=True), \
+                mock.patch.object(runner, "preflight", side_effect=runner.PreflightError("grok-run: CLI upgrade failed")), \
+                mock.patch.object(sys, "stdout", io.StringIO()) as stdout, \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(runner.main(), 1)
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["detail"], "grok_preflight_failed")
+            self.assertEqual(json.loads(Path(result["diagnostic_path"]).read_text())["status"], "failed")
+
+    def test_retrieval_failure_keeps_receipt_when_stderr_is_discarded(self):
+        with tempfile.TemporaryDirectory() as td:
+            fixture = Path(td) / "answer.ndjson"
+            end = json.loads((FIXTURES / "hook-turns.ndjson").read_text().splitlines()[-1])
+            fixture.write_text(json.dumps({"type": "text", "data": "No further action."}) + "\n" + json.dumps(end))
+            receipt_path = Path(td) / "receipt.json"
+            env = dict(os.environ, GROK_RUN_FAKE_NDJSON=str(fixture), GROK_RUN_RECEIPT=str(receipt_path))
+            run = subprocess.run(["bash", str(RUNNER), "--retrieve", "--prompt", "Retrieve https://example.com/post"],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10)
+            self.assertEqual(run.returncode, 6)
+            result = json.loads(run.stdout)
+            self.assertEqual(result["retrieval"]["status"], "unusable_retrieval")
+            receipt = json.loads(receipt_path.read_text())
+            self.assertEqual(receipt["detail"], "unusable_retrieval")
+            self.assertEqual(result["diagnostic_path"], str(receipt_path))
+
     def test_sign_in_exit_alerts_once_without_provider_diagnostics(self):
         with mock.patch.object(sys, "argv", ["grok-run", "--prompt", "test"]), \
                 mock.patch.dict(os.environ, {}, clear=True), \
@@ -34,6 +189,15 @@ class GrokRunTests(unittest.TestCase):
             self.assertEqual(runner.main(), 3)
             alert.assert_called_once_with()
             self.assertEqual(stderr.getvalue().strip(), "Grok needs sign-in: run grok login")
+
+    def test_health_probe_owns_the_sign_in_alert(self):
+        with mock.patch.object(sys, "argv", ["grok-run", "--prompt", "test", "--no-sign-in-alert"]), \
+                mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(runner, "preflight", side_effect=runner.PreflightError("Grok needs sign-in", 3)), \
+                mock.patch.object(runner, "sign_in_alert") as alert, \
+                mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(runner.main(), 3)
+            alert.assert_not_called()
 
     def test_alert_failure_preserves_sign_in_exit_and_reports_failure(self):
         with mock.patch.object(sys, "argv", ["grok-run", "--prompt", "test"]), \
@@ -45,25 +209,23 @@ class GrokRunTests(unittest.TestCase):
             self.assertIn("alert FAILED", stderr.getvalue())
             self.assertNotIn("private diagnostic", stderr.getvalue())
 
-    def test_unattributed_hook_turns_cannot_nominate_an_earlier_answer(self):
-        # Minimized from the private 2026-10-02 Grok hook-turn capture. Retain
-        # response/usage boundaries; replace source prose and omit rule text.
+    def test_wrapper_report_and_desk_last_message_have_distinct_contracts(self):
         raw = (FIXTURES / "hook-turns.ndjson").read_text()
-        text, _, code = runner.parse_output(raw.splitlines(), "fixture")
+        parsed = grok_wire.parse_result(raw, 0, require_identity=False)
+        text, code = parsed["result"], parsed["code"]
         self.assertEqual(code, 0)
-        # This historical capture has no task/response provenance. Its prose
-        # cannot authorize replacing the final response with an earlier one.
-        self.assertEqual(text, "Noted. Standing by.")
-        desk = grok_wire.parse_result(raw, 0)
-        self.assertEqual(desk["status"], "completed")
-        self.assertEqual(desk["result"], text)
+        self.assertIn("Fetched post: the announced skill is example-pro.", text)
+        self.assertTrue(text.startswith("I will fetch the post.\n\n"))
+        self.assertEqual(text.count("Noted. Standing by."), 5)
+        self.assertEqual(grok_wire.parse_result(raw, 0)["result"], "Noted. Standing by.")
 
     def test_short_literal_answers_are_preserved(self):
         end = json.loads((FIXTURES / "hook-turns.ndjson").read_text().splitlines()[-1])
         for ack in ("Noted. Standing by.", "Noted. No tools were called.", "No action."):
             with self.subTest(ack=ack):
                 raw = [json.dumps({"type": "text", "data": ack}), json.dumps(end)]
-                text, _, code = runner.parse_output(raw, "fixture")
+                parsed = grok_wire.parse_result("\n".join(raw), 0)
+                text, code = parsed["result"], parsed["code"]
                 self.assertEqual(text, ack)
                 self.assertEqual(code, 0)
 
@@ -85,12 +247,13 @@ class GrokRunTests(unittest.TestCase):
                                 mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(sys, 'stdout', io.StringIO()) as stdout, \
                                 mock.patch.object(sys, 'stderr', io.StringIO()):
                             self.assertEqual(runner.main(), 0)
-                            self.assertEqual(stdout.getvalue().strip(), answer)
+                            self.assertEqual(stdout.getvalue().strip(), ("The boot stopped after page 1.\n\n" if earlier else "") + answer)
 
     def test_latest_short_substantive_answer_wins(self):
         events = [json.loads(line) for line in (FIXTURES / "hook-turns.ndjson").read_text().splitlines()]
         events[-1:-1] = [{"type": "text", "data": "The answer is 42."}, {"type": "usage"}]
-        text, _, code = runner.parse_output(map(json.dumps, events), "fixture")
+        parsed = grok_wire.parse_result("\n".join(map(json.dumps, events)), 0)
+        text, code = parsed["result"], parsed["code"]
         self.assertEqual((text, code), ("The answer is 42.", 0))
 
     def test_timeout_option_reaches_provider_and_preserves_default(self):
@@ -132,7 +295,8 @@ class GrokRunTests(unittest.TestCase):
         run, receipt = self.run_fixture("good.ndjson")
         self.assertEqual(run.returncode, 0)
         self.assertEqual(run.stdout, "Hello world\n")
-        self.assertEqual(receipt, {
+        self.assertEqual({key: receipt[key] for key in ("requested_model", "actual_models",
+            "stopReason", "num_turns", "cost_usd", "cli_version")}, {
             "requested_model": "grok-4.7", "actual_models": ["grok-4.7-build"],
             "stopReason": "end_turn", "num_turns": 2, "cost_usd": 0.012,
             "cli_version": "fixture",
@@ -179,7 +343,7 @@ class GrokRunTests(unittest.TestCase):
     def test_recorded_live_cli_cost_and_text(self):
         run, receipt = self.run_fixture("live-ok.ndjson")
         self.assertEqual(run.returncode, 0)
-        self.assertEqual(run.stdout, "OK\n")
+        self.assertEqual(run.stdout, "\n\n".join(["OK"] * 9) + "\n")
         self.assertEqual(receipt["actual_models"], ["grok-4.7-build"])
         self.assertEqual(receipt["num_turns"], 9)
         self.assertEqual(receipt["cost_usd"], 0.04628488)

@@ -1,0 +1,2626 @@
+{
+  "version": "retrieval-real-misses-run/v1",
+  "measured_at": "2026-10-06T14:29:31.058499+00:00",
+  "runner_sha256": "a66cd32d38f3147da026f471e4bb66fe7f45790830fc95eab6e7216e15021b2c",
+  "source_revision": "b4b912c5152b2a42a22ba1c127e03f8858fd4e25",
+  "routing_sha256": {
+    "ops/config/rule-routes.v1.json": "a430be96f45260f858f9ad021064a103d0b80cb32e3fbd04b9c9782b4c64714e",
+    "ops/config/rule-jit-triggers.v1.json": "b0b23e68c4121e649b82f5d7f93704f1574e2a7ce798a5e3d823b1322c04dd59",
+    "ops/rule_trigger_delivery.py": "773911b40433f70242b7b85eb33c64a487e8be20dd6c9f2ba28ac70daf10edb1",
+    "lib/rule_routes.py": "84f227f016caa8424bcd98bf0acb68424f22bc48437965d244de235f44f51d62"
+  },
+  "fixture_sha256": "c5b28457205ea2234d6d377b5ab016111f186cf0b33dbc036980a2a37749bff5",
+  "observations": [
+    {
+      "case_id": "m01-01",
+      "candidates": [
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m01-02",
+      "candidates": [
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m01-03",
+      "candidates": [
+        {
+          "refs": [
+            "L-100"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": "needs_disambiguation",
+      "fallback": null
+    },
+    {
+      "case_id": "m02-01",
+      "candidates": [],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m02-02",
+      "candidates": [
+        {
+          "refs": [
+            "deal:8825a116-9bbf-4153-95b3-f5adf722f4d3"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m02-03",
+      "candidates": [
+        {
+          "refs": [
+            "deal:9bee85b9-d005-47ee-80a3-08fc44357ce2"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m03-01",
+      "candidates": [],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m03-02",
+      "candidates": [
+        {
+          "refs": [
+            "decision:50d7b806-a0bb-4fa3-92b4-6d262950dbeb"
+          ],
+          "eligible": false
+        },
+        {
+          "refs": [
+            "decision:e58ecfc3-d5da-4f64-a8cd-8f34158244af"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:52d57f12-e439-4593-9d80-87e2ac6a13d0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:47c65408-573b-4d6b-ba38-e32d4f4f0999"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m03-03",
+      "candidates": [
+        {
+          "refs": [
+            "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:443fe82a-bfad-4a19-9536-58b26513553a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:04101316-689f-4f91-b65c-fc3f9a60966a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:2a481bc0-63bf-40dc-9bfb-8187bd3e44b4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:83bd13cf-52cb-4d2b-93ae-ebb79190cd65"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m04-01",
+      "candidates": [
+        {
+          "refs": [
+            "rule:015183f5"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:0156e9fa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:018ce972"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:08c4eda2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1021fa84"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:152ceb65"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:173119a8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:179be4b8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1c21263c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1c42d80c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1d50a3bb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1f3a7372"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1fddcffb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:2271e684"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:27277539"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:2b889e80"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:347a9ca6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:3578d799"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:38b15dc6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:3a9dbafd"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:43e2ef76"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:49c627cc"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4a77c35d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4e104d4c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4f7c348f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4fae20f4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:58cef3a1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:590b11e1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:596f7549"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:5be2f462"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:6330bec8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:661d7757"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:6a4e6283"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:73381d78"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:767f9b41"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:76fcbed6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:7e9739f2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:847f9995"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:8c1e6057"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9310827b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9530fb1c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:95e76c1f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9730f565"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:97326357"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a3da3d39"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a3f6c7f9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a6e6ab4e"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a9ecd5b4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:b1521526"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:b3ea627f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c1db316c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c315befa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c864b8cb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:cd84d22a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d5dcfe26"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d7f74c93"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d8c9b1f0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d9874334"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d9ce2b08"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:dcf98880"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:df8f1da0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e313a3ca"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e4d965d9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e8868cbe"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:eaa31ac5"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:efbdfb1a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f04a05aa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f47a8fe9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f5beac20"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f673326b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fa217e48"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fc21a431"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fc4d7753"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null
+    },
+    {
+      "case_id": "m04-02",
+      "candidates": [],
+      "error": "read_command_failed"
+    },
+    {
+      "case_id": "m04-03",
+      "candidates": [
+        {
+          "refs": [
+            "rule:015183f5"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:0156e9fa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:018ce972"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:08c4eda2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1021fa84"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:152ceb65"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:173119a8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:179be4b8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1c21263c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1c42d80c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1d50a3bb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1f3a7372"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:1fddcffb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:2271e684"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:27277539"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:2b889e80"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:347a9ca6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:3578d799"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:38b15dc6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:3a9dbafd"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:43e2ef76"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:49c627cc"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4a77c35d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4e104d4c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4f7c348f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:4fae20f4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:58cef3a1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:590b11e1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:596f7549"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:5be2f462"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:6330bec8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:661d7757"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:6a4e6283"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:73381d78"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:767f9b41"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:76fcbed6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:7e9739f2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:847f9995"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:8c1e6057"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9310827b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9530fb1c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:95e76c1f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:9730f565"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:97326357"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a3da3d39"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a3f6c7f9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a6e6ab4e"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:a9ecd5b4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:b1521526"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:b3ea627f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c1db316c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c315befa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:c864b8cb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:cd84d22a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d5dcfe26"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d7f74c93"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d8c9b1f0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d9874334"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:d9ce2b08"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:dcf98880"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:df8f1da0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e313a3ca"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e4d965d9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:e8868cbe"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:eaa31ac5"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:efbdfb1a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f04a05aa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f47a8fe9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f5beac20"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:f673326b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fa217e48"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fc21a431"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "rule:fc4d7753"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null
+    },
+    {
+      "case_id": "m05-01",
+      "candidates": [
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null,
+      "live_rows": 1
+    },
+    {
+      "case_id": "m05-02",
+      "candidates": [
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null,
+      "live_rows": 1
+    },
+    {
+      "case_id": "m05-03",
+      "candidates": [
+        {
+          "refs": [
+            "P-0055"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null,
+      "live_rows": 1
+    },
+    {
+      "case_id": "m06-01",
+      "candidates": [
+        {
+          "refs": [
+            "section:13470051-d572-48fb-aeac-1b5f818f283a"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m06-02",
+      "candidates": [
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:2d69b284-b06c-45c7-a16d-e85499cceb35"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:0d3a6481-583f-4b3a-893f-505fd98ddcb4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1889da32-b426-4067-898c-f3b6a6dbb546"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:72dd083a-2c83-48e7-b9f3-452f18fbb0b4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:cd34d11a-a349-4923-a939-258ef0f55dd6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:88c395f6-2427-49ec-b9fe-8110ac708f9e"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:13470051-d572-48fb-aeac-1b5f818f283a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:31ee0350-bd62-4e69-98ad-e17bfe360b01"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:7fe7c4e2-478c-4f19-8f4e-7df97328949b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:e1e34138-e829-489a-aff3-9d33477de6ea"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:48d19bbd-66f1-4638-a678-49495eb8e9a0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:5882b0cd-16f4-4896-b567-eb0fca6554f7"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1c62b7e8-f4db-4d28-8c3d-aa69e28f974c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:80c8b3e8-84ab-4491-b009-5bd2d3190f49"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:82efbe8b-b382-4bc8-8076-fbdbe20711ae"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:54a32776-cef4-46af-b21d-ef80d82b7b44"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ed5bae96-e682-4268-82cd-1af45a31ff31"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:3f8bbee8-c036-4465-8f4e-a80b9b9857f9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:4552de91-0806-47ae-ae02-6ea313b90d72"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m06-03",
+      "candidates": [
+        {
+          "refs": [
+            "section:240a764d-886e-46c4-b9c9-57b78d27d9b9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c07abd1c-cf34-462c-ae6a-eeb323a4a2e6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:8ea6df4f-e277-4d42-8da1-44e9f45656b6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:fd90ac68-37f2-471e-9a7e-ca07d0016317"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:9f7ec2b1-3010-4d90-91fc-1f33e0ff146a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d0497b44-9a35-49e4-9d5e-8c261710e13a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:51d04113-d397-4e5b-a212-847affa9fb6f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ce234b91-1957-4348-8e77-c693a4e021cb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d3da50f1-401a-47c8-ab78-a0e4ff298175"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:373b3bac-c2a0-40ee-ae69-a5e673553e8b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1abcc2f2-130b-4569-8822-b1d74cc5611f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ee2bf90a-0ed2-42f1-8fab-03303c9744af"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:57aab456-5407-4a0b-87d2-7a3b4cbd64ae"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:4996a56d-6685-451e-949a-f472d22f22a4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b1367e63-3135-415d-aa3a-1f693d630a86"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:7b2dd183-6af1-4b19-bc78-a852285fbefa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:0b279b24-664f-4b65-b13b-0237c5fa512d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:de30a1b3-da9a-4d7b-95f8-af0c55bb0fbf"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:bbb581e8-a1ec-498b-95cd-f133c060de2f"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": true
+    },
+    {
+      "case_id": "m07-01",
+      "candidates": [
+        {
+          "refs": [
+            "section:906fe14f-ba66-4948-bce7-d11daef66331"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:5882b0cd-16f4-4896-b567-eb0fca6554f7"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d43ca79d-14e3-457b-9c9e-ba69dac36a19"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c07abd1c-cf34-462c-ae6a-eeb323a4a2e6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:84fea0f1-e812-46cd-9177-26b70304b6fa"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1ab82a8a-8b26-4f86-9df0-02090b297ee5"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:0d3a6481-583f-4b3a-893f-505fd98ddcb4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1c62b7e8-f4db-4d28-8c3d-aa69e28f974c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:8d689472-a53f-429c-8982-b816eec17186"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:861c958c-d1b5-4805-ac86-916a31986083"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:8a8040c6-f652-4b95-bb2b-39cfecfa5783"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d6f998ab-c0de-4e06-a303-1c4f782b1366"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a5020f1e-a589-4815-820c-cebd6c23cb1e"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:4a2977d1-b7de-482d-b3f5-ec72176de125"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b4545844-6113-4497-ad21-718f33ca378d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:691b80d0-de35-4cc5-b347-23bc4892e53d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:08861309-b392-4d8c-9d34-9c5d786d238f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:906ca83c-d968-43d4-bbe5-1fd1548ccfe6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:26159674-cdc2-4714-92cb-a26f0162f5b6"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m07-02",
+      "candidates": [
+        {
+          "refs": [
+            "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:e4ca8db3-ec25-4034-b422-cc76a80c1571"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m07-03",
+      "candidates": [
+        {
+          "refs": [
+            "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:4b4b2c57-caa6-4d78-9788-1d13f51e0dbc"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:5882b0cd-16f4-4896-b567-eb0fca6554f7"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:31ee0350-bd62-4e69-98ad-e17bfe360b01"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:3f26b279-b714-4963-ac2c-f29728a74d3e"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:42b88601-aa20-41c5-a62f-2226a3d829bc"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:cd34d11a-a349-4923-a939-258ef0f55dd6"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m08-01",
+      "candidates": [
+        {
+          "refs": [
+            "section:be423154-5a85-4df1-bcd5-f548506db0ab"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:e1e34138-e829-489a-aff3-9d33477de6ea"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a984038c-7923-4518-b89c-8814b37f8f8a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:cc492529-4208-4a72-9b02-882708a8ec02"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6c0e4022-f5b4-43ad-983d-18dfaa91a8bf"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:265ddeef-7b69-4205-8cc7-3e53f7dce420"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:5b7818fb-01f5-47e6-8ec5-12e19126359b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a4864ee7-e0a4-4b36-848f-5aa134989796"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:7af45c76-0872-4182-9772-6763d14cebe2"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b4ba5c88-3d82-4ef3-a949-436d217f18ec"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:2b96d2a7-0506-4972-bb99-a455f674752a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:259be747-8cff-4b8a-b71f-d91727cce7a4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:aa95fbc7-2c55-43fd-9ffe-889c06db306c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:26159674-cdc2-4714-92cb-a26f0162f5b6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f1cebafb-bdc1-4b1d-baa5-a299c4cc06db"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:7e263aa0-9823-477b-86e3-bd8cf0c32003"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:50421d04-1cd5-4dc6-9c6b-1d069179c1a9"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1189e531-4b2b-4945-83c8-726639e77950"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b338b4c5-ac61-4c61-ba96-fc3001bef560"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:474c621f-cfb1-4723-95d9-a906528327bc"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m08-02",
+      "candidates": [
+        {
+          "refs": [
+            "section:2034440f-3373-4f1c-9f31-852b91f679c3"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:138ba060-f5f1-432e-ab49-2d6f0d32e3b0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:3ab4e685-ca6e-412a-b390-165f7701e01f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:68135ed4-6e69-4eaf-9baf-c64c9ba62efe"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:454510d3-4d0b-409e-86fa-c30fc0c5e27a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:e7313422-9b02-4c87-bd9b-c90e85197eb7"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:9d970a5f-39a7-4381-83e6-d8aa8ed6fe27"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:373b3bac-c2a0-40ee-ae69-a5e673553e8b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:65989124-bc2c-4dc2-9294-6dc25e6afd2b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b1367e63-3135-415d-aa3a-1f693d630a86"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": false
+    },
+    {
+      "case_id": "m08-03",
+      "candidates": [
+        {
+          "refs": [
+            "section:01dc6fe2-a052-4203-aeb1-1ad06c070ee1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f28148b8-bc54-442c-a367-89f0b7c80bb8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b9229a18-ad6a-4abc-b101-2734e9496a55"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c07abd1c-cf34-462c-ae6a-eeb323a4a2e6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:bb98e415-c92a-46f7-80f1-e5857adf6d65"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f96056d5-988c-4e25-b9a6-bf0583b70d14"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d3da50f1-401a-47c8-ab78-a0e4ff298175"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:22a62b6c-db57-44be-b222-5497586e8f0c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:59f4631f-5b1f-452a-8793-fadec676aa93"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:373b3bac-c2a0-40ee-ae69-a5e673553e8b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ee2bf90a-0ed2-42f1-8fab-03303c9744af"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:57aab456-5407-4a0b-87d2-7a3b4cbd64ae"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b1367e63-3135-415d-aa3a-1f693d630a86"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c685a04d-3460-45ff-84a8-16b6f1966217"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:06112545-afd7-448f-adf0-2763b8c4774d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:67eb616e-4d7a-4a3d-b866-28caa6b22abd"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c90aae97-1aac-4775-9ddb-dab204c37e79"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1189e531-4b2b-4945-83c8-726639e77950"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:06f98165-b0b6-4029-9e16-10a5c8611798"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": true
+    },
+    {
+      "case_id": "m09-01",
+      "candidates": [
+        {
+          "refs": [
+            "decision:541afe49-ecf0-489c-8999-f825b48fe6a8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:b8bbdb29-3ea5-5411-9b24-3cb03e312c05"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:68d846db-997a-48e0-b78d-133ef8a68a7a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:5f6abeba-be7e-5ad4-b2ec-2871f300d344"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:dcd3082f-6902-4454-867d-806965e7d756"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m09-02",
+      "candidates": [
+        {
+          "refs": [
+            "decision:e20c9c82-7a5a-447e-8631-8fe93761886d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:541afe49-ecf0-489c-8999-f825b48fe6a8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:68d846db-997a-48e0-b78d-133ef8a68a7a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:5f6abeba-be7e-5ad4-b2ec-2871f300d344"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m09-03",
+      "candidates": [
+        {
+          "refs": [
+            "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:541afe49-ecf0-489c-8999-f825b48fe6a8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:5f6abeba-be7e-5ad4-b2ec-2871f300d344"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:49e62812-236a-5525-96bc-6e9db3d3d006"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "decision:d64f93c0-4547-5cdb-9f97-fc82ae1da4b0"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m10-01",
+      "candidates": [],
+      "error": null,
+      "state": null,
+      "fallback": null
+    },
+    {
+      "case_id": "m10-02",
+      "candidates": [
+        {
+          "refs": [
+            "section:01dc6fe2-a052-4203-aeb1-1ad06c070ee1"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:93edfab0-49b9-469a-b3b8-4d717d80503c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:8d689472-a53f-429c-8982-b816eec17186"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:53ca48b9-ccd3-40c0-9bdb-8abbf9072385"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f28148b8-bc54-442c-a367-89f0b7c80bb8"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ab239153-62b4-4cf2-a80f-0a5bc96dbedd"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1580b923-9849-4bd3-b2ab-af721e4394cb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b9229a18-ad6a-4abc-b101-2734e9496a55"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a951f5e8-dc6f-4c7a-b909-1d9f45cca735"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:bb3351a8-c13b-4361-a398-c1db9f15613a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:c07abd1c-cf34-462c-ae6a-eeb323a4a2e6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:9f4c4be3-b049-43d8-ad9a-8e738b7e1937"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d3da50f1-401a-47c8-ab78-a0e4ff298175"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:22a62b6c-db57-44be-b222-5497586e8f0c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:59f4631f-5b1f-452a-8793-fadec676aa93"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:7225cc04-ec5a-49ae-9af0-c9e0d86af9b4"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6e4763f9-3268-44c2-b0ed-82a56f1ea13d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:2686a790-78b3-4035-89ca-bf643f56837d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:57aab456-5407-4a0b-87d2-7a3b4cbd64ae"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": true
+    },
+    {
+      "case_id": "m10-03",
+      "candidates": [
+        {
+          "refs": [
+            "section:93edfab0-49b9-469a-b3b8-4d717d80503c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:bb3351a8-c13b-4361-a398-c1db9f15613a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b0c8d7ec-7f41-4b55-be2f-7baf23843f8d"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a2da7971-c836-46e3-b0cd-e81a556d3343"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:08f3f4f4-ed3c-4564-935f-5fe89d4da215"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d0497b44-9a35-49e4-9d5e-8c261710e13a"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f6f918ff-9728-462b-a191-80541ffdc006"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:d3da50f1-401a-47c8-ab78-a0e4ff298175"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:22a62b6c-db57-44be-b222-5497586e8f0c"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:59f4631f-5b1f-452a-8793-fadec676aa93"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:373b3bac-c2a0-40ee-ae69-a5e673553e8b"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:6f2ad48d-4ca4-4a4d-8333-cb02e414ae2f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:f4a726e2-e7e1-46e8-b191-b43ba91540e0"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:fd2a4396-ca57-4f90-8198-5d43ae685cdb"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:1abcc2f2-130b-4569-8822-b1d74cc5611f"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:ee2bf90a-0ed2-42f1-8fab-03303c9744af"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:57aab456-5407-4a0b-87d2-7a3b4cbd64ae"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:b1367e63-3135-415d-aa3a-1f693d630a86"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:a5b33102-42fd-4f46-9acb-9f7a45d3d8f6"
+          ],
+          "eligible": true
+        },
+        {
+          "refs": [
+            "section:74aaa2f1-ec16-43f2-be67-c216a3f96a3d"
+          ],
+          "eligible": true
+        }
+      ],
+      "error": null,
+      "state": null,
+      "fallback": true
+    }
+  ],
+  "report": {
+    "overall": {
+      "questions": 27,
+      "hits_at_5": 16,
+      "hit_rate_at_5": 0.5925925925925926,
+      "errors": 1,
+      "contract_failures": 1,
+      "rule_routing": {
+        "questions": 3,
+        "delivered": 1,
+        "delivery_recall": 0.3333333333333333
+      }
+    },
+    "by_cause": {
+      "never-asked": {
+        "questions": 9,
+        "hits_at_5": 7,
+        "hit_rate_at_5": 0.7777777777777778,
+        "errors": 1,
+        "contract_failures": 1,
+        "rule_routing": {
+          "questions": 3,
+          "delivered": 1,
+          "delivery_recall": 0.3333333333333333
+        }
+      },
+      "never-asked/drift": {
+        "questions": 3,
+        "hits_at_5": 3,
+        "hit_rate_at_5": 1.0,
+        "errors": 0,
+        "contract_failures": 0,
+        "rule_routing": {
+          "questions": 0,
+          "delivered": 0,
+          "delivery_recall": null
+        }
+      },
+      "not-captured": {
+        "questions": 3,
+        "hits_at_5": 0,
+        "hit_rate_at_5": 0.0,
+        "errors": 0,
+        "contract_failures": 0,
+        "rule_routing": {
+          "questions": 0,
+          "delivered": 0,
+          "delivery_recall": null
+        }
+      },
+      "not-linked": {
+        "questions": 3,
+        "hits_at_5": 2,
+        "hit_rate_at_5": 0.6666666666666666,
+        "errors": 0,
+        "contract_failures": 0,
+        "rule_routing": {
+          "questions": 0,
+          "delivered": 0,
+          "delivery_recall": null
+        }
+      },
+      "search-quality": {
+        "questions": 9,
+        "hits_at_5": 4,
+        "hit_rate_at_5": 0.4444444444444444,
+        "errors": 0,
+        "contract_failures": 0,
+        "rule_routing": {
+          "questions": 0,
+          "delivered": 0,
+          "delivery_recall": null
+        }
+      }
+    },
+    "cases": [
+      {
+        "case_id": "m01-01",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m01-02",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m01-03",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m02-01",
+        "cause": "never-asked",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m02-02",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m02-03",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m03-01",
+        "cause": "never-asked",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m03-02",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m03-03",
+        "cause": "never-asked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m04-01",
+        "cause": "never-asked",
+        "hit_at_5": null,
+        "rule_delivered": false,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m04-02",
+        "cause": "never-asked",
+        "hit_at_5": null,
+        "rule_delivered": false,
+        "contract_pass": false,
+        "error": "read_command_failed"
+      },
+      {
+        "case_id": "m04-03",
+        "cause": "never-asked",
+        "hit_at_5": null,
+        "rule_delivered": true,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m05-01",
+        "cause": "never-asked/drift",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m05-02",
+        "cause": "never-asked/drift",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m05-03",
+        "cause": "never-asked/drift",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m06-01",
+        "cause": "search-quality",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m06-02",
+        "cause": "search-quality",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m06-03",
+        "cause": "search-quality",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m07-01",
+        "cause": "search-quality",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m07-02",
+        "cause": "search-quality",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m07-03",
+        "cause": "search-quality",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m08-01",
+        "cause": "search-quality",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m08-02",
+        "cause": "search-quality",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m08-03",
+        "cause": "search-quality",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m09-01",
+        "cause": "not-linked",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m09-02",
+        "cause": "not-linked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m09-03",
+        "cause": "not-linked",
+        "hit_at_5": true,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m10-01",
+        "cause": "not-captured",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m10-02",
+        "cause": "not-captured",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      },
+      {
+        "case_id": "m10-03",
+        "cause": "not-captured",
+        "hit_at_5": false,
+        "rule_delivered": null,
+        "contract_pass": true,
+        "error": null
+      }
+    ]
+  }
+}

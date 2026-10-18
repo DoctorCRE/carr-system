@@ -29,10 +29,13 @@ function normalize(path) {
 function matches(row, path) {
   let subject = path;
   let pattern = row.pattern;
+  let basenamePrefix = row.basename_prefix || "";
   if (row.case_insensitive === true) {
     subject = subject.toLowerCase();
     pattern = pattern.toLowerCase();
+    basenamePrefix = basenamePrefix.toLowerCase();
   }
+  if (!subject.slice(subject.lastIndexOf("/") + 1).startsWith(basenamePrefix)) return false;
   switch (row.match) {
     case "path": return subject === pattern;
     case "prefix": return subject.startsWith(pattern);
@@ -66,6 +69,29 @@ export function reviewTierForPaths(paths) {
 export function isReviewNoise(path) {
   const normal = normalize(path);
   if (normal === null) return false;
+  if (isTestFile(path)) return false;
   if (REVIEW_TIERS.never_exclude.some(row => matches(row, normal))) return false;
   return REVIEW_TIERS.noise_exclusions.some(row => matches(row, normal));
+}
+
+export function isTestFile(path) {
+  const normal = normalize(path);
+  return normal !== null && REVIEW_TIERS.test_files.some(row => matches(row, normal));
+}
+
+export function reviewChangeSize(changes) {
+  const code_paths = [], test_paths = [];
+  let code_lines = 0, test_lines = 0;
+  for (const change of changes) {
+    const test = isTestFile(change.path);
+    (test ? test_paths : code_paths).push(change.path);
+    const counts = [change.additions, change.deletions];
+    const known = counts.every(v => Number.isSafeInteger(v) && v >= 0);
+    if (test) test_lines = known && test_lines !== null ? test_lines + counts[0] + counts[1] : null;
+    else code_lines = known && code_lines !== null ? code_lines + counts[0] + counts[1] : null;
+  }
+  const limits = REVIEW_TIERS.change_size;
+  const change_size = code_lines === null ? "unknown" : code_lines <= limits.small_max_code_lines ? "small"
+    : code_lines <= limits.medium_max_code_lines ? "medium" : "large";
+  return {code_lines, test_lines, change_size, code_paths, test_paths};
 }

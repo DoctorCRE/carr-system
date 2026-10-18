@@ -37,7 +37,7 @@ Two notes on the mapping:
 ## How it wires into the rest of the system
 - **Intake** (`DNA/Clients/intake/`): the "Key players" section captures which vendors the client *already has* vs. *needs*. This timeline says *when* to fill each gap. A blank slot + the matching deal stage = an intro to make.
 - **Deal stages**: the four stages here track the deal's progression (roughly: engagement → touring → LOI/negotiation → closing), sitting under the pipeline status in the operator's own `DNA/Clients/clients-active.md`.
-- **The network (yours + Dell's, plus shared)**: the actual people come from `vendors.xlsx`; this only sequences the categories.
+- **Our vendor network**: the actual people come from `vendors.xlsx`; this only sequences the categories.
 - **Referral revenue**: every well-timed intro is a two-way referral relationship — the reason the network exists.
 
 ## Files

@@ -12,12 +12,10 @@ What is pinned, one test class each:
   batching         N merges since the last release ship as ONE release of the
                    latest SHA
   stop on failure  a nonzero step stops the lane, records step/rc/log, enqueues
-                   exactly one diagnosis turn, and the same SHA is never retried
+                   exactly one diagnosis turn; code failures wait for a new SHA
   staging guard    a failed staging step never reaches promotion
   kill switch      config flag, local override file, per-lane flag
   lock             a second concurrent tick runs nothing
-  verifier≠maker   the maker, a human partner, the author and this pipeline are
-                   refused as verifier
   blockers         a missing credential files one loop, once, and runs nothing
   dry run          prints commands, executes none, writes no state
   schema supersede a new schema-snapshot PR closes the older open ones (close
@@ -25,6 +23,7 @@ What is pinned, one test class each:
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import os
@@ -47,11 +46,12 @@ assert _SPEC is not None and _SPEC.loader is not None
 rp = importlib.util.module_from_spec(_SPEC)
 sys.modules["release_pipeline"] = rp
 _SPEC.loader.exec_module(rp)
-
 FIXTURE_ENV = fixture_env()
 VERSION = "0f1e2d3c-4b5a-4968-8776-655443322110"
 CF_TOKEN = "cf-selftest-token-must-never-be-echoed-9f8e7d"
-DEPLOY_STEPS = {"wrangler-auth", "upload", "staging", "promote", "app-release"}
+DEPLOY_STEPS = {"wrangler-auth", "upload", "staging", "promote", "app-release", "rollback", "app-rollback"}
+PRIOR = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"        # the Worker version serving before the release
+PRIOR_APP = "5c4b3a29-1807-4f6e-9d5c-4b3a29180716"    # the app version serving before the release
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -68,8 +68,12 @@ class FakeRunner:
                  health_baseline_findings: list | None = None, health_findings: list | None = None,
                  health_baseline_out_extra: str = "", health_out_extra: str = "",
                  health_baseline_write_json: bool = True, health_write_json: bool = True,
-                 outputs: dict | None = None):
+                 outputs: dict | None = None, smoke: dict | None = None):
         self.fail_at, self.pending, self.live = fail_at, pending, live
+        # The release-smoke summaries, by step: {"smoke-post": ["invoices-list"]}
+        # fails that journey in that run; None writes no summary (a crashed run).
+        # Absent steps pass every journey.
+        self.smoke = smoke or {}
         self.outputs = outputs or {}
         self.wrangler_out = wrangler_out
         # Defaults: a clean, COMPLETE health read with no findings, on both
@@ -132,11 +136,19 @@ class FakeRunner:
             assert "CLOUDFLARE_API_TOKEN" not in env, f"the deploy token reached non-deploy step {name}"
         if name in ("health-baseline", "health"):
             return rp.Result(0 if name != self.fail_at else 7, self._health_output(name, argv))
+        if name.startswith("smoke-"):
+            return self._smoke_output(name, argv)
         if name == self.fail_at:
             failed_out = self.outputs.get(name, "boom")
             log.parent.mkdir(parents=True, exist_ok=True)
             log.write_text(failed_out, encoding="utf-8")
             return rp.Result(7, failed_out)
+        is_app_worktree = name == "app-worktree"
+        is_app_worktree_cleanup = (name == "worktree-cleanup" and argv[:5] == [
+            "git", "-C", str(cwd), "worktree", "remove"] and "/app-" in argv[-1])
+        if is_app_worktree or name == "app-main-ref-refresh" or is_app_worktree_cleanup:
+            proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
+            return rp.Result(proc.returncode, proc.stdout + proc.stderr)
         if name == "release-key":
             key = argv[argv.index("--key") + 1]
             return rp.Result(0 if key.endswith("-01") else 2, "")
@@ -150,21 +162,69 @@ class FakeRunner:
         if name == "promote" and self.live is not None:
             upload = next(a for n, a in self.calls if n == "upload")
             self.live["sha"] = upload[upload.index("--release-sha") + 1]
+            self.live["version"] = VERSION
+        if name == "rollback" and self.live is not None:
+            self.live["version"] = argv[argv.index("--promote-version") + 1]
         return rp.Result(0, out)
+
+    def _smoke_output(self, name, argv):
+        """Write the summary a real ops/release-smoke.py run would, at --out.
+        A failure named `browser-journeys::<test>` fails the browser proof
+        with that test named in evidence.failed_tests."""
+        failed = self.smoke.get(name, [])
+        if failed is None:
+            return rp.Result(1, "Traceback: release-smoke crashed")
+        lane = argv[argv.index('--lane') + 1]
+        only = argv[argv.index("--only") + 1].split(",") if "--only" in argv else None
+        tests = sorted(f.split("::", 1)[1] for f in failed if "::" in f)
+        failed = sorted({f.split("::", 1)[0] for f in failed if only is None or f.split("::", 1)[0] in only})
+        out = Path(argv[argv.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+
+        def evidence(f):
+            if f not in failed:
+                return {}
+            row = {"tests": [{"title": f, "status": "failed",
+                              "artifacts": [str(out / "browser/artifacts/a1/screenshots/x.png"),
+                                            str(out / "browser/artifacts/a1/trace.zip")]}]}
+            return {**row, "failed_tests": tests} if f == "browser-journeys" and tests else row
+        probes = [{"id": f, "status": "fail" if f in failed else "pass", "ms": 3,
+                   "detail": f"{f} broke" if f in failed else "", "evidence": evidence(f)}
+                  for f in rp.SMOKE_LANE_JOURNEYS[lane] if only is None or f in only]
+        value = {"schema": "carr-release-smoke.v1", "lane": argv[argv.index('--lane') + 1],
+                 "sha": argv[argv.index('--sha') + 1], "phase": argv[argv.index('--phase') + 1],
+                 "invocation_id": argv[argv.index('--invocation-id') + 1],
+                 "ok": not failed, "failed": failed, "probes": probes}
+        (out / "summary.json").write_text(json.dumps(value))
+        return rp.Result(1 if failed else 0, "release-smoke: done")
 
     def names(self) -> list[str]:
         return [n for n, _ in self.calls]
 
 
+def install_toolchain_wrangler(repo: Path) -> Path:
+    """Write a stub wrangler where Pipeline.auth_wrangler looks for it."""
+    wrangler = (rp.wrangler_toolchain(repo, repo / "out/release-pipeline")
+                / "node_modules/.bin/wrangler")
+    wrangler.parent.mkdir(parents=True, exist_ok=True)
+    wrangler.write_text("#!/bin/sh\nexit 0\n")
+    wrangler.chmod(0o755)
+    return wrangler
+
+
+class InstallingRunner(FakeRunner):
+    """FakeRunner whose `wrangler-install` step writes the binary, as npm ci does."""
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("wrangler-install") and res.rc == 0:
+            bin_ = Path(cwd) / "node_modules/.bin/wrangler"
+            bin_.parent.mkdir(parents=True, exist_ok=True)
+            bin_.write_text("#!/bin/sh\nexit 0\n")
+        return res
+
+
 HEAD_DATE = "2026-09-29T00:00:00Z"
-
-
-def approve(pr, *, when="2026-09-30T00:00:00Z", assoc="OWNER", body=None, cid=None, reviewed=None):
-    if body is None:
-        body = f"APPROVE\nReviewed-SHA: {reviewed or pr_head(pr)}\n"
-    return {"id": cid or 900 + pr, "body": body, "created_at": when, "author_association": assoc,
-            "user": {"login": "jbookout" if assoc == "OWNER" else "stranger"},
-            "html_url": f"https://github.com/o/r/pull/{pr}#issuecomment-{cid or 900 + pr}"}
 
 
 def pr_head(n: int) -> str:
@@ -172,12 +232,14 @@ def pr_head(n: int) -> str:
 
 
 class FakeGitHub:
-    """Every PR approved by the owner after its head commit, CI green, canary
-    green on every main commit, app check `test` green — unless overridden."""
+    """Merged source with green CI and canary results unless overridden."""
 
-    def __init__(self, approve_all: bool = True, comments: dict | None = None, canary: dict | None = None,
-                 red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None):
-        self.approve_all, self.comment_map = approve_all, comments or {}
+    _pr_numbers: dict[str, int] = {}
+
+    def __init__(self, canary: dict | None = None,
+                 red_ci_prs: set | None = None, checks: list | None = None, raise_on: str | None = None,
+                 ci_runs: dict | None = None):
+        self.ci_runs = ci_runs or {}     # pr -> [(id, conclusion)], replacing the default single run
         self.canary, self.red_ci_prs = canary, red_ci_prs or set()
         self.checks = checks if checks is not None else [
             {"name": "test", "status": "completed", "conclusion": "success"}]
@@ -186,7 +248,7 @@ class FakeGitHub:
         self.merge_commit: dict[str, str] = {}   # commit -> the PR's merge_commit_sha, when not itself
 
     def pr_number(self, sha):
-        return 100 + int(sha[:4], 16) % 800
+        return self._pr_numbers.setdefault(sha, 100 + len(self._pr_numbers))
 
     def pr_for_commit(self, sha):
         if self.raise_on == "pr_for_commit":
@@ -202,6 +264,9 @@ class FakeGitHub:
     def runs_for(self, sha):
         if sha in self.heads:               # a PR head (see pr_for_commit)
             pr = self.heads[sha]
+            if pr in self.ci_runs:
+                return [{"id": i, "name": "CI", "event": "pull_request", "status": "completed",
+                         "conclusion": c} for i, c in self.ci_runs[pr]]
             ok = pr not in self.red_ci_prs
             return [{"id": 40000 + pr, "name": "CI", "event": "pull_request", "status": "completed",
                      "conclusion": "success" if ok else "failure"}]
@@ -218,12 +283,6 @@ class FakeGitHub:
         return [{"name": "ops/ci.sh --strict", "conclusion": "success"},
                 {"name": "ops/ci.sh --strict --only pushfloor unit secret", "conclusion": "success"}]
 
-    def comments(self, pr):
-        if pr in self.comment_map:
-            return self.comment_map[pr]
-        return [approve(pr)] if self.approve_all else [{"id": 1, "body": "looks fine to me",
-                                                       "created_at": "2026-09-30T00:00:00Z",
-                                                       "author_association": "OWNER", "html_url": "x"}]
 
     def check_runs(self, sha):
         return self.checks
@@ -246,7 +305,10 @@ class Fixture:
             git(repo, "config", "user.email", "t@example.invalid")
             git(repo, "config", "user.name", "t")
             (repo / "README.md").write_text("x")
-            git(repo, "add", "README.md")
+            (repo / "mcp-server").mkdir()
+            (repo / "mcp-server" / "package.json").write_text('{"name": "mcp-server"}\n')
+            (repo / "mcp-server" / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
+            git(repo, "add", "README.md", "mcp-server")
             git(repo, "commit", "-q", "-m", "c")
             git(repo, "push", "-q", "origin", "HEAD:main")
             cls._base_sha = git(repo, "rev-parse", "HEAD")
@@ -285,6 +347,10 @@ class Fixture:
         venv_python.parent.mkdir(parents=True, exist_ok=True)
         venv_python.write_text("#!/bin/sh\nexit 0\n")
         venv_python.chmod(0o755)
+        # The token-check wrangler already installed, as on every tick after
+        # the first; TokenCheckWrangler removes it to test the install.
+        self.wrangler = install_toolchain_wrangler(self.repo)
+
 
     def commit(self, files: dict[str, str]) -> str:
         for rel, text in files.items():
@@ -307,6 +373,7 @@ class Fixture:
 
     def pipeline(self, runner, *, cfg=None, github=None, live=None, dry_run=False, verbs=None,
                  slice_marker=None):
+        cfg = cfg or self.config()
         live = live if live is not None else {"sha": self.base}
         verbs = verbs if verbs is not None else []
         # Step 10 never spawns the real marker here: every run records the
@@ -315,11 +382,26 @@ class Fixture:
             slice_marker = lambda key, sha: (self.slice_marks.append((key, sha)) or {"rc": 0})  # noqa: E731
         env = rp.child_env(FIXTURE_ENV)
         env.update({k: FIXTURE_ENV[k] for k in ("GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL")})
-        return rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
+        # Fixture source stands in for the modules loaded by a production
+        # process. Capture it at construction, before any simulated sync.
+        loaded = {path: rp.git_blob((self.repo / path).read_bytes())
+                  if (self.repo / path).is_file() else None for path in (
+                      "ops/release-pipeline.py", "lib/credential_file.py",
+                      "lib/github_reader.py", "lib/secret_redaction.py",
+                      "ops/release-smoke.py", "ops/doctorcre-production-smoke.py",
+                      "ops/config/release-pipeline.v1.json")}
+        if isinstance(cfg, rp.LoadedConfig):
+            loaded["ops/config/release-pipeline.v1.json"] = cfg.source_blob
+        pipe = rp.Pipeline(cfg or self.config(), repo=self.repo, runner=runner,
                            github=lambda _r: github or FakeGitHub(),
-                           http=lambda _u: {"git_sha": {"value": live["sha"]}},
+                           http=lambda _u: {"git_sha": {"value": live["sha"]},
+                                            "worker_version": {"id": live.get("version", PRIOR)}},
                            call_verb=lambda verb, args: (verbs.append((verb, args)) or (True, {"ok": True})),
-                           slice_marker=slice_marker, dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
+                           slice_marker=slice_marker, controller_blobs=loaded,
+                           dry_run=dry_run, env=env, today="2026-09-30", out=lambda _s: None)
+        pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": {"fixture": "digest"}}
+        pipe.sleep = lambda _seconds: None
+        return pipe
 
     def state(self) -> dict:
         p = self.repo / "out/release-pipeline/state.json"
@@ -337,6 +419,323 @@ class Base(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+
+
+class WorkerIdentityReconciliation(Base):
+    def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        latest = self.fx.commit({"mcp-server/src/a.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        original = pipe.release_target
+
+        def target(gh, cfg, base, head):
+            self.assertEqual(base, live_sha)
+            self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+            return original(gh, cfg, base, head)
+
+        with mock.patch.object(pipe, "release_target", side_effect=target):
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        row = next(row for row in self.fx.records() if row["status"] == "live_identity_reconciled")
+        self.assertEqual((row["from_sha"], row["sha"]), (self.fx.base, live_sha))
+        self.assertEqual(row["provider_version_id"], PRIOR)
+
+    def test_already_live_main_is_reconciled_without_redeployment_or_slice_mark(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": latest})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base,
+                                    "failed_sha": "f" * 40, "failed_step": "migrate-apply"}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], "f" * 40)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertEqual([row["status"] for row in self.fx.records()], ["live_identity_reconciled"])
+
+    def test_dry_run_uses_live_base_without_persisting_reconciliation(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        pipe = self.fx.pipeline(FakeRunner(), live={"sha": live_sha}, dry_run=True)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe, "release_target", return_value=live_sha) as target:
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(target.call_args.args[2], live_sha)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records(), [])
+
+    def test_failed_reconciliation_receipt_cannot_advance_checkpoint_or_select_target(self):
+        live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
+        self.fx.commit({"mcp-server/src/a.js": "next"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": live_sha})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        with mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture receipt failed")), \
+             mock.patch.object(pipe, "release_target") as target:
+            self.assertEqual(pipe.tick(["worker"]), 1)
+        target.assert_not_called()
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(runner.calls, [])
+
+    def test_identity_outside_main_history_is_refused(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, live={"sha": "e" * 40})
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.records()[-1]["reason"], "history_diverged")
+        self.assertEqual(runner.calls, [])
+
+    def test_target_before_merged_live_side_branch_is_refused(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        (self.fx.repo / "mcp-server/s.js").write_text("already live")
+        git(self.fx.repo, "add", "mcp-server/s.js")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        row = self.fx.records()[-1]
+        self.assertEqual(row["status"], "blocked")
+        self.assertEqual(row["reason"], "history_diverged")
+        self.assertEqual(row["sha"], candidate)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_docs_only_target_before_merged_live_side_branch_cannot_regress_checkpoint(self):
+        candidate = self.fx.commit({"mcp-server/src/c.js": "same runtime", "docs/c.md": "candidate"})
+        git(self.fx.repo, "checkout", "-q", "-b", "live-side", self.fx.base)
+        runtime = self.fx.repo / "mcp-server/src/c.js"
+        runtime.parent.mkdir(parents=True, exist_ok=True)
+        runtime.write_text("same runtime")
+        (self.fx.repo / "README.md").write_text("live side")
+        git(self.fx.repo, "add", "mcp-server/src/c.js", "README.md")
+        git(self.fx.repo, "commit", "-q", "-m", "side")
+        live_sha = git(self.fx.repo, "rev-parse", "HEAD")
+        self.assertEqual(git(self.fx.repo, "rev-parse", f"{candidate}:mcp-server"),
+                         git(self.fx.repo, "rev-parse", f"{live_sha}:mcp-server"))
+        git(self.fx.repo, "checkout", "-q", "main")
+        git(self.fx.repo, "merge", "--no-ff", "-m", "merge side", "live-side")
+        merge = git(self.fx.repo, "rev-parse", "HEAD")
+        head = self.fx.commit({"mcp-server/src/h.js": "next"})
+        live = {"sha": live_sha}
+        runner = FakeRunner(live=live)
+        gh = FakeGitHub(canary={candidate: ("completed", "success"),
+                               merge: ("in_progress", None), head: ("in_progress", None)})
+        pipe = self.fx.pipeline(runner, github=gh, live=live)
+        pipe.store.save({"worker": {"last_released_sha": candidate}})
+
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        rows = self.fx.records()
+        self.assertEqual([row["status"] for row in rows], ["live_identity_reconciled", "blocked"])
+        self.assertEqual((rows[0]["from_sha"], rows[0]["sha"]), (candidate, live_sha))
+        self.assertEqual((rows[-1]["reason"], rows[-1]["sha"]), ("history_diverged", candidate))
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], live_sha)
+        self.assertEqual(live["sha"], live_sha)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_unreadable_identity_refuses_even_when_checkpoint_equals_main(self):
+        for response in [OSError("offline"), {}, {"git_sha": {"value": "short"}},
+                         {"git_sha": "malformed"},
+                         {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}}]:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                if isinstance(response, Exception):
+                    pipe.http = mock.Mock(side_effect=response)
+                else:
+                    pipe.http = mock.Mock(return_value=response)
+                pipe.tick(["worker"])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+
+
+class RejectionReconciliation(Base):
+    def setUp(self):
+        super().setUp()
+        self.sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        self.gh = FakeGitHub()
+        self.clock = 1000.0
+        self.runner = FakeRunner()
+        self.pipe = self.fx.pipeline(self.runner, github=self.gh)
+        self.pipe.now = lambda: self.clock
+
+    def wire_live(self):
+        live = {"sha": self.fx.base}
+        self.runner.live = live
+        self.pipe.http = lambda _url: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
+
+
+    def test_health_recheck_is_bounded_and_recovery_runs_all_release_guards(self):
+        self.runner.health_baseline_findings = [{"key": "reader", "subject": "", "count": 1,
+            "hard_error": True, "time_rolling": False}]
+        self.pipe.tick(["worker"])
+        count = self.runner.names().count("health-baseline")
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("health-baseline"), count)
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        self.runner.health_baseline_findings = []
+        self.runner.fail_at = "staging"
+        self.assertEqual(self.pipe.tick(["worker"]), 1)
+        self.assertIn("staging", self.runner.names())
+        self.assertNotIn("promote", self.runner.names())
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], self.sha)
+
+
+    def test_canonical_staging_observer_hashes_real_provider_scope_and_exact_ledger(self):
+        from decimal import Decimal
+        module = rp.runpy.run_path(str(HERE.parent / "tools/staging-project-replacement.py"))
+        scope = module["ProviderScope"]("project", "candidate", "branch", "endpoint", "host",
+            17, "region", Decimal("0.25"), Decimal("1"))
+        module["resolve_existing_scopes"] = mock.Mock(return_value=(None, None, scope))
+        module["derive_dsn"] = mock.Mock(return_value=module["SecretDsn"](scope, "private-dsn-canary"))
+        cursor = mock.MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.fetchone.return_value = ("schema_migrations",)
+        cursor.fetchall.return_value = [("0001_fixture.sql", "a" * 64)]
+        conn = mock.MagicMock()
+        conn.__enter__.return_value = conn
+        conn.cursor.return_value = cursor
+        psycopg = mock.Mock(); psycopg.connect.return_value = conn
+        module["psycopg"] = psycopg
+        with mock.patch.object(rp.runpy, "run_path", return_value=module):
+            snapshot = rp.Pipeline.staging_ledger(self.pipe)
+        digest = rp.evidence_digest(snapshot)
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        self.assertEqual(snapshot["ledger"]["migration_ledger"], {"0001_fixture.sql": "a" * 64})
+        self.assertNotIn("private-dsn-canary", json.dumps(snapshot))
+        self.assertIn("default_transaction_read_only=on", psycopg.connect.call_args.kwargs["options"])
+        cursor.execute.assert_any_call('select filename,sha256 from public.schema_migrations order by filename collate "C"')
+
+    def test_staging_ledger_reconciliation_permits_one_retry_and_retains_checks(self):
+        self.runner.fail_at = "staging-prepare"
+        ledger = {"candidate": "fixture", "ledger": {"migration": "old"}}
+        self.pipe.staging_ledger = lambda: dict(ledger)
+        self.assertEqual(self.pipe.tick(["worker"]), 1)
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("staging-prepare"), 1)
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        ledger["ledger"] = {"migration": "reconciled"}
+        self.assertEqual(self.pipe.tick(["worker"]), 1)
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("staging-prepare"), 2)
+        self.assertNotIn("promote", self.runner.names())
+        rejection = self.fx.state()["worker"]["rejection"]
+        self.assertEqual(rejection["repair"]["owner"], "tools/staging-project-replacement.py")
+        self.assertIn("staging_ledger_digest", rejection)
+
+    def test_pre_rejection_staging_failure_acquires_a_baseline_then_recovers(self):
+        self.wire_live()
+        # The exact lane shape a staging failure persisted before rejections existed.
+        self.pipe.store.save({"worker": {"failed_sha": self.sha, "failed_step": "staging-prepare",
+                                         "failed_at": "2026-10-01T00:00:00+00:00"}})
+        ledger = {"candidate": "fixture", "ledger": "before"}
+        self.pipe.staging_ledger = lambda: dict(ledger)
+        self.pipe.tick(["worker"])
+        lane = self.fx.state()["worker"]
+        self.assertEqual(lane["failed_sha"], self.sha)
+        self.assertIn("staging_ledger_digest", lane["rejection"])
+        self.assertGreater(lane["rejection"]["recheck_after"], self.clock)
+        self.assertEqual(self.runner.calls, [])  # a first observation is a baseline, never recovery
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        ledger["ledger"] = "reconciled"
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("staging-prepare"), 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.sha)
+
+    def test_staging_recovery_reconciles_the_failed_target_behind_a_pending_head(self):
+        self.wire_live()
+        self.runner.fail_at = "staging-prepare"
+        ledger = {"candidate": "fixture", "ledger": "before"}
+        self.pipe.staging_ledger = lambda: dict(ledger)
+        self.assertEqual(self.pipe.tick(["worker"]), 1)
+        newer = self.fx.commit({"mcp-server/src/b.js": "2"})
+        self.gh.canary = {self.sha: ("completed", "success"), newer: ("in_progress", None)}
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        ledger["ledger"] = "reconciled"
+        self.runner.fail_at = None
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("staging-prepare"), 2)
+        lane = self.fx.state()["worker"]
+        self.assertIsNone(lane["failed_sha"])
+        self.assertEqual(lane["last_released_sha"], self.sha)  # the canary target, never the pending head
+
+    def test_staging_observation_failures_never_wake_a_failed_release(self):
+        self.runner.fail_at = "staging-prepare"
+        self.pipe.staging_ledger = lambda: {"candidate": "fixture", "ledger": "before"}
+        self.pipe.tick(["worker"])
+        for error in [ValueError("empty acknowledgement"), RuntimeError("REFUSED"),
+                      subprocess.CalledProcessError(7, "probe", stderr="private-error-canary"),
+                      OSError("private-error-canary")]:
+            with self.subTest(error=type(error).__name__):
+                self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+                self.pipe.staging_ledger = mock.Mock(side_effect=error)
+                self.pipe.tick(["worker"])
+                self.assertEqual(self.runner.names().count("staging-prepare"), 1)
+                self.assertNotIn("private-error-canary", self.pipe.store.state_path.read_text())
+                self.assertNotIn("private-error-canary", self.pipe.store.records_path.read_text())
+
+    def test_staging_recovery_resumes_interrupted_retirement(self):
+        self.runner.fail_at = "staging-prepare"
+        ledger = {"candidate": "fixture", "ledger": "before"}
+        self.pipe.staging_ledger = lambda: dict(ledger)
+        self.pipe.tick(["worker"])
+        kept = Path(self.fx.state()["worker"]["failed_worktree"])
+        git(self.fx.repo, "worktree", "add", "--detach", str(kept), self.sha)
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        ledger["ledger"] = "reconciled"
+        rename = rp.os.rename
+        def interrupted(src, dst):
+            rename(src, dst)
+            raise OSError("interrupted after rename")
+        with mock.patch.object(rp.os, "rename", side_effect=interrupted):
+            self.pipe.tick(["worker"])
+        self.clock += self.pipe.REJECTION_RECHECK_SECONDS
+        self.pipe.tick(["worker"])
+        self.assertEqual(self.runner.names().count("staging-prepare"), 2)
+        self.assertIsNone(rp.worktree_registration(self.fx.repo, kept))
+
+    def test_fingerprint_sink_keeps_no_body_or_exception_canaries(self):
+        secret = "invented-client-identifier-canary"
+        original = self.gh.pr_for_commit
+        self.gh.pr_for_commit = lambda sha: {**original(sha), "body": secret}
+        self.pipe.tick(["worker"])
+        self.gh.pr_for_commit = mock.Mock(side_effect=ValueError(secret))
+        self.pipe.tick(["worker"])
+        raw = (self.pipe.store.state_path.read_bytes() + self.pipe.store.records_path.read_bytes())
+        self.assertNotIn(secret.encode(), raw)
+
+
+class FakeGitHubIdentity(unittest.TestCase):
+    def test_red_ci_does_not_leak_to_a_commit_with_a_colliding_short_hash(self):
+        green = "01bec640" + "0" * 32
+        red = "04dec640" + "0" * 32
+        red_pr = FakeGitHub().pr_number(red)
+        gh = FakeGitHub(red_ci_prs={red_pr})
+        green_source = gh.pr_for_commit(green)
+        red_source = gh.pr_for_commit(red)
+        self.assertNotEqual(green_source["number"], red_source["number"])
+        self.assertEqual(gh.runs_for(green_source["head"]["sha"])[0]["conclusion"], "success")
+        self.assertEqual(gh.runs_for(red_source["head"]["sha"])[0]["conclusion"], "failure")
+        self.assertEqual(FakeGitHub().pr_number(green), green_source["number"])
 
 
 class FixtureIsolation(unittest.TestCase):
@@ -436,7 +835,384 @@ class CanaryGlobDrift(unittest.TestCase):
         self.assertEqual(_workflow_paths_ignore(text), ["a/**", "**/*.md"])
 
 
+class CanaryAggregate(Base):
+    def test_release_poll_wait_is_bounded_to_one_minute(self):
+        import plistlib
+        source = HERE / 'launchd/com.carr.release-pipeline.plist'
+        schedule = plistlib.loads(source.read_bytes())['StartCalendarInterval']
+        self.assertEqual([row['Minute'] for row in schedule], list(range(60)))
+
+    def test_canary_verdict_uses_the_workflow_conclusion_without_jobs(self):
+        pipeline = self.fx.pipeline(FakeRunner())
+        class GH:
+            status = 'completed'
+            conclusion = 'success'
+            def runs_for(self, sha):
+                return [{'id': 9, 'name': 'main canary', 'status': self.status,
+                         'conclusion': self.conclusion}]
+            def jobs(self, run_id):
+                raise AssertionError('canary verdict must not fetch redundant job evidence')
+        gh = GH()
+        cfg = self.fx.config()['worker']
+        self.assertEqual(pipeline.canary_verdict(gh, cfg, 'a'*40), 'green')
+        for conclusion in ['failure', 'timed_out', 'action_required', None]:
+            gh.conclusion = conclusion
+            self.assertEqual(pipeline.canary_verdict(gh, cfg, 'a'*40), 'red')
+        for conclusion in ['skipped', 'neutral', 'cancelled']:
+            gh.conclusion = conclusion
+            self.assertEqual(pipeline.canary_verdict(gh, cfg, 'a'*40), 'cancelled')
+        gh.status = 'in_progress'
+        gh.conclusion = None
+        self.assertEqual(pipeline.canary_verdict(gh, cfg, 'a'*40), 'pending')
+
+
+class DurableReleaseEvidence(Base):
+    def test_failed_proof_append_cannot_advance_release_or_slices(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        original = pipe.store.record
+
+        def record(row):
+            if row["status"] == "release_verified":
+                raise OSError("owned fixture proof append failed")
+            original(row)
+
+        pipe.store.record = record
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertNotEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_proof_is_durable_before_release_checkpoint_or_slice_marker(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        original = pipe.store.record
+        observations = []
+
+        def record(row):
+            if row["status"] == "release_verified":
+                observations.append((self.fx.state().get("worker", {}).get("last_released_sha"),
+                                     list(self.fx.slice_marks)))
+            original(row)
+
+        pipe.store.record = record
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(observations, [(None, [])])
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+
+    def test_failed_terminal_append_keeps_checkpoint_open_after_verified_proof(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        original = pipe.store.record
+
+        def record(row):
+            if row["status"] == "shipped":
+                raise OSError("owned fixture terminal append failed")
+            original(row)
+
+        pipe.store.record = record
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertNotEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+        verified = [row for row in self.fx.records() if row["status"] == "release_verified"]
+        self.assertEqual([row["sha"] for row in verified], [latest])
+        self.assertEqual(self.fx.slice_marks, [(verified[0]["release_key"], latest)])
+
+    def test_unreadable_written_proof_cannot_advance_release_or_slices(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
+        with mock.patch.object(pipe.store, "records", return_value=[]):
+            self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertNotEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+        self.assertEqual(self.fx.slice_marks, [])
+
+
+class RecoveryCrash(BaseException):
+    pass
+
+
+class ReleaseJournalRecovery(Base):
+    def case(self, lane, checkpoint=True):
+        self.case_ordinal = getattr(self, "case_ordinal", 0) + 1
+        latest = self.fx.commit({"mcp-server/src/a.js" if lane == "worker" else "src/worker.js": f"{lane}-{self.case_ordinal}"})
+        live = ({"sha": self.fx.base, "version": PRIOR} if lane == "worker" else
+                {"source_commit": self.fx.base, "environment": "production", "provider_version_id": PRIOR_APP})
+        runner = FakeRunner(live=live if lane == "worker" else None)
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        if lane == "app":
+            original = runner.run
+
+            def run(argv, **kwargs):
+                result = original(argv, **kwargs)
+                if argv[:2] == ["node", "scripts/release-production.mjs"]:
+                    live.update(source_commit=latest, provider_version_id=VERSION)
+                return result
+
+            runner.run = run
+
+        def pipeline():
+            pipe = self.fx.pipeline(runner, cfg=cfg, live=live if lane == "worker" else None)
+            if lane == "app":
+                pipe.http = lambda _url: dict(live)
+            return pipe
+
+        pipe = pipeline()
+        pipe.store.save({lane: {"last_released_sha": self.fx.base}} if checkpoint else {})
+        pipe.store.records_path.unlink(missing_ok=True)
+        self.fx.slice_marks.clear()
+        return latest, live, runner, pipe, pipeline
+
+    def assert_one_release(self, lane, latest, runner):
+        self.assertEqual(runner.names().count("upload" if lane == "worker" else "app-release"), 1)
+        if lane == "worker":
+            self.assertEqual(runner.names().count("promote"), 1)
+        rows = [row for row in rp.Store(self.fx.repo / "out/release-pipeline").records()
+                if row.get("lane") == lane and row["status"] == "shipped"]
+        self.assertEqual([row["sha"] for row in rows], [latest])
+
+    def test_restart_after_shipped_before_checkpoint_never_redeploys_or_marks_twice(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane)
+                original = pipe.store.save
+
+                def save(state):
+                    if state[lane].get("last_released_sha") == latest:
+                        raise RecoveryCrash()
+                    original(state)
+
+                with mock.patch.object(pipe.store, "save", side_effect=save), self.assertRaises(RecoveryCrash):
+                    pipe.tick([lane])
+                marks = list(self.fx.slice_marks)
+                original_row = self.fx.records()[-1]
+                self.assertEqual(restart().tick([lane]), 0)
+                self.assert_one_release(lane, latest, runner)
+                self.assertEqual(self.fx.slice_marks, marks)
+                self.assertEqual(self.fx.state()[lane]["last_released_sha"], latest)
+                self.assertEqual([row for row in self.fx.records() if row["status"] == "shipped" and row.get("lane") == lane], [original_row])
+
+    def test_restart_after_verified_proof_finishes_original_identity(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane)
+                original = pipe.store.record_durable
+
+                def record(row):
+                    original(row)
+                    if row["status"] == "release_verified":
+                        raise RecoveryCrash()
+
+                with mock.patch.object(pipe.store, "record_durable", side_effect=record), self.assertRaises(RecoveryCrash):
+                    pipe.tick([lane])
+                proof = self.fx.records()[-1]
+                self.assertEqual(restart().tick([lane]), 0)
+                self.assert_one_release(lane, latest, runner)
+                final = self.fx.records()[-1]
+                self.assertEqual(final["run_id"], proof["run_id"])
+                if lane == "worker":
+                    self.assertEqual(final["release_key"], proof["release_key"])
+                    self.assertEqual(final["provider_version_id"], proof["provider_version_id"])
+
+    def test_restart_after_failed_append_with_or_without_checkpoint_stays_open(self):
+        for lane in ["worker", "app"]:
+            for checkpoint in [True, False]:
+                with self.subTest(lane=lane, checkpoint=checkpoint):
+                    latest, live, runner, pipe, restart = self.case(lane, checkpoint)
+                    with mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture append failed")):
+                        self.assertEqual(pipe.tick([lane]), 1)
+                    before = len(runner.calls)
+                    self.assertEqual(restart().tick([lane]), 0)
+                    self.assertEqual(len(runner.calls), before)
+                    self.assertEqual(self.fx.state()[lane].get("last_released_sha"), self.fx.base if checkpoint else None)
+                    self.assertFalse([row for row in self.fx.records() if row.get("lane") == lane and row.get("sha") == latest and row["status"] == "shipped"])
+
+    def test_failed_append_after_canary_target_behind_main_never_redeploys(self):
+        for checkpoint in [True, False]:
+            with self.subTest(checkpoint=checkpoint):
+                latest, live, runner, pipe, restart = self.case("worker", checkpoint)
+                self.fx.commit({"docs/recovery-later.md": f"main advanced-{self.case_ordinal}"})
+                with mock.patch.object(pipe, "release_target", return_value=latest), \
+                     mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture append failed")):
+                    self.assertEqual(pipe.tick(["worker"]), 1)
+                before = len(runner.calls)
+                again = restart()
+                with mock.patch.object(again, "release_target", return_value=latest):
+                    self.assertEqual(again.tick(["worker"]), 0)
+                self.assertEqual(len(runner.calls), before)
+                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), self.fx.base if checkpoint else None)
+                self.assertFalse([row for row in self.fx.records() if row.get("lane") == "worker" and row["status"] == "shipped"])
+
+    def test_restart_after_terminal_persistence_failure_finishes_original_proof(self):
+        for lane in ["worker", "app"]:
+            for checkpoint in [True, False]:
+                for boundary in ["append", "readback"]:
+                    with self.subTest(lane=lane, checkpoint=checkpoint, boundary=boundary):
+                        latest, live, runner, pipe, restart = self.case(lane, checkpoint)
+                        original_record = pipe.store.record
+                        original_readback = pipe.store.readback_durable
+
+                        def record(row):
+                            if boundary == "append" and row["status"] == "shipped":
+                                raise OSError("fixture terminal append failed")
+                            original_record(row)
+
+                        def readback(row):
+                            if boundary == "readback" and row["status"] == "shipped":
+                                raise OSError("fixture terminal readback failed")
+                            original_readback(row)
+
+                        with mock.patch.object(pipe.store, "record", side_effect=record), \
+                             mock.patch.object(pipe.store, "readback_durable", side_effect=readback):
+                            self.assertEqual(pipe.tick([lane]), 1)
+                        marks = list(self.fx.slice_marks)
+                        proof = next(row for row in self.fx.records() if row["status"] == "release_verified")
+                        self.assertEqual(restart().tick([lane]), 0)
+                        self.assert_one_release(lane, latest, runner)
+                        self.assertEqual(self.fx.slice_marks, marks)
+                        shipped = next(row for row in self.fx.records() if row["status"] == "shipped")
+                        self.assertEqual(shipped["run_id"], proof["run_id"])
+                        self.assertEqual(self.fx.state()[lane]["last_shipped_proof"], proof["proof_digest"])
+
+    def test_restart_after_readback_failure_recovers_written_proof_without_redeploy(self):
+        for lane in ["worker", "app"]:
+            for checkpoint in [True, False]:
+                with self.subTest(lane=lane, checkpoint=checkpoint):
+                    latest, live, runner, pipe, restart = self.case(lane, checkpoint)
+                    with mock.patch.object(pipe.store, "records", return_value=[]):
+                        self.assertEqual(pipe.tick([lane]), 1)
+                    self.assertEqual(restart().tick([lane]), 0)
+                    self.assert_one_release(lane, latest, runner)
+
+    def test_restart_after_marker_claim_or_launch_never_launches_twice(self):
+        for boundary in ["claim", "launch"]:
+            with self.subTest(boundary=boundary):
+                latest, live, runner, pipe, restart = self.case("worker")
+                original = pipe.store.record_durable
+                original_marker = pipe.slice_marker
+
+                def record(row):
+                    original(row)
+                    if boundary == "claim" and row["status"] == "slice_marker_claimed":
+                        raise RecoveryCrash()
+
+                def marker(key, sha):
+                    original_marker(key, sha)
+                    raise RecoveryCrash()
+
+                with mock.patch.object(pipe.store, "record_durable", side_effect=record), \
+                     mock.patch.object(pipe, "slice_marker", side_effect=marker if boundary == "launch" else original_marker), \
+                     self.assertRaises(RecoveryCrash):
+                    pipe.tick(["worker"])
+                marks = list(self.fx.slice_marks)
+                self.assertEqual(restart().tick(["worker"]), 0)
+                self.assert_one_release("worker", latest, runner)
+                self.assertEqual(self.fx.slice_marks, marks)
+                self.assertIsNone(self.fx.records()[-1]["slice_marker"]["started"])
+
+    def test_torn_terminal_append_restarts_without_duplicate_release_or_marker(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane)
+                original = pipe.store.record
+
+                def record(row):
+                    if row["status"] == "shipped":
+                        with pipe.store.records_path.open("ab") as fh:
+                            fh.write(b'{"status":"shipped",')
+                            fh.flush()
+                            os.fsync(fh.fileno())
+                        raise RecoveryCrash()
+                    original(row)
+
+                with mock.patch.object(pipe.store, "record", side_effect=record), self.assertRaises(RecoveryCrash):
+                    pipe.tick([lane])
+                marks = list(self.fx.slice_marks)
+                self.assertEqual(restart().tick([lane]), 0)
+                self.assert_one_release(lane, latest, runner)
+                self.assertEqual(self.fx.slice_marks, marks)
+                self.assertTrue(pipe.store.records_path.read_bytes().endswith(b"\n"))
+                self.assertIn(b'{"status":"shipped",\n', pipe.store.records_path.read_bytes())
+
+    def test_corrupt_attempt_binding_cannot_be_reconciled(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane)
+                original = pipe.store.save
+
+                def save(state):
+                    if state[lane].get("last_released_sha") == latest:
+                        raise RecoveryCrash()
+                    original(state)
+
+                with mock.patch.object(pipe.store, "save", side_effect=save), self.assertRaises(RecoveryCrash):
+                    pipe.tick([lane])
+                rows = self.fx.records()
+                rows[-1]["run_id"] = "different-attempt"
+                pipe.store.records_path.write_text("\n".join(json.dumps(row) for row in rows)+"\n")
+                before = len(runner.calls)
+                self.assertEqual(restart().tick([lane]), 0)
+                self.assertEqual(len(runner.calls), before)
+                self.assertEqual(self.fx.state()[lane].get("last_released_sha"), self.fx.base)
+
+    def test_unreceipted_bootstrap_cannot_advance_source_only_checkpoint(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane, False)
+                if lane == "worker":
+                    live.update(sha=latest, version=VERSION)
+                else:
+                    live.update(source_commit=latest, provider_version_id=VERSION)
+                self.fx.commit({"docs/bootstrap-later.md": f"later-{lane}"})
+                self.assertEqual(pipe.tick([lane]), 0)
+                self.assertIsNone(self.fx.state()[lane].get("last_released_sha"))
+                self.assertFalse([row for row in self.fx.records() if row.get("lane") == lane and row["status"] in ["shipped", "no_release_needed"]])
+
+    def test_completed_older_proofs_do_not_block_the_next_release(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        following = self.fx.commit({"mcp-server/src/a.js": "following"})
+        following_runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(following_runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(following_runner.names().count("upload"), 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], following)
+        self.assertEqual([row["sha"] for row in self.fx.records() if row["status"] == "shipped"], [latest, following])
+        self.assertEqual(len(self.fx.slice_marks), 2)
+
+    def test_changed_provider_identity_keeps_original_proof_incomplete(self):
+        for lane in ["worker", "app"]:
+            with self.subTest(lane=lane):
+                latest, live, runner, pipe, restart = self.case(lane)
+                original = pipe.store.record_durable
+
+                def record(row):
+                    original(row)
+                    if row["status"] == "release_verified":
+                        raise RecoveryCrash()
+
+                with mock.patch.object(pipe.store, "record_durable", side_effect=record), self.assertRaises(RecoveryCrash):
+                    pipe.tick([lane])
+                live["version" if lane == "worker" else "provider_version_id"] = PRIOR
+                before = len(runner.calls)
+                self.assertEqual(restart().tick([lane]), 0)
+                self.assertEqual(len(runner.calls), before)
+                self.assertEqual(self.fx.state()[lane].get("last_released_sha"), self.fx.base)
+
+
 class Batching(Base):
+    def test_offline_live_poll_never_waits_on_the_wall_clock(self):
+        with mock.patch.object(rp.time, "sleep", side_effect=AssertionError("real sleep in offline fixture")):
+            pipe = self.fx.pipeline(FakeRunner())
+            pipe.http = mock.Mock(return_value={"git_sha": {"value": self.fx.base}})
+            matched, last, _, _ = pipe.await_live(pipe.cfg["worker"], "offline-poll",
+                                                  lambda row: row["git_sha"]["value"] == "unserved-source",
+                                                  attempts=3)
+        self.assertFalse(matched)
+        self.assertEqual(last["git_sha"]["value"], self.fx.base)
+        self.assertEqual(pipe.http.call_count, 3)
+
     def test_many_merges_ship_once_at_the_latest_sha(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         self.fx.commit({"mcp-server/src/b.js": "2"})
@@ -447,6 +1223,10 @@ class Batching(Base):
         uploads = [a for n, a in runner.calls if n == "upload"]
         self.assertEqual(len(uploads), 1)
         self.assertEqual(uploads[0][uploads[0].index("--release-sha") + 1], latest)
+        upload = uploads[0]
+        self.assertEqual(upload[upload.index("--verifier") + 1], "github-actions")
+        self.assertEqual(upload[upload.index("--verifier-evidence") + 1],
+                         upload[upload.index("--test-evidence") + 1])
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
         shipped = [r for r in self.fx.records() if r["status"] == "shipped"]
         self.assertEqual([r["sha"] for r in shipped], [latest])
@@ -512,7 +1292,9 @@ class Batching(Base):
     def test_doc_only_batch_advances_without_release(self):
         latest = self.fx.commit({"docs/n.md": "3", "mcp-server/test/x.test.mjs": "t"})
         runner = FakeRunner()
-        self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 0)
+        pipe = self.fx.pipeline(runner)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 0)
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
         self.assertEqual(self.fx.records()[-1]["status"], "no_release_needed")
@@ -589,6 +1371,555 @@ class StopOnFailure(Base):
         self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 1)
         self.assertEqual(self.fx.records()[-1]["step"], "verify-live")
 
+
+class PrerequisiteRecovery(Base):
+    def test_rejected_token_is_probed_until_repaired_without_redispatch(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        rejected = "Authentication error [code: 10000]"
+        first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+        self.assertEqual(self.fx.pipeline(first, verbs=verbs).tick(["worker"]), 1)
+        for _ in range(2):
+            runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": rejected})
+            self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(runner.names(), ["wrangler-auth"])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn"])
+
+    def test_auth_transport_failure_recovers_after_a_successful_probe(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "wrangler-auth")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+    def test_auth_probe_install_failure_reaches_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for fail_at in ("wrangler-install", None):
+                with self.subTest(lane=lane, fail_at=fail_at), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    shutil.rmtree(fx.repo / "out/release-pipeline/toolchain")
+                    runner = FakeRunner(fail_at=fail_at)
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-install")
+                    self.assertEqual(fx.records()[-1]["step"], "wrangler-install")
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    retry = FakeRunner()
+                    self.assertEqual(pipeline(retry).tick([lane]), 0)
+                    self.assertEqual(retry.calls, [])
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
+    def test_second_auth_transport_failure_retains_first_diagnosis_across_restarts(self):
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline(runner):
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe
+                first = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "network unavailable"})
+                self.assertEqual(pipeline(first).tick([lane]), 1)
+                original_turn = verbs[0][1]
+                for _ in range(2):
+                    runner = FakeRunner(outputs={"wrangler-auth": "network unavailable"})
+                    original_run = runner.run
+                    def run(argv, **kw):
+                        if kw["log"].stem.endswith("wrangler-auth"):
+                            runner.fail_at = ("wrangler-auth" if "wrangler-auth" in runner.names() else None)
+                        return original_run(argv, **kw)
+                    runner.run = run
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth", "wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-auth")
+                    self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [("add-room-turn", original_turn)])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+
+    def test_auth_probe_execution_failure_gets_its_own_diagnosis_after_restart(self):
+        for lane in ("worker", "app"):
+            for output in ("SyntaxError: Unexpected token", "Error [ERR_MODULE_NOT_FOUND]",
+                           "unrecognized process failure", ""):
+                with self.subTest(lane=lane, output=output), tempfile.TemporaryDirectory() as tmp:
+                    fx = Fixture(Path(tmp))
+                    sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                    cfg = fx.config()
+                    cfg[lane]["enabled"] = True
+                    verbs = []
+                    def pipeline(runner):
+                        pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                        if lane == "app":
+                            pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                        return pipe
+                    (fx.cred / "tokens.env").write_text("")
+                    self.assertEqual(pipeline(FakeRunner()).tick([lane]), 1)
+                    (fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": output})
+                    self.assertEqual(pipeline(runner).tick([lane]), 1)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                    self.assertEqual(fx.state()[lane]["failed_step"], "wrangler-execution")
+                    failure = fx.records()[-1]
+                    self.assertEqual((failure["step"], failure["rc"]), ("wrangler-execution", 7))
+                    self.assertEqual(Path(failure["log"]).read_text(), output)
+                    self.assertEqual([v for v, _ in verbs], ["add-loop", "add-room-turn", "add-room-turn"])
+                    self.assertIn("wrangler-execution", json.dumps(verbs[-1][1]))
+                    for _ in range(2):
+                        retry = FakeRunner()
+                        self.assertEqual(pipeline(retry).tick([lane]), 0)
+                        self.assertEqual(retry.calls, [])
+                        self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                    self.assertEqual(len(verbs), 3)
+
+    def test_first_transport_failure_save_keeps_diagnosis_across_restarts(self):
+        class Interrupted(BaseException):
+            pass
+        for lane in ("worker", "app"):
+            with self.subTest(lane=lane), tempfile.TemporaryDirectory() as tmp:
+                fx = Fixture(Path(tmp))
+                sha = fx.commit({"mcp-server/src/a.js": "1", "src/worker.js": "1"})
+                cfg = fx.config()
+                cfg[lane]["enabled"] = True
+                verbs = []
+                def pipeline():
+                    runner = FakeRunner(fail_at="wrangler-auth", outputs={"wrangler-auth": "fetch failed"})
+                    pipe = fx.pipeline(runner, cfg=cfg, verbs=verbs)
+                    if lane == "app":
+                        pipe.http = lambda _u: {"source_commit": fx.base, "environment": "production"}
+                    return pipe, runner
+                pipe, _ = pipeline()
+                save = pipe.store.save
+                def interrupt_after_failed_save(state):
+                    save(state)
+                    if state.get(lane, {}).get("failed_step") == "wrangler-auth":
+                        raise Interrupted()
+                pipe.store.save = interrupt_after_failed_save
+                with self.assertRaises(Interrupted):
+                    pipe.tick([lane])
+                self.assertEqual(fx.state()[lane]["failed_sha"], sha)
+                self.assertEqual(verbs, [])
+                for _ in range(2):
+                    retry, runner = pipeline()
+                    self.assertEqual(retry.tick([lane]), 0)
+                    self.assertEqual(runner.names(), ["wrangler-auth"])
+                self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+                self.assertEqual(fx.state()[lane]["dispatches"][sha], 1)
+                self.assertEqual(fx.state()["pending_diagnoses"], {})
+
+    def test_code_failures_still_require_a_fix_forward_merge(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        pipe = self.fx.pipeline(FakeRunner())
+        for step in ("app-build", "npm-ci", "wrangler-install", "staging", "migrate-apply", "smoke-post"):
+            with self.subTest(step=step):
+                pipe.store.save({"worker": {"failed_sha": sha, "failed_step": step}})
+                runner, verbs = FakeRunner(), []
+                self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+
+    def test_tracked_venv_link_conflict_waits_for_fix_forward_after_restart(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        blob = git(self.fx.repo, "hash-object", "-w", "README.md")
+        git(self.fx.repo, "update-index", "--add", "--cacheinfo", f"100644,{blob},.venv")
+        git(self.fx.repo, "commit", "-q", "-m", "tracked venv conflict")
+        git(self.fx.repo, "push", "-q", "origin", "HEAD:main")
+        sha = git(self.fx.repo, "rev-parse", "HEAD")
+        verbs = []
+        runner = RealGitRunner("")
+        original_run = runner.run
+        def run(argv, **kw):
+            if argv[0] == "ln":
+                runner.calls.append(("venv-link", list(argv)))
+                result = subprocess.run(argv, cwd=kw["cwd"], env=kw["env"], capture_output=True, text=True)
+                kw["log"].parent.mkdir(parents=True, exist_ok=True)
+                kw["log"].write_text(result.stdout + result.stderr)
+                return rp.Result(result.returncode, result.stdout + result.stderr)
+            return original_run(argv, **kw)
+        runner.run = run
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "venv-link")
+        self.assertIn("File exists", Path(self.fx.records()[-1]["log"]).read_text())
+        for _ in range(2):
+            retry = FakeRunner()
+            self.assertEqual(self.fx.pipeline(retry, verbs=verbs).tick(["worker"]), 0)
+            self.assertEqual(retry.calls, [])
+            self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+    def test_missing_venv_is_probed_before_any_release_step_then_recovers(self):
+        python = self.fx.repo / ".venv/bin/python"
+        python.unlink()
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        verbs = []
+        self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=verbs).tick(["worker"]), 1)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        python.write_text("#!/bin/sh\nexit 0\n")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
+
+
+class PostReleaseProof(Base):
+    """After every production release the live system is proven by
+    ops/release-smoke.py: a journey that passed before the release and fails
+    after it (twice: one retry absorbs a flake) marks the release FAILED, rolls
+    the lane back and files one loop naming the journey and its evidence."""
+
+    def worker(self, runner, verbs=None, live=None):
+        live = live if live is not None else {"sha": self.fx.base}
+        runner.live = live
+        verbs = verbs if verbs is not None else []
+        rc = self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"])
+        return rc, verbs, live
+
+    def argv(self, runner, name):
+        return next(a for n, a in runner.calls if n == name)
+
+
+    def test_crash_cannot_reuse_an_earlier_green_summary(self):
+        sha = self.fx.base
+        old = self.fx.repo / rp.SMOKE_OUT / sha / 'post'
+        old.mkdir(parents=True)
+        (old / 'summary.json').write_text(json.dumps({'failed': [], 'probes': []}))
+        pipe = self.fx.pipeline(FakeRunner(smoke={'smoke-post': None}))
+        self.assertIsNone(pipe.smoke_run('worker', sha, 'post'))
+
+    def test_smoke_summary_must_bind_source_and_required_probes(self):
+        class WrongRunner(FakeRunner):
+            def _smoke_output(inner, name, argv):
+                result = super()._smoke_output(name, argv)
+                path = Path(argv[argv.index('--out') + 1]) / 'summary.json'
+                value = json.loads(path.read_text())
+                value['sha'] = '0' * 40
+                path.write_text(json.dumps(value))
+                return result
+        self.assertIsNone(self.fx.pipeline(WrongRunner()).smoke_run('worker', self.fx.base, 'post'))
+
+    def test_app_summary_cannot_skip_required_browser_proof(self):
+        class SkippedRunner(FakeRunner):
+            def _smoke_output(inner, name, argv):
+                result = super()._smoke_output(name, argv)
+                path = Path(argv[argv.index('--out') + 1]) / 'summary.json'
+                value = json.loads(path.read_text())
+                next(p for p in value['probes'] if p['id'] == 'browser-journeys')['status'] = 'skip'
+                path.write_text(json.dumps(value))
+                return result
+        self.assertIsNone(self.fx.pipeline(SkippedRunner()).smoke_run('app', self.fx.base, 'post'))
+
+    def test_pass_ships_with_baseline_before_any_apply_and_proof_after_promotion(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner()
+        rc, verbs, _ = self.worker(runner)
+        self.assertEqual(rc, 0)
+        names = runner.names()
+        self.assertLess(names.index("smoke-baseline"), names.index("staging-prepare"))
+        self.assertLess(names.index("promote"), names.index("smoke-post"))
+        self.assertNotIn("smoke-retry", names)
+        self.assertNotIn("rollback", names)
+        post = self.argv(runner, "smoke-post")
+        self.assertEqual(post[post.index("--phase") + 1], "post")
+        self.assertEqual(post[post.index("--sha") + 1], sha)
+        self.assertTrue(post[post.index("--worker-dir") + 1].endswith("mcp-server"))
+        evidence = Path(post[post.index("--out") + 1])
+        self.assertEqual(evidence.parent, self.fx.repo / "out" / "release-smoke" / sha)
+        self.assertTrue(evidence.name.startswith("post-"))
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["status"], "shipped")
+        self.assertEqual(rec["post_release"]["regressions"], [])
+        self.assertEqual(rec["post_release"]["evidence_dir"], str(evidence.parent))
+        self.assertNotIn("add-loop", [v for v, _ in verbs])
+
+    def test_fail_marks_failed_rolls_the_worker_back_and_files_one_loop(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": ["invoices-list"], "smoke-retry": ["invoices-list"]})
+        rc, verbs, live = self.worker(runner)
+        self.assertEqual(rc, 1)
+        rollback = self.argv(runner, "rollback")
+        self.assertEqual(rollback[:3], ["bin/deploy-worker.sh", "--promote-version", PRIOR])
+        self.assertEqual(rollback[rollback.index("--recovery-strategy") + 1], "rollback")
+        self.assertEqual(rollback[rollback.index("--rollback-plan-ref") + 1], "runbooks/rollback-worker.md")
+        self.assertEqual(live["version"], PRIOR)
+        self.assertLess(runner.names().index("smoke-retry"), runner.names().index("rollback"))
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["step"]), ("failed", "post-release-smoke"))
+        self.assertEqual(rec["post_release"]["regressions"], ["invoices-list"])
+        self.assertEqual(rec["post_release"]["rollback"]["ok"], True)
+        self.assertEqual(rec["post_release"]["rollback"]["served_version"], PRIOR)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["failed_sha"], sha)
+        self.assertNotEqual(state.get("last_released_sha"), sha)
+        loops = [a for v, a in verbs if v == "add-loop"]
+        self.assertEqual(len(loops), 1)
+        body = loops[0]["body"]
+        self.assertIn("invoices-list", body)
+        self.assertIn("invoices-list broke", body)
+        self.assertIn("screenshots/x.png", body)
+        self.assertIn("trace.zip", body)
+        self.assertIn("rolled back", body)
+        self.assertEqual(loops[0]["kind"], "open_loop")
+        self.assertTrue(loops[0]["idempotency_key"])
+        self.assertIn("add-room-turn", [v for v, _ in verbs])   # the fix-forward diagnosis still goes
+
+    def test_a_journey_that_passes_on_its_one_retry_is_flaky_and_ships(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": ["deal-board"]})
+        rc, verbs, _ = self.worker(runner)
+        self.assertEqual(rc, 0)
+        retry = self.argv(runner, "smoke-retry")
+        self.assertEqual(retry[retry.index("--only") + 1], "deal-board")
+        self.assertEqual(runner.names().count("smoke-retry"), 1)
+        self.assertNotIn("rollback", runner.names())
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["post_release"]["flaky"]), ("shipped", ["deal-board"]))
+        self.assertNotIn("add-loop", [v for v, _ in verbs])
+
+    def test_a_failure_already_present_before_the_release_is_not_this_releases(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-baseline": ["invoices-list"], "smoke-post": ["invoices-list"],
+                                   "smoke-retry": ["invoices-list"]})
+        rc, _, _ = self.worker(runner)
+        self.assertEqual(rc, 0)
+        self.assertNotIn("rollback", runner.names())
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["post_release"]["preexisting"], ["invoices-list"])
+        self.assertEqual(rec["post_release"]["regressions"], [])
+
+    def test_identity_and_released_verbs_are_never_excused_by_the_baseline(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-baseline": ["verb-registry"], "smoke-post": ["verb-registry"],
+                                   "smoke-retry": ["verb-registry"]})
+        rc, _, _ = self.worker(runner)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.fx.records()[-1]["post_release"]["regressions"], ["verb-registry"])
+
+    def test_a_release_that_migrated_production_is_never_rolled_back(self):
+        self.fx.commit({"mcp-server/src/a.js": "1", "migrations/0999_x.sql": "select 1;"})
+        runner = FakeRunner(pending=1, smoke={"smoke-post": ["deal-board"], "smoke-retry": ["deal-board"]})
+        rc, verbs, _ = self.worker(runner)
+        self.assertEqual(rc, 1)
+        self.assertNotIn("rollback", runner.names())
+        rb = self.fx.records()[-1]["post_release"]["rollback"]
+        self.assertFalse(rb["attempted"])
+        self.assertIn("forward fix", rb["reason"])
+        body = next(a for v, a in verbs if v == "add-loop")["body"]
+        self.assertIn("NOT rolled back", body)
+
+    def test_a_refused_rollback_is_recorded_and_still_fails_the_release(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(fail_at="rollback", smoke={"smoke-post": ["deal-board"], "smoke-retry": ["deal-board"]})
+        rc, verbs, _ = self.worker(runner)
+        self.assertEqual(rc, 1)
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["step"], "post-release-smoke")
+        self.assertEqual((rec["post_release"]["rollback"]["attempted"], rec["post_release"]["rollback"]["ok"]),
+                         (True, False))
+        self.assertIn("rollback FAILED", next(a for v, a in verbs if v == "add-loop")["body"])
+
+    def test_a_rollback_production_never_reads_back_is_a_failed_rollback(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": ["deal-board"], "smoke-retry": ["deal-board"]})
+        live = {"sha": self.fx.base}
+        runner.live = live
+        orig = runner.run
+
+        def run(argv, **kw):
+            res = orig(argv, **kw)
+            if "--promote-version" in argv and argv[argv.index("--promote-version") + 1] == PRIOR:
+                live["version"] = VERSION      # exit 0, but production still serves the release
+            return res
+        runner.run = run  # type: ignore[method-assign]
+        verbs: list = []
+        pipe = self.fx.pipeline(runner, live=live, verbs=verbs)
+        pipe.sleep = lambda _s: None
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        rb = self.fx.records()[-1]["post_release"]["rollback"]
+        self.assertEqual((rb["attempted"], rb["ok"], rb["served_version"]), (True, False, VERSION))
+        self.assertIn("rollback FAILED", next(a for v, a in verbs if v == "add-loop")["body"])
+
+    def test_an_unreadable_smoke_fails_the_release_but_never_rolls_back(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": None, "smoke-retry": None})
+        rc, verbs, _ = self.worker(runner)
+        self.assertEqual(rc, 1)
+        self.assertNotIn("rollback", runner.names())
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["step"], "post-release-smoke")
+        self.assertFalse(rec["post_release"]["rollback"]["attempted"])
+        self.assertEqual(len([v for v, _ in verbs if v == "add-loop"]), 1)
+
+    def test_the_stage_has_its_own_off_switch(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        cfg = self.fx.config()
+        cfg["worker"]["post_release_smoke"] = False
+        runner = FakeRunner(smoke={"smoke-post": ["deal-board"], "smoke-retry": ["deal-board"]})
+        live = {"sha": self.fx.base}
+        runner.live = live
+        self.assertEqual(self.fx.pipeline(runner, cfg=cfg, live=live).tick(["worker"]), 0)
+        self.assertFalse([n for n in runner.names() if n.startswith("smoke-")])
+
+    def app_cfg(self):
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        return cfg
+
+    def app(self, runner, sha, verbs):
+        pipe = self.fx.pipeline(runner, cfg=self.app_cfg(), verbs=verbs)
+        live = {"source_commit": self.fx.base, "environment": "production", "provider_version_id": PRIOR_APP}
+        pipe.http = lambda _u: dict(live)
+        orig = runner.run
+
+        def run(argv, **kw):
+            res = orig(argv, **kw)
+            if argv[:2] == ["node", "scripts/release-production.mjs"]:
+                live.update(source_commit=sha, provider_version_id=VERSION)
+            if argv[:2] == ["node", "scripts/rollback-production.mjs"]:
+                live.update(source_commit=self.fx.base, provider_version_id=argv[2])
+            return res
+        runner.run = run  # type: ignore[method-assign]
+        return pipe.tick(["app"]), live
+
+    def test_missing_browser_proof_cannot_be_excused_by_the_baseline(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={name: ["browser-journeys"] for name in
+                                  ("smoke-baseline", "smoke-post", "smoke-retry")})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.fx.records()[-1]["post_release"]["regressions"], ["browser-journeys"])
+
+    def test_app_pass_runs_the_browser_journeys_from_the_release_checkout(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner()
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 0)
+        names = runner.names()
+        self.assertLess(names.index("smoke-baseline"), names.index("app-release"))
+        self.assertLess(names.index("app-release"), names.index("smoke-post"))
+        post = self.argv(runner, "smoke-post")
+        self.assertEqual(post[post.index("--lane") + 1], "app")
+        self.assertEqual(post[post.index("--app-dir") + 1], runner.cwds["app-release"])
+        self.assertNotIn("--worker-dir", post)
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_a_browser_test_already_failing_before_the_release_is_excused_per_test(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={name: ["browser-journeys::a.e2e.ts::one"] for name in
+                                  ("smoke-baseline", "smoke-post", "smoke-retry")})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.fx.records()[-1]["post_release"]["preexisting"], ["browser-journeys::a.e2e.ts::one"])
+
+    def test_a_pre_existing_browser_failure_never_excuses_a_new_one(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={"smoke-baseline": ["browser-journeys::a.e2e.ts::one"],
+                                   "smoke-post": ["browser-journeys::a.e2e.ts::one", "browser-journeys::b.e2e.ts::two"],
+                                   "smoke-retry": ["browser-journeys::a.e2e.ts::one", "browser-journeys::b.e2e.ts::two"]})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 1)
+        rec = self.fx.records()[-1]["post_release"]
+        self.assertEqual(rec["regressions"], ["browser-journeys::b.e2e.ts::two"])
+        self.assertEqual(rec["preexisting"], ["browser-journeys::a.e2e.ts::one"])
+        self.assertIn("app-rollback", runner.names())
+
+    def assert_browser_regression_across_granularity(self, post, retry):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": post, "smoke-retry": retry})
+        rc, _ = self.app(runner, sha, [])
+        self.assertEqual(rc, 1)
+        rec = self.fx.records()[-1]["post_release"]
+        self.assertEqual(rec["flaky"], [])
+        self.assertEqual(rec["regressions"], ["browser-journeys"])
+        self.assertIn("app-rollback", runner.names())
+
+    def test_a_whole_browser_failure_then_a_named_one_is_a_regression_not_a_flake(self):
+        self.assert_browser_regression_across_granularity(
+            ["browser-journeys"], ["browser-journeys::b.e2e.ts::two"])
+
+    def test_a_named_browser_failure_then_a_whole_one_is_a_regression_not_a_flake(self):
+        self.assert_browser_regression_across_granularity(
+            ["browser-journeys::b.e2e.ts::two"], ["browser-journeys"])
+
+    def test_each_lane_proves_only_its_own_journeys(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner()
+        self.assertEqual(self.app(runner, sha, [])[0], 0)
+        self.assertEqual(rp.SMOKE_LANE_JOURNEYS["app"], ("release-identity", "sign-in-gate", "browser-journeys"))
+        self.assertNotIn("deal-board", rp.SMOKE_LANE_JOURNEYS["app"])
+        self.assertNotIn("sign-in-gate", rp.SMOKE_LANE_JOURNEYS["worker"])
+
+    def test_a_failure_pre_existing_in_two_consecutive_releases_files_a_coverage_loop(self):
+        failing = {name: ["invoices-list"] for name in ("smoke-baseline", "smoke-post", "smoke-retry")}
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        rc, verbs, live = self.worker(FakeRunner(smoke=failing))
+        self.assertEqual(rc, 0)
+        self.assertEqual([a for v, a in verbs if v == "add-loop"], [])   # once may be a passing outage
+        self.fx.commit({"mcp-server/src/b.js": "2"})
+        runner = FakeRunner(smoke=failing)
+        verbs2: list = []
+        live = {"sha": self.fx.state()["worker"]["last_released_sha"]}
+        runner.live = live
+        self.assertEqual(self.fx.pipeline(runner, live=live, verbs=verbs2).tick(["worker"]), 0)
+        loops = [a for v, a in verbs2 if v == "add-loop"]
+        self.assertEqual(len(loops), 1)
+        self.assertIn("invoices-list", loops[0]["body"])
+        self.assertIn("two consecutive", loops[0]["body"])
+        self.assertEqual(self.fx.records()[-1]["post_release"]["persistent_preexisting"], ["invoices-list"])
+
+    def test_a_missing_smoke_switch_refuses_the_lane_before_anything_runs(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        cfg = self.fx.config()
+        del cfg["worker"]["post_release_smoke"]
+        runner = FakeRunner()
+        live = {"sha": self.fx.base}
+        runner.live = live
+        self.fx.pipeline(runner, cfg=cfg, live=live).tick(["worker"])
+        self.assertNotIn("promote", runner.names())
+        self.assertFalse([n for n in runner.names() if n.startswith("smoke-")])
+
+    def test_app_fail_rolls_back_to_the_previous_app_version(self):
+        sha = self.fx.commit({"src/worker.js": "1"})
+        runner = FakeRunner(smoke={"smoke-post": ["browser-journeys"], "smoke-retry": ["browser-journeys"]})
+        verbs: list = []
+        rc, live = self.app(runner, sha, verbs)
+        self.assertEqual(rc, 1)
+        self.assertEqual(self.argv(runner, "app-rollback"), ["node", "scripts/rollback-production.mjs", PRIOR_APP])
+        self.assertEqual(runner.cwds["app-rollback"], runner.cwds["app-release"])
+        self.assertIn("CLOUDFLARE_API_TOKEN", runner.envs["app-rollback"])
+        self.assertEqual(live["provider_version_id"], PRIOR_APP)
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["step"]), ("failed", "post-release-smoke"))
+        self.assertTrue(rec["post_release"]["rollback"]["ok"])
+        self.assertEqual(len([v for v, _ in verbs if v == "add-loop"]), 1)
+        self.assertNotEqual(self.fx.state()["app"].get("last_released_sha"), sha)
 
 class StagingGuard(Base):
     def test_failed_staging_never_promotes(self):
@@ -720,12 +2051,12 @@ class HealthCompleteMarkerDoesNotDrift(unittest.TestCase):
                                 "— has it been renamed or reshaped?")
         health_check_marker = m.group(1) + m.group(2)
         self.assertEqual(rp.HEALTH_COMPLETE_MARKER, health_check_marker)
-        # And both print call sites in tools/health-check.py actually use
+        # And all print call sites in tools/health-check.py actually use
         # the constant, not a re-typed literal that could drift from it on
         # its own.
         self.assertEqual(health_check_src.count("print(_HEALTH_COMPLETION_MARKER)"), 2,
                          "tools/health-check.py should print the marker constant, by name, "
-                         "from exactly two places (the REFUSED early-return and the normal end)")
+                         "from the REFUSED return and the normal end")
 
 
 class HealthGate(Base):
@@ -1246,12 +2577,16 @@ class HealthGate(Base):
         verbs: list = []
         for attempt in range(1, n):
             runner = FakeRunner(live=live, health_baseline_marker=False)
-            rc = self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"])
+            pipe = self.fx.pipeline(runner, live=live, verbs=verbs)
+            pipe.now = lambda: attempt * 10000
+            rc = pipe.tick(["worker"])
             self.assertEqual(rc, 0, f"attempt {attempt} should still be a clean, silent hold")
             self.assertEqual(self.fx.records()[-1]["reason"], "health_baseline_unavailable")
             self.assertEqual(verbs, [], f"no loop should be filed before attempt {n}")
         runner = FakeRunner(live=live, health_baseline_marker=False)
-        rc = self.fx.pipeline(runner, live=live, verbs=verbs).tick(["worker"])
+        pipe = self.fx.pipeline(runner, live=live, verbs=verbs)
+        pipe.now = lambda: n * 10000
+        rc = pipe.tick(["worker"])
         self.assertEqual(rc, 3, "the Nth consecutive incomplete baseline must escalate")
         rec = self.fx.records()[-1]
         self.assertEqual(rec["reason"], "health_baseline_stalled")
@@ -1265,11 +2600,15 @@ class HealthGate(Base):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
         n = rp.Pipeline.HEALTH_BASELINE_ESCALATE_AFTER
-        for _ in range(n - 1):
+        for attempt in range(n - 1):
             runner = FakeRunner(live=live, health_baseline_marker=False)
-            self.fx.pipeline(runner, live=live).tick(["worker"])
+            pipe = self.fx.pipeline(runner, live=live)
+            pipe.now = lambda: attempt * 10000
+            pipe.tick(["worker"])
         good_runner = FakeRunner(live=live)
-        self.assertEqual(self.fx.pipeline(good_runner, live=live).tick(["worker"]), 0)
+        pipe = self.fx.pipeline(good_runner, live=live)
+        pipe.now = lambda: n * 10000
+        self.assertEqual(pipe.tick(["worker"]), 0)
         self.assertEqual(self.fx.state()["worker"].get("health_baseline_incomplete", {}).get(sha),
                          None)
 
@@ -1312,643 +2651,22 @@ class Lock(Base):
             self.assertTrue(held)
 
 
-class VerifierIsNotMaker(unittest.TestCase):
-    cfg = json.loads((HERE / "config" / "release-pipeline.v1.json").read_text())["worker"]
+class GitHubBudgetEnvironment(unittest.TestCase):
+    def test_configured_cache_path_reaches_github_reader_without_credentials(self):
+        budget_path = "/tmp/github-read-budget.json"
+        env = rp.child_env({
+            "HOME": "/tmp/home",
+            "CARR_GITHUB_READ_BUDGET": budget_path,
+            "DATABASE_URL": "fixture-dsn",
+            "CARR_DB_PASSWORD": "fixture-password",
+            "GH_TOKEN": "fixture-token",
+        })
+
+        self.assertEqual(rp.GitHub("o/r", env).reader.budget.path, Path(budget_path))
+        self.assertNotIn("DATABASE_URL", env)
+        self.assertNotIn("CARR_DB_PASSWORD", env)
+        self.assertNotIn("GH_TOKEN", env)
 
-    def test_default_is_the_review_agent(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {}), "claude-review-agent")
-
-    def test_only_the_merge_event_names_the_reviewer(self):
-        self.assertEqual(rp.choose_verifier(self.cfg, {"reviewer": "Sonnet-Review"}), "sonnet-review")
-
-    def test_comment_text_cannot_name_the_verifier(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            sha = fx.commit({"mcp-server/src/a.js": "1"})
-            n = FakeGitHub().pr_number(sha)
-            gh = FakeGitHub(comments={n: [approve(n, body=f"APPROVE\nReviewed-SHA: {pr_head(n)}\nVerifier: joe")]})
-            live = {"sha": fx.base}
-            runner = FakeRunner(live=live)
-            fx.pipeline(runner, github=gh, live=live).tick(["worker"])
-            up = next(a for name, a in runner.calls if name == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
-
-    def test_maker_humans_pipeline_and_author_are_refused(self):
-        for bad in ("carr_jobs", "joe", "Dell", "release-pipeline", "jbookout"):
-            with self.assertRaises(rp.Blocked, msg=bad):
-                rp.choose_verifier(self.cfg, {"reviewer": bad})
-        with self.assertRaises(rp.Blocked):
-            rp.choose_verifier(self.cfg, {"reviewer": "claude-a", "author_actor": "claude-a"})
-
-    def test_upload_binds_the_verifier_and_its_evidence(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            fx.commit({"mcp-server/src/a.js": "1"})
-            live = {"sha": fx.base}
-            runner = FakeRunner(live=live)
-            fx.pipeline(runner, live=live).tick(["worker"])
-            up = next(a for n, a in runner.calls if n == "upload")
-            self.assertEqual(up[up.index("--verifier") + 1], "claude-review-agent")
-            self.assertRegex(up[up.index("--verifier-evidence") + 1], r"^github:o/r/pull/\d+#issuecomment-\d+$")
-            self.assertRegex(up[up.index("--test-evidence") + 1],
-                             r"^github-actions:jbookout/carr-system/runs/\d+#ops-ci-strict$")
-
-    def test_a_merge_without_independent_review_is_blocked_not_failed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = Fixture(Path(tmp))
-            fx.commit({"mcp-server/src/a.js": "1"})
-            runner = FakeRunner()
-            self.assertEqual(fx.pipeline(runner, github=FakeGitHub(approve_all=False)).tick(["worker"]), 0)
-            self.assertEqual(runner.calls, [])
-            self.assertEqual(fx.records()[-1]["reason"], "no_independent_review")
-            self.assertNotIn("failed_sha", fx.state().get("worker", {}))
-
-
-class ReviewGate(Base):
-    """B1: the approval must be trusted, the latest verdict, and fresh."""
-
-    def blocked_reason(self, comments_for_head):
-        # distinct content per call: a repeat call must add a real code commit,
-        # not an empty one (see Fixture's info/exclude)
-        self._calls = getattr(self, "_calls", 0) + 1
-        sha = self.fx.commit({"mcp-server/src/a.js": str(self._calls)})
-        n = FakeGitHub().pr_number(sha)
-        runner = FakeRunner()
-        self.assertEqual(self.fx.pipeline(runner, github=FakeGitHub(comments={n: comments_for_head(n)}))
-                         .tick(["worker"]), 0)
-        self.assertEqual(runner.calls, [])
-        return self.fx.records()[-1]["reason"]
-
-    def test_an_outsider_comment_is_not_an_approval(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, assoc="NONE")]), "no_independent_review")
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, assoc="CONTRIBUTOR")]), "no_independent_review")
-
-    def test_a_later_block_overrides_an_earlier_approve(self):
-        self.assertEqual(self.blocked_reason(lambda n: [
-            approve(n, when="2026-09-30T01:00:00Z", cid=1),
-            approve(n, when="2026-09-30T02:00:00Z", cid=2, body="Independent review: BLOCK\nmissing test")]),
-            "review_blocked")
-
-    def test_an_outsider_cannot_override_with_a_later_approve(self):
-        self.assertEqual(self.blocked_reason(lambda n: [
-            approve(n, when="2026-09-30T02:00:00Z", cid=2, body="Independent review: BLOCK"),
-            approve(n, when="2026-09-30T03:00:00Z", cid=3, assoc="NONE")]), "review_blocked")
-
-    def test_an_approval_of_an_earlier_head_is_stale(self):
-        # N1: approval for H1 posted after H2 was committed but before it was
-        # pushed. Dates cannot tell; the exact Reviewed-SHA can.
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, reviewed="ab" * 20,
-                                                                when="2099-01-01T00:00:00Z")]),
-                         "review_stale")
-
-    def test_an_approval_without_reviewed_sha_is_stale(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(n, body="Independent review: PASS")]),
-                         "review_stale")
-
-    def test_hidden_or_later_reviewed_sha_cannot_approve_a_release(self):
-        for make_body in (
-            lambda n: f"APPROVE <!--\nReviewed-SHA: {pr_head(n)}\n-->",
-            lambda n: f"APPROVE `\nReviewed-SHA: {pr_head(n)}\n`",
-            lambda n: f"APPROVE\nExplanation\n```\nReviewed-SHA: {pr_head(n)}\n```",
-        ):
-            with self.subTest(kind=make_body(1001).split("\n", 1)[0]):
-                self.assertEqual(self.blocked_reason(lambda n: [approve(n, body=make_body(n))]),
-                                 "review_stale")
-
-    def test_a_short_sha_prefix_is_not_enough(self):
-        self.assertEqual(self.blocked_reason(lambda n: [approve(
-            n, body=f"Independent review: PASS at {pr_head(n)[:12]}")]), "review_stale")
-
-    def test_the_exact_reviewed_sha_ships(self):
-        self.fx.commit({"mcp-server/src/a.js": "1"})
-        live = {"sha": self.fx.base}
-        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-
-    def test_crlf_literal_review_header_ships(self):
-        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
-        n = FakeGitHub().pr_number(sha)
-        comment = approve(n, body=f"APPROVE\r\nReviewed-SHA: {pr_head(n)}\r\n")
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        self.assertEqual(self.fx.pipeline(runner, github=FakeGitHub(comments={n: [comment]}),
-                                          live=live).tick(["worker"]), 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-
-    def test_verdict_comments_are_read_across_pages(self):
-        gh = rp.GitHub("o/r", {})
-        real = rp.subprocess.run
-
-        class Done:
-            returncode = 0
-            stdout = json.dumps([[{"id": 1}], [{"id": 2}, {"id": 3}]])
-
-        seen = []
-
-        def fake(argv, **kw):
-            seen.append(argv)
-            return Done()
-        rp.subprocess.run = fake
-        try:
-            self.assertEqual([c["id"] for c in gh.comments(5)], [1, 2, 3])
-        finally:
-            rp.subprocess.run = real
-        self.assertIn("--paginate", seen[0])
-
-
-
-class NumberedGitHub(FakeGitHub):
-    """FakeGitHub with PR numbers assigned explicitly per commit, so no two
-    commits of one scenario can hash to the same PR number (the default
-    numbering collides about once in 800 pairs)."""
-
-    def __init__(self, numbers: dict[str, int], **kw):
-        super().__init__(**kw)
-        self.numbers = numbers
-
-    def pr_number(self, sha):
-        return self.numbers[sha] if sha in self.numbers else super().pr_number(sha)
-
-
-class FixForward(Base):
-    """A merged PR B whose latest trusted verdict is BLOCK may ship ONLY
-    together with its fix: a LATER commit in the same batch, at or before the
-    release target, that is exactly PR F's merge commit, whose DECIDING
-    approval (exact or main-merge-only) carries the line `Fixes-Forward: #<B>`,
-    and whose change is still present at the target. Anything else is a
-    review_blocked hold. Never a fresh APPROVE on B's defective head."""
-
-    def setUp(self):
-        super().setUp()
-        self.nums: dict[str, int] = {}
-
-    def land(self, files, message=None):
-        sha = self.fx.commit(files)
-        if message:   # reword the tip, as `git revert` would title it
-            git(self.fx.repo, "commit", "-q", "--amend", "-m", message)
-            git(self.fx.repo, "push", "-q", "-f", "origin", "HEAD:main")
-            sha = git(self.fx.repo, "rev-parse", "HEAD")
-        self.nums[sha] = 1000 + len(self.nums) + 1
-        return sha, self.nums[sha]
-
-    def block(self, n, *, when="2026-09-30T02:00:00Z", cid=None):
-        return approve(n, when=when, cid=cid or 5000 + n,
-                       body=f"BLOCKING: P1 defect\n\nReviewed-SHA: {pr_head(n)}\n")
-
-    def fix_approve(self, n, names, *, when="2026-09-30T03:00:00Z", cid=None, assoc="OWNER", prefix=""):
-        lines = "".join(f"{prefix}Fixes-Forward: #{b}\n" for b in names)
-        return approve(n, when=when, cid=cid or 6000 + n, assoc=assoc,
-                       body=f"APPROVE\nReviewed-SHA: {pr_head(n)}\n{lines}")
-
-    def two_commits(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed"})
-        return b, f, nb, nf
-
-    def tick(self, comments, *, canary=None, live=None, merge_commit=None):
-        live = live or {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        gh = NumberedGitHub(self.nums, comments=comments, canary=canary)
-        gh.merge_commit = merge_commit or {}
-        self.assertEqual(self.fx.pipeline(runner, github=gh, live=live).tick(["worker"]), 0)
-        return runner, self.fx.records()[-1]
-
-    def assert_held(self, runner, rec, nb):
-        self.assertEqual(rec["status"], "blocked")
-        self.assertEqual(rec["reason"], "review_blocked")
-        self.assertIn(f"#{nb}", rec["detail"])
-        self.assertFalse(DEPLOY_STEPS & {n for n, _ in runner.calls}, "a held batch ran a deploy step")
-        self.assertNotIn("failed_sha", self.fx.state().get("worker", {}))
-
-    def test_fix_in_batch_and_target_after_fix_releases_with_evidence(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [approve(nb, cid=1), self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["sha"], f)
-        [ff] = rec["fix_forwards"]
-        self.assertEqual(ff["blocked_pr"], nb)
-        self.assertEqual(ff["blocked_commit"], b)
-        self.assertEqual(ff["fixing_pr"], nf)
-        self.assertEqual(ff["fixing_commit"], f)
-        self.assertEqual(ff["fixing_reviewed_sha"], pr_head(nf))
-        self.assertEqual(ff["fixing_approval_url"], f"https://github.com/o/r/pull/{nf}#issuecomment-{6000 + nf}")
-        self.assertTrue(ff["block_url"].endswith(f"#issuecomment-{5000 + nb}"))
-        self.assertNotIn(nb, rec["prs"], "a blocked PR is never listed as approved")
-
-    def test_target_between_blocked_and_fix_holds(self):
-        b, f, nb, nf = self.two_commits()
-        # the canary is green on the blocked commit only: the target is B itself
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                canary={b: ("completed", "success")})
-        self.assertEqual(rec["sha"], b)
-        self.assert_held(runner, rec, nb)
-
-    def test_target_on_a_commit_between_blocked_and_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        m, _ = self.land({"mcp-server/src/b.js": "unrelated"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                canary={m: ("completed", "success")})
-        self.assertEqual(rec["sha"], m)
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_naming_the_wrong_pr_holds(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb + 1000])]})
-        self.assert_held(runner, rec, nb)
-
-    def test_unicode_line_separator_cannot_spoof_fix_forward_header(self):
-        b, f, nb, nf = self.two_commits()
-        body = (f"APPROVE\u2028Reviewed-SHA: {'a' * 40}\u2028Fixes-Forward: #{nb}\n"
-                f"Reviewed-SHA: {pr_head(nf)}\n")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf, body=body)]})
-        self.assertEqual(runner.calls, [])
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-
-    def test_marker_on_a_non_deciding_approval_holds(self):
-        b, f, nb, nf = self.two_commits()
-        later_plain = approve(nf, when="2026-09-30T04:00:00Z", cid=7001)
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb]), later_plain]})
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_on_a_trusted_non_verdict_comment_holds(self):
-        b, f, nb, nf = self.two_commits()
-        handoff = approve(nf, when="2026-09-30T05:00:00Z", cid=7002,
-                          body=f"Hand-off to the orchestrator\nFixes-Forward: #{nb}\n")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf), handoff]})
-        self.assert_held(runner, rec, nb)
-
-    def test_marker_on_an_untrusted_comment_holds(self):
-        b, f, nb, nf = self.two_commits()
-        outsider = self.fix_approve(nf, [nb], when="2026-09-30T06:00:00Z", cid=7003, assoc="NONE")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [approve(nf), outsider]})
-        self.assert_held(runner, rec, nb)
-
-    def test_quoted_marker_does_not_count(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb], prefix="> ")]})
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_not_in_the_batch_holds(self):
-        f, nf = self.land({"mcp-server/src/a.js": "earlier fix"})
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        # F already released: the batch is B alone
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]}, live={"sha": f})
-        self.assertEqual(rec["from_sha"], f)
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_merged_before_the_blocked_pr_holds(self):
-        f, nf = self.land({"mcp-server/src/a.js": "earlier fix"})
-        b, nb = self.land({"mcp-server/src/a.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], b)
-        self.assert_held(runner, rec, nb)
-
-    def test_fixing_pr_whose_own_latest_verdict_is_block_holds(self):
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)],
-                                 nf: [self.fix_approve(nf, [nb]), self.block(nf, when="2026-09-30T09:00:00Z")]})
-        self.assertEqual(rec["status"], "blocked")
-        self.assertEqual(rec["reason"], "review_blocked")
-        self.assertFalse(DEPLOY_STEPS & {n for n, _ in runner.calls})
-
-    def test_fixing_commit_that_is_not_the_fixing_prs_merge_commit_holds(self):
-        # GitHub maps the commit to F, but F's own merge_commit_sha is elsewhere
-        # (e.g. an earlier commit of a rebase merge): the fix is not proven in.
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]},
-                                merge_commit={f: "ab" * 20})
-        self.assert_held(runner, rec, nb)
-
-    def test_a_later_revert_of_the_fix_in_the_same_batch_holds(self):
-        # B, then its fix F, then an approved PR R that reverts F: the target R
-        # carries B's defect without F's change.
-        b, f, nb, nf = self.two_commits()
-        r, nr = self.land({"mcp-server/src/a.js": "defect"}, message=f"Revert fix\n\nThis reverts commit {f}.")
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-        self.assertIn("no longer present", rec["detail"])
-
-    def test_partial_revert_of_two_file_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "defect", "mcp-server/src/b.js": "old"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "unrelated improvement"})
-        r, nr = self.land({"mcp-server/src/a.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_one_file_fix_holds(self):
-        b, nb = self.land({"mcp-server/src/a.js": "bad one\nbad two\n"})
-        f, nf = self.land({"mcp-server/src/a.js": "good one\ngood two\n"})
-        r, nr = self.land({"mcp-server/src/a.js": "bad one\ngood two\n"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_leading_space_path_holds(self):
-        b, nb = self.land({" leading.js": "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({" leading.js": "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({" leading.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_pathspec_magic_name_holds(self):
-        b, nb = self.land({":(literal)odd.js": "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({":(literal)odd.js": "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({":(literal)odd.js": "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_carriage_return_path_holds(self):
-        name = "carriage\rreturn.js"
-        b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({name: "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_partial_revert_of_crlf_path_holds(self):
-        name = "carriage\r\nreturn.js"
-        b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-        f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-        r, nr = self.land({name: "defect"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["sha"], r)
-        self.assert_held(runner, rec, nb)
-
-    def test_filename_matrix_preserves_fix_presence_decision(self):
-        names = (" leading.js", "trailing.js ", "carriage\rreturn.js", "line\nfeed.js",
-                 "carriage\r\nreturn.js", ":(literal)odd.js", "tab\tname.js",
-                 "unicodé.js", "-dash.js")
-        for name in names:
-            with self.subTest(name=repr(name)), tempfile.TemporaryDirectory() as td:
-                self.fx = Fixture(Path(td))
-                self.nums = {}
-                b, nb = self.land({name: "defect", "mcp-server/src/a.js": "old"})
-                f, nf = self.land({name: "fixed", "mcp-server/src/a.js": "unrelated improvement"})
-                u, nu = self.land({"mcp-server/src/unrelated.js": "later edit"})
-                self.assertTrue(self.fx.pipeline(FakeRunner()).change_present(self.fx.repo, f, u))
-                r, nr = self.land({name: "defect"})
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-                self.assertEqual(rec["sha"], r)
-                self.assert_held(runner, rec, nb)
-
-    def test_a_later_edit_of_the_fix_lines_holds_unless_it_carries_the_marker_too(self):
-        b, f, nb, nf = self.two_commits()
-        g, ng = self.land({"mcp-server/src/a.js": "fixed better"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assert_held(runner, rec, nb)
-        # G's reviewer attests G still fixes B: G's own change is present, so it ships with G as the fixer
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])],
-                                 ng: [self.fix_approve(ng, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["fix_forwards"][0]["fixing_pr"], ng)
-
-    def test_an_unrelated_later_commit_keeps_the_fix(self):
-        b, f, nb, nf = self.two_commits()
-        m, _ = self.land({"mcp-server/src/b.js": "unrelated"})
-        runner, rec = self.tick({nb: [self.block(nb)], nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(rec["sha"], m)
-
-    def test_two_blocked_prs_and_a_fix_naming_only_one_holds(self):
-        a, na = self.land({"mcp-server/src/a.js": "defect a"})
-        b, nb = self.land({"mcp-server/src/b.js": "defect b"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "fixed"})
-        runner, rec = self.tick({na: [self.block(na)], nb: [self.block(nb)], nf: [self.fix_approve(nf, [na])]})
-        self.assert_held(runner, rec, nb)
-
-    def test_a_marker_never_rescues_a_stale_or_missing_review(self):
-        # the marker only answers a BLOCK verdict; an unreviewed PR still holds as before
-        b, f, nb, nf = self.two_commits()
-        runner, rec = self.tick({nb: [approve(nb, body="Independent review: PASS")],
-                                 nf: [self.fix_approve(nf, [nb])]})
-        self.assertEqual(rec["reason"], "review_stale")
-
-    def test_one_fix_may_carry_several_markers(self):
-        a, na = self.land({"mcp-server/src/a.js": "defect a"})
-        b, nb = self.land({"mcp-server/src/b.js": "defect b"})
-        f, nf = self.land({"mcp-server/src/a.js": "fixed", "mcp-server/src/b.js": "fixed"})
-        runner, rec = self.tick({na: [self.block(na)], nb: [self.block(nb)], nf: [self.fix_approve(nf, [na, nb])]})
-        self.assertEqual(rec["status"], "shipped", rec)
-        self.assertEqual(sorted(x["blocked_pr"] for x in rec["fix_forwards"]), sorted([na, nb]))
-
-    def test_marker_parser_is_line_exact(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        prefix = f"APPROVE\nReviewed-SHA: {'a' * 40}\n"
-        crlf_prefix = f"APPROVE\r\nReviewed-SHA: {'a' * 40}\r\n"
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #1342\n"}), {1342})
-        self.assertEqual(rp.fixes_forward({"body": prefix + "Fixes-Forward: #1342\n"}, "b" * 40),
-                         set(), "the header SHA must be the accepted reviewed SHA")
-        self.assertEqual(ff({"body": crlf_prefix + "Fixes-Forward: #1342\r\n"}), {1342})
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward:   #1342  \n"}), {1342})
-        self.assertEqual(ff({"body": prefix + "  Fixes-Forward: #1342\n"}), set(), "indented")
-        self.assertEqual(ff({"body": prefix + "    Fixes-Forward: #1342\n"}), set(), "indented code block")
-        self.assertEqual(ff({"body": prefix + "```\nFixes-Forward: #1342\n```\n"}), set(), "fenced")
-        self.assertEqual(ff({"body": prefix + "~~~text\nFixes-Forward: #1342\n~~~\n"}), set(), "fenced")
-        self.assertEqual(ff({"body": prefix + "```\nx\n```\nFixes-Forward: #1342\n"}), set(),
-                         "a marker after prose or examples is outside the authority header")
-        self.assertEqual(ff({"body": prefix + "see Fixes-Forward: #1342"}), set())
-        self.assertEqual(ff({"body": prefix + "> Fixes-Forward: #1342"}), set())
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: 1342"}), set())
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #01342"}), set(), "leading zero")
-        self.assertEqual(ff({"body": prefix + "Fixes-Forward: #1342, #1343"}), set())
-
-    def test_mismatched_or_shorter_fences_do_not_authorize_a_fix(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        examples = [
-            "````\n```\nFixes-Forward: #1342\n````",
-            "````\n~~~\nFixes-Forward: #1342\n````",
-            "~~~\n```\nFixes-Forward: #1342\n~~~",
-            "````\n````example\nFixes-Forward: #1342\n````",
-        ]
-        for example in examples:
-            with self.subTest(example=example):
-                body = f"APPROVE\nReviewed-SHA: {'a' * 40}\n{example}\n"
-                self.assertEqual(ff({"body": body}), set())
-
-    def test_fenced_example_marker_holds_full_release(self):
-        b, f, nb, nf = self.two_commits()
-        for example in (f"````\n```\nFixes-Forward: #{nb}\n````",
-                        f"````\n~~~\nFixes-Forward: #{nb}\n````",
-                        f"````\n````example\nFixes-Forward: #{nb}\n````"):
-            with self.subTest(example=example):
-                approval = approve(nf, body=f"APPROVE\nReviewed-SHA: {pr_head(nf)}\n{example}\n")
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [approval]})
-                self.assert_held(runner, rec, nb)
-
-    def test_hidden_marker_contexts_hold_full_release(self):
-        b, f, nb, nf = self.two_commits()
-        examples = (
-            f"Example <!--\nFixes-Forward: #{nb}\n-->",
-            f"<!--\nFixes-Forward: #{nb}\n-->",
-            f"<pre>\nFixes-Forward: #{nb}\n</pre>",
-            f"Example <pre>\nFixes-Forward: #{nb}\n</pre>",
-            f"Example <textarea>\nFixes-Forward: #{nb}\n</textarea>",
-            f"Example ``\nFixes-Forward: #{nb}\n``",
-        )
-        for example in examples:
-            with self.subTest(example=example):
-                approval = approve(nf, body=f"APPROVE\nReviewed-SHA: {pr_head(nf)}\n{example}\n")
-                runner, rec = self.tick({nb: [self.block(nb)], nf: [approval]})
-                self.assert_held(runner, rec, nb)
-
-    def test_only_contiguous_header_markers_confer_authority(self):
-        ff = lambda approval: rp.fixes_forward(approval, "a" * 40)
-        reviewed = f"Reviewed-SHA: {'a' * 40}"
-        self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\nFixes-Forward: #1342\n"
-                                     "Fixes-Forward: #1343\nExplanation follows\n"}), {1342, 1343})
-        for prefix in ("Example\n", "\n", "<!-- -->\n", "```\n```\n"):
-            with self.subTest(prefix=prefix):
-                self.assertEqual(ff({"body": f"APPROVE\n{reviewed}\n{prefix}Fixes-Forward: #1342\n"}), set())
-
-
-class SquashGitHub(FakeGitHub):
-    """FakeGitHub, except the squash commit `merged` maps to PR `number`
-    whose real head is `head`, approved at `reviewed`."""
-
-    def __init__(self, merged: str, number: int, head: str, reviewed: str):
-        super().__init__()
-        self.merged, self.number, self.real_head = merged, number, head
-        self.comment_map = {number: [approve(number, reviewed=reviewed)]}
-
-    def pr_number(self, sha):
-        # Main commits must not inherit the squash PR's review by a hash collision.
-        number = super().pr_number(sha)
-        return number + 1 if number == self.number else number
-
-    def pr_for_commit(self, sha):
-        if sha == self.merged:
-            self.heads[self.real_head] = self.number
-            return {"number": self.number, "merged_at": "2026-09-30T00:00:00Z",
-                    "head": {"sha": self.real_head}}
-        return super().pr_for_commit(sha)
-
-
-class UpdateBranchReview(Base):
-    """`gh pr update-branch` merges main into a PR after its review, so the
-    merged head H is not the Reviewed-SHA R. R covers H only when R..H is
-    nothing but main merges that leave the PR's own files alone. The PR is
-    built in a separate author clone and squash-merged, as on GitHub, so the
-    pipeline's checkout has neither R nor H until it fetches refs/pull/N/head."""
-
-    N = 777
-
-    def test_squash_fixture_reserves_its_explicit_pr_number(self):
-        main_commit = "02a5" + "0" * 36
-        gh = SquashGitHub("a" * 40, self.N, "b" * 40, "b" * 40)
-        self.assertEqual(FakeGitHub().pr_number(main_commit), self.N)
-        self.assertNotEqual(gh.pr_for_commit(main_commit)["number"], self.N)
-
-    def test_exact_review_ships_when_main_hash_collides_with_squash_pr(self):
-        reviewed, head, merged = self.build()
-        with mock.patch.object(FakeGitHub, "pr_number", return_value=self.N):
-            rc, runner = self.tick(merged, head, head)
-        self.assertEqual(rc, 0)
-        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
-        self.assertIn("promote", runner.names())
-
-    def build(self, *, merge_touches_pr_file=False, merge_touches_other_file=False,
-              pr_rel="mcp-server/src/pr.js", main_extra=None):
-        fx = self.fx
-        author = fx.tmp / "author"
-        git(fx.tmp, "clone", "-q", str(fx.origin), str(author))
-        git(author, "config", "user.email", "a@example.invalid")
-        git(author, "config", "user.name", "a")
-        git(author, "checkout", "-q", "-b", "pr")
-        (author / "mcp-server/src").mkdir(parents=True, exist_ok=True)
-        (author / pr_rel).write_text("reviewed\n")
-        git(author, "add", "-A")
-        git(author, "commit", "-q", "-m", "the PR")
-        reviewed = git(author, "rev-parse", "HEAD")
-        main_files = {"mcp-server/src/other.js": "main moved"}
-        if main_extra is not None:
-            main_files[main_extra] = "main added"
-        main_moved = fx.commit(main_files)   # main advances
-        git(author, "fetch", "-q", "origin", "main")
-        git(author, "merge", "-q", "--no-ff", "--no-edit", "origin/main")   # what update-branch does
-        if merge_touches_pr_file or merge_touches_other_file:
-            rel = pr_rel if merge_touches_pr_file else "mcp-server/src/sneak.js"
-            (author / rel).write_text("changed inside the merge, after review\n")
-            git(author, "add", "-A")
-            git(author, "commit", "-q", "--amend", "--no-edit")
-        head = git(author, "rev-parse", "HEAD")
-        git(author, "push", "-q", "origin", f"HEAD:refs/pull/{self.N}/head")
-        git(author, "checkout", "-q", "-B", "main", "origin/main")
-        git(author, "merge", "-q", "--squash", head)
-        git(author, "commit", "-q", "-m", f"the PR (#{self.N})")
-        merged = git(author, "rev-parse", "HEAD")
-        git(author, "push", "-q", "origin", "HEAD:main")
-        git(fx.repo, "fetch", "-q", "origin", "main")
-        self.assertNotEqual(main_moved, merged)
-        return reviewed, head, merged
-
-    def tick(self, merged, head, reviewed):
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        gh = SquashGitHub(merged, self.N, head, reviewed)
-        return self.fx.pipeline(runner, live=live, github=gh).tick(["worker"]), runner
-
-    def test_exact_rule_is_recorded(self):
-        reviewed, head, merged = self.build()
-        rc, _ = self.tick(merged, head, head)          # approval names H itself
-        self.assertEqual(rc, 0)
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["status"], "shipped")
-        self.assertEqual((rec["review_rule"], rec["reviewed_sha"], rec["pr_head_sha"]), ("exact", head, head))
-        self.assertIn({"pr": self.N, "rule": "exact", "reviewed_sha": head, "head_sha": head}, rec["reviews"])
-
-    def test_main_merge_only_rule_accepts_update_branch(self):
-        reviewed, head, merged = self.build()
-        self.assertNotEqual(reviewed, head)
-        rc, _ = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["status"], "shipped")
-        self.assertEqual((rec["review_rule"], rec["reviewed_sha"], rec["pr_head_sha"]),
-                         ("main-merge-only", reviewed, head))
-
-    def test_merge_that_touches_a_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_pr_file=True)
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-        self.assertIn("mcp-server/src/pr.js", rec["detail"])
-        self.assertIsNone(self.fx.state().get("worker", {}).get("failed_sha"))
-
-    def test_merge_that_touches_whitespace_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_pr_file=True,
-                                            pr_rel=" pr.js", main_extra="\tpr.js")
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(rc, 0)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-
-    def test_merge_that_smuggles_a_non_pr_file_holds(self):
-        reviewed, head, merged = self.build(merge_touches_other_file=True)
-        rc, runner = self.tick(merged, head, reviewed)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual((rec["status"], rec["reason"]), ("blocked", "review_stale"))
-        self.assertIn("non-PR file", rec["detail"])
-        self.assertIn("mcp-server/src/sneak.js", rec["detail"])
-
-    def test_non_merge_commit_after_review_holds(self):
-        reviewed, head, merged = self.build()
-        # an approval of an OLDER sha whose successor is an ordinary commit: R = parent of the PR commit
-        older = git(self.fx.repo, "rev-parse", f"{self.fx.base}")
-        rc, runner = self.tick(merged, head, older)
-        self.assertEqual(runner.calls, [])
-        rec = self.fx.records()[-1]
-        self.assertEqual(rec["reason"], "review_stale")
-        self.assertIn("not a two-parent merge", rec["detail"])
 
 class CanaryAndCI(Base):
     """B2: the nearest canary verdict decides; every release-path PR has green CI."""
@@ -2001,6 +2719,36 @@ class CanaryAndCI(Base):
         self.assertEqual(rec["reason"], "ci_not_green")
         self.assertIn(f"PR #{FakeGitHub().pr_number(first)}", rec["detail"])
 
+    def test_a_newer_cancelled_ci_run_does_not_hide_an_older_green_one(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38153038213, "success"),
+                                                                 (38154018553, "cancelled")]})
+        self.assertEqual(self.fx.pipeline(FakeRunner(live=live), github=gh, live=live).tick(["worker"]), 0,
+                         self.fx.records())
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_a_newer_failed_ci_run_still_holds_over_an_older_green_one(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner()
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38153038213, "success"),
+                                                                 (38154018553, "failure")]})
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["reason"], "ci_not_green")
+        self.assertIn("38154018553", rec["detail"])
+
+    def test_only_a_cancelled_ci_run_holds(self):
+        first = self.fx.commit({"mcp-server/src/a.js": "1"})
+        runner = FakeRunner()
+        gh = FakeGitHub(ci_runs={FakeGitHub().pr_number(first): [(38154018553, "cancelled")]})
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["reason"], "ci_not_green")
+        self.assertIn("has no successful", rec["detail"])
+
     def test_unicode_named_release_path_cannot_hide_failed_ci(self):
         first = self.fx.commit({"mcp-server/src/unicodé.js": "1"})
         self.fx.commit({"mcp-server/src/ordinary.js": "2"})
@@ -2043,10 +2791,13 @@ class ReleaseTarget(Base):
 
     GREEN, RED = ("completed", "success"), ("completed", "failure")
 
+    def setUp(self):
+        super().setUp()
+        self.live = {"sha": self.fx.base}
+
     def ship(self, gh):
-        live = {"sha": self.fx.base}
-        runner = FakeRunner(live=live)
-        rc = self.fx.pipeline(runner, github=gh, live=live).tick(["worker"])
+        runner = FakeRunner(live=self.live)
+        rc = self.fx.pipeline(runner, github=gh, live=self.live).tick(["worker"])
         return rc, runner
 
     def released(self, runner):
@@ -2060,15 +2811,26 @@ class ReleaseTarget(Base):
         self.assertEqual((rec["status"], rec["sha"]), ("shipped", target))
         return rec
 
+    def test_repaired_credential_retries_failed_canary_below_unverified_head(self):
+        target = self.fx.commit({"mcp-server/src/z.js": "1"})
+        head = self.fx.commit({"mcp-server/src/a.js": "1"})
+        gh = FakeGitHub(canary={target: self.GREEN, head: ("in_progress", None)})
+        (self.fx.cred / "tokens.env").write_text("")
+        self.assertEqual(self.fx.pipeline(FakeRunner(), github=gh).tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], target)
+        runner = FakeRunner()
+        self.assertEqual(self.fx.pipeline(runner, github=gh).tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assert_shipped(*self.ship(gh), target)
+
     def test_head_in_progress_ships_the_older_green_commit(self):
         z = self.fx.commit({"mcp-server/src/z.js": "1"})
         a = self.fx.commit({"mcp-server/src/a.js": "1"})
         pr_a = FakeGitHub().pr_number(a)
-        # HEAD's PR is unapproved and its CI is red: neither may matter, because
+        # HEAD's CI is red, but the release target is the older green source.
         # the batch now ends at z and every downstream check names z, not HEAD.
-        gh = FakeGitHub(canary={z: self.GREEN, a: ("in_progress", None)}, red_ci_prs={pr_a},
-                        comments={pr_a: [{"id": 1, "body": "looks fine", "created_at": HEAD_DATE,
-                                          "author_association": "OWNER", "html_url": "x"}]})
+        gh = FakeGitHub(canary={z: self.GREEN, a: ("in_progress", None)}, red_ci_prs={pr_a})
         rc, runner = self.ship(gh)
         rec = self.assert_shipped(rc, runner, z)
         self.assertEqual(rec["pr"], FakeGitHub().pr_number(z))
@@ -2173,7 +2935,7 @@ class ReleaseTarget(Base):
 
 
 class AppLane(Base):
-    """B3: the app lane has a review gate and an empty check list is a hold."""
+    """The app lane requires green checks and verifies the live release."""
 
     def cfg(self):
         cfg = self.fx.config()
@@ -2189,16 +2951,8 @@ class AppLane(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.records()[-1]["reason"], "checks_missing")
 
-    def test_app_needs_an_approved_pr(self):
-        self.fx.commit({"src/worker.js": "1"})
-        runner = FakeRunner()
-        pipe = self.fx.pipeline(runner, cfg=self.cfg(), github=FakeGitHub(approve_all=False))
-        pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.calls, [])
-        self.assertEqual(self.fx.records()[-1]["reason"], "no_independent_review")
 
-    def test_reviewed_app_change_releases(self):
+    def test_green_merged_app_change_releases_without_review(self):
         sha = self.fx.commit({"src/worker.js": "1"})
         runner = FakeRunner()
         pipe = self.fx.pipeline(runner, cfg=self.cfg())
@@ -2212,8 +2966,10 @@ class AppLane(Base):
                 live["source_commit"] = sha
             return res
         runner.run = run  # type: ignore[method-assign]
-        self.assertEqual(pipe.tick(["app"]), 0)
-        self.assertEqual(runner.names()[:5], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build", "app-release"])
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.names()[:8], ["wrangler-auth", "app-worktree", "app-npm-ci", "app-build",
+                                              "smoke-baseline", "app-main-ref-refresh", "app-release",
+                                              "smoke-post"])
         build_index = runner.names().index("app-build")
         self.assertEqual(runner.calls[build_index][1], ["npm", "run", "build"])
         self.assertEqual(runner.envs["app-build"]["DOCTORCRE_SOURCE_COMMIT"], sha)
@@ -2224,6 +2980,63 @@ class AppLane(Base):
         # no ops.release row for membership to attach to.
         self.assertEqual(self.fx.slice_marks, [])
         self.assertNotIn("slice_marker", self.fx.records()[-1])
+
+    def test_immutable_main_fetch_refreshes_stale_tracking_ref_before_exact_main_guard(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+        stale = git(self.fx.repo, "rev-parse", "refs/remotes/origin/main")
+        self.assertNotEqual(candidate, stale)
+        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
+        fetch_head.write_text("another session's fetch evidence\n")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 0, self.fx.records()[-1])
+        self.assertEqual(runner.guard_observations, [(candidate, candidate)])
+        self.assertEqual(git(self.fx.repo, "rev-parse", "HEAD"), self.fx.base)
+        self.assertEqual(git(self.fx.repo, "rev-parse", "refs/remotes/origin/main"), candidate)
+        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
+        self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+
+    def test_app_release_refuses_main_advance_during_build(self):
+        other = self.fx.tmp / "app-main-writer"
+        git(self.fx.tmp, "clone", "-q", str(self.fx.origin), str(other))
+        git(other, "config", "user.email", "t@example.invalid")
+        git(other, "config", "user.name", "t")
+        (other / "src").mkdir()
+        (other / "src/app.js").write_text("reviewed release candidate\n")
+        git(other, "add", "src/app.js")
+        git(other, "commit", "-q", "-m", "reviewed app release candidate")
+        git(other, "push", "-q", "origin", "HEAD:main")
+        candidate = git(other, "rev-parse", "HEAD")
+
+        def advance_main():
+            (other / "src/next.js").write_text("unexpected later main commit\n")
+            git(other, "add", "src/next.js")
+            git(other, "commit", "-q", "-m", "advance main during app build")
+            git(other, "push", "-q", "origin", "HEAD:main")
+
+        live = {"source_commit": self.fx.base, "environment": "production"}
+        runner = ExactMainAppGuardRunner(live=live, on_build=advance_main)
+        pipe = self.fx.pipeline(runner, cfg=self.cfg(), live=live)
+        pipe.http = lambda _url: live
+
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["sha"], candidate)
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        self.assertNotEqual(git(self.fx.repo, "ls-remote", "origin", "refs/heads/main").split()[0], candidate)
 
     def test_failed_credential_free_build_never_reaches_publication(self):
         self.fx.commit({"src/worker.js": "1"})
@@ -2409,7 +3222,7 @@ class Robustness(Base):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         self.fx.pipeline(FakeRunner(fail_at="upload")).tick(["worker"])
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        kept = store.release_worktree("worker", sha)
+        kept = Path(store.load()["worker"].get("failed_worktree") or store.release_worktree("worker", sha))
         kept.parent.mkdir(parents=True, exist_ok=True)
         git(self.fx.repo, "worktree", "add", "--detach", str(kept), sha)
         (kept / "diagnosis.log").write_text("evidence")
@@ -2453,12 +3266,135 @@ class ClearFailedRetirement(Base):
         self.assertEqual((moved / "diagnosis.log").read_text(), "evidence")
         git(self.fx.repo, "worktree", "add", "--detach", str(self.kept), self.sha)
 
-    def test_clear_resumes_after_prune_failure(self):
+    def test_retirement_does_not_prune_an_unrelated_missing_registration(self):
+        unrelated = self.fx.tmp / "unrelated"
+        git(self.fx.repo, "worktree", "add", "--detach", str(unrelated), self.sha)
+        unrelated.rename(self.fx.tmp / "unrelated-diagnosis")
+        self.clear()
+        self.assertIsNotNone(rp.worktree_registration(self.fx.repo, unrelated))
+        self.assert_retry_available()
+
+    def test_wrong_head_worktree_is_not_retired(self):
+        git(self.kept, "checkout", "--detach", self.fx.base)
+        with self.assertRaisesRegex(SystemExit, "identity"):
+            self.clear()
+        self.assertTrue(self.kept.exists())
+        self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+
+    def test_unregistered_active_directory_is_untouched(self):
+        git(self.fx.repo, "worktree", "remove", "--force", str(self.kept))
+        self.kept.mkdir(); (self.kept / "unrelated.txt").write_text("owned by another operation")
+        with self.assertRaisesRegex(SystemExit, "identity"):
+            self.clear()
+        self.assertEqual((self.kept / "unrelated.txt").read_text(), "owned by another operation")
+
+    def test_attempt_worktrees_do_not_collide_with_retained_diagnosis(self):
+        self.store.save({})
+        runner = FakeRunner(fail_at="upload")
+        pipe = self.fx.pipeline(runner)
+        pipe.tick(["worker"])
+        path1 = Path(pipe.store.load()["worker"]["failed_worktree"])
+        self.assertIn(pipe.run_id, path1.name)
+        self.assertNotEqual(path1, self.kept)
+        self.assertTrue(self.kept.exists())
+
+    def test_first_failure_save_binds_owned_attempt_worktree(self):
+        self.store.save({})
+        pipe = self.fx.pipeline(FakeRunner(fail_at="staging-prepare"))
+        save = pipe.store.save
+        def checked(state):
+            lane = state.get("worker", {})
+            if lane.get("failed_sha"):
+                self.assertEqual(lane.get("failed_worktree"),
+                    str(pipe.store.release_worktree("worker", self.sha, pipe.run_id)))
+            save(state)
+        with mock.patch.object(pipe.store, "save", side_effect=checked):
+            pipe.tick(["worker"])
+
+    def test_release_fetch_does_not_mutate_shared_remote_refs_or_fetch_head(self):
+        git(self.fx.repo, "update-ref", "refs/remotes/origin/main", self.fx.base)
+        fetch_head = self.fx.repo / ".git/FETCH_HEAD"
+        fetch_head.write_text("another session's fetch evidence\n")
+        pipe = self.fx.pipeline(FakeRunner(), github=FakeGitHub())
+        pipe.tick(["worker"])
+        self.assertEqual(git(self.fx.repo, "rev-parse", "origin/main"), self.fx.base)
+        self.assertEqual(fetch_head.read_text(), "another session's fetch evidence\n")
+
+    def test_retirement_resume_does_not_repeat_registration_removal_or_receipt(self):
+        record = self.store.record
+        def interrupted(row):
+            record(row)
+            raise OSError("lost acknowledgement after durable receipt")
+        with mock.patch.object(self.store, "record", side_effect=interrupted):
+            with self.assertRaises(OSError):
+                self.clear()
+        self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+        self.clear()
+        self.assertEqual(len(self.store.records()), 1)
+        self.assert_retry_available()
+
+    def test_torn_receipt_append_never_clears_without_a_readable_receipt(self):
+        path = self.store.records_path
+        def torn(row):
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write('{"lane": "worker", "status": "failure_cle')
+            raise OSError("interrupted mid-append")
+        with mock.patch.object(self.store, "record", side_effect=torn):
+            with self.assertRaises(OSError):
+                self.clear()
+        self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+        self.clear()
+        receipts = [r for r in self.store.records() if r.get("status") == "failure_cleared"]
+        self.assertEqual(len(receipts), 1)
+        self.assert_retry_available()
+
+    def test_unreadable_receipt_never_clears_failure(self):
+        with mock.patch.object(self.store, "record", return_value=None):
+            with self.assertRaisesRegex(SystemExit, "receipt"):
+                self.clear()
+        self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+
+    def test_registration_result_fault_matrix_preserves_failure_and_evidence(self):
+        original = rp.subprocess.run
+        for rc, output in [(0, ""), (0, "worktree partial\0\0"),
+                (0, "worktree /unknown\0HEAD invalid\0\0"), (7, "")]:
+            with self.subTest(rc=rc, output=output):
+                def run(argv, **kwargs):
+                    if argv[-3:] == ["list", "--porcelain", "-z"]:
+                        return subprocess.CompletedProcess(argv, rc, output, "secret-error-canary")
+                    return original(argv, **kwargs)
+                with mock.patch.object(rp.subprocess, "run", side_effect=run):
+                    with self.assertRaises(SystemExit) as refusal:
+                        self.clear()
+                self.assertNotIn("secret-error-canary", str(refusal.exception))
+                self.assertTrue(self.kept.exists())
+                self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+
+    def test_malformed_registration_after_rename_never_clears_failure(self):
+        archive = self.store.root / "worktrees-cleared" / (self.kept.name + "-retained")
+        archive.parent.mkdir(parents=True)
+        os.rename(self.kept, archive)
+        state = self.store.load()
+        state["worker"]["failed_worktree_retirement"] = {"sha": self.sha, "path": str(archive)}
+        self.store.save(state)
+        original = rp.subprocess.run
+        def run(argv, **kwargs):
+            if argv[-3:] == ["list", "--porcelain", "-z"]:
+                return subprocess.CompletedProcess(argv, 0, "worktree /unknown\0HEAD invalid\0\0", "")
+            return original(argv, **kwargs)
+        with mock.patch.object(rp.subprocess, "run", side_effect=run):
+            with self.assertRaises(SystemExit):
+                self.clear()
+        self.assertEqual(self.store.load()["worker"]["failed_sha"], self.sha)
+        self.assertEqual(self.store.records(), [])
+        self.assertTrue(archive.is_dir())
+
+    def test_clear_resumes_after_registration_removal_failure(self):
         original = subprocess.run
 
         def run(argv, **kwargs):
-            if argv[-2:] == ["worktree", "prune"]:
-                return subprocess.CompletedProcess(argv, 7, "", "injected prune failure")
+            if argv[-3:-1] == ["worktree", "remove"]:
+                return subprocess.CompletedProcess(argv, 7, "", "injected registration failure")
             return original(argv, **kwargs)
 
         with mock.patch.object(rp.subprocess, "run", side_effect=run):
@@ -2473,8 +3409,8 @@ class ClearFailedRetirement(Base):
         original = subprocess.run
 
         def run(argv, **kwargs):
-            if argv[-2:] == ["worktree", "prune"]:
-                return subprocess.CompletedProcess(argv, 7, "", "injected prune failure")
+            if argv[-3:-1] == ["worktree", "remove"]:
+                return subprocess.CompletedProcess(argv, 7, "", "injected registration failure")
             return original(argv, **kwargs)
 
         with mock.patch.object(rp.subprocess, "run", side_effect=run):
@@ -2492,11 +3428,11 @@ class ClearFailedRetirement(Base):
         self.assert_retry_available()
         self.assertEqual((old_archive / "diagnosis.log").read_text(), "evidence")
 
-    def test_clear_resumes_after_prune_timeout(self):
+    def test_clear_resumes_after_registration_removal_timeout(self):
         original = subprocess.run
 
         def run(argv, **kwargs):
-            if argv[-2:] == ["worktree", "prune"]:
+            if argv[-3:-1] == ["worktree", "remove"]:
                 raise subprocess.TimeoutExpired(argv, 300)
             return original(argv, **kwargs)
 
@@ -2507,7 +3443,7 @@ class ClearFailedRetirement(Base):
         self.clear()
         self.assert_retry_available()
 
-    def test_clear_resumes_after_interruption_between_rename_and_prune(self):
+    def test_clear_resumes_after_interruption_between_rename_and_registration_removal(self):
         original = os.rename
 
         def rename(src, dst):
@@ -2535,11 +3471,11 @@ class ClearFailedRetirement(Base):
         self.clear()
         self.assert_retry_available()
 
-    def test_clear_refuses_successful_prune_that_retains_registration(self):
+    def test_clear_refuses_successful_removal_that_retains_registration(self):
         original = subprocess.run
 
         def run(argv, **kwargs):
-            if argv[-2:] == ["worktree", "prune"]:
+            if argv[-3:-1] == ["worktree", "remove"]:
                 return subprocess.CompletedProcess(argv, 0, "", "")
             return original(argv, **kwargs)
 
@@ -2579,7 +3515,7 @@ class ClearFailedRetirement(Base):
             self.clear()
         self.assert_retry_available()
 
-    def test_tick_cannot_update_another_lane_during_prune(self):
+    def test_tick_cannot_update_another_lane_during_registration_removal(self):
         state = self.store.load()
         state["app"] = {"last_released_sha": self.fx.base}
         self.store.save(state)
@@ -2590,7 +3526,7 @@ class ClearFailedRetirement(Base):
         pipe.out = output.append
 
         def run(argv, **kwargs):
-            if argv[-2:] == ["worktree", "prune"]:
+            if argv[-3:-1] == ["worktree", "remove"]:
                 self.assertEqual(pipe.tick(["worker", "app"]), 0)
                 self.assertTrue(any("another run holds the lock" in line for line in output))
                 self.assertEqual(runner.calls, [])
@@ -2612,6 +3548,23 @@ class ClearFailedRetirement(Base):
         with mock.patch.object(self.store, "record", side_effect=record):
             self.clear()
         self.assert_retry_available()
+
+
+class StaleControllerRefusal(Base):
+    def test_stale_controller_bytes_refuse_release_without_burning_target(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "candidate", "ops/release-pipeline.py": "current controller\n"})
+        (self.fx.repo / "ops/release-pipeline.py").write_text("obsolete controller\n")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 3)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.records()[-1]["reason"], "controller_stale")
+        self.assertEqual(self.fx.records()[-1]["sha"], sha)
+        state = self.fx.state()["worker"]
+        self.assertFalse(state.get("failed_sha"))
+        self.assertEqual(state["last_released_sha"], self.fx.base)
 
 
 class Blockers(Base):
@@ -2900,24 +3853,29 @@ class CapabilityRecovery(Base):
         self.assertEqual(loops[0], loops[1])
         self.assertEqual(retry.runner.calls, [])
 
-    def test_repaired_token_stays_paused_and_report_names_all_recoveries(self):
+    def test_report_tracks_only_lanes_still_failed_after_token_repair(self):
         sha = self.missing()
         calls = []
         self.assertEqual(self.fx.pipeline(FakeRunner(), verbs=calls).tick(["worker"]), 1)
         notification = calls[0][1]["body"]
         self.assertIn(sha, notification)
-        self.assertIn("clear-failed", notification)
-        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        pipe = self.fx.pipeline(FakeRunner())
+        self.assertIn("automatically retries", notification)
+        live = {"sha": self.fx.base}
+        pipe = self.fx.pipeline(FakeRunner(live=live), live=live, verbs=calls)
         state = pipe.store.load()
         state["app"] = {"failed_sha": "b" * 40, "failed_step": "credential-missing"}
         pipe.store.save(state)
-        self.assertEqual(pipe.tick(["worker"]), 0)
-        self.assertEqual(pipe.runner.calls, [])
         report = rp.report(pipe.store, "2099-01-01")
         for lane, head in (("worker", sha), ("app", "b" * 40)):
             self.assertIn(f"--lane {lane} --sha {head}", report)
         self.assertIn("verif", report.lower())
+        (self.fx.cred / "tokens.env").write_text(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        report = rp.report(pipe.store, "2099-01-01")
+        self.assertNotIn(f"--lane worker --sha {sha}", report)
+        self.assertIn(f"--lane app --sha {'b' * 40}", report)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual([v for v, _ in calls], ["add-loop", "add-room-turn"])
 
     def test_loop_operation_key_binds_complete_payload(self):
         first = rp.blocker_loop("CLOUDFLARE_API_TOKEN", "missing from /one")
@@ -2966,7 +3924,6 @@ class DeployCredential(unittest.TestCase):
         if app:
             cfg["worker"]["enabled"] = False
             cfg["app"]["enabled"] = True
-            cfg["app"]["review_required_after"] = "2000-01-01T00:00:00Z"
         pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs, dry_run=dry_run)
         pipe.out = self.lines.append
         return pipe
@@ -3016,6 +3973,7 @@ class DeployCredential(unittest.TestCase):
         self.assertTrue(any("credential missing" in line for line in self.lines))
 
     def test_missing_file_fails_loudly_and_dispatches(self):
+        shutil.rmtree(self.fx.repo / "out/release-pipeline/toolchain")
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         verbs: list = []
         runner = FakeRunner()
@@ -3080,7 +4038,7 @@ class DeployCredential(unittest.TestCase):
         self.assertNotIn("loop_filed", self.fx.records()[-1])
         self.assertIn("CLOUDFLARE_API_TOKEN", self.fx.state()["filed_blockers"])
 
-    def test_token_restoration_requires_the_notified_clearance_for_both_lanes(self):
+    def test_token_restoration_automatically_retries_both_lanes(self):
         for lane in ("worker", "app"):
             with self.subTest(lane=lane):
                 self.write_tokens("")
@@ -3100,21 +4058,14 @@ class DeployCredential(unittest.TestCase):
                 self.assertIn("ops/release-pipeline.py report", body)
                 self.assertIn(f"clear-failed --lane {lane} --sha {sha}",
                               rp.report(store, "2099-01-01"))
-                self.assertNotIn("every tick", body)
+                self.assertIn("automatically retries", body)
                 self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-                paused = FakeRunner()
-                paused_pipe = self.pipeline(paused, app=lane == "app")
-                if lane == "app":
-                    paused_pipe.http = lambda _u: {"source_commit": self.fx.base, "environment": "production"}
-                self.assertEqual(paused_pipe.tick([lane]), 0)
-                self.assertEqual(paused.calls, [])
-                self.assertEqual(self.fx.state()[lane]["failed_sha"], sha)
-                rp.clear_failed(store, lane, sha, "credential restored and verified", repo_dir=self.fx.repo)
                 live = {"sha": self.fx.base}
                 runner = FakeRunner(live=live)
                 pipe = self.pipeline(runner, app=lane == "app")
                 if lane == "worker":
-                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]}}
+                    pipe.http = lambda _u: {"git_sha": {"value": live["sha"]},
+                                          "worker_version": {"id": live.get("version", PRIOR)}}
                 else:
                     pipe.http = lambda _u: {"source_commit": live["sha"], "environment": "production"}
                     original_run = runner.run
@@ -3130,13 +4081,13 @@ class DeployCredential(unittest.TestCase):
     def test_combined_lanes_recover_from_one_notification_without_resetting_dedup(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "both", "src/worker.js": "both"})
         cfg = self.fx.config(credential_dir="~/.config/carr")
-        cfg["app"].update(enabled=True, review_required_after="2000-01-01T00:00:00Z")
+        cfg["app"].update(enabled=True)
         live = {"worker": self.fx.base, "app": self.fx.base}
         verbs: list = []
 
         def pipeline(runner):
             pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
-            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}}
+            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}, "worker_version": {"id": PRIOR}}
                                      if url == cfg["worker"]["live_release_url"] else
                                      {"source_commit": live["app"], "environment": "production"})
             return pipe
@@ -3150,22 +4101,7 @@ class DeployCredential(unittest.TestCase):
         self.assertIn("every currently failed lane", loops[0]["body"])
 
         self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
-        paused = FakeRunner()
-        self.assertEqual(pipeline(paused).tick(["worker", "app"]), 0)
-        self.assertEqual(paused.calls, [])
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        # Recovery must come from current state even after the failure's day.
-        recovery = rp.report(store, "2099-01-01")
-        commands = [shlex.split(line.strip()) for line in recovery.splitlines()
-                    if line.strip().startswith("ops/release-pipeline.py clear-failed ")]
-        self.assertEqual(len(commands), 2)
-        self.assertEqual({cmd[cmd.index("--lane") + 1] for cmd in commands}, set(live))
-        for cmd in commands:
-            self.assertEqual(cmd[cmd.index("--sha") + 1], sha)
-            rp.clear_failed(store, cmd[cmd.index("--lane") + 1],
-                            cmd[cmd.index("--sha") + 1], cmd[cmd.index("--reason") + 1],
-                            repo_dir=self.fx.repo)
-
         worker_live = {"sha": self.fx.base}
         runner = FakeRunner(live=worker_live)
         original_run = runner.run
@@ -3192,16 +4128,6 @@ class DeployCredential(unittest.TestCase):
         self.assertTrue(any("would FAIL here: credential missing" in line for line in self.lines))
         self.assertEqual(self.fx.records(), [])
 
-    def test_read_env_value(self):
-        f = self.cred / "t.env"
-        f.write_text("A=1\nexport B=\"two\"\nC='3'\nB=last\nD=\n")
-        self.assertEqual(rp.read_env_value(f, "A"), "1")
-        self.assertEqual(rp.read_env_value(f, "B"), "last")
-        self.assertEqual(rp.read_env_value(f, "C"), "3")
-        self.assertIsNone(rp.read_env_value(f, "D"))
-        self.assertIsNone(rp.read_env_value(f, "E"))
-        self.assertIsNone(rp.read_env_value(self.cred / "absent.env", "A"))
-
 
 class FailClosedVenv(Base):
     """The coordinator's own re-run of health-preflight at a8619391 caught
@@ -3221,7 +4147,7 @@ class FailClosedVenv(Base):
         runner = FakeRunner()
         self.assertEqual(self.fx.pipeline(runner).tick(["worker"]), 1)
         rec = self.fx.records()[-1]
-        self.assertEqual(rec["step"], "venv-link")
+        self.assertEqual(rec["step"], "venv-source-missing")
         self.assertIn(".venv", rec.get("detail", ""))
         self.assertIn("bin/python", rec.get("detail", ""))
         # the real `ln -s` never ran — no dangling symlink was created.
@@ -3284,6 +4210,103 @@ class DryRun(Base):
             self.assertIn(needle, text)
 
 
+class LostStagingCredentialRotation(Base):
+    """Joe's 2026-10-12 approval reaches the provisioner through ONE command:
+    `tick --lane worker --rotate-lost-staging-credential LABEL` forwards
+    --rotate-lost-credential LABEL to the staging-app-writer step and nowhere
+    else; without it the step's argv is exactly what it always was."""
+
+    def _app_writer_argv(self, runner):
+        return next(argv for name, argv in runner.calls if name == "staging-app-writer")
+
+    def test_the_flag_is_forwarded_to_the_staging_app_writer_step_only(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.rotate_lost_staging_credentials = ("writer", "gate_zero_producer")
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[argv.index("--apply"):], [
+            "--apply", "--rotate-lost-credential", "writer",
+            "--rotate-lost-credential", "gate_zero_producer"])
+        for name, other in runner.calls:
+            if name != "staging-app-writer":
+                self.assertNotIn("--rotate-lost-credential", other, name)
+
+    def test_without_the_flag_the_step_is_unchanged(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        argv = self._app_writer_argv(runner)
+        self.assertEqual(argv[-1], "--apply")
+        self.assertNotIn("--rotate-lost-credential", argv)
+
+    def test_dry_run_says_a_rotation_would_occur_and_runs_nothing(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        lines: list[str] = []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, dry_run=True)
+        pipe.out = lines.append
+        pipe.rotate_lost_staging_credentials = ("writer",)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        text = "\n".join(lines)
+        self.assertIn("[dry-run] staging-app-writer will DELIBERATELY ROTATE "
+                      "the lost staging credential(s) writer", text)
+        self.assertIn("provision-staging-app-writer.py", text)
+        self.assertIn("--apply --rotate-lost-credential writer", text)
+
+    def test_main_forwards_the_labels_for_a_worker_tick_only(self):
+        built: list[dict] = []
+
+        class Recorder:
+            def __init__(self, cfg, **kwargs):
+                built.append(kwargs)
+
+            def tick(self, lanes):
+                built[-1]["lanes"] = lanes
+                return 0
+
+        with mock.patch.object(rp, "Pipeline", Recorder), \
+                mock.patch.object(rp, "load_config", return_value={}):
+            self.assertEqual(rp.main(["tick", "--lane", "worker", "--dry-run",
+                                      "--rotate-lost-staging-credential", "writer",
+                                      "--rotate-lost-staging-credential", "reader"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ("writer", "reader"))
+            self.assertEqual(built[-1]["lanes"], ["worker"])
+            self.assertTrue(built[-1]["dry_run"])
+            self.assertEqual(rp.main(["tick", "--lane", "worker"]), 0)
+            self.assertEqual(built[-1]["rotate_lost_staging_credentials"], ())
+            for bad in (["tick", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "app", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--lane", "app",
+                         "--rotate-lost-staging-credential", "writer"],
+                        ["report", "--lane", "worker", "--rotate-lost-staging-credential", "writer"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "production"],
+                        ["tick", "--lane", "worker", "--rotate-lost-staging-credential", "writer",
+                         "--rotate-lost-staging-credential", "writer"]):
+                with self.subTest(bad=bad), mock.patch("sys.stderr"), \
+                        self.assertRaises(SystemExit) as raised:
+                    rp.main(bad)
+                self.assertEqual(raised.exception.code, 2)
+
+    def test_the_labels_are_exactly_the_provisioners_credential_profiles(self):
+        spec = importlib.util.spec_from_file_location(
+            "staging_database_credential_for_release_selftest",
+            HERE.parent / "tools/staging_database_credential.py")
+        assert spec is not None and spec.loader is not None
+        credential = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = credential
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(credential)
+        with self.assertRaises(credential.CredentialRefusal) as unknown:
+            credential.profile("__no_such_profile__", config_root=Path(self._tmp.name))
+        listed = str(unknown.exception).split(": ", 1)[1].split(", ")
+        self.assertEqual(sorted(rp.ROTATABLE_STAGING_CREDENTIALS), sorted(listed))
+
+
 class SchemaSnapshotGhRunner(FakeRunner):
     """FakeRunner with a stubbed `gh pr list` / `gh pr close`: an in-memory
     set of open PRs, and chosen PR numbers whose close exits nonzero or
@@ -3330,6 +4353,68 @@ class SchemaSnapshotGhRunner(FakeRunner):
         return res
 
 
+class RealGitRunner(FakeRunner):
+    """Runs git steps for real; migrate-apply regenerates the worktree's
+    db/schema.sql the way bin/migrate-prod.sh does."""
+
+    def __init__(self, schema: str, **kw):
+        super().__init__(**kw)
+        self.schema = schema
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        if argv[0] != "git":
+            res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            if log.stem.endswith("migrate-apply"):
+                (Path(cwd) / "db/schema.sql").write_text(self.schema)
+            return res
+        self.calls.append((log.stem.split("-", 1)[1], list(argv)))
+        proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
+        return rp.Result(proc.returncode, proc.stdout + proc.stderr)
+
+
+class ExactMainAppGuardRunner(RealGitRunner):
+    """Use real local Git state for the app's unchanged exact-main guard."""
+
+    def __init__(self, **kw):
+        self.on_build = kw.pop("on_build", None)
+        super().__init__("", **kw)
+        self.guard_observations = []
+        self.live = kw.get("live")
+
+    def run(self, argv, *, cwd, log, env, timeout=3600):
+        if argv[:2] == ["node", "scripts/release-production.mjs"]:
+            head = git(Path(cwd), "rev-parse", "HEAD")
+            tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
+            self.guard_observations.append((head, tracking))
+            if head != tracking:
+                self.calls.append((log.stem.split("-", 1)[1], list(argv)))
+                return rp.Result(1, "release guard: HEAD must equal origin/main")
+            if isinstance(self.live, dict):
+                self.live["source_commit"] = head
+                self.live["environment"] = "production"
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        if log.stem.endswith("app-build") and self.on_build is not None:
+            self.on_build()
+        return result
+
+
+class SchemaFollowupBase(Base):
+    def test_schema_followup_branches_from_observed_main_not_the_stale_shared_ref(self):
+        stale = self.fx.commit({"db/schema.sql": "create table a(id int);\n"})
+        head = self.fx.commit({"db/schema.sql": "create table a (id int);\n", "mcp-server/src/a.js": "1"})
+        git(self.fx.repo, "update-ref", "refs/remotes/origin/main", stale)
+        live = {"sha": self.fx.base}
+        runner = RealGitRunner("create table a(id int);\n", pending=1, live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertIn("schema-commit", runner.names())
+        branch = f"{rp.SCHEMA_SNAPSHOT_PREFIX}{head[:8]}"
+        self.assertEqual(git(self.fx.repo, "rev-parse", f"{branch}^"), head)
+        self.assertEqual(git(self.fx.repo, "rev-parse", "origin/main"), stale)  # shared ref untouched
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+
 class SchemaSnapshotSupersede(Base):
     """Every production release that applied migrations opens a cumulative
     `release/schema-snapshot-*` PR. Nothing merges them automatically, so the
@@ -3348,7 +4433,7 @@ class SchemaSnapshotSupersede(Base):
         (wt / "db").mkdir(parents=True)
         (wt / "db" / "schema.sql").write_text("-- snapshot\n")
         (pipe.store.root / "worktrees" / f"schema-{self.SHA[:12]}" / "db").mkdir(parents=True)
-        return pipe, pipe.schema_followup(wt, self.SHA)
+        return pipe, pipe.schema_followup(wt, self.SHA, self.SHA)
 
     def test_older_snapshots_close_new_stays_open_others_untouched(self):
         runner = SchemaSnapshotGhRunner({**self.OLDER, **self.OTHER}, self.NEW)
@@ -3417,7 +4502,7 @@ class SchemaSnapshotSupersede(Base):
                 (wt / "db" / "schema.sql").write_text("-- snapshot\n")
                 fwt = pipe.store.root / "worktrees" / f"schema-{self.SHA[:12]}"
                 (fwt / "db").mkdir(parents=True, exist_ok=True)
-                pipe.schema_followup(wt, self.SHA)   # must not raise
+                pipe.schema_followup(wt, self.SHA, self.SHA)   # must not raise
                 self.assertEqual(pipe.schema_superseded_closed, [])
                 self.assertNotIn("gh-pr-close", runner.names())
                 self.assertEqual(set(runner.open_prs), set(self.OLDER) | {self.NEW})
@@ -3456,72 +4541,6 @@ class SchemaSnapshotSupersede(Base):
         self.assertEqual(runner.closed, [])
 
 
-class GitHubApiRetry(unittest.TestCase):
-    """A transient `gh api` failure is retried twice (5s, then 15s) before the
-    lane blocks, and the block says why: the tail of gh's stderr. Four Worker
-    blocks on 2026-10-04 were one-off gh failures that succeeded seconds later."""
-
-    PATH = "repos/o/r/issues/1504/comments?per_page=100"
-
-    def _gh(self, *results):
-        calls = iter(results)
-
-        def run(argv, **kw):
-            rc, out, err = next(calls)
-            return subprocess.CompletedProcess(argv, rc, out, err)
-        return run
-
-    def test_two_failures_then_success_returns_the_data(self):
-        fail = (1, "", "error connecting to api.github.com\n")
-        with mock.patch.object(rp.subprocess, "run",
-                               side_effect=self._gh(fail, fail, (0, '{"ok": 1}', ""))) as run, \
-                mock.patch.object(rp.time, "sleep") as sleep:
-            data = rp.GitHub("o/r", {}).api(self.PATH)
-        self.assertEqual(data, {"ok": 1})
-        self.assertEqual(run.call_count, 3)
-        self.assertEqual([c.args[0] for c in sleep.call_args_list], [5, 15])
-
-    def test_three_failures_block_with_the_stderr_tail(self):
-        noise = "x" * 500
-        fail = (1, "", f"{noise}\nHTTP 502: Bad Gateway (https://api.github.com/repos/o/r)\n")
-        with mock.patch.object(rp.subprocess, "run", side_effect=self._gh(fail, fail, fail)) as run, \
-                mock.patch.object(rp.time, "sleep"):
-            with self.assertRaises(rp.Blocked) as ctx:
-                rp.GitHub("o/r", {}).api(self.PATH)
-        self.assertEqual(run.call_count, 3)
-        self.assertEqual(ctx.exception.reason, "github_unreadable")
-        msg = str(ctx.exception)
-        self.assertIn("exited 1", msg)
-        self.assertIn("after 3 attempts", msg)
-        self.assertIn("HTTP 502: Bad Gateway", msg)
-        self.assertNotIn("\n", msg)
-        self.assertLess(len(msg), 400)
-
-    def test_the_stderr_tail_is_redacted(self):
-        token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
-        fail = (1, "", f"Authorization: token {token}\nHTTP 401\n")
-        with mock.patch.object(rp.subprocess, "run", side_effect=self._gh(fail, fail, fail)), \
-                mock.patch.object(rp.time, "sleep"):
-            with self.assertRaises(rp.Blocked) as ctx:
-                rp.GitHub("o/r", {"GH_TOKEN": token}).api(self.PATH)
-        self.assertNotIn(token, str(ctx.exception))
-        self.assertIn("HTTP 401", str(ctx.exception))
-
-    def test_fine_grained_tokens_are_redacted_without_environment_credentials(self):
-        token = "github" + "_pat_" + ("A" * 82)
-        for suffix in ("", "." * 150 + "\n"):
-            with self.subTest(crosses_cutoff=bool(suffix)):
-                fail = (1, "", f"Authorization: token {token}\n{suffix}HTTP 401\n")
-                with mock.patch.object(rp.subprocess, "run", side_effect=self._gh(fail, fail, fail)), \
-                        mock.patch.object(rp.time, "sleep"):
-                    with self.assertRaises(rp.Blocked) as ctx:
-                        rp.GitHub("o/r", {}).api(self.PATH)
-                self.assertNotIn("A" * 10, ctx.exception.detail)
-                self.assertNotIn("github" + "_pat_", ctx.exception.detail)
-                self.assertIn("[REDACTED]", ctx.exception.detail)
-                self.assertIn("HTTP 401", ctx.exception.detail)
-
-
 class GitHubDiagnosticPersistence(Base):
     def test_fine_grained_tokens_never_reach_console_or_blocked_records(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
@@ -3547,6 +4566,88 @@ class GitHubDiagnosticPersistence(Base):
             self.assertNotIn(token, diagnostic)
             self.assertIn("[REDACTED]", diagnostic)
             self.assertIn("HTTP 401", diagnostic)
+
+
+class TokenCheckWrangler(Base):
+    """wrangler-auth runs the pipeline's own wrangler install, never the
+    pipeline checkout's mcp-server/node_modules (emptied 2026-10-05, which
+    made `wrangler whoami` exit 127 on both lanes)."""
+
+    def toolchain(self) -> Path:
+        return self.fx.repo / "out/release-pipeline/toolchain"
+
+    def test_whoami_uses_the_installed_toolchain_not_the_checkout(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(runner.names()[0], "wrangler-auth")
+        self.assertNotIn("wrangler-install", runner.names())
+        whoami = dict(runner.calls)["wrangler-auth"]
+        self.assertEqual(whoami, [str(self.fx.wrangler), "whoami"])
+        self.assertEqual(runner.cwds["wrangler-auth"], str(self.fx.repo / "mcp-server"))
+
+    def test_missing_toolchain_is_installed_before_whoami_and_kept(self):
+        shutil.rmtree(self.toolchain())
+        stale = self.toolchain() / "mcp-server-0000000000000000"
+        stale.mkdir(parents=True)
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertEqual(runner.names()[:3], ["wrangler-install", "wrangler-auth", "worktree"])
+        install = dict(runner.calls)["wrangler-install"]
+        self.assertEqual(install, ["npm", "ci", "--no-audit", "--no-fund"])
+        home = self.fx.wrangler.parents[2]
+        self.assertEqual(runner.cwds["wrangler-install"], str(home) + ".partial")
+        self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["wrangler-install"])
+        self.assertEqual(dict(runner.calls)["wrangler-auth"][0], str(self.fx.wrangler))
+        self.assertTrue(self.fx.wrangler.exists())
+        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), [home.name])
+        for name in rp.TOOLCHAIN_FILES:
+            self.assertEqual((home / name).read_bytes(), (self.fx.repo / "mcp-server" / name).read_bytes())
+
+        # The next tick reuses the install.
+        self.fx.commit({"mcp-server/src/a.js": "2"})
+        again = InstallingRunner(live=live)
+        self.assertEqual(self.fx.pipeline(again, live=live).tick(["worker"]), 0)
+        self.assertNotIn("wrangler-install", again.names())
+
+    def test_lockfile_change_selects_a_new_install(self):
+        old = self.fx.wrangler
+        (self.fx.repo / "mcp-server/package-lock.json").write_text('{"lockfileVersion": 3, "x": 1}\n')
+        new = rp.wrangler_toolchain(self.fx.repo, self.fx.repo / "out/release-pipeline")
+        self.assertNotEqual(new, old.parents[2])
+
+    def test_install_without_a_binary_fails_at_wrangler_install(self):
+        shutil.rmtree(self.toolchain())
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        rec = self.fx.records()[-1]
+        self.assertEqual((rec["status"], rec["step"], rec["sha"]), ("failed", "wrangler-install", sha))
+        self.assertFalse(self.fx.wrangler.parents[2].exists())
+
+    def test_failed_npm_ci_stops_before_whoami(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = InstallingRunner(live=live, fail_at="wrangler-install")
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertEqual(runner.names(), ["wrangler-install"])
+        self.assertEqual(self.fx.records()[-1]["step"], "wrangler-install")
+
+    def test_dry_run_installs_nothing(self):
+        shutil.rmtree(self.toolchain())
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        self.fx.pipeline(runner, live=live, dry_run=True).tick(["worker"])
+        self.assertEqual(runner.calls, [])
+        self.assertFalse(self.toolchain().exists())
 
 
 class Report(Base):

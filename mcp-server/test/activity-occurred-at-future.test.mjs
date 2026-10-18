@@ -1,33 +1,3 @@
-// activity-occurred-at-future.test.mjs — a touch cannot have happened tomorrow.
-//
-// WHAT WAS FOUND, 2026-08-15, while pulling context for the vendor-level drift
-// list: of 59 vendors carrying a last-touch date, FOUR were dated after today —
-// 2026-08-18, two on 2026-08-26, and 2026-08-27. The nearest is three days out,
-// which reads exactly like a booked meeting logged as though it had happened.
-//
-// WHY IT MATTERS, and it is not tidiness: last_touch is what staleness is
-// measured from. A vendor whose last touch is in the future can never read as
-// stale, no matter how long it has actually been since anyone spoke to them. The
-// row goes quiet and no surface can tell.
-//
-// THE FIELD ALREADY MEANT THIS. log-activity documents occurred_at as "when it
-// happened (defaults now)", past tense, and the activity table already draws
-// this boundary from the other side: migration 0017 stopped a `note` moving
-// last_touch because a note is annotation rather than contact. A future date
-// crosses the same line in the other direction. No new ruling was needed and
-// none was asked for — the doctrine store was searched for any decision on touch
-// dates or scheduled contact and returned nothing.
-//
-// THE FUTURE ALREADY HAS ITS OWN VERBS: set-next-action for the ball you owe,
-// add-critical-date for a dated deal obligation. A scheduled meeting belongs in
-// those, not in the record of what has already occurred.
-//
-// TOLERANCE: a small skew window is allowed, because a caller's clock and the
-// server's are not the same clock and a touch logged "now" can arrive a few
-// seconds ahead. The window is minutes, not days — it exists for clock skew, not
-// for scheduling.
-//
-// Run with: node --test mcp-server/test/activity-occurred-at-future.test.mjs
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -147,7 +117,6 @@ test("an unparseable date is left alone, not guessed at", async () => {
     "this guard judges FUTURE dates; malformed input is a different problem and not this one to invent a verdict on");
 });
 
-// Upgrade reconciliation reads canonical capture evidence from the existing record reader.
 test("record history includes complete calendar replay evidence", async () => {
   const calls = [];
   const history = [{ key: "calcap-person@example.test-2026-09-25",

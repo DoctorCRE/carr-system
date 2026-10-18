@@ -10,6 +10,8 @@ passes; a task routed away as a design/judgment call goes to the Opus desk.
 from __future__ import annotations
 
 import importlib.util
+import atexit
+from contextlib import ExitStack
 import os
 import subprocess
 import sys
@@ -39,6 +41,12 @@ FIX = """```diff
  assert add(2, 3) == 5
 ```"""
 WRONG = FIX.replace("a + b", "a * b")
+TEMP_STACK = ExitStack()
+atexit.register(TEMP_STACK.close)
+
+
+def managed_temp(prefix):
+    return TEMP_STACK.enter_context(tempfile.TemporaryDirectory(prefix=prefix))
 
 
 def check(name, fn):
@@ -51,7 +59,7 @@ def check(name, fn):
 
 
 def repo():
-    d = tempfile.mkdtemp(prefix="flash-escalate-")
+    d = managed_temp("flash-escalate-")
     with open(os.path.join(d, "calc.py"), "w") as fh:
         fh.write(BROKEN)
     subprocess.run(["git", "init", "-q"], cwd=d, env=ENV, check=True)
@@ -124,7 +132,7 @@ def bytecode_caches_never_block_the_fix():
     # Live escalation 2026-09-24: the real folder already had __pycache__ from running the test once,
     # Sol's test run in the copy rewrote it, and the read-back patch failed to apply on the .pyc.
     # The live folder was not a git repo, so the copy skipped __pycache__ and the patch re-created it.
-    d = tempfile.mkdtemp(prefix="flash-escalate-nogit-")
+    d = managed_temp("flash-escalate-nogit-")
     with open(os.path.join(d, "calc.py"), "w") as fh:
         fh.write(BROKEN)
     write_cache(d, b"local run")

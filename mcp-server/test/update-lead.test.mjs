@@ -41,7 +41,7 @@ const joe = { id: ids.joe, slug: "joe", display: "Joe", human: true,
 
 const LEAD_STAGES = ["new", "qualified", "engaged", "outreach_active",
   "nurture_drip", "opportunity", "active_deal", "closed_won",
-  "closed_lost", "do_not_contact"];
+  "closed_lost", "do_not_contact", "archived"];
 const LEAD_LANES = ["renewal", "new_entity", "relocation", "upstream", "associate"];
 
 class UpdateLeadFake {
@@ -94,8 +94,7 @@ class UpdateLeadFake {
     if (sql.startsWith("update lead set")) {
       assert.equal(params.at(-1), this.leadId);
       this.updated = { sql, params };
-      // params: [...fieldValues, actor.id, leadId] per the verb's own binding order
-      return { rows: [] };
+      return { rows: [{ version: ++this.row.version }] };
     }
 
     if (sql.startsWith("insert into event")) {
@@ -123,7 +122,8 @@ test("update-lead: moves an existing lead OFF nurture_drip — the exact loop #3
   assert.ok(db.updated, "the update statement must have run");
   const verbs = db.events.map(e => e.verb);
   assert.ok(verbs.includes("update-lead"));
-  assert.deepEqual(db.events[0].new_value, { stage: "active_deal" });
+  assert.deepEqual(db.events[0].new_value, { stage: "active_deal",
+    transition_proof: { before_version: 3, after_version: 4, actor_slug: "joe" } });
   assert.deepEqual(db.events[0].old_value, { stage: "nurture_drip" });
 });
 
@@ -279,4 +279,20 @@ test("update-lead: clearing a standing suppression instruction is an explicit hu
     fields: { stage: "engaged", suppressed: false },
   });
   assert.deepEqual(new Set(result.updated), new Set(["stage", "suppressed"]));
+});
+
+test("archive decisions require a partner, while notes on an archived lead remain editable", async () => {
+  const machine = { ...joe, slug: "synthetic-agent", human: false };
+  for (const [stage, next] of [["new", "archived"], ["archived", "new"]]) {
+    const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-999999", stage, version: 1 });
+    await assert.rejects(() => TOOLS["update-lead"].handler(db, machine, {
+      idempotency_key: `synthetic-stage-${stage}`, lead: "L-999999", base_version: 1, fields: { stage: next },
+    }), /archive_requires_partner/);
+    assert.equal(db.updated, null);
+  }
+  const db = new UpdateLeadFake({ leadId: ids.lead118, ref: "L-999999", stage: "archived", version: 1 });
+  assert.deepEqual(await TOOLS["update-lead"].handler(db, machine, {
+    idempotency_key: "synthetic-archive-note", lead: "L-999999", base_version: 1,
+    fields: { notes: "Synthetic reviewed note" },
+  }), { ok: true, updated: ["notes"] });
 });

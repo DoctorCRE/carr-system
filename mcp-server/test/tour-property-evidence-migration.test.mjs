@@ -1,9 +1,10 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import test from "node:test";
 
 test("property evidence is exposed only through a tenant-scoped, rights-filtered read function", () => {
-  const sql = readFileSync(new URL("../../migrations/0754_tour_property_evidence.sql", import.meta.url), "utf8");
+  const sql = readMigration(new URL("../../migrations/0754_tour_property_evidence.sql", import.meta.url));
   assert.match(sql, /function ops\.read_tour_property_evidence\(p_tenant text,p_property uuid,p_as_of timestamptz\)/);
   assert.match(sql, /stable security definer set search_path=pg_catalog,ops,public,pg_temp/);
   assert.match(sql, /tour_jurisdiction_dataset/);

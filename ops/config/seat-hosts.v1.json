@@ -1,0 +1,23 @@
+{
+  "schema": "carr-seat-hosts/v1",
+  "purpose": "Which Mac each AI builder seat runs on, and how that Mac appears on the tailnet. Read by ops/host_liveness.py (health rows, seat SKIP) and tools/room-bridge/seat_gate.py (dispatch refusal). A seat mapped to null runs off-host (the Jev Worker) and has no host to be offline.",
+  "tailnet": "tailc8cc93.ts.net",
+  "hosts": {
+    "mac-studio": {
+      "dns_name": "mac-studio.tailc8cc93.ts.net",
+      "aliases": ["studio", "mac-studio", "mac-studio.tailc8cc93.ts.net"]
+    },
+    "joes-macbook-pro": {
+      "dns_name": "joes-macbook-pro.tailc8cc93.ts.net",
+      "aliases": ["macbook", "joes-macbook-pro", "joes-macbook-pro.tailc8cc93.ts.net"]
+    }
+  },
+  "seats": {
+    "opus-studio": "mac-studio",
+    "sol-studio": "mac-studio",
+    "grok": "mac-studio",
+    "e2e-auth": "mac-studio",
+    "sol-macbook": "joes-macbook-pro",
+    "jev": null
+  }
+}

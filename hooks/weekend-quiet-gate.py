@@ -21,9 +21,8 @@ cognition token on a decision a predicate can make).
 THE EXCEPTION IS THE LOAD-BEARING PART, and it is the rule's own: "human elects
 to work weekend". A partner typing into a session on a Sunday IS that election
 — he is at the keyboard, he opened the session, and refusing to answer him
-would be absurd. So this reads his keystrokes, exactly as escalation-gate.py
-does for its "he asked" exemption, and a session cannot grant itself the
-exemption by asserting he is around.
+would be absurd. So this reads his keystrokes; a session cannot grant itself
+the exemption by asserting he is around.
 
 SCOPE IS DELIBERATELY NARROW: partner-facing SENDS only. Reads, record writes,
 loop filing, peer messages between sessions, and every other tool are untouched
@@ -66,18 +65,6 @@ SEND_TOOLS = re.compile(
     re.I)
 
 
-# WHOSE TURN IS IT — ANSWERED IN ONE PLACE (hooks/turn_origin.py).
-# This gate used to carry its own allowlist of origin kinds, accepting "user"
-# and "keyboard". The harness has never written either; a typed turn carries
-# {"kind": "human"}. Across sixteen real transcripts that allowlist matched ZERO
-# of 3,271 candidate records, so the carve-out below could not fire once.
-#
-# The corrected allowlist that replaced it was better and still weaker than the
-# detector ledger-sweep.py had already earned the hard way — patched four times
-# in nine days, ending at a POSITIVE test with two screens this gate lacked: the
-# cross-session relay tag, and the refusal to trust any origin kind that is not
-# exactly "human". Rather than keep a second, thinner answer to the same
-# question, this now asks the shared one.
 from turn_origin import partner_typed_this  # noqa: E402
 
 
@@ -119,8 +106,7 @@ def partner_is_here(transcript_path):
 
     His own keystrokes are the election the rule names, and they are the one
     signal a session cannot fabricate for itself. Harness-injected turns are
-    NOT his words — the same distinction ledger-sweep.py got wrong on
-    2026-08-05 when it quoted a task notification as the partner speaking.
+    NOT his words.
 
     THE ORIGIN ALLOWLIST WAS GUESSED, AND THE GUESS WAS WRONG (defect 16291f00,
     2026-08-22). It accepted kinds "user" and "keyboard". The harness has never
@@ -181,40 +167,46 @@ REASON = (
 )
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    dlog(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    dlog(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    if not SEND_TOOLS.match(tool or ""):
+        sys.exit(0)
+
+    clock = now()
+    if clock is None:
+        dlog("ALLOW(unreadable-clock)")
+        sys.exit(0)
+    if clock.weekday() < 5:                               # Mon-Fri
+        sys.exit(0)
+
+    if partner_is_here(payload.get("transcript_path")):
+        dlog(f"ALLOW(partner-present) {tool}")
+        sys.exit(0)
+
+    day = clock.strftime("%A")
+    dlog(f"DENY {tool} on {day}")
+    print(REASON.format(day=day), file=sys.stderr)
+    sys.exit(2)
+
+
 def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:                                  # noqa: BLE001
-        dlog(f"ALLOW(parse-error) {exc}")
-        sys.exit(0)
-
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        if not SEND_TOOLS.match(tool or ""):
-            sys.exit(0)
-
-        clock = now()
-        if clock is None:
-            dlog("ALLOW(unreadable-clock)")
-            sys.exit(0)
-        if clock.weekday() < 5:                               # Mon-Fri
-            sys.exit(0)
-
-        if partner_is_here(payload.get("transcript_path")):
-            dlog(f"ALLOW(partner-present) {tool}")
-            sys.exit(0)
-
-        day = clock.strftime("%A")
-        dlog(f"DENY {tool} on {day}")
-        print(REASON.format(day=day), file=sys.stderr)
-        sys.exit(2)
-
-    except SystemExit:
-        raise
-    except Exception as exc:                                  # noqa: BLE001
-        dlog(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

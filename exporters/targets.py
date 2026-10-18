@@ -835,7 +835,7 @@ INTRO_PROSE_HEAD = [
     "",
     "> **Companion file, different axis:** `vendor-intro-timeline.md` covers vendor →",
     "> **CLIENT** intros (which vendor category to introduce to a client at each deal",
-    "> stage). THIS file is vendor ↔ vendor (which of Dell's vendors can meet each",
+    "> stage). THIS file is vendor ↔ vendor (which vendors in our vendor network can meet each",
     "> other). Both pull from `vendors.xlsx`.",
     "",
 ]

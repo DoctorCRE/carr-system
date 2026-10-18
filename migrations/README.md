@@ -23,6 +23,26 @@ binding stress-test addendum). STATUS: schema v2 pending Joe's grain review
   of `record-layer/schema-draft-2026-07-30.sql` (v2). Until first apply, keep
   them identical — after first apply, the vault file freezes as the design
   record and changes land here as new migrations.
+- **Every new migration declares its risk in its header** (the comment lines
+  before the first statement), checked by `ops/migration-safety-gate.py`:
+
+  ```sql
+  -- rollback: <how to undo it>            (or: -- rollback: forward-only — <why>)
+  -- expand-contract: contract — <why>     (drop, rename, type change, NOT NULL
+                                            without default, truncate, unbounded delete)
+  -- lock-review: <table size, why ok>     (non-concurrent index, validated
+                                            constraint, table rewrite, vacuum full)
+  ```
+
+  Expand adds the new shape beside the old; contract removes the old shape only
+  after every reader and writer has moved. A contract migration lands in its own
+  PR, after the expand release.
+- **db/schema.sql carries every migration.** A PR that adds a migration also
+  regenerates the snapshot: `ops/migration-shadow.py --write` (PostgreSQL 18),
+  or commit the `migration-shadow-schema-<sha>` artifact the CI migration job
+  uploads. That job builds the base branch's snapshot on a throwaway
+  PostgreSQL 18 cluster, applies the PR's migrations, and requires the committed
+  snapshot to equal the result.
 - **Seeds are honest.** `0002_seed.sql` seeds only documented vocab;
   lead stages come from the live registry at import, human-reviewed, never
   guessed.

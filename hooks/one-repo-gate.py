@@ -18,8 +18,8 @@ a control. Verified against the published hooks reference, not assumed.
 
 WHAT ACTUALLY ENFORCES IT is the door the failure came through. The shape is not
 "a directory got registered", it is "engineering work got WRITTEN somewhere that
-is not the repo" — a PreToolUse Write gate, the same door record-home-gate.py and
-gate-edit-gate.py already sit on, which does deny.
+is not the repo" — a PreToolUse Write gate, the same door record-home-gate.py
+already sits on, which does deny.
 
 WHAT IT DENIES, and every test is PATH-STRUCTURAL rather than content-sniffing,
 for the reason lint-gate.py's doctrine gives and the originating loop repeats:
@@ -284,27 +284,37 @@ def check(tool_input, cwd):
                        tree=os.path.dirname(tree) or tree, escape=ESCAPE_VAR)
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    if tool not in ("Write", "Edit", "MultiEdit") or not isinstance(tool_input, dict):
+        sys.exit(0)
+    reason = check(tool_input, payload.get("cwd"))
+    if reason:
+        log(f"DENY {tool} :: {reason.splitlines()[0][:200]}")
+        print(reason, file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0)
+
+
 def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:                                   # fail OPEN
-        log(f"ALLOW(parse-error) {exc}")
-        sys.exit(0)
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-        if tool not in ("Write", "Edit", "MultiEdit") or not isinstance(tool_input, dict):
-            sys.exit(0)
-        reason = check(tool_input, payload.get("cwd"))
-        if reason:
-            log(f"DENY {tool} :: {reason.splitlines()[0][:200]}")
-            print(reason, file=sys.stderr)
-            sys.exit(2)
-        sys.exit(0)
-    except Exception as exc:                                   # fail OPEN
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

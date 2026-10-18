@@ -9,12 +9,15 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+import sys
 import uuid
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from lib import record_call  # noqa: E402
 FIELDS = {"lead", "native_ref", "counterparty_address", "kind", "occurred_at",
-          "draft_body_sha256", "ended_at", "attended", "automated", "first_contact_draft_id", "lead_stage_signal", "follow_up_after"}
+          "draft_body_sha256", "ended_at", "attended", "automated", "first_contact_draft_id", "lead_stage_signal", "follow_up_after", "archive_reason"}
+INVOICE_FIELDS = {"native_ref", "from_address", "deal_name", "client_name", "property_address", "occurred_at"}
 
 
 def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago"):
@@ -22,34 +25,31 @@ def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago"):
         if evidence is not None:
             raise ValueError("dry run reads stored evidence; omit --evidence-file")
         return call("lead-stage-preview", {})
+    captures = []
     for item in evidence or []:
-        if not isinstance(item, dict) or set(item) - FIELDS:
+        invoice = isinstance(item, dict) and "deal_name" in item
+        allowed = INVOICE_FIELDS if invoice else FIELDS
+        required = {"native_ref", "from_address", "deal_name", "occurred_at"} if invoice else {"lead", "native_ref", "counterparty_address", "kind", "occurred_at"}
+        if not isinstance(item, dict) or set(item) - allowed:
             raise ValueError("derived evidence has unsupported fields")
-        required = {"lead", "native_ref", "counterparty_address", "kind", "occurred_at"}
         if not required <= set(item):
             raise ValueError("derived evidence is incomplete")
-    for item in evidence or []:
-        # Replay of one native item is one capture. Changed bytes get an envelope
-        # conflict rather than silently rewriting the original evidence.
-        identity = json.dumps([item["lead"], item["native_ref"], item["kind"]])
-        key = "lead-contact:" + hashlib.sha256(identity.encode()).hexdigest()
-        call("record-lead-contact", {**item, "idempotency_key": key})
+        verb = "record-deal-invoice" if invoice else "record-lead-contact"
+        identity = [verb, item["native_ref"]] if invoice else [item["lead"], item["native_ref"], item["kind"]]
+        key = ("deal-invoice:" if invoice else "lead-contact:") + hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        captures.append((verb, {**item, "idempotency_key": key}))
+    for verb, args in captures:
+        call(verb, args)
     return call("advance-leads", {"idempotency_key": "lead-stage-job:" + str(uuid.uuid4()), "time_zone": time_zone})
 
 
 def call_verb(verb, args):
-    try:
-        result = subprocess.run([str(REPO / "run.sh"), "call", verb, json.dumps(args)],
-                                cwd=REPO, text=True, capture_output=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"{verb} failed (timeout)") from None
-    except OSError:
-        raise RuntimeError(f"{verb} failed (launch)") from None
-    if result.returncode:
+    result = record_call.call_verb(verb, args, timeout=120)
+    if not result.ok:
         # Errors may contain source identifiers. Console carries only operation
-        # and exit status; no captured source text is echoed into a public log.
-        raise RuntimeError(f"{verb} failed (exit {result.returncode})")
-    return json.loads(result.stdout)
+        # and outcome; no captured source text is echoed into a public log.
+        raise RuntimeError(f"{verb} failed ({result.kind})")
+    return result.reply
 
 
 def main():

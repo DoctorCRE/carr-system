@@ -26,27 +26,28 @@ ALLOW-LISTED NAMES ONLY (see CREDENTIALS below). An unknown NAME is refused —
 this tool is a narrow door onto a few known destinations, not a generic writer
 into ~/.config/carr/.
 
-WHERE EACH TOKEN LANDS. Every entry here writes into
-~/.config/carr/tokens.env, mode 600 with the parent directory 700 — the same
-env-file shape bin/routine-credential-env.sh reads (see its
-carr_load_routine_db_env) and bin/staging-secrets.sh writes
-(~/.config/carr/staging-tokens.env). There is no existing per-service file for
-these three: grepping bin/deploy-worker.sh and the rest of the tree shows
-CLOUDFLARE_API_TOKEN is read out of the ambient process environment (wrangler's
-own convention, and how tools/provision-staging-app-writer.py allowlists it
-through to a subprocess) rather than sourced from a repo-known file, and no
-ops/release-pipeline.py exists in this tree to grep. tokens.env is therefore a
-NEW shared file, following the existing db.env / staging-tokens.env
-convention, not a rename of something deploy-worker.sh already reads. Joe
-still needs to `source ~/.config/carr/tokens.env` (or export its lines) before
-a command that expects CLOUDFLARE_API_TOKEN in its environment; this tool only
-gets the value into that file safely.
+WHERE EACH TOKEN LANDS is lib/token_store.py's one map, shared with the nightly
+mint lane (lib/credential_mint.py), and the write is that module's one 0600
+atomic writer: a value Joe pastes here and a value the system mints for the
+same NAME land in the same line of the same file. Most names land in
+~/.config/carr/tokens.env; NEON_API_KEY lands in db.env, which every shell job
+that derives a Neon connection already sources. A command that expects
+CLOUDFLARE_API_TOKEN in its environment still has to load tokens.env itself
+(ops/release-pipeline.py does, for its wrangler steps only).
+
+ROOT GRANTS. The names in ops/config/credential-root-grants.v1.json
+(CLOUDFLARE_TOKEN_ROOT, NEON_ORG_ROOT_KEY, OPENAI_ADMIN_KEY) are accepted too.
+Each is the ONE credential Joe places per provider (decision cbe91287,
+2026-10-12); the nightly 'credential mint' step mints and rotates every child
+credential from it, so after this one paste he never mints those by hand again.
+A root grant is verified with the provider's read-only call from
+lib/credential_mint.py before it is saved, exactly like every other name here.
 
 VERIFICATION IS A STATUS CODE, NEVER A VALUE. Cloudflare's token-verify
 endpoint and GitHub's /user endpoint are both probed with the token, and only
 the HTTP status (plus, for Cloudflare, the `result.status` field) is read back
 — the response body is otherwise discarded. CLAUDE_CODE_OAUTH_TOKEN has no
-verify probe: presence is all this tool can attest to for it.
+live verify probe: only the inventory-owned token syntax is checked here.
 
 NO SEAL. This is a local operator script — no verb, no verb schema/flags, no
 worker route, no job definition — so per the SCAC successor seal procedure a
@@ -61,18 +62,16 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
-import os
-import re
-import stat
 import subprocess
 import sys
-import tempfile
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Callable, cast
 
-ENV_DIR = os.path.expanduser("~/.config/carr")
-TOKENS_ENV = os.path.join(ENV_DIR, "tokens.env")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lib import credential_mint, token_store
+from lib.credential_shape import valid_claude_token, claude_token_hint
 
 HTTP_TIMEOUT_SECONDS = 15
 
@@ -165,84 +164,37 @@ def github_shape_hint(value: str) -> str:
     return hint
 
 
-# NAME -> {"target": <path under ~/.config/carr/>, "verify": callable | None,
+def verify_claude_shape(token: str) -> tuple[bool, str]:
+    # `claude setup-token` wraps the token across two Terminal lines, so a
+    # one-line copy saves a short value that only fails later with HTTP 401.
+    if valid_claude_token(token):
+        return True, "shape checked (no live probe)"
+    return False, "not a complete setup-token value; copy both wrapped lines as one"
+
+
+def claude_shape_hint(value: str) -> str:
+    return claude_token_hint(value)
+
+
+def _verify_root(grant: str) -> Callable[[str], tuple[bool, str]]:
+    return lambda value: credential_mint.verify_root_grant(grant, value)
+
+
+# NAME -> {"target": <file from lib/token_store.py>, "verify": callable | None,
 #          "shape_hint": callable | None}
-# Room for more: add an entry here, nothing else needs to change to support it.
-CREDENTIALS: dict[str, dict[str, object]] = {
-    "CLOUDFLARE_API_TOKEN": {
-        "target": TOKENS_ENV,
-        "verify": verify_cloudflare,
-        "shape_hint": cloudflare_shape_hint,
-    },
-    "GITHUB_FINE_GRAINED_TOKEN": {
-        "target": TOKENS_ENV,
-        "verify": verify_github,
-        "shape_hint": github_shape_hint,
-    },
-    "CLAUDE_CODE_OAUTH_TOKEN": {
-        "target": TOKENS_ENV,
-        "verify": None,
-        "shape_hint": None,
-    },
+# A new NAME needs a token_store destination first; nothing else changes.
+_VERIFY: dict[str, dict[str, object]] = {
+    "CLOUDFLARE_API_TOKEN": {"verify": verify_cloudflare, "shape_hint": cloudflare_shape_hint},
+    "GITHUB_FINE_GRAINED_TOKEN": {"verify": verify_github, "shape_hint": github_shape_hint},
+    "CLAUDE_CODE_OAUTH_TOKEN": {"verify": verify_claude_shape, "shape_hint": claude_shape_hint},
+    "CLOUDFLARE_TOKEN_ROOT": {"verify": _verify_root("cloudflare"), "shape_hint": cloudflare_shape_hint},
+    "NEON_ORG_ROOT_KEY": {"verify": _verify_root("neon"), "shape_hint": None},
+    "OPENAI_ADMIN_KEY": {"verify": _verify_root("openai"), "shape_hint": None},
 }
-
-_KEY_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)=")
-
-
-def _fsync_directory(path: str) -> None:
-    fd = os.open(path or ".", os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def write_env_line(path: str, name: str, value: str) -> None:
-    """Write or replace exactly the NAME=... line in path, atomically.
-
-    Every other line is preserved byte-for-byte. The value is never logged,
-    printed, or placed anywhere but this file.
-    """
-    directory = os.path.dirname(path) or "."
-    os.makedirs(directory, mode=0o700, exist_ok=True)
-    os.chmod(directory, 0o700)
-
-    existing_lines: list[str] = []
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as handle:
-            existing_lines = handle.read().splitlines()
-
-    new_lines: list[str] = []
-    replaced = False
-    for line in existing_lines:
-        m = _KEY_LINE_RE.match(line)
-        if m and m.group(1) == name:
-            if not replaced:
-                new_lines.append(f"{name}={value}")
-                replaced = True
-            # A stray duplicate key from a hand-edit is dropped, not kept --
-            # two lines for the same NAME is ambiguous for every reader of
-            # this file (both the Python and the shell parser).
-            continue
-        new_lines.append(line)
-    if not replaced:
-        new_lines.append(f"{name}={value}")
-
-    content = "\n".join(new_lines) + "\n"
-
-    fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".store-token.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
-        os.replace(tmp_path, path)
-        _fsync_directory(directory)
-    except BaseException:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
-        raise
+CREDENTIALS: dict[str, dict[str, object]] = {
+    name: {"target": str(token_store.destination(name).path), **entry}
+    for name, entry in _VERIFY.items()
+}
 
 
 def clear_clipboard() -> None:
@@ -306,7 +258,7 @@ def store_token(
             )
             return 1
 
-    write_env_line(target, name, value)
+    token_store.write_env_line(target, token_store.destination(name).key, value)
 
     if verify_message is None:
         print(f"{name} saved to {target}, no verify probe configured for it", file=out)

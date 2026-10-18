@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """Static and state-machine checks for the one-time staging 0382 repair."""
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import hashlib
 import importlib.util
 import os
-from pathlib import Path
 from typing import Any
 
 
@@ -67,15 +72,15 @@ check("public server identity refuses even in pinned hosted CI",
           hosted_environment) is False)
 
 
-migration_bytes = module.MIGRATION.read_bytes()
+migration_bytes = read_migration(REPO, module.MIGRATION.name).encode()
 check(
     "checked-in 0382 matches Production's recorded immutable digest",
     hashlib.sha256(migration_bytes).hexdigest() == module.EXPECTED_SHA256,
 )
 check("repaired body is the exact 0382 body", module.normalize_sql(module.EXPECTED_REPAIRED_BODY)
-      in module.normalize_sql(module.MIGRATION.read_text()))
+      in module.normalize_sql(read_migration(REPO, module.MIGRATION.name)))
 check("legacy body is the exact 0170 body", module.normalize_sql(module.EXPECTED_LEGACY_BODY)
-      in module.normalize_sql((REPO / "migrations/0170_guidance_import_lifecycle.sql").read_text()))
+      in module.normalize_sql(read_migration(REPO, "0170_guidance_import_lifecycle.sql")))
 check("exact genuine hole replays and records",
       module.classify_state({module.LATER_NAME: module.LATER_SHA256}, "legacy")
       == "replay_and_record")

@@ -72,7 +72,6 @@ vig = Image.radial_gradient("L").resize((W, H), Image.Resampling.LANCZOS).point(
 bg = Image.composite(Image.new("RGBA", (W, H), (0, 18, 44, 255)), bg, vig)
 bg.save(f"{OUT}/01_background_scale.png")
 
-# 02 — kicker
 l = plate()
 centered(l, "BEFORE YOU SIGN", font("Montserrat-SemiBold.ttf", 30), ORANGE, 214, tracking=9)
 l.save(f"{OUT}/02_kicker_above.png")
@@ -86,7 +85,6 @@ l = plate()
 centered(l, "WORKS FOR YOU.", font("Oswald-Bold.ttf", 92), WHITE, 414, tracking=2)
 l.save(f"{OUT}/04_head2_right.png")
 
-# 05 — orange rule
 l = plate()
 ImageDraw.Draw(l).rectangle([W / 2 - 108, 556, W / 2 + 108, 562], fill=ORANGE)
 l.save(f"{OUT}/05_rule_scale.png")
@@ -100,14 +98,12 @@ for i, line in enumerate(["The listing broker represents the landlord",
     centered(l, line, body, DIM, 626 + i * 50)
 l.save(f"{OUT}/06_body.png")
 
-# 07 — the claim
 l = plate()
 for i, line in enumerate(["CARR represents healthcare",
                           "tenants and buyers only."]):
     centered(l, line, font("Montserrat-Bold.ttf", 37), WHITE, 806 + i * 50)
 l.save(f"{OUT}/07_claim.png")
 
-# 08 — logo
 logo = Image.open(os.path.join(BRAND, "assets", "carr-white.png")).convert("RGBA")
 scale = (W * 0.20) / logo.width
 logo = logo.resize((int(logo.width * scale), int(logo.height * scale)), Image.Resampling.LANCZOS)
@@ -115,7 +111,6 @@ l = plate()
 l.paste(logo, (int((W - logo.width) / 2), 946), logo)
 l.save(f"{OUT}/08_logo_scale.png")
 
-# 09 — byline
 l = plate()
 centered(l, "JOE BOOKOUT  ·  HEALTHCARE REAL ESTATE",
          font("Montserrat-SemiBold.ttf", 23), DIM, 1024, tracking=4)

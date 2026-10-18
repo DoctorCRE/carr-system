@@ -171,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GestureDelegate {
 
         guard let wav else {
             Log.shared.line("INFO empty capture, nothing to transcribe")
-            liveTyper.retractAll() // defensive: near-instant release, but never leave live-typed text stranded
+            MainActor.assumeIsolated { liveTyper.retractAll() } // defensive: near-instant release, but never leave live-typed text stranded
             settle()
             return
         }
@@ -180,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GestureDelegate {
         guard peak >= config.minPeakLevel, seconds >= 0.35 else {
             Log.shared.line("INFO capture gated (peak=\(String(format: "%.4f", peak)) seconds=\(String(format: "%.2f", seconds))) — discarded")
             try? FileManager.default.removeItem(at: wav)
-            liveTyper.retractAll()
+            MainActor.assumeIsolated { liveTyper.retractAll() }
             cue(config.soundGated)
             settle()
             return
@@ -346,7 +346,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GestureDelegate {
     func gestureCaptureAborted() {
         stopPreview()
         recorder.abort()
-        liveTyper.retractAll()
+        MainActor.assumeIsolated { liveTyper.retractAll() }
         Log.shared.line("INFO capture aborted (shortcut or mode exit)")
         settle()
     }
@@ -367,7 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, GestureDelegate {
     /// get it via LiveTyper's bare backspace primitive. Guarded by app
     /// identity + a 5-minute staleness window so it can never reach into an
     /// unrelated field or an unrelated, long-past dictation.
-    private func handleCrossUtteranceScratch() {
+    @MainActor private func handleCrossUtteranceScratch() {
         guard let last = lastInsert else {
             Log.shared.line("INFO scratch-that: nothing to erase (no prior insert this session)")
             return

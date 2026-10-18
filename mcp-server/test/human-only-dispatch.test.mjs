@@ -11,15 +11,10 @@
 // noticed.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 import { authorizationClassForActor } from "../src/identity.js";
 
 const humanOnlyVerbs = Object.keys(TOOLS).filter((name) => TOOLS[name].humanOnly === true).sort();
-const foundationAssuranceMigrationPresent = existsSync(
-  new URL("../../migrations/0508_foundation_assurance_minimum_receipt.sql", import.meta.url),
-);
-
 // The exact reproduction principal from the release review: a verified NONHUMAN
 // local actor that partner-authority.js resolves to sponsor 'joe', i.e. the one
 // that already holds the authority connection.
@@ -77,7 +72,6 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
   // over: it means a verb gained or lost the flag, and that is a decision
   // somebody should see in a diff.
   assert.deepEqual(humanOnlyVerbs, [
-    ...(foundationAssuranceMigrationPresent ? ["accept-benchmark-manifest-draft"] : []),
     "accept-outcome-feedback",
     "accept-portfolio-revision",
     "accept-ready-plan",
@@ -87,12 +81,11 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "answer-work-request-for-joe",
     "approve-lead-draft",
     "approve-lead-move",
-    "assign-execution-route",
-    "attest-attempt-evaluation",
-    "attest-execution-environment-conformance",
+    "claim-lead",
     "close-incident",
     "confirm-merge",
     "decide-doc-suggestion",
+    "link-lead-client",
     "propose-doc-correction",
     // V5-F01: installing the field-authority/retention policy and appending a
     // preservation hold are partner acts on the authority connection.
@@ -115,7 +108,8 @@ test("the registry still carries the humanOnly verbs this gate was built for", (
     "revoke-correspondence-adapter-consent",
     // V5-RW02: only a verified partner revokes Dell's Salesforce read consent.
     "revoke-salesforce-read-consent",
-    "transition-execution-environment-provider",
+    "undo-invoice-close",
+    "undo-lead-move",
   ]);
 });
 

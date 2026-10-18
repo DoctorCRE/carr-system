@@ -1,0 +1,73 @@
+{
+  "schema": "carr-fast-ship-verification/v1",
+  "recorded_at_utc": "2026-10-05T18:37:51.221573+00:00",
+  "environment": "macOS; PostgreSQL17; three independent disposable databases; foreground runs concurrent on a shared host. Local timings are not hosted before/after latency.",
+  "source_sha256": {
+    "ops/ci.sh": "ecfb0176ac8817389412f1e4fcc72e2d904f535ba0f6361f059d22d9fb4603a8",
+    "ops/ci-migration-gates.py": "9d0c269e55925c75796834f856d06b95a593c39e36f2e9ef94a58b0d31061eed",
+    "ops/siep12-policy-epoch-local-pg-gate.py": "2a3c27f1b6f4be5f82218c75f9d4a134496c3394e5d559a50342a6a3648a920e",
+    "ops/siep18-reference-monitor-local-pg-gate.py": "52e422e7bf0852f62f534cbaf354c39b68823ba22416ae9e3d3d1701d06c3928"
+  },
+  "repeat_runs": [
+    {
+      "command": "./run.sh local-db-ci --class migration --port 56480",
+      "exit_code": 0,
+      "migration_seconds": 668,
+      "gate_phase_seconds": 382,
+      "individual_gate_seconds_sum": 582,
+      "gate_programs_passed": 69,
+      "class_proof": "  OK    migration   committed schema loads; 42 pending migration(s) apply; app-role grants verified live; trigger reads granted; 69 db acceptance gate program(s) pass (each program reports its own assertions)",
+      "wrapper_proof": "local-db-ci: migration proof and atomic Joe authority lifecycle passed on disposable PostgreSQL",
+      "gate_timings": "db-gate-timing:siep12-policy-epoch-local-pg-gate=283s siep18-reference-monitor-local-pg-gate=139s staging-release-readback-gate=49s cre-lifecycle-local-pg-gate=45s zz-engineering-controller-concurrency-gate=33s atomic-rule-compat-migration-gate=16s staging-database-login-provision-db-gate=5s staging-app-writer-provision-db-gate=4s siep11-mutation-registry-local-pg-gate=2s lead-stage-db-gate=1s siep-evidence-graph-local-pg-gate=1s siep17-token-challenge-local-pg-gate=1s snapshot-authority-membership-gate=1s staging-ledger-repair-0382-db-gate=1s work-portfolio-local-pg-gate=1s authority-privilege-gate=0s calendar-prebrief-joe-runtime-local-pg-gate=0s calendar-prebrief-projection-local-pg-gate=0s calendar-prebrief-service-registration-gate=0s capability-completion-gate=0s completion-register-schema-local-pg-gate=0s control-catalog-parity-gate=0s control-plane-db-gate=0s control-plane-registry-gate=0s delivery-cadence-a05-assurance-reader-local-pg-gate=0s doc-outcome-cards-local-pg-gate=0s engineering-claim-local-pg-gate=0s engineering-envelope-race-local-pg-gate=0s engineering-envelope-successor-gate=0s engineering-fixture-schedule-local-pg-gate=0s evidence-activation-db-gate=0s gate-runtime-role-gate=0s gate-zero-scheduler-canary-gate=0s guidance-registry-db-gate=0s jev-call-receipt-local-pg-gate=0s joe-answer-work-request-gate=0s legacy-program-tenant-backfill-gate=0s p0-1-release-gate=0s private-row-sponsor-rls-gate=0s program3-incident-gate=0s program3-trace-gate=0s program5-forward-fix-rehearsal-gate=0s program5-promotion-gate=0s program6-browser-action-challenge-gate=0s program6-human-triage-gate=0s program6-outcome-feedback-gate=0s program6-ready-plan-gate=0s program6-sourced-routine-gate=0s program6-sourced-shape-disposition-gate=0s release-readiness-gate=0s renewal-decision-delivery-gate=0s renewal-lease-ledger-local-pg-gate=0s resource-observation-local-pg-gate=0s salesforce-reconciliation-rw02-local-pg-gate=0s siep-01-heavy-build-session-reproduction-local-pg-gate=0s siep-program-local-pg-gate=0s siep13-artifact-registry-local-pg-gate=0s siep14-root-trust-local-pg-gate=0s siep15-device-enrollment-local-pg-gate=0s siep18-exact-effects-local-pg-gate=0s situation-retrieval-db-gate=0s slice-done-marker-local-pg-gate=0s slice-done-marker-race-local-pg-gate=0s staging-replacement-project-local-pg-gate=0s staging-retrieval-doctrine-seed-gate=0s tour-pdf-render-result-storage-ref-local-pg-gate=0s work-request-withdrawal-db-gate=0s workflow-cutover-r02-local-pg-gate=0s zero-hit-fallback-db-gate=0s",
+      "step_timings": "migration-step-timing: load=26s migrate=151s tour=81s grants=0s triggers=28s sync=0s gates=382s",
+      "log_sha256": "eacbd2195b97e806c71043a3bb61ef2856ffe784b706ab216efdb647e0c01e9f",
+      "output_last_modified_utc": "2026-10-05T18:36:52.273282+00:00"
+    },
+    {
+      "command": "./run.sh local-db-ci --class migration --port 56490",
+      "exit_code": 0,
+      "migration_seconds": 667,
+      "gate_phase_seconds": 381,
+      "individual_gate_seconds_sum": 581,
+      "gate_programs_passed": 69,
+      "class_proof": "  OK    migration   committed schema loads; 42 pending migration(s) apply; app-role grants verified live; trigger reads granted; 69 db acceptance gate program(s) pass (each program reports its own assertions)",
+      "wrapper_proof": "local-db-ci: migration proof and atomic Joe authority lifecycle passed on disposable PostgreSQL",
+      "gate_timings": "db-gate-timing:siep12-policy-epoch-local-pg-gate=283s siep18-reference-monitor-local-pg-gate=139s staging-release-readback-gate=49s cre-lifecycle-local-pg-gate=45s zz-engineering-controller-concurrency-gate=32s atomic-rule-compat-migration-gate=16s staging-database-login-provision-db-gate=5s staging-app-writer-provision-db-gate=4s siep11-mutation-registry-local-pg-gate=2s lead-stage-db-gate=1s siep-evidence-graph-local-pg-gate=1s siep17-token-challenge-local-pg-gate=1s snapshot-authority-membership-gate=1s staging-ledger-repair-0382-db-gate=1s work-portfolio-local-pg-gate=1s authority-privilege-gate=0s calendar-prebrief-joe-runtime-local-pg-gate=0s calendar-prebrief-projection-local-pg-gate=0s calendar-prebrief-service-registration-gate=0s capability-completion-gate=0s completion-register-schema-local-pg-gate=0s control-catalog-parity-gate=0s control-plane-db-gate=0s control-plane-registry-gate=0s delivery-cadence-a05-assurance-reader-local-pg-gate=0s doc-outcome-cards-local-pg-gate=0s engineering-claim-local-pg-gate=0s engineering-envelope-race-local-pg-gate=0s engineering-envelope-successor-gate=0s engineering-fixture-schedule-local-pg-gate=0s evidence-activation-db-gate=0s gate-runtime-role-gate=0s gate-zero-scheduler-canary-gate=0s guidance-registry-db-gate=0s jev-call-receipt-local-pg-gate=0s joe-answer-work-request-gate=0s legacy-program-tenant-backfill-gate=0s p0-1-release-gate=0s private-row-sponsor-rls-gate=0s program3-incident-gate=0s program3-trace-gate=0s program5-forward-fix-rehearsal-gate=0s program5-promotion-gate=0s program6-browser-action-challenge-gate=0s program6-human-triage-gate=0s program6-outcome-feedback-gate=0s program6-ready-plan-gate=0s program6-sourced-routine-gate=0s program6-sourced-shape-disposition-gate=0s release-readiness-gate=0s renewal-decision-delivery-gate=0s renewal-lease-ledger-local-pg-gate=0s resource-observation-local-pg-gate=0s salesforce-reconciliation-rw02-local-pg-gate=0s siep-01-heavy-build-session-reproduction-local-pg-gate=0s siep-program-local-pg-gate=0s siep13-artifact-registry-local-pg-gate=0s siep14-root-trust-local-pg-gate=0s siep15-device-enrollment-local-pg-gate=0s siep18-exact-effects-local-pg-gate=0s situation-retrieval-db-gate=0s slice-done-marker-local-pg-gate=0s slice-done-marker-race-local-pg-gate=0s staging-replacement-project-local-pg-gate=0s staging-retrieval-doctrine-seed-gate=0s tour-pdf-render-result-storage-ref-local-pg-gate=0s work-request-withdrawal-db-gate=0s workflow-cutover-r02-local-pg-gate=0s zero-hit-fallback-db-gate=0s",
+      "step_timings": "migration-step-timing: load=26s migrate=152s tour=79s grants=0s triggers=29s sync=0s gates=381s",
+      "log_sha256": "4d0be56f0e3e4b340f1a9ac2e849efa252894c8d57274454e21e4c2a4d7f887a",
+      "output_last_modified_utc": "2026-10-05T18:36:54.153476+00:00"
+    },
+    {
+      "command": "./run.sh local-db-ci --class migration --port 56500",
+      "exit_code": 0,
+      "migration_seconds": 666,
+      "gate_phase_seconds": 380,
+      "individual_gate_seconds_sum": 578,
+      "gate_programs_passed": 69,
+      "class_proof": "  OK    migration   committed schema loads; 42 pending migration(s) apply; app-role grants verified live; trigger reads granted; 69 db acceptance gate program(s) pass (each program reports its own assertions)",
+      "wrapper_proof": "local-db-ci: migration proof and atomic Joe authority lifecycle passed on disposable PostgreSQL",
+      "gate_timings": "db-gate-timing:siep12-policy-epoch-local-pg-gate=282s siep18-reference-monitor-local-pg-gate=139s staging-release-readback-gate=48s cre-lifecycle-local-pg-gate=45s zz-engineering-controller-concurrency-gate=32s atomic-rule-compat-migration-gate=16s staging-database-login-provision-db-gate=5s staging-app-writer-provision-db-gate=4s lead-stage-db-gate=1s siep-evidence-graph-local-pg-gate=1s siep11-mutation-registry-local-pg-gate=1s siep17-token-challenge-local-pg-gate=1s snapshot-authority-membership-gate=1s staging-ledger-repair-0382-db-gate=1s work-portfolio-local-pg-gate=1s authority-privilege-gate=0s calendar-prebrief-joe-runtime-local-pg-gate=0s calendar-prebrief-projection-local-pg-gate=0s calendar-prebrief-service-registration-gate=0s capability-completion-gate=0s completion-register-schema-local-pg-gate=0s control-catalog-parity-gate=0s control-plane-db-gate=0s control-plane-registry-gate=0s delivery-cadence-a05-assurance-reader-local-pg-gate=0s doc-outcome-cards-local-pg-gate=0s engineering-claim-local-pg-gate=0s engineering-envelope-race-local-pg-gate=0s engineering-envelope-successor-gate=0s engineering-fixture-schedule-local-pg-gate=0s evidence-activation-db-gate=0s gate-runtime-role-gate=0s gate-zero-scheduler-canary-gate=0s guidance-registry-db-gate=0s jev-call-receipt-local-pg-gate=0s joe-answer-work-request-gate=0s legacy-program-tenant-backfill-gate=0s p0-1-release-gate=0s private-row-sponsor-rls-gate=0s program3-incident-gate=0s program3-trace-gate=0s program5-forward-fix-rehearsal-gate=0s program5-promotion-gate=0s program6-browser-action-challenge-gate=0s program6-human-triage-gate=0s program6-outcome-feedback-gate=0s program6-ready-plan-gate=0s program6-sourced-routine-gate=0s program6-sourced-shape-disposition-gate=0s release-readiness-gate=0s renewal-decision-delivery-gate=0s renewal-lease-ledger-local-pg-gate=0s resource-observation-local-pg-gate=0s salesforce-reconciliation-rw02-local-pg-gate=0s siep-01-heavy-build-session-reproduction-local-pg-gate=0s siep-program-local-pg-gate=0s siep13-artifact-registry-local-pg-gate=0s siep14-root-trust-local-pg-gate=0s siep15-device-enrollment-local-pg-gate=0s siep18-exact-effects-local-pg-gate=0s situation-retrieval-db-gate=0s slice-done-marker-local-pg-gate=0s slice-done-marker-race-local-pg-gate=0s staging-replacement-project-local-pg-gate=0s staging-retrieval-doctrine-seed-gate=0s tour-pdf-render-result-storage-ref-local-pg-gate=0s work-request-withdrawal-db-gate=0s workflow-cutover-r02-local-pg-gate=0s zero-hit-fallback-db-gate=0s",
+      "step_timings": "migration-step-timing: load=26s migrate=152s tour=79s grants=0s triggers=28s sync=1s gates=380s",
+      "log_sha256": "2c1ba987e09d5f407da10c3d41b3d310f46e6ac0ecd22a3c568609aea05746d6",
+      "output_last_modified_utc": "2026-10-05T18:36:54.154890+00:00"
+    }
+  ],
+  "flake_observation": "0 failures across 3 complete repeated runs; no claim about an unmeasured future flake rate.",
+  "checks": {
+    "reuse_selftest": 7,
+    "isolation_selftest": 3,
+    "release_pipeline_selftest": 218,
+    "ci_selftest": 168,
+    "launchd_calendar_selftest": 99,
+    "mypy_source_files": 1159,
+    "main_canary_selftest": "0 failures",
+    "ci_classes": "types secret dependency passed",
+    "syntax_diff": "passed"
+  },
+  "delivery_limit": "Source PR only. No merge, approval, auto-merge, force push, scheduler installation or production deploy/DB apply.",
+  "expected_merge_to_live": "Budget estimate:1\u20132min evidence/aggregate +0\u20131min poll +deployment duration +host queue. Under20min requires deployment <=17min and no long pending-canary wait. Not measured live.",
+  "excluded_runs": [
+    "Initial copied-role restore failed; corrected owner/grant authority and added real-PG regression coverage.",
+    "Migration run whose executing Bash file was shortened while running is excluded; repeated afterward with frozen source."
+  ]
+}

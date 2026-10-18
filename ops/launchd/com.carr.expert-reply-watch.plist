@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- doctrine: expert-reply-watch -->
+  <key>Label</key><string>com.carr.expert-reply-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>expert-reply-watch</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/tools/expert_reply_watch.py</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>1</integer>
+    <key>Hour</key><integer>6</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>{{REPO}}/out/expert-reply-watch.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/expert-reply-watch.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

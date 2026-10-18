@@ -49,19 +49,24 @@ const INCIDENT_REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 // The partner-sponsored local machine credentials (identity.js LOCAL_SPONSOR):
 // what `./run.sh call` -- and so the daily sweep and every ops job -- presents.
 const SYSTEM_SEAT_SLUGS = Object.freeze(["joe-local", "dell-local"]);
+const SYSTEM_SEAT_DOORS = Object.freeze(["local-token", "unattended-token"]);
 
 // Which V5-A05 seat an authenticated actor holds. Derived only from fields the
 // server's own connection authenticator wrote (identity.js), never from an
 // argument: a caller cannot name its seat.
 //   authority -- a verified human partner (Joe or Dell) on their own session.
 //   system    -- the partner-sponsored local machine credential, arriving
-//                through the local-token door with a verified native sponsor.
+//                through the local-token door with a verified native sponsor,
+//                or Joe's unattended runner through the unattended-token door
+//                (identity.js unattendedActorForToken): the scheduled sweep is
+//                that runner's work, so moving it there keeps its seat (PR
+//                #1727 review).
 //   other     -- everything else: model agents (even partner-sponsored ones),
 //                Hermes, reviewers, probes, unsponsored agents.
 export function a05SeatForActor(actor) {
   if (actor?.human === true && isKnownPartner(actor.slug)) return "authority";
   if (actor?.human === false && SYSTEM_SEAT_SLUGS.includes(actor.slug) &&
-      actor.via === "local-token" && actor.native_agent_verified === true &&
+      SYSTEM_SEAT_DOORS.includes(actor.via) && actor.native_agent_verified === true &&
       isKnownPartner(actor.sponsoring_human_slug) &&
       authorizationClassForActor(actor) === "sponsored_agent")
     return "system";

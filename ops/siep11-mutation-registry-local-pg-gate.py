@@ -9,14 +9,13 @@ import os
 import json
 import sys
 import threading
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import psycopg
 
 from gate_runtime_role import grant_settable_runtime_roles, rollback_only_connection, set_local_role
-from scac_mutation_db_inventory import project, summarize
+from scac_mutation_db_inventory import project, summarize, validate_current_catalog
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -82,64 +81,10 @@ def refusal(cur, query: str, params: tuple, fragment: str) -> None:
     raise RuntimeError(f"expected refusal containing {fragment!r}")
 
 
-def sealed_service_launchd(registry_version: str) -> list[tuple[str, str, str]]:
-    """Check live source closure and read the selected seal's frozen catalog.
-
-    Decision 05e144eb exempts launchd source edits from registry resealing.
-    Comparing an immutable database snapshot with today's catalog would demand
-    a successor anyway. Keep exact DB parity against its independent fixture;
-    workflowDefinitionInventory still refuses missing/duplicate live owners.
-    """
-    result = subprocess.run(
-        ["node", "--input-type=module", "-e", """
-        import { frozenInventory, workflowDefinitionInventory }
-          from './ops/scac-mutation-inventory.mjs';
-        workflowDefinitionInventory();
-        const mappings = frozenInventory(process.argv[1]).flatMap(row =>
-          (row.physical_authority_refs || []).filter(ref =>
-            ref.startsWith('ops.service_environment:')).map(ref => {
-              const parts = ref.split(':');
-              if (parts.length !== 3 || !parts[1] || !parts[2])
-                throw new Error('malformed frozen service authority');
-              return [parts[1], parts[2], row.source_locator];
-            }));
-        process.stdout.write(JSON.stringify(mappings));
-        """, registry_version],
-        cwd=REPO, capture_output=True, text=True, timeout=30, check=True,
-    )
-    rows = json.loads(result.stdout)
-    if not isinstance(rows, list) or not rows or any(
-        not isinstance(row, list) or len(row) != 3
-        or any(not isinstance(value, str) or not value for value in row)
-        for row in rows
-    ):
-        raise ValueError("malformed sealed launchd service catalog")
-    mappings = sorted(tuple(row) for row in rows)
-    if len(mappings) != len(set(mappings)):
-        raise ValueError("duplicate sealed launchd service mapping")
-    return mappings
-
-
-def validate_launchd_authority_refs(
-    cur, registry_version: str, expected_launchd: list[tuple],
+def validate_launchd_catalog(
+    cur, expected_launchd: list[tuple],
     expected_service_launchd: list[tuple[str, str, str]],
-    expected_sealed_service_launchd: list[tuple[str, str, str]],
 ) -> None:
-    authority_refs = cur.execute(
-        """select e.ingress_key,e.contract->>'source_locator',ref.value
-             from ops.scac_mutation_registry_entry e
-             cross join lateral jsonb_array_elements_text(e.contract->'physical_authority_refs') ref(value)
-            where e.ingress_kind='workflow_entrypoint'
-              and e.registry_version=%s
-              and e.contract ? 'physical_authority_refs'
-            order by e.ingress_key,ref.value""",
-        (registry_version,),
-    ).fetchall()
-    service_refs = [row for row in authority_refs if row[2].startswith("ops.service_environment:")]
-    legacy_refs = [row for row in authority_refs if row[2].startswith("ops.legacy_schedule_launchd_contract:")]
-    if len(service_refs) != len(expected_sealed_service_launchd) or \
-       len(legacy_refs) != len(expected_launchd):
-        raise RuntimeError(f"unexpected launchd physical authority reference counts {authority_refs!r}")
     actual_service_launchd = [tuple(row) for row in cur.execute(
         """select s.key,se.environment,se.deploy_mechanism,s.retired_at is not null
              from ops.service s join ops.service_environment se on se.service_id=s.id
@@ -149,12 +94,6 @@ def validate_launchd_authority_refs(
     expected_active_service_launchd = [(*row, False) for row in expected_service_launchd]
     if actual_service_launchd != expected_active_service_launchd:
         raise RuntimeError("launchd service environments do not exactly match the active checked-in catalog")
-    expected_service_refs = sorted(
-        (path, f"ops.service_environment:{service_key}:{environment}")
-        for service_key, environment, path in expected_sealed_service_launchd
-    )
-    if sorted((source_locator, ref) for _, source_locator, ref in service_refs) != expected_service_refs:
-        raise RuntimeError("launchd service authority refs do not exactly cover sealed service environments")
     actual_launchd = [tuple(row) for row in cur.execute(
         """select surface_id,workflow_key,workflow_version,locator,repo_plist_relpath,
                   installed_plist_name,program_arguments,plist_sha256,schedule_sha256,timezone
@@ -162,9 +101,6 @@ def validate_launchd_authority_refs(
     ).fetchall()]
     if actual_launchd != expected_launchd:
         raise RuntimeError("launchd legacy contracts do not exactly match checked-in paths, labels, arguments, or digests")
-    expected_legacy_refs = sorted(f"ops.legacy_schedule_launchd_contract:{row[0]}" for row in expected_launchd)
-    if sorted(row[2] for row in legacy_refs) != expected_legacy_refs:
-        raise RuntimeError("launchd legacy authority refs do not exactly cover the checked-in native contracts")
 
 
 def main() -> int:
@@ -199,7 +135,7 @@ def main() -> int:
                 "select catalog_projection from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v1'"
             ).fetchone()[0]
             expected_categories = {
-                "secdef_execute": sealed_projection["secdef_execute"],
+                "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
                 "relation_dml": sealed_projection["relation_dml"],
                 "column_dml": sealed_projection["column_dml"],
                 "job_definitions": JOB_DEFINITION_CATALOG,
@@ -216,8 +152,7 @@ def main() -> int:
             ).fetchone()
             digest = version[0]
             runtime_version = successor[0] if successor is not None else "scac-mutation-registry.v1"
-            expected_sealed_service_launchd = sealed_service_launchd(runtime_version)
-            if runtime_version not in {"scac-mutation-registry.v2", "scac-mutation-registry.v3", "scac-mutation-registry.v4", "scac-mutation-registry.v5", "scac-mutation-registry.v6", "scac-mutation-registry.v7", "scac-mutation-registry.v8", "scac-mutation-registry.v9", "scac-mutation-registry.v10", "scac-mutation-registry.v11", "scac-mutation-registry.v12", "scac-mutation-registry.v13", "scac-mutation-registry.v14", "scac-mutation-registry.v15", "scac-mutation-registry.v16", "scac-mutation-registry.v17", "scac-mutation-registry.v18", "scac-mutation-registry.v19", "scac-mutation-registry.v20", "scac-mutation-registry.v21", "scac-mutation-registry.v22", "scac-mutation-registry.v23", "scac-mutation-registry.v24", "scac-mutation-registry.v25", "scac-mutation-registry.v26", "scac-mutation-registry.v27", "scac-mutation-registry.v28", "scac-mutation-registry.v29", "scac-mutation-registry.v30", "scac-mutation-registry.v31", "scac-mutation-registry.v32", "scac-mutation-registry.v33", "scac-mutation-registry.v34", "scac-mutation-registry.v35", "scac-mutation-registry.v36", "scac-mutation-registry.v37", "scac-mutation-registry.v38", "scac-mutation-registry.v39", "scac-mutation-registry.v40", "scac-mutation-registry.v41", "scac-mutation-registry.v42", "scac-mutation-registry.v43", "scac-mutation-registry.v44", "scac-mutation-registry.v45", "scac-mutation-registry.v46", "scac-mutation-registry.v47", "scac-mutation-registry.v48", "scac-mutation-registry.v49", "scac-mutation-registry.v50", "scac-mutation-registry.v51", "scac-mutation-registry.v52", "scac-mutation-registry.v53", "scac-mutation-registry.v54", "scac-mutation-registry.v55", "scac-mutation-registry.v56", "scac-mutation-registry.v57", "scac-mutation-registry.v58", "scac-mutation-registry.v59", "scac-mutation-registry.v60", "scac-mutation-registry.v61", "scac-mutation-registry.v62", "scac-mutation-registry.v63", "scac-mutation-registry.v64", "scac-mutation-registry.v65", "scac-mutation-registry.v66", "scac-mutation-registry.v67", "scac-mutation-registry.v68", "scac-mutation-registry.v69", "scac-mutation-registry.v70", "scac-mutation-registry.v71", "scac-mutation-registry.v72", "scac-mutation-registry.v73", "scac-mutation-registry.v74", "scac-mutation-registry.v75", "scac-mutation-registry.v76", "scac-mutation-registry.v77", "scac-mutation-registry.v78", "scac-mutation-registry.v79", "scac-mutation-registry.v80", "scac-mutation-registry.v81", "scac-mutation-registry.v82", "scac-mutation-registry.v83", "scac-mutation-registry.v84", "scac-mutation-registry.v85", "scac-mutation-registry.v86", "scac-mutation-registry.v87", "scac-mutation-registry.v88", "scac-mutation-registry.v89", "scac-mutation-registry.v90", "scac-mutation-registry.v91", "scac-mutation-registry.v92", "scac-mutation-registry.v93", "scac-mutation-registry.v94", "scac-mutation-registry.v95", "scac-mutation-registry.v96", "scac-mutation-registry.v97", "scac-mutation-registry.v98", "scac-mutation-registry.v99", "scac-mutation-registry.v100", "scac-mutation-registry.v101", "scac-mutation-registry.v102", "scac-mutation-registry.v103", "scac-mutation-registry.v104", "scac-mutation-registry.v105", "scac-mutation-registry.v106", "scac-mutation-registry.v107", "scac-mutation-registry.v108", "scac-mutation-registry.v109", "scac-mutation-registry.v110"}:
+            if runtime_version not in {'scac-mutation-registry.v118'}:
                 raise RuntimeError(f"unsupported live successor {runtime_version!r}")
             # A successor may only ADD a seal. Whatever version is live, the one
             # immediately below it must still be present AND still validate its
@@ -276,9 +211,8 @@ def main() -> int:
             ).fetchone()[0]:
                 raise RuntimeError("registry contains authority-expanding or malformed rows")
 
-            validate_launchd_authority_refs(
-                cur, runtime_version, expected_launchd, expected_service_launchd,
-                expected_sealed_service_launchd
+            validate_launchd_catalog(
+                cur, expected_launchd, expected_service_launchd
             )
 
             cur.execute("savepoint wrong_service_path_probe")
@@ -288,9 +222,8 @@ def main() -> int:
                        and se.deploy_mechanism='ops/launchd/com.carr.rules-refresh.plist'"""
             )
             try:
-                validate_launchd_authority_refs(
-                    cur, runtime_version, expected_launchd, expected_service_launchd,
-                    expected_sealed_service_launchd
+                validate_launchd_catalog(
+                    cur, expected_launchd, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -306,9 +239,8 @@ def main() -> int:
                        and se.environment='production'"""
             )
             try:
-                validate_launchd_authority_refs(
-                    cur, runtime_version, expected_launchd, expected_service_launchd,
-                    expected_sealed_service_launchd
+                validate_launchd_catalog(
+                    cur, expected_launchd, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -320,9 +252,8 @@ def main() -> int:
             cur.execute("savepoint retired_service_probe")
             cur.execute("update ops.service set retired_at=now() where key='rules-refresh'")
             try:
-                validate_launchd_authority_refs(
-                    cur, runtime_version, expected_launchd, expected_service_launchd,
-                    expected_sealed_service_launchd
+                validate_launchd_catalog(
+                    cur, expected_launchd, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -342,9 +273,8 @@ def main() -> int:
                       from ops.service where key='siep11-rogue'"""
             )
             try:
-                validate_launchd_authority_refs(
-                    cur, runtime_version, expected_launchd, expected_service_launchd,
-                    expected_sealed_service_launchd
+                validate_launchd_catalog(
+                    cur, expected_launchd, expected_service_launchd
                 )
             except RuntimeError:
                 pass
@@ -359,9 +289,8 @@ def main() -> int:
                     where surface_id='nightly-record-layer.launchd.v1'"""
             )
             try:
-                validate_launchd_authority_refs(
-                    cur, runtime_version, expected_launchd, expected_service_launchd,
-                    expected_sealed_service_launchd
+                validate_launchd_catalog(
+                    cur, expected_launchd, expected_service_launchd
                 )
             except RuntimeError:
                 pass

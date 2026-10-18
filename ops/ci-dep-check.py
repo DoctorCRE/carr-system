@@ -184,6 +184,13 @@ def write_lock() -> int:
 
 
 def check_python(problems, notes):
+    projection = REPO / 'scripts/doc-drift/requirements.txt'
+    if projection.exists():
+        import runpy
+        try:
+            runpy.run_path(str(REPO / 'ops/doc-drift-product.py'))['verify_dependencies'](REPO)
+        except (ValueError, OSError) as error:
+            problems.append(str(error))
     if not LOCK.exists():
         problems.append(
             f"{LOCK.relative_to(REPO)} does not exist — Python installs are "

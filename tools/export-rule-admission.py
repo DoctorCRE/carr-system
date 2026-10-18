@@ -28,6 +28,11 @@ classification disagreement — it is the SEPARATE finding
 ops/rule-admission-audit.py already owns (missing=...), and this export leaves
 it out rather than inventing a bucket for it.
 
+Offline retirement maintenance:
+    python3 tools/export-rule-admission.py --prune-to-map ops/config/rule-enforcement-map.json
+This removes rows from the existing snapshot only; it preserves the store-read
+source and timestamp and never claims to have refreshed database truth.
+
 RUN IT (needs DATABASE_URL; wired through bin/sync-rule-admission-prod.sh
 --export, which derives the production DSN the same way --apply does):
     DATABASE_URL=... python3 tools/export-rule-admission.py
@@ -42,7 +47,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import psycopg
 
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO / "ops" / "config" / "rule-admission-export.v1.json"
@@ -77,18 +81,46 @@ def fetch_admitted(cur) -> dict[str, dict[str, str]]:
     return out
 
 
+def prune_snapshot(payload, active_ids):
+    """Project an existing export onto the reviewed live inventory, without DB access.
+
+    Keep the original read timestamp and source: pruning is not a fresh store read.
+    """
+    result = dict(payload)
+    result["rules"] = {rid: row for rid, row in payload["rules"].items() if rid in active_ids}
+    result["rule_count"] = len(result["rules"])
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default=str(DEFAULT_OUT),
                          help="where to write the export (default: %(default)s)")
     parser.add_argument("--source", default="production",
                          help="label recorded in the export's 'source' field")
+    parser.add_argument("--prune-to-map", type=Path,
+                        help="offline: prune the existing --out snapshot to this reviewed enforcement map; "
+                             "preserve its original store-read provenance")
     args = parser.parse_args()
+    if args.prune_to_map:
+        out_path = Path(args.out)
+        payload = json.loads(out_path.read_text())
+        reviewed = json.loads(args.prune_to_map.read_text())
+        active_ids = {rid for ids in reviewed["active_rule_ids"].values() for rid in ids}
+        if not active_ids:
+            parser.error("reviewed map has no active rules; refusing to empty the export")
+        payload = prune_snapshot(payload, active_ids)
+        out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        print(f"export-rule-admission: pruned existing snapshot to {len(payload['rules'])} active admitted rule(s); "
+              "original store-read provenance retained")
+        return 0
 
     dsn = os.environ.get("DATABASE_URL")
     if not dsn:
         print("export-rule-admission: DATABASE_URL is required", file=sys.stderr)
         return 2
+
+    import psycopg
 
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         rules = fetch_admitted(cur)

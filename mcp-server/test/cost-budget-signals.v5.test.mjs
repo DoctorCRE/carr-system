@@ -1,11 +1,3 @@
-// V5-A04 — budget signals FIRE at a crossing, once, and overdrawn ancestors
-// deny new reservations without touching the ones that already exist.
-//
-// The shipped suites prove the SNAPSHOT: evaluateReplan says "warn" at 150 and
-// "replan" at 200. This file proves the EVENT: a warning or replan fires when a
-// committed operation crosses a line, never twice for one crossing, never on a
-// replay, a refusal or a race loser — and the deny path leaves every existing
-// reservation exactly where it was.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -67,11 +59,6 @@ function treeValue(sliceCeiling = 300) {
 let counter = 0;
 const nextId = prefix => `${prefix}:${++counter}`;
 
-/**
- * A ledger whose two slices are each estimated at 100 units, so CHILD and ROOT
- * roll up to 200: a slice at 150 percent is its parent at 75 percent. With
- * `siblingEstimate: false` only SLICE carries an estimate.
- */
 function estimated(sliceCeiling, { siblingEstimate = true } = {}) {
   let ledger = recordEstimate(openLedger(treeValue(sliceCeiling)), {
     operation_id: "op:estimate", node_id: SLICE, expected_total_cost_units: 100,
@@ -92,7 +79,6 @@ function actualOp(amount, nodeId = SLICE) {
     vendor_reference: `INV-${id.replace(":", "-")}`, incurred_at: AT };
 }
 
-/** Apply one operation and return the ledger, the outcome and what it fired. */
 function step(ledger, apply, operation) {
   const result = apply(ledger, operation);
   const signals = detectCostThresholdCrossings({ before_ledger: ledger, after_ledger: result.ledger });
@@ -101,7 +87,6 @@ function step(ledger, apply, operation) {
 
 const summary = signals => signals.map(s => `${s.node_id}:${s.kind}`).sort();
 
-// --- the thresholds fire at the crossing, not on every read ----------------
 
 test("FIRE: 149 fires nothing, 150 fires one warning, staying above fires nothing, 200 fires one replan", () => {
   let ledger = estimated();
@@ -158,14 +143,11 @@ test("FIRE: a replay, a refusal and an outstanding reservation fire nothing", ()
   const first = step(estimated(), postActual, operation);
   assert.equal(first.signals.length, 1);
 
-  // The same operation again is a retry: the ledger returns unchanged, the
-  // version does not move, and nothing fires a second time.
   const replay = step(first.ledger, postActual, operation);
   assert.equal(replay.outcome.replayed, true);
   assert.equal(ledgerVersion(replay.ledger), ledgerVersion(first.ledger));
   assert.deepEqual(replay.signals, []);
 
-  // A refused reservation advances the version but moves no money.
   const refused = step(first.ledger, reserve, {
     operation_id: "op:too-big", node_id: SLICE, reservation_id: "res:too-big",
     amount_units: 9999, requested_at: AT,
@@ -174,7 +156,6 @@ test("FIRE: a replay, a refusal and an outstanding reservation fire nothing", ()
   assert.equal(ledgerVersion(refused.ledger), ledgerVersion(first.ledger) + 1);
   assert.deepEqual(refused.signals, []);
 
-  // A reservation is an intention, not spend: the ratio reads incurred only.
   const reserved = step(estimated(), reserve, {
     operation_id: "op:big-intent", node_id: SLICE, reservation_id: "res:big-intent",
     amount_units: 300, requested_at: AT,
@@ -184,8 +165,6 @@ test("FIRE: a replay, a refusal and an outstanding reservation fire nothing", ()
 });
 
 test("FIRE: falling back below and crossing again is a new crossing with a new id", () => {
-  // A 160-unit liability crosses 150. Settling it for 100 drops the node back
-  // to 100 percent. A later 60-unit actual crosses 150 again.
   let fired = step(estimated(), recordLateLiability, {
     operation_id: "op:liab", node_id: SLICE, liability_id: "liab:1", amount_units: 160,
     vendor_reference: "INV-LIAB", incurred_at: AT,
@@ -216,8 +195,6 @@ test("FIRE: a lowered estimate that puts incurred cost over the line is a crossi
 });
 
 test("FIRE: an ancestor fires on its own rolled-up crossing, and a node with no estimate never fires", () => {
-  // CHILD and ROOT carry no estimate of their own; they roll up to 200. At
-  // 300 units SLICE is at 300 percent and both ancestors at exactly 150.
   const fired = step(estimated(), postActual, actualOp(300));
   assert.deepEqual(summary(fired.signals),
     [`${CHILD}:warning`, `${ROOT}:warning`, `${SLICE}:replan`, `${SLICE}:warning`]);
@@ -225,8 +202,6 @@ test("FIRE: an ancestor fires on its own rolled-up crossing, and a node with no 
   assert.deepEqual(summary(below.signals), [`${SLICE}:replan`, `${SLICE}:warning`],
     "at 149.5 percent the ancestors have not crossed");
 
-  // With only SLICE estimated, SIBLING has no denominator of its own and never
-  // fires, while its ancestors measure against SLICE's estimate and do.
   const sibling = step(estimated(undefined, { siblingEstimate: false }), postActual,
     actualOp(10_000, SIBLING));
   assert.deepEqual(summary(sibling.signals), [`${CHILD}:replan`, `${CHILD}:warning`,
@@ -253,8 +228,6 @@ test("FIRE: only adjacent ledgers of one lineage can be compared", () => {
   assert.equal(code(() => detectCostThresholdCrossings({ before_ledger: otherTree, after_ledger: base })),
     "ledger_lineage_mismatch");
 
-  // Same nodes, but a different tree_id, or the same tree_id with a different
-  // ceiling: each is a different scope tree, not one lineage.
   const next = postActual(one, actualOp(1)).ledger;
   const renamed = compileScopeTree({ ...treeSource(), tree_id: "tree:renamed" });
   assert.equal(code(() => detectCostThresholdCrossings({ before_ledger: one, after_ledger: { ...next, tree: renamed } })),
@@ -262,8 +235,6 @@ test("FIRE: only adjacent ledgers of one lineage can be compared", () => {
   assert.equal(code(() => detectCostThresholdCrossings({ before_ledger: one, after_ledger: { ...next, tree: treeValue(999) } })),
     "ledger_lineage_mismatch");
 
-  // Identical entry logs that differ only in a REFUSED operation: a refusal
-  // writes no entry, so only the applied index tells the lineages apart.
   const tooBig = id => ({ operation_id: `op:${id}`, node_id: SLICE, reservation_id: `res:${id}`,
     amount_units: 9999, requested_at: AT });
   const refusedX = reserve(base, tooBig("refused-x")).ledger;
@@ -272,9 +243,6 @@ test("FIRE: only adjacent ledgers of one lineage can be compared", () => {
   assert.equal(code(() => detectCostThresholdCrossings({ before_ledger: refusedX, after_ledger: refusedYThenActual })),
     "ledger_lineage_mismatch");
 
-  // Same applied operations, but a history entry was rewritten: an "after"
-  // that lowered an earlier charge could otherwise manufacture or hide a
-  // crossing while looking adjacent.
   const real = postActual(one, actualOp(200)).ledger;
   const doctored = { ...real, entries: real.entries.map((entry, index) =>
     index === 2 ? { ...entry, amount_units: entry.amount_units + 1 } : entry) };
@@ -283,9 +251,6 @@ test("FIRE: only adjacent ledgers of one lineage can be compared", () => {
 });
 
 test("FIRE: the first estimate recorded for work already over the line fires at once", () => {
-  // No estimate means no denominator and no band. The moment one is recorded
-  // the work is measured, and if it is already at 200 percent both lines were
-  // crossed by that measurement.
   let fired = step(openLedger(treeValue()), postActual, actualOp(200));
   assert.deepEqual(fired.signals, [], "unmeasurable work fires nothing");
   fired = step(fired.ledger, recordEstimate, {
@@ -297,7 +262,6 @@ test("FIRE: the first estimate recorded for work already over the line fires at 
   assert.equal(fired.signals.find(s => s.node_id === SLICE).variance_basis_points_before, null);
 });
 
-// --- qualification failure --------------------------------------------------
 
 test("FIRE: qualification failure fires one replan on the transition, and only on it", () => {
   const ask = (before_state, after_state, observation_ref = "obs:1") => detectQualificationReplan({
@@ -320,15 +284,12 @@ test("FIRE: qualification failure fires one replan on the transition, and only o
   assert.throws(() => ask("qualified", "expired"), { code: "unknown_qualification_state" });
 });
 
-// --- concurrency: one base, two writers --------------------------------------
 
 test("RACE: two actuals that each cross 150 from one base fire exactly one warning", () => {
   const base = postActual(estimated(), actualOp(130)).ledger;
   const cell = openLedgerCell(base);
   const a = cell.prepare({ kind: "post_actual", operation: actualOp(30) });
   const b = cell.prepare({ kind: "post_actual", operation: actualOp(30) });
-  // Computed naively against the shared base, BOTH would claim the crossing.
-  // That is the double-fire the cell exists to prevent.
   for (const prepared of [a, b]) {
     assert.deepEqual(summary(detectCostThresholdCrossings({ before_ledger: base, after_ledger: prepared.next_ledger })),
       [`${SLICE}:warning`]);
@@ -394,7 +355,6 @@ test("RACE: a reservation racing an overdrawing actual is refused ancestor_overd
   assert.equal(recomputed.outcome.detail, V5_ANCESTOR_OVERDRAWN_DETAIL);
 });
 
-// --- overdrawn ancestors deny new reservations; existing ones are untouched --
 
 test("OVERDRAWN: a refused reservation leaves every existing reservation as it was, and they still work", () => {
   let ledger = estimated();
@@ -439,7 +399,6 @@ test("OVERDRAWN: the refusal text names what is denied, what is untouched and th
   assert.equal(v5CostLedgerProjection().overdrawn_refusal_touches_existing_reservations, false);
 });
 
-// --- the projection ----------------------------------------------------------
 
 test("PROJECTION: the signal vocabulary is hashed in and the durable gap is named", () => {
   const text = JSON.stringify(v5CostVariancePreimage());

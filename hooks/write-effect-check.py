@@ -181,63 +181,69 @@ def marker_path(session_id):
     return os.path.join(STATE, f"{digest}.json")
 
 
-def main():
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    if (payload.get("tool_name") or payload.get("toolName") or "") not in (
+            "Bash", "functions.exec"):
+        sys.exit(0)
+    event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
+    session = payload.get("session_id") or payload.get("sessionId") or ""
+    path = marker_path(session)
+
+    if event == "PreToolUse":
+        os.makedirs(STATE, exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump({"at": time.time_ns()}, fh)
+        sys.exit(0)
+
+    if event != "PostToolUse":
+        sys.exit(0)
+
     try:
-        payload = json.load(sys.stdin)
+        with open(path) as fh:
+            cutoff = int(json.load(fh)["at"])
     except Exception:
-        sys.exit(0)
+        sys.exit(0)                     # no marker: silent, never an error
     try:
-        if (payload.get("tool_name") or payload.get("toolName") or "") not in (
-                "Bash", "functions.exec"):
-            sys.exit(0)
-        event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
-        session = payload.get("session_id") or payload.get("sessionId") or ""
-        path = marker_path(session)
+        os.remove(path)
+    except OSError:
+        pass
 
-        if event == "PreToolUse":
-            os.makedirs(STATE, exist_ok=True)
-            with open(path, "w") as fh:
-                json.dump({"at": time.time_ns()}, fh)
-            sys.exit(0)
-
-        if event != "PostToolUse":
-            sys.exit(0)
-
-        try:
-            with open(path) as fh:
-                cutoff = int(json.load(fh)["at"])
-        except Exception:
-            sys.exit(0)                     # no marker: silent, never an error
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-        root = watched_root()
-        if not root or not os.path.isdir(root):
-            sys.exit(0)
-
-        hit = violations(changed_since(root, cutoff))
-        if not hit:
-            sys.exit(0)                     # silence when there is nothing to say
-
-        listed = "\n".join(f"  · {p}" for p in hit[:10])
-        more = f"\n  … and {len(hit) - 10} more" if len(hit) > 10 else ""
-        log(f"CHANGED {len(hit)} watched file(s) :: {hit[:5]}")
-        print(
-            "WRITE EFFECT CHECK — a file nothing is allowed to write CHANGED "
-            f"during that command:\n{listed}{more}\n"
-            "This is measured from the filesystem, not guessed from the command, "
-            "so it does not matter which tool or syntax carried the write.\n"
-            "The write has already landed — this reports, it cannot undo. Put the "
-            "content where it belongs through the record verbs (rule 76a53dfe) "
-            "and leave the file as the record renders it.",
-            file=sys.stderr)
+    root = watched_root()
+    if not root or not os.path.isdir(root):
         sys.exit(0)
-    except Exception as exc:
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+
+    hit = violations(changed_since(root, cutoff))
+    if not hit:
+        sys.exit(0)                     # silence when there is nothing to say
+
+    listed = "\n".join(f"  · {p}" for p in hit[:10])
+    more = f"\n  … and {len(hit) - 10} more" if len(hit) > 10 else ""
+    log(f"CHANGED {len(hit)} watched file(s) :: {hit[:5]}")
+    print(
+        "WRITE EFFECT CHECK — a file nothing is allowed to write CHANGED "
+        f"during that command:\n{listed}{more}\n"
+        "This is measured from the filesystem, not guessed from the command, "
+        "so it does not matter which tool or syntax carried the write.\n"
+        "The write has already landed — this reports, it cannot undo. Put the "
+        "content where it belongs through the record verbs (rule 76a53dfe) "
+        "and leave the file as the record renders it.",
+        file=sys.stderr)
+    sys.exit(0)
+
+
+def main():
+    sys.exit(run(decide))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
