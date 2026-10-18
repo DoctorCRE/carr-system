@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Collection, Iterator
 from urllib.request import Request, urlopen
 from urllib.parse import urlencode
 
@@ -1867,7 +1867,7 @@ def render(project: str, *, discover: bool = False) -> None:
 
 
 def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]],
-                        keep: set[str] = frozenset()) -> int:
+                        keep: Collection[str] = ()) -> int:
     """Expire old GitHub cards and watchdog projections while retaining their notes."""
     cutoff = now_utc() - RECENT_MERGED
     expired = []
@@ -1894,7 +1894,7 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
 def apply_sync(state: dict[str, Any],
                fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]],
                evidence: dict[tuple[str, int], str | None] | None = None,
-               keep: set[str] = frozenset()) -> bool:
+               keep: Collection[str] = ()) -> bool:
     changed = False
     known = {pr_key(task) for task in state.get("tasks", {}).values() if task.get("pr") is not None}
     failed: list[dict[str, str]] = [
