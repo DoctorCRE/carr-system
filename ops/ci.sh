@@ -610,6 +610,16 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
     return
   fi
 
+  # The unit runner has no PostgreSQL server on PATH. Run the historical-data
+  # correction proof here, where matching server tools are installed, and
+  # require it to execute rather than silently skip.
+  if ! CARR_NATIONAL_ACCOUNT_TEST_REQUIRED=1 run_quiet "$LOGDIR/migration-national-account-correction.log" \
+      node --test mcp-server/test/national-account-classification-correction.test.mjs; then
+    tail -30 "$LOGDIR/migration-national-account-correction.log" >&2
+    bad migration "the national-account correction or linked-work rollback proof failed"
+    return
+  fi
+
   _mstep migrate
   local definer_pg_proof definer_pg_log
   for definer_pg_proof in \

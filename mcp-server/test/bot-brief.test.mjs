@@ -43,6 +43,17 @@ test("bot-brief is read-only, typed, and rejects caller authority fields", () =>
     assert.equal(Object.hasOwn(TOOLS["bot-brief"].inputSchema.properties, key), false);
 });
 
+test("bot-brief refuses unsafe or invalid profile versions before other source reads", async () => {
+  for (const version of ["9007199254740993", 9007199254740992, "0", "1.5", "invalid", null]) {
+    const client = clientFor({ rows: profile({ version }) });
+    await assert.rejects(
+      TOOLS["bot-brief"].handler(client, joe, { profile_key: "doc" }),
+      error => error instanceof ToolError && error.payload.error === "profile_version_invalid",
+    );
+    assert.equal(client.calls.length, 1);
+  }
+});
+
 test("packs are canonicalized before recognition and definition hashing", async () => {
   const a = await TOOLS["bot-brief"].handler(clientFor({
     packs: [{ pack: "system-watch", title: "System", triggers: ["x"], rule_count: "1" }],
