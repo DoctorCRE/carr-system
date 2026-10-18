@@ -70,22 +70,19 @@ function sponsor(actor) {
   return slug;
 }
 
+// The board publisher owns task_counts: it counts every card, including ones
+// trimmed from `tasks`, so the directory relays it rather than recounting.
 export function progressBoardSummary(row) {
   const data = row.snapshot_json ?? {};
-  const tasks = data.tasks && typeof data.tasks === "object" && !Array.isArray(data.tasks)
-    ? Object.values(data.tasks) : [];
-  const counts = new Map();
-  for (const task of tasks) {
-    if (!task || typeof task !== "object" || Array.isArray(task)) continue;
-    const status = typeof task.status === "string" && task.status.trim() ? task.status : "queued";
-    counts.set(status, (counts.get(status) ?? 0) + 1);
-  }
+  const counts = data.task_counts && typeof data.task_counts === "object" && !Array.isArray(data.task_counts)
+    ? Object.entries(data.task_counts).filter(([status, count]) => status.trim() && Number.isInteger(count) && count >= 0)
+    : [];
   return {
     board_id: row.board_id,
     title: typeof data.title === "string" && data.title.trim() ? data.title : row.board_id,
     project: typeof data.project === "string" && data.project.trim() ? data.project : row.board_id,
     updated_at: row.updated_at,
-    task_counts: Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))),
+    task_counts: Object.fromEntries(counts.sort(([a], [b]) => a.localeCompare(b))),
   };
 }
 
