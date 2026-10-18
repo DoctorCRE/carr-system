@@ -1,4 +1,4 @@
--- 0898_one_step_gate_rule_approval.sql
+-- 0900_one_step_gate_rule_approval.sql
 -- rollback: create or replace ops.approve_rule from migrations/0867_adopt_active_legacy_rule_approval.sql; admissions and receipts it wrote are immutable approval history and stay
 -- lock-review: CREATE OR REPLACE of one existing SECURITY DEFINER function; signature, owner and grants are unchanged and no row is rewritten.
 --
