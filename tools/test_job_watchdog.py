@@ -1115,6 +1115,59 @@ class StateTests(unittest.TestCase):
                     command.assert_called_once()
                     self.assertEqual(command.call_args.args[0][2], "read-loop")
 
+    def test_fixer_preserves_failed_checkout_branch_and_uses_a_fresh_tree(self):
+        import hashlib
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "jbookout/software-factory"
+            origin.parent.mkdir()
+            repository = root / "authorized"
+            def git(*args, cwd=repository):
+                return w.command(["git", *args], c, cwd).strip()
+            git("init", "--bare", str(origin), cwd=root)
+            git("init", "-b", "main", str(repository), cwd=root)
+            git("config", "user.name", "Watchdog fixture")
+            git("config", "user.email", "watchdog@users.noreply.github.com")
+            payload = repository / "large-fixture.bin"
+            payload.write_bytes(b"x" * 4859233)
+            git("add", "large-fixture.bin")
+            git("commit", "-m", "Synthetic checkout fixture")
+            head = git("rev-parse", "HEAD")
+            git("remote", "add", "origin", str(origin))
+            git("push", "origin", "HEAD:refs/pull/58/head")
+            c["repository_roots"]["jbookout/software-factory"] = str(repository)
+            subject = "jbookout/software-factory#58@" + head
+            f = w.finding("pr_blocked_review", subject, "synthetic review", c,
+                          repo="jbookout/software-factory", pr=58, head=head, card="pr-test")
+            abandoned = "watchdog-fix-" + hashlib.sha256(subject.encode()).hexdigest()[:16]
+            # git worktree add reserves its branch before writing the files. A failed
+            # write can leave this ref after Git rolls back the worktree directory.
+            git("branch", abandoned, head)
+            real_command = w.command
+            def command(argv, config, cwd=None):
+                if "register" in argv:
+                    name = argv[argv.index("register") + 1]
+                    Path(argv[argv.index("--registry") + 1]).write_text(json.dumps({"desks": {name: {
+                        **c["fixer"], "cwd": argv[argv.index("--cwd") + 1]}}}))
+                    return ""
+                return real_command(argv, config, cwd)
+            effects = w.Effects(root, c)
+            with patch.object(w, "command", side_effect=command), \
+                 patch.object(effects, "launch", return_value={"ok": True}) as launch:
+                effects.fix(f)
+            tree = Path(launch.call_args.args[2])
+            sys.path.insert(0, str(ROOT / "tools/room-bridge"))
+            import desks
+            self.assertIsNotNone(desks.NAME_OK.fullmatch(tree.name))
+            self.assertNotEqual(tree.name, abandoned)
+            self.assertEqual(git("rev-parse", "HEAD", cwd=tree), head)
+            self.assertEqual((tree / payload.name).stat().st_size, payload.stat().st_size)
+            self.assertEqual(git("rev-parse", abandoned), head)
+            self.assertFalse((repository / ".claude/worktrees" / abandoned).exists())
+
     def test_fixer_uses_verified_model_room_desk_and_agent_runner(self):
         import job_watchdog as w
         from unittest.mock import patch
