@@ -48,6 +48,17 @@ class CurrentGrants(unittest.TestCase):
             validate_registered_grants(self.projection(), baseline,
                                        {**contract, 'retired_secdef_execute': [{**retired, 'grantable': True}]})
 
+    def test_registered_replacement_retires_the_old_definition(self):
+        old = {**GRANT, 'config': ['search_path=ops, public, pg_temp']}
+        new = {**GRANT, 'config': ['search_path=pg_catalog, ops, pg_temp']}
+        baseline = {**BASELINE, 'secdef_execute': {'count': 1, 'digest': digest([old])}}
+        contract = {**CONTRACT, 'secdef_execute': [new], 'retired_secdef_execute': [old]}
+        validate_registered_grants({**BASE, 'secdef_execute': [new]}, baseline, contract)
+        with self.assertRaisesRegex(RuntimeError, 'registered grant'):
+            validate_registered_grants({**BASE, 'secdef_execute': [old]}, baseline, contract)
+        with self.assertRaisesRegex(RuntimeError, 'retired grant'):
+            validate_registered_grants({**BASE, 'secdef_execute': [new, old]}, baseline, contract)
+
     def test_retired_grants_preserve_catalog_order(self):
         first = {**GRANT, 'ingress_key': 'a'}
         live = {**GRANT, 'ingress_key': 'b'}
