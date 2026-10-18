@@ -1,3 +1,4 @@
+-- rollback: forward-only — the leader ledger and transfer function are new objects; undo through a successor migration that drops them.
 -- Source only: manual host failover is not enabled by applying this schema.
 create table ops.studio_leader (
     singleton boolean primary key default true check (singleton),
