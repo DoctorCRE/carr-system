@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "ec1890f49eabb94ae0456af32a6eb2b91a412fb315efb79bc680ea83c44b7aa9";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "251be3b2d88ea571cfe6856750de69171b8b7d8a0690186d88ae13ad272ef2e3";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -70,7 +70,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "acknowledge-board-answer": {
     "ingress_key": "mcp-tool:acknowledge-board-answer",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "dcecaee083001a769a4909cc8266bcd185cc55533e81bd27b85288c9ebe7d076",
     "write": true,
     "human_only": false,
@@ -320,7 +320,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "answer-board-question": {
     "ingress_key": "mcp-tool:answer-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "53f4e8b7367cd9f892f94cbf76ec53dab19e4de30a2e41789d6fd81a58e17a60",
     "write": true,
     "human_only": true,
@@ -500,7 +500,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "ask-board-question": {
     "ingress_key": "mcp-tool:ask-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,
@@ -1505,7 +1505,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "list-progress-boards": {
     "ingress_key": "mcp-tool:list-progress-boards",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
     "write": false,
     "human_only": false,
@@ -2013,7 +2013,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "publish-board-snapshot": {
     "ingress_key": "mcp-tool:publish-board-snapshot",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "0786bbdf9ad6e7491088190d98b3ae8eec5eefe8658069ce3830eef42f84fc1e",
     "write": true,
     "human_only": false,
@@ -2093,7 +2093,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-board-answers": {
     "ingress_key": "mcp-tool:read-board-answers",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "91e298ac2dd0586ded466af4c10c4d810116cdc191a812e52f4a81dd6b65bfd4",
     "write": false,
     "human_only": false,
@@ -2313,7 +2313,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-progress-board": {
     "ingress_key": "mcp-tool:read-progress-board",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "09ba6375dcf875532b1fdb4424f53890ed66ef3ff23ae0e769a312c15b8a9f85",
     "write": false,
     "human_only": false,
@@ -2533,7 +2533,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "record-board-answer-applied": {
     "ingress_key": "mcp-tool:record-board-answer-applied",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "241e3d8252a22c4401747e23539e8fcc8a36f3a080462ab257f1a32810417519",
     "write": true,
     "human_only": false,
@@ -3238,7 +3238,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "revise-board-question": {
     "ingress_key": "mcp-tool:revise-board-question",
     "source_locator": "mcp-server/src/board-answers.js",
-    "source_digest": "1d76f086e9690e5a77b24ee92885109fcd02f0b8cbdb0a3685e28a535c5be330",
+    "source_digest": "c2c221583552be4bceab0f11552a93f84e1f9ed7033d5e9d188cb01f0ff6c0dd",
     "schema_digest": "b95a520ce369528def95fb0fbef60bb5c00f630cfaa50feae0a4a6d1ef8664e9",
     "write": true,
     "human_only": false,

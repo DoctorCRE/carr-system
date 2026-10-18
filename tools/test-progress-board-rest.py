@@ -340,6 +340,40 @@ class RestRefresh(unittest.TestCase):
         with patch.object(B, "rest_rows", return_value=[]), B.github_read_pass():
             self.assertEqual([p["number"] for p in B.read_repository(REPO, "2026-10-01")[1]], [1])
 
+    def test_v1_discovery_and_the_all_repos_read_share_one_listing(self):
+        merged_at = B.now_utc().isoformat(timespec="seconds").replace("+00:00", "Z")
+        details = {5: pull(5, title="W5: Open slice"), 6: pull(6, title="Routine fix"),
+                   7: pull(7, title="Merged slice", labels=[{"name": "V1"}], state="closed",
+                           merged_at=merged_at, updated_at=merged_at, merge_commit_sha="c" * 40)}
+        def github(args, timeout=30):
+            path = args[1]
+            self.calls.append(args)
+            if path.startswith(f"repos/{REPO}/pulls?"):
+                return [details[5], details[6]]
+            if path.startswith(f"repos/{REPO}/issues?"):
+                return [{"number": 7, "state": "closed", "updated_at": merged_at, "pull_request": {"url": "pr"}},
+                        {"number": 8, "state": "closed", "updated_at": merged_at, "title": "W8: Plain issue"}]
+            if "/pulls?" in path or "/issues?" in path:
+                return []
+            if re.search(r"/pulls/\d+$", path):
+                return details[int(path.rsplit("/", 1)[1])]
+            return self.github(args, timeout)
+        with patch.object(B, "gh_json", github), B.github_read_pass():
+            discovered = B.discover_v1()
+            B.read_repository(REPO, B.recent_merge_since())
+        self.assertEqual(set(discovered), {(REPO, 5), (REPO, 7)})
+        self.assertTrue(all(error is None for _, error in discovered.values()))
+        listings = [c[1].split("?")[0] for c in self.calls if "/pulls?" in c[1] or "/issues?" in c[1]]
+        self.assertEqual(sorted(listings), sorted(f"repos/{repo}/{kind}" for repo in B.AUTOMATIC_DELIVERY_TARGETS
+                                                  for kind in ("pulls", "issues")))
+
+    def test_v1_discovery_refuses_a_malformed_listing_row(self):
+        def github(args, timeout=30):
+            return [{"number": "7"}] if "/pulls?" in args[1] else []
+        with patch.object(B, "gh_json", github), B.github_read_pass():
+            with self.assertRaisesRegex(RuntimeError, "malformed open PR"):
+                B.discover_v1()
+
     def test_unaccounted_closure_never_advances_cursor(self):
         def github(args, timeout=30):
             if "/pulls?" in args[1]:
