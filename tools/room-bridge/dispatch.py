@@ -49,6 +49,12 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+BUILDER_OPENING = (
+    "Use pstack's poteto-mode for this work. Step 1, size it: tiny -> build it now; "
+    "one session -> run /grill-with-docs first; bigger -> run /wayfinder. "
+    "Use /tdd for any behaviour change."
+)
+
 import codex_models  # noqa: E402
 import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
@@ -1040,6 +1046,8 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
+        if (a.checkout or a.writes) and not task.startswith(BUILDER_OPENING):
+            task = BUILDER_OPENING + "\n\n" + task
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)

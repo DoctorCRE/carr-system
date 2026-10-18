@@ -38,6 +38,7 @@
       "hooks/write-effect-check.py"
     ],
     "optional": [
+      "hooks/builder-agent-gate.py",
       "hooks/delegation-gate.py",
       "hooks/job-watchdog-digest.py",
       "hooks/machine-converge.py",
