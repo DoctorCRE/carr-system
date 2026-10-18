@@ -129,7 +129,7 @@ FINDING_CALL_NAMES = {"_canonical_finding", "_red"}
 # somewhere and must be excluded from the business-count-never-hard_error
 # check below.
 STRUCTURAL_KEYS = {
-    "canonical_health_refused", "source_unreadable", "export_unreadable",
+    "feature_switch_unreadable", "canonical_health_refused", "source_unreadable", "export_unreadable",
     "job_ledger", "control_state", "repo_status", "registry_integrity",
     "credential_health", "unrecorded_failure", "tailscale",
     "storage_health_unavailable", "verb_usage",
@@ -1244,6 +1244,44 @@ class RcAssignedOnlyViaRed(unittest.TestCase):
         overlap = business_keys & hard_error_keys
         self.assertEqual(overlap, set(),
                          f"business-count key(s) wrongly marked hard_error=True: {overlap}")
+
+
+class FeatureSwitchFindings(unittest.TestCase):
+    def test_cli_results_map_to_business_or_unreadable_findings(self):
+        import contextlib
+        import io
+        import os
+        import subprocess
+        import sys
+        section = next(node for node in _find_function('_canonical_health').body
+                       if isinstance(node, ast.If) and node.body
+                       and isinstance(node.body[0], ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == 'feature_command'
+                               for target in node.body[0].targets))
+        bound = 'on breach: owner loop; retire; verify; auto-clear'
+        cases = [
+            ({'feature_switches': {'ok': True, 'overdue': [], 'line': f'OK {bound}'}}, None, False),
+            ({'feature_switches': {'ok': True, 'overdue': [{'line': f'WARN {bound}'}], 'line': f'WARN {bound}'}}, 'feature_switch_retirement', False),
+            ({'feature_switches': {'ok': True, 'overdue': ['x'], 'line': f'OK {bound}'}}, 'feature_switch_unreadable', True),
+            ([], 'feature_switch_unreadable', True),
+        ]
+        for fixture, key, hard_error in cases:
+            with self.subTest(key=key, fixture=fixture), tempfile.TemporaryDirectory() as directory:
+                fixture_path = Path(directory) / 'health.json'
+                fixture_path.write_text(json.dumps(fixture))
+                ns = _load_finding_and_red_functions()
+                ns.update(rc=0, CANONICAL_SECTION='registry', CANONICAL_FIXTURE=str(fixture_path),
+                          REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent), os=os, sys=sys, subprocess=subprocess)
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    exec(compile(ast.Module(body=[section], type_ignores=[]), str(HEALTH_CHECK_PATH), 'exec'), ns)
+                self.assertEqual(ns['rc'], int(key is not None))
+                findings = ns['_FINDINGS']
+                self.assertEqual(len(findings), int(key is not None))
+                if key:
+                    self.assertEqual(findings[0]['key'], key)
+                    self.assertEqual(findings[0]['hard_error'], hard_error)
+                if hard_error:
+                    self.assertIn('UNKNOWN feature switches:', output.getvalue())
 
 
 class ProvisioningPendingIsNamedAndTemporary(unittest.TestCase):

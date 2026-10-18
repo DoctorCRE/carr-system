@@ -10,6 +10,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,18 +76,21 @@ with tempfile.TemporaryDirectory() as raw:
     envelope["signature"] = base64.b64encode(signature).decode("ascii")
     got_raw, evidence = coordinator.verify_envelope(envelope, public, contract())
     check("exact DB contract signed envelope verifies", got_raw == raw_payload and evidence["signature_sha256"] == hashlib.sha256(signature).hexdigest())
-    if not hasattr(coordinator.os, "memfd_create"):
-        def fixture_memfd(_name: str) -> int:
-            with tempfile.TemporaryFile() as anonymous:
-                return os.dup(anonymous.fileno())
-        coordinator.os.memfd_create = fixture_memfd
+    real_run = subprocess.run
+
+    def refuse_nonseekable_ed25519(argv, **kwargs):
+        if "pkeyutl" in argv and "/dev/stdin" in argv:
+            return subprocess.CompletedProcess(argv, 1, b"", b"")
+        return real_run(argv, **kwargs)
+
+    with patch.object(coordinator.subprocess, "run", refuse_nonseekable_ed25519):
         try:
-            portable_raw, _ = coordinator.verify_envelope(envelope, public, contract())
-        finally:
-            delattr(coordinator.os, "memfd_create")
-    else:
-        portable_raw, _ = coordinator.verify_envelope(envelope, public, contract())
-    check("anonymous seekable verification input is portable", portable_raw == raw_payload)
+            coordinator.verify_envelope(envelope, public, contract())
+            nonseekable_ok = True
+        except coordinator.Refusal:
+            nonseekable_ok = False
+    check("verification works when OpenSSL refuses nonseekable one-shot input", nonseekable_ok)
+
     for name, key, value in (("cross-job replay", "job_id", "00000000-0000-4000-8000-000000000010"), ("altered scheduled window", "window_starts_at", "2026-08-12T06:30:00Z"), ("altered destination", "destination", "calendar-prebrief-canary-joe"), ("altered allowlist revision", "allowlist_revision_id", "00000000-0000-4000-8000-000000000010"), ("altered challenge", "challenge_id", "00000000-0000-4000-8000-000000000010")):
         changed = dict(envelope)
         changed[key] = value
@@ -167,6 +172,68 @@ with tempfile.TemporaryDirectory() as raw:
     fake_open = root / "fake-open.py"
     fake_open.write_text("#!/usr/bin/env python3\nimport os,subprocess,sys\na=sys.argv[1:]\nassert a[0]=='-n' and a[2]=='--args' and a[3]=='collector' and len(a)==9\nraise SystemExit(subprocess.run([a[1]+'/Contents/MacOS/carr-calendar-access',*a[4:]],env=os.environ.copy()).returncode)\n", encoding="utf-8")
     fake_open.chmod(0o700)
+    # Force a producer to send the envelope in two writes. A FIFO read may
+    # return after the first write even while the producer still holds it open.
+    first_read = threading.Event()
+    original_open = Path.open
+
+    class ObservedReader:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def read(self, size):
+            chunk = self.stream.read(size)
+            if chunk:
+                first_read.set()
+            return chunk
+
+    def observed_open(path, *args, **kwargs):
+        stream = original_open(path, *args, **kwargs)
+        return ObservedReader(stream) if path.name == "envelope.fifo" and args[0] == "rb" else stream
+
+    def fragmented_collector(argv, **_kwargs):
+        with original_open(Path(argv[5]), "rb") as request:
+            json.load(request)
+        with original_open(Path(argv[6]), "wb", buffering=0) as response:
+            response.write(b'{"value":')
+            if not first_read.wait(5):
+                raise RuntimeError("fixture envelope reader did not consume the first fragment")
+            try:
+                response.write(b'"fragmented"}')
+            except BrokenPipeError:
+                pass
+        return subprocess.CompletedProcess(argv, 0)
+
+    capture_env = {"CARR_CALENDAR_PREBRIEF_EVENTKIT_APP": str(app_launcher.parents[2]),
+                   "CARR_CALENDAR_PREBRIEF_COLLECTOR_VERSION": "fixture-1"}
+    with patch.dict(os.environ, capture_env), patch.object(Path, "open", observed_open), patch.object(coordinator.subprocess, "run", fragmented_collector):
+        try:
+            captured = coordinator._capture(contract())
+        except coordinator.Refusal:
+            captured = None
+    check("FIFO envelope reads through EOF across separate producer writes", captured == {"value": "fragmented"})
+
+    def oversized_collector(argv, **_kwargs):
+        with original_open(Path(argv[5]), "rb") as request:
+            json.load(request)
+        with original_open(Path(argv[6]), "wb", buffering=0) as response:
+            remaining = memoryview(b"x" * (coordinator.MAX_PIPE + 1))
+            try:
+                while remaining:
+                    remaining = remaining[response.write(remaining):]
+            except BrokenPipeError:
+                pass
+        return subprocess.CompletedProcess(argv, 0)
+
+    with patch.dict(os.environ, capture_env), patch.object(coordinator.subprocess, "run", oversized_collector):
+        check("FIFO envelope still refuses beyond its byte bound", refuses(lambda: coordinator._capture(contract())))
+
     profile = root / "e2e-profile.env"
     claim = root / "claim.py"
 

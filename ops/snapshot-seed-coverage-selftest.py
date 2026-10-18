@@ -190,6 +190,16 @@ def main():
              module.check(lead_repo, lead_artifact) == [])
         case("catch-up creation evidence refuses if copied into the snapshot",
              "EXCLUDED" in summarise(module.check(lead_repo, lead_artifact + copy_block(lead_table))))
+        switch_table = "feature_switch"
+        switch_reason = classification["excluded"].get(switch_table)
+        switch_repo = build_repo(tmp + "/feature-switches", {
+            "0902_feature_switches.sql": (REPO / "migrations/0902_feature_switches.sql").read_text(),
+        }, {"carried": {}, "excluded": {switch_table: switch_reason} if switch_reason else {}})
+        switch_artifact = artifact(["0902_feature_switches.sql"])
+        case("runtime switches are omitted from a schema-only rebuild",
+             module.check(switch_repo, switch_artifact) == [])
+        case("runtime switch values refuse if copied into a tracked snapshot",
+             "EXCLUDED" in summarise(module.check(switch_repo, switch_artifact + copy_block(switch_table))))
         # ---------------------------------------------------------------- 1
         repo = build_repo(tmp + "/a", {"0100_seed.sql": seeding},
                           {"carried": {}, "excluded": {}})

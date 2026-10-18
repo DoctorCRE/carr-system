@@ -22,14 +22,6 @@ with tempfile.TemporaryDirectory() as d:
  root=Path(d); private=root/"private.pem"; public=root/"public.pem"; subprocess.run([OPENSSL,"genpkey","-algorithm","ED25519","-out",str(private)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); subprocess.run([OPENSSL,"pkey","-in",str(private),"-pubout","-out",str(public)],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
  x={"sponsor":"joe","job_id":"j","lease":"l","scheduled_for":"2026-08-21T11:30:00Z","allowlist_revision":"r","observed_calendar_keys":["a"*64],"raw_capture_digest":"b"*64,"raw_capture_count":1,"collector_version":"v1","key_fingerprint":"fp","signature":""}; payload=e.canonical(x); sig=sign(private,payload); x["signature"]=base64.b64encode(sig).decode()
  ok("valid signed envelope verifies",e.verify(x,public,"fp",lambda _:False)["sponsor"]=="joe")
- if not hasattr(e.os,"memfd_create"):
-  def fixture_memfd(_name):
-   with tempfile.TemporaryFile() as anonymous:return e.os.dup(anonymous.fileno())
-  e.os.memfd_create=fixture_memfd
-  try: portable=e.verify(x,public,"fp",lambda _:False)
-  finally: delattr(e.os,"memfd_create")
- else: portable=e.verify(x,public,"fp",lambda _:False)
- ok("anonymous seekable verification input is portable",portable["sponsor"]=="joe")
  badsig=dict(x); badsig["signature"]="AA=="; ok("bad signature refuses",refuses(lambda:e.verify(badsig,public,"fp",lambda _:False)))
  wrong=dict(x); wrong["key_fingerprint"]="other"; ok("wrong key fingerprint refuses",refuses(lambda:e.verify(wrong,public,"fp",lambda _:False)))
  old=dict(x); old["collector_version"]=""; ok("bad collector version refuses",refuses(lambda:e.verify(old,public,"fp",lambda _:False)))
