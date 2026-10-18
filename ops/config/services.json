@@ -978,24 +978,6 @@
       ]
     },
     {
-      "key": "videopipeline",
-      "name": "Video encode watcher",
-      "purpose": "Encodes video dropped into the CARR Video Pipeline intake folder.",
-      "family": "Local Mac edge",
-      "criticality": "low",
-      "owner_actor": "joe",
-      "repo_path": "(outside the repo: ~/Movies/CARR Video Pipeline/Scripts/watch-encode.sh)",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.videopipeline.plist",
-          "runs_on": "primary",
-          "notes": "WatchPaths-triggered; silence is normal, so no cadence. Its script lives OUTSIDE the repo, under ~/Movies, which means it is not version-controlled and would not survive the Mac \u2014 worth naming here because the catalog is where that kind of exposure becomes visible."
-        }
-      ]
-    },
-    {
       "key": "keepalive-probe",
       "name": "KeepAlive server liveness probe",
       "purpose": "Asks the three long-running servers whether they are up, and writes the answer to the ledger.",
