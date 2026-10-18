@@ -26,7 +26,7 @@ BACKOFFS = {"constant", "linear", "exponential"}
 # destination boundary.  A manifest edit alone can never turn a live command
 # into a canary.
 CANARY_ISOLATION_GUARDS: frozenset[str] = frozenset({
-    "calendar-fetch-daily.canary.v1", "notes-sweep-hourly.canary.v1",
+    "calendar-fetch-daily.canary.v1",
     "nightly-record-layer.availability-matcher.canary.v1",
 })
 DECISION_FIELDS = ("routing", "filtering", "validation", "completion")
@@ -132,8 +132,14 @@ def resolve_auto_mode(canary_contract: dict[str, Any] | None,
     version, each item shaped ``{"mode": ..., "status": ...}``.
     """
     accepted = {row.get("mode") for row in acceptance_rows if row.get("status") == "accepted"}
-    canary_disabled = isinstance(canary_contract, dict) and canary_contract.get("enabled") is False
-    if canary_disabled:
+    if isinstance(canary_contract, dict) and canary_contract.get("enabled") is False:
+        # Accepted shadow alone satisfies live for a canary-less workflow, and
+        # the production tick resolves tiers with ``--mode auto``.  A contract
+        # that sets ``auto_promote_live: false`` opts out of that shortcut: the
+        # tick never goes past shadow for it, and live stays an explicit,
+        # person-made ``schedule --mode live``.
+        if canary_contract.get("auto_promote_live") is False:
+            return "shadow"
         return "live" if "shadow" in accepted else "shadow"
     if "canary" in accepted:
         return "live"
@@ -280,6 +286,11 @@ def validate_manifest(manifest: dict[str, Any], *, repo: Path | None = None) -> 
                     errors.append(f"{prefix}.execution.canary.args must be an explicit string array")
             elif not isinstance(canary.get("reason"), str) or not canary["reason"].strip():
                 errors.append(f"{prefix}.execution.canary disabled state requires a reason")
+            if isinstance(canary, dict) and "auto_promote_live" in canary and (
+                    canary["auto_promote_live"] is not False or canary.get("enabled") is not False):
+                errors.append(
+                    f"{prefix}.execution.canary.auto_promote_live may only be false, "
+                    "and only on a contract whose canary is disabled")
         elif kind == "cognition":
             job_key = execution.get("cognition_job")
             if job_key not in cognition:

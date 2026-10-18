@@ -191,34 +191,29 @@ for key,evidence in command_fixtures.items():
     check(f'{key} nonidentical receipt evidence refuses',not evaluate_stage(workflow,'completion',cp._workflow_fact_collector(workflow,weekday_payload,execution=evidence,receipt_ref='job:fixture:attempt:1',receipt_evidence=altered,mode='shadow')))
 
 # Every enabled deterministic canary has a separate registered command
-# and must attest their nonsecret destination plus exact leased source/receipt
-# identity in the receipt marker.
-notes_marker='notes-sweep: notes-canary-result {"attempted_count":1,"contract":"notes-canary-result.v1","destination_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","duplicate_count":0,"failed_count":0,"posted_count":1,"queued_count":1,"receipt_identity":"job:00000000-0000-0000-0000-000000000001:attempt:1","schema_version":1,"source_digest_kind":"note_id_set_sha256","source_new_count":1,"source_note_count":1,"source_snapshot_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","source_snapshot_id":"notes-sweep-hourly:00000000-0000-0000-0000-000000000001:attempt:1","still_queued_count":0}'
+# and must attest its nonsecret destination plus exact leased source identity
+# in the receipt marker.  Notes has no canary tier any more: no canary marker
+# or registered canary argument can validate for it.
 canary_fixtures={
  'nightly-record-layer': {'entrypoint':'bin/nightly.sh','mode':'canary','args':['--canary'],'exit_code':0,
    'stdout_tail':'nightly canary result: {"availability_count":0,"match_count":0,"open_search_count":0,"output_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","snapshot_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","source_snapshot_id":"00000000-0000-0000-0000-000000000001"}'},
- 'notes-sweep-hourly': {'entrypoint':'bin/notes-sweep-post.sh','mode':'canary','args':['--canary'],'exit_code':0,
-   'stdout_tail':notes_marker},
 }
 for key,evidence in canary_fixtures.items():
     workflow=by[key]
     canary=cp._workflow_fact_collector(workflow,weekday_payload,execution=evidence,mode='canary')
     check(f'{key} isolated canary marker and registered arguments validate',evaluate_stage(workflow,'validation',canary))
-    if key == 'notes-sweep-hourly':
-        aggregate = cp._notes_canary_aggregate(evidence)
-        receipt_evidence = {**evidence, 'notes_canary_result': aggregate}
-        completion = cp._workflow_fact_collector(workflow,weekday_payload,execution=evidence,
-            receipt_ref='job:fixture:attempt:1',receipt_evidence=receipt_evidence,mode='canary')
-        check('Notes canary generic immutable receipt binds the parsed aggregate',
-              evaluate_stage(workflow,'completion',completion))
-        forged_receipt = {**receipt_evidence,'notes_canary_result':{**aggregate,'posted_count':0,'duplicate_count':1}}
-        check('Notes canary generic receipt refuses a mismatched structured aggregate',
-              not evaluate_stage(workflow,'completion',cp._workflow_fact_collector(workflow,weekday_payload,
-                  execution=evidence,receipt_ref='job:fixture:attempt:1',receipt_evidence=forged_receipt,mode='canary')))
-    missing_identity={**evidence,'stdout_tail':(
-        str(evidence['stdout_tail']).replace('"source_snapshot_id":"00000000-0000-0000-0000-000000000001"','"source_snapshot_id":"missing"')
-        if key == 'nightly-record-layer' else str(evidence['stdout_tail']).replace('"receipt_identity":"job:00000000-0000-0000-0000-000000000001:attempt:1"','"receipt_identity":"job:00000000-0000-0000-0000-000000000002:attempt:1"'))}
+    missing_identity={**evidence,'stdout_tail':str(evidence['stdout_tail']).replace('"source_snapshot_id":"00000000-0000-0000-0000-000000000001"','"source_snapshot_id":"missing"')}
     check(f'{key} canary marker without isolated source/destination identity refuses',not evaluate_stage(workflow,'validation',cp._workflow_fact_collector(workflow,weekday_payload,execution=missing_identity,mode='canary')))
+
+notes=by['notes-sweep-hourly']
+retired_notes_canary={'entrypoint':'bin/notes-sweep-post.sh','mode':'canary','args':['--canary'],'exit_code':0,
+  'stdout_tail':'notes-sweep: notes-canary-result {"contract":"notes-canary-result.v1"}'}
+check('retired Notes canary marker and arguments never validate',
+      not evaluate_stage(notes,'validation',cp._workflow_fact_collector(notes,weekday_payload,execution=retired_notes_canary,mode='canary')))
+check('retired Notes canary arguments are not a registered selection',
+      not evaluate_stage(notes,'filtering',cp._workflow_fact_collector(notes,weekday_payload,execution=retired_notes_canary,mode='canary')))
+check('control plane no longer carries a Notes canary aggregate parser',
+      not hasattr(cp,'_notes_canary_aggregate'))
 
 # Nightly's live completion marker cannot stand in for its newly isolated
 # availability-matcher canary.  The modes have distinct arguments and markers.

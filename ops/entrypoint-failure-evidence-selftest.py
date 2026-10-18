@@ -305,8 +305,10 @@ def main() -> int:
 
     # ---- exit 78 (EX_CONFIG): NOT A FAILURE ------------------------------
     #
-    # Measured 2026-08-27: notes-sweep-hourly's canary exits 78 every window
-    # because ~/.config/carr/notes-canary.env has never existed on this Mac.
+    # Measured 2026-08-27: notes-sweep-hourly's canary (since retired) exited 78
+    # every window because its credential file had never existed on this Mac.
+    # The fixture below keeps that exit-code contract with the live path's own
+    # not-configured message.
     # bin/nightly.sh and every other launchd chain already read 78 as SKIP,
     # never FAIL (this repo's standing EX_CONFIG convention); run_once did
     # not, and burned the job's retry budget on a gap no retry could close.
@@ -316,7 +318,7 @@ def main() -> int:
     def not_configured_run(argv, **_kwargs):
         return subprocess.CompletedProcess(
             argv, 78, "notes-sweep: probing config\n",
-            "notes canary config must be 0600")
+            "notes-sweep: NOT CONFIGURED - ingest.env is missing")
 
     module.subprocess.run = not_configured_run
     try:
@@ -335,7 +337,7 @@ def main() -> int:
           not_configured is not None and not_configured.returncode == 78)
     check("EntrypointNotConfigured carries the entrypoint's own message on its stderr tail",
           not_configured is not None
-          and "notes canary config must be 0600" in not_configured.stderr_tail)
+          and "notes-sweep: NOT CONFIGURED - ingest.env is missing" in not_configured.stderr_tail)
 
     def secret_not_configured_run(argv, **_kwargs):
         return subprocess.CompletedProcess(
@@ -379,7 +381,7 @@ def main() -> int:
     not_configured_decoded = json.loads(not_configured_detail) if not_configured_detail else {}
     check("_failure_detail encodes EntrypointNotConfigured as JSON with both tails, same shape as EntrypointFailure",
           not_configured_decoded.get("message") == "entrypoint exited 78 (not configured)"
-          and "notes canary config must be 0600" in not_configured_decoded.get("stderr_tail", ""))
+          and "notes-sweep: NOT CONFIGURED - ingest.env is missing" in not_configured_decoded.get("stderr_tail", ""))
 
     # ---- run_once end to end: exit 78 lands as skipped, not dead-lettered --
 
@@ -432,7 +434,7 @@ def main() -> int:
     skipped_stored = json.loads(skipped_stored_detail) if skipped_stored_detail else {}
     check("the not-configured message lands in ops.skip_job's p_detail as valid, redacted JSON",
           skipped_stored.get("message") == "entrypoint exited 78 (not configured)"
-          and "notes canary config must be 0600" in skipped_stored.get("stderr_tail", ""))
+          and "notes-sweep: NOT CONFIGURED - ingest.env is missing" in skipped_stored.get("stderr_tail", ""))
 
     print(f"\nentrypoint-failure-evidence-selftest: {total-len(failures)}/{total} passed")
     return 1 if failures else 0

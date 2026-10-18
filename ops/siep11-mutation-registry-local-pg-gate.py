@@ -22,9 +22,10 @@ sys.path.insert(0, str(REPO))
 from lib.control_plane_scheduler_cutover import scheduler_launchd_rows  # noqa: E402
 
 
+# Digest repinned for #1880 (notes-sweep-hourly v4, canary removed).
 JOB_DEFINITION_CATALOG = {
     "count": 26,
-    "digest": "sha256:152742893824c64275a99326335f2b8ca97cf592153c5cb280b353adfa15eb91",
+    "digest": "sha256:72672ed8f706c5ffad85f66053f6ceca8ead4360745379194bef1effa18f88ac",
 }
 
 def fail(message: str) -> int:

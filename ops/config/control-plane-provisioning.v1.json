@@ -66,8 +66,8 @@
     "provisioning": "external_human_approval"
   },
   "deterministic_canaries": {
-    "file": "~/.config/carr/{calendar,notes}-canary.env",
+    "file": "~/.config/carr/calendar-canary.env",
     "required_names": ["CARR_CANARY_INGEST_URL", "CARR_CANARY_DESTINATION_ID"],
-    "scope": "isolated calendar and Notes canary destinations only; no live URL or local state root"
+    "scope": "isolated calendar canary destination only; no live URL or local state root"
   }
 }
