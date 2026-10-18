@@ -33,12 +33,14 @@ class PostgresLeaderTests(unittest.TestCase):
             [cls.pg_ctl, '-D', str(cls.data), '-m', 'immediate', '-w', 'stop'],
             check=True, capture_output=True, timeout=15) if (cls.data / 'postmaster.pid').exists() else None)
         pg_bin = Path(pg_ctl).parent
-        subprocess.run([str(pg_bin / 'initdb'), '-D', str(cls.data), '-A', 'trust', '-U', 'fixture'],
-                       check=True, capture_output=True, timeout=30)
+        # macOS postmaster refuses to start without a valid locale ("became multithreaded").
+        env = {**os.environ, 'LC_ALL': 'C'}
+        subprocess.run([str(pg_bin / 'initdb'), '-D', str(cls.data), '-A', 'trust', '-U', 'fixture', '-E', 'UTF8'],
+                       check=True, capture_output=True, timeout=30, env=env)
         # Unix-only, private owned socket directory, no inherited DSN or production host.
         subprocess.run([pg_ctl, '-D', str(cls.data), '-l', str(cls.base / 'postgres.log'),
                         '-o', "-h '' -k " + str(cls.socket), '-w', 'start'],
-                       check=True, capture_output=True, timeout=30)
+                       check=True, capture_output=True, timeout=30, env=env)
         cls.dsn = dict(host=str(cls.socket), user='fixture', dbname='postgres', autocommit=True)
         with psycopg.connect(**cls.dsn) as c:
             c.execute('create schema ops; create role carr_jobs; create role carr_authority')
@@ -62,6 +64,14 @@ class PostgresLeaderTests(unittest.TestCase):
     def setUp(self):
         with self.connect() as c: c.execute("update ops.studio_leader set host='studio',epoch=1")
 
+    def wait_backend_gone(self, leader, pid):
+        import time
+        deadline = time.monotonic() + 10
+        while leader.conn.execute('select 1 from pg_stat_activity where pid=%s', (pid,)).fetchone():
+            if time.monotonic() > deadline:
+                self.fail(f'backend {pid} still alive after close')
+            time.sleep(0.05)
+
     def test_running_job_blocks_transfer_then_old_host_cannot_restart(self):
         a, b = [Leader(self.connect()) for _ in range(2)]
         admin = Leader(self.authority())
@@ -71,7 +81,10 @@ class PostgresLeaderTests(unittest.TestCase):
             b.close()
             with self.assertRaisesRegex(Exception, 'running_jobs'):
                 admin.claim('studio', 'macbook', self.evidence())
+            pid = a.conn.info.backend_pid
             a.close()
+            # close() returns before the server backend exits; claim only once it is gone.
+            self.wait_backend_gone(admin, pid)
             self.assertEqual(admin.claim('studio', 'macbook', self.evidence()), 2)
             old, new = Leader(self.connect()), Leader(self.connect())
             try:

@@ -61,6 +61,10 @@ def task_text(payload):
         part = record.get('payload', {})
         if record.get('type') == 'event_msg' and part.get('type') == 'user_message':
             text = part.get('message')
+        if record.get('type') == 'response_item' and part.get('type') == 'message' and part.get('role') == 'user':
+            # Codex 0.159+ rollouts record user turns only in this shape.
+            text = '\n'.join(c.get('text', '') for c in part.get('content') or []
+                             if isinstance(c, dict) and c.get('type') == 'input_text')
         if isinstance(text, str) and text:
             if len(text) > 90000:
                 raise ValueError('task_too_large')
