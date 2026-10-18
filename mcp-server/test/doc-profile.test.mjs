@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { dispatch, allowedIn, profileForActor, mcpApiHandler } from "../src/mcp.js";
 import { TOOLS } from "../src/tools.js";
 import { authenticatedIdentity } from "../src/identity.js";
@@ -138,9 +137,9 @@ test("Doc still admits false capture overrides and empty activity links", async 
   }
 });
 
-test("the original /mcp discovery and initialization contract stays unchanged", async () => {
+test("ordinary /mcp keeps its tool contracts and boot instructions behind compact discovery", async () => {
   const { result } = await rpc("/mcp", "tools/list");
-  assert.deepEqual(result.tools.map(t => t.name), Object.keys(TOOLS));
+  assert.ok(result.tools.length < Object.keys(TOOLS).length);
   for (const tool of result.tools) {
     assert.equal(tool.description, TOOLS[tool.name].description);
     assert.deepEqual(tool.inputSchema, TOOLS[tool.name].inputSchema);
@@ -149,11 +148,10 @@ test("the original /mcp discovery and initialization contract stays unchanged", 
       idempotentHint: true, openWorldHint: false,
     });
   }
-  assert.deepEqual(result.tools.find(t => t.name === 'whats-new').annotations, {
-    readOnlyHint:false,destructiveHint:false,idempotentHint:true,openWorldHint:false,
-  });
   const initialized = (await rpc("/mcp", "initialize")).result;
-  assert.equal(createHash("sha256").update(initialized.instructions).digest("hex"), "f5addd0158e33d2082cb108e0aef0b4135abe6b04887d9381b034e3c82eea882");
+  assert.match(initialized.instructions, /call standing-context FIRST/);
+  assert.match(initialized.instructions, /list-verbs with a filter.*call-verb/);
+  assert.match(initialized.instructions, /idempotency_key.*base_version/);
   assert.equal(initialized.serverInfo.name, "carr-record-layer");
   assert.deepEqual((await rpc("/mcp", "ping")).result, {});
 });

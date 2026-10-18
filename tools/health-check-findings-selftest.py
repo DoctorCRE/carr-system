@@ -820,6 +820,7 @@ class PaidCapCanonicalHealthTests(unittest.TestCase):
                   _canonical_contradiction_alarm=lambda: 0,
                   _canonical_workflow_truth=lambda: None, _canonical_assurance_health=lambda: None,
                   _tailscale_row=lambda: ("OK fixture node", False),
+                  _cloudflare_spend_row=lambda: ("OK fixture cloudflare spend", False, False),
                   _system_sends_row=lambda: ("OK system sends fixture", False, False),
                   _host_liveness_rows=lambda: [("OK fixture host", False, "fixture")],
                   _build_duration_row=lambda: ("OK fixture build duration", 0),
@@ -1295,7 +1296,9 @@ class ProvisioningPendingIsNamedAndTemporary(unittest.TestCase):
         pending = next(node for node in tree.body if isinstance(node, ast.Assign)
                        and any(getattr(t, "id", None) == "PROVISIONING_PENDING" for t in node.targets))
         keys = {k.value for k in pending.value.keys}
-        self.assertEqual(keys, {"production_uptime", "system_costs"})
+        # cloudflare_spend joined 2026-10-08 (PR 1649): only its never-run state is soft, while the
+        # guard's token and schedule wait for review; a verdict it reports stays hard.
+        self.assertEqual(keys, {"production_uptime", "system_costs", "cloudflare_spend"})
 
 
 class CanonicalHealthReturnsAreAllowlisted(unittest.TestCase):

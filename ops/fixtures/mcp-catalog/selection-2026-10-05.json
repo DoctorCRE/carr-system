@@ -1,0 +1,25 @@
+{
+  "sample": "last 20000 rows of canonical out/hook-telemetry.jsonl",
+  "start": "2026-09-24T11:09:09Z",
+  "end": "2026-10-05T20:35:43Z",
+  "counting": "deduplicated by session, tool_use_id and native tool name; only carr and named account-connector prefixes; observed calls, not population-wide most-called verbs",
+  "calls": {
+    "standing-context": 194,
+    "ask-jev": 35,
+    "add-room-turn": 25,
+    "read-room": 16,
+    "map-architecture": 14,
+    "loop-board": 8,
+    "read-loop": 5,
+    "add-loop": 2,
+    "list-my-codex-sessions": 2,
+    "find": 1,
+    "catch-me-up": 1,
+    "read-session-identity": 1,
+    "search-doctrine": 1,
+    "teach": 1,
+    "read-room-queue": 1,
+    "doctrine-sections": 1
+  },
+  "choice": "Contract-first compact core: every existing direct carr permission entry, name-specific CARR hook verbs, Model Room source readers, boot rule readers, and observed Jev, map and room calls. Continuity stays on dedicated surfaces. The core is stable, not changed dynamically by this sample."
+}

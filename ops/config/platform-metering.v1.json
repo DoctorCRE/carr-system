@@ -3,6 +3,55 @@
   "reviewed_at": "2026-09-12T09:01:51Z",
   "owner": "joe",
   "objective": "Keep CARR reliable without using paid cloud execution as an iteration loop.",
+  "local_worker_preparation": {
+    "source_clause": "study-gehariharan_2104261974330929208.md#1",
+    "collected_at": "2026-09-30T02:36:47Z",
+    "status": "blocked_before_remote_inventory",
+    "owner": "process",
+    "target": "spare Dell PC",
+    "access_route": "ssh dell",
+    "target_identity_verified": false,
+    "facts": {
+      "cpu": {"status": "unknown", "value": null, "reason": "SSH timed out before a remote command ran; CPU model, architecture and core counts were not observed."},
+      "ram": {"status": "unknown", "value": null, "reason": "No remote observation of installed or available memory."},
+      "disk": {"status": "unknown", "value": null, "reason": "No remote observation of device, capacity, free space or filesystem."},
+      "os": {"status": "unknown", "value": null, "reason": "Local peer-directory metadata describes a MacBook Air running macOS; it does not establish the intended Dell's OS or identity."},
+      "network": {"status": "unknown", "value": null, "reason": "Local peer-directory online status did not yield SSH or overlay ping reachability; the intended Dell's interfaces, link and route remain unobserved."},
+      "access": {"status": "unknown", "value": null, "reason": "Two minimal noninteractive SSH probes timed out at TCP connection; authentication, account privileges and readable paths were not tested."}
+    },
+    "access_observations": [
+      {"probe": "ssh -G dell (hostname and port only)", "provenance": "local_access_probe", "result": "Configured destination names a MacBook Air; intended spare-PC identity unverified.", "remote_command_ran": false},
+      {"probe": "ssh -o BatchMode=yes -o ConnectTimeout=10 dell 'uname -s'", "attempts": 2, "provenance": "local_access_probe", "result": "TCP connection timed out before authentication or remote execution.", "remote_command_ran": false},
+      {"probe": "Tailscale status --json (bounded peer metadata)", "provenance": "local_access_probe", "result": "Local directory reports the configured MacBook Air peer as online with macOS; this is not a remote hardware observation.", "remote_command_ran": false},
+      {"probe": "Tailscale ping (one attempt, five-second timeout)", "provenance": "local_access_probe", "result": "No reply from the configured peer.", "remote_command_ran": false}
+    ],
+    "other_unknowns": ["battery condition", "sustained thermals and throttling", "power and energy use", "installed tool versions", "workload memory and disk fit", "cold and warm Dell runtime", "isolation and revocation capabilities"],
+    "selected_workload": {
+      "name": "DoctorCRE Tour search and selection-cart regression",
+      "repository": "jbookout/doctorcre-app",
+      "source_commit": "6a9f996cd731a9debe1d9df82b9449f864d28f5e",
+      "source_tree": "edc2e0ee8b98d9bed4a1ccb211157ae67a8f732c",
+      "command_argv": ["node", "--test", "test/tours-search-cart.test.mjs"],
+      "fixture_kind": "synthetic_jsdom_fetch",
+      "required_runtime": "Node.js >=20 and dependencies from the pinned package-lock.json",
+      "input_sha256": {
+        "test/tours-search-cart.test.mjs": "2c666bb6b95a2ddb21e592c3cf091c85ffe9c318fe8517a9a9bdccf6fb5a84b9",
+        "tours/index.html": "2aa00ce4defb2c0f85fe28a87c5070a0a3f30f0abc59764b0874d2f0021dcc40",
+        "tours/app.js": "3d90c492733f67a6c4ea2093f0641704f3aaaef934be54ad5b501bfe69820a7d",
+        "tours/tour-format.js": "a62c99b1adee0a76446c80ab74fa703e148c98836c63b605b37a6ee0b32d7ae8",
+        "contracts/carr-interface.v1.json": "94f37fcd77ffea3eee83ee6b0e78eec99216583b460e028d33b1375509255816",
+        "package.json": "bed6b7b171b66a8b928b368e31b6898eccbbf68c0c2ab00ff6090b05bfd457a5",
+        "package-lock.json": "a702ab9dac56bca59a86fe14eb61768a2e3fdea0039cc9cc7d086e253f88b5e1"
+      },
+      "selection_reason": "Uses the existing named product test with in-memory fixtures for filter pagination, saved selections, conflicting edits and idempotent writes. No product screen change is needed."
+    },
+    "accepted_pilot_ref": null,
+    "remote_workload_executed": false,
+    "remote_changes_made": false,
+    "done_test_result": "incomplete",
+    "unblock_condition": "The orchestrator supplies a verified binding for the intended Dell and a reachable approved SSH route for read-only inventory. Before any pilot execution, bind the existing accepted pilot admission to this exact workload and source revision.",
+    "delivery_boundary": "Inventory preparation only; no runner installation, scheduling, additional slots, credential grants or required-CI migration. The orchestrator owns independent exact-head review."
+  },
   "standing_rule_binding": {
     "rule_id": "a57d981a-8f6d-4c18-95ee-0e63a5a90b89",
     "statement_sha256": "c6fd62eb91d3f03b21a6098a6fd6b2848b902a45b8c0430b1717edf4e143f668",
