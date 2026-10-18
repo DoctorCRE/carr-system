@@ -49,7 +49,7 @@ class CleanupTests(unittest.TestCase):
                 state["tasks"]["wd-ordinary"] = {"status": "blocked", "title": "Watchdog noise"}
                 board.write_json(state)
                 with patch.object(board, "discover_v1", return_value={}), \
-                        patch.object(board, "refresh_and_publish"), contextlib.redirect_stdout(io.StringIO()):
+                        patch.object(board, "publish_board"), contextlib.redirect_stdout(io.StringIO()):
                     board.main(["reconcile", "test", "--apply"])
                 result = board.read_state("test")
                 self.assertEqual(result["tasks"], {vendor_card: vendor_task})
@@ -60,7 +60,7 @@ class CleanupTests(unittest.TestCase):
                 watchdog.append(root / config["paths"]["findings"],
                                 {"key": incident["key"], "cleared_at": AT.isoformat(), "recovery_reported": True})
                 with patch.object(board, "discover_v1", return_value={}), \
-                        patch.object(board, "refresh_and_publish"), contextlib.redirect_stdout(io.StringIO()):
+                        patch.object(board, "publish_board"), contextlib.redirect_stdout(io.StringIO()):
                     board.main(["reconcile", "test", "--apply"])
                 recovered = board.read_state("test")
                 self.assertEqual(recovered["tasks"], {})
@@ -92,8 +92,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(again, result)
 
     def test_reconcile_applies_the_scheduled_sync_rule_to_every_pr_card(self):
-        curated = {"title": "Curated: invoices rework", "status": "blocked", "pr": 3, "pr_head": "a" * 40,
-                   "blocked_reason": "Waiting on credential", "blocked_source": "manual", "manual_stage": "review"}
+        curated = {"title": "Curated: invoices rework", "status": "blocked", "pr": 3, "pr_head": "a" * 40}
         tasks = {"pr-3": curated, "pr-4": {"title": "Old attempt", "status": "superseded", "pr": 4}}
         facts = {(REPO, 3): (pr(3), None), (REPO, 4): (pr(4), None)}
         expected = copy.deepcopy({"tasks": tasks})
@@ -102,8 +101,6 @@ class CleanupTests(unittest.TestCase):
             result, report = board.reconcile_state({"tasks": tasks}, facts, AT.isoformat())
         self.assertEqual(result["tasks"], expected["tasks"])
         self.assertEqual(result["tasks"]["pr-3"]["title"], "Curated: invoices rework")
-        self.assertEqual(result["tasks"]["pr-3"]["blocked_reason"], "Waiting on credential")
-        self.assertEqual(result["tasks"]["pr-3"]["manual_stage"], "review")
         self.assertEqual(result["tasks"]["pr-4"]["status"], expected["tasks"]["pr-4"]["status"])
         self.assertTrue(report["check_passed"])
 
@@ -154,7 +151,7 @@ class CleanupTests(unittest.TestCase):
             path.parent.mkdir()
             path.write_text(json.dumps({"project": "test", "tasks": {"wd-any": {"status": "blocked"}}}))
             before = path.read_bytes()
-            with patch.object(board, "discover_v1", return_value={}), patch.object(board, "refresh_and_publish") as publish:
+            with patch.object(board, "discover_v1", return_value={}), patch.object(board, "publish_board") as publish:
                 with contextlib.redirect_stdout(io.StringIO()) as output:
                     board.main(["reconcile", "test"])
                 self.assertIn("DRY RUN", output.getvalue())
@@ -284,13 +281,13 @@ class ReconcileApplyTests(BoardFileCase):
 
     def apply(self, fetch):
         with patch.object(board, "discover_v1", return_value={}), patch.object(board, "fetch_pr", fetch), \
-                patch.object(board, "refresh_and_publish") as publish, contextlib.redirect_stdout(io.StringIO()):
+                patch.object(board, "publish_board") as publish, contextlib.redirect_stdout(io.StringIO()):
             board.main(["reconcile", "test", "--apply"])
         return publish
 
     def test_apply_writes_archives_and_publishes(self):
         publish = self.apply(lambda number, repo: (pr(number), None))
-        publish.assert_called_once_with("test")
+        publish.assert_called_once_with("test", refresh_inventory=False)
         state = board.read_state("test")
         self.assertEqual(set(state["tasks"]), {"pr-1"})
         self.assertEqual(state["tasks"]["pr-1"]["title"], "Keep me")

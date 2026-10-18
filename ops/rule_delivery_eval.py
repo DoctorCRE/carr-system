@@ -1,71 +1,8 @@
-"""rule_delivery_eval.py — score every rule-delivery path against gold labels.
+"""Rule-delivery scoring with one store-scope selection interface.
 
-WHY THIS EXISTS (Joe, 2026-09-26: "I'm not convinced that our rule system is
-effective enough in its current state"). Rules reach a session by several
-independent paths, and until this file none of them had a labelled precision
-or recall: the drift observer logs "needed but not loaded" from a keyword
-classifier, the Jev selectors log what they surfaced, and the nightly replay
-is deterministic with its judge stubbed. Each log measures a path against
-itself. This measures every path against the same hand-labelled answer key.
-
-WHAT A CASE IS. A situation — the partner's prompt (or a machine
-notification), plus, when there is one, the tool calls the session made in
-that turn — and the gold set of rule ids whose condition actually binds
-there. `disputed` ids are excluded from both sides of the count.
-
-REPLAY, NOT RE-IMPLEMENTATION (Jev, architecture_or_design, 2026-09-26: 1.00
-for replaying real code over re-implementing it or scoring old logs). Each
-adapter calls the production selection function itself:
-
-  prompt_compiled   ops/rule_trigger_delivery.advise with the Jev judgment
-                    disabled (compiled prompt_regex rows + always-on only),
-                    then the hook's own pack-layer filter
-                    (lib/rule_delivery_preuse.semantic_delivery);
-  prompt_full       the same call with the budgeted Jev judgment live — what
-                    the UserPromptSubmit hook actually delivers;
-  jit_pretooluse    hooks/rule-pack-preuse-reselection.py's own
-                    matched_triggers()/_matches() on each tool call;
-  layered_triggers  the same hook's route rail: routed_rule_ids() over
-                    ops/config/rule-routes.v1.json, unioned with the compiled
-                    table rows it carries in the same door call, on each tool
-                    call (exact matches; no dedupe state is read). Charged for
-                    gold of every layer, since routes cover every layer. The
-                    current boot and historical layer-zero map are scored
-                    beside it;
-  drift_shadow      hooks/rule-pack-drift-gate.py as shipped: mode shadow
-                    loads nothing;
-  drift_if_acting   the same gate's evaluate(): the packs it says the turn
-                    needed, delivered as those packs' pack-layer rules;
-  boot_layer0       historical enforcement-map layer-zero selection.
-  boot_always_on    current Joe-scoped always-on ids from rule-classes.v1.json,
-                    the class contract used by standing-context's live boot.
-
-DRY RUN. Nothing here writes a production log, cache or audit file: the
-selector log goes to os.devnull, no session id is passed (so no dedupe or
-verdict cache is read or written), Jev's per-call receipts go to a sink the
-caller names, and jev_judge.record() is replaced by a no-op on the harness's
-private copy of the module (its outage row would otherwise land in
-out/jev-judge.jsonl). The selftest snapshots GUARDED_OUT_FILES before and
-after a run and fails on any change. The standing-context door that fetches
-selected rule text is not replayed. The actual boot adapter uses the same
-committed class contract as the live Worker and excludes other partners'
-personal rules; live rule statements remain in the store.
-
-RESPONSIBILITY UNIVERSES. A path is charged only for gold rules it is
-responsible for: the prompt and JIT paths for pack-layer rules (the current
-always-on set is loaded at boot; control-layer rules are delivered by the gate
-that enforces them), the legacy selector and the system rows for everything. A
-delivered rule that is not gold is a false positive wherever it came from.
-
-METRICS (Jev, verification_selection, 2026-09-26): the headline is SYSTEM
-recall — the union of what actually reaches a session (0.84 over per-path
-micro numbers); per-stratum recall (0.88); notification turns scored apart
-from the pooled human numbers (0.85); pack-level scoring for the
-pack-granular drift observer (0.86).
-
-A LIBRARY. The command line is tools/rule-delivery-eval.py; this file carries
-no entrypoint construct, for the sealed-inventory reason
-ops/typesafe_client.py documents.
+Historical path names remain report columns for paired scoring. Offline replay
+uses independently frozen judgments; live mode injects the admitted typed judge.
+No evaluation writes production judgment caches or logs.
 """
 
 import concurrent.futures as cf
@@ -73,6 +10,7 @@ import importlib.util
 import json
 import os
 import re
+import tempfile
 from collections import Counter
 
 CASES_SCHEMA = "rule-delivery-eval-cases/v1"
@@ -100,7 +38,7 @@ EVAL_SESSION = "rule-delivery-eval"
 GUARDED_OUT_FILES = (
     "rule-trigger-delivery.jsonl", "rule-prompt-delivered.json",
     "jev-rule-select.jsonl", "jev-rule-select-cache.json", "jev-judge.jsonl",
-    "rule-delivery-shadow.jsonl", "jev-calls.jsonl",
+    "jev-calls.jsonl", "jev-semantic-cache.json", "jev-judge-cache.sqlite3",
 )
 
 PACK_LAYER = "pack"
@@ -198,33 +136,15 @@ def rule_meta(repo, corpus=None):
     return meta
 
 
-def boot_always_on_ids(repo, sponsor="joe"):
-    """Ids the live boot would render in full for one sponsor.
-
-    The runtime scopes active store rows first, then applies the class file's
-    personal boundary; every rule in scope keeps its full text. The committed
-    class file contains classified ids; this replays selection without store
-    access.
-    """
-    path = os.path.join(repo, "ops", "config", "rule-classes.v1.json")
-    with open(path, "r", encoding="utf-8") as handle:
-        rows = json.load(handle)["rules"]
-    return {rid for rid, row in rows.items() if row.get("personal_to") in (None, sponsor)}
-
-
-def universes(meta, names, *, boot_ids=None):
-    if "boot_always_on" in names and boot_ids is None:
-        raise ValueError("boot_always_on universe requires current boot ids")
+def universes(meta, names):
     pack = {rid for rid, row in meta.items() if row["layer"] == PACK_LAYER}
     everything = set(meta)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     table = {"prompt_compiled": pack, "prompt_full": pack, "jit_pretooluse": pack,
-             "drift_shadow": pack, "drift_if_acting": pack, "boot_layer0": layer0,
-             "boot_always_on": set(boot_ids or ()),
+             "boot_layer0": layer0,
              "layered_triggers": everything,
              "system_moment": everything,
              "system_moment_packlayer": pack,
-             "system_moment_plus_drift": everything, "system_scoped_boot": everything,
              # The doctrine search door delivers doctrine only; it owes no rule.
              "doctrine_search": set()}
     return {name: table.get(name, everything) for name in names}
@@ -241,15 +161,20 @@ class JevProxy:
     def __init__(self, tsc, calls_log):
         self._tsc = tsc
         self.calls_log = calls_log
+        self._cache = tempfile.TemporaryDirectory(prefix="carr-rule-eval-")
         self.noul, self.choice, self.score = tsc.noul, tsc.choice, tsc.score
 
     def ask(self, state, questions, **kwargs):
         kwargs.pop("caller", None)
         kwargs.pop("version", None)
         kwargs["calls_log"] = self.calls_log
-        semantic = _load(os.path.join(os.path.dirname(os.path.dirname(__file__)), "ops", "jev_semantic.py"), "jev_semantic_eval")
-        return semantic.ask(state, questions, client=self._tsc, caller="rule_delivery_eval",
-                            version="vendor-v1", **kwargs)
+        from ops import jev_semantic as semantic
+        if kwargs.pop('model', 'jev-1.13.0') != 'jev-1.13.0':
+            raise ValueError('evaluation model must be pinned')
+        return self._tsc.ask(state, questions, caller='rule_delivery_eval',
+                             model='jev-1.13.0', cache_key=semantic.cache_key(
+                                 state, questions, 'rule_delivery_eval', 'stored-moment-eval-v1'),
+                             cache_path=os.path.join(self._cache.name, 'transport.sqlite3'), **kwargs)
 
 
 def _quiet_judge(repo, tag):
@@ -257,17 +182,6 @@ def _quiet_judge(repo, tag):
     module = _load(os.path.join(repo, "ops", "jev_judge.py"), f"jev_judge_quiet_{tag}")
     module.record = lambda *args, **kwargs: {}
     return module
-
-
-def _quiet_rule_trigger_delivery(repo, tag):
-    """A private ops/rule_trigger_delivery whose Jev siblings cannot log."""
-    rtd = _load(os.path.join(repo, "ops", "rule_trigger_delivery.py"), f"rtd_eval_{tag}")
-    original = rtd._sibling
-
-    def sibling(name):
-        return _quiet_judge(repo, tag) if name == "jev_judge" else original(name)
-    rtd._sibling = sibling
-    return rtd
 
 
 # ------------------------------------------------------------------ adapters
@@ -339,83 +253,45 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
     meta = rule_meta(repo)
     layer0 = {rid for rid, row in meta.items() if row["layer"] == "layer0"}
     pack_layer = {rid for rid, row in meta.items() if row["layer"] == PACK_LAYER}
-    always_on = boot_always_on_ids(repo)
 
-    def prompt_delivery(rtd, text, **kwargs):
-        rows = rtd.advise(text, session_id=None, log_path=os.devnull, **kwargs)
-        ids, packs = preuse.semantic_delivery(repo_path, [row["id"] for row in rows])
-        return {"rules": set(ids), "packs": set(packs)}
+    from ops.rule_scope_replay import FrozenSelection
+    from lib.rule_scope_lookup import select_rules
+    frozen = FrozenSelection(repo)
 
-    rtd_off = _quiet_rule_trigger_delivery(repo, "off")
+    def delivery(case, *, prompt=False, live_judge=None):
+        events = ([{'hook_event_name': 'UserPromptSubmit', 'task': case['prompt']}] if prompt else
+                  [{'hook_event_name': 'PreToolUse', 'task': case['prompt'], **call} for call in case['tool_calls']])
+        rules, unresolved, defects = set(), [], []
+        for event in events:
+            if live_judge:
+                result = select_rules(frozen.catalog, event, judge=live_judge)
+            else:
+                try:
+                    result = frozen.select(event)
+                except ValueError:
+                    result = select_rules(frozen.catalog, event)
+            rules.update(r['id'] for r in result['rules'])
+            unresolved.extend(result['unresolved'])
+            defects.extend(result['data_defects'])
+        return {'rules': rules, 'packs': {p for r in rules for p in meta.get(r, {}).get('packs', [])},
+                'unresolved': unresolved, 'data_defects': defects, 'complete': not unresolved and not defects}
 
     def prompt_compiled(case):
-        return prompt_delivery(rtd_off, case["prompt"], rank=_raise, ask=_raise)
-
-    hook = _load(os.path.join(repo, "hooks", "rule-pack-preuse-reselection.py"),
-                 "preuse_hook_eval")
-
-    def jit(case):
-        rules = set()
-        for index, call in enumerate(case["tool_calls"]):
-            payload = {"hook_event_name": "PreToolUse", "tool_name": call["tool_name"],
-                       "tool_input": call.get("tool_input"), "session_id": EVAL_SESSION,
-                       "tool_use_id": f"eval-{case['id']}-{index}"}
-            if hook._matches(payload):
-                rules.update(hook.scheduled_rule_ids())
-                continue
-            rows = hook.matched_triggers(payload)
-            if rows:
-                rules.update(preuse.merge_trigger_delivery(rows)[2])
-        return {"rules": rules, "packs": {p for r in rules for p in meta.get(r, {}).get("packs", [])}}
+        return delivery(case, prompt=True)
 
     def layered(case):
-        rules = set()
-        for index, call in enumerate(case["tool_calls"]):
-            payload = {"hook_event_name": "PreToolUse", "tool_name": call["tool_name"],
-                       "tool_input": call.get("tool_input"), "session_id": EVAL_SESSION,
-                       "tool_use_id": f"eval-{case['id']}-{index}"}
-            if hook._matches(payload):
-                # The scheduled rail still owns a background Bash call.
-                rules.update(hook.scheduled_rule_ids())
-                continue
-            routed = hook.routed_rule_ids(payload)
-            rows = hook.matched_triggers(payload)
-            table = preuse.merge_trigger_delivery(rows)[2] if rows else []
-            rules.update(routed)
-            rules.update(table)
-        return {"rules": rules, "packs": {p for r in rules for p in meta.get(r, {}).get("packs", [])}}
-
-    drift = _load(os.path.join(repo, "hooks", "rule-pack-drift-gate.py"), "drift_gate_eval")
-    triggers, members, _digest = drift.load_packs()
-
-    def drift_needed(case):
-        return drift.evaluate(_synthetic_turn(case), triggers, members)["needed"]
-
-    def drift_shadow(case):
-        drift_needed(case)  # the gate still runs; in shadow it loads nothing
-        return {"rules": set(), "packs": set()}
-
-    def drift_acting(case):
-        needed = set(drift_needed(case))
-        rules = {rid for pack in needed for rid in members.get(pack, []) if rid in pack_layer}
-        return {"rules": rules, "packs": needed}
+        return delivery(case)
 
     def boot(case):
         return {"rules": set(layer0), "packs": set()}
 
-    def live_boot(case):
-        return {"rules": set(always_on), "packs": set()}
-
     adapters = [
         {"name": "prompt_compiled", "select": prompt_compiled, "jev": False},
-        {"name": "jit_pretooluse", "select": jit, "jev": False,
+        {"name": "jit_pretooluse", "select": layered, "jev": False,
          "applies": lambda case: bool(case["tool_calls"])},
         {"name": "layered_triggers", "select": layered, "jev": False,
          "applies": lambda case: bool(case["tool_calls"])},
-        {"name": "drift_shadow", "select": drift_shadow, "jev": False},
-        {"name": "drift_if_acting", "select": drift_acting, "jev": False},
         {"name": "boot_layer0", "select": boot, "jev": False},
-        {"name": "boot_always_on", "select": live_boot, "jev": False},
     ]
     if doctrine_search:
         adapters.append({"name": "doctrine_search", "jev": True,
@@ -426,10 +302,9 @@ def build_adapters(repo, *, jev="off", client_factory=None, calls_log=os.devnull
             tsc = _load(os.path.join(repo, "ops", "typesafe_client.py"), "tsc_eval")
             client_factory = lambda sink: JevProxy(tsc, sink)  # noqa: E731
         client = client_factory(calls_log)
-        rtd_live = _quiet_rule_trigger_delivery(repo, "live")
 
         def prompt_full(case):
-            return prompt_delivery(rtd_live, case["prompt"], client=client, ask=client.ask)
+            return delivery(case, prompt=True, live_judge=client.ask)
 
         adapters += [{"name": "prompt_full", "select": prompt_full, "jev": True}]
     elif jev != "off":
@@ -451,6 +326,8 @@ def run_adapters(cases, adapters, *, workers=1):
         def one(case, adapter=adapter):
             try:
                 result = adapter["select"](case)
+                if result.get("complete") is False:
+                    return case["id"], {"rules": set(), "packs": set()}, "rule_scope_selection_incomplete"
                 return case["id"], {"rules": set(result.get("rules") or ()),
                                     "packs": (set(result["packs"]) if result.get("packs")
                                               is not None else None),
@@ -471,47 +348,24 @@ def run_adapters(cases, adapters, *, workers=1):
     return deliveries, errors
 
 
-SYSTEM_ROWS = ("system_moment", "system_moment_packlayer", "system_moment_plus_drift",
-               "system_scoped_boot")
+SYSTEM_ROWS = ("system_moment", "system_moment_packlayer")
 
 
 def add_system_rows(deliveries):
-    """The system rows, built from the per-path deliveries.
+    """Union prompt and tool deliveries, scored over all or pack-layer rules.
 
-    WHY "MOMENT" AND NOT "EVERYTHING IN CONTEXT". While ops.rule_delivery_policy
-    is 'shadow', standing-context recites EVERY active rule at boot as a gist
-    line (mcp-server/src/doctrine.js, the `enforcing` branch), so availability
-    is total by construction and says nothing. What varies is whether the
-    binding rule's full text is put in front of the session at the moment it
-    binds, which is what the prompt and JIT paths do. So:
-
-      system_moment            prompt path (the Jev judgment when run, else
-                               the compiled rows) plus JIT, charged for gold
-                               of every layer;
-      system_moment_packlayer  the same deliveries, charged only for
-                               pack-layer gold (the layer those paths serve);
-      system_moment_plus_drift the same plus the drift observer acting;
-      system_scoped_boot       the moment paths plus the current always-on
-                               boot. Historical reports without that adapter
-                               retain their legacy layer-zero interpretation.
+    The boot is a digest receipt and contributes no binding rule text.
     """
     prompt = deliveries.get("prompt_full") or deliveries.get("prompt_compiled") or {}
     jit = deliveries.get("jit_pretooluse") or {}
-    boot = deliveries.get("boot_always_on") or deliveries.get("boot_layer0") or {}
-    drift = deliveries.get("drift_if_acting") or {}
     rows = {name: {} for name in SYSTEM_ROWS}
-    for case_id in set(prompt) | set(boot) | set(drift):
+    for case_id in set(prompt) | set(jit):
         moment = set(prompt.get(case_id, {}).get("rules") or ())
         moment |= jit.get(case_id, {}).get("rules") or set()
         doctrine = set(prompt.get(case_id, {}).get("doctrine") or ())
         doctrine |= jit.get(case_id, {}).get("doctrine") or set()
         rows["system_moment"][case_id] = {"rules": moment, "packs": None, "doctrine": doctrine}
         rows["system_moment_packlayer"][case_id] = {"rules": moment, "packs": None}
-        rows["system_moment_plus_drift"][case_id] = {
-            "rules": moment | (drift.get(case_id, {}).get("rules") or set()), "packs": None}
-        rows["system_scoped_boot"][case_id] = {
-            "rules": moment | (boot.get(case_id, {}).get("rules") or set()), "packs": None,
-            "doctrine": doctrine | (boot.get(case_id, {}).get("doctrine") or set())}
     deliveries.update(rows)
     return deliveries
 
@@ -771,8 +625,8 @@ def render_markdown(report, statements=None, *, top=10, paths=None):
     statements = statements or {}
     order = paths or [p for p in SYSTEM_ROWS + ("prompt_full",
                                   "prompt_compiled", "jit_pretooluse",
-                                  "layered_triggers", "drift_shadow", "drift_if_acting",
-                                  "boot_always_on", "boot_layer0",
+                                  "layered_triggers",
+                                  "boot_layer0",
                                   "doctrine_search")
                       if p in report["paths"]]
     lines = [f"Cases: {report['cases']} ({', '.join(f'{k} {v}' for k, v in sorted(report['strata'].items()))})",

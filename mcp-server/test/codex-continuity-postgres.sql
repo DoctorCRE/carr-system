@@ -1,7 +1,6 @@
 \set ON_ERROR_STOP on
 begin;
 
--- The disposable migration lane applies the schema before this handler fixture.
 
 insert into actor (id,slug,kind,display_name) values
  ('b1900000-0000-4000-8000-000000000001','codex-continuity-proof','automation','Continuity proof');
@@ -77,7 +76,6 @@ begin
 end $$;
 reset role;
 
--- Even a table owner cannot silently rewrite a saved revision.
 do $$
 declare denied boolean:=false;
 begin

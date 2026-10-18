@@ -7,24 +7,47 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+from git_env import fixture_env
 
 REPO = Path(__file__).resolve().parents[1]
 RUNNER = REPO / 'ops' / 'ci-quarantine.py'
 
 
 class QuarantineTests(unittest.TestCase):
+    def seed_repo(self, path):
+        path.mkdir()
+        (path / 'code.py').write_text('original')
+        env = fixture_env()
+        subprocess.run(['git', 'init', str(path)], env=env, capture_output=True, check=True)
+        subprocess.run(['git', '-C', str(path), 'add', 'code.py'], env=env, check=True)
+        subprocess.run(['git', '-C', str(path), '-c', 'user.name=Fixture', '-c',
+                        'user.email=fixture@example.invalid', 'commit', '-m', 'seed'],
+                       env=env, capture_output=True, check=True)
+
+    def test_unrelated_checkout_changes_do_not_change_attempt_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout = root / 'other-checkout'
+            self.seed_repo(checkout)
+            marker = root / 'attempt'
+            command = (f"from pathlib import Path; Path({str(checkout / 'code.py')!r}).write_text('changed'); "
+                       f"p=Path({str(marker)!r}); seen=p.exists(); p.touch(); raise SystemExit(0 if seen else 1)")
+            with mock.patch.dict(globals(), REPO=checkout):
+                result = self.invoke(root, command)
+            receipt = json.loads((root / 'test.log.result.json').read_text())
+            self.assertEqual(receipt['status'], 'flake-candidate', result.stdout + result.stderr)
+
     def test_quarantined_failure_still_executes_and_reports(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             marker = root / 'executed'
-            manifest = root / 'quarantine.json'
-            manifest.write_text(json.dumps({'version': 1, 'tests': [{
+            entry = {
                 'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
-                'owner': 'jbookout', 'expires': '2099-01-01', 'reason': 'Same-tree failure followed by pass.'}]}))
-            result = subprocess.run([sys.executable, str(RUNNER), 'run', '--test', 'ops/example-selftest.py',
-                '--manifest', str(manifest), '--log', str(root / 'test.log'), '--', sys.executable, '-c',
-                f"from pathlib import Path; Path({str(marker)!r}).write_text('ran'); raise SystemExit(1)"],
-                cwd=REPO, capture_output=True, text=True, timeout=15)
+                'owner': 'jbookout', 'expires': '2099-01-01', 'reason': 'Same-tree failure followed by pass.'}
+            result = self.invoke(root,
+                f"from pathlib import Path; Path({str(marker)!r}).write_text('ran'); raise SystemExit(1)", [entry])
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(marker.read_text(), 'ran')
             receipt = json.loads((root / 'test.log.result.json').read_text())
@@ -33,11 +56,14 @@ class QuarantineTests(unittest.TestCase):
             self.assertIn('QUARANTINED', result.stdout)
 
     def invoke(self, root, command, entries=(), name='ops/example-selftest.py'):
+        fixture = root / 'repo'
+        self.seed_repo(fixture)
         manifest = root / 'quarantine.json'
         manifest.write_text(json.dumps({'version': 1, 'tests': list(entries)}))
         return subprocess.run([sys.executable, str(RUNNER), 'run', '--test', name,
-            '--manifest', str(manifest), '--log', str(root / 'test.log'), '--',
-            sys.executable, '-c', command], cwd=REPO, capture_output=True, text=True, timeout=15)
+            '--manifest', str(manifest), '--repo', str(fixture), '--log', str(root / 'test.log'), '--',
+            sys.executable, '-c', command], cwd=fixture, env=fixture_env(),
+            capture_output=True, text=True, timeout=15)
 
     def test_expired_and_incomplete_quarantines_fail_even_if_test_passes(self):
         for entry in (
@@ -77,14 +103,8 @@ class QuarantineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fixture = root / 'repo'
-            fixture.mkdir()
-            (fixture / 'code.py').write_text('original')
-            from git_env import fixture_env
+            self.seed_repo(fixture)
             env = fixture_env()
-            subprocess.run(['git', 'init', str(fixture)], env=env, capture_output=True, check=True)
-            subprocess.run(['git', '-C', str(fixture), 'add', 'code.py'], env=env, check=True)
-            subprocess.run(['git', '-C', str(fixture), '-c', 'user.name=Fixture', '-c',
-                'user.email=fixture@example.invalid', 'commit', '-m', 'seed'], env=env, capture_output=True, check=True)
             manifest = root / 'manifest.json'
             manifest.write_text('{"version":1,"tests":[]}')
             result = subprocess.run([sys.executable, str(RUNNER), 'run', '--test', 'code.py',

@@ -57,7 +57,8 @@ from pathlib import Path
 import psycopg
 
 REPO = Path(__file__).resolve().parents[1]
-MIGRATIONS = REPO / "migrations"
+sys.path.insert(0, str(REPO / "tools"))
+from migration_source import migration_names, read_migration
 SNAPSHOT = REPO / "db" / "schema.sql"
 BUNDLE = "carr_authority"
 # The externally provisioned authority logins, DERIVED FROM THE MIGRATIONS
@@ -70,12 +71,11 @@ BUNDLE = "carr_authority"
 AUTHORITY_LOGIN_PATTERN = re.compile(r"\bcarr_authority_[a-z][a-z0-9_]*\b")
 
 
-def authority_logins() -> tuple[str, ...]:
+def authority_logins(repo: Path = REPO) -> tuple[str, ...]:
     """Every authority login role the migrations name, in stable order."""
     found: set[str] = set()
-    for path in sorted(MIGRATIONS.glob("*.sql")):
-        found.update(AUTHORITY_LOGIN_PATTERN.findall(
-            path.read_text(encoding="utf-8", errors="ignore")))
+    for name in sorted(migration_names(repo)):
+        found.update(AUTHORITY_LOGIN_PATTERN.findall(read_migration(repo, name)))
     if not found:
         # Never silently proceed with an empty expectation: an empty set would
         # make every coverage assertion below vacuously true.

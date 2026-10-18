@@ -1,12 +1,3 @@
-// a02-rule-enforcement-reader.test.mjs — the JS half of V5-A02's rule
-// coverage read: how lifecycle-assurance.v5.js reports, or refuses, the record
-// the database function returns.
-//
-// These tests exercise real JS logic only (shape and count validation, the
-// fail-closed paths, the pass-through). What the SQL function derives from
-// real rows is proved in a02-rule-enforcement-postgres.test.mjs, and each
-// validation check's planted-bug mutant is killed in
-// a02-rule-enforcement-reader-mutants.test.mjs. Nothing here greps source.
 
 import test from "node:test";
 import assert from "node:assert/strict";

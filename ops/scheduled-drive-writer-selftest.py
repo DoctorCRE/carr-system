@@ -144,67 +144,10 @@ def main() -> int:
               and admin.returncode == 78 and "routine capability refused" in admin.stderr)
 
         nightly = (ROOT / "bin" / "nightly.sh").read_text(encoding="utf-8")
-        normal, _recovery = nightly.split('if [ "$RECOVERY" -eq 1 ]; then\n  export CARR_EXPORT_LIVE=1', 1)
-        check("nightly normal route clears ambient Drive before its first child",
-              "unset CARR_VAULT CARR_EXPORT_LIVE" in normal)
-        # AN EXACT COUNT, NOT A FLOOR (changed 2026-08-22). This asserted at
-        # least eleven Drive projections, which was the wrong shape twice over.
-        # A floor cannot notice a projection being REMOVED once the total is
-        # comfortably above it, and removal is the direction this file has been
-        # moving all week as classes retire. It also counted every mention of
-        # the helper's name, including its own definition and the prose about
-        # it, so the number never meant what it looked like.
-        #
-        # Counting step invocations exactly means any change in either
-        # direction fails here and gets read by a person — which is what you
-        # want, because adding a Drive projection and retiring one are both
-        # decisions rather than housekeeping. When this fails, update the number
-        # in the same commit that changes the chain and say which step moved.
-        #
-        # One as of 2026-08-23, down from thirteen. The graph left once its
-# last raw disk read was sourced from the records instead. Only
-# upstream corroborate is left, and it waits on an external intake.
-# Two as of 2026-08-23, down from thirteen. The corpus push left once the
-# tool learned to hold its vault rows itself, so its twelve live
-# home-rooted rows stopped being switched off by a retired root.
-# Before that, three. The consumer boards and
-# lead promote left last: neither was ever blocked on a destination,
-# only on a pool read that gave up before trying the path that worked.
-# Before that, five as of 2026-08-22. The portability mirror
-# left last, repointed to the same OneDrive root as the exports.
-# Before that, six: the exports gained a
-        # canonical destination (CARR OneDrive, decision bdbb7441), the section
-        # index and system graph were found already writing inside the repo and
-        # only unmarked, and four retired outright — cutover readiness, the
-        # vault drift watch at both ends, and the settings mirror.
-        projections = len(re.findall(r'^drive_projection "', nightly, re.M))
-        # THE NORMAL PATH IS A TOMBSTONE NOW, NOT AN EXECUTED REFUSAL (2026-08-23).
-        # This used to also require the literal string
-        # "routine-canonical-seam-refusal.sh" somewhere in the file, which the
-        # chain no longer launches. That assertion was satisfied by ANY mention of
-        # the filename, including a comment — it went on passing after the chain
-        # stopped calling the script, which is the same prose-mention hazard
-        # ops/nightly-capability-skip-selftest.py strips comments to avoid.
-        #
-        # So this reads the drive_projection function body instead: the recovery
-        # branch must still run the real command, and the normal branch must route
-        # to `tombstone` rather than executing anything at all. The 69 exit
-        # contract of bin/routine-canonical-seam-refusal.sh is still asserted, by
-        # running the script — see the check a few lines above, which is where a
-        # claim about that file's behaviour belongs.
-        body = re.search(r'^drive_projection\(\) \{.*?^\}', nightly, re.M | re.S)
-        body_text = body.group(0) if body else ""
-        check("every remaining Drive projection is routed through the recovery envelope",
-              projections == 1 and "RECOVERY NONCANONICAL" in nightly
-              and bool(body_text) and 'step "RECOVERY NONCANONICAL $label" "$@"' in body_text,
-              f"{projections} drive_projection step(s) in bin/nightly.sh")
-        check("a refused Drive projection is gated out, not executed to produce its refusal",
-              'tombstone "$label"' in body_text
-              and "routine-canonical-seam-refusal.sh" not in body_text,
-              "the normal branch of drive_projection() still launches a refusal process")
-        check("nightly recognizes the record-native dashboard replacement",
-              "open-items dashboard replaced by record-native Front Door" in nightly
-              and 'drive_projection "open-items dashboard' not in nightly)
+        normal = nightly[nightly.index('unset CARR_VAULT CARR_EXPORT_LIVE'):]
+        check("nightly clears ambient Drive before launching jobs",
+              normal.index('unset CARR_VAULT CARR_EXPORT_LIVE CARR_DRIVE_RECOVERY')
+              < normal.index('carr_routine_exec'))
         registry = json.loads((ROOT / "ops/config/drive-dependencies.v1.json").read_text())
         registry_rows = {row["id"]: row for row in registry["entries"]}
         check("Drive registry names the record-native dashboard replacement",

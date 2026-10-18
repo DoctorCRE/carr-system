@@ -26,6 +26,12 @@ own code runs unchanged. What is held:
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import importlib.util
 import json
 import os
@@ -33,12 +39,10 @@ import shutil
 import signal
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 import unittest
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from unittest import mock
 
 REPO = Path(__file__).resolve().parents[1]
@@ -554,7 +558,7 @@ class Migration0597OnADisposableCluster(unittest.TestCase):
                         f"-p {cls.port} -k {cls.tmp} -c listen_addresses=''", "start"], check=True, capture_output=True, env=env)
         cls.sql("create schema ops; create extension pgcrypto schema public; "
                 "create role carr_reader; create role carr_writer; create role carr_jobs; create role carr_authority;")
-        cls.sql((REPO / "migrations" / "0597_pitr_probe.sql").read_text())
+        cls.sql(read_migration(REPO, "0597_pitr_probe.sql"))
 
     @classmethod
     def sql(cls, text, check=True):

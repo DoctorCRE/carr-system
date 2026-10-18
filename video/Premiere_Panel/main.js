@@ -17,7 +17,6 @@ async function getProject() {
     return { ppro, project };
 }
 
-// Import everything sitting in the drop folders into the project
 async function importFromDrops() {
     const fs = require("fs");
     const { project } = await getProject();

@@ -185,6 +185,35 @@ def main() -> int:
                   and paths.pending.exists()
                   and not pathlib.Path(str(paths.pending) + ".preparing").exists())
 
+    # THE UNDO FOR A DELIBERATE ROTATION: the pending file this run minted is
+    # removed when its password change never committed, and nothing else is.
+    with tempfile.TemporaryDirectory() as raw:
+        root = pathlib.Path(raw)
+        final = root / "staging-writer.env"
+        paths = credential.CredentialPaths(
+            final=final, pending=pathlib.Path(str(final) + ".pending"))
+        minted = credential.prepare_pending(
+            paths, key="CARR_DB_STAGING_WRITER_URL", role_name="app_writer",
+            owner_uri=owner, expected_endpoint="staging.example",
+            expected_port=5432, expected_database="neondb",
+            password_factory=lambda: "d" * 64,
+        )
+        try:
+            credential.discard_pending(
+                paths, key="CARR_DB_STAGING_WRITER_URL", expected_value=minted.value + "x")
+        except credential.CredentialRefusal:
+            check("a pending file that is not this run's minted value is never discarded",
+                  paths.pending.exists())
+        else:
+            raise AssertionError("discard removed a pending credential it did not mint")
+        credential.discard_pending(
+            paths, key="CARR_DB_STAGING_WRITER_URL", expected_value=minted.value)
+        check("an uncommitted rotation's own pending file is removed and nothing is promoted",
+              not paths.pending.exists() and not paths.final.exists())
+        credential.discard_pending(
+            paths, key="CARR_DB_STAGING_WRITER_URL", expected_value=minted.value)
+        check("discarding an already-absent pending file is a no-op", not paths.pending.exists())
+
     with tempfile.TemporaryDirectory() as raw:
         root = pathlib.Path(raw)
         target = root / "credential.env"

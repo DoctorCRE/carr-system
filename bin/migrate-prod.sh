@@ -180,7 +180,7 @@ done
 stamp() { print -r -- "$(date -u +%FT%TZ) migrate-prod $*" >> "$LOG" }
 
 if (( APPLY )); then
-  dirty=$(cd "$REPO" && git status --porcelain migrations/)
+  dirty=$(cd "$REPO" && git status --porcelain migrations/ db/migration-baseline.json)
   if [[ -n "$dirty" ]]; then
     stamp "REFUSED uncommitted migrations: ${dirty//$'\n'/ · }"
     LAST_REASON_CLASS="uncommitted_migrations"

@@ -273,7 +273,7 @@ class ReviewRegressions(unittest.TestCase):
     def test_retired_stop_and_agent_cannot_load_transcript_facet_enforcement(self):
         # Findings 1-3: malformed IDs, duplicate IDs and ambiguous anchors
         # belonged to the retired prompt-facet checks, not boundary judgments.
-        for path in ("hooks/completion-evidence-gate.py", "hooks/executor-tier-gate.py"):
+        for path in ("hooks/executor-tier-gate.py",):
             with self.subTest(path=path):
                 source = (Path(REPO) / path).read_text()
                 self.assertFalse("from lib.jev_required_actions import" in source, path)

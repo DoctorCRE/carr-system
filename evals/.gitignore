@@ -1,0 +1,7 @@
+**/receipt.json
+**/evidence/*
+!**/evidence/baseline.jsonl
+!**/evidence/run-meta.json
+!**/evidence/v3/
+**/evidence/v3/*
+!**/evidence/v3/baseline.jsonl

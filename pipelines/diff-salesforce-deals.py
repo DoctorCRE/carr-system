@@ -246,7 +246,6 @@ if SF_IDS:
           f"(they need a real record first, never an id alone).")
     sys.exit(0)
 
-# ---------- report ----------
 print(f"Salesforce capture: {len(rows)} deals   |   Deal Room JSON: {len(deals)} deals\n")
 
 if new:

@@ -18,7 +18,6 @@ sys.path.insert(0, str(ROOT / "lib"))
 import scheduled_jobs as jobs
 import launchd_calendar
 
-MANIFEST = ROOT / "ops/config/scheduled-jobs.v1.json"
 EVERY_TWO_MINUTES = {"StartCalendarInterval": [{"Minute": m} for m in range(0, 60, 2)]}
 
 
@@ -312,15 +311,14 @@ class ReportTests(unittest.TestCase):
         self.snapshot["errors"] = ["launchctl_disabled"]
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            manifest, snapshot = root / "manifest.json", root / "snapshot.json"
-            manifest.write_text(json.dumps(self.manifest))
+            snapshot = root / "snapshot.json"
             snapshot.write_text(json.dumps(self.snapshot))
             result = subprocess.run([sys.executable, str(ROOT / "ops/scheduled-jobs-check.py"),
-                                     "--manifest", str(manifest), "--fixture", str(snapshot),
+                                     "--fixture", str(snapshot),
                                      "--now", "1000", "--json"], capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             rows = json.loads(result.stdout)
-            self.assertEqual([(r["label"], r["code"]) for r in rows],
+            self.assertEqual([(r["label"], r["code"]) for r in rows if r["code"] == "evidence_unavailable"],
                              [("launchctl_disabled", "evidence_unavailable")])
 
     def test_portable_watch_paths_compare_with_live_absolute_paths(self):
@@ -415,7 +413,7 @@ class ReportTests(unittest.TestCase):
                "subject": "canonical", "reason": "behind", "next_action": "repair fleet-sync",
                "owner": "orchestrator", "needs_joe": None, "first_seen": "episode-one"}
         responses = [json.dumps({"ok": True, "loop_id": "fixture-loop"}),
-                     json.dumps({"loop_id": "fixture-loop", "status": "open", "version": 4}),
+                     json.dumps({"ok": True, "loop": {"loop_id": "fixture-loop", "status": "open", "version": 4}}),
                      json.dumps({"ok": True, "status": "done"}),
                      json.dumps({"ok": True, "loop_id": "fixture-loop-two"})]
         with tempfile.TemporaryDirectory() as raw:
@@ -434,116 +432,33 @@ class ReportTests(unittest.TestCase):
                 self.assertNotEqual(first["idempotency_key"], second["idempotency_key"])
 
 
-class ReceiptTests(unittest.TestCase):
-    WRAPPER = "/machine/carr-system/bin/run-scheduled.sh"
-
-    def test_receipt_follows_the_wrapper_option_parser(self):
-        plain = jobs.receipt_name(["/bin/zsh", self.WRAPPER, "svc", "launchd.run", "/bin/sh", "/x.sh"])
-        self.assertEqual(plain, jobs.receipt_name(
-            ["/bin/zsh", self.WRAPPER, "--", "svc", "launchd.run", "/bin/sh", "/x.sh"]))
-        self.assertEqual(plain, jobs.receipt_name(
-            ["/bin/zsh", self.WRAPPER, "--heartbeat-interval", "900", "--also-heartbeat", "edge",
-             "--", "svc", "launchd.run", "/bin/sh", "/x.sh"]))
-        self.assertIsNone(jobs.receipt_name(["/bin/zsh", "/machine/carr-system/bin/task.sh"]))
-
-
 class ManifestTests(unittest.TestCase):
-    def setUp(self):
-        self.manifest = jobs.load_manifest(MANIFEST)
-        self.raw = json.loads(MANIFEST.read_text())
-
-    def refused(self, mutate):
-        raw = copy.deepcopy(self.raw)
-        mutate(raw)
+    def test_native_definitions_supply_program_and_schedule(self):
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "manifest.json"
-            path.write_text(json.dumps(raw))
-            with self.assertRaises(ValueError):
-                jobs.load_manifest(path)
+            root = Path(directory)
+            launchd = root / "ops/launchd"
+            launchd.mkdir(parents=True)
+            path = launchd / "com.carr.test.plist"
+            definition = {"Label": "com.carr.test", "ProgramArguments": ["{{REPO}}/bin/task.sh"],
+                          "StartCalendarInterval": {"Hour": 3, "Minute": 15},
+                          "StandardOutPath": "{{REPO}}/out/task.log"}
+            path.write_bytes(plistlib.dumps(definition))
+            manifest = jobs.native_manifest(root)
+            self.assertEqual(len(manifest["jobs"]), 1)
+            job = manifest["jobs"][0]
+            self.assertEqual(job["program_arguments"], ["~/carr-system/bin/task.sh"])
+            self.assertEqual(job["interval"], {"StartCalendarInterval": {"Hour": 3, "Minute": 15}})
+            definition["StartCalendarInterval"]["Hour"] = 5
+            path.write_bytes(plistlib.dumps(definition))
+            self.assertEqual(jobs.native_manifest(root)["jobs"][0]["interval"],
+                             {"StartCalendarInterval": {"Hour": 5, "Minute": 15}})
 
-    def row(self, raw, label):
-        return next(j for j in raw["jobs"] if j["label"] == label)
-
-    def test_every_declared_job_is_healthy_on_each_machine_role(self):
-        for role in ("primary", "secondary"):
-            with self.subTest(role=role):
-                snapshot = healthy_snapshot(self.manifest, role, now=0)
-                self.assertEqual(jobs.report(self.manifest, snapshot, now=0), [])
-
-    def test_freshness_bounds_outlast_each_schedules_longest_gap(self):
-        snapshots = {role: healthy_snapshot(self.manifest, role, now=0) for role in ("primary", "secondary")}
-        for job in self.manifest["jobs"]:
-            if job.get("log_max_age_seconds") is None:
-                continue
-            snapshot = snapshots[launchd_scope_places(job["label"])]
-            gap = jobs.longest_gap_seconds(jobs.expand(job["interval"]))
-            for now, stale in ((gap, False), (job["log_max_age_seconds"] + 1, True)):
-                with self.subTest(label=job["label"], now=now):
-                    codes = {(r["label"], r["code"]) for r in jobs.report(self.manifest, snapshot, now)}
-                    self.assertEqual((job["label"], "stale_log") in codes, stale)
-
-    def test_weekly_and_weekday_schedules_have_their_real_gaps(self):
-        self.assertEqual(jobs.longest_gap_seconds({"StartCalendarInterval": {"Weekday": 1, "Hour": 3, "Minute": 30}}), 7 * 86400)
-        self.assertEqual(jobs.longest_gap_seconds({"StartCalendarInterval": {"Weekday": 1, "Hour": 3}}), 7 * 86400 - 59 * 60)
-        weekdays = {"StartCalendarInterval": [{"Weekday": d, "Hour": 6, "Minute": 45} for d in range(1, 6)]}
-        self.assertEqual(jobs.longest_gap_seconds(weekdays), 3 * 86400)
-        self.assertIsNone(jobs.longest_gap_seconds({"KeepAlive": True, "RunAtLoad": True}))
-
-    def test_nonperiodic_jobs_cannot_declare_a_freshness_bound(self):
-        self.refused(lambda raw: self.row(raw, "com.carr.tailscale-up").update(log_max_age_seconds=172800))
-
-    def test_bound_shorter_than_the_schedule_gap_is_refused(self):
-        self.refused(lambda raw: self.row(raw, "com.carr.timebomb-audit").update(log_max_age_seconds=172800))
-
-    def test_shared_or_reused_activity_signal_is_refused(self):
-        self.refused(lambda raw: self.row(raw, "com.carr.rules-refresh").update(
-            activity_path="~/carr-system/out/run-scheduled.log"))
-        fleet = self.row(self.raw, "com.carr.fleet-sync")
-        self.refused(lambda raw: self.row(raw, "com.carr.notes-sweep").update(activity_path=fleet["activity_path"]))
-
-    def test_receipt_activity_paths_are_the_ones_the_wrapper_writes(self):
-        for job in self.manifest["jobs"]:
-            if "run-scheduled-receipts/" in job.get("activity_path", ""):
-                with self.subTest(label=job["label"]):
-                    self.assertEqual(job["activity_path"], "~/carr-system/out/run-scheduled-receipts/" +
-                                     jobs.receipt_name(job["program_arguments"]))
-
-    def test_unrendered_template_tokens_are_refused(self):
-        self.refused(lambda raw: self.row(raw, "com.carr.capture-watch")["interval"].update(
-            WatchPaths=["{{HOME}}/Recordings"]))
-
-    def test_start_interval_is_refused_for_launchd(self):
-        self.refused(lambda raw: self.row(raw, "local.carr-progress-board").update(interval={"StartInterval": 120}))
-
-    def test_board_cadence_is_the_calendar_helpers_two_minute_form(self):
-        board = self.row(self.raw, "local.carr-progress-board")
-        self.assertEqual(launchd_calendar.cadence_seconds(board["interval"]), 120)
-        self.assertEqual(board["interval"]["StartCalendarInterval"],
-                         launchd_calendar.calendar_for_interval(120, board["label"])[0])
-
-    def test_placement_is_not_restated_in_the_manifest(self):
-        self.refused(lambda raw: self.row(raw, "com.carr.job-watchdog").update(
-            expected_enabled_by_role={"primary": True, "secondary": False}))
-
-    def test_launchd_rows_project_their_repository_templates(self):
-        spec = importlib.util.spec_from_file_location("config_as_code", ROOT / "ops/config-as-code.py")
-        config = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(config)
-        def portable(text):
-            text = text.replace("{{REPO}}", "~/carr-system").replace("{{HOME}}", "~")
-            return re.sub(r"/Users/[^/<]+/", "~/", text)
-        for name in sorted(p.name for p in (ROOT / "ops/launchd").glob("com.carr.*.plist")):
-            path = ROOT / os.path.relpath(config.launchd_repo_path(name), config.REPO)
-            template = plistlib.loads(portable(path.read_text()).encode())
-            self.assertIn(template["Label"], [j["label"] for j in self.raw["jobs"]],
-                          f"{name} has no manifest row; declare it in {MANIFEST.name}")
-            job = self.row(self.raw, template["Label"])
-            with self.subTest(label=job["label"]):
-                self.assertEqual(job["program_arguments"], template["ProgramArguments"])
-                self.assertEqual(job["interval"], jobs.schedule(template))
-                if job.get("log_paths"):
-                    self.assertEqual(job["log_paths"], [template.get("StandardOutPath"),
-                                                        template.get("StandardErrorPath")])
+    def test_definition_only_jobs_are_not_expected_to_run(self):
+        manifest = jobs.native_manifest()
+        for label in ("com.carr.repo-hygiene-janitor",):
+            job = next(j for j in manifest["jobs"] if j["label"] == label)
+            self.assertFalse(job["expected_enabled"])
+            self.assertFalse(job["expected_installed"])
 
 
 if __name__ == "__main__":

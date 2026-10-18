@@ -427,7 +427,7 @@ class ReplayTests(unittest.TestCase):
                              reason="failure", next_action="retry")
             self.assertEqual(run.call_args.kwargs["env"]["PROGRESS_BOARD_LOCAL_ONLY"], "1")
             self.assertIn("--receipt", run.call_args.args[0])
-            self.assertIn("--defer-refresh", run.call_args.args[0])
+            self.assertNotIn("--defer-refresh", run.call_args.args[0])
 
     def test_current_head_latest_review_and_active_fixer(self):
         import job_watchdog as w
@@ -796,9 +796,11 @@ class RunnerTests(unittest.TestCase):
             executable.chmod(0o755)
             dispatch = ROOT / "tools/room-bridge/dispatch.py"
             registry = root / "desk.json"
-            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"])
+            (root / "models_cache.json").write_text(json.dumps({"models": [
+                {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol"}]}))
+            env = dict(os.environ, CODEX_HOME=str(root), PATH=str(root) + os.pathsep + os.environ["PATH"])
             registration = subprocess.run([sys.executable, str(dispatch), "--registry", str(registry),
-                                           "register", "fixture", "--kind", "codex-session", "--model", "gpt-6.1-sol",
+                                           "register", "fixture", "--kind", "codex-session", "--family", "sol",
                                            "--effort", "high", "--sandbox", "workspace-write", "--cwd", directory],
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(registration.returncode, 0, registration.stderr)
@@ -848,6 +850,39 @@ class RunnerTests(unittest.TestCase):
             ledger = [json.loads(s) for s in (root / "out/watchdog/runs.jsonl").read_text().splitlines()]
             self.assertEqual(ledger[-1]["status"], "completed")
             self.assertEqual(ledger[-1]["findings"], 0)
+
+    def test_board_github_opt_out_survives_re_registration(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = root / "github-calls"
+            gh = root / "gh"
+            gh.write_text("#!" + sys.executable + "\nfrom pathlib import Path\n"
+                          + "Path(" + repr(str(calls)) + ").open('a').write('call\\n')\n"
+                          + "print('{}')\n")
+            gh.chmod(0o755)
+            config_path = root / "config.json"
+            c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+            c["board_github_enabled"] = False
+            config_path.write_text(json.dumps(c))
+            real_run = subprocess.run
+            observed_env = []
+            def observe(argv, **kwargs):
+                observed_env.append(kwargs["env"])
+                return real_run(argv, **kwargs)
+            with patch.object(w.subprocess, "run", side_effect=observe), patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"],
+                                         "PROGRESS_BOARD_SKIP_GH": "0"}):
+                for status in ("running", "review"):
+                    # Every registration starts from disk, without an inherited opt-out.
+                    w.board_task(root, w.load_config(config_path), "synthetic-card", "executor",
+                                 status, "Synthetic evidence")
+            self.assertTrue(observed_env)
+            self.assertTrue(all(e.get("PROGRESS_BOARD_SKIP_GH") == "1" for e in observed_env))
+            self.assertFalse(calls.exists(), "re-registration must spend zero GitHub requests")
+            board = json.loads((root / "out/boards/carr-v5.json").read_text())
+            self.assertEqual(board["tasks"]["synthetic-card"]["status"], "review")
+            self.assertFalse(w.load_config(ROOT / "ops/config/job-watchdog.json")["board_github_enabled"])
 
     def test_command_gets_eof_and_exit_is_recorded_on_board(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -967,6 +1002,62 @@ class StateTests(unittest.TestCase):
                 else:
                     self.assertFalse(board.exists())
 
+    def test_scheduled_drift_recovery_reads_loop_envelope(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        c["actions"]["file_defects"] = False
+        for status in ("open", "done", "dropped"):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                effects = w.Effects(root, c)
+                f = w.finding("scheduled_job_drift", "synthetic-schedule", "schedule missing", c)
+                w.reconcile(root, c, [f], effects, 100)
+                path = root / c["paths"]["findings"]
+                w.append(path, {"key": f["key"], "loop_id": "synthetic-loop"})
+                calls = []
+                def record(argv, config):
+                    verb, payload = argv[2], json.loads(argv[3])
+                    calls.append((verb, payload))
+                    if verb == "read-loop":
+                        self.assertEqual(payload, {"loop_id": "synthetic-loop"})
+                        return "local-verb identity -> test actor\n" + json.dumps({
+                            "loop": {"loop_id": "synthetic-loop", "version": 7, "status": status},
+                            "amended": False, "amendments": []})
+                    self.assertEqual(verb, "close-loop")
+                    return json.dumps({"ok": True})
+                with patch.object(w, "command", side_effect=record):
+                    recovered = w.reconcile(root, c, [], effects, 200)
+                    w.reconcile(root, c, [], effects, 300)
+                self.assertEqual(recovered, [])
+                self.assertEqual(w.read_latest(path)[f["key"]]["cleared_at"], w.stamp(200))
+                self.assertEqual([verb for verb, _ in calls],
+                                 ["read-loop", "close-loop"] if status == "open" else ["read-loop"])
+                if status == "open":
+                    closed = calls[1][1]
+                    self.assertEqual(closed["loop_id"], "synthetic-loop")
+                    self.assertEqual(closed["base_version"], 7)
+                    self.assertEqual(closed["resolution"], "done")
+                    self.assertEqual(closed["idempotency_key"], "scheduled-jobs-clear:synthetic-loop")
+
+    def test_scheduled_drift_recovery_refuses_invalid_loop_readback(self):
+        import job_watchdog as w
+        from unittest.mock import patch
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        loop = {"loop_id": "synthetic-loop", "version": 7, "status": "open"}
+        responses = [{}, loop, {"loop": None}, {"loop": {**loop, "loop_id": "other-loop"}},
+                     {"loop": {**loop, "version": True}}, {"loop": {**loop, "version": 0}},
+                     {"loop": {**loop, "status": "unknown"}}]
+        with tempfile.TemporaryDirectory() as directory:
+            effects = w.Effects(Path(directory), c)
+            for response in responses:
+                with self.subTest(response=response), \
+                     patch.object(w, "command", return_value=json.dumps(response)) as command:
+                    with self.assertRaisesRegex(RuntimeError, "scheduled-job loop readback failed"):
+                        effects.clear({"kind": "scheduled_job_drift", "loop_id": "synthetic-loop", "key": "k"})
+                    command.assert_called_once()
+                    self.assertEqual(command.call_args.args[0][2], "read-loop")
+
     def test_fixer_uses_verified_model_room_desk_and_agent_runner(self):
         import job_watchdog as w
         from unittest.mock import patch
@@ -1039,7 +1130,10 @@ class StateTests(unittest.TestCase):
         self.assertEqual(accepted, {"joe", "dell", "claude"})
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         cases = (("pr_ci_red", None, "claude"), ("job_hang", "credentials", "joe"),
-                 ("pr_blocked_review", "ruling", "joe"))
+                 ("pr_blocked_review", "money", "joe"))
+        # add-loop refuses a capability or ruling loop without a residue, so
+        # every needs_joe class the config can produce must map to one.
+        self.assertEqual(set(c["needs_joe_patterns"]), set(w.NEEDS_JOE_RESIDUE))
         for kind, needs_joe, owner in cases:
             with self.subTest(kind=kind, needs_joe=needs_joe):
                 f = w.finding(kind, "subject-" + kind, "reason", c)
