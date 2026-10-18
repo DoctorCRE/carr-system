@@ -42,11 +42,9 @@ class WorktreeReservations(unittest.TestCase):
             git("config", "core.hooksPath", "/dev/null")
             (repo / "tools").mkdir()
             (repo / "ops").mkdir()
-            for name in ("reserve-migration.py", "next-migration.py", "migration_number_contract.py",
-                         "migration_reservations.py"):
-                source = ROOT / "tools" / name
-                if source.exists():
-                    shutil.copyfile(source, repo / "tools" / name)
+            for source in [ROOT / "tools/reserve-migration.py", ROOT / "tools/next-migration.py",
+                           *(ROOT / "tools").glob("migration_*.py")]:
+                shutil.copyfile(source, repo / "tools" / source.name)
             shutil.copyfile(ROOT / "ops/git_env.py", repo / "ops/git_env.py")
             (repo / "migrations").mkdir()
             # Keep the allocator's filename contract, without copying any data.
