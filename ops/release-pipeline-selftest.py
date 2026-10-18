@@ -4344,6 +4344,9 @@ class SchemaSnapshotGhRunner(FakeRunner):
                 self.closed.append((num, argv[argv.index("--comment") + 1]))
                 self.open_prs.pop(num, None)
             return rp.Result(rc, "")
+        if argv[:3] == ["git", "status", "--porcelain"] and log.stem.endswith("schema-diff"):
+            self.calls.append(("schema-diff", list(argv)))
+            return rp.Result(0, " M db/schema.sql\n")      # the shadow rewrote the snapshot
         res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
         if log.stem.endswith("schema-pr") and res.rc == 0:
             self.open_prs[self.new_pr] = argv[argv.index("--head") + 1]
@@ -4357,15 +4360,18 @@ class RealGitRunner(FakeRunner):
     """Runs git steps for real; migrate-apply regenerates the worktree's
     db/schema.sql the way bin/migrate-prod.sh does."""
 
-    def __init__(self, schema: str, **kw):
+    def __init__(self, schema: str, shadow_schema: str | None = None, **kw):
         super().__init__(**kw)
-        self.schema = schema
+        self.schema = schema            # what bin/migrate-prod.sh dumps from production
+        self.shadow_schema = schema if shadow_schema is None else shadow_schema   # what the PG 18 shadow writes
 
     def run(self, argv, *, cwd, log, env, timeout=3600):
         if argv[0] != "git":
             res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
             if log.stem.endswith("migrate-apply"):
                 (Path(cwd) / "db/schema.sql").write_text(self.schema)
+            if log.stem.endswith("schema-shadow"):
+                (Path(cwd) / "db/schema.sql").write_text(self.shadow_schema)
             return res
         self.calls.append((log.stem.split("-", 1)[1], list(argv)))
         proc = subprocess.run(argv, cwd=str(cwd), env=env, capture_output=True, text=True)
@@ -4413,6 +4419,37 @@ class SchemaFollowupBase(Base):
         self.assertEqual(git(self.fx.repo, "rev-parse", f"{branch}^"), head)
         self.assertEqual(git(self.fx.repo, "rev-parse", "origin/main"), stale)  # shared ref untouched
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], head)
+
+    def _released_with_prod_dump(self, shadow_schema):
+        """A release whose production dump is formatted differently from main's
+        snapshot (what bin/migrate-prod.sh wrote), with a chosen shadow result."""
+        head = self.fx.commit({"db/schema.sql": "alter table a add check ((x > 0));\n", "mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = RealGitRunner("alter table a add check (x > 0);\n", shadow_schema, pending=1, live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        return head, runner, pipe
+
+    def test_snapshot_pr_is_regenerated_by_the_ci_gate_not_copied_from_the_production_dump(self):
+        head, runner, _ = self._released_with_prod_dump("alter table a add check ((x > 0)) not valid;\n")
+        shadow = [argv for name, argv in runner.calls if name == "schema-shadow"]
+        self.assertEqual(len(shadow), 1)
+        self.assertEqual(shadow[0][1:], ["ops/migration-shadow.py", "--write", "--base", head])
+        branch = f"{rp.SCHEMA_SNAPSHOT_PREFIX}{head[:8]}"
+        self.assertEqual(git(self.fx.repo, "show", f"{branch}:db/schema.sql").strip(),
+                         "alter table a add check ((x > 0)) not valid;")
+
+    def test_no_snapshot_pr_when_the_regenerated_file_equals_main(self):
+        # Production dumps `check (x > 0)`, main carries `check ((x > 0))` and the
+        # PostgreSQL 18 shadow reproduces main's text: nothing for a PR to say.
+        head, runner, pipe = self._released_with_prod_dump("alter table a add check ((x > 0));\n")
+        for step in ("schema-shadow", "schema-diff", "schema-worktree-remove", "schema-branch-remove"):
+            self.assertIn(step, runner.names())
+        for step in ("schema-commit", "schema-push", "schema-pr"):
+            self.assertNotIn(step, runner.names())
+        branch = f"{rp.SCHEMA_SNAPSHOT_PREFIX}{head[:8]}"
+        self.assertEqual(git(self.fx.repo, "branch", "--list", branch), "")
+        self.assertFalse((pipe.store.root / "worktrees" / f"schema-{head[:12]}").exists())
 
 
 class SchemaSnapshotSupersede(Base):
