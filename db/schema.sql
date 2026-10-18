@@ -40391,6 +40391,21 @@ CREATE FUNCTION ops.scac_current_grant_contract() RETURNS jsonb
       "ingress_kind": "db_function_acl",
       "function_kind": "f",
       "security_definer": true
+    },
+    {
+      "config": [
+        "search_path=pg_catalog, ops, pg_temp"
+      ],
+      "grantee": "carr_writer",
+      "parallel": "u",
+      "grantable": false,
+      "privilege": "execute",
+      "signature": "ops.write_feature_switch(p_action text, p_args jsonb)",
+      "volatility": "v",
+      "ingress_key": "db-function-acl:ops.write_feature_switch(p_action text, p_args jsonb):carr_writer:execute",
+      "ingress_kind": "db_function_acl",
+      "function_kind": "f",
+      "security_definer": true
     }
   ],
   "retired_secdef_execute": [
@@ -69778,6 +69793,71 @@ $$;
 --
 
 COMMENT ON FUNCTION ops.workflow_cutover_board(p_workflow_key text, p_workflow_version integer) IS 'DoctorCRE V5-R02 read door: active plan, stage history and caller counts for one workflow identity. Carries no census claim -- the MCP verb layer merges an independently fail-closed census read in on top of this.';
+
+
+--
+-- Name: feature_switch; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.feature_switch (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    organization_tenant_id text NOT NULL,
+    name text NOT NULL,
+    description text NOT NULL,
+    default_enabled boolean NOT NULL,
+    enabled boolean,
+    audience text NOT NULL,
+    owner text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    expected_removal_on date NOT NULL,
+    retired_at timestamp with time zone,
+    retirement_loop_id uuid,
+    version integer DEFAULT 1 NOT NULL,
+    CONSTRAINT feature_switch_audience_check CHECK ((audience = ANY (ARRAY['joe'::text, 'team'::text, 'everyone'::text]))),
+    CONSTRAINT feature_switch_description_check CHECK (((length(btrim(description)) >= 1) AND (length(btrim(description)) <= 1000))),
+    CONSTRAINT feature_switch_name_check CHECK ((name ~ '^[a-z][a-z0-9-]{0,62}$'::text)),
+    CONSTRAINT feature_switch_owner_check CHECK ((owner = ANY (ARRAY['joe'::text, 'dell'::text, 'claude'::text]))),
+    CONSTRAINT feature_switch_version_check CHECK ((version > 0))
+);
+
+
+--
+-- Name: write_feature_switch(text, jsonb); Type: FUNCTION; Schema: ops; Owner: -
+--
+
+CREATE FUNCTION ops.write_feature_switch(p_action text, p_args jsonb) RETURNS public.feature_switch
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'pg_temp'
+    AS $$
+declare r public.feature_switch;
+begin
+  if p_action='create' then
+    insert into public.feature_switch
+      (organization_tenant_id,name,description,default_enabled,audience,owner,expected_removal_on)
+    values (p_args->>'tenant',p_args->>'name',p_args->>'description',(p_args->>'default_enabled')::boolean,
+            p_args->>'audience',p_args->>'owner',(p_args->>'expected_removal_on')::date)
+    returning * into r;
+  elsif p_action='flip' then
+    update public.feature_switch set enabled=(p_args->>'enabled')::boolean,
+      audience=coalesce(p_args->>'audience',audience),version=version+1
+    where id=(p_args->>'id')::uuid and version=(p_args->>'base_version')::integer returning * into r;
+  elsif p_action='revise' then
+    update public.feature_switch set description=p_args->>'description',
+      default_enabled=(p_args->>'default_enabled')::boolean,audience=p_args->>'audience',owner=p_args->>'owner',
+      expected_removal_on=(p_args->>'expected_removal_on')::date,
+      retired_at=case when jsonb_typeof(p_args->'retired') is distinct from 'boolean' then retired_at
+                      when (p_args->>'retired')::boolean then coalesce(retired_at,now()) else null end,
+      version=version+1
+    where id=(p_args->>'id')::uuid and version=(p_args->>'base_version')::integer returning * into r;
+  elsif p_action='link_loop' then
+    update public.feature_switch set retirement_loop_id=nullif(p_args->>'retirement_loop_id','')::uuid
+    where id=(p_args->>'id')::uuid returning * into r;
+  else
+    raise exception 'feature_switch_action_invalid';
+  end if;
+  if r.id is null then raise exception 'feature_switch_version_conflict' using errcode='40001'; end if;
+  return r;
+end $$;
 
 
 --
@@ -99901,6 +99981,22 @@ ALTER TABLE ONLY public.export_run
 
 
 --
+-- Name: feature_switch feature_switch_organization_tenant_id_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feature_switch
+    ADD CONSTRAINT feature_switch_organization_tenant_id_name_key UNIQUE (organization_tenant_id, name);
+
+
+--
+-- Name: feature_switch feature_switch_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feature_switch
+    ADD CONSTRAINT feature_switch_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: growth_snapshot growth_snapshot_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -108188,6 +108284,13 @@ CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDAT
 
 
 --
+-- Name: feature_switch scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_row BEFORE INSERT OR DELETE OR UPDATE ON public.feature_switch FOR EACH ROW EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
 -- Name: growth_snapshot scac_reference_monitor_guard_row; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -109088,6 +109191,13 @@ CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.e
 --
 
 CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.export_run FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
+
+
+--
+-- Name: feature_switch scac_reference_monitor_guard_truncate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scac_reference_monitor_guard_truncate BEFORE TRUNCATE ON public.feature_switch FOR EACH STATEMENT EXECUTE FUNCTION ops.scac_reference_monitor_guard();
 
 
 --
@@ -118487,6 +118597,7 @@ revoke all on function ops.work_request_evidence_requires_live_request() from pu
 revoke all on function ops.work_request_supersession_strands(p_work_request_id uuid) from public;
 revoke all on function ops.work_request_triage_receipt_append_only() from public;
 revoke all on function ops.workflow_cutover_board(p_workflow_key text, p_workflow_version integer) from public;
+revoke all on function ops.write_feature_switch(p_action text, p_args jsonb) from public;
 revoke all on function ops.write_pitr_probe(p_role text) from public;
 revoke all on function ops.write_tour_share_comment(p_session_digest text, p_projection_ref text, p_property_ref text, p_comment text, p_idempotency_key uuid) from public;
 revoke all on function ops.write_tour_share_feedback(p_session_digest text, p_projection_ref text, p_property_ref text, p_action text, p_shortlisted boolean, p_comment text, p_idempotency_key uuid) from public;
@@ -119767,6 +119878,9 @@ grant select on table public.experiment to dot_reader;
 grant insert, select on table public.export_run to carr_exporter;
 grant insert, select, update on table public.export_run to carr_writer;
 grant select on table public.export_run to dot_reader;
+grant select on table public.feature_switch to carr_reader;
+grant select on table public.feature_switch to carr_writer;
+grant select on table public.feature_switch to dot_reader;
 grant insert, select on table public.growth_snapshot to carr_jobs;
 grant select on table public.growth_snapshot to carr_reader;
 grant select on table public.growth_snapshot to dot_reader;
@@ -121906,6 +122020,7 @@ grant execute on function ops.work_request_evidence_receipt_kind(p_receipt text)
 grant execute on function ops.work_request_evidence_receipt_normalized(p_ref text) to carr_reader;
 grant execute on function ops.work_request_evidence_receipt_normalized(p_ref text) to carr_writer;
 grant execute on function ops.workflow_cutover_board(p_workflow_key text, p_workflow_version integer) to carr_reader;
+grant execute on function ops.write_feature_switch(p_action text, p_args jsonb) to carr_writer;
 grant execute on function ops.write_tour_share_comment(p_session_digest text, p_projection_ref text, p_property_ref text, p_comment text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.write_tour_share_feedback(p_session_digest text, p_projection_ref text, p_property_ref text, p_action text, p_shortlisted boolean, p_comment text, p_idempotency_key uuid) to carr_writer;
 grant execute on function ops.write_tour_share_shortlist(p_session_digest text, p_projection_ref text, p_property_ref text, p_shortlisted boolean, p_idempotency_key uuid) to carr_writer;
@@ -122535,6 +122650,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
 0897_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 07:03:58.910517+00
 0900_studio_failover_leader.sql	a6dfdd933aeb33abb9ab449939a63041605c4c38b636d057198d8e625bf05629	2026-10-18 08:27:43.727306+00
+0902_feature_switches.sql	22a66e95e02aef1e0ea8871ea4d5148a2eb946e3f7444fdd75738fc1897fe72c	2026-10-18 09:03:05.153122+00
 \.
 
 
