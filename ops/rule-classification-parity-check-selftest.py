@@ -155,6 +155,38 @@ def _run_cli(map_data, export_data, *, expect_rc, expect_stdout_contains=None):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def case_offline_retirement_prune():
+    """Exercise the sanctioned writer with no database or credential dependency."""
+    with tempfile.TemporaryDirectory(prefix="admission-prune-selftest-") as tmp:
+        snapshot = os.path.join(tmp, "snapshot.json")
+        reviewed = os.path.join(tmp, "map.json")
+        original = {"schema_version": 1, "exported_at": "2026-01-01T00:00:00Z",
+                    "source": "frozen-store-read", "rule_count": 2,
+                    "rules": {"aaaaaaaa": {"state": "admitted"}, "bbbbbbbb": {"state": "admitted"}}}
+        with open(snapshot, "w") as fh:
+            json.dump(original, fh)
+        with open(reviewed, "w") as fh:
+            json.dump({"active_rule_ids": {"shared": ["aaaaaaaa"]}}, fh)
+        command = [sys.executable, os.path.join(REPO, "tools/export-rule-admission.py"),
+                   "--out", snapshot, "--prune-to-map", reviewed]
+        env = {key: value for key, value in os.environ.items() if key != "DATABASE_URL"}
+        result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            actual = json.load(fh)
+        expected = dict(original, rules={"aaaaaaaa": original["rules"]["aaaaaaaa"]}, rule_count=1)
+        ok = result.returncode == 0 and actual == expected
+        repeated = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            ok = ok and repeated.returncode == 0 and json.load(fh) == expected
+        with open(reviewed, "w") as fh:
+            json.dump({"active_rule_ids": {}}, fh)
+        refused = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
+        with open(snapshot) as fh:
+            ok = ok and refused.returncode != 0 and json.load(fh) == expected
+        print(f"{'PASS' if ok else 'FAIL'}  offline retirement prune preserves provenance, is idempotent, and refuses an empty map")
+        return ok
+
+
 def main() -> int:
     partial_map = copy.deepcopy(MAP_BASE)
     partial_controls = partial_map["rule_controls"]
@@ -165,8 +197,29 @@ def main() -> int:
     stale_partial_export = with_rule(EXPORT_BASE, "204391be",
                                      {"enforcement_class": "judgment_advisory",
                                       "state": "admitted"})
+    removed_why = ("Automated gate conduct_stop removed in PR 1801 under Joe's 2026-10-15 "
+                   "purge ruling; the rule stays in force as prose guidance.")
+    removed_map = copy.deepcopy(MAP_BASE)
+    removed_controls = removed_map["rule_controls"]
+    assert isinstance(removed_controls, dict)
+    removed_controls["dddddddd"] = {
+        "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
+        "why_unenforceable": removed_why}
+    plain_judgment_map = copy.deepcopy(MAP_BASE)
+    plain_controls = plain_judgment_map["rule_controls"]
+    assert isinstance(plain_controls, dict)
+    plain_controls["dddddddd"] = {
+        "category": "judgment_advisory", "enforcement_class": "judgment_ambient",
+        "why_unenforceable": "Framing judgment for a specific kind of proposal."}
+    machine_export = with_rule(EXPORT_BASE, "dddddddd",
+                               {"enforcement_class": "machine_enforceable", "state": "admitted"})
     cases = [
         case_unit_buckets(),
+        case("a removed-gate rule may lead the export until production re-syncs",
+             removed_map, machine_export, expect_ok=True, expect_compared=3),
+        case("a judgment rule without the removed-gate record still fails",
+             plain_judgment_map, machine_export, expect_ok=False,
+             expect_mismatch_ids=["dddddddd"]),
         case("matching buckets pass", MAP_BASE, EXPORT_BASE,
              expect_ok=True, expect_compared=2),
         case("divergent bucket fails and names the rule",
@@ -195,6 +248,7 @@ def main() -> int:
         case_cli_divergent_fails(),
         case_cli_unmapped_export_rule_fails(),
         case_cli_empty_export_passes(),
+        case_offline_retirement_prune(),
     ]
     print(f"rule-classification-parity-check-selftest: {sum(cases)}/{len(cases)} passed")
     return 0 if all(cases) else 1

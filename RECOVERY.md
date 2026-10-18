@@ -72,7 +72,7 @@ edge node, not recovering data.
    yourself is named there with the path to get it.
 4. **Reinstall the scheduled jobs**: `ops/config-as-code.py install --apply`
    writes the launchd agents from the repo copies.
-5. **Verify**: `./run.sh health`, `tools/scheduler-truth.py`, and
+5. **Verify**: `./run.sh health`, `ops/scheduled-jobs-check.py`, and
    `tools/ops-record.py health`. The last one should stop reading `unknown` for
    the local jobs as each next fires.
 
@@ -114,7 +114,7 @@ only history that exists. There is no vendor safety net behind them.
 
 A plain PostgreSQL dump — SQL text. `CREATE TABLE`, `COPY`, thousands of rows.
 Nothing exotic: any Postgres can consume it, and restoring is piping it into an
-empty database. `restore-rehearse.sh` automates exactly that, plus the branch
+empty database. `bin/restore-rehearse.sh` automates exactly that, plus the branch
 creation, the row-count comparison and the teardown.
 
 That is worth knowing because it means the recovery does not depend on this

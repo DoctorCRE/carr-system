@@ -1,25 +1,3 @@
-// arg-type-coercion.test.mjs — coverage for loop 353, found live 2026-08-13.
-//
-// THE DEFECT. `teach` decides a taught rule's SCOPE (shared, binding both
-// partners, versus personal, binding one) from a declared-boolean argument. It
-// stored that scope with loose truthiness (`args.personal ? actor.id : null`)
-// and echoed it back with strict equality (`args.personal === true`). MCP
-// tool-call arguments are never validated against inputSchema server-side —
-// mcp.js's callTool passes `rpc.params?.arguments` straight through — so a
-// boolean sent as the STRING "false" was truthy at the storage line and false
-// at the echo line. Two live calls on 2026-08-13 asked for a SHARED rule,
-// received `personal_requested:false` AND `scope_applied:"personal:joe"`, and
-// stored a rule that would have bound one partner while its own text bound
-// both. Only a hand comparison of two exported files caught it.
-//
-// THE SAME ROOT CAUSE as decision 7026246b's compareVersion fix, which repaired
-// exactly one field (base_version). A sweep of mcp-server/src found 17 more
-// sites reading a declared boolean or number with loose truthiness or bare
-// arithmetic, SEVEN of them writing a wrong value straight to the database. So
-// the fix is at the choke point (executeRegisteredTool), not per handler.
-//
-// Run with: node --test mcp-server/test/arg-type-coercion.test.mjs
-// (also picked up by `npm test`'s test/*.test.mjs glob).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,16 +5,11 @@ import { TOOLS, ToolError, executeRegisteredTool, coerceArgsToSchema, assertRequ
 
 const S = (properties) => ({ type: "object", properties });
 
-// ────────────────────────────────────────────────────────────────────────
-// coerceArgsToSchema — pure logic, no DB.
-// ────────────────────────────────────────────────────────────────────────
 
 test("THE BUG — a declared boolean arriving as the string \"false\" becomes false, not truthy", () => {
   const args = { personal: "false" };
   coerceArgsToSchema(S({ personal: { type: "boolean" } }), args);
   assert.equal(args.personal, false);
-  // The exact assertion the defect failed: the storage line and the echo line
-  // must now agree, whichever comparison style each uses.
   assert.equal(args.personal ? "personal" : "shared", "shared");
   assert.equal(args.personal === true, false);
 });
@@ -72,10 +45,6 @@ test("declared numbers coerce from numeric strings and refuse non-numeric ones",
 });
 
 test("STRICTLY SCHEMA-DRIVEN — a declared string holding \"true\" is never touched", () => {
-  // The safety property that makes a boundary coercer safe at all: free text is
-  // untouchable by construction, because only the DECLARED type is consulted
-  // and the value is never sniffed. human_quote, note and rationale are all
-  // declared strings and routinely carry prose.
   const args = { human_quote: "true", statement: "false", note: "42" };
   coerceArgsToSchema(S({
     human_quote: { type: "string" }, statement: { type: "string" }, note: { type: "string" },
@@ -84,8 +53,6 @@ test("STRICTLY SCHEMA-DRIVEN — a declared string holding \"true\" is never tou
 });
 
 test("a union type is skipped rather than guessed at", () => {
-  // log-decision's `about` takes string OR array; patch-deal-field has nullable
-  // strings. Coercing either to one scalar would destroy the other.
   const args = { about: "C-127", other: "5", nullable: "true" };
   coerceArgsToSchema(S({
     about: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" } }] },
@@ -105,8 +72,6 @@ test("absent, null and undefined fields are left alone, not defaulted", () => {
 });
 
 test("RECURSION — nested flags coerce, including one inside an array item's nested object", () => {
-  // add-premises carries also_listing_side inside ownership[], and force_new one
-  // level deeper inside ownership[].new_party. A top-level-only walk misses both.
   const schema = S({
     ownership: { type: "array", items: S({
       also_listing_side: { type: "boolean" },
@@ -124,19 +89,13 @@ test("RECURSION — nested flags coerce, including one inside an array item's ne
 });
 
 test("a free-form object with no declared properties is a no-op, not a crash", () => {
-  // teach's own `scope` is {type:"object"} with no properties.
   const args = { scope: { section: "Operating mechanics", anything: "true" } };
   coerceArgsToSchema(S({ scope: { type: "object" } }), args);
   assert.deepEqual(args, { scope: { section: "Operating mechanics", anything: "true" } });
 });
 
-// ────────────────────────────────────────────────────────────────────────
-// The real teach schema, and the choke point that applies the coercion.
-// ────────────────────────────────────────────────────────────────────────
 
 test("teach's REAL inputSchema still declares personal as a boolean", () => {
-  // If this ever stops being true the coercion silently stops covering the
-  // field that caused the defect, so it is asserted rather than assumed.
   assert.equal(TOOLS["teach"].inputSchema.properties.personal.type, "boolean");
 });
 
@@ -156,11 +115,9 @@ test("REGRESSION — teach through the choke point stores SHARED when personal i
     enforcement_home: "core",
   });
 
-  // personal_to is params[4]; null means SHARED.
   assert.equal(inserts[0][4], null, "a shared rule must not be stored with a personal_to actor");
   assert.equal(out.scope_applied, "shared");
   assert.equal(out.personal_requested, false);
-  // The pre-fix response was the contradiction itself: these two disagreed.
   assert.equal(out.scope_applied === "shared", out.personal_requested === false);
 });
 
@@ -216,42 +173,12 @@ test("the choke point rejects a garbage boolean before the handler runs", async 
 });
 
 test("every verb's inputSchema is walkable without throwing on well-typed args", () => {
-  // A coercer that crashed on some verb's schema shape would take down the whole
-  // choke point. Walking all of them with an empty payload proves the walk is
-  // total over the live registry, not just the schemas this file hand-writes.
   for (const [name, tool] of Object.entries(TOOLS)) {
     assert.doesNotThrow(() => coerceArgsToSchema(tool.inputSchema, {}),
       `coerceArgsToSchema threw walking ${name}`);
   }
 });
 
-// ────────────────────────────────────────────────────────────────────────
-// REQUIRED ARGUMENTS, added 2026-08-14 after the same choke point let a verb
-// answer confidently with nothing.
-//
-// THE DEFECT. Every verb declares `required` in its inputSchema and NOTHING
-// enforced it. mcp.js passes rpc.params.arguments straight through, and the
-// local CLI path does too, so a required field that was misspelled — or simply
-// absent — arrived as undefined and the handler ran anyway. search-doctrine
-// builds websearch_to_tsquery('english', undefined), which is not an error in
-// Postgres: it matches nothing. Measured live before this fix:
-//
-//     search-doctrine {"query":"HIPAA"}  ->  ok:true, hits:[], total:0
-//     search-doctrine {}                 ->  ok:true, hits:[], total:0
-//     search-doctrine {"q":"HIPAA"}      ->  20 hits
-//
-// A call carrying NO ARGUMENTS AT ALL returned a clean, confident empty answer.
-//
-// WHY THAT IS WORSE THAN A CRASH, and the reason this is not cosmetic: an empty
-// result set is indistinguishable from a genuine absence. On 2026-08-14 a
-// session searched doctrine for a settled council ruling, was handed total:0,
-// and concluded the ruling did not exist — then filed a defect saying the
-// doctrine read path was broken. The ruling was there. The parameter name was
-// wrong. Rule c53beeaa already says an ok:true confirms the call PARSED and
-// never that the values landed; this is that rule enforced at the door.
-//
-// The near-miss suggestion exists because that is the actual failure mode: the
-// caller had the schema in front of them and still sent `query` for `q`.
 
 test("required: a missing required argument is refused, not answered emptily", () => {
   const schema = { type: "object", properties: { q: { type: "string" } }, required: ["q"] };
@@ -288,9 +215,7 @@ test("required: null and empty string are absent; false and 0 are PRESENT", () =
                    properties: { flag: { type: "boolean" }, n: { type: "integer" },
                                  s: { type: "string" } },
                    required: ["flag", "n", "s"] };
-  // A caller who genuinely means false or zero has supplied the argument.
   assert.doesNotThrow(() => assertRequiredArgs(schema, { flag: false, n: 0, s: "x" }));
-  // null and "" carry no instruction and are what an unset template produces.
   assert.throws(() => assertRequiredArgs(schema, { flag: false, n: 0, s: "" }),
     (e) => /missing_required/.test(JSON.stringify(e.payload)));
   assert.throws(() => assertRequiredArgs(schema, { flag: null, n: 0, s: "x" }),
@@ -304,8 +229,6 @@ test("required: a schema with no required list accepts anything", () => {
 });
 
 test("required: every verb that declares required fields is actually guarded", () => {
-  // The choke point must apply to ALL of them, not a hand-kept list — that is
-  // the whole reason this lives in executeRegisteredTool.
   const withRequired = Object.entries(TOOLS)
     .filter(([, t]) => Array.isArray(t?.inputSchema?.required) && t.inputSchema.required.length);
   assert.ok(withRequired.length > 20,

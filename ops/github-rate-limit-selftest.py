@@ -19,6 +19,7 @@ class BudgetReads(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / 'state.json'
+        self.env = {'GH_LIMITER_DIR': str(Path(self.tmp.name) / 'legacy-budget')}
         self.now = 1000.0
         self.calls = []
 
@@ -26,7 +27,7 @@ class BudgetReads(unittest.TestCase):
         self.tmp.cleanup()
 
     def budget(self, **kw):
-        return GitHubReadBudget({}, path=self.path, clock=lambda: self.now, spacing=0, **kw)
+        return GitHubReadBudget(self.env, path=self.path, clock=lambda: self.now, spacing=0, **kw)
 
     def reader(self, results, **kw):
         def gh(argv, **options):
@@ -85,13 +86,13 @@ class BudgetReads(unittest.TestCase):
     def test_resource_and_principal_pools_are_separate(self):
         self.budget().observe('core', {'x-ratelimit-reset': '1500', 'x-ratelimit-remaining': '0'}, '', 1000)
         self.budget().check('graphql')
-        app = GitHubReadBudget({'CARR_GITHUB_BUDGET_PRINCIPAL': 'app:123:org/repo'}, path=self.path, clock=lambda: self.now, spacing=0)
+        app = GitHubReadBudget({**self.env, 'CARR_GITHUB_BUDGET_PRINCIPAL': 'app:123:org/repo'}, path=self.path, clock=lambda: self.now, spacing=0)
         app.check('core')
         with self.assertRaises(GitHubReadPaused):
             self.budget().check('core')
 
     def test_pacing_and_hold_arriving_during_queue_wait(self):
-        gate = GitHubReadBudget({}, path=self.path, clock=lambda: self.now, spacing=2)
+        gate = GitHubReadBudget(self.env, path=self.path, clock=lambda: self.now, spacing=2)
         self.assertEqual(gate.reserve('core'), 0)
         self.assertEqual(gate.reserve('core'), 2)
         def pause(seconds):
@@ -146,7 +147,7 @@ class BudgetReads(unittest.TestCase):
         gate = self.budget()
         gate.observe('unknown', {}, 'API rate limit exceeded', 1000)
         gate.observe('core', {'retry-after': '60'}, 'HTTP 429', 1000)
-        app = GitHubReadBudget({'CARR_GITHUB_BUDGET_PRINCIPAL': 'app:123:org/repo'},
+        app = GitHubReadBudget({**self.env, 'CARR_GITHUB_BUDGET_PRINCIPAL': 'app:123:org/repo'},
                                path=self.path, clock=lambda: self.now, spacing=0)
         with self.assertRaises(GitHubReadPaused) as app_hold:
             app.check('graphql')

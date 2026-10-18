@@ -8,6 +8,14 @@ const CLIENT_PROFILES = Object.freeze({
     identityNotice: "local machine actor (via local-token)",
     workerSecret: "LOCAL_TOKENS",
   }),
+  // The runner nobody sits beside (launchd/nightly, Model Room desks). Its own
+  // token and Worker secret: a missing unattended token stays missing rather
+  // than borrowing the attended local credential.
+  unattended: Object.freeze({
+    tokenVariable: "CARR_MCP_UNATTENDED_TOKEN",
+    identityNotice: "unattended machine actor (via unattended-token)",
+    workerSecret: "UNATTENDED_TOKENS",
+  }),
   "codex-continuity": Object.freeze({
     tokenVariable: "CARR_CODEX_CONTINUITY_MCP_TOKEN",
     identityNotice: "Codex continuity actor (via codex-continuity-token)",

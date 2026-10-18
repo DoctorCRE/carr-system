@@ -207,7 +207,8 @@ class GitHubReadBudget:
         with self.state() as data:
             self._check(data, resource)
 
-    def reserve(self, resource):
+    def reserve(self, resource, *, with_slot=False):
+        """Return the reserved delay, optionally paired with its absolute wall slot."""
         with self.state() as data:
             self._check(data, resource)
             row = data.setdefault(self.shared, {})
@@ -215,7 +216,8 @@ class GitHubReadBudget:
             slot = max(now, float(row.get("next_start", 0)))
             row["next_start"] = slot + self.spacing
             data[self.shared] = row
-            return max(0, slot - now)
+            delay = max(0, slot - now)
+            return (slot, delay) if with_slot else delay
 
     def observe(self, resource, headers, diagnostic, observed_at):
         until = retry_deadline(headers, diagnostic, observed_at)

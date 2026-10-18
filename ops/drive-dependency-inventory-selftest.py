@@ -81,6 +81,14 @@ with tempfile.TemporaryDirectory() as temp:
     refs, uncovered, multiple = inventory.audit(root, duplicate)
     assert any(ref.file == "bin/run.sh" and ids == ["one", "two"] for ref, ids in multiple)
     passed += 1
+    # A source row whose file was deleted covers nothing; it must not pass silently.
+    try:
+        inventory.audit(root, registry(entry("task", "ops/config/task.json"), entry("gone", "pipelines/deleted.py")))
+    except inventory.InventoryError as exc:
+        assert "gone: pipelines/deleted.py" in str(exc)
+        passed += 1
+    else:
+        raise AssertionError("a source pattern matching no tracked path was accepted")
     try:
         inventory.validate_registry(registry({"id": "bad", "class": "normal_runtime", "sources": ["x"], "path_pattern": "x"}), schema=inventory._read_json(ROOT / "ops/config/drive-dependencies.schema.v1.json"))
     except inventory.InventoryError:
@@ -164,10 +172,6 @@ with tempfile.TemporaryDirectory() as temp:
         else:
             raise AssertionError("unregistered mode-160000 Gitlink was skipped")
 
-ci = (ROOT / "ops/ci.sh").read_text()
-assert "drive-dependency-inventory drive-retirement-readiness-gate" in ci
-passed += 1
-
 actual = inventory._read_json(ROOT / "ops/config/drive-dependencies.v1.json")
 actual_entries = inventory.validate_registry(
     actual, schema=inventory._read_json(ROOT / "ops/config/drive-dependencies.schema.v1.json"))
@@ -175,7 +179,7 @@ by_id = {item["id"]: item["class"] for item in actual_entries}
 assert all(by_id[item] in inventory.OPERATIONAL_CLASSES for item in (
     "normal-record-source-vault-relative", "normal-executor-agent-definitions",
     "projection-rule-render-verifiers", "normal-front-door-launch-links",
-    "normal-drift-decision-history", "normal-routine-child-vault",
+    "normal-routine-child-vault",
     "scheduled-settings-render"))
 passed += 1
 

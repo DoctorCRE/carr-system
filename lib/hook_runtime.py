@@ -1,18 +1,46 @@
 """Claude hook event transport and verdicts, shared by gates and fixtures."""
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from functools import wraps
 import io
 import json
-import os
 import sys
 
 
-@dataclass(frozen=True)
 class Verdict:
-    code: int = 0
-    stdout: str = ''
-    stderr: str = ''
+    """An immutable (code, stdout, stderr) triple.
+
+    Hand-written rather than a frozen dataclass: every hook process imports
+    this module, and `dataclasses` (with `inspect` behind it) was about 20 ms
+    of CPU per hook start on the 2026-10-12 measurement, paid dozens of times
+    per tool call for three fields.
+    """
+    __slots__ = ('code', 'stdout', 'stderr')
+
+    def __init__(self, code=0, stdout='', stderr=''):
+        object.__setattr__(self, 'code', code)
+        object.__setattr__(self, 'stdout', stdout)
+        object.__setattr__(self, 'stderr', stderr)
+
+    def __setattr__(self, name, value):
+        raise AttributeError(f"cannot assign to field {name!r}")
+
+    def __delattr__(self, name):
+        raise AttributeError(f"cannot delete field {name!r}")
+
+    def _fields(self):
+        return (self.code, self.stdout, self.stderr)
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self._fields() == other._fields()
+
+    def __hash__(self):
+        return hash(self._fields())
+
+    def __repr__(self):
+        return (f"{self.__class__.__qualname__}(code={self.code!r}, "
+                f"stdout={self.stdout!r}, stderr={self.stderr!r})")
 
     @classmethod
     def block(cls, reason):
@@ -55,6 +83,15 @@ class Verdict:
         return self.code
 
 
+def announce(message, event="Stop"):
+    try:
+        Verdict.announce(message, event).emit(sys.stdout, sys.stderr)
+        sys.stdout.flush()
+    except Exception:
+        pass
+    return 0
+
+
 class Event(dict):
     def transcript(self, *, hook, log_path=None):
         from lib.transcript_read import load_transcript
@@ -64,22 +101,6 @@ class Event(dict):
         return load_transcript(path, hook=hook,
                                session=self.get('session_id') or self.get('sessionId'),
                                log_path=log_path)
-
-    def latch(self, hook, reason, claims):
-        from hooks import stop_latch
-        session = self.get('session_id') or self.get('sessionId')
-        identity = stop_latch.claim_identity(hook, reason, claims)
-        # Fixtures relocate state before invoking this method; existing gates
-        # can keep their imported latch state and individual banking order.
-        saved = stop_latch.STATE
-        stop_latch.STATE = os.environ.get('CARR_STOP_LATCH_STATE') or saved
-        try:
-            if stop_latch.latched(session, identity):
-                return True
-            stop_latch.record_fire(session, identity)
-            return False
-        finally:
-            stop_latch.STATE = saved
 
 
 def decision(function=None, *, on_error=None, failure="open"):

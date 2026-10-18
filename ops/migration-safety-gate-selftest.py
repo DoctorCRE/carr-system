@@ -19,6 +19,7 @@ its inputs.
 Run: .venv/bin/python ops/migration-safety-gate-selftest.py
 """
 import hashlib
+import json
 import importlib.util
 import os
 import pathlib
@@ -279,6 +280,46 @@ with tempfile.TemporaryDirectory() as tmp:
     git(repo, "checkout", "-q", "main")
     r = run_gate(repo, "--base", "main")
     check("a run on main itself passes", r.returncode == 0, r.stdout + r.stderr)
+
+    # Removing covered SQL must preserve its full ledger identity and history.
+    source = git(repo, "rev-parse", "HEAD").strip()
+    snapshot_text = (repo / "db/schema.sql").read_text()
+    manifest = {
+        "schema": "carr-migration-baseline/v1", "source_revision": source,
+        "snapshot": {"path": "db/schema.sql", "sha256": digest(snapshot_text)},
+        "cutoff": "0001_legacy.sql",
+        "migrations": [{"filename": "0001_legacy.sql",
+                        "sha256": digest("alter table deal drop column legacy;\n")}],
+    }
+    write(repo, "db/migration-baseline.json", json.dumps(manifest))
+    (repo / "migrations/0001_legacy.sql").unlink()
+    git(repo, "add", "db/migration-baseline.json", "migrations/0001_legacy.sql")
+    git(repo, "commit", "-q", "-m", "covered history")
+    r = run_gate(repo, "--base", source)
+    check("covered SQL absent from disk keeps the unchanged historical ledger",
+          r.returncode == 0, r.stdout + r.stderr)
+    write(repo, "db/schema.sql", ledger([("0001_legacy.sql", "0" * 64)]))
+    git(repo, "add", "db/schema.sql")
+    git(repo, "commit", "-q", "-m", "corrupt historical ledger")
+    r = run_gate(repo, "--base", source)
+    check("a covered filename with a different ledger checksum is stale",
+          r.returncode == 1 and "checksum" in r.stderr, r.stdout + r.stderr)
+    r = run_gate(repo, "--base", source, "--head", source)
+    check("an exact pre-manifest ref still uses its own full-file history",
+          r.returncode == 0, r.stdout + r.stderr)
+
+    git(repo, "checkout", "-q", "HEAD~1")
+    established = git(repo, "rev-parse", "HEAD").strip()
+    manifest["snapshot"] = {"path": "db/schema.sql", "sha256": "f" * 64}
+    write(repo, "db/migration-baseline.json", json.dumps(manifest))
+    git(repo, "add", "db/migration-baseline.json")
+    git(repo, "commit", "-q", "-m", "rewrite baseline snapshot binding")
+    r = run_gate(repo, "--base", source)
+    check("the manifest must bind the exact pinned source snapshot bytes",
+          r.returncode != 0 and "snapshot" in r.stderr, r.stdout + r.stderr)
+    r = run_gate(repo, "--base", established)
+    check("an established baseline manifest cannot change on a later branch",
+          r.returncode != 0 and "immutable" in r.stderr, r.stdout + r.stderr)
 
     r = run_gate(repo, "--base", "no-such-ref")
     check("an unreadable base is exit 2, not a pass", r.returncode == 2, r.stdout + r.stderr)

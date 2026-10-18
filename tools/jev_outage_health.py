@@ -270,6 +270,24 @@ def _body(reason):
             "Verify with a usable Jev judgment. This loop auto-closes on that judgment.")
 
 
+def outage_blocker(reason):
+    """add-loop owner and blocker fields for an outage, in its residue vocabulary.
+
+    Only credits and the API credential wait on Joe (decision cbe91287); a
+    timeout, rate limit or unreadable log is the orchestrator's to repair.
+    """
+    if reason == "billing_exhausted":
+        return {"owner": "Joe", "blocker": "human_only",
+                "blocker_detail": "Joe must add TypeSafe account credits",
+                "residue_kind": "money_movement", "residue_host": "TypeSafe"}
+    if reason == "auth_failed":
+        return {"owner": "Joe", "blocker": "capability",
+                "blocker_detail": "Joe signs back in to the TypeSafe provider (auth_failed)",
+                "residue_kind": "provider_login", "residue_host": "TypeSafe"}
+    return {"owner": "claude", "blocker": "other_lane",
+            "blocker_detail": f"The orchestrator must restore TypeSafe judgments after a provider failure: {reason}"}
+
+
 def reconcile(result, state_path, verb):
     """Idempotently open/update the one outage loop, then close on success."""
     try:
@@ -286,10 +304,7 @@ def reconcile(result, state_path, verb):
             return "none"
         if result["status"] == "warn":
             reason = result["reason"]
-            payload = {"kind": "open_loop", "owner": "Joe", "domain": "system",
-                       "blocker": "human_only" if reason == "billing_exhausted" else "capability",
-                       "blocker_detail": ("Joe must add TypeSafe account credits" if reason == "billing_exhausted"
-                                          else f"TypeSafe provider failure: {reason}"), "body": _body(reason)}
+            payload = {"kind": "open_loop", "domain": "system", **outage_blocker(reason), "body": _body(reason)}
             outcome = repair_loop.reconcile(state, payload, verb, save)
             if state.get("loop_id"):
                 state["state"] = "outage_open"
@@ -307,6 +322,9 @@ def reconcile(result, state_path, verb):
 
 
 def call_verb(name, payload):
-    """A loop verb's reply, or {"ok": False} for anything but an ok outcome."""
+    """A loop verb's reply, or {"ok": False} for anything but an ok outcome;
+    `refused` marks a definite no from the record layer (nothing written)."""
     result = record_call.call_verb(name, payload, timeout=35)
-    return result.reply if result.ok and isinstance(result.reply, dict) else {"ok": False}
+    if result.ok and isinstance(result.reply, dict):
+        return result.reply
+    return {"ok": False, "refused": result.kind == record_call.REFUSED}

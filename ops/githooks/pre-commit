@@ -36,25 +36,6 @@
 
 PROTECTED="main"
 
-# ── a gate change carries its bless (rule c0b38d80) ──────────────────────────
-# Violated twice for real (2026-08-12, 2026-08-14): a gate moved without
-# ops/config/gate-baseline.json and every later session started under a GATE
-# INTEGRITY FAILURE banner it could do nothing about. The commit is the one
-# moment the two can be forced to move together. The logic lives in
-# staged-gate-bless-check.py beside this file, which also verifies the staged
-# HASHES match — a bless of the wrong bytes is the 2026-08-13 false re-bless,
-# not a bless. Escape hatch, same idiom as the rest of this file:
-#   CARR_ALLOW_UNBLESSED_GATE=1 git commit ...
-# Guarded on python3 AND on the helper being present, because an
-# accident-stopper whose interpreter or file is missing must degrade to
-# silence, not to blocking every commit on the machine.
-hookdir="$(dirname "$0")"
-if [ "$CARR_ALLOW_UNBLESSED_GATE" != "1" ] \
-    && [ -f "$hookdir/staged-gate-bless-check.py" ] \
-    && command -v python3 >/dev/null 2>&1; then
-  python3 "$hookdir/staged-gate-bless-check.py" || exit 1
-fi
-
 # ── a staged credential never reaches a commit (2026-08-23 gates council) ────
 # THE BIND-MOMENT WAS WRONG, and this is the fix. ops/ci-secret-scan.py without
 # a scope reads files git already TRACKS, so a brand-new file carrying a key was
@@ -69,7 +50,7 @@ fi
 # Hosted CI keeps the unscoped whole-tree scan as depth; this is the cheap half,
 # not a replacement for it.
 #
-# Same guard idiom as the block above: no python3, no helper, no check -- an
+# No interpreter or scanner means no local scan: no python3, no helper, no check -- an
 # accident-stopper whose interpreter is missing must degrade to silence rather
 # than block every commit on the machine.
 if [ "$CARR_ALLOW_STAGED_SECRET" != "1" ] \

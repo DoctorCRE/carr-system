@@ -566,17 +566,17 @@ SECURITY_LENS = (
 
 
 def security_lens_if_triggered(commit_sha: str) -> Optional[str]:
-    """Return the security lens when the commit touches sensitive paths, else
-    None. Fails OPEN (None) on any git error, with the error logged — a broken
-    trigger must degrade to a normal review, never block one."""
+    """Return the security lens for sensitive paths or unknown changed paths.
+    Known paths below the security tier and empty diffs return None."""
     try:
         out = subprocess.run(
             ["git", "-C", str(REPO), "diff-tree", "--no-commit-id",
              "--name-only", "-r", commit_sha],
             capture_output=True, text=True, timeout=30)
         if out.returncode != 0:
-            log(f"security-lens trigger check failed (git rc={out.returncode}); lens not armed")
-            return None
+            log(f"security-lens trigger check failed (git rc={out.returncode}); "
+                "security lens ARMED conservatively")
+            return SECURITY_LENS
         changed = [l.strip() for l in out.stdout.splitlines() if l.strip()]
         if not changed:
             return None
@@ -591,9 +591,10 @@ def security_lens_if_triggered(commit_sha: str) -> Optional[str]:
                 "security lens ARMED conservatively")
             return SECURITY_LENS
         return SECURITY_LENS if armed else None
-    except Exception as e:  # noqa: BLE001 — fail open by design, but say so
-        log(f"security-lens trigger check errored ({type(e).__name__}); lens not armed")
-        return None
+    except Exception as e:  # noqa: BLE001 — fail toward more review
+        log(f"security-lens trigger check errored ({type(e).__name__}); "
+            "security lens ARMED conservatively")
+        return SECURITY_LENS
 
 
 def render_contract_prompt(req: dict) -> str:

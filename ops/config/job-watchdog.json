@@ -66,6 +66,7 @@
     "release_log": "out/release-pipeline.log"
   },
   "board": "carr-v5",
+  "board_github_enabled": false,
   "needs_joe_lane": "needs-joe",
   "hang_patterns": [
     "(?m)^Reading additional input from stdin(?:\\.\\.\\.)?\\s*$",

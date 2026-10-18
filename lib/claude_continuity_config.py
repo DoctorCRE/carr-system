@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 MODES = frozenset({"disabled", "shadow", "checkpoint", "inject"})
 ACTIVE_MODES = frozenset({"shadow", "checkpoint", "inject"})
-EVENTS = frozenset({"UserPromptSubmit", "PostToolUse", "PreCompact", "SessionStart", "Stop"})
+EVENTS = frozenset({"PreCompact", "SessionStart"})
 HOOK_BASENAME = "/ops/claude-continuity-hook.py"
 MCP_SERVER_NAME = "carr-continuity"
 MAX_CONFIG_BYTES = 2_000_000
@@ -129,9 +129,46 @@ def has_overlay(hooks: object) -> bool:
             and any(observed_entries(entries) for entries in hooks.values()))
 
 
+def _strip_retired(hooks: dict, contract: Contract) -> None:
+    """Remove only the canonical adapter hooks left under events the contract no longer wires.
+
+    Matching is by hook identity (type command plus the exact canonical command
+    string); every other member of the same group, prompt hooks included, stays.
+    A tampered or wrapping continuity hook is left in place for validate_hooks to
+    refuse.
+    """
+    canonical = [hook for entries in contract.hooks.values() for entry in entries
+                 for hook in entry.get("hooks", []) if isinstance(hook, dict)]
+    commands = {hook.get("command") for hook in canonical}
+
+    def owned(hook: object) -> bool:
+        return (isinstance(hook, dict) and hook.get("type") == "command"
+                and hook.get("command") in commands and hook in canonical)
+
+    for event in [event for event in hooks if event not in contract.hooks]:
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept = []
+        for entry in entries:
+            members = entry.get("hooks") if isinstance(entry, dict) else None
+            if not isinstance(members, list) or not any(owned(hook) for hook in members):
+                kept.append(entry)
+                continue
+            remaining = [hook for hook in members if not owned(hook)]
+            if remaining:
+                kept.append({**entry, "hooks": remaining})
+        if kept:
+            hooks[event] = kept
+        else:
+            del hooks[event]
+
+
 def add_overlay(document: dict, contract: Contract) -> dict:
     result = copy.deepcopy(document)
     hooks = result.setdefault("hooks", {})
+    if isinstance(hooks, dict):
+        _strip_retired(hooks, contract)
     validate_hooks(hooks, contract, require_complete=False)
     for event, wanted in contract.hooks.items():
         entries = hooks.setdefault(event, [])
@@ -147,6 +184,7 @@ def remove_overlay(document: dict, contract: Contract) -> dict:
     hooks = result.get("hooks")
     if not isinstance(hooks, dict):
         return result
+    _strip_retired(hooks, contract)
     validate_hooks(hooks, contract, require_complete=False)
     for event, wanted in contract.hooks.items():
         entries = hooks.get(event)

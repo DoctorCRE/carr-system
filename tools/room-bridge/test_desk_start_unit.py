@@ -1,19 +1,8 @@
 #!/usr/bin/env python3
-"""Unit proof for `desk start` — the command that puts a desk on the line.
+"""Plain `claude -p` prints and exits.
 
-A DESK MUST OUTLIVE ITS FIRST ANSWER. Plain `claude -p` prints and exits, so a
-session started that way is gone before the second task arrives; the live test
-in this package passed exactly once by winning that race before it was fixed.
-So starting a desk means starting a session that STAYS, and the two things
-that keep it standing are streaming input and a stdin that never reaches
-end-of-file. The launcher holds the second open by giving the session a FIFO
+a FIFO
 opened read-write, which cannot EOF while the process holds both ends.
-
-No real Claude session is booted here and no tokens are spent: a stand-in
-binds the socket and sits there, which is the only behaviour the launcher
-actually depends on.
-
-Run:  python3 tools/room-bridge/test_desk_start_unit.py
 """
 
 from __future__ import annotations

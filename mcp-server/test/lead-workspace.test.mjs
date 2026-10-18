@@ -1,6 +1,7 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+
 import { assertAdmits } from './helpers/registry-admission.mjs';
 import { TOOLS } from '../src/tools.js';
 const id=n=>`30000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
@@ -31,7 +32,7 @@ class Fake {
  if(s.startsWith('with board as materialized'))return{rows:[{leads:[this.row],detail:p[0]===this.row.id?{...this.row,notes:'Synthetic original entry',correspondence:this.evidence,correspondence_coverage:'captured_entries_only'}:null}]};
  if(s.startsWith('select cl.id from client'))return{rows:p[0]===id(800)?[{id:id(800)}]:[]};
  if(s.startsWith('select l.stage')||s.startsWith('select l.client_id')||s.includes('from lead where id=$1'))return{rows:[this.row]};
- if(s.startsWith('update lead set')){this.updated={s,p};return{rows:[]}};
+ if(s.startsWith('update lead set')){this.updated={s,p};return{rows:s.includes('returning version')?[{version:++this.row.version}]:[]}};
  if(s.startsWith('insert into event')){this.events.push({verb:p[2],field:p[5],old:JSON.parse(p[6]),new:JSON.parse(p[7]),cause:s.match(/'(human_stated|human_correction|automation_job)'/)[1],quote:p[8],reason:p[9]});return{rows:[]}};
  if(s.includes('from v_lead_board b'))return{rows:[{...this.row,party_id:id(2)}]};
  if(s.startsWith('select p.phone'))return{rows:[{phone:'+1-555-010-0000',email:'example@example.test',notes:'Synthetic original entry'}]};
@@ -65,7 +66,7 @@ test('Claim authenticated human on unowned New preserves stage; refuses claimed,
  for(const fields of [{live_party:false},{stage:'qualified'},{owner_id:id(2)},{client_id:id(2)},{is_client:true},{linked_client:true},{suppressed:true}]){const bad=new Fake();Object.assign(bad.row,fields);await assert.rejects(()=>TOOLS['claim-lead'].handler(bad,human,args()),e=>e.payload.error==='lead_not_claimable');assert.equal(bad.updated,undefined)}
  const stale=new Fake();stale.row.version=2;await assert.rejects(()=>TOOLS['claim-lead'].handler(stale,human,args()),e=>e.payload.error==='version_conflict');
 });
-test('Archived stage migration is explicit and never rewrites history',async()=>{const s=await readFile(new URL('../../migrations/0845_lead_archived_stage.sql',import.meta.url),'utf8');assert.match(s,/'archived'/);assert.match(s,/on conflict/);assert.doesNotMatch(s,/update (?:lead|event)\s|delete from/i)});
+test('Archived stage migration is explicit and never rewrites history',async()=>{const s=await readMigration(new URL('../../migrations/0845_lead_archived_stage.sql',import.meta.url));assert.match(s,/'archived'/);assert.match(s,/on conflict/);assert.doesNotMatch(s,/update (?:lead|event)\s|delete from/i)});
 
 test('actor switch between read and command refuses all three writes before mutation',async()=>{for(const verb of ['claim-lead','link-lead-client','update-lead']){const db=new Fake();await assert.rejects(()=>TOOLS[verb].handler(db,human,args({expected_actor:'dell',client_id:id(800),confirmed:true,fields:{stage:'qualified'}})),e=>e.payload.error==='account_changed');assert.equal(db.updated,undefined)}});
 
@@ -111,4 +112,29 @@ test('non-Alabama omitted owner retains the calling executor and omitted score f
  const db=new Fake(),executor={...human,id:id(902),slug:'codex',display:'Synthetic executor',human:false};
  await TOOLS['new-lead'].handler(db,executor,{idempotency_key:'executor-key',party_id:id(2),stage:'new'});
  assert.equal(db.events[0].new.owner_id,executor.id);assert.equal(db.events[0].new.owner,executor.slug);assert.equal(db.events[0].new.score,null);assert.equal(db.events[0].new.score_reason,null);
+});
+
+
+test('stage transition proof binds locked versions and the actual writer, independent of lead owner',async()=>{
+ const db=new Fake();Object.assign(db.row,{version:7,owner_id:id(901),owner:'dell'});
+ const command=args({base_version:7,fields:{stage:'qualified'},stage_review:{reason:'Synthetic reviewed transition',evidence_ids:[]}});
+ assert.deepEqual(await TOOLS['update-lead'].handler(db,human,command),{ok:true,updated:['stage']});
+ const event=db.events[0];
+ assert.deepEqual(event.old,{stage:'new'});
+ assert.deepEqual(event.new.transition_proof,{before_version:7,after_version:8,actor_slug:'joe'});
+ assert.equal(event.new.stage,'qualified');
+ assert.equal(event.new.stage_review.reason,'Synthetic reviewed transition');
+ assert.equal((await TOOLS['update-lead'].handler(db,human,command)).replayed,true);
+ assert.equal(db.events.length,1);
+ assert.equal(db.row.version,8);
+});
+test('stage proof is absent for unrelated field events and refused actor or stale version writes',async()=>{
+ const note=new Fake();await TOOLS['update-lead'].handler(note,human,args({fields:{notes:'Synthetic note'}}));
+ assert.equal(note.events[0].new.transition_proof,undefined);
+ for(const change of [{expected_actor:'dell'},{base_version:0}]) {
+  const db=new Fake();
+  await assert.rejects(()=>TOOLS['update-lead'].handler(db,human,args({fields:{stage:'qualified'},...change})),
+   e=>['account_changed','version_conflict'].includes(e.payload?.error));
+  assert.equal(db.updated,undefined);assert.equal(db.events.length,0);
+ }
 });

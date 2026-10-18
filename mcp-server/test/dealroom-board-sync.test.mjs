@@ -1,12 +1,3 @@
-// Deal Room board sync: where the values on the board come from, and what
-// happens when two reads, a write and a poll are in flight at once.
-//
-// Every ordering claim here is EXECUTED. The reads are deferred promises
-// resolved in a deliberate order, so an overlapping refresh, a slow read, a
-// failed read and a poll that lands late are real sequences rather than
-// descriptions of one. Source assertions appear only where the claim is about
-// placement — that a code path was removed, or that app.js wires this module in
-// rather than keeping a second copy of the rule.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -25,7 +16,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-/** Let every already-settled microtask run before asserting. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const deal = (overrides = {}) => ({
@@ -46,11 +36,6 @@ const changeEvent = (overrides = {}) => ({
   field: "phase", old_value: "Research", new_value: "Negotiation", ...overrides,
 });
 
-/**
- * A coordinator over scripted reads. `boardReads` and `changeReads` are queues
- * of thunks; each call takes the next one, so a test decides exactly what the
- * Nth read does and when it answers.
- */
 function harness({ boardReads = [], changeReads = [], now = null } = {}) {
   const applied = [];
   const statuses = [];
@@ -78,7 +63,6 @@ function harness({ boardReads = [], changeReads = [], now = null } = {}) {
   };
 }
 
-// ------------------------------------------------- values come from the board
 
 test("a board snapshot is the only thing that sets a value, and the feed never does", async () => {
   const ancient = changeEvent({
@@ -93,7 +77,6 @@ test("a board snapshot is the only thing that sets a value, and the feed never d
   await h.sync.refreshBoard({ reason: "load" });
   assert.equal(h.dealById("d1").phase, "Closing");
 
-  // The oldest page of the log arrives. It carries a phase from January.
   const poll = await h.sync.pollChanges();
   assert.equal(poll.applied, true);
   assert.equal(poll.changes.events[0].new_value, "On Deck", "the page really does carry an old value");
@@ -111,11 +94,8 @@ test("app.js no longer copies any field value out of a change event", async () =
       `pollOnce must not write ${field} from an event`);
   }
   assert.doesNotMatch(pollOnce, /event\.new_value/, "no event value reaches the board at all");
-  // What the feed still does, all of it exercised by deal-change-receipts.test.mjs.
   assert.match(pollOnce, /state\.presence = result\.presence \|\| \[\];/);
   assert.match(pollOnce, /state\.captureSessions = result\.capture_sessions \|\| \[\];/);
-  // The feed still names each cell's base — through the one function that also
-  // takes a write's answer, so neither source can drag a base backwards.
   assert.match(pollOnce, /noteCellBase\(cellKey\(event\.subject_id, event\.field\), event\)/);
   assert.equal((app.match(/state\.fieldBase\.set\(/g) || []).length, 1,
     "and exactly one place writes that map");
@@ -124,7 +104,6 @@ test("app.js no longer copies any field value out of a change event", async () =
     "news asks for an authoritative read instead of applying itself");
 });
 
-// ------------------------------------------------------ serialized board reads
 
 test("overlapping refreshes never run two board reads, and collapse into one follow-up", async () => {
   const first = deferred();
@@ -154,9 +133,6 @@ test("overlapping refreshes never run two board reads, and collapse into one fol
 });
 
 test("a caller that asks after its own write waits for a NEW read, not the open one", async () => {
-  // The open read was issued before the write was confirmed, so joining it
-  // would answer with data that cannot contain it. This is why a request that
-  // arrives mid-flight queues a fresh read instead of sharing the current one.
   const open = deferred();
   const follow = deferred();
   const h = harness({ boardReads: [() => open.promise, () => follow.promise] });
@@ -183,7 +159,6 @@ test("a superseded answer is discarded: it applies nothing and moves no clock", 
 
   const hungRead = h.sync.refreshBoard({ reason: "first" });
   await settle();
-  // The reconnect path: do not queue behind a read that may never answer.
   const forced = h.sync.refreshBoard({ reason: "reconnect", force: true });
   fresh.resolve(board([deal({ phase: "Closing" })]));
   assert.equal((await forced).applied, true);
@@ -199,7 +174,6 @@ test("a superseded answer is discarded: it applies nothing and moves no clock", 
   assert.equal(h.sync.stats().board_superseded, 1);
 });
 
-// --------------------------------------------------- slow, failed, recovering
 
 test("a failed read leaves the last successful values on screen and says so", async () => {
   const h = harness({
@@ -245,7 +219,6 @@ test("the badge never claims more than has actually been read", async () => {
   const read = h.sync.refreshBoard({ reason: "load" });
   assert.equal(h.statuses.at(-1).state, SYNC_STATES.SYNCING, "a read a person is waiting on says so");
 
-  // A successful change poll is not evidence that the VALUES are current.
   await h.sync.pollChanges();
   assert.equal(h.sync.status().state, SYNC_STATES.SYNCING);
   assert.equal(h.sync.status().snapshots, 0);
@@ -258,16 +231,12 @@ test("the badge never claims more than has actually been read", async () => {
   assert.equal(h.sync.status().state, SYNC_STATES.READY);
   assert.equal(h.sync.status().snapshots, 1);
 
-  // A background refresh (the feed asked for it) changes no badge while it runs.
   const quiet = h.sync.requestRefresh("change-feed");
   assert.equal(h.sync.status().state, SYNC_STATES.READY, "a background read does not flash the badge");
   await quiet;
   assert.equal(h.sync.status().state, SYNC_STATES.READY);
 });
 
-// Regression, root's reproduction: after a board read failed, a poll that
-// succeeded with an empty page repainted the badge "ready" — a working feed
-// answering for values it does not carry.
 test("a working feed cannot clear a failed board read, and a fresh board cannot hide a failed feed", async () => {
   const h = harness({
     boardReads: [
@@ -286,7 +255,6 @@ test("a working feed cannot clear a failed board read, and a fresh board cannot 
   await h.sync.pollChanges();
   assert.equal(h.sync.status().state, SYNC_STATES.READY);
 
-  // One direction: the board read fails, then the feed answers.
   await h.sync.refreshBoard({ reason: "retry" });
   assert.equal(h.sync.status().board_health, HEALTH.FAILED);
   const afterFeed = await h.sync.pollChanges();
@@ -297,7 +265,6 @@ test("a working feed cannot clear a failed board read, and a fresh board cannot 
   assert.match(h.sync.status().last_error, /503/, "and the board's trouble is the one reported");
   assert.equal(h.sync.status().cursor, "c2", "while the feed still did its own job");
 
-  // The other direction: the board recovers while the feed is the broken one.
   const feedFailed = await h.sync.pollChanges();
   assert.equal(feedFailed.ok, false);
   assert.equal(h.sync.status().feed_health, HEALTH.FAILED);
@@ -313,8 +280,6 @@ test("a working feed cannot clear a failed board read, and a fresh board cannot 
   assert.equal(h.sync.status().last_error, null);
 });
 
-// Regression, root's reproduction: start A, queue B, force C, settle A — and B
-// started a third read behind C, bumped the sequence, and stopped C applying.
 test("forcing a read cancels the queued one, so old work cannot overtake the new generation", async () => {
   const a = deferred();
   const c = deferred();
@@ -340,7 +305,6 @@ test("forcing a read cancels the queued one, so old work cannot overtake the new
   assert.equal(outC.applied, true, "C applies, which is the whole point of forcing it");
   assert.equal(h.dealById("d1").phase, "Legal");
 
-  // B's caller is answered rather than left waiting on a read that was dropped.
   const outB = await queuedB;
   assert.equal(outB.applied, true, "B was re-homed onto C rather than run late");
   assert.equal(outB.ticket.reason, "C");
@@ -349,8 +313,6 @@ test("forcing a read cancels the queued one, so old work cannot overtake the new
   assert.equal(h.sync.stats().board_reads, 2, "three requests, two reads, none of them stale");
 });
 
-// Regression, root's reproduction: setOnline bumped the generation but left the
-// hung feed read registered, so every later tick skipped as "busy" forever.
 test("a reconnect supersedes a hung feed, and its late answer cannot move the cursor", async () => {
   const hung = deferred();
   const h = harness({
@@ -376,7 +338,6 @@ test("a reconnect supersedes a hung feed, and its late answer cannot move the cu
   assert.equal(fresh.applied, true, "polling works again after a reconnect");
   assert.equal(h.sync.status().cursor, "c3");
 
-  // The hung read answers at last, carrying a page built on the OLD cursor.
   hung.resolve(changes([changeEvent({ id: "late" })], { cursor: "c2" }));
   assert.equal((await stuck).reason, "superseded");
   assert.equal(h.sync.status().cursor, "c3", "a late answer cannot move the cursor backwards");
@@ -432,7 +393,6 @@ test("going offline stops trusting what is in flight; coming back only says we a
   assert.match(h.sync.status().last_error, /no network connection/i);
 });
 
-// ------------------------------------- a confirmed local write is not undone
 
 test("a snapshot issued before a confirmed write cannot put the old value back", async () => {
   const open = deferred();
@@ -441,8 +401,6 @@ test("a snapshot issued before a confirmed write cannot put the old value back",
 
   const inFlight = h.sync.refreshBoard({ reason: "background" });
   await settle();
-  // The partner changes the phase and parks the record; the server said yes to
-  // both while the read above was still open.
   h.sync.noteLocalWrite("d1", { phase: "Closing" });
   h.sync.noteLocalWrite("d1", { operating_state: "parked", parking_reason: "client_paused" });
   assert.equal(h.sync.status().held_fields, 3);
@@ -458,8 +416,6 @@ test("a snapshot issued before a confirmed write cannot put the old value back",
     ["d1|operating_state", "d1|parking_reason", "d1|phase"]);
   assert.equal(h.sync.status().held_fields, 3, "still held: that read could not have contained them");
 
-  // The next read is issued AFTER the write was confirmed, so it is allowed to
-  // disagree — including with a newer value someone else wrote.
   const later = h.sync.refreshBoard({ reason: "after-write" });
   next.resolve(board([deal({ phase: "Legal", operating_state: "parked", parking_reason: "other" })]));
   await later;
@@ -468,17 +424,8 @@ test("a snapshot issued before a confirmed write cannot put the old value back",
   assert.equal(h.sync.status().held_fields, 0, "and nothing is held any more");
 });
 
-// ------------------------------------------- identity across a replacement
 
-// Regression, independent review's blocking defect 1: an open review agenda
-// captured row OBJECTS, and snapshot replacement left it rendering the values
-// they had when it started — permanently, from the first refresh onward.
 test("a snapshot's per-cell bases reach the app untouched, even under a held value", async () => {
-  // The board read now carries `field_base` — each editable cell's latest
-  // committed event — beside the values. The coordinator must pass it through: it
-  // is not a value, no hold applies to it, and the app's own forward-only rule is
-  // what decides whether an older one is taken. This is the pairing the write path
-  // depends on: a HELD value on a row whose base is the older one the read saw.
   const open = deferred();
   const h = harness({ boardReads: [() => open.promise] });
   const base = { phase: { id: "e5", recorded_at: "2026-09-10T14:00:00.000000+00:00" } };
@@ -511,8 +458,6 @@ test("a row captured before a snapshot resolves to current values by id, in the 
     ],
   });
   await h.sync.refreshBoard({ reason: "load" });
-  // What an agenda captures when it starts: the row objects, in the order it
-  // chose — which is not the board's order and must not become it.
   const captured = [h.dealById("d1"), h.dealById("d3"), h.dealById("d2")];
 
   await h.sync.refreshBoard({ reason: "periodic" });
@@ -530,7 +475,6 @@ test("a row captured before a snapshot resolves to current values by id, in the 
   assert.equal(resolved[1], captured[1],
     "a record the board no longer holds stays as last seen — not dropped, not invented");
 
-  // Shapes that must not throw in the middle of a review.
   assert.equal(resolveCurrentRow(null, rows), null);
   assert.equal(resolveCurrentRow(undefined, rows), null);
   assert.equal(resolveCurrentRow({ name: "no id" }, rows).name, "no id");
@@ -539,9 +483,6 @@ test("a row captured before a snapshot resolves to current values by id, in the 
     "a plain list resolves the same way a Map does");
 });
 
-// Regression, independent review's residual 6: a request landing in the one
-// microtask between a read clearing and its follow-up starting used to see no
-// open read, start its own, and then be superseded by the follow-up.
 test("a request that lands between a read settling and its follow-up starting does not double-read", async () => {
   const first = deferred();
   const h = harness({
@@ -549,8 +490,6 @@ test("a request that lands between a read settling and its follow-up starting do
   });
 
   const readA = h.sync.refreshBoard({ reason: "A" });
-  // Registered BEFORE the queued entry's own callback, so it runs in exactly
-  // that window: boardRun already cleared, the follow-up not yet started.
   let inGap = null;
   readA.then(() => { inGap = h.sync.refreshBoard({ reason: "gap" }); });
   const queuedB = h.sync.refreshBoard({ reason: "B" });
@@ -600,13 +539,10 @@ test("a render fault is not a read fault, and a board that could not be shown is
   assert.equal(sync.status().snapshots, 0, "an unrendered snapshot is not a snapshot");
   assert.equal(sync.status().last_read_at, null);
   assert.equal(sync.status().held_fields, 1);
-  // The screen is now older than an answer we already threw away. Saying
-  // "ready" would be a claim about the page that the page cannot support.
   assert.equal(sync.status().board_health, HEALTH.RENDER_FAILED);
   assert.equal(sync.status().state, SYNC_STATES.ERROR);
   assert.match(sync.status().last_error, /render blew up/);
 
-  // A working feed does not repair it either: the feed did not fail.
   await sync.pollChanges();
   assert.equal(sync.status().feed_health, HEALTH.OK);
   assert.equal(sync.status().state, SYNC_STATES.ERROR, "still not ready, and still not a connection problem");
@@ -619,7 +555,6 @@ test("a render fault is not a read fault, and a board that could not be shown is
   assert.equal(sync.status().last_error, null);
 });
 
-// -------------------------------------------------------- serialized polling
 
 test("a poll tick during an open poll is dropped, and a slow page cannot land after a newer one", async () => {
   const first = deferred();
@@ -670,7 +605,6 @@ test("a failed poll is visible and does not move the cursor", async () => {
   assert.equal(h.sync.status().cursor, "c2");
 });
 
-// ------------------------------------------------------------- an empty board
 
 test("an empty board still carries presence and capture, and the first record arrives by board read", async () => {
   const h = harness({
@@ -696,8 +630,6 @@ test("an empty board still carries presence and capture, and the first record ar
   assert.equal(poll.changes.presence.length, 1, "presence still arrives");
   assert.equal(poll.changes.capture_sessions[0].state, "transcribing");
 
-  // A record this session has never seen is exactly what a new deal looks like
-  // to an empty board, so it is a reason to read the board again.
   assert.equal(batchTouchesBoard([changeEvent({ subject_id: "d9" })]), true);
   await h.sync.requestRefresh("change-feed");
   assert.deepEqual(h.deals().map((row) => row.name), ["New Practice"]);
@@ -715,7 +647,6 @@ test("what counts as board news", () => {
   assert.equal(batchTouchesBoard([{ subject_type: "client", subject_id: "c1" }, changeEvent()]), true);
 });
 
-// ------------------------------------------------------------ the pure pieces
 
 test("merging holds copies rather than mutates, and only holds newer than the read win", () => {
   const holds = createHolds();
@@ -740,7 +671,6 @@ test("merging holds copies rather than mutates, and only holds newer than the re
   assert.equal(holds.size, 0);
   assert.equal(holds.get("d1"), null);
 
-  // Degenerate shapes stay degenerate rather than inventing rows.
   assert.deepEqual(mergeBoardSnapshot({}, holds, 1).deals, []);
   assert.deepEqual(mergeBoardSnapshot(null, null, 1).deals, []);
   holds.note("d1", null, 1);
@@ -767,8 +697,6 @@ test("the coordinator holds no transport, storage, DOM or timer of its own", asy
   }
   assert.doesNotMatch(code, /https?:|\/api\/|\/pipeline\/|\/mcp\b/, "no endpoint literal is compiled in");
 
-  // The boundary itself: drive the whole surface with every network entry point
-  // replaced by a tripwire.
   const tripped = [];
   const originals = new Map();
   for (const name of ["fetch", "XMLHttpRequest", "WebSocket", "EventSource"]) {
@@ -803,7 +731,6 @@ test("the coordinator holds no transport, storage, DOM or timer of its own", asy
   }
 });
 
-// ----------------------------------------------------------------- app wiring
 
 test("app.js reads the board in exactly one place, through the coordinator", async () => {
   const app = await file("dealroom/js/app.js");
@@ -824,8 +751,6 @@ test("app.js reads the board in exactly one place, through the coordinator", asy
 test("app.js holds ids, not row objects, and does not drop the keyboard when a snapshot lands", async () => {
   const app = await file("dealroom/js/app.js");
 
-  // Defect 1: the agenda keeps the set and order it captured, and resolves the
-  // values at the moment it draws them.
   const renderAgenda = app.slice(app.indexOf("function renderAgenda"), app.indexOf("async function advanceAgenda"));
   assert.match(renderAgenda, /const captured = review\.deals\[review\.index\];\s*const deal = resolveCurrentRow\(captured, state\.deals\);/,
     "the agenda card reads the row the board holds now, not the copy it captured");
@@ -834,8 +759,6 @@ test("app.js holds ids, not row objects, and does not drop the keyboard when a s
   assert.match(imported, /resolveCurrentRow/, "the identity rule is imported, not re-implemented here");
   assert.doesNotMatch(app, /function resolveCurrentRow/, "and it has one home");
 
-  // Defect 2: the National Accounts grid is all buttons, which userIsEditing
-  // does not see, and a snapshot now lands on a timer.
   const preserve = app.slice(app.indexOf("function renderPreservingFocus"), app.indexOf("function workspaceDeals"));
   assert.match(preserve, /grid\.contains\(active\)/, "only a focus inside the grid is claimed");
   assert.match(preserve, /closest\('\[data-account\]'\)\?\.dataset\.account/);
@@ -850,8 +773,6 @@ test("app.js holds ids, not row objects, and does not drop the keyboard when a s
 test("app.js holds a confirmed write and asks for a fresh read rather than awaiting one", async () => {
   const app = await file("dealroom/js/app.js");
   const confirmLocalWrite = app.slice(app.indexOf("function confirmLocalWrite"), app.indexOf("/**\n * One undo, one event"));
-  // The row is looked up NOW: one captured before a snapshot arrived is no
-  // longer the object being rendered, so writing to it would show nothing.
   assert.match(confirmLocalWrite, /const deal = state\.deals\.get\(dealId\) \|\| null;\s*if \(deal\) Object\.assign\(deal, patch\);/);
   assert.match(confirmLocalWrite, /state\.boardSync\.noteLocalWrite\(dealId, patch\);/);
   assert.match(confirmLocalWrite, /state\.boardSync\.requestRefresh\('after-write'\);/);
@@ -863,8 +784,6 @@ test("app.js holds a confirmed write and asks for a fresh read rather than await
   assert.match(patchField, /const deal = confirmLocalWrite\(dealId, \{ \[field\]: value \}\);/);
   assert.match(patchField, /renderBoardOnly\(\);\s*showToast\(/, "the value is on screen before anything is re-read");
 
-  // Every optimistic local edit goes through the one path, so none of them can
-  // be reverted by a snapshot from a read that was already open.
   assert.equal((app.match(/noteLocalWrite\(/g) || []).length, 1, "one place holds a value");
   assert.equal((app.match(/confirmLocalWrite\(/g) || []).length, 5, "its definition and the four write sites");
   for (const [name, end] of [
@@ -878,9 +797,6 @@ test("app.js holds a confirmed write and asks for a fresh read rather than await
   }
 });
 
-// Placement only. What these writes DO under a lost answer, a double click, a
-// refusal and a partner conflict is executed in field-write-reconciliation.test.mjs
-// (the model) and dealroom.test.js (the model against the real verb).
 test("app.js sends one cell change under one key, and never mints a second one per attempt", async () => {
   const app = await file("dealroom/js/app.js");
   assert.match(app, /from '\.\/field-write-reconciliation\.mjs'/);
@@ -909,7 +825,6 @@ test("app.js sends one cell change under one key, and never mints a second one p
       `${name} must not treat an unanswered write as a saved one`);
   }
 
-  // No optimistic value, no timer, no blind re-send: a retry is a person's act.
   const patchField = app.slice(app.indexOf("async function patchField"), app.indexOf("async function patchOperatingState"));
   assert.ok(patchField.indexOf("await sendCellWrite(") < patchField.indexOf("confirmLocalWrite("),
     "nothing is applied to the board before the server answers");
@@ -918,7 +833,6 @@ test("app.js sends one cell change under one key, and never mints a second one p
   assert.doesNotMatch(app, /set(Timeout|Interval)\([^)]*(retry|sendCellWrite|patchField)/i,
     "no timer re-sends a write nobody asked to re-send");
 
-  // The unconfirmed write is on the row, not only in a toast that fades.
   const rowHtml = app.slice(app.indexOf("function rowHtml"), app.indexOf("function applyPresence"));
   assert.match(rowHtml, /unresolvedFieldWrites\(state\.fieldWrites, deal\.id\)/);
   assert.match(rowHtml, /data-retry-write="\$\{esc\(entry\.cell\)\}"/, "the control names the cell it re-sends");
@@ -928,17 +842,12 @@ test("app.js sends one cell change under one key, and never mints a second one p
   assert.match(retry, /const \{ deal, field, value \} = entry\.request;/,
     "the retry is the retained request, not a fresh reading of the board");
 
-  // A park that did not land keeps the dialog, the reason and the note.
   const park = app.slice(app.indexOf("function parkDealForm"), app.indexOf("function marketAgentForm"));
   assert.match(park, /\{ surface:'inline' \}/, "the reason is shown on the form, not over it in a toast");
   assert.match(park, /if \(result\.status !== 'ok'\) throw new Error\(result\.message/,
     "only a parked record closes the form");
 });
 
-// Placement for the two review corrections. The behaviour — an answer that
-// arrives after the feed moved, for an ordinary cell and for operating state —
-// is executed in field-write-reconciliation.test.mjs and, against the real verb,
-// in dealroom.test.js.
 test("app.js answers a modal inside the modal, and never paints a replayed answer over newer state", async () => {
   const app = await file("dealroom/js/app.js");
 
@@ -963,16 +872,11 @@ test("app.js answers a modal inside the modal, and never paints a replayed answe
   const retry = app.slice(app.indexOf("async function retryCellWrite"), app.indexOf("async function patchField"));
   assert.match(retry, /const options = \{ surface: writeSurfaceFor\(trigger\) \};/);
 
-  // 2. An accepted answer the feed has moved past is reported, not applied.
   const send = app.slice(app.indexOf("function sendCellWrite"), app.indexOf("/** The cell, named"));
   assert.match(send, /baseNow: \(\) => state\.fieldBase\.get\(cell\)\?\.id \|\| null/,
     "the cell's base is read again when the answer lands, not remembered from the way out");
-  // The other half of the same rule: an accepted answer names the event it
-  // committed, and that becomes the base for the next write to this cell.
   assert.match(send, /if \(result\.status === 'ok' && !result\.superseded && result\.event_id\) \{\s*noteCellBase\(cell, \{ id: result\.event_id, recorded_at: result\.event_recorded_at \}\);/,
     "a replayed answer about an older operation can never reset the base");
-  // And the third source of a base, which is what closes the cold first write:
-  // the authoritative read itself, seeded through the same forward-only rule.
   const snapshot = app.slice(app.indexOf("function applyBoardSnapshot"), app.indexOf("async function pollOnce"));
   assert.match(snapshot, /for \(const \[field, seen\] of Object\.entries\(deal\.field_base \|\| \{\}\)\) \{\s*noteCellBase\(cellKey\(deal\.id, field\), seen\);/,
     "every editable cell's base comes from the same read as its value");
@@ -1032,15 +936,12 @@ test("app.js keeps every unconfirmed change reachable, outside the filters that 
     "and a way to reach the record itself when its row is filtered out");
   assert.ok((bar.match(/esc\(/g) || []).length >= 5, "every rendered value is escaped");
 
-  // It is drawn before the board's own visibility is considered, because the
-  // accounts home hides the board section entirely.
   const board = app.slice(app.indexOf("function renderBoardOnly"), app.indexOf("function renderStats"));
   assert.ok(board.indexOf("renderPendingWrites();") < board.indexOf("$('#boardSection').hidden"),
     "an unconfirmed change belongs to the page, not to whichever workspace is showing");
   assert.equal((app.match(/renderPendingWrites\(\)/g) || []).length, 2,
     "the definition and the one call site every render already passes through");
 
-  // And the sentence that sends a person to it names it.
   const helper = await file("dealroom/js/field-write-reconciliation.mjs");
   for (const reason of ["no_answer", "server_error", "unresolved"]) {
     const line = helper.slice(helper.indexOf(`${reason}: '`), helper.indexOf("',", helper.indexOf(`${reason}: '`)));
@@ -1051,10 +952,6 @@ test("app.js keeps every unconfirmed change reachable, outside the filters that 
 test("app.js swaps one dialog's contents instead of opening it twice", async () => {
   const app = await file("dealroom/js/app.js");
   const openForm = app.slice(app.indexOf("function openForm"), app.indexOf("function nextStepForm"));
-  // #formDialog is shared by every form, and the conflict chooser is raised FROM
-  // the park form while that dialog is still open. showModal() on an open dialog
-  // throws, and the exception landed on the error line the submit had just
-  // cleared — the chooser appeared with a browser message above it.
   assert.match(openForm, /if \(!dialog\.open\) dialog\.showModal\(\);/);
   assert.equal((openForm.match(/dialog\.showModal\(\)/g) || []).length, 1,
     "one place opens it, and only when it is not already open");
@@ -1066,7 +963,6 @@ test("app.js is honest in the badge and refuses to show an empty board it never 
   const app = await file("dealroom/js/app.js");
   const detail = app.slice(app.indexOf("function syncDetail("), app.indexOf("function setSync"));
   const setSync = app.slice(app.indexOf("function setSync"), app.indexOf("/**\n * Read the board authoritatively"));
-  // Both paths are reported, separately, because they fail separately.
   assert.match(detail, /Board values are from the last successful read at \$\{at\}/,
     "the detail names the moment the values are from");
   assert.match(detail, /No board read has succeeded yet in this session\./);
@@ -1105,8 +1001,6 @@ test("app.js reaches the freshness detail without a mouse, and outside the live 
   assert.match(node, /const existing = \$\('#syncFreshness'\);\s*if \(existing\) return existing;/,
     "built once, not on every status publish");
   assert.match(app, /syncDetailNode\(\)\.textContent = detail;/);
-  // The half this does NOT solve is named in the source rather than implied:
-  // a sighted touch user still has no way to summon the detail.
   assert.match(app, /sighted touch user/i);
 });
 
@@ -1120,15 +1014,11 @@ test("app.js asks again on a bounded interval, because the feed cannot promise c
   assert.match(constant, /commit landed out of order/,
     "the reason it exists: a cursor can miss an event, so news-only refresh can be stale forever");
   assert.doesNotMatch(constant, /guarantees that|always current|never stale/i);
-  // The interval is a backstop, not the mechanism: a change still shows up on
-  // the next poll's refresh request, which is far sooner.
   assert.match(app, /batchTouchesBoard\(batch\)\) state\.boardSync\.requestRefresh\('change-feed'\)/);
 });
 
-// --------------------------------------------------- one realistic sequence
 
 test("a long history drains without touching values, and one burst of news costs one board read", async () => {
-  // 450 events, 200 to a page: the shape deal-change-receipts.test.mjs drains.
   const page = (n, size, cursor) => changes(
     Array.from({ length: size }, (_, i) => changeEvent({
       id: `ev${n}-${i}`, recorded_at: "2025-02-01T00:00:00.000000+00:00",
@@ -1158,8 +1048,6 @@ test("a long history drains without touching values, and one burst of news costs
   assert.equal(h.dealById("d1").phase, "Closing", "and 450 old events changed nothing on it");
   assert.equal(h.sync.status().cursor, "c450");
 
-  // app.js gates this call on the feed being caught up; here the news page is
-  // the caller's own decision, exercised as app.js makes it.
   const news = await h.sync.pollChanges();
   assert.equal(batchTouchesBoard(news.changes.events), true);
   await h.sync.requestRefresh("change-feed");

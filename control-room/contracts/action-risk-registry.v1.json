@@ -14,7 +14,7 @@
  },
  "counts": {
   "human_boundary": 32,
-  "append_only": 35,
+  "append_only": 36,
   "read_only": 38,
   "optimistic_concurrency": 19,
   "NONE": 12,
@@ -285,6 +285,19 @@
     "upserts": 0
    },
    "does": "Perform the separate claimed\u2192in_progress transition for the persisted current capability session"
+  },
+  "bind-work-request-criterion-evidence": {
+   "protection": "append_only",
+   "write": true,
+   "binds_both_partners": false,
+   "base_version_required": false,
+   "sql": {
+    "updates": 0,
+    "deletes": 0,
+    "inserts": 0,
+    "upserts": 0
+   },
+   "does": "Technical-check completion for sponsored actors: bind ONE acceptance criterion of a ready sourced Work Request to ONE server receipt tied to that request"
   },
   "call-verb": {
    "protection": "append_only",
@@ -1103,7 +1116,7 @@
     "inserts": 0,
     "upserts": 0
    },
-   "does": "Propose evidence-bound outcome feedback for one accepted sourced ready plan"
+   "does": "Propose evidence-bound outcome feedback for one accepted sourced ready plan; it completes nothing"
   },
   "propose-ready-plan": {
    "protection": "optimistic_concurrency",

@@ -518,8 +518,11 @@ def check_boundary(boundary, *, store=None, client=None, judge_module=None,
             if not questions:
                 return _result('flag', kind, dict(base, reason='numeric_source_verification_required'),
                                advice=_advice(kind, rows), escalate=True)
-            answer = _sibling("jev_semantic").ask(state, questions, client=client, timeout=min(JUDGE_TIMEOUT_SECONDS, left),
-                              retries=0, caller="jev_fact_boundary", version="vendor-v1", transport=jj.judge)
+            semantic = _sibling("jev_semantic")
+            answer = semantic.evaluate(semantic.JudgmentRequest(
+                state, questions, timeout=min(JUDGE_TIMEOUT_SECONDS, left), retries=0,
+                caller="jev_fact_boundary", version="vendor-v1"),
+                adapter=semantic.LiveAdapter(client=client, transport=jj.judge)).unwrap()
         except Exception as exc:
             try:
                 jj.record("supervise.fact_boundary", str(boundary.get("ref"))[:200], {}, None,

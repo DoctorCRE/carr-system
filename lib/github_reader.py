@@ -42,6 +42,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, resource_for, split_response
 from lib.secret_redaction import redact_text, sensitive_env_values
 
+SOURCE_BYTES = Path(__file__).read_bytes()
+
 GH_FALLBACKS = ("/opt/homebrew/bin/gh", "/usr/local/bin/gh")
 RETRY_DELAYS = (5, 15)
 TAIL_LIMIT = 200

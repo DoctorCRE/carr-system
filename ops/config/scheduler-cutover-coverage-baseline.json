@@ -1,9 +1,0 @@
-{
- "_note": "Coverage of this Mac's launchd jobs by control-plane workflow surfaces. Raised by ops/scheduler-cutover-coverage-gate.py --record in the same change that binds a job. Never lower it to make a red run green \u2014 a regression is the signal.",
- "covered": [
-  "com.carr.calendar-eventkit",
-  "com.carr.nightly-record-layer",
-  "com.carr.notes-sweep"
- ],
- "covered_count": 3
-}

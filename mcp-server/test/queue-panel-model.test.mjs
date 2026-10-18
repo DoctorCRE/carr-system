@@ -54,3 +54,16 @@ test("Queue rendering stays text-only and reduced motion keeps cards in the docu
   assert.match(css, /prefers-reduced-motion: reduce/);
   assert.doesNotMatch(css, /prefers-reduced-motion: reduce[\s\S]{0,1000}display:\s*none/);
 });
+
+
+test("canonical receipt fields take precedence over nested card metadata", () => {
+  const projection = queueProjection([{
+    task_id: "t_canonical",
+    summary: "Canonical summary",
+    card: { ...card("t_other", "ready"), summary: null },
+  }]);
+  assert.equal(projection.cards.length, 1);
+  assert.equal(projection.cards[0].task_id, "t_canonical");
+  assert.equal(projection.cards[0].summary, "Canonical summary");
+  assert.equal(projection.byColumn.ready[0].task_id, "t_canonical");
+});

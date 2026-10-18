@@ -1,3 +1,4 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
@@ -13,10 +14,8 @@ const contract = JSON.parse(fs.readFileSync(
   new URL("../../ops/config/scac-charter.v1.json", import.meta.url),
   "utf8",
 ));
-const authorityMigration = fs.readFileSync(
-  new URL("../../migrations/0324_siep_program_authority.sql", import.meta.url),
-  "utf8",
-);
+const authorityMigration = readMigration(
+  new URL("../../migrations/0324_siep_program_authority.sql", import.meta.url));
 
 const clone = value => structuredClone(value);
 const reject = (mutate, pattern = /SCAC charter invalid/) => {
@@ -114,9 +113,9 @@ test("charter names every existing authority it reuses and forbids shadow owners
   for (const path of ["control-room/contracts/action-risk-registry.v1.json", "ops/action-risk-registry.py"]) {
     assert.equal(fs.existsSync(new URL(`../../${path}`, import.meta.url)), true, `${path} must resolve`);
   }
-  const deviceMigration = fs.readFileSync(new URL("../../migrations/0163_control_plane_device_evidence.sql", import.meta.url), "utf8");
-  const renewalMigration = fs.readFileSync(new URL("../../migrations/0249_renewal_signed_source_ingress.sql", import.meta.url), "utf8");
-  const calendarMigration = fs.readFileSync(new URL("../../migrations/0229_calendar_prebrief_projection.sql", import.meta.url), "utf8");
+  const deviceMigration = readMigration(new URL("../../migrations/0163_control_plane_device_evidence.sql", import.meta.url));
+  const renewalMigration = readMigration(new URL("../../migrations/0249_renewal_signed_source_ingress.sql", import.meta.url));
+  const calendarMigration = readMigration(new URL("../../migrations/0229_calendar_prebrief_projection.sql", import.meta.url));
   assert.match(deviceMigration, /create table if not exists ops\.device_evidence_receipt/);
   assert.match(renewalMigration, /create function ops\.ingest_renewal_signed_snapshot/);
   assert.match(calendarMigration, /create or replace function ops\.record_calendar_prebrief_verified_envelope/);
@@ -222,7 +221,7 @@ test("closed-shape adversaries cannot expand authority or promote diagnostics", 
 });
 
 test("SIEP-10 adds no migration, grant, runtime ingress, or Production activation", () => {
-  const migrations = fs.readdirSync(new URL("../../migrations/", import.meta.url));
+  const migrations = listMigrationNames();
   assert.equal(migrations.some(name => /siep[-_]?10|scac[-_]?charter/i.test(name)), false);
   const checker = fs.readFileSync(new URL("../../ops/scac-charter-check.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(checker, /\b(?:create table|grant\s|revoke\s|insert into|update\s+ops\.|delete from)\b/i);

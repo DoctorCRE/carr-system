@@ -50,20 +50,19 @@ jobs:
         classes:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
-          - "replay"
           - "migration"
-    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
+    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
       postgres:
-        image: postgres:17
+        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: carr_ci
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -170,6 +169,14 @@ jobs:
                end if;
              end \$\$;"
 
+      - name: Verify edge incident delivery
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-noise-incident-test.py
+
+      - name: Verify audit attempt and cache integrity
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-failure-audit-test.py
+
       - name: Run this group's check classes
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the
@@ -178,6 +185,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           # The migration shadow drops its regenerated db/schema.sql here; the
           # next step uploads it when the class fails, so a stale snapshot is

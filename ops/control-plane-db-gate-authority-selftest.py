@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 
 
 REPO = Path(__file__).resolve().parents[1]
 GATE = (REPO / "ops" / "control-plane-db-gate.py").read_text(encoding="utf-8")
-MIGRATION = (REPO / "migrations" / "0161_control_plane_authority_boundary.sql").read_text(encoding="utf-8")
+MIGRATION = read_migration(REPO, "0161_control_plane_authority_boundary.sql")
 FAILED: list[str] = []
 
 

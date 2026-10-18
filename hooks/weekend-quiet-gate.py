@@ -21,9 +21,8 @@ cognition token on a decision a predicate can make).
 THE EXCEPTION IS THE LOAD-BEARING PART, and it is the rule's own: "human elects
 to work weekend". A partner typing into a session on a Sunday IS that election
 — he is at the keyboard, he opened the session, and refusing to answer him
-would be absurd. So this reads his keystrokes, exactly as escalation-gate.py
-does for its "he asked" exemption, and a session cannot grant itself the
-exemption by asserting he is around.
+would be absurd. So this reads his keystrokes; a session cannot grant itself
+the exemption by asserting he is around.
 
 SCOPE IS DELIBERATELY NARROW: partner-facing SENDS only. Reads, record writes,
 loop filing, peer messages between sessions, and every other tool are untouched
@@ -66,18 +65,6 @@ SEND_TOOLS = re.compile(
     re.I)
 
 
-# WHOSE TURN IS IT — ANSWERED IN ONE PLACE (hooks/turn_origin.py).
-# This gate used to carry its own allowlist of origin kinds, accepting "user"
-# and "keyboard". The harness has never written either; a typed turn carries
-# {"kind": "human"}. Across sixteen real transcripts that allowlist matched ZERO
-# of 3,271 candidate records, so the carve-out below could not fire once.
-#
-# The corrected allowlist that replaced it was better and still weaker than the
-# detector ledger-sweep.py had already earned the hard way — patched four times
-# in nine days, ending at a POSITIVE test with two screens this gate lacked: the
-# cross-session relay tag, and the refusal to trust any origin kind that is not
-# exactly "human". Rather than keep a second, thinner answer to the same
-# question, this now asks the shared one.
 from turn_origin import partner_typed_this  # noqa: E402
 
 
@@ -119,8 +106,7 @@ def partner_is_here(transcript_path):
 
     His own keystrokes are the election the rule names, and they are the one
     signal a session cannot fabricate for itself. Harness-injected turns are
-    NOT his words — the same distinction ledger-sweep.py got wrong on
-    2026-08-05 when it quoted a task notification as the partner speaking.
+    NOT his words.
 
     THE ORIGIN ALLOWLIST WAS GUESSED, AND THE GUESS WAS WRONG (defect 16291f00,
     2026-08-22). It accepted kinds "user" and "keyboard". The harness has never
