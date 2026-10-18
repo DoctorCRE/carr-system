@@ -167,7 +167,7 @@ def main():
 
     with tempfile.TemporaryDirectory() as tmp:
         leader_table = "ops.studio_leader"
-        leader_migration = "0847_studio_failover_leader.sql"
+        leader_migration = "0895_studio_failover_leader.sql"
         reason = coverage["excluded"].get(leader_table)
         leader_repo = build_repo(tmp + "/failover", {
             leader_migration: (REPO / "migrations" / leader_migration).read_text(),
