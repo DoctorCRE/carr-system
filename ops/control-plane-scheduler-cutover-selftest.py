@@ -259,13 +259,13 @@ def main() -> int:
         replacement=healthy_replacement(), receipt_verifier=wrong_receipt_workflow, now=NOW))
     notes = observed("notes-sweep-hourly.launchd.v1", loaded={"com.carr.notes-sweep"})
     notes_replacement = healthy_replacement()
-    notes_replacement.update({"workflow_key": "notes-sweep-hourly", "workflow_version": 3})
+    notes_replacement.update({"workflow_key": "notes-sweep-hourly", "workflow_version": 4})
     refuses("one of two Notes legacy schedules is refused outside the coordinated contract", lambda: prepare_disable(
         REGISTRY, surface_id="notes-sweep-hourly.launchd.v1", observation=notes,
         replacement=notes_replacement, receipt_verifier=receipt_verifier, now=NOW))
     forged_notes_binding = {
         "surface_id": "notes-sweep-hourly.launchd.v1", "workflow_key": "notes-sweep-hourly",
-        "workflow_version": 3, "locator": "com.carr.notes-sweep",
+        "workflow_version": 4, "locator": "com.carr.notes-sweep",
         "pre_disable_observation_fingerprint": notes["source_fingerprint"], "replacement_receipts": ["receipt:shadow", "receipt:canary"],
     }
     forged_notes_prepare = {"schema_version": 1, "contract": "control-plane-scheduler-cutover",
