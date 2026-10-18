@@ -46,7 +46,7 @@ def fixture_budget(fixture):
 # each call returns; tests rewrite it between runs.
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 fixture_path = Path(os.environ["BOARD_GH_FIXTURE"])
@@ -88,7 +88,7 @@ def raw(pr, merged=False):
     return {"number": pr.get("number", 42 if "view" in fixture else None), "state": "open" if state == "OPEN" else "closed",
             "draft": pr.get("isDraft", False), "head": {"sha": pr.get("headRefOid"), "ref": pr.get("headRefName", "")},
             "user": pr.get("author"), "merge_commit_sha": sha,
-            "merged_at": pr.get("mergedAt", "2026-10-04T00:00:00Z") if state == "MERGED" else None,
+            "merged_at": pr.get("mergedAt", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()) if state == "MERGED" else None,
             "title": pr.get("title", "PR"), "body": pr.get("body", ""), "html_url": pr.get("url", ""),
             "created_at": pr.get("createdAt", "2026-09-28T00:00:00Z"),
             "updated_at": pr.get("updatedAt") or datetime.fromtimestamp(fixture_path.stat().st_mtime, timezone.utc).isoformat(),
