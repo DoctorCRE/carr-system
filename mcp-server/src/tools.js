@@ -1,6 +1,7 @@
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
+import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
@@ -337,6 +338,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // are migrated to model the extra query for every historical write verb.
   if (verb === "record-commission-receipt" || ["record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
+  if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
@@ -8758,6 +8760,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // assertRequiredArgs above: a missing required field used to reach the
   // handler as undefined and come back as a confident empty answer.
   assertRequiredArgs(tool.inputSchema, args);
+  if (FEATURE_VERBS[name]) await requireFeature(client, actor, FEATURE_VERBS[name]);
   // V5-S01 GLOBAL BOUNDARIES, AT THE ONE SEAM EVERY DOOR PASSES (2026-09-25).
   // Evaluated here, after coercion and the required-argument check so the
   // verdict reads the arguments in their final form, and before the handler
@@ -8794,6 +8797,7 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
 
 
 const TOOL_REGISTRATION_SOURCE = Object.freeze({
+  'feature-switches':'mcp-server/src/feature-switches.js',
   "inline": "mcp-server/src/tools.js",
   "deal-room-inline": "mcp-server/src/tools.js",
   "deploy-gap-inline": "mcp-server/src/tools.js",
@@ -9865,6 +9869,7 @@ registerTools({
 }, "deploy-gap-inline");
 
 // Doctrine store verbs (P2, decision 82a2fb62) — same envelope, same contracts.
+registerTools(featureSwitchTools({ withEnvelope, writeEvent, executeRegisteredTool }), 'feature-switches');
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");

@@ -85,6 +85,7 @@
     "defect": "the defect log — runtime history",
     "deprecation": "the deprecation register — runtime history",
     "event": "the event log — business data",
+    "feature_switch": "runtime feature configuration and audience decisions written through record verbs, not source vocabulary. Data backups retain switches and their audit history. A schema-only rebuild intentionally has no runtime switches; worker and UI gates fail closed until an audited set-feature-switch creates configuration. The feature-switch migration's initial default-off seed is not replayed from a snapshot ledger and does not need carrying.",
     "marketing_subject": "marketing subjects pointing at clients and deals — business data",
     "media_recommendation": "media recommendations — business content, not configuration",
     "national_account_owner": "national account ownership records — business data",

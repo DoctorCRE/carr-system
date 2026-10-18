@@ -2,6 +2,7 @@
 """Subprocess proof for the signed EventKit collector with no live Calendar."""
 from __future__ import annotations
 
+import base64
 import json
 import importlib.util
 import os
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -72,18 +74,34 @@ class EKEventStore:
     key = root / "collector.pem"
     subprocess.run([OPENSSL, "genpkey", "-algorithm", "ED25519", "-out", str(key)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     key.chmod(0o600)
-    if not hasattr(collector.os, "memfd_create"):
-        def fixture_memfd(_name: str) -> int:
-            with tempfile.TemporaryFile() as anonymous:
-                return os.dup(anonymous.fileno())
-        collector.os.memfd_create = fixture_memfd
+    real_run = subprocess.run
+
+    def refuse_nonseekable_ed25519(argv, **kwargs):
+        if "pkeyutl" in argv and "/dev/stdin" in argv:
+            return subprocess.CompletedProcess(argv, 1, b"", b"")
+        return real_run(argv, **kwargs)
+
+    with patch.object(collector.subprocess, "run", refuse_nonseekable_ed25519):
         try:
-            portable_signature = collector.sign(key, b"portable fixture")
-        finally:
-            delattr(collector.os, "memfd_create")
-    else:
-        portable_signature = collector.sign(key, b"portable fixture")
-    check("anonymous seekable Ed25519 input is portable", bool(portable_signature))
+            collector.sign(key, b"pipe-length regression")
+            nonseekable_ok = True
+        except collector.Refusal:
+            nonseekable_ok = False
+    check("signing works when OpenSSL refuses nonseekable one-shot input", nonseekable_ok)
+
+    payload = b"large in-memory Ed25519 fixture" * 40000
+    signature = collector.sign(key, payload)
+    public = root / "public.pem"
+    subprocess.run([OPENSSL, "pkey", "-in", str(key), "-pubout", "-out", str(public)], check=True, capture_output=True)
+    with tempfile.TemporaryFile() as raw_input, tempfile.TemporaryFile() as raw_signature:
+        raw_input.write(payload); raw_input.seek(0)
+        raw_signature.write(base64.b64decode(signature)); raw_signature.seek(0)
+        verified = subprocess.run([OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(public),
+                                   "-rawin", "-in", f"/dev/fd/{raw_input.fileno()}",
+                                   "-sigfile", f"/dev/fd/{raw_signature.fileno()}"],
+                                  pass_fds=(raw_input.fileno(), raw_signature.fileno()), capture_output=True)
+    check("large in-memory signature interoperates with OpenSSL", verified.returncode == 0)
+
     environment = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(fake), "CARR_CALENDAR_PREBRIEF_ALLOWLIST": str(allowlist), "CARR_CALENDAR_PREBRIEF_COLLECTOR_PRIVATE_KEY": str(key), "CARR_CALENDAR_PREBRIEF_COLLECTOR_VERSION": "fixture-1"}
     run = subprocess.run([sys.executable, str(COLLECTOR)], input=json.dumps(contract()), text=True, capture_output=True, env=environment, check=False)
     envelope = json.loads(run.stdout) if run.returncode == 0 else {}
