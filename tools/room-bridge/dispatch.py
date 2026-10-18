@@ -685,6 +685,7 @@ def acknowledge_received(dispatch_ref: str, *, desk: str, log_offset: int,
     if injected_at:
         evidence = f"{evidence} injected at {injected_at}"
     return call_verb("acknowledge-dispatch", {
+        "idempotency_key": f"dispatch-ack:{dispatch_ref}:{DESK_ACK_STAGE}",
         "dispatch_ref": dispatch_ref,
         "stage": DESK_ACK_STAGE,
         "evidence": evidence,
