@@ -25,6 +25,16 @@ export async function requireFeature(c, actor, name) {
   });
 }
 
+// Runtime roles hold no table DML on feature_switch; every write goes through this one registered function.
+const write = async (c, action, args) => {
+  try {
+    return (await c.query('select * from ops.write_feature_switch($1,$2::jsonb)',[action,JSON.stringify(args)])).rows[0];
+  } catch (error) {
+    if (error.code === '40001' && /feature_switch_version_conflict/.test(error.message)) return null;
+    throw error;
+  }
+};
+
 export const FEATURE_SWITCH_WRITES = new Set(['set-feature-switch','flip-feature-switch','check-feature-switches']);
 const common = {
   name:{ type:'string', pattern:'^[a-z][a-z0-9-]{0,62}$' },
@@ -45,27 +55,24 @@ export function featureSwitchTools({ withEnvelope, writeEvent, executeRegistered
       throw new ToolError({ error:'feature_switch_input_invalid' });
     const tenant = organizationTenantForActor(actor);
     await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`feature-switch:${tenant}:${args.name}`]);
-    const prior = (await c.query('select * from feature_switch where organization_tenant_id=$1 and name=$2 for update',
+    const prior = (await c.query('select * from feature_switch where organization_tenant_id=$1 and name=$2',
       [tenant,args.name])).rows[0];
     if ((prior?.version || 0) !== args.base_version || flip && !prior)
       throw new ToolError({ error:'feature_switch_version_conflict', current_version:prior?.version || 0 });
     let row;
     if (!prior) {
       if (args.retired === true) throw new ToolError({error:'feature_switch_cannot_create_retired'});
-      row = (await c.query(`insert into feature_switch
-        (organization_tenant_id,name,description,default_enabled,audience,owner,expected_removal_on)
-        values ($1,$2,$3,$4,$5,$6,$7::date) returning *`,
-      [tenant,args.name,args.description.trim(),args.default_enabled,args.audience,args.owner,args.expected_removal_on])).rows[0];
+      row = await write(c,'create',{ tenant, name:args.name, description:args.description.trim(), default_enabled:args.default_enabled,
+        audience:args.audience, owner:args.owner, expected_removal_on:args.expected_removal_on });
     } else if (flip) {
       if (prior.retired_at) throw new ToolError({ error:'feature_switch_retired' });
-      row = (await c.query(`update feature_switch set enabled=$1,audience=$2,version=version+1
-        where id=$3 returning *`,[args.enabled,args.audience ?? prior.audience,prior.id])).rows[0];
+      row = await write(c,'flip',{ id:prior.id, base_version:prior.version, enabled:args.enabled, audience:args.audience ?? prior.audience });
     } else {
-      row = (await c.query(`update feature_switch set description=$1,default_enabled=$2,audience=$3,owner=$4,
-        expected_removal_on=$5::date,retired_at=case when $6::boolean is null then retired_at when $6::boolean then coalesce(retired_at,now()) else null end,
-        version=version+1 where id=$7 returning *`,
-      [args.description.trim(),args.default_enabled,args.audience,args.owner,args.expected_removal_on,args.retired ?? null,prior.id])).rows[0];
+      row = await write(c,'revise',{ id:prior.id, base_version:prior.version, description:args.description.trim(),
+        default_enabled:args.default_enabled, audience:args.audience, owner:args.owner,
+        expected_removal_on:args.expected_removal_on, retired:args.retired ?? null });
     }
+    if (!row) throw new ToolError({ error:'feature_switch_version_conflict', current_version:prior?.version || 0 });
     await writeEvent(c,actor,verb,'feature_switch',row.id,{
       old:prior ? projection(prior) : null, new:projection(row), idempotency_key:args.idempotency_key,
     });
@@ -81,7 +88,7 @@ export function featureSwitchTools({ withEnvelope, writeEvent, executeRegistered
         await c.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[`feature-switch-health:${tenant}`]);
         const rows=(await c.query(`select *,expected_removal_on::text as expected_removal_on,
           retired_at is null and expected_removal_on < (now() at time zone 'America/Chicago')::date as overdue
-          from feature_switch where organization_tenant_id=$1 order by name for update`,[tenant])).rows;
+          from feature_switch where organization_tenant_id=$1 order by name`,[tenant])).rows;
         const overdue=[],cleared=[];
         for(const row of rows){
           let loop=row.retirement_loop_id ? (await c.query('select id,number,owner,body,status,version from loop_item where id=$1',[row.retirement_loop_id])).rows[0] : null;
@@ -92,7 +99,7 @@ export function featureSwitchTools({ withEnvelope, writeEvent, executeRegistered
                 title:`Retire feature switch ${row.name}`,body,domain:'system',blocker:'other_lane',
                 blocker_detail:`Orchestrator review and release of the ${row.name} removal change`});
               loop={id:added.loop_id,number:added.number};
-              await c.query('update feature_switch set retirement_loop_id=$1 where id=$2',[loop.id,row.id]);
+              await write(c,'link_loop',{ id:row.id, retirement_loop_id:loop.id });
             }else if(loop.owner!==row.owner || loop.body!==body){
               await executeRegisteredTool(c,actor,'update-loop',{idempotency_key:randomUUID(),loop_id:loop.id,base_version:loop.version,owner:row.owner,body});
             }
@@ -102,7 +109,7 @@ export function featureSwitchTools({ withEnvelope, writeEvent, executeRegistered
             if(loop?.status==='open') await executeRegisteredTool(c,actor,'close-loop',{idempotency_key:randomUUID(),loop_id:loop.id,base_version:loop.version,
               outcome:`Feature switch ${row.name} is ${row.retired_at ? 'retired' : 'no longer past its reviewed removal date'}; verified by check-feature-switches.`,resolution:'done'});
             cleared.push(row.retirement_loop_id);
-            await c.query('update feature_switch set retirement_loop_id=null where id=$1',[row.id]);
+            await write(c,'link_loop',{ id:row.id, retirement_loop_id:null });
           }
         }
         return {ok:true,overdue,cleared,line:`${overdue.length ? 'WARN' : 'OK'} feature switches: ${overdue.length} overdue · on breach: create/update deduplicated owner loop; retire and remove gates after review or record a reviewed future date; verify list-feature-switches and consumer tests; auto-clear when retired or no longer overdue.`};

@@ -78,7 +78,7 @@ test('Feature switch record lifecycle on disposable PostgreSQL', { skip: !bin &&
     await c.query(`create schema ops;
       create function ops.scac_reference_monitor_guard() returns trigger
       language plpgsql as $$ begin return new; end $$;`);
-    await c.query(readFileSync(path.join(root,'migrations/0898_feature_switches.sql'),'utf8'));
+    await c.query(readFileSync(path.join(root,'migrations/0902_feature_switches.sql'),'utf8'));
     const guards = (await c.query(`select tgname,tgtype,tgenabled from pg_trigger
       where tgrelid='public.feature_switch'::regclass
       and tgfoid='ops.scac_reference_monitor_guard()'::regprocedure order by tgname`)).rows;
@@ -86,6 +86,19 @@ test('Feature switch record lifecycle on disposable PostgreSQL', { skip: !bin &&
       ['scac_reference_monitor_guard_row',31,'O'],
       ['scac_reference_monitor_guard_truncate',34,'O'],
     ],'switch writes must register row and truncate guards with the existing reference monitor');
+    await c.query('grant usage on schema ops to carr_writer');
+    for (const privilege of ['insert','update','delete','truncate']) {
+      assert.equal((await c.query(`select has_table_privilege('carr_writer','public.feature_switch',$1) allowed`,[privilege])).rows[0].allowed,
+        false,`carr_writer must hold no table-level ${privilege} on feature_switch`);
+    }
+    const writer = (await c.query(`select p.prosecdef,p.proconfig,pg_get_userbyid(p.proowner) owner,
+      has_function_privilege('carr_writer',p.oid,'execute') runtime,has_function_privilege('public',p.oid,'execute') everyone
+      from pg_proc p where p.pronamespace='ops'::regnamespace and p.proname='write_feature_switch'`)).rows;
+    assert.equal(writer.length,1,'switch writes must go through one registered ops.write_feature_switch function');
+    assert.equal(writer[0].prosecdef,true);
+    assert.equal(writer[0].runtime,true);
+    assert.equal(writer[0].everyone,false);
+    assert.deepEqual(writer[0].proconfig,['search_path=pg_catalog, ops, pg_temp'],'search_path must pin trusted schemas only, never public');
     await c.query('grant select,insert on event,tool_call to carr_writer');
     await c.query('grant select on actor to carr_writer');
     await c.query("insert into actor(id,slug,display_name,kind) values($1,'joe','Synthetic Joe','human')",[actor.id]);
