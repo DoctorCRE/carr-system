@@ -84,11 +84,11 @@ class VendorWatchTests(unittest.TestCase):
 
     def test_no_reference_and_hourly_boundary(self):
         self.assertEqual(self.check(1000), [])
-        self.assertEqual(self.calls, [INDEX, RECAP])
+        self.assertEqual(self.calls, [INDEX])
         self.assertEqual(self.check(4599), [])
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.check(4600), [])
-        self.assertEqual(len(self.calls), 4)
+        self.assertEqual(len(self.calls), 2)
 
     def test_first_reference_board_and_durable_repeat(self):
         self.index = "vendor-index-live.txt"
@@ -112,7 +112,7 @@ class VendorWatchTests(unittest.TestCase):
         self.assertEqual([f["kind"] for f in found], ["vendor_release_fetch_error"])
         self.assertIn("503", found[0]["reason"])
         self.assertEqual(found[0]["url"], INDEX)
-        self.assertEqual(self.calls, [INDEX, RECAP])
+        self.assertEqual(self.calls, [INDEX])
         self.report(found, 1000)
         self.assertEqual(self.check(1001)[0]["kind"], "vendor_release_fetch_error")
         self.error = False
@@ -315,7 +315,7 @@ class VendorWatchTests(unittest.TestCase):
         self.index = "vendor-index-live.txt"
         with patch.object(w, "collect", return_value={"errors": []}), patch.object(w, "fetch_document", self.fetch), patch.object(w.Effects, "act", side_effect=AssertionError("watch must only report")):
             self.assertEqual(w.scan(self.root, self.config), 0)
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 1)
         self.assertEqual(len(w.read_latest(self.root / self.config["paths"]["findings"])), 1)
 
     def test_reference_entry_label_and_announcement_reference_link(self):
