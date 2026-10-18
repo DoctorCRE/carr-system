@@ -71,6 +71,9 @@ def call_verb(verb: str, args: dict) -> tuple[bool, Any]:
 # a contract drift between the JS classifier and the SQL mirror would take.
 KNOWN_STATUSES = {"current", "missed", "no_receipt_on_record"}
 
+# record_call renders a refusal as `<verb> refused: {"error": "key_reuse"}`.
+KEY_REUSE = '"key_reuse"'
+
 
 def sweep_subject(subject: dict) -> dict:
     ok, status = call_verb("cadence-status", subject)
@@ -109,6 +112,16 @@ def sweep_subject(subject: dict) -> dict:
         "subject_ref": subject["subject_ref"],
         "detail": f"expired {expires_at}; sweep detected {status.get('days_since_last_receipt')} days since last receipt",
     })
+    if not ok and KEY_REUSE in raised:
+        # The idempotency key is a pure function of (subject, expiry instant),
+        # so the record layer refusing it as key_reuse means this exact miss
+        # was already escalated and only the request body differs: `detail`
+        # embeds days_since_last_receipt, which changes every day. That is the
+        # same as the duplicate the docstring promises, not a failed alert.
+        # Refusing it here left the job exiting 1 every day after the first
+        # alert until the miss was resolved.
+        return {**subject, "outcome": "escalated", "duplicate": True,
+                "detail": "already escalated for this expiry (key_reuse)"}
     if not ok:
         return {**subject, "outcome": "escalation_failed", "detail": raised}
     if not isinstance(raised, dict):
