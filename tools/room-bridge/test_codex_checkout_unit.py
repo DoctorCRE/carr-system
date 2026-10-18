@@ -176,7 +176,8 @@ class CheckoutDispatchTests(unittest.TestCase):
         other = self.root / 'doctorcre-app'
         other.mkdir()
         self.git('init', '-b', 'main', cwd=other)
-        self.git('commit', '--allow-empty', '-m', 'app', cwd=other)
+        self.git('-c', 'user.name=App Author', '-c', 'user.email=app@users.noreply.github.com',
+                 'commit', '--allow-empty', '-m', 'app', cwd=other)
         self.git('remote', 'add', 'origin', str(self.root / 'app-origin.git'), cwd=other)
         plain = self.root / 'flash-desk'
         plain.mkdir()
