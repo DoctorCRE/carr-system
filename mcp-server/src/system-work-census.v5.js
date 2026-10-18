@@ -3,6 +3,7 @@ import { canonicalJson } from './artifact-trust.js';
 import { createHash } from 'node:crypto';
 import { organizationTenantForActor, personalScopeForActor } from './identity.js';
 import { closureProjection } from './engineering-runtime.js';
+import { safeInteger } from './safe-integer.js';
 
 const base = (source, kind, sql, note = null) => ({ source, kind, sql, note });
 // Every SELECT has the same typed columns. Source states are preserved, never
@@ -163,7 +164,8 @@ const navigationFor=(row,kind)=>{
 const normalized=(row,leg,now)=>{
  const opened=iso(row.opened_at),activity=iso(row.last_activity_at);if(!opened||!activity||!row.id) return null;
  const navigation=navigationFor(row,leg.kind);
- const item={...row,id:String(row.id),source:leg.source,kind:leg.kind,opened_at:opened,last_activity_at:activity,
+ const version=leg.kind==='progress_task'?safeInteger(row.version,'board_version_invalid'):row.version;
+ const item={...row,version,id:String(row.id),source:leg.source,kind:leg.kind,opened_at:opened,last_activity_at:activity,
    age:Math.max(0,Math.floor((+now-Date.parse(opened))/86400000)),link:navigation.link,navigation,
    status:row.state,updated_at:activity,source_ref:leg.source,open:navigation.link,related:[],unlinked:true};
  item.source_workflow=leg.kind==='incident'?{read:{verb:'get-incident',args:item.identity}}:
@@ -201,7 +203,10 @@ export async function readSystemWorkCensus({client,actor,correlationId,now=()=>n
    for(const page of pages) {
     const stored=response.rows.find(r=>r.board_id===page.board_id);
     const rows=stored?.snapshot_json?.items;
-    if(!stored || Number(stored.version)!==page.version || !Array.isArray(rows) || rows.length!==page.count ||
+    let storedVersion;
+    try { storedVersion=safeInteger(stored?.version,'board_version_invalid'); }
+    catch { pagesMissing=true;continue; }
+    if(storedVersion!==page.version || !Array.isArray(rows) || rows.length!==page.count ||
        (page.digest && createHash('sha256').update(canonicalJson(stored.snapshot_json)).digest('hex')!==page.digest)) {pagesMissing=true;continue;}
     loaded.push(...rows);
    }
