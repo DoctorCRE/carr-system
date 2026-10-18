@@ -287,6 +287,7 @@ def _to_codex(
     fresh: bool = False,
     config_overrides: tuple[str, ...] = (),
     live_desktop: bool = False,
+    provider_run=None,
     stream_output: bool = False,
     timeout_s: float | None = None,
     on_executor=None,
@@ -399,11 +400,11 @@ def _to_codex(
             # pipe makes the run hang or swallow whatever the caller was fed.
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
-            if on_executor or stream_output:
+            if provider_run is None and (on_executor or stream_output):
                 proc = _run_codex_process(argv, env or os.environ.copy(), limit_s,
                                           on_executor, stream_output, **process_options)
             else:
-                proc = subprocess.run(
+                proc = (provider_run or subprocess.run)(
                     argv, env=env or os.environ.copy(), capture_output=True,
                     text=True, timeout=limit_s, stdin=subprocess.DEVNULL,
                     **process_options,
@@ -481,6 +482,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     codex_timeout_s = request.get('codex_timeout_s')
     config_overrides = tuple(request.get('config_overrides', ()))
     stream_options: dict = {'stream_output': True} if request.get('stream_output') else {}
+    runner_options: dict = {'provider_run': request['provider_run']} if request.get('provider_run') is not None else {}
     def executor_started(identity):
         on_executor({**identity, **({'socket': entry['socket']}
                                     if identity.get('kind') in ('codex_turn', 'no_launch') and entry.get('socket') else {})})
@@ -497,7 +499,10 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     elif entry["kind"] == "claude-remote":
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
-        outcome = grok_wire.run_task(entry, task, **({"retrieval": True} if retrieval else {}))
+        grok_options = {"retrieval": True} if retrieval else {}
+        if request.get('provider_run') is not None:
+            grok_options["run"] = request['provider_run']
+        outcome = grok_wire.run_task(entry, task, **grok_options)
     elif entry["kind"] == "flash-local":
         outcome = flash_wire.run_task(task)
     elif entry["kind"] == "codex-live":
@@ -512,14 +517,14 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     elif cwd:
         outcome = _to_codex(
             {**entry, "cwd": cwd}, task, env, fresh=True, config_overrides=config_overrides,
-            timeout_s=codex_timeout_s, **stream_options,
+            timeout_s=codex_timeout_s, **runner_options, **stream_options,
             **codex_options,
         )
     else:
         outcome = _to_codex(
             entry, task, env, fresh=fresh, config_overrides=config_overrides,
             live_desktop=live_desktop, timeout_s=codex_timeout_s,
-            **stream_options,
+            **runner_options, **stream_options,
             **codex_options,
         )
     return outcome
@@ -535,6 +540,7 @@ def dispatch(
     config_overrides: tuple[str, ...] = (),
     cwd: str | None = None,
     live_desktop: bool = False,
+    provider_run=None,
     stream_output: bool = False,
     retrieval: bool = False,
     codex_timeout_s: float | None = None,
@@ -551,7 +557,11 @@ def dispatch(
 
     `cwd` (codex-session desks only) runs this one task in that directory on a FRESH
     thread and leaves the desk's standing thread untouched: flash-run's escalation gives
-    the Sol fixer desk a throwaway copy per task (2026-09-24)."""
+    the Sol fixer desk a throwaway copy per task (2026-09-24).
+
+    `provider_run` lets a bounded adapter confine the Codex/Grok child while
+    retaining this module's dispatch and result contract. Ordinary callers
+    keep the default runner."""
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
     if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
@@ -574,8 +584,8 @@ def dispatch(
         raise DeskError("unsupported_model_override", "job family and effort overrides require a Codex desk")
     if retrieval and entry["kind"] != "grok-cli":
         raise DeskError("unsupported_retrieval", "explicit source retrieval requires a Grok desk")
-    if stream_output and entry["kind"] not in ("codex-session", "codex-exec"):
-        raise DeskError("unsupported_stream", "stream output requires a headless Codex desk")
+    if stream_output and (entry["kind"] not in ("codex-session", "codex-exec") or provider_run is not None):
+        raise DeskError("unsupported_stream", "stream output requires a headless Codex desk without a custom runner")
     original_task = task
     # The background wire validates the original task before adding its own
     # instruction. Prepending here would turn a blank task into valid work.
@@ -603,6 +613,8 @@ def dispatch(
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
     declared_writes = write_ownership.declaration(original_task, writes)
+    if declared_writes and provider_run is not None:
+        raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
     if declared_writes and entry['kind'] not in codex_models.CODEX_KINDS:
         raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex adapter')
 
@@ -623,6 +635,7 @@ def dispatch(
                'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
                'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
                'config_overrides': config_overrides, 'stream_output': stream_output,
+               'provider_run': provider_run,
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
     with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
