@@ -225,6 +225,45 @@ class ReportTests(unittest.TestCase):
                 self.assertNotIn("bootstrap", argv)
                 self.assertNotIn("load", argv)
 
+    def collect_with(self, plists, toplevel, listed=""):
+        """jobs.collect over a fake home holding `plists` ({label: plist}); git answers `toplevel`."""
+        def run(argv, **kwargs):
+            if argv[:2] == ["launchctl", "list"]: output = "PID\tStatus\tLabel\n" + listed
+            elif "--show-toplevel" in argv: output = toplevel + "\n"
+            elif argv[:2] == ["launchctl", "print"]: output = "service = {\n\tstate = not running\n}"
+            else: output = ""
+            return subprocess.CompletedProcess(argv, 0, output, "")
+        with tempfile.TemporaryDirectory() as raw:
+            agents = Path(raw) / "Library/LaunchAgents"
+            agents.mkdir(parents=True)
+            for label, plist in plists.items():
+                (agents / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label, **plist}))
+            with patch.object(Path, "home", return_value=Path(raw)), \
+                 patch.object(jobs.machine_role, "is_primary", return_value=False), \
+                 patch.object(jobs.subprocess, "run", side_effect=run):
+                return jobs.collect(self.manifest)
+
+    def test_a_declared_job_outside_the_scope_prefixes_is_still_observed(self):
+        """local.ds4-flash-next sits outside com.carr./local.carr-; unseen, an installed one read as absent."""
+        declared = copy.deepcopy(self.manifest["jobs"][0])
+        declared["label"] = "local.ds4-test"
+        self.manifest["jobs"].append(declared)
+        snap = self.collect_with(
+            {"local.ds4-test": {"ProgramArguments": ["/bin/sh"]}, "local.undeclared": {"ProgramArguments": ["/bin/sh"]}},
+            "/machine/carr-system", listed="-\t0\tlocal.ds4-test\n-\t0\tlocal.undeclared\n")
+        self.assertEqual(sorted(snap["plists"]), ["local.ds4-test"])
+        self.assertEqual(sorted(snap["launchctl_print"]), ["local.ds4-test"])
+
+    def test_a_package_managers_own_repository_is_not_a_job_checkout(self):
+        """git answers /opt/homebrew for every Homebrew binary; that is not where a job's code lives."""
+        homebrew = "/opt/homebrew/opt/cliproxyapi/bin/cliproxyapi"
+        snap = self.collect_with({"com.carr.test": {"ProgramArguments": [homebrew, "-config", "/etc/x.yaml"]}},
+                                 "/opt/homebrew")
+        self.assertEqual(snap["checkout_roots"], {})
+        self.assertFalse(jobs.checkout_drift([homebrew], "/machine/carr-system", snap["checkout_roots"]))
+        snap = self.collect_with({"com.carr.test": {"ProgramArguments": [homebrew]}}, "/machine/other-clone")
+        self.assertEqual(snap["checkout_roots"][homebrew], "/machine/other-clone")
+
     def test_unrunnable_crontab_is_one_evidence_error(self):
         def run(argv, **kwargs):
             if argv[0] == "crontab":
