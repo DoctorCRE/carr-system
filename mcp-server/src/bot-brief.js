@@ -1,6 +1,8 @@
 // CARR-owned, read-only bootstrap contract for a local bot runtime.
 // The brief describes a profile; it never turns that profile into authority.
 
+import { safeInteger } from "./safe-integer.js";
+
 import {
   authorizationClassForActor,
   organizationTenantForActor,
@@ -160,6 +162,7 @@ export function botBriefTools({ ToolError, assertNoCallerAuthorityFields }) {
           throw new ToolError({ error: "profile_not_found", profile_key: profileKey,
             hint: "read-profiles lists the named roster; new profiles are a migration" });
         const row = profileResult.rows[0];
+        const profileVersion = safeInteger(row.version, "profile_version_invalid");
 
         const generationResult = await c.query(
           "select generation from doctrine_meta where id=1");
@@ -228,7 +231,7 @@ export function botBriefTools({ ToolError, assertNoCallerAuthorityFields }) {
             runtimeRegistration = await admittedHermesRuntime(rawRegistration, {
               tenant: identity.organization_tenant_id,
               sponsor: scope.status === "personal" ? scope.sponsor : null,
-              profileKey, profileVersion: Number(row.version), profileModel: row.current_model,
+              profileKey, profileVersion, profileModel: row.current_model,
               workRequest: args.work_request, bindingId: args.activation_binding_id,
             });
             if (!runtimeRegistration)
@@ -247,7 +250,7 @@ export function botBriefTools({ ToolError, assertNoCallerAuthorityFields }) {
           desk: row.current_desk ?? null,
           sponsor_scope: row.sponsor_scope,
           status: row.status,
-          version: Number(row.version),
+          version: profileVersion,
         };
         const definition = {
           profile, doctrine_generation: generation, rule_delivery_mode: deliveryMode,
