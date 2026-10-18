@@ -410,3 +410,71 @@ test("AC-DS-REGISTRY: a refused write is surfaced as its reason and never as a s
   assert.throws(() => dispatchAckProjection(undefined, ToolError),
     e => e.error === "dispatch_ack_refused");
 });
+
+// ===========================================================================
+// Idempotency key on the two dispatch writes. withEnvelope refuses a call with
+// no idempotency_key and replays a stored response for a repeated one, but
+// these two schemas were closed (additionalProperties:false) without the key,
+// so the room bridge could not send it. The envelope below models exactly that
+// contract: required key, replay without running the write.
+// ===========================================================================
+
+const LINK_ARGS = { dispatch_ref: "33333333-3333-4333-8333-333333333333",
+  turn_msg_id: "11111111-1111-4111-8111-111111111111", session_id: "codex-session-7" };
+const ACK_ARGS = { dispatch_ref: "33333333-3333-4333-8333-333333333333", stage: "received" };
+
+// What a closed schema does to a property it does not list.
+const closedSchemaRefuses = (schema, args) =>
+  schema.additionalProperties === false &&
+  Object.keys(args).some(k => !(k in schema.properties));
+
+function replayingEnvelope() {
+  const stored = new Map();
+  return async (_c, _a, _verb, args, fn) => {
+    if (!args.idempotency_key) throw new ToolError({ error: "missing_idempotency_key" });
+    if (stored.has(args.idempotency_key)) return { replayed: true, ...stored.get(args.idempotency_key) };
+    const result = await fn();
+    stored.set(args.idempotency_key, result);
+    return result;
+  };
+}
+
+function recordingClient(rowFor) {
+  const calls = [];
+  return { calls, query: async (text, values) => {
+    calls.push(text);
+    return { rows: [{ result: rowFor(text, values) }] };
+  } };
+}
+
+const linkRow = (_t, v) => ({ ok: true, id: 1, turn_id: 9, dispatch_ref: v[3],
+  turn_msg_id: v[0], session_id: v[1], written_by: "hermes-pilot", deduplicated: false });
+const ackRow = (_t, v) => ({ ok: true, id: 2, dispatch_ref: v[0], stage: v[1],
+  by_actor: "hermes-pilot", deduplicated: false });
+
+for (const [verb, args, row, sqlMark] of [
+  ["record-dispatch-link", LINK_ARGS, linkRow, "ops.record_dispatch_link"],
+  ["acknowledge-dispatch", ACK_ARGS, ackRow, "ops.acknowledge_dispatch"],
+]) {
+  test(`AC-DS-IDEM: ${verb} accepts and requires idempotency_key`, () => {
+    const schema = TOOLS[verb].inputSchema;
+    const withKey = { ...args, idempotency_key: randomUUID() };
+    assert.equal(closedSchemaRefuses(schema, withKey), false,
+      "the closed schema must list idempotency_key or the bridge cannot send it");
+    assert.ok(schema.required.includes("idempotency_key"));
+  });
+
+  test(`AC-DS-IDEM: a repeated ${verb} with the same key writes once`, async () => {
+    const t = dispatchSpineTools({ withEnvelope: replayingEnvelope(), writeEvent: noEvent, ToolError });
+    const client = recordingClient(row);
+    const withKey = { ...args, idempotency_key: randomUUID() };
+    const first = await t[verb].handler(client, {}, { ...withKey });
+    const second = await t[verb].handler(client, {}, { ...withKey });
+    assert.equal(client.calls.filter(q => q.includes(sqlMark)).length, 1);
+    assert.equal(first.replayed, undefined);
+    assert.equal(second.replayed, true);
+    const other = await t[verb].handler(client, {}, { ...withKey, idempotency_key: randomUUID() });
+    assert.equal(other.replayed, undefined);
+    assert.equal(client.calls.filter(q => q.includes(sqlMark)).length, 2);
+  });
+}

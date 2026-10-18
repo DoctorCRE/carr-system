@@ -632,7 +632,9 @@ def main() -> int:
             call_verb=fake_call,
         )
         assert sent["verb"] == "record-dispatch-link", sent["verb"]
-        # The three facts the bridge holds at that moment, and no fourth.
+        assert sent["args"].get("idempotency_key") == "dispatch-link:11111111-1111-4111-8111-111111111111:claude-desktop-7", sent["args"]
+        assert sent["args"]["dispatch_ref"] == "33333333-3333-4333-8333-333333333333"
+        # The observed link facts accompany the envelope's replay key.
         assert sent["args"]["turn_msg_id"] == "11111111-1111-4111-8111-111111111111"
         assert sent["args"]["session_id"] == "claude-desktop-7"
         assert sent["args"]["work_request_id"] == "22222222-2222-4222-8222-222222222222"
@@ -643,6 +645,31 @@ def main() -> int:
 
     check("the bridge mints the link with the turn msg_id it just wrote",
           bridge_mints_the_link_with_the_turn_it_just_wrote)
+
+    def dispatch_link_retries_reuse_the_entire_request():
+        import bridge  # noqa: PLC0415
+        import uuid  # noqa: PLC0415
+        calls = []
+
+        def fake_call(verb, args, **kwargs):
+            calls.append((verb, args, kwargs))
+            return {"ok": True}
+
+        link = {"turn_msg_id": "11111111-1111-4111-8111-111111111111",
+                "session_id": "codex-session-7"}
+        bridge.record_dispatch_link(**link, call_verb=fake_call)
+        bridge.record_dispatch_link(**link, call_verb=fake_call)
+        # The envelope hashes dispatch_ref too, so a retry must repeat it.
+        assert calls[0] == calls[1], calls
+        uuid.UUID(calls[0][1]["dispatch_ref"])
+        for changed in ({**link, "session_id": "codex-session-8"},
+                        {**link, "turn_msg_id": "22222222-2222-4222-8222-222222222222"}):
+            bridge.record_dispatch_link(**changed, call_verb=fake_call)
+            assert calls[-1][1]["idempotency_key"] != calls[0][1]["idempotency_key"], calls
+            assert calls[-1][1]["dispatch_ref"] != calls[0][1]["dispatch_ref"], calls
+
+    check("dispatch link retries keep the envelope payload stable and separate distinct links",
+          dispatch_link_retries_reuse_the_entire_request)
 
     def desk_acknowledges_received_and_can_never_send_acknowledged():
         sent = {}
@@ -657,7 +684,15 @@ def main() -> int:
             desk="claude-desk", log_offset=4096,
             injected_at="2026-09-19T00:00:00Z", call_verb=fake_call,
         )
+        first = dict(sent["args"])
+        dispatch.acknowledge_received(
+            "33333333-3333-4333-8333-333333333333",
+            desk="claude-desk", log_offset=4096,
+            injected_at="2026-09-19T00:00:00Z", call_verb=fake_call,
+        )
+        assert sent["args"] == first, sent["args"]
         assert sent["verb"] == "acknowledge-dispatch", sent["verb"]
+        assert sent["args"].get("idempotency_key") == "dispatch-ack:33333333-3333-4333-8333-333333333333:received", sent["args"]
         assert sent["args"]["stage"] == "received", sent["args"]
         # The evidence is MEASURED -- the desk name and the byte offset the turn
         # landed at -- and never "it probably arrived".
