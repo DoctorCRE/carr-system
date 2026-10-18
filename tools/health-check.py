@@ -1775,6 +1775,21 @@ def _canonical_health():
             _canonical_assurance_health()
 
     if CANONICAL_SECTION in ("all", "registry"):
+        feature_command = [sys.executable, os.path.join(REPO_ROOT, "tools/feature-switch-health.py")]
+        if CANONICAL_FIXTURE:
+            feature_command += ["--fixture", CANONICAL_FIXTURE]
+        try:
+            feature_result = subprocess.run(feature_command, cwd=REPO_ROOT, text=True, capture_output=True, timeout=35)
+            print(feature_result.stdout.rstrip())
+            if feature_result.returncode == 1:
+                rc = _red("feature_switch_retirement", feature_result.stdout.strip())
+            elif feature_result.returncode:
+                rc = _red("feature_switch_unreadable", feature_result.stdout.strip(), hard_error=True)
+        except (OSError, subprocess.TimeoutExpired):
+            detail = "UNKNOWN feature switches · on breach: retry record check; owner claude; retire overdue switch; verify list-feature-switches; auto-clear on successful check"
+            print(detail)
+            rc = _red("feature_switch_unreadable", detail, hard_error=True)
+    if CANONICAL_SECTION in ("all", "registry"):
         print("Registry integrity — canonical v_export_leads")
         p = subprocess.run(
             [sys.executable, os.path.join(REPO_ROOT, "tools/registry-audit.py")],

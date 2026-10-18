@@ -89,13 +89,16 @@ def load_secret() -> str:
 
 def provision_and_deploy(repo: Path, sha: str, secret: str, child_env: dict, *, run=subprocess.run):
     config = validate_config((repo / "mcp-server/wrangler.toml").read_text())
+    wrangler = repo / "mcp-server/node_modules/.bin/wrangler"
+    if not os.access(wrangler, os.X_OK):
+        raise StagingRefusal("wrangler is missing or not executable at " + str(wrangler)
+                             + "; run `npm ci` in " + str(repo / "mcp-server"))
     child_env = {**child_env, "CLOUDFLARE_ACCOUNT_ID": config["account_id"]}
     checked_run([sys.executable, repo / "ops/deploy-attachment-check.py", repo / "mcp-server/wrangler.toml", "staging"],
                 cwd=repo, env=child_env, run=run)
     checked_run([sys.executable, repo / "tools/release-manifest.py", "doctorcre-artifact", "materialize",
                  "--pin", repo / "ops/config/doctorcre-artifact.v1.json", "--root", repo / "out/doctorcre-artifacts"],
                 cwd=repo, env=child_env, run=run)
-    wrangler = repo / "mcp-server/node_modules/.bin/wrangler"
     checked_run([wrangler, "secret", "put", "E2E_SESSION_SECRET", "--env", "staging"],
                 cwd=repo / "mcp-server", env=child_env, input=secret + "\n", run=run)
     print("E2E secret provisioned to carr-mcp-staging; value suppressed", flush=True)
