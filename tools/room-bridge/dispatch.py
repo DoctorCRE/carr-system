@@ -400,7 +400,7 @@ def _to_codex(
             # pipe makes the run hang or swallow whatever the caller was fed.
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
-            if on_executor or stream_output:
+            if provider_run is None and (on_executor or stream_output):
                 proc = _run_codex_process(argv, env or os.environ.copy(), limit_s,
                                           on_executor, stream_output, **process_options)
             else:
@@ -613,6 +613,8 @@ def dispatch(
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
     declared_writes = write_ownership.declaration(original_task, writes)
+    if declared_writes and provider_run is not None:
+        raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
     if declared_writes and entry['kind'] not in codex_models.CODEX_KINDS:
         raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex adapter')
 

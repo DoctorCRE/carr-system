@@ -27,10 +27,10 @@ class ResearchDeskTests(unittest.TestCase):
         self.folder = Path(self.temp.name).resolve()
 
     def test_route_requires_named_model_effort_and_no_added_authority(self):
-        entry = {'name': 'source-study', 'kind': 'codex-session', 'model': 'fixture-model',
+        entry = {'name': 'source-study', 'kind': 'codex-session', 'family': 'sol',
                  'effort': 'high', 'sandbox': 'read-only'}
         self.assertEqual(self.room.validate_desk(entry), entry)
-        for change in ({'model': None}, {'effort': None}, {'sandbox': 'danger-full-access'},
+        for change in ({'family': None}, {'effort': None}, {'sandbox': 'danger-full-access'},
                        {'kind': 'claude-session'}, {'add_dirs': ['/']}, {'name': 'unreviewed'}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.room.validate_desk({**entry, **change})
@@ -52,7 +52,7 @@ class ResearchDeskTests(unittest.TestCase):
         class Registry:
             def resolve(self, name):
                 return {'kind': 'codex-session', 'model': 'fixture-model', 'effort': 'high'}
-        with patch.object(dispatch, '_run_codex_streamed', side_effect=AssertionError('unconfined runner')):
+        with patch.object(dispatch, '_run_codex_process', side_effect=AssertionError('unconfined runner')):
             with self.assertRaises(DeskError):
                 dispatch.dispatch('source-study', 'fixture', registry=Registry(),
                                   stream_output=True, provider_run=lambda *_: None)
@@ -201,7 +201,7 @@ Path(args[args.index('-o') + 1]).write_text('verified fixture report')
 sessions = Path(os.environ['CODEX_HOME']) / 'sessions'
 sessions.mkdir()
 rows = [{'type': 'session_meta', 'payload': {'id': 'fixture-thread'}},
-        {'type': 'turn_context', 'payload': {'model': 'fixture-model', 'effort': 'high'}}]
+        {'type': 'turn_context', 'payload': {'model': 'gpt-9.9-sol', 'effort': 'high'}}]
 (sessions / 'rollout.jsonl').write_text('\\n'.join(json.dumps(r) for r in rows))
 print(json.dumps({'type': 'thread.started', 'thread_id': 'fixture-thread'}))
 print(json.dumps({'type': 'turn.completed'}))
@@ -210,9 +210,10 @@ print(json.dumps({'type': 'turn.completed'}))
         auth = self.folder / 'auth'
         auth.mkdir()
         (auth / 'auth.json').write_text('{"provider_auth":"synthetic"}')
+        (auth / 'models_cache.json').write_text(json.dumps({'models': [{'slug': 'gpt-9.9-sol'}]}))
         registry = self.folder / 'registry.json'
         registry.write_text(json.dumps({'desks': {'source-study': {
-            'kind': 'codex-session', 'model': 'fixture-model', 'effort': 'high', 'sandbox': 'read-only'}}}))
+            'kind': 'codex-session', 'family': 'sol', 'effort': 'high', 'sandbox': 'read-only'}}}))
         env = dict(os.environ, CARR_HERMES_DESKS=str(registry), CODEX_HOME=str(auth),
                    DATABASE_URL='synthetic-dsn', CARR_TOKEN='synthetic-token',
                    PATH=str(job / 'bin') + os.pathsep + os.environ['PATH'])
@@ -224,7 +225,7 @@ print(json.dumps({'type': 'turn.completed'}))
         self.assertEqual(result.returncode, 0, result.stderr)
         row = json.loads(result.stdout)
         self.assertEqual(row['result'], 'verified fixture report')
-        self.assertEqual(row['observed'], {'model': 'fixture-model', 'effort': 'high', 'thread_id': 'fixture-thread'})
+        self.assertEqual(row['observed'], {'model': 'gpt-9.9-sol', 'effort': 'high', 'thread_id': 'fixture-thread'})
         self.assertFalse(list(job.rglob('auth.json')), 'provider credentials must not persist after dispatch')
 
     @unittest.skipUnless(shutil.which('sandbox-exec'), 'macOS confinement probe')

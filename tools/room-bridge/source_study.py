@@ -24,9 +24,9 @@ ROOT = HERE.parents[1]
 
 def validate_desk(entry):
     if (entry.get('name') != 'source-study' or entry.get('kind') != 'codex-session'
-            or not entry.get('model') or not entry.get('effort')
+            or not entry.get('family') or not entry.get('effort')
             or entry.get('sandbox') != 'read-only' or entry.get('add_dirs')):
-        raise ValueError('source-study desk must name a model/effort and read-only posture without extra directories')
+        raise ValueError('source-study desk must name a model family/effort and read-only posture without extra directories')
     return entry
 
 
@@ -41,8 +41,13 @@ def preflight(phase):
         validate_entry(entry)
     else:
         validate_desk(entry)
+        # Desks name a family; dispatch resolves the model from the Codex catalog
+        # on every job. Pin the resolved model so a catalog change between
+        # preflight and the job is refused rather than silently studied.
+        import codex_models
+        entry = {**entry, 'model': codex_models.resolve_model(entry['family'], os.environ)}
     # Never resume a thread with another job's inputs, cwd or authority.
-    bound = {key: entry.get(key) for key in ('name', 'kind', 'model', 'effort', 'sandbox')}
+    bound = {key: entry.get(key) for key in ('name', 'kind', 'family', 'model', 'effort', 'sandbox')}
     digest = hashlib.sha256(json.dumps(bound, sort_keys=True).encode()).hexdigest()
     return {**bound, 'digest': digest}
 
@@ -58,6 +63,10 @@ def runtime_env(folder, auth_home, ambient, *, provider='codex'):
     # environment tokens and the caller's session history are excluded.
     shutil.copyfile(auth_home / 'auth.json', provider_home / 'auth.json')
     (provider_home / 'auth.json').chmod(0o600)
+    catalog = auth_home / 'models_cache.json'
+    if provider == 'codex' and catalog.is_file():
+        # Non-secret model catalog; dispatch resolves the desk family from it.
+        shutil.copyfile(catalog, provider_home / 'models_cache.json')
     (provider_home / 'config.toml').write_text('' if provider == 'grok' else
         'approval_policy="never"\nsandbox_mode="read-only"\nweb_search="live"\n'
         '[features]\nshell_tool=false\nmulti_agent=false\n')
