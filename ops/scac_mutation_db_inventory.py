@@ -233,8 +233,11 @@ def validate_registered_grants(projection, baseline, contract):
         if remaining["secdef_execute"].count(grant) != 1:
             raise RuntimeError(f"registered grant missing or altered: {grant['ingress_key']}")
         remaining["secdef_execute"].remove(grant)
+    # A retired definition may share its ingress key with the registered grant
+    # that replaces it (same function and grantee, new metadata); only an
+    # unregistered installed row with that key means the old grant survived.
     for grant in contract.get("retired_secdef_execute", []):
-        if any(row["ingress_key"] == grant["ingress_key"] for row in projection["secdef_execute"]):
+        if any(row["ingress_key"] == grant["ingress_key"] for row in remaining["secdef_execute"]):
             raise RuntimeError(f"retired grant is still installed: {grant['ingress_key']}")
         remaining["secdef_execute"].append(grant)
     if contract.get("retired_secdef_execute"):
