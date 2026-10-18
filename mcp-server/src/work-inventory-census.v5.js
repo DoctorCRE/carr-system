@@ -20,6 +20,7 @@
 // matches on PLAIN TEXT, so even naming those constructs in a comment here
 // would turn this library into an ingress. That cost one verdict to learn.
 
+import { readableWorkRequestSql } from "./work-request-read.js";
 import { readSystemWorkCensus } from "./system-work-census.v5.js";
 import { organizationTenantForActor } from "./identity.js";
 
@@ -75,14 +76,16 @@ export const WORK_INVENTORY_LEGS = [
     rowsSql: `select 'work_request' as kind, ref as id, version::text as version, title,
                      state as status, updated_at, organization_tenant_id,
                      superseded_by::text as related_work_request, origin_ref as related_origin
-                from ops.work_request
+                from ops.work_request w
                where ($1::text is null or organization_tenant_id = $1::text)
+                 and ${readableWorkRequestSql("w")}
                  and ($2::text[] is null or state = any($2::text[]))
                  and ($3::timestamptz is null or updated_at <= $3::timestamptz)
                order by updated_at desc, ref asc
                limit $4::int`,
-    countSql: `select count(*) as count from ops.work_request
+    countSql: `select count(*) as count from ops.work_request w
                 where ($1::text is null or organization_tenant_id = $1::text)
+                 and ${readableWorkRequestSql("w")}
                   and ($2::text[] is null or state = any($2::text[]))`,
     related: (row) => [
       ...(row.related_work_request ? [{ kind: "work_request", id: row.related_work_request }] : []),
