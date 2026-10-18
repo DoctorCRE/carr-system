@@ -1264,7 +1264,11 @@ def scan(root, config, config_path=None, *, vendor_only=False):
             append(ledger, {"key": scan_key, "status": "completed", "at": stamp(),
                             "findings": len(found), "collection_errors": len(facts["errors"])})
             print(digest(root, config))
-            return 1 if facts["errors"] or any(f["kind"] in {"action_error", "record_error", "vendor_release_fetch_error"} for f in found) else 0
+            # The exit status says this scan could not do its job: evidence it could
+            # not read, or an effect or report it could not complete. A third-party
+            # source refusing a fetch is a reported finding about that source, not a
+            # failed scan, so it does not turn the scheduled job red.
+            return 1 if facts["errors"] or any(f["kind"] in {"action_error", "record_error"} for f in found) else 0
     except BlockingIOError:
         # Another scan owns the entire interval's effects; say so instead of vanishing.
         append(path_at(root, config["paths"]["scan_ledger"]),
