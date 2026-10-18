@@ -59,9 +59,13 @@ Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
    action point through the per-call route hook.
 2. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
    `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
-   142 and a claim left `held`). Declare `--writes` as the exact files, never a
-   whole `test/` folder: an overlap with any open non-held PR refuses the job.
-   A killed job leaves its claim held; `dispatch.py reconcile --claim <msg_id>`.
+   142). There are no shared-file claims and no `reconcile` subcommand (#1811):
+   a writing job holds only its checkout's `room-writer.lock`, which the next
+   writer clears by itself once the recorded executor is gone. A job that ended
+   with `termination_confirmed: false` blocks only that checkout, and only while
+   its process group (pgid in `<gitdir>/room-writer.lock`) is still alive: kill
+   that group if it is. `--checkout` jobs each get a fresh clone, so they never
+   block one another.
 3. **The progress board is one per checkout**, resolved from the main working
    tree; a worktree no longer needs its own `init`.
 4. **A Stop gate that holds the turn open is answered with the delta only**, and

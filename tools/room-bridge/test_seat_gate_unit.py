@@ -76,7 +76,8 @@ class SendThroughTheGate(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         Path(self.root, 'models_cache.json').write_text(json.dumps({'models': [{'slug': 'gpt-6.1-sol', 'display_name': 'GPT-6.1-Sol'}]}))
-        env = patch.dict(os.environ, {'CODEX_HOME': str(self.root)})
+        env = patch.dict(os.environ, {'CODEX_HOME': str(self.root),
+                                      'CARR_CODEX_SLOT_DIR': str(self.root / 'slots')})
         env.start()
         self.addCleanup(env.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
