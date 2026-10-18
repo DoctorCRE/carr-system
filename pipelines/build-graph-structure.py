@@ -157,7 +157,6 @@ for d in DEALS:
     if (r := clean(d.get("referral"))) and len(r) < 45:
         members[f"⚑ {r}"].add(n)
 
-# ---------- write ----------
 if os.path.isdir(OUT): shutil.rmtree(OUT)
 os.makedirs(OUT, exist_ok=True)
 

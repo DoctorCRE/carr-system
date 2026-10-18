@@ -1,0 +1,115 @@
+{
+  "as_of": "2026-10-05T08:00:00-05:00",
+  "nppes_rows": [
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000001"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "08/01/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000002"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Miami",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "33101",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000003"
+    },
+    {
+      "Entity Type Code": "1",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "207Q00000X",
+      "NPI": "1000000004",
+      "Provider First Name": "Example",
+      "Provider Last Name (Legal Name)": "Associate"
+    },
+    {
+      "Entity Type Code": "2",
+      "Provider Enumeration Date": "09/30/2026",
+      "Provider Organization Name (Legal Business Name)": "Example Dental",
+      "Provider Business Practice Location Address City Name": "Pensacola",
+      "Provider Business Practice Location Address State Name": "FL",
+      "Provider Business Practice Location Address Postal Code": "32501",
+      "Healthcare Provider Taxonomy Code_1": "",
+      "NPI": "1000000001"
+    }
+  ],
+  "claims": [],
+  "classification_cases": [
+    {
+      "name": "Example Hospital",
+      "taxonomy": "282N00000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example Home Health",
+      "taxonomy": "251E00000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example Skilled Nursing",
+      "taxonomy": "313M00000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example Assisted Living",
+      "taxonomy": "3104A0630X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example DME",
+      "taxonomy": "332B00000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example Transport",
+      "taxonomy": "341600000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example FQHC",
+      "taxonomy": "261QF0400X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example County Health Department",
+      "taxonomy": "261Q00000X",
+      "classification": "EXCLUDE"
+    },
+    {
+      "name": "Example Dental Practice",
+      "taxonomy": "1223G0001X",
+      "classification": "STRONG"
+    },
+    {
+      "name": "Example Unknown Practice",
+      "taxonomy": "",
+      "classification": "REVIEW"
+    },
+    {
+      "name": "Example Ambulatory Surgery",
+      "taxonomy": "261QA1903X",
+      "classification": "STRONG"
+    }
+  ]
+}

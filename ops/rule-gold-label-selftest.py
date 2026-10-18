@@ -455,8 +455,9 @@ def test_fixture(gl, ev):
     # the guidance-deferred reporting group
     group = set(((doc.get("rule_groups") or {}).get("guidance_deferred") or {}).get("rules") or [])
     manifest = {rid for rid, g in gl.rule_groups(str(REPO)).items() if g == "guidance_deferred"}
-    check("fixture tags the guidance-deferred group from the manifest",
-          group == manifest & live and len(group) >= 90, len(group))
+    active = set(gl.rule_classes(str(REPO)))
+    check("frozen guidance-deferred tags match the manifest for still-active rules",
+          group & active == manifest & live and len(group) >= 90, len(group))
     check("each case's deferred tag is its gold within the group",
           all(c["gold_guidance_deferred"] == [r for r in c["gold"] if r in group] for c in base))
     # 9. the universal-trigger policy is applied uniformly
@@ -683,7 +684,7 @@ def test_cli_train():
             data = json.loads(report.read_text())
             check("report is train-only", data.get("split") == "train")
             check("report has per-class rows",
-                  data["paths"]["system_scoped_boot"].get("by_class") is not None)
+                  data["paths"]["system_moment"].get("by_class") is not None)
         result = subprocess.run(
             [sys.executable, str(EVAL_CLI), "--cases", str(FIXTURE), "--jev", "off",
              "--out-dir", tmp],

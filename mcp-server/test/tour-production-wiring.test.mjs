@@ -22,8 +22,8 @@ test("Worker production router mounts authenticated Tours and public reports", (
   const dealroom = read("mcp-server/src/dealroom-web.js");
   assert.match(index, /createTourInternalWebHandler\(createTourRuntimeAdapters\(\)\)/);
   assert.match(index, /createReportsWebHandler\(createReportsRuntimeAdapters\(\)\)/);
-  assert.match(index, /isReportsHostRequest\(request\)[\s\S]*reportsHandler\.fetch/);
-  assert.ok(index.indexOf("isReportsHostRequest(request)") < index.indexOf('url.pathname === "/mcp"'), "reports host must close before machine/OAuth routing");
+  assert.match(index, /isReportsHostRequest\(request, env\)[\s\S]*reportsHandler\.fetch/);
+  assert.ok(index.indexOf("isReportsHostRequest(request, env)") < index.indexOf('url.pathname === "/mcp"'), "reports host must close before machine/OAuth routing");
   assert.match(index, /tourHandler:\s*tourInternalHandler/);
   assert.match(dealroom, /isTourInternalRequest\(request\)[\s\S]*tourHandler\.fetch/);
   assert.match(dealroom, /"\/api\/tours\/"/);

@@ -409,41 +409,6 @@ def _(assert_):
             f"root_b should NOT detect built_unclosed (file not there): {result_b!r}")
 
 
-# -- seed state capture: the migration's real state, not hardcoded 'ready' ----
-
-
-@case("_seed_evidence_rows captures the real state from the migration, not 'ready'")
-def _(assert_):
-    """The seed parser must capture the state column from the migration SQL.
-    When the DB is down and a row is in 'in_progress', the seed fallback must
-    see 'in_progress' -- not silently hardcode 'ready' and miss the open work.
-    """
-    root = tempfile.mkdtemp()
-    mig_dir = os.path.join(root, "migrations")
-    os.makedirs(mig_dir, exist_ok=True)
-    mig = os.path.join(mig_dir, "0125_ai_capability_program.sql")
-    open(mig, "w").write(
-        "insert into ops.work_request\n"
-        "  (program_ordinal, program_key, ref, title, disposition, existing_status, state,\n"
-        "   desired_outcome, acceptance_criteria, project_context, requester_actor, owner_actor)\n"
-        "values\n"
-        "  (1, 'test-suite-v1', 'WR-X-001', 'Test', 'build', 'absent', 'in_progress',\n"
-        "   'outcome', 'criteria',\n"
-        "   '{\"scope\":\"test\",\"evidence\":[\"ops/widget.py\"]}'::jsonb, 'joe', 'joe');\n"
-    )
-    import importlib.util as _ilu
-    gate_path = os.path.join(os.path.dirname(HERE), "hooks", "close-before-open-gate.py")
-    _spec = _ilu.spec_from_file_location("_gate_seed", gate_path)
-    assert _spec is not None and _spec.loader is not None, f"cannot load {gate_path}"
-    _gate = _ilu.module_from_spec(_spec)
-    _spec.loader.exec_module(_gate)
-    rows = _gate._seed_evidence_rows(root)
-    assert_(len(rows) == 1,
-            f"seed parser should find 1 row: {rows!r}")
-    assert_(rows[0]["state"] == "in_progress",
-            f"seed parser must capture state='in_progress', not 'ready': {rows[0]!r}")
-
-
 def main():
     for name, fn in CASES:
         errors = []

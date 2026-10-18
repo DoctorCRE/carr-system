@@ -2,7 +2,7 @@
   "schema_version": "engineering-codex-desk.v1",
   "name": "engineering-codex",
   "kind": "codex-session",
-  "model": "gpt-6.1-sol",
+  "family": "sol",
   "effort": "xhigh",
   "cwd": "{{REPO}}",
   "sandbox": "workspace-write",

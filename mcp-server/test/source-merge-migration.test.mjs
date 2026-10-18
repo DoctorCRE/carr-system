@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,8 +6,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const migration = fs.readFileSync(path.join(ROOT,
-  "migrations/0470_source_merge_authority_projection.sql"), "utf8");
+const migration = readMigration(path.join(ROOT,
+  "migrations/0470_source_merge_authority_projection.sql"));
 const workflow = fs.readFileSync(path.join(ROOT,
   ".github/workflows/source-merge-controller.yml"), "utf8");
 
@@ -62,7 +63,7 @@ test("dark assurance and ownership rows are projected without expanding accepted
 
 test("automatic invoker runs trusted protected-main code with narrowly named credentials", () => {
   assert.match(workflow, /workflow_run:[\s\S]+workflows:\s*\[CI\]/i);
-  assert.match(workflow, /schedule:[\s\S]+cron:\s*"\*\/15 \* \* \* \*"/i);
+  assert.match(workflow, /schedule:[\s\S]+cron:\s*"\*\/15 0-5,12-23 \* \* \*"/i);
   assert.match(workflow, /uses:\s*actions\/checkout@[0-9a-f]{40}[\s\S]+ref:\s*main[\s\S]+persist-credentials:\s*false/i);
   assert.match(workflow, /CARR_SOURCE_MERGE_READER_TOKEN:\s*\$\{\{ secrets\.CARR_SOURCE_MERGE_READER_TOKEN \}\}/);
   assert.match(workflow, /run:\s*node mcp-server\/bin\/run-source-merge\.mjs auto/i);

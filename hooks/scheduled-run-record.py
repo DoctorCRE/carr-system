@@ -54,8 +54,7 @@ from lib.scheduled_run import log, quick_launched_task, record_from_transcript  
 def _repo_root():
     """The repo root, from CARR_REPO_ROOT env or script-relative.
 
-    Same contract as hooks/chat-lint-gate.py's repo_root() (2026-08-23
-    load-flake sweep): the selftest points CARR_REPO_ROOT at a throwaway tree
+    The selftest points CARR_REPO_ROOT at a throwaway tree
     so concurrent ci.sh runs never share one idempotency-cache directory.
     Production leaves the variable unset.
     """
@@ -88,44 +87,53 @@ def mark_recorded(session_id: str) -> None:
         pass
 
 
-def main() -> int:
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        log(f"ALLOW(parse-error) {exc}")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    if (payload.get("hook_event_name") or "") != "Stop":
+        return 0
+    if payload.get("stop_hook_active"):
         return 0
 
-    try:
-        if (payload.get("hook_event_name") or "") != "Stop":
-            return 0
-        if payload.get("stop_hook_active"):
-            return 0
-
-        session_id = payload.get("session_id") or payload.get("sessionId") or ""
-        transcript = payload.get("transcript_path") or payload.get("transcriptPath") or ""
-        if not transcript or not os.path.exists(transcript):
-            return 0
-
-        if already_recorded(session_id):
-            return 0
-
-        # Cheap head-only check first — this is the cost every ordinary,
-        # non-scheduled session's every Stop pays, so it must stay cheap.
-        if not quick_launched_task(transcript):
-            return 0
-
-        result = record_from_transcript(transcript, source_ref="hooks/scheduled-run-record.py")
-        mark_recorded(session_id)
-        if not result.get("recorded"):
-            # Logged inside record_from_transcript already; nothing more to do.
-            # Never surface this as a block — an unrecordable run is a gap in
-            # observability, not a reason to alter or repeat the scheduled
-            # task's own turn.
-            pass
+    session_id = payload.get("session_id") or payload.get("sessionId") or ""
+    transcript = payload.get("transcript_path") or payload.get("transcriptPath") or ""
+    if not transcript or not os.path.exists(transcript):
         return 0
-    except Exception as exc:  # noqa: BLE001 — fail open, like every gate here
-        log(f"ALLOW(internal-error) {exc}")
+
+    if already_recorded(session_id):
         return 0
+
+    # Cheap head-only check first — this is the cost every ordinary,
+    # non-scheduled session's every Stop pays, so it must stay cheap.
+    if not quick_launched_task(transcript):
+        return 0
+
+    result = record_from_transcript(transcript, source_ref="hooks/scheduled-run-record.py")
+    mark_recorded(session_id)
+    if not result.get("recorded"):
+        # Logged inside record_from_transcript already; nothing more to do.
+        # Never surface this as a block — an unrecordable run is a gap in
+        # observability, not a reason to alter or repeat the scheduled
+        # task's own turn.
+        pass
+    return 0
+
+
+def main():
+    return run(decide, parse_error=_parse_error)
 
 
 if __name__ == "__main__":

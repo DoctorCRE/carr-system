@@ -1,18 +1,4 @@
 #!/usr/bin/env python3
-"""Contract tests for codex_ipc.py — the wire into a thread Codex Desktop holds open.
-
-WHY THIS EXISTS, found live 2026-09-27: the orchestrator seat moved to a Codex
-Desktop thread and a room turn addressed to it failed with "thread ... already
-has an active writer". The exec-resume path opens a second writer on the thread,
-which Codex refuses while the Desktop app holds it. The Desktop app routes a new
-turn on a thread it owns through its own IPC router (~/.codex/ipc/ipc.sock):
-initialize, then thread-owner-discovery, then thread-follower-start-turn.
-
-These tests run a fake router on a temporary unix socket that speaks the same
-framing (4-byte little-endian length + UTF-8 JSON) and checks every frame the
-client sends, so a wrong method name, version, or turn shape fails here instead
-of in the live orchestrator thread.
-"""
 
 from __future__ import annotations
 
@@ -39,7 +25,6 @@ def _frame(obj: dict) -> bytes:
 
 
 class FakeRouter:
-    """One-connection fake of the Codex Desktop IPC router."""
 
     def __init__(self, *, owner: bool = True, start_error: str | None = None,
                  steer_ok: bool = True, chatter: bool = True):
@@ -82,7 +67,6 @@ class FakeRouter:
         rid = msg.get("requestId")
         method = msg.get("method")
         if self.chatter:
-            # the real router interleaves broadcasts and discovery requests
             conn.sendall(_frame({"type": "broadcast", "method": "thread-stream-state-changed",
                                  "params": {}}))
             conn.sendall(_frame({"type": "client-discovery-request", "requestId": "d-1",

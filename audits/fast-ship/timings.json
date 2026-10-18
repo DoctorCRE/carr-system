@@ -1,0 +1,2402 @@
+{
+  "method": "Nearest-rank p50/p90 in seconds; finished class timings only, including finished work in failed or cancelled runs. Unfinished classes are excluded.",
+  "lanes": {
+    "main": {
+      "run_ids": [
+        37346919225,
+        37328525632,
+        37326914027,
+        37325668763,
+        37325025381,
+        37322365812,
+        37317983556,
+        37310477216,
+        37308598202,
+        37305517001,
+        37304956102,
+        37299842552,
+        37290828201,
+        37287820662,
+        37283418260,
+        37277020275,
+        37275017897,
+        37273589810,
+        37272182143,
+        37264025612,
+        37261699974,
+        37259510525,
+        37253165206,
+        37250345058,
+        37249977700,
+        37243419446,
+        37243369624,
+        37243057241,
+        37242731230,
+        37237597989
+      ],
+      "window": [
+        "2026-10-04T21:48:59Z",
+        "2026-10-05T17:14:21Z"
+      ],
+      "outcomes": {
+        "in_progress": 1,
+        "cancelled": 18,
+        "success": 11
+      },
+      "missing_logs": [
+        37346919225
+      ],
+      "classes": {
+        "gates": {
+          "n": 23,
+          "p50": 800,
+          "p90": 1069
+        },
+        "replay": {
+          "n": 8,
+          "p50": 236,
+          "p90": 298
+        },
+        "migration": {
+          "n": 11,
+          "p50": 864,
+          "p90": 929
+        },
+        "types": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "freshness": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        }
+      },
+      "db_gates": {
+        "siep12-policy-epoch-local-pg-gate": {
+          "n": 11,
+          "p50": 313,
+          "p90": 321
+        },
+        "siep18-reference-monitor-local-pg-gate": {
+          "n": 11,
+          "p50": 148,
+          "p90": 153
+        },
+        "cre-lifecycle-local-pg-gate": {
+          "n": 11,
+          "p50": 57,
+          "p90": 66
+        },
+        "zz-engineering-controller-concurrency-gate": {
+          "n": 11,
+          "p50": 32,
+          "p90": 33
+        },
+        "staging-release-readback-gate": {
+          "n": 11,
+          "p50": 35,
+          "p90": 38
+        },
+        "atomic-rule-compat-migration-gate": {
+          "n": 11,
+          "p50": 20,
+          "p90": 25
+        },
+        "staging-database-login-provision-db-gate": {
+          "n": 11,
+          "p50": 6,
+          "p90": 7
+        },
+        "staging-app-writer-provision-db-gate": {
+          "n": 11,
+          "p50": 5,
+          "p90": 7
+        },
+        "snapshot-authority-membership-gate": {
+          "n": 11,
+          "p50": 2,
+          "p90": 2
+        },
+        "work-portfolio-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "slice-done-marker-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "siep17-token-challenge-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 2
+        },
+        "siep15-device-enrollment-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "siep11-mutation-registry-local-pg-gate": {
+          "n": 11,
+          "p50": 2,
+          "p90": 3
+        },
+        "siep-program-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "siep-evidence-graph-local-pg-gate": {
+          "n": 11,
+          "p50": 2,
+          "p90": 2
+        },
+        "siep-01-heavy-build-session-reproduction-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "renewal-decision-delivery-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "program6-ready-plan-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program5-forward-fix-rehearsal-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "lead-stage-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "gate-zero-scheduler-canary-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "evidence-activation-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-claim-local-pg-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "control-plane-db-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "calendar-prebrief-service-registration-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "zero-hit-fallback-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "workflow-cutover-r02-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "work-request-withdrawal-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "tour-pdf-render-result-storage-ref-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "staging-retrieval-doctrine-seed-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "staging-replacement-project-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "staging-ledger-repair-0382-db-gate": {
+          "n": 11,
+          "p50": 1,
+          "p90": 1
+        },
+        "slice-done-marker-race-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "situation-retrieval-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep18-exact-effects-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "siep14-root-trust-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "siep13-artifact-registry-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "salesforce-reconciliation-rw02-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "resource-observation-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "renewal-lease-ledger-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "release-readiness-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-sourced-shape-disposition-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-sourced-routine-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-outcome-feedback-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-human-triage-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-browser-action-challenge-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "program5-promotion-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program3-trace-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "program3-incident-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "private-row-sponsor-rls-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "p0-1-release-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "legacy-program-tenant-backfill-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "joe-answer-work-request-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "jev-call-receipt-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "guidance-registry-db-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "gate-runtime-role-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-fixture-schedule-local-pg-gate": {
+          "n": 10,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-envelope-successor-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "engineering-envelope-race-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "doc-outcome-cards-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "delivery-cadence-a05-assurance-reader-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "control-plane-registry-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "control-catalog-parity-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "completion-register-schema-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "capability-completion-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        },
+        "calendar-prebrief-projection-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "calendar-prebrief-joe-runtime-local-pg-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 0
+        },
+        "authority-privilege-gate": {
+          "n": 11,
+          "p50": 0,
+          "p90": 1
+        }
+      },
+      "successful_run_seconds": {
+        "n": 11,
+        "p50": 1920.0,
+        "p90": 3612.0
+      },
+      "samples": [
+        {
+          "run_id": 37328525632,
+          "class": "gates",
+          "seconds": 768
+        },
+        {
+          "run_id": 37328525632,
+          "class": "replay",
+          "seconds": 281
+        },
+        {
+          "run_id": 37325668763,
+          "class": "gates",
+          "seconds": 750
+        },
+        {
+          "run_id": 37325668763,
+          "class": "replay",
+          "seconds": 284
+        },
+        {
+          "run_id": 37322365812,
+          "class": "gates",
+          "seconds": 501
+        },
+        {
+          "run_id": 37322365812,
+          "class": "replay",
+          "seconds": 196
+        },
+        {
+          "run_id": 37322365812,
+          "class": "migration",
+          "seconds": 717
+        },
+        {
+          "run_id": 37322365812,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37322365812,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37317983556,
+          "class": "gates",
+          "seconds": 809
+        },
+        {
+          "run_id": 37317983556,
+          "class": "replay",
+          "seconds": 298
+        },
+        {
+          "run_id": 37310477216,
+          "class": "gates",
+          "seconds": 585
+        },
+        {
+          "run_id": 37310477216,
+          "class": "replay",
+          "seconds": 235
+        },
+        {
+          "run_id": 37310477216,
+          "class": "migration",
+          "seconds": 916
+        },
+        {
+          "run_id": 37310477216,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37310477216,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37305517001,
+          "class": "gates",
+          "seconds": 595
+        },
+        {
+          "run_id": 37305517001,
+          "class": "replay",
+          "seconds": 250
+        },
+        {
+          "run_id": 37305517001,
+          "class": "migration",
+          "seconds": 963
+        },
+        {
+          "run_id": 37305517001,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37305517001,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37304956102,
+          "class": "gates",
+          "seconds": 572
+        },
+        {
+          "run_id": 37304956102,
+          "class": "replay",
+          "seconds": 236
+        },
+        {
+          "run_id": 37304956102,
+          "class": "migration",
+          "seconds": 929
+        },
+        {
+          "run_id": 37304956102,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37304956102,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37299842552,
+          "class": "gates",
+          "seconds": 476
+        },
+        {
+          "run_id": 37299842552,
+          "class": "replay",
+          "seconds": 181
+        },
+        {
+          "run_id": 37299842552,
+          "class": "migration",
+          "seconds": 787
+        },
+        {
+          "run_id": 37299842552,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37299842552,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37290828201,
+          "class": "gates",
+          "seconds": 1069
+        },
+        {
+          "run_id": 37287820662,
+          "class": "gates",
+          "seconds": 638
+        },
+        {
+          "run_id": 37287820662,
+          "class": "migration",
+          "seconds": 703
+        },
+        {
+          "run_id": 37287820662,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37287820662,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37283418260,
+          "class": "gates",
+          "seconds": 1071
+        },
+        {
+          "run_id": 37277020275,
+          "class": "gates",
+          "seconds": 1062
+        },
+        {
+          "run_id": 37275017897,
+          "class": "gates",
+          "seconds": 668
+        },
+        {
+          "run_id": 37275017897,
+          "class": "migration",
+          "seconds": 788
+        },
+        {
+          "run_id": 37275017897,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37275017897,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37272182143,
+          "class": "gates",
+          "seconds": 1048
+        },
+        {
+          "run_id": 37264025612,
+          "class": "gates",
+          "seconds": 800
+        },
+        {
+          "run_id": 37264025612,
+          "class": "migration",
+          "seconds": 897
+        },
+        {
+          "run_id": 37264025612,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37264025612,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37261699974,
+          "class": "gates",
+          "seconds": 943
+        },
+        {
+          "run_id": 37259510525,
+          "class": "gates",
+          "seconds": 1075
+        },
+        {
+          "run_id": 37253165206,
+          "class": "gates",
+          "seconds": 635
+        },
+        {
+          "run_id": 37253165206,
+          "class": "migration",
+          "seconds": 661
+        },
+        {
+          "run_id": 37253165206,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37253165206,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37250345058,
+          "class": "gates",
+          "seconds": 812
+        },
+        {
+          "run_id": 37250345058,
+          "class": "migration",
+          "seconds": 896
+        },
+        {
+          "run_id": 37250345058,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37250345058,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37249977700,
+          "class": "gates",
+          "seconds": 1036
+        },
+        {
+          "run_id": 37243419446,
+          "class": "gates",
+          "seconds": 1035
+        },
+        {
+          "run_id": 37242731230,
+          "class": "gates",
+          "seconds": 1031
+        },
+        {
+          "run_id": 37237597989,
+          "class": "gates",
+          "seconds": 700
+        },
+        {
+          "run_id": 37237597989,
+          "class": "migration",
+          "seconds": 864
+        },
+        {
+          "run_id": 37237597989,
+          "class": "types",
+          "seconds": 0
+        },
+        {
+          "run_id": 37237597989,
+          "class": "freshness",
+          "seconds": 0
+        }
+      ]
+    },
+    "pr": {
+      "run_ids": [
+        37347404615,
+        37347393282,
+        37347006696,
+        37345368780,
+        37343880075,
+        37343868165,
+        37343148482,
+        37343033849,
+        37342836891,
+        37342420824,
+        37341817437,
+        37341549396,
+        37341524542,
+        37341363182,
+        37339882413,
+        37339205916,
+        37339047404,
+        37336087576,
+        37335925957,
+        37334271688,
+        37334209455,
+        37333792089,
+        37333493253,
+        37333346046,
+        37332376412,
+        37330803543,
+        37330514206,
+        37330513415,
+        37330280307,
+        37329803022
+      ],
+      "window": [
+        "2026-10-05T15:04:19Z",
+        "2026-10-05T17:18:11Z"
+      ],
+      "outcomes": {
+        "failure": 8,
+        "cancelled": 11,
+        "success": 11
+      },
+      "missing_logs": [],
+      "classes": {
+        "replay": {
+          "n": 21,
+          "p50": 276,
+          "p90": 308
+        },
+        "gates": {
+          "n": 18,
+          "p50": 810,
+          "p90": 833
+        },
+        "migration": {
+          "n": 19,
+          "p50": 1115,
+          "p90": 1326
+        },
+        "pushfloor": {
+          "n": 20,
+          "p50": 0,
+          "p90": 1
+        },
+        "unit": {
+          "n": 20,
+          "p50": 247,
+          "p90": 264
+        },
+        "types": {
+          "n": 20,
+          "p50": 33,
+          "p90": 38
+        },
+        "contract": {
+          "n": 20,
+          "p50": 0,
+          "p90": 1
+        },
+        "secret": {
+          "n": 20,
+          "p50": 35,
+          "p90": 36
+        },
+        "dependency": {
+          "n": 20,
+          "p50": 9,
+          "p90": 9
+        },
+        "binding": {
+          "n": 20,
+          "p50": 2,
+          "p90": 3
+        },
+        "artifact": {
+          "n": 20,
+          "p50": 1,
+          "p90": 2
+        },
+        "freshness": {
+          "n": 20,
+          "p50": 0,
+          "p90": 0
+        }
+      },
+      "db_gates": {
+        "siep12-policy-epoch-local-pg-gate": {
+          "n": 19,
+          "p50": 385,
+          "p90": 479
+        },
+        "siep18-reference-monitor-local-pg-gate": {
+          "n": 19,
+          "p50": 181,
+          "p90": 226
+        },
+        "cre-lifecycle-local-pg-gate": {
+          "n": 19,
+          "p50": 65,
+          "p90": 75
+        },
+        "zz-engineering-controller-concurrency-gate": {
+          "n": 19,
+          "p50": 33,
+          "p90": 34
+        },
+        "staging-release-readback-gate": {
+          "n": 19,
+          "p50": 41,
+          "p90": 49
+        },
+        "atomic-rule-compat-migration-gate": {
+          "n": 19,
+          "p50": 25,
+          "p90": 29
+        },
+        "staging-database-login-provision-db-gate": {
+          "n": 19,
+          "p50": 8,
+          "p90": 10
+        },
+        "staging-app-writer-provision-db-gate": {
+          "n": 19,
+          "p50": 7,
+          "p90": 9
+        },
+        "siep11-mutation-registry-local-pg-gate": {
+          "n": 19,
+          "p50": 3,
+          "p90": 3
+        },
+        "siep-evidence-graph-local-pg-gate": {
+          "n": 19,
+          "p50": 2,
+          "p90": 3
+        },
+        "work-portfolio-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "snapshot-authority-membership-gate": {
+          "n": 19,
+          "p50": 2,
+          "p90": 3
+        },
+        "slice-done-marker-race-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep17-token-challenge-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 2
+        },
+        "siep15-device-enrollment-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 2
+        },
+        "salesforce-reconciliation-rw02-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-sourced-routine-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program5-promotion-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "legacy-program-tenant-backfill-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "guidance-registry-db-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "evidence-activation-db-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "engineering-claim-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "control-plane-db-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "calendar-prebrief-service-registration-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "zero-hit-fallback-db-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "workflow-cutover-r02-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "work-request-withdrawal-db-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "tour-pdf-render-result-storage-ref-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "staging-retrieval-doctrine-seed-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "staging-replacement-project-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "staging-ledger-repair-0382-db-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "slice-done-marker-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "situation-retrieval-db-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep18-exact-effects-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep14-root-trust-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep13-artifact-registry-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "siep-program-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "siep-01-heavy-build-session-reproduction-local-pg-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 2
+        },
+        "resource-observation-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "renewal-lease-ledger-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "renewal-decision-delivery-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "release-readiness-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-sourced-shape-disposition-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 0
+        },
+        "program6-ready-plan-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "program6-outcome-feedback-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-human-triage-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program6-browser-action-challenge-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program5-forward-fix-rehearsal-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program3-trace-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "program3-incident-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "private-row-sponsor-rls-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "p0-1-release-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "lead-stage-db-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 2
+        },
+        "joe-answer-work-request-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "jev-call-receipt-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 0
+        },
+        "gate-zero-scheduler-canary-gate": {
+          "n": 19,
+          "p50": 1,
+          "p90": 1
+        },
+        "gate-runtime-role-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-fixture-schedule-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-envelope-successor-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "engineering-envelope-race-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "doc-outcome-cards-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "delivery-cadence-a05-assurance-reader-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "control-plane-registry-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "control-catalog-parity-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "completion-register-schema-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "capability-completion-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "calendar-prebrief-projection-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "calendar-prebrief-joe-runtime-local-pg-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 1
+        },
+        "authority-privilege-gate": {
+          "n": 19,
+          "p50": 0,
+          "p90": 0
+        }
+      },
+      "successful_run_seconds": {
+        "n": 11,
+        "p50": 1368.0,
+        "p90": 1445.0
+      },
+      "samples": [
+        {
+          "run_id": 37347404615,
+          "class": "replay",
+          "seconds": 308
+        },
+        {
+          "run_id": 37347404615,
+          "class": "gates",
+          "seconds": 607
+        },
+        {
+          "run_id": 37347404615,
+          "class": "migration",
+          "seconds": 690
+        },
+        {
+          "run_id": 37347404615,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37347404615,
+          "class": "unit",
+          "seconds": 250
+        },
+        {
+          "run_id": 37347404615,
+          "class": "types",
+          "seconds": 38
+        },
+        {
+          "run_id": 37347404615,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37347404615,
+          "class": "secret",
+          "seconds": 35
+        },
+        {
+          "run_id": 37347404615,
+          "class": "dependency",
+          "seconds": 10
+        },
+        {
+          "run_id": 37347404615,
+          "class": "binding",
+          "seconds": 3
+        },
+        {
+          "run_id": 37347404615,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37347404615,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37347006696,
+          "class": "replay",
+          "seconds": 270
+        },
+        {
+          "run_id": 37347006696,
+          "class": "migration",
+          "seconds": 1304
+        },
+        {
+          "run_id": 37347006696,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37347006696,
+          "class": "unit",
+          "seconds": 257
+        },
+        {
+          "run_id": 37347006696,
+          "class": "types",
+          "seconds": 36
+        },
+        {
+          "run_id": 37347006696,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37347006696,
+          "class": "secret",
+          "seconds": 35
+        },
+        {
+          "run_id": 37347006696,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37347006696,
+          "class": "binding",
+          "seconds": 3
+        },
+        {
+          "run_id": 37347006696,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37347006696,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37347006696,
+          "class": "gates",
+          "seconds": 602
+        },
+        {
+          "run_id": 37345368780,
+          "class": "replay",
+          "seconds": 242
+        },
+        {
+          "run_id": 37345368780,
+          "class": "gates",
+          "seconds": 818
+        },
+        {
+          "run_id": 37345368780,
+          "class": "migration",
+          "seconds": 1287
+        },
+        {
+          "run_id": 37345368780,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37345368780,
+          "class": "unit",
+          "seconds": 249
+        },
+        {
+          "run_id": 37345368780,
+          "class": "types",
+          "seconds": 28
+        },
+        {
+          "run_id": 37345368780,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37345368780,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37345368780,
+          "class": "dependency",
+          "seconds": 8
+        },
+        {
+          "run_id": 37345368780,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37345368780,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37345368780,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343880075,
+          "class": "gates",
+          "seconds": 493
+        },
+        {
+          "run_id": 37343880075,
+          "class": "replay",
+          "seconds": 300
+        },
+        {
+          "run_id": 37343880075,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343880075,
+          "class": "unit",
+          "seconds": 254
+        },
+        {
+          "run_id": 37343880075,
+          "class": "types",
+          "seconds": 40
+        },
+        {
+          "run_id": 37343880075,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343880075,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37343880075,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37343880075,
+          "class": "binding",
+          "seconds": 3
+        },
+        {
+          "run_id": 37343880075,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37343880075,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343880075,
+          "class": "migration",
+          "seconds": 711
+        },
+        {
+          "run_id": 37343148482,
+          "class": "replay",
+          "seconds": 180
+        },
+        {
+          "run_id": 37343148482,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343148482,
+          "class": "unit",
+          "seconds": 267
+        },
+        {
+          "run_id": 37343148482,
+          "class": "types",
+          "seconds": 35
+        },
+        {
+          "run_id": 37343148482,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37343148482,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37343148482,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37343148482,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37343148482,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37343148482,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37343148482,
+          "class": "gates",
+          "seconds": 515
+        },
+        {
+          "run_id": 37343148482,
+          "class": "migration",
+          "seconds": 1018
+        },
+        {
+          "run_id": 37343033849,
+          "class": "replay",
+          "seconds": 238
+        },
+        {
+          "run_id": 37342836891,
+          "class": "migration",
+          "seconds": 699
+        },
+        {
+          "run_id": 37342836891,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37342836891,
+          "class": "unit",
+          "seconds": 236
+        },
+        {
+          "run_id": 37342836891,
+          "class": "types",
+          "seconds": 26
+        },
+        {
+          "run_id": 37342836891,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37342836891,
+          "class": "secret",
+          "seconds": 34
+        },
+        {
+          "run_id": 37342836891,
+          "class": "dependency",
+          "seconds": 8
+        },
+        {
+          "run_id": 37342836891,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37342836891,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37342836891,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37342836891,
+          "class": "gates",
+          "seconds": 814
+        },
+        {
+          "run_id": 37342836891,
+          "class": "replay",
+          "seconds": 189
+        },
+        {
+          "run_id": 37342420824,
+          "class": "gates",
+          "seconds": 822
+        },
+        {
+          "run_id": 37342420824,
+          "class": "replay",
+          "seconds": 276
+        },
+        {
+          "run_id": 37342420824,
+          "class": "migration",
+          "seconds": 1348
+        },
+        {
+          "run_id": 37342420824,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37342420824,
+          "class": "unit",
+          "seconds": 263
+        },
+        {
+          "run_id": 37342420824,
+          "class": "types",
+          "seconds": 39
+        },
+        {
+          "run_id": 37342420824,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37342420824,
+          "class": "secret",
+          "seconds": 35
+        },
+        {
+          "run_id": 37342420824,
+          "class": "dependency",
+          "seconds": 10
+        },
+        {
+          "run_id": 37342420824,
+          "class": "binding",
+          "seconds": 3
+        },
+        {
+          "run_id": 37342420824,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37342420824,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341817437,
+          "class": "replay",
+          "seconds": 308
+        },
+        {
+          "run_id": 37341817437,
+          "class": "pushfloor",
+          "seconds": 1
+        },
+        {
+          "run_id": 37341817437,
+          "class": "unit",
+          "seconds": 163
+        },
+        {
+          "run_id": 37341817437,
+          "class": "types",
+          "seconds": 17
+        },
+        {
+          "run_id": 37341817437,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341817437,
+          "class": "secret",
+          "seconds": 22
+        },
+        {
+          "run_id": 37341817437,
+          "class": "dependency",
+          "seconds": 5
+        },
+        {
+          "run_id": 37341817437,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37341817437,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37341817437,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341549396,
+          "class": "gates",
+          "seconds": 661
+        },
+        {
+          "run_id": 37341549396,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341549396,
+          "class": "unit",
+          "seconds": 264
+        },
+        {
+          "run_id": 37341549396,
+          "class": "types",
+          "seconds": 37
+        },
+        {
+          "run_id": 37341549396,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341549396,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37341549396,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37341549396,
+          "class": "binding",
+          "seconds": 3
+        },
+        {
+          "run_id": 37341549396,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37341549396,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341549396,
+          "class": "replay",
+          "seconds": 304
+        },
+        {
+          "run_id": 37341549396,
+          "class": "migration",
+          "seconds": 1326
+        },
+        {
+          "run_id": 37341363182,
+          "class": "replay",
+          "seconds": 242
+        },
+        {
+          "run_id": 37341363182,
+          "class": "pushfloor",
+          "seconds": 1
+        },
+        {
+          "run_id": 37341363182,
+          "class": "unit",
+          "seconds": 202
+        },
+        {
+          "run_id": 37341363182,
+          "class": "types",
+          "seconds": 23
+        },
+        {
+          "run_id": 37341363182,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341363182,
+          "class": "secret",
+          "seconds": 29
+        },
+        {
+          "run_id": 37341363182,
+          "class": "dependency",
+          "seconds": 8
+        },
+        {
+          "run_id": 37341363182,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37341363182,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37341363182,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37341363182,
+          "class": "migration",
+          "seconds": 1313
+        },
+        {
+          "run_id": 37339882413,
+          "class": "replay",
+          "seconds": 244
+        },
+        {
+          "run_id": 37339882413,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339882413,
+          "class": "unit",
+          "seconds": 215
+        },
+        {
+          "run_id": 37339882413,
+          "class": "types",
+          "seconds": 23
+        },
+        {
+          "run_id": 37339882413,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37339882413,
+          "class": "secret",
+          "seconds": 30
+        },
+        {
+          "run_id": 37339882413,
+          "class": "dependency",
+          "seconds": 7
+        },
+        {
+          "run_id": 37339882413,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37339882413,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37339882413,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339882413,
+          "class": "gates",
+          "seconds": 621
+        },
+        {
+          "run_id": 37339882413,
+          "class": "migration",
+          "seconds": 1115
+        },
+        {
+          "run_id": 37339205916,
+          "class": "migration",
+          "seconds": 985
+        },
+        {
+          "run_id": 37339205916,
+          "class": "gates",
+          "seconds": 799
+        },
+        {
+          "run_id": 37339205916,
+          "class": "pushfloor",
+          "seconds": 1
+        },
+        {
+          "run_id": 37339205916,
+          "class": "unit",
+          "seconds": 183
+        },
+        {
+          "run_id": 37339205916,
+          "class": "types",
+          "seconds": 20
+        },
+        {
+          "run_id": 37339205916,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339205916,
+          "class": "secret",
+          "seconds": 25
+        },
+        {
+          "run_id": 37339205916,
+          "class": "dependency",
+          "seconds": 6
+        },
+        {
+          "run_id": 37339205916,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37339205916,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37339205916,
+          "class": "freshness",
+          "seconds": 1
+        },
+        {
+          "run_id": 37339205916,
+          "class": "replay",
+          "seconds": 308
+        },
+        {
+          "run_id": 37339047404,
+          "class": "gates",
+          "seconds": 830
+        },
+        {
+          "run_id": 37339047404,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339047404,
+          "class": "unit",
+          "seconds": 246
+        },
+        {
+          "run_id": 37339047404,
+          "class": "types",
+          "seconds": 35
+        },
+        {
+          "run_id": 37339047404,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339047404,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37339047404,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37339047404,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37339047404,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37339047404,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37339047404,
+          "class": "migration",
+          "seconds": 1269
+        },
+        {
+          "run_id": 37339047404,
+          "class": "replay",
+          "seconds": 183
+        },
+        {
+          "run_id": 37336087576,
+          "class": "gates",
+          "seconds": 612
+        },
+        {
+          "run_id": 37336087576,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37336087576,
+          "class": "unit",
+          "seconds": 232
+        },
+        {
+          "run_id": 37336087576,
+          "class": "types",
+          "seconds": 27
+        },
+        {
+          "run_id": 37336087576,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37336087576,
+          "class": "secret",
+          "seconds": 27
+        },
+        {
+          "run_id": 37336087576,
+          "class": "dependency",
+          "seconds": 8
+        },
+        {
+          "run_id": 37336087576,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37336087576,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37336087576,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37336087576,
+          "class": "migration",
+          "seconds": 1324
+        },
+        {
+          "run_id": 37336087576,
+          "class": "replay",
+          "seconds": 313
+        },
+        {
+          "run_id": 37334271688,
+          "class": "migration",
+          "seconds": 1025
+        },
+        {
+          "run_id": 37334271688,
+          "class": "gates",
+          "seconds": 833
+        },
+        {
+          "run_id": 37334271688,
+          "class": "replay",
+          "seconds": 310
+        },
+        {
+          "run_id": 37334271688,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37334271688,
+          "class": "unit",
+          "seconds": 261
+        },
+        {
+          "run_id": 37334271688,
+          "class": "types",
+          "seconds": 33
+        },
+        {
+          "run_id": 37334271688,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37334271688,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37334271688,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37334271688,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37334271688,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37334271688,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37334209455,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37334209455,
+          "class": "unit",
+          "seconds": 247
+        },
+        {
+          "run_id": 37334209455,
+          "class": "types",
+          "seconds": 35
+        },
+        {
+          "run_id": 37334209455,
+          "class": "contract",
+          "seconds": 1
+        },
+        {
+          "run_id": 37334209455,
+          "class": "secret",
+          "seconds": 35
+        },
+        {
+          "run_id": 37334209455,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37334209455,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37334209455,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37334209455,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37334209455,
+          "class": "replay",
+          "seconds": 299
+        },
+        {
+          "run_id": 37334209455,
+          "class": "migration",
+          "seconds": 1193
+        },
+        {
+          "run_id": 37334209455,
+          "class": "gates",
+          "seconds": 810
+        },
+        {
+          "run_id": 37332376412,
+          "class": "replay",
+          "seconds": 294
+        },
+        {
+          "run_id": 37332376412,
+          "class": "migration",
+          "seconds": 1106
+        },
+        {
+          "run_id": 37332376412,
+          "class": "gates",
+          "seconds": 827
+        },
+        {
+          "run_id": 37332376412,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37332376412,
+          "class": "unit",
+          "seconds": 169
+        },
+        {
+          "run_id": 37332376412,
+          "class": "types",
+          "seconds": 17
+        },
+        {
+          "run_id": 37332376412,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37332376412,
+          "class": "secret",
+          "seconds": 23
+        },
+        {
+          "run_id": 37332376412,
+          "class": "dependency",
+          "seconds": 5
+        },
+        {
+          "run_id": 37332376412,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37332376412,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37332376412,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330803543,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330803543,
+          "class": "unit",
+          "seconds": 280
+        },
+        {
+          "run_id": 37330803543,
+          "class": "types",
+          "seconds": 34
+        },
+        {
+          "run_id": 37330803543,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330803543,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37330803543,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37330803543,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37330803543,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37330803543,
+          "class": "freshness",
+          "seconds": 1
+        },
+        {
+          "run_id": 37330803543,
+          "class": "replay",
+          "seconds": 232
+        },
+        {
+          "run_id": 37330803543,
+          "class": "gates",
+          "seconds": 844
+        },
+        {
+          "run_id": 37330803543,
+          "class": "migration",
+          "seconds": 735
+        },
+        {
+          "run_id": 37330514206,
+          "class": "gates",
+          "seconds": 817
+        },
+        {
+          "run_id": 37330514206,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330514206,
+          "class": "unit",
+          "seconds": 255
+        },
+        {
+          "run_id": 37330514206,
+          "class": "types",
+          "seconds": 33
+        },
+        {
+          "run_id": 37330514206,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330514206,
+          "class": "secret",
+          "seconds": 36
+        },
+        {
+          "run_id": 37330514206,
+          "class": "dependency",
+          "seconds": 9
+        },
+        {
+          "run_id": 37330514206,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37330514206,
+          "class": "artifact",
+          "seconds": 2
+        },
+        {
+          "run_id": 37330514206,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37330514206,
+          "class": "migration",
+          "seconds": 760
+        },
+        {
+          "run_id": 37330514206,
+          "class": "replay",
+          "seconds": 251
+        },
+        {
+          "run_id": 37329803022,
+          "class": "gates",
+          "seconds": 810
+        },
+        {
+          "run_id": 37329803022,
+          "class": "replay",
+          "seconds": 302
+        },
+        {
+          "run_id": 37329803022,
+          "class": "pushfloor",
+          "seconds": 0
+        },
+        {
+          "run_id": 37329803022,
+          "class": "unit",
+          "seconds": 170
+        },
+        {
+          "run_id": 37329803022,
+          "class": "types",
+          "seconds": 19
+        },
+        {
+          "run_id": 37329803022,
+          "class": "contract",
+          "seconds": 0
+        },
+        {
+          "run_id": 37329803022,
+          "class": "secret",
+          "seconds": 22
+        },
+        {
+          "run_id": 37329803022,
+          "class": "dependency",
+          "seconds": 5
+        },
+        {
+          "run_id": 37329803022,
+          "class": "binding",
+          "seconds": 2
+        },
+        {
+          "run_id": 37329803022,
+          "class": "artifact",
+          "seconds": 1
+        },
+        {
+          "run_id": 37329803022,
+          "class": "freshness",
+          "seconds": 0
+        },
+        {
+          "run_id": 37329803022,
+          "class": "migration",
+          "seconds": 1139
+        }
+      ]
+    }
+  }
+}

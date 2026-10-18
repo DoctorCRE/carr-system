@@ -31,49 +31,6 @@ import subprocess
 from datetime import datetime
 
 
-# These are the two completion banners emitted by bin/nightly.sh.  Keep the
-# success marker distinct from the Healthchecks ping's human-readable
-# "whole chain OK" message: that ping is emitted before the chain's real
-# completion banner and is not a run verdict.
-NIGHTLY_OK_BANNER = "===== nightly chain OK ====="
-NIGHTLY_FAILURE_BANNER = "FINISHED WITH FAILURES"
-_NIGHTLY_OK_ENVELOPE = re.compile(
-    r"(?P<timestamp>[0-9]{4}-[0-9]{2}-[0-9]{2}T"
-    r"[0-9]{2}:[0-9]{2}:[0-9]{2}Z)  " + re.escape(NIGHTLY_OK_BANNER)
-)
-
-
-def nightly_completion(line: str) -> bool | None:
-    """Return a chain outcome for a completion line, or ``None`` otherwise.
-
-    Success is either a stripped bare banner or bin/nightly.sh's exact ``say``
-    envelope: a calendar-valid UTC timestamp, two spaces, then the banner.  A
-    substring test also matches ``hc-ping: whole chain OK -> pinged``; accepting
-    any other prefix, spacing, or suffix recreates the same early-close class.
-    """
-    if line.strip() == NIGHTLY_OK_BANNER:
-        return True
-
-    # Remove one physical line ending, not arbitrary trailing whitespace.  The
-    # producer appends a newline; a space or a second line is a suffix and must
-    # keep the candidate from matching.
-    envelope = line
-    if envelope.endswith("\r\n"):
-        envelope = envelope[:-2]
-    elif envelope.endswith(("\n", "\r")):
-        envelope = envelope[:-1]
-    match = _NIGHTLY_OK_ENVELOPE.fullmatch(envelope)
-    if match:
-        try:
-            datetime.strptime(match.group("timestamp"), "%Y-%m-%dT%H:%M:%SZ")
-        except ValueError:
-            pass
-        else:
-            return True
-    if NIGHTLY_FAILURE_BANNER in line:
-        return False
-    return None
-
 
 def changed_lines(diff_text: str) -> set[tuple[str, str]]:
     """The set of (sign, content) pairs a diff actually changes.

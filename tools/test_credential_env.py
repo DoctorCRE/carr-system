@@ -61,6 +61,20 @@ def main() -> int:
     check("reads only the requested keys, nothing else in the file leaks out",
           reads_only_the_requested_keys)
 
+    def literal_tokens_reach_the_child_unchanged():
+        path = root / "tokens-literal.env"
+        for source, expected in (("left#right # comment", "left#right"),
+                                 (r'"left\$right"', "left$right")):
+            _write_tokens(path, f"CLAUDE_CODE_OAUTH_TOKEN={source}\n")
+            got = credential_env.load_carr_tokens(["CLAUDE_CODE_OAUTH_TOKEN"], path=path)
+            assert got == {"CLAUDE_CODE_OAUTH_TOKEN": expected}, got
+            env, warning = credential_env.claude_child_env({"PATH": "/usr/bin"}, path=path)
+            assert warning is None, warning
+            assert env["CLAUDE_CODE_OAUTH_TOKEN"] == expected, env
+
+    check("literal hashes and escaped dollars reach the child unchanged",
+          literal_tokens_reach_the_child_unchanged)
+
     def refuses_a_644_file():
         path = root / "tokens-loose.env"
         _write_tokens(path, "CLAUDE_CODE_OAUTH_TOKEN=sk-not-a-real-secret\n", mode=0o644)

@@ -40,6 +40,10 @@ test('all Node cluster constructors acquire the shared fixture budget', async ()
   }
   const constructors = await scan(root);
   assert.ok(constructors.length > 0);
-  for (const { url, source } of constructors)
+  for (const { url, source } of constructors) {
     assert.match(source, /await acquirePostgresFixtureGroup\(/, url.pathname);
+    assert.match(source, /await acquireDisposablePostgres\(/, url.pathname);
+    assert.doesNotMatch(source, /execFileSync\(\s*(?:binary|path\.join)\([^\n]*['"](?:initdb|pg_ctl)['"]/,
+      `${url.pathname}: cluster launch must execute inside its supervisor`);
+  }
 });

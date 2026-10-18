@@ -9,18 +9,23 @@ import math
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request, urlopen
 
 SOURCE = Path(__file__).resolve().parents[1]
-# Each evidence source and the finding kinds detect derives from it. detect refuses
+# Each evidence source and the finding kinds the watchdog derives from it. detect refuses
 # a kind its source does not declare, and an unreadable source blinds exactly these.
 EVIDENCE = {
+    "scheduled_jobs": frozenset({"scheduled_job_drift"}),
+    "vendor_releases": frozenset({"vendor_release_fetch_error"}),
     "jobs": frozenset({"job_failed", "job_dead", "job_hang", "job_silent", "job_over_limit"}),
     "prs": frozenset({"pr_blocked_review", "pr_ci_red", "pr_conflict", "pr_draft_idle", "pr_ready"}),
     "merge_queue": frozenset({"pr_ready"}),
@@ -30,7 +35,7 @@ EVIDENCE = {
 }
 # An unreadable evidence source cannot prove the findings it feeds have cleared.
 EVIDENCE_ERROR_KINDS = frozenset({"collection_error", "environment", "rate_limited"})
-RATE_LIMIT = re.compile(r"API rate limit|secondary rate limit", re.I)
+RATE_LIMIT = re.compile(r"API rate limit|secondary rate limit|CARR_GITHUB_LOCAL_HOLD:|rate limited after|HTTP 429", re.I)
 RELEASE_LANE = re.compile(r"^release-pipeline\[([^\]]+)\]: (.*)$")
 # Lines that end a lane's tick (ops/release-pipeline.py run_lane). Anything else the
 # lane prints, such as a failed loop filing after BLOCKED, never replaces its outcome.
@@ -57,7 +62,28 @@ def load_config(path):
     for action in config["actions"].values():
         if isinstance(action, str) and action not in {"restart_once", "fix_once", "enqueue", "report"}:
             raise ValueError("unknown watchdog action")
+    ids = set()
+    for watch in config.get("vendor_release_watches", []):
+        if watch["id"] in ids or not watch["match"] or not watch["sources"] or not watch["reference_prefixes"]:
+            raise ValueError("invalid vendor release watch")
+        ids.add(watch["id"])
+        for key in ("interval_seconds", "timeout_seconds", "max_bytes"):
+            if not isinstance(watch[key], (int, float)) or watch[key] <= 0:
+                raise ValueError(f"invalid vendor release {key}")
+        for url in watch["sources"] + watch["reference_prefixes"]:
+            parts = urlsplit(url)
+            if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+                raise ValueError("vendor release sources must be public HTTPS URLs")
     return config
+
+
+def repository_roots(config=None):
+    config = config or load_config(SOURCE / "ops/config/job-watchdog.json")
+    return {repo: Path(config["repository_roots"][repo]).expanduser() for repo in config["repositories"]}
+
+
+def protected_branch(config, name):
+    return name in config["protected_branches"]
 
 
 def epoch(value):
@@ -70,12 +96,166 @@ def stamp(now=None):
     return datetime.fromtimestamp(time.time() if now is None else now, timezone.utc).isoformat()
 
 
+# What still waits on Joe for each needs_joe pattern class, in add-loop's
+# residue vocabulary (mcp-server/src/tools.js RESIDUE_KINDS). add-loop refuses
+# a capability or ruling loop that does not name one.
+NEEDS_JOE_RESIDUE = {"credentials": "provider_login", "money": "money_movement",
+                     "client-facing": "external_send"}
+
+
+def loop_blocker(f):
+    """add-loop blocker fields for a loop filed from finding ``f``."""
+    needs = f.get("needs_joe")
+    if not needs:
+        return {"blocker": "other_lane"}
+    return {"blocker": "capability" if needs == "credentials" else "ruling",
+            "residue_kind": NEEDS_JOE_RESIDUE[needs], "residue_host": f["subject"]}
+
+
+def loop_owner(f):
+    """Record-layer owner for a loop filed from finding ``f``.
+
+    The finding's own ``owner`` ("orchestrator") names a machine seat on the
+    progress board. add-loop accepts only a single actor in joe/dell/claude
+    (LOOP_OWNERS in mcp-server/src/tools.js): "claude" when the system can
+    finish the work without a human, otherwise the human who must act. The
+    orchestrator is the Claude seat, so its work files as "claude"; a finding
+    that needs Joe files as "joe". The seat name stays in source_note/body.
+    """
+    return "joe" if f.get("needs_joe") else "claude"
+
+
 def finding(kind, subject, reason, config, **fields):
     key = f"{kind}:{subject}"
     needs_joe = next((k for k, patterns in config["needs_joe_patterns"].items()
                       if any(p in reason.lower() for p in patterns)), None)
     return {"key": key, "kind": kind, "subject": subject, "reason": reason,
             "next_action": config["next_actions"][kind], "owner": "orchestrator", "needs_joe": needs_joe, **fields}
+
+
+def _read_document(url, timeout, max_bytes):
+    """Size-bounded transport, run only in the deadline-owned HTTP child."""
+    request = Request(url, headers={"User-Agent": "CARR-vendor-release-watch/1"})
+    with urlopen(request, timeout=timeout) as response:
+        body = response.read(int(max_bytes) + 1)
+        if len(body) > max_bytes:
+            raise ValueError("vendor document exceeds configured size limit")
+        return body.decode("utf-8")
+
+
+def fetch_document(url, timeout, max_bytes):
+    """Bound the whole fetch, including DNS, redirects, headers and body reads."""
+    deadline = time.monotonic() + timeout
+    # Socket timeouts measure inactivity. A separate process lets the caller
+    # stop even a DNS lookup or slow-drip read, including from a worker thread.
+    script = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from job_watchdog import _read_document
+try:
+    result = {'text': _read_document(sys.argv[2], float(sys.argv[3]), int(sys.argv[4]))}
+except Exception as exc:
+    result = {'error': str(exc), 'value_error': isinstance(exc, ValueError)}
+print(json.dumps(result))
+"""
+    with subprocess.Popen([sys.executable, "-c", script, str(SOURCE / "lib"),
+                           url, str(timeout), str(int(max_bytes))],
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE) as proc:
+        try:
+            output, error = proc.communicate(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()  # Reap the owned child before releasing the scan lock.
+            raise TimeoutError("vendor document exceeded elapsed fetch deadline") from None
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        if time.monotonic() >= deadline:
+            raise TimeoutError("vendor document exceeded elapsed fetch deadline")
+        if proc.returncode:
+            raise OSError("vendor HTTP child failed: " + error.decode("utf-8", errors="replace"))
+    result = json.loads(output)
+    if "error" in result:
+        raise (ValueError if result["value_error"] else OSError)(result["error"])
+    return result["text"]
+
+
+class ReferenceLinks(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self.href = None
+        self.label = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self.href = dict(attrs).get("href")
+            self.label = []
+
+    def handle_data(self, data):
+        if self.href:
+            self.label.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.href:
+            self.links.append(("".join(self.label), self.href))
+            self.href = None
+
+
+def release_reference_urls(text, source, watch):
+    parser = ReferenceLinks()
+    parser.feed(text)
+    links = parser.links + re.findall(r"\[([^\]]+)\]\(([^\s)]+)\)", text)
+    links += [("", url) for url in re.findall(r'https?://[^\s<>"\')]+', text)]
+    urls = set()
+    for label, href in links:
+        url = urljoin(source, href).rstrip(".,;")
+        if (watch["match"].lower() in (label + " " + url).lower()
+                and any(url.startswith(prefix) for prefix in watch["reference_prefixes"])):
+            urls.add(url)
+    return sorted(urls)
+
+
+def vendor_release_findings(root, config, now, *, fetch=None):
+    """Called under the scan lock. Cache hourly reads and retry unreported findings."""
+    watches = config.get("vendor_release_watches", [])
+    if not watches:
+        return []
+    fetch = fetch or fetch_document
+    ledger = path_at(root, config["paths"]["vendor_release_ledger"])
+    states = read_latest(ledger)
+    previous = read_latest(path_at(root, config["paths"]["findings"]))
+    found = []
+    for watch in watches:
+        state = states.get(watch["id"], {})
+        if not state or now - state["checked_at"] >= watch["interval_seconds"]:
+            urls, errors = set(), []
+            for source in watch["sources"]:
+                try:
+                    text = fetch(source, watch["timeout_seconds"], watch["max_bytes"])
+                    urls.update(release_reference_urls(text, source, watch))
+                except Exception as exc:
+                    errors.append({"url": source, "reason": source + ": " + str(exc)})
+            # A partial read cannot establish the complete reference URL set.
+            state = {"key": watch["id"], "checked_at": now, "urls": sorted(urls), "errors": errors}
+            append(ledger, state)
+        for error in state["errors"]:
+            found.append(finding("vendor_release_fetch_error", watch["id"] + ":" + error["url"],
+                                 error["reason"], config, url=error["url"]))
+        if state["errors"] or not state["urls"]:
+            continue
+        signature = hashlib.sha256(json.dumps(state["urls"]).encode()).hexdigest()
+        key = watch["finding_kind"] + ":" + watch["id"] + ":" + signature
+        if previous.get(key, {}).get("reported"):
+            continue
+        found.append({"key": key, "kind": watch["finding_kind"], "subject": watch["id"] + ":" + signature,
+                      "reason": "Vendor API reference published: " + ", ".join(state["urls"]),
+                      "url": state["urls"][0], "urls": state["urls"], "card": watch["card"],
+                      "owner": "orchestrator", "needs_joe": None, "permanent": True,
+                      "board_status": "question-for-orchestrator", "next_action": watch["next_action"]})
+    return found
 
 
 def reviewed_head(comment):
@@ -144,6 +324,10 @@ def detect(facts, config, now):
             raise ValueError(f"{kind} is not declared as derived from {source} in EVIDENCE")
         found.append(finding(kind, subject, reason, config, **fields))
     t = config["thresholds"]
+    for row in facts.get("scheduled_jobs", []):
+        emit("scheduled_jobs", "scheduled_job_drift", row["label"], row["detail"],
+             key=row["key"], next_action=row["fix"] +
+             "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
     for job in jobs:
         subject = job["id"]
@@ -159,7 +343,8 @@ def detect(facts, config, now):
         evidence = "\nLog evidence: " + tail if tail else ""
         if any(re.search(p, tail) for p in config["hang_patterns"]):
             emit("jobs", "job_hang", subject, "interactive hang signature in log tail" + evidence, **fields)
-        elif now - epoch(job.get("log_mtime", job["start"])) >= t["silent_seconds"]:
+        elif config.get("job_silence_policies", {}).get(job.get("card")) != "until_run_limit" and \
+                now - epoch(job.get("log_mtime", job["start"])) >= t["silent_seconds"]:
             emit("jobs", "job_silent", subject, "log silent for at least the configured limit" + evidence, **fields)
         if now - epoch(job["start"]) >= job["limit"]:
             emit("jobs", "job_over_limit", subject, "registered run exceeded its time limit" + evidence, **fields)
@@ -211,8 +396,9 @@ def detect(facts, config, now):
         if log["type"] == "release" and now - epoch(log["mtime"]) >= t["pipeline_stale_seconds"]:
             emit(source, "pipeline_stale", log["path"], "release log stopped updating")
     for branch in facts.get("branches", []):
-        if branch["name"].startswith("claude/") and now - epoch(branch["updated"]) >= t["branch_idle_seconds"]:
-            emit("branches", "branch_idle", branch["repo"] + ":" + branch["name"], "claude branch idle for configured limit")
+        if not protected_branch(config, branch["name"]) and not branch.get("open_pr") and \
+                now - epoch(branch["updated"]) >= t["branch_idle_seconds"]:
+            emit("branches", "branch_idle", branch["repo"] + ":" + branch["name"], "branch idle for configured limit")
     for error in facts.get("errors", []):
         found.append(finding(error["kind"], error["source"], error["reason"], config, blinds=error["blinds"]))
     for f in found:
@@ -275,13 +461,18 @@ def tail(path, limit):
 
 
 def command(argv, config, cwd=None):
+    if argv[0] == "gh" and not shutil.which("gh"):
+        raise MissingTool("gh")
+    invocation = [sys.executable, str(SOURCE / "ops/github-gh.py"), *argv[1:]] if argv[0] == "gh" else argv
     try:
-        result = subprocess.run(argv, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
+        result = subprocess.run(invocation, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
                                 text=True, timeout=config["thresholds"]["command_timeout_seconds"])
     except FileNotFoundError as exc:
         if cwd is not None and not Path(cwd).is_dir():
             raise
         raise MissingTool(argv[0]) from exc
+    if result.returncode == 127 and argv[0] == "gh":
+        raise MissingTool("gh")
     if result.returncode:
         raise RuntimeError(f"{argv[0]} exit {result.returncode}: {result.stderr.strip()} {result.stdout.strip()}")
     return result.stdout
@@ -312,7 +503,9 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
                expected_task=None, reason=None, next_action=None):
     project = project or config["board"]
     board = root / "out/boards" / (project + ".json")
-    env = dict(os.environ, PROGRESS_BOARD_ROOT=str(root / "out"))
+    env = dict(os.environ, PROGRESS_BOARD_ROOT=str(root / "out"), PROGRESS_BOARD_LOCAL_ONLY="1")
+    if not config.get("board_github_enabled", True):
+        env["PROGRESS_BOARD_SKIP_GH"] = "1"
     with locked(root / "out/watchdog/board.lock"):
         if not board.exists():
             result = subprocess.run([sys.executable, str(SOURCE / "tools/progress_board.py"), "init",
@@ -321,10 +514,14 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
                                     timeout=config["thresholds"]["command_timeout_seconds"])
             if result.returncode:
                 raise RuntimeError(result.stderr)
-        prior = json.loads(board.read_text()).get("tasks", {}).get(card, {})
+        prior = json.loads(board.read_text()).get("tasks", {}).get(card)
         argv = [sys.executable, str(SOURCE / "tools/progress_board.py"), "task", project, card,
-                "--title", prior.get("title", card), "--executor", prior.get("executor", executor) if executor == "orchestrator" else executor, "--status", status,
-                "--health", health or ("blocked" if status == "blocked" else "healthy"), "--note", note]
+                "--status", status, "--health", health or ("blocked" if status == "blocked" else "healthy"),
+                "--note", note, "--receipt"]
+        if prior is None:
+            argv.extend(["--title", card, "--executor", executor])
+        elif executor != "orchestrator":
+            argv.extend(["--executor", executor])
         argv.extend(["--lane", config["needs_joe_lane"] if needs_joe else "status"])
         if expected_task is not None:
             argv.extend(["--expected-task", json.dumps(expected_task)])
@@ -337,7 +534,15 @@ def board_task(root, config, card, executor, status, note, project=None, pr=None
                                 timeout=config["thresholds"]["command_timeout_seconds"])
         if result.returncode:
             raise RuntimeError(result.stderr)
-        return prior
+        try:
+            receipt = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("progress board returned an invalid task receipt") from exc
+        if (not isinstance(receipt, dict) or type(receipt.get("applied")) is not bool
+                or receipt.get("before") is not None and not isinstance(receipt.get("before"), dict)
+                or receipt.get("after") is not None and not isinstance(receipt.get("after"), dict)):
+            raise RuntimeError("progress board returned an invalid task receipt")
+        return receipt.get("before") or {}
 
 
 def run_job(root, config, card, executor, minutes, argv):
@@ -398,7 +603,7 @@ def run_job(root, config, card, executor, minutes, argv):
     return code
 
 
-def reconcile(root, config, found, effects, now, complete=True):
+def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=None):
     """Called under the scan lock. Persist intent before each non-repeatable effect."""
     findings_path = path_at(root, config["paths"]["findings"])
     actions_path = path_at(root, config["paths"]["actions"])
@@ -408,9 +613,19 @@ def reconcile(root, config, found, effects, now, complete=True):
     extras = []
     for key, f in current.items():
         prior = previous.get(key, {})
-        row = {**f, "first_seen": prior.get("first_seen", stamp(now)), "cleared_at": None}
+        first_seen = prior.get("first_seen", stamp(now))
+        if f["kind"] in {"scheduled_job_drift", "vendor_release_fetch_error"} and prior.get("cleared_at"):
+            first_seen = stamp(now)
+        row = {**f, "first_seen": first_seen, "cleared_at": None}
         if prior.get("cleared_at"):
             row["board_recovery"] = None
+        if f["kind"] == "vendor_release_fetch_error":
+            new_incident = not prior or bool(prior.get("cleared_at"))
+            legacy_key = "job-watchdog:" + hashlib.sha256(f["key"].encode()).hexdigest()
+            incident_key = "job-watchdog:" + hashlib.sha256((f["key"] + ":" + first_seen).encode()).hexdigest()
+            row.update(loop_id=None if new_incident else prior.get("loop_id"),
+                       loop_idempotency_key=incident_key if new_incident else prior.get("loop_idempotency_key", legacy_key),
+                       reported=False if new_incident else prior.get("reported", False))
         if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
             append(findings_path, row)
         # Failed reporting is retried with the SAME record-layer idempotency key.
@@ -419,6 +634,12 @@ def reconcile(root, config, found, effects, now, complete=True):
                 row.update(effects.report(row) or {})
                 row["reported"] = True
                 append(findings_path, row)
+                error_key = "record_error:" + key
+                report_error = previous.get(error_key)
+                if report_error and not report_error.get("cleared_at"):
+                    report_error = {**report_error, "cleared_at": stamp(now)}
+                    append(findings_path, report_error)
+                    previous[error_key] = report_error
             except Exception as exc:
                 extras.append(finding("record_error", key, str(exc), config))
         action = config["actions"].get(f["kind"], config["actions"]["default"])
@@ -471,16 +692,33 @@ def reconcile(root, config, found, effects, now, complete=True):
             blinded |= set(f["blinds"])
     if complete:
         for key, prior in previous.items():
-            if key not in current and not prior.get("cleared_at") and prior.get("kind") not in blinded:
-                if prior.get("board_recovery"):
+            pending_recovery = prior["kind"] == "vendor_release_fetch_error" and not prior.get("recovery_reported")
+            if (key not in current and (not prior.get("cleared_at") or pending_recovery)
+                    and prior.get("kind") not in blinded and not prior.get("permanent")
+                    and (clear_kinds is None or prior["kind"] in clear_kinds)):
+                if prior["kind"] == "vendor_release_fetch_error":
                     try:
-                        effects.clear(prior, list(current.values()))
+                        effects.resolve(prior)
+                    except Exception as exc:
+                        row = {**prior, "cleared_at": None, "recovery_error": str(exc)}
+                        append(findings_path, row)
+                        current[key] = {**row, "reason": "Vendor fetch recovered; recovery reporting failed: " + str(exc),
+                                        "next_action": "Retry watchdog recovery reporting; inspect the board or record-layer error."}
+                        continue  # Keep recovery pending until every visible effect succeeds.
+                retire_generated = getattr(effects, "retire_generated_card_without_receipt", None)
+                if prior.get("board_recovery") or (not prior.get("card") and retire_generated is not None):
+                    try:
+                        if prior.get("board_recovery"):
+                            effects.clear(prior, list(current.values()))
+                        else:
+                            retire_generated(prior)
                     except Exception as exc:
                         error = finding("board_error", key, str(exc), config)
                         current[error["key"]] = error
                         append(findings_path, {**error, "first_seen": stamp(now), "cleared_at": None})
                         continue  # Keep the original open so board recovery is retried.
-                append(findings_path, {**prior, "cleared_at": stamp(now)})
+                append(findings_path, {**prior, "cleared_at": prior.get("cleared_at") or stamp(now),
+                                       "recovery_reported": True, "recovery_error": None})
     return list(current.values())
 
 
@@ -584,6 +822,9 @@ def read_pr_cache(path):
 
 
 def rate_limit_reason(config, original):
+    detail = str(original)
+    if any(marker in detail for marker in ("CARR_GITHUB_LOCAL_HOLD:", "CARR_GITHUB_PROVIDER_HOLD:")) or re.search(r"rate limited after [0-9]+ attempt", detail):
+        return detail
     try:
         resources = json.loads(command(["gh", "api", "rate_limit"], config))["resources"]
         if not isinstance(resources, dict):
@@ -640,6 +881,14 @@ def collect(root, config, now=None):
             facts["jobs"].append(job)
     except Exception as exc:
         error("job registry", exc, "jobs")
+    if sys.platform == "darwin":
+        try:
+            import scheduled_jobs
+            facts["scheduled_jobs"] = scheduled_jobs.check(now=now)
+            if any(row["code"] == "evidence_unavailable" for row in facts["scheduled_jobs"]):
+                error("scheduled job evidence", RuntimeError("incomplete scheduled-job observation"), "scheduled_jobs")
+        except Exception as exc:
+            error("scheduled jobs", exc, "scheduled_jobs")
     queue = path_at(root, config["paths"]["merge_queue"])
     if queue.exists():
         try:
@@ -650,6 +899,13 @@ def collect(root, config, now=None):
     # head and updated_at, bounded by an age limit for changes that bump neither.
     cache_path = path_at(root, config["paths"]["pr_cache"])
     cache = read_pr_cache(cache_path)
+    dates_path = root / "out/watchdog/branch-dates.json"
+    try:
+        dates = json.loads(dates_path.read_text())
+        if not isinstance(dates, dict):
+            dates = {}
+    except (OSError, ValueError):
+        dates = {}
     t = config["thresholds"]
     for repo in config["repositories"]:
         if limited:
@@ -686,10 +942,31 @@ def collect(root, config, now=None):
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
             for page in pages:
                 for branch in page:
-                    if branch["name"].startswith("claude/"):
-                        commit = json.loads(command(["gh", "api", f"repos/{repo}/commits/{branch['commit']['sha']}"], config))
+                    if not protected_branch(config, branch["name"]):
+                        sha = branch["commit"]["sha"]
+                        key = repo + ":" + sha
+                        date = dates.get(key)
+                        try:
+                            if not isinstance(date, str) or not math.isfinite(epoch(date)):
+                                raise ValueError("invalid cached commit date")
+                        except (AttributeError, TypeError, ValueError):
+                            date = None
+                        if date is None:
+                            # Commit dates are immutable. Prefer already fetched objects;
+                            # still list remote refs every scan so retirement clears facts.
+                            try:
+                                checkout = Path(config["repository_roots"][repo]).expanduser()
+                                date = command(["git", "show", "-s", "--format=%cI", sha], config, checkout).strip()
+                                epoch(date)
+                            except Exception:
+                                commit = json.loads(command(["gh", "api", f"repos/{repo}/commits/{sha}"], config))
+                                date = commit["commit"]["committer"]["date"]
+                                epoch(date)
+                            dates[key] = date
                         facts["branches"].append({"repo": repo, "name": branch["name"],
-                                                  "updated": commit["commit"]["committer"]["date"]})
+                                                  "updated": date,
+                            "open_pr": any(p["repo"] == repo and p.get("headRefName") == branch["name"]
+                                           for p in facts["prs"])})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
@@ -707,6 +984,10 @@ def collect(root, config, now=None):
         staged = cache_path.with_suffix(".tmp")
         staged.write_text(json.dumps(cache, separators=(",", ":")))
         staged.replace(cache_path)
+        dates_path.parent.mkdir(parents=True, exist_ok=True)
+        staged = dates_path.with_suffix(".tmp")
+        staged.write_text(json.dumps(dates, separators=(",", ":")))
+        staged.replace(dates_path)
     except OSError:
         pass  # A lost cache only costs the next scan a full collection.
     facts["errors"].extend({**e, "blinds": sorted(e["blinds"])} for e in [*missing.values(), *limited.values()])
@@ -734,6 +1015,15 @@ class Effects:
 
     def report(self, f):
         c = self.config
+        if f["kind"] == "vendor_release_fetch_error" or f.get("board_status"):
+            board_task(self.root, c, self.card(f), "orchestrator", f.get("board_status", "blocked"),
+                       f["reason"] + "\nNext action: " + f["next_action"],
+                       health="question" if f.get("board_status") else "blocked",
+                       reason=f["reason"], next_action=f["next_action"])
+            if c["actions"]["file_defects"]:
+                key = f.get("loop_idempotency_key") or "job-watchdog:" + hashlib.sha256(f["key"].encode()).hexdigest()
+                return self._file_defect(f, key)
+            return {"ok": True}
         card = self.card(f)
         before = self.show_finding(f)
         # Sibling findings share the original state, not each other's blocked overlay.
@@ -749,13 +1039,14 @@ class Effects:
         append(path_at(self.root, c["paths"]["findings"]),
                {"key": f["key"], "board_recovery": recovery})
         if c["actions"]["file_defects"] and f["kind"] != "pr_ready":
-            digest_key = hashlib.sha256(f["key"].encode()).hexdigest()
+            episode_key = f["key"] + (":" + f["first_seen"] if f["kind"] == "scheduled_job_drift" else "")
+            digest_key = hashlib.sha256(episode_key.encode()).hexdigest()
             payload = {"idempotency_key": "job-watchdog:" + digest_key,
-                       "kind": "open_loop", "owner": "orchestrator", "domain": "system",
+                       "kind": "open_loop", "owner": loop_owner(f), "domain": "system",
                        "body": f["reason"] + "\nNext action: " + f["next_action"],
                        "source_note": "job watchdog: " + f["subject"],
                        "marker": "decision" if f.get("needs_joe") and f["needs_joe"] != "credentials" else "none",
-                       "blocker": "capability" if f.get("needs_joe") == "credentials" else "ruling" if f.get("needs_joe") else "other_lane",
+                       **loop_blocker(f),
                        "blocker_detail": ("Joe must restore authentication through the provider login; "
                                           "the watchdog cannot supply this credential. Evidence: " + f["reason"])
                        if f.get("needs_joe") == "credentials" else f["reason"] if f.get("needs_joe")
@@ -766,9 +1057,75 @@ class Effects:
             response = json.loads(result[start:])
             if response.get("ok") is not True or not response.get("loop_id"):
                 raise RuntimeError("record layer refused watchdog defect: " + str(response))
+            if f["kind"] == "scheduled_job_drift":
+                return {"board_recovery": recovery, "loop_id": response["loop_id"]}
         return {"board_recovery": recovery}
 
+    def _record(self, verb, payload):
+        result = command([str(SOURCE / "run.sh"), "call", verb, json.dumps(payload)], self.config)
+        # run.sh emits an identity banner before JSON; read the response itself.
+        return json.loads(result[result.find("{"):])
+
+    def _file_defect(self, f, key):
+        payload = {"idempotency_key": key,
+                       "kind": "open_loop", "owner": loop_owner(f), "domain": "system",
+                       "body": f["reason"] + "\nNext action: " + f["next_action"],
+                       "source_note": "job watchdog: " + f["subject"],
+                       "marker": "decision" if f.get("needs_joe") or f.get("board_status") == "question-for-orchestrator" else "none",
+                       **loop_blocker(f),
+                       "blocker_detail": f["reason"] if f.get("needs_joe") else "Orchestrator's named executor or queue repair: " + f["subject"]}
+        response = self._record("add-loop", payload)
+        if response.get("ok") is not True or not response.get("loop_id"):
+            raise RuntimeError("record layer refused watchdog defect: " + str(response))
+        return {"ok": True, "loop_id": response["loop_id"], "loop_idempotency_key": key}
+
+    def resolve(self, f):
+        loop_id = f.get("loop_id")
+        if not loop_id and self.config["actions"]["file_defects"]:
+            # Upgrade an active pre-recovery ledger using its original filing
+            # key. Replaying add-loop reads the same durable loop, not a new one.
+            key = f.get("loop_idempotency_key") or "job-watchdog:" + hashlib.sha256(f["key"].encode()).hexdigest()
+            loop_id = self._file_defect(f, key)["loop_id"]
+        if loop_id:
+            response = self._record("read-loop", {"loop_id": loop_id})
+            loop = response.get("loop") if isinstance(response, dict) else None
+            if (not isinstance(loop, dict) or loop.get("loop_id") != loop_id
+                    or type(loop.get("version")) is not int or loop["version"] < 1
+                    or loop.get("status") not in {"open", "done", "dropped"}):
+                raise RuntimeError("record layer refused watchdog recovery read: " + str(response))
+            if loop["status"] == "open":
+                response = self._record("close-loop", {
+                    "idempotency_key": "job-watchdog:recovered:" + hashlib.sha256(loop_id.encode()).hexdigest(),
+                    "loop_id": loop_id, "base_version": loop["version"], "resolution": "done",
+                    "outcome": "Vendor fetch recovered: " + f["url"] + "; successful configured fetch cleared the source error.",
+                })
+                if response.get("ok") is not True:
+                    raise RuntimeError("record layer refused watchdog recovery close: " + str(response))
+        card = f.get("card") or "wd-" + hashlib.sha256(f["subject"].encode()).hexdigest()[:16]
+        board_task(self.root, self.config, card, "orchestrator", "done",
+                   "Vendor fetch recovered: " + f["url"] + "\nNext action: continue the configured vendor watch.")
+        return {"ok": True}
+
     def clear(self, f, active):
+        if f["kind"] == "scheduled_job_drift" and f.get("loop_id"):
+            result = command([str(SOURCE / "run.sh"), "call", "read-loop",
+                              json.dumps({"loop_id": f["loop_id"]})], self.config)
+            response = json.loads(result[result.find("{"):])
+            current = response.get("loop") if isinstance(response, dict) else None
+            if (not isinstance(current, dict) or current.get("loop_id") != f["loop_id"]
+                    or type(current.get("version")) is not int or current["version"] < 1
+                    or current.get("status") not in {"open", "done", "dropped"}):
+                raise RuntimeError("scheduled-job loop readback failed")
+            if current["status"] == "open":
+                payload = {"loop_id": f["loop_id"], "base_version": current["version"],
+                           "idempotency_key": "scheduled-jobs-clear:" + f["loop_id"],
+                           "resolution": "done", "outcome":
+                           "A complete scheduled-job scan no longer finds " + f["key"] +
+                           "; checked live machine evidence against the native launchd definitions."}
+                result = command([str(SOURCE / "run.sh"), "call", "close-loop", json.dumps(payload)], self.config)
+                closed = json.loads(result[result.find("{"):])
+                if closed.get("ok") is not True:
+                    raise RuntimeError("scheduled-job loop closure failed")
         recovery = f["board_recovery"]
         card = recovery["card"]
         owned = {"status": "blocked", "health": "blocked", "note": recovery["note"],
@@ -784,6 +1141,16 @@ class Effects:
                    needs_joe=before.get("lane") == self.config["needs_joe_lane"],
                    health=before.get("health", "healthy"), expected_task=owned,
                    reason=before.get("blocked_reason"), next_action=before.get("next_action"))
+
+    def retire_generated_card_without_receipt(self, f):
+        card = self.card(f)
+        note = f["reason"] + "\nNext action: " + f["next_action"]
+        owned = {"status": "blocked", "health": "blocked", "note": note, "executor": "orchestrator",
+                 "lane": self.config["needs_joe_lane"] if f.get("needs_joe") else None,
+                 "blocked_reason": f["reason"], "next_action": f["next_action"]}
+        board_task(self.root, self.config, card, "orchestrator", "done",
+                   "Watchdog finding recovered; evidence source is healthy.",
+                   expected_task=owned)
 
     def launch(self, f, argv, cwd, *, job_id, restart_count=0, root_id=None):
         c = self.config
@@ -899,22 +1266,63 @@ def digest(root, config):
     return "\n".join(lines)
 
 
-def scan(root, config, config_path=None):
+def schedule_reaper(root, config, effects, now):
+    policy = config.get("branch_janitor")
+    if not policy:
+        return
+    canonical = config.get("repository_roots", {}).get("jbookout/carr-system")
+    if not canonical or Path(root).resolve() != Path(canonical).expanduser().resolve():
+        return  # A fixture or session checkout must never schedule the live fleet.
+    ledger = root / "out/orch/branch-janitor-schedule.jsonl"
+    previous = read_latest(ledger).get("schedule", {})
+    if now - previous.get("at", 0) < policy["interval_seconds"]:
+        return
+    pid = previous.get("wrapper_pid")
+    identity = process_identity(pid, config) if pid else None
+    if identity and identity == previous.get("process_identity"):
+        return
+    # Read back a possibly interrupted launch before starting another wrapper.
+    jobs = read_latest(path_at(root, config["paths"]["registry"]))
+    active = next((j for j in jobs.values() if j.get("card") == "branch-janitor" and
+                   "exit_code" not in j and j.get("process_identity") and
+                   process_identity(j.get("pid"), config) == j["process_identity"]), None)
+    if active:
+        return
+    job_id = "branch-janitor-" + uuid.uuid4().hex[:12]
+    append(ledger, {"key": "schedule", "at": now, "status": "intent", "job_id": job_id})
+    result = effects.launch({"card": "branch-janitor", "executor": "deterministic reaper",
+                             "limit": policy["limit_seconds"]},
+        [sys.executable, str(SOURCE / "hooks/worktree-self-plumb.py"), "--reap", "--fleet",
+         "--repo", str(root)], root, job_id=job_id)
+    append(ledger, {"key": "schedule", "at": now, "status": "started", **result,
+                    "process_identity": process_identity(result["wrapper_pid"], config)})
+
+
+def scan(root, config, config_path=None, *, vendor_only=False):
     try:
         with locked(path_at(root, config["paths"]["scan_lock"]), blocking=False):
             now = time.time()
             ledger = path_at(root, config["paths"]["scan_ledger"])
             prior_runs = read_latest(ledger)
-            append(ledger, {"key": "scan", "status": "started", "at": stamp(now),
-                            "previous_status": prior_runs.get("scan", {}).get("status")})
+            scan_key = "vendor-watch" if vendor_only else "scan"
+            append(ledger, {"key": scan_key, "status": "started", "at": stamp(now),
+                            "previous_status": prior_runs.get(scan_key, {}).get("status")})
             effects = Effects(root, config)
             effects.config_path = Path(config_path or SOURCE / "ops/config/job-watchdog.json").resolve()
-            facts = collect(root, config, now)
-            found = reconcile(root, config, detect(facts, config, now), effects, now)
-            append(ledger, {"key": "scan", "status": "completed", "at": stamp(),
+            if not vendor_only:
+                try:
+                    schedule_reaper(root, config, effects, now)
+                except Exception as exc:
+                    append(root / "out/orch/branch-janitor-schedule.jsonl",
+                           {"key": "schedule_error", "at": now, "error": type(exc).__name__})
+            facts = {"errors": []} if vendor_only else collect(root, config, now)
+            candidates = detect(facts, config, now) + vendor_release_findings(root, config, now)
+            found = reconcile(root, config, candidates, effects, now,
+                              clear_kinds={"vendor_release_fetch_error"} if vendor_only else None)
+            append(ledger, {"key": scan_key, "status": "completed", "at": stamp(),
                             "findings": len(found), "collection_errors": len(facts["errors"])})
             print(digest(root, config))
-            return 1 if facts["errors"] or any(f["kind"] in {"action_error", "record_error"} for f in found) else 0
+            return 1 if facts["errors"] or any(f["kind"] in {"action_error", "record_error", "vendor_release_fetch_error"} for f in found) else 0
     except BlockingIOError:
         # Another scan owns the entire interval's effects; say so instead of vanishing.
         append(path_at(root, config["paths"]["scan_ledger"]),

@@ -1,0 +1,93 @@
+{
+  "schema": "leak-guard-allowlist.v1",
+  "entries": [
+    {
+      "path": "security/fixtures/synthetic-contact.json",
+      "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
+      "rule": "pii-phone",
+      "reason": "Reserved synthetic contact values for scanner qualification; contains no record-layer data."
+    },
+    {
+      "path": "security/fixtures/synthetic-contact.json",
+      "sha256": "1f73e855f4b964ccb0355c72ef214a9ae9d06e6bb69b7ab045fec904578e03e6",
+      "rule": "pii-address",
+      "reason": "Reserved synthetic contact values for scanner qualification; contains no record-layer data."
+    },
+    {
+      "path": "security/leak_guard.py",
+      "sha256": "2fd0ec5f96977578dba8b75220e1ec64af19b693e66a142d95d2dd1f799d83dd",
+      "rule": "pii-address",
+      "reason": "the guard's own doc comment quoting a synthetic address; reworded in 3b112565"
+    },
+    {
+      "path": "security/leak_guard.py",
+      "sha256": "f5d8854a9ae10a8618a7fe54436410fe1dfc319224b0bcd1c9a845287d327155",
+      "rule": "pii-address",
+      "reason": "the guard's own doc comment quoting a synthetic address; replaced in 342f539e"
+    },
+    {
+      "path": "ops/disk-reaper.py",
+      "sha256": "13d4bf9ba3882823db52c0f5a5b23901c8bc12851717ebd921d37dadb230f8d5",
+      "rule": "pii-email",
+      "reason": "unescaped dots in the GitHub SSH origin regex at 5b2971a6, not an address; escaped in 94cef0ec"
+    },
+    {
+      "path": "ops/disk-reaper.py",
+      "sha256": "29012a5967b0815f502486e2f281e2a5ad86eef72c9e0927b63ae8cf5f31de76",
+      "rule": "pii-email",
+      "reason": "unescaped dots in the GitHub SSH origin regex at fae3aa03, not an address; escaped in 94cef0ec"
+    },
+    {
+      "path": "ops/disk-reaper.py",
+      "sha256": "51aba0aacbedc3e99f3b4ac39981d6a4f2049e381db2cad6cf19107bf23c9dc1",
+      "rule": "pii-email",
+      "reason": "unescaped dots in the GitHub SSH origin regex at a7c97855, not an address; escaped in 94cef0ec"
+    },
+    {
+      "path": "evals/jev-judgments/evidence/baseline.jsonl",
+      "sha256": "76fdd7e7cb518323cd49d448aa67672bf0627902c2451d518fcad8f6085f1d88",
+      "rule": "pii-phone",
+      "reason": "a 10-digit sha256 prefix inside a case id, not a phone number"
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
+      "rule": "client-data",
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "ca19adb6a542b4343bc36748758116bb4c84fcb9f98b8abe87eb642c139f5215",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the NPPES territory predicate, not a client identity, contact or street address. This exception binds only the qualified value hash and these exact source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "bf796d9711351cc9d49b5d9703efea1f9d8a05e820c21563252c265016f37b61",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
+    },
+    {
+      "path": "tools/routines/lead_signals.py",
+      "sha256": "99ab31103b36298fc3c5c3a2cf71c8a90bd40083db129c869e90b78ab099a8dc",
+      "rule": "client-data",
+      "value_sha256": "eca5f4dc9bfccefc5a304b36d2e54b9f54bf59886b9c44ce83cdc349529d3451",
+      "reason": "Public county or city name in the initial NPPES territory predicate. This PR retains its original introduced commit; this qualification binds only that public value hash, path and exact historical source bytes."
+    },
+    {
+      "path": "migrations/0865_lead_stage_transition_proof_scac_successor.sql",
+      "sha256": "a0e6b9a7416c74df283c016ff5eeeb2e25aaeb856db8c1a6cb2c03899401cb60",
+      "rule": "generic-api-key",
+      "reason": "Historical generated SCAC v114 source-contract manifest at fc7c1578f. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
+    },
+    {
+      "path": "migrations/0865_lead_stage_transition_proof_scac_successor.sql",
+      "sha256": "11907f15985826b8b5cb0009ab4de02d7f4922a9f53d5950478838f102f8ffaf",
+      "rule": "generic-api-key",
+      "reason": "Historical generated SCAC v114 source-contract manifest at 710845781. Line 161 serializes ingress identifiers, schema and handler digests, and job routing metadata, not authentication material. Retained in PR history after the successor was removed; exception binds only these exact immutable SQL bytes and this generic detector."
+    }
+  ]
+}

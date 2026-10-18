@@ -1320,6 +1320,272 @@ commit;
         provision.validate_profile_login = saved_main_dependencies["validate_profile_login"]
         provision.require_direct_owner_identity = saved_main_dependencies[
             "require_direct_owner_identity"]
+    # ======================================================================
+    # DELIBERATE ROTATION OF A LOST CANDIDATE CREDENTIAL (Joe, 2026-10-12)
+    # ======================================================================
+    # The writer role exists and pg_authid shows it holding a password, but
+    # this machine has neither its final nor its pending file. Real credential
+    # files are written into a private temporary root standing in for the
+    # candidate root; the database, Worker and provider are fakes.
+    rotation_saved = {
+        "reject_unsafe_environment": provision.reject_unsafe_environment,
+        "replacement_target": provision.replacement_target,
+        "resolve_replacement_binding": provision.resolve_replacement_binding,
+        "load_rollback_worker_values": provision.load_rollback_worker_values,
+        "bulk_worker_database_secrets": provision.bulk_worker_database_secrets,
+        "verify_worker_database_secret_bindings": provision.verify_worker_database_secret_bindings,
+        "read_seed_state": provision.read_seed_state,
+        "connect": provision.psycopg.connect,
+        "prove_provider_preservation": provision.replacement.prove_provider_preservation,
+        "load_grants": provision.snapshot_grants.load_current_grants_to_role,
+        "exclusive_lock": provision.credential.exclusive_lock,
+        "load_existing": provision.credential.load_existing,
+        "validate_profile_login": provision.validate_profile_login,
+        "require_direct_owner_identity": provision.require_direct_owner_identity,
+        "apply_login_profile": provision.apply_login_profile,
+        "replacement_credential_root": provision.replacement_credential_root,
+        "seat_passwordless": FakeOwnerCursor.seat_passwordless,
+    }
+    rotation_events: list[tuple[Any, ...]] = []
+    minted_passwords: list[str] = []
+    rotation_faults: dict[str, bool] = {}
+    real_load_existing = provision.credential.load_existing
+
+    class RotationOwner(FakeOwner):
+        def commit(self) -> None:
+            rotation_events.append(("commit",))
+            if rotation_faults.get("commit") and any(
+                    event[0] == "apply" for event in rotation_events):
+                raise RuntimeError("connection lost mid-commit")
+
+        def rollback(self) -> None:
+            rotation_events.append(("rollback",))
+
+    def rotation_load(paths, *, role_name, **kwargs):
+        if role_name == provision.APP_ROLE:
+            return real_load_existing(paths, role_name=role_name, **kwargs)
+        return provision.credential.StoredCredential(
+            "final", pathlib.Path("/fixture/final"), candidate_by_role[role_name],
+            "fixture-password", candidate.endpoint_host, 5432, "neondb")
+
+    def rotation_apply(_conn, profile, _grants, password, **kwargs):
+        rotation_events.append(
+            ("apply", profile.label, kwargs.get("rotate", False), kwargs.get("commit", True)))
+        minted_passwords.append(password)
+
+    def rotation_bulk(values) -> None:
+        if values == old_values:
+            rotation_events.append(("bulk", "prior"))
+            return
+        rotation_events.append(("bulk", "candidate"))
+        published_writer.append(values["DATABASE_URL_WRITER"])
+        if rotation_faults.get("publish"):
+            raise provision.ProvisioningRefusal("synthetic Worker publication failure")
+
+    def rotation_prove(_dsn, profile, *_args, **_kwargs) -> None:
+        if profile.label == "writer":
+            rotation_events.append(("prove", profile.label))
+            if rotation_faults.get("prove"):
+                raise provision.ProvisioningRefusal("synthetic postflight login failure")
+
+    published_writer: list[str] = []
+    rotation_argv = [
+        "--candidate-operation-id", str(CANDIDATE_OPERATION_ID),
+        "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA, "--apply",
+    ]
+
+    def run_rotation(argv, **faults):
+        rotation_events.clear()
+        minted_passwords.clear()
+        published_writer.clear()
+        rotation_faults.clear()
+        rotation_faults.update(faults)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = provision.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    with tempfile.TemporaryDirectory() as raw_root:
+        rotation_root = pathlib.Path(raw_root) / "candidate"
+        rotation_root.mkdir(mode=0o700)
+        writer_file = provision.credential.profile("writer", config_root=rotation_root)
+        try:
+            provision.reject_unsafe_environment = lambda _environment: None
+            provision.replacement_target = lambda *_args, **_kwargs: target
+            provision.resolve_replacement_binding = lambda *_args, **_kwargs: binding_fixture
+            provision.load_rollback_worker_values = lambda _old: dict(old_values)
+            provision.snapshot_grants.load_current_grants_to_role = lambda *_a, **_k: []
+            provision.credential.exclusive_lock = exclusive_lock
+            provision.read_seed_state = lambda *_args, **_kwargs: valid_state
+            provision.replacement.prove_provider_preservation = lambda *_a, **_k: None
+            provision.bulk_worker_database_secrets = rotation_bulk
+            provision.verify_worker_database_secret_bindings = lambda **_kwargs: None
+            provision.psycopg.connect = lambda *_args, **_kwargs: RotationOwner()
+            provision.require_direct_owner_identity = lambda _cur: "neondb_owner"
+            provision.validate_profile_login = rotation_prove
+            provision.apply_login_profile = rotation_apply
+            provision.replacement_credential_root = lambda _operation: rotation_root
+            provision.credential.load_existing = rotation_load
+            FakeOwnerCursor.seat_passwordless = False
+
+            def after_apply(events):
+                start = next(i for i, event in enumerate(events) if event[0] == "apply")
+                return events[start:]
+
+            # WITHOUT THE FLAG the lost file still refuses, exactly as before.
+            rc, out, err = run_rotation(rotation_argv)
+            check("without --rotate-lost-credential a lost writer file still refuses",
+                  rc == 2 and out == "" and "unsafe role/credential state" in err
+                  and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
+                  and not writer_file.paths.pending.exists()
+                  and not writer_file.paths.final.exists())
+
+            # WITH THE FLAG: mint, ALTER uncommitted, publish + read back, commit,
+            # prove, promote -- in that order -- and report the rotation.
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"])
+            rotated = json.loads(out)
+            minted = minted_passwords[0] if minted_passwords else ""
+            check("the flag rotates the lost writer through the adopt path's settlement order",
+                  rc == 0 and after_apply(rotation_events) == [
+                      ("apply", "writer", True, False), ("bulk", "candidate"),
+                      ("commit",), ("prove", "writer"), ("rollback",),
+                  ])
+            check("the rotated password is fresh, in-process, published and promoted",
+                  len(minted.encode()) >= 32 and minted not in candidate_by_role.values()
+                  and bool(published_writer) and minted in published_writer[0]
+                  and writer_file.paths.final.exists()
+                  and not writer_file.paths.pending.exists()
+                  and (writer_file.paths.final.stat().st_mode & 0o777) == 0o600)
+            rotation_record = rotated["deliberate_rotations"]
+            check("the run output records profile, role, time and the approved reason",
+                  rotated["role_outcomes"]["writer"] == "rotated"
+                  and rotated["role_outcomes"]["reader"] == "reused"
+                  and len(rotation_record) == 1
+                  and rotation_record[0]["profile"] == "writer"
+                  and rotation_record[0]["role"] == "app_writer"
+                  and rotation_record[0]["worker_secret"] == "DATABASE_URL_WRITER"
+                  and rotation_record[0]["reason"]
+                  == "local credential file lost; Joe approved 2026-10-12"
+                  and rotation_record[0]["rotated_at"].endswith("+00:00"))
+            check("the rotated password never appears in the run output",
+                  bool(minted) and minted not in out + err and published_writer[0] not in out + err)
+
+            # A WORKING CREDENTIAL IS NEVER ROTATED: the final file now exists.
+            before_bytes = writer_file.paths.final.read_bytes()
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"])
+            check("rotation refuses when the final credential file exists",
+                  rc == 2 and out == "" and "never rotated" in err
+                  and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
+                  and writer_file.paths.final.read_bytes() == before_bytes)
+            writer_file.paths.final.rename(writer_file.paths.pending)
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"])
+            check("rotation refuses when only the pending credential file exists, "
+                  "and says how to recover an interrupted rotation",
+                  rc == 2 and "never rotated" in err
+                  and "rerun WITHOUT the flag" in err and "remove it" in err
+                  and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
+                  and writer_file.paths.pending.read_bytes() == before_bytes)
+            writer_file.paths.pending.unlink()
+
+            # PUBLICATION FAILS: the ALTER never commits and the pending file goes.
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"], publish=True)
+            minted = minted_passwords[0] if minted_passwords else ""
+            check("a failed publication rolls the rotation back and leaves no pending file",
+                  rc == 2 and out == ""
+                  and after_apply(rotation_events) == [
+                      ("apply", "writer", True, False), ("bulk", "candidate"),
+                      ("bulk", "prior"), ("rollback",),
+                  ]
+                  and not writer_file.paths.pending.exists()
+                  and not writer_file.paths.final.exists()
+                  and "deliberate rotations committed" not in err
+                  and bool(minted) and minted not in out + err)
+
+            # THE COMMIT FAILS AFTER PUBLICATION: compensate, then discard.
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"], commit=True)
+            check("a failed commit restores the prior Worker set and discards the pending file",
+                  rc == 2 and after_apply(rotation_events) == [
+                      ("apply", "writer", True, False), ("bulk", "candidate"),
+                      ("commit",), ("bulk", "prior"), ("rollback",),
+                  ]
+                  and not writer_file.paths.pending.exists()
+                  and not writer_file.paths.final.exists())
+
+            # COMMITTED, THEN THE LOGIN PROOF FAILS: the password is live, so the
+            # pending file is the only copy and is KEPT, and the refusal says a
+            # rotation committed -- without saying what it is.
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"], prove=True)
+            minted = minted_passwords[0] if minted_passwords else ""
+            check("a refusal after the commit keeps the live pending file and names the rotation",
+                  rc == 2 and writer_file.paths.pending.exists()
+                  and not writer_file.paths.final.exists()
+                  and "deliberate rotations committed" in err and "app_writer" in err
+                  and bool(minted) and minted not in out + err)
+            writer_file.paths.pending.unlink()
+
+            # A ROTATION AIMED ANYWHERE BUT THE RECEIPTED CANDIDATE REFUSES.
+            for label, project_id in (("Production", provision.PRODUCTION_PROJECT_ID),
+                                      ("prior staging", old.project_id),
+                                      ("an unknown project", "project-unknown")):
+                wrong = dataclasses.replace(candidate_scope, project_id=project_id)
+                try:
+                    provision.require_rotation_target(wrong, binding_fixture)
+                except provision.ProvisioningRefusal:
+                    pass
+                else:
+                    raise AssertionError(f"rotation accepted {label} as its target")
+            provision.require_rotation_target(candidate_scope, binding_fixture)
+            # Even a binding whose CANDIDATE slot names Production or the prior
+            # staging project is refused: those two are never rotation targets.
+            for label, project_id in (("Production", provision.PRODUCTION_PROJECT_ID),
+                                      ("prior staging", old.project_id)):
+                aliased = types.SimpleNamespace(
+                    old=old, candidate=types.SimpleNamespace(project_id=project_id))
+                try:
+                    provision.require_rotation_target(
+                        dataclasses.replace(candidate_scope, project_id=project_id), aliased)
+                except provision.ProvisioningRefusal:
+                    pass
+                else:
+                    raise AssertionError(f"rotation accepted {label} named as the candidate")
+            check("rotation targets only the receipted staging candidate project", True)
+
+            # AND MAIN ASKS THAT QUESTION before anything is minted: an owner
+            # connection that is not the candidate's refuses the whole run.
+            stray_owner = dataclasses.replace(
+                candidate_owner, scope=dataclasses.replace(
+                    candidate_scope, project_id=old.project_id))
+            provision.resolve_replacement_binding = lambda *_args, **_kwargs: \
+                dataclasses.replace(binding_fixture, owner=stray_owner)
+            rc, out, err = run_rotation(
+                rotation_argv + ["--rotate-lost-credential", "writer"])
+            check("main refuses a rotation whose owner connection is not the candidate",
+                  rc == 2 and "not the receipted staging candidate" in err
+                  and not any(event[0] in {"apply", "bulk"} for event in rotation_events)
+                  and not writer_file.paths.pending.exists())
+            provision.resolve_replacement_binding = lambda *_args, **_kwargs: binding_fixture
+        finally:
+            for name in ("reject_unsafe_environment", "replacement_target",
+                         "resolve_replacement_binding", "load_rollback_worker_values",
+                         "bulk_worker_database_secrets",
+                         "verify_worker_database_secret_bindings", "read_seed_state",
+                         "validate_profile_login", "require_direct_owner_identity",
+                         "apply_login_profile", "replacement_credential_root"):
+                setattr(provision, name, rotation_saved[name])
+            provision.psycopg.connect = rotation_saved["connect"]
+            provision.replacement.prove_provider_preservation = rotation_saved[
+                "prove_provider_preservation"]
+            provision.snapshot_grants.load_current_grants_to_role = rotation_saved["load_grants"]
+            provision.credential.exclusive_lock = rotation_saved["exclusive_lock"]
+            provision.credential.load_existing = rotation_saved["load_existing"]
+            FakeOwnerCursor.seat_passwordless = rotation_saved["seat_passwordless"]
+
     try:
         provision.worker_environment({"CLOUDFLARE_ACCOUNT_ID": "0" * 32})
     except provision.ProvisioningRefusal:
@@ -1607,6 +1873,44 @@ commit;
               True)
     else:
         raise AssertionError("adoption widened to a tool-created profile")
+    # ---- THE DELIBERATE-ROTATION ROW -------------------------------------
+    # One state only: role present, pg_authid shows a password, no file at all,
+    # AND the operator named the profile. Every neighbour refuses.
+    for created_by_migration in (False, True):
+        check(f"a named lost credential rotates (migration-created={created_by_migration})",
+              provision.decide_profile_action(
+                  role_exists_now=True, credential_state="absent",
+                  role_created_by_migration=created_by_migration,
+                  role_passwordless=False, rotate_lost=True) == "rotate")
+        try:
+            provision.decide_profile_action(
+                role_exists_now=True, credential_state="absent",
+                role_created_by_migration=created_by_migration, role_passwordless=False)
+        except provision.ProvisioningRefusal:
+            pass
+        else:
+            raise AssertionError("a lost credential rotated without the explicit flag")
+    for state, exists, passwordless, needle in (
+            ("final", True, False, "never rotated"),
+            ("pending", True, False, "never rotated"),
+            ("absent", False, None, "does not exist"),
+            ("absent", True, True, "not a lost credential"),
+            ("absent", True, None, "not a lost credential")):
+        try:
+            provision.decide_profile_action(
+                role_exists_now=exists, credential_state=state,
+                role_created_by_migration=True, role_passwordless=passwordless,
+                rotate_lost=True)
+        except provision.ProvisioningRefusal as exc:
+            if needle not in str(exc):
+                raise AssertionError(f"rotation refusal for {state}/{exists}/{passwordless} "
+                                     f"does not say why: {exc}")
+        else:
+            raise AssertionError(
+                f"rotation accepted state={state} exists={exists} passwordless={passwordless}")
+    check("rotation refuses an existing file, a missing role, and a passwordless or "
+          "unreadable seat", True)
+
     check("exactly the two dedicated producer profiles are migration-created",
           {profile.label for profile in provision.PROFILES
            if profile.created_by_migration} == {
@@ -1731,6 +2035,91 @@ commit;
     finally:
         provision.role_exists = original_exists
         provision.collect_role_authority = original_bundle
+        provision.collect_profile_closure = original_closure
+
+    # ---- DELIBERATE ROTATION ON THE DATABASE SIDE -------------------------
+    # The writer is a tool-created role: exact closure first, then pg_authid
+    # under the lock must show a password, then the ALTER -- uncommitted, with
+    # no grant re-issued and no role created.
+    original_exists = provision.role_exists
+    original_closure = provision.collect_profile_closure
+    exact_writer = profile_closure(profile, snapshot.acl_facts(tiny_plan))
+    try:
+        provision.role_exists = lambda _cur, _role: True
+        provision.collect_profile_closure = lambda _cur, _profile: exact_writer
+        rotated_conn = Connection(passwordless=False)
+        created = provision.apply_login_profile(
+            rotated_conn, profile, tiny_plan, "r" * 64,
+            expected_creator="neondb_owner", rotate=True, commit=False)
+        rotated_statements = [repr(statement).lower()
+                              for statement in rotated_conn.cur.statements]
+        alter_index = next((index for index, statement in enumerate(rotated_statements)
+                            if "alter role" in statement and "password" in statement), None)
+        check("rotation ALTERs the existing role's password, uncommitted, after pg_authid",
+              not created and alter_index is not None
+              and rotated_conn.commits == 0 and rotated_conn.rollbacks == 0
+              and rotated_conn.cur.password_probe_index is not None
+              and rotated_conn.cur.password_probe_index < alter_index)
+        check("rotation creates no role and re-issues no grant",
+              not any("create role" in statement for statement in rotated_statements)
+              and not any(str(statement).lstrip().lower().startswith(("grant ", "revoke "))
+                          for statement in rotated_conn.cur.statements))
+
+        passwordless_conn = Connection(passwordless=True)
+        try:
+            provision.apply_login_profile(
+                passwordless_conn, profile, tiny_plan, "r" * 64,
+                expected_creator="neondb_owner", rotate=True, commit=False)
+        except provision.ProvisioningRefusal as exc:
+            check("rotation refuses a role with no password under the lock",
+                  "holds no password" in str(exc) and passwordless_conn.rollbacks == 1
+                  and not any("password" in repr(statement).lower()
+                              and "alter role" in repr(statement).lower()
+                              for statement in passwordless_conn.cur.statements))
+        else:
+            raise AssertionError("rotation credentialed a passwordless role")
+
+        drifted = dataclasses.replace(
+            exact_writer, login=dataclasses.replace(
+                exact_writer.login, powerful_attributes=("createdb",)))
+        provision.collect_profile_closure = lambda _cur, _profile: drifted
+        drift_conn = Connection(passwordless=False)
+        try:
+            provision.apply_login_profile(
+                drift_conn, profile, tiny_plan, "r" * 64,
+                expected_creator="neondb_owner", rotate=True, commit=False)
+        except provision.ProvisioningRefusal:
+            check("rotation refuses a drifted role before touching its password",
+                  drift_conn.rollbacks == 1
+                  and not any("alter role" in repr(statement).lower()
+                              for statement in drift_conn.cur.statements))
+        else:
+            raise AssertionError("rotation re-credentialed a drifted role")
+        provision.collect_profile_closure = lambda _cur, _profile: exact_writer
+
+        provision.role_exists = lambda _cur, _role: False
+        absent_conn = Connection(passwordless=False)
+        try:
+            provision.apply_login_profile(
+                absent_conn, profile, tiny_plan, "r" * 64,
+                expected_creator="neondb_owner", rotate=True, commit=False)
+        except provision.ProvisioningRefusal as exc:
+            check("rotation refuses a role that does not exist and creates none",
+                  "no credential to rotate" in str(exc)
+                  and not any("create role" in repr(statement).lower()
+                              for statement in absent_conn.cur.statements))
+        else:
+            raise AssertionError("rotation invented a role")
+        try:
+            provision.apply_login_profile(
+                Connection(passwordless=False), profile, tiny_plan, "r" * 64,
+                expected_creator="neondb_owner", rotate=True, adopt=True)
+        except provision.ProvisioningRefusal as exc:
+            check("a profile is never adopted and rotated in one call", "never both" in str(exc))
+        else:
+            raise AssertionError("adopt and rotate were combined")
+    finally:
+        provision.role_exists = original_exists
         provision.collect_profile_closure = original_closure
 
     # ======================================================================
@@ -2031,6 +2420,33 @@ commit;
         else:
             raise AssertionError(f"an incoherent argument set was accepted: {bad_argv}")
     check("every staging input is required and no production mode can be asked for", True)
+
+    base_argv = ["--candidate-operation-id", str(CANDIDATE_OPERATION_ID),
+                 "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA]
+    for bad_argv, why in (
+        (base_argv + ["--rotate-lost-credential", "writer"], "without --apply"),
+        (base_argv + ["--apply", "--rotate-lost-credential", "production"], "unknown label"),
+        (base_argv + ["--apply", "--rotate-lost-credential", "writer",
+                      "--rotate-lost-credential", "writer"], "duplicate label"),
+        (base_argv + ["--apply", "--rollback-to-prior-staging",
+                      "--rotate-lost-credential", "writer"], "with rollback"),
+        (base_argv + ["--apply", "--repair-prior-rollback-credentials",
+                      "--rotate-lost-credential", "writer"], "with prior repair"),
+    ):
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                provision.parse_args(bad_argv)
+        except SystemExit as exc:
+            if exc.code != 2:
+                raise AssertionError(f"wrong exit for rotation {why}")
+        else:
+            raise AssertionError(f"rotation was accepted {why}")
+    accepted = provision.parse_args(base_argv + [
+        "--apply", "--rotate-lost-credential", "writer",
+        "--rotate-lost-credential", "gate_zero_producer"])
+    check("rotation is opt-in per profile, --apply only, candidate cutover only",
+          accepted.rotate_lost_credential == ["writer", "gate_zero_producer"]
+          and provision.parse_args(base_argv + ["--apply"]).rotate_lost_credential == [])
 
     check("Production project id is imported from the canonical db-tap pin",
           provision.PRODUCTION_PROJECT_ID

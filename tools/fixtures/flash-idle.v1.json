@@ -1,0 +1,9 @@
+[
+  {"name":"stopped", "started":null, "request":null, "now":10000, "stop":false},
+  {"name":"never requested before boundary", "started":100, "request":null, "now":999, "stop":false},
+  {"name":"never requested at boundary", "started":100, "request":null, "now":1000, "stop":true},
+  {"name":"old instance activity", "started":100, "request":10, "now":999, "stop":false},
+  {"name":"recent request", "started":100, "request":5000, "now":5800, "stop":false},
+  {"name":"request at boundary", "started":100, "request":5000, "now":5900, "stop":true},
+  {"name":"future clock", "started":100, "request":5000, "now":4999, "stop":false}
+]

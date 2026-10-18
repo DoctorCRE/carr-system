@@ -194,7 +194,7 @@ def load_candidate_spec() -> CandidateSpec:
     spec = CandidateSpec(int(raw["postgres_version"]), str(raw["region_id"]),
                          _decimal(raw["compute_min_cu"], "compute minimum"),
                          _decimal(raw["compute_max_cu"], "compute maximum"))
-    if spec != CandidateSpec(18, "aws-us-east-1", Decimal("0.25"), Decimal("8")):
+    if spec != CandidateSpec(18, "aws-us-east-1", Decimal("0.25"), Decimal("2")):
         raise ReplacementRefusal("tracked candidate spec is not the reviewed PG18 profile")
     return spec
 

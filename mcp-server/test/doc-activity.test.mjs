@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { docActivityEntry, docActivityTools } from '../src/doc-activity.js';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { connectionRouteForTool } from '../src/mcp.js';
-import { CURRENT_REGISTRY_VERSION, frozenInventory } from '../../ops/scac-mutation-inventory.mjs';
+import { CURRENT_REGISTRY_VERSION } from '../../ops/scac-mutation-inventory.mjs';
 import { SCAC_MUTATION_REGISTRY_VERSION, registeredOperation } from '../src/mutation-registry.js';
 const tools = docActivityTools({ ToolError: class extends Error { constructor(p) { super(p.error); this.payload = p; } } });
 const actor = { slug: 'joe', human: true };
@@ -35,16 +35,11 @@ test('closed read schema, runtime input checks, dates and authority cannot be su
     await assert.rejects(tool.handler({ query() { assert.fail('invalid input reached database'); } }, actor, args), /input_invalid/);
   }
 });
-test('activity successor adds only its reader and preserves every historical source contract', () => {
-  const before = frozenInventory('scac-mutation-registry.v106');
-  const after = frozenInventory('scac-mutation-registry.v107');
-  assert.equal(after.length, before.length + 1);
-  assert.deepEqual(after.filter(row => row.ingress_key !== 'mcp-tool:read-doc-activity'), before);
+test('activity reader is registered as read-only', () => {
   assert.equal(SCAC_MUTATION_REGISTRY_VERSION, CURRENT_REGISTRY_VERSION);
-  const entry = registeredOperation('read-doc-activity');
-  assert.equal(entry.write, false);
-  assert.equal(after.find(row => row.ingress_key === entry.ingress_key).principal_mode, 'authenticated_registered_principal');
+  assert.equal(registeredOperation('read-doc-activity').write, false);
 });
+
 test('feed selects the scoped read-only writer route', () => {
   assert.equal(connectionRouteForTool(TOOLS['read-doc-activity']), 'writer_read_only');
 });

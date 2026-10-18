@@ -1,40 +1,4 @@
-"""Fail-closed fast-forward for ONE fleet-sync sibling checkout.
-
-A LIBRARY ON PURPOSE — no shebang, no ``__main__`` guard. bin/fleet-sync.sh
-(already an inventoried SCAC script entrypoint) is the only caller, invoking
-``sync_sibling`` through a small inline interpreter snippet rather than
-shelling out to this file as its own script. That keeps this module from
-becoming a second sealed ingress for exactly the same one job a single
-inventoried entrypoint already covers — see ops/jev_change_tolls.py's
-``new_ingress_admitted`` toll, whose own remedy is precisely this: keep a
-helper with neither a shebang nor a main guard a library, and host dispatch
-inside an entrypoint that is already inventoried.
-
-bin/fleet-sync.sh keeps ~/carr-system's own checkout current through
-tools/fleet_sync_safety.py's eligibility proof plus its own fetch/ff-only
-logic. This module carries the SAME safety contract for the sibling repos
-listed in ops/config/fleet-sync-siblings.json (doctorcre-app,
-software-factory today) — repos that live as siblings of the carr-system
-checkout, at ``${REPO:h}/<name>``.
-
-Every case here is a DELIBERATE refusal, matching bin/fleet-sync.sh's own
-design for the canonical checkout:
-
-  - an ABSENT sibling is a clean skip, never a failure. Dell's Mac (and some
-    Macs) simply won't have every sibling checked out.
-  - a sibling NOT on its default branch is left alone.
-  - TRACKED local changes (``git status --porcelain --untracked-files=no``)
-    are never discarded; the sibling is skipped and the dirty paths named.
-  - a DIVERGED sibling (HEAD not an ancestor of origin/<branch>) is a human
-    question, exactly as for the canonical checkout.
-  - otherwise: ``git fetch origin <branch>`` then ``git merge --ff-only
-    origin/<branch>``. Never merge, rebase, reset, or force anything.
-
-A sibling's own outcome is intentionally cheap to consume: this module
-returns one of three statuses ("ok", "skip", "fail") and a one-line message,
-so bin/fleet-sync.sh can report each sibling on its own line without letting
-any of them affect its own exit code or block the canonical sync/re-render.
-"""
+"""Fast-forward an eligible fleet-sync sibling checkout without discarding local work."""
 from __future__ import annotations
 
 import os

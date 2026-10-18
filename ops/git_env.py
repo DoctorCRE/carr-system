@@ -43,6 +43,8 @@ stops covering GIT_LOCATION_VARS — the hook keeps its own literal list on
 purpose (see the note there) and that case is what stops the two drifting.
 """
 import os
+from pathlib import Path
+import subprocess
 
 # Every variable git consults BEFORE the working directory. Sourced from
 # git(1)'s environment section rather than from memory, and deliberately
@@ -67,6 +69,15 @@ GIT_CONFIG_VARS = (
     "GIT_CONFIG_GLOBAL",
     "GIT_CONFIG_SYSTEM",
     "GIT_CONFIG_COUNT",
+)
+
+
+# Fixture porcelain and auto-GC own every writer until they return. Tests that
+# invoke real hooks also persist these settings because real-work scrubbing
+# deliberately removes command-level config from the hook environment.
+FIXTURE_GIT_CONFIG = (
+    ("maintenance.autoDetach", "false"),
+    ("gc.autoDetach", "false"),
 )
 
 
@@ -103,11 +114,42 @@ def fixture_env(base=None):
 
     Everything scrubbed_env() removes, plus system and global config discovery,
     so the fixture cannot inherit a real identity and a `git config` that
-    escaped --local has nowhere real to land.
+    escaped --local has nowhere real to land. Automatic maintenance remains
+    enabled but must finish before the command returns, so temporary repository
+    teardown cannot race a detached writer.
     """
     env = scrubbed_env(base)
     for var in GIT_CONFIG_VARS:
         env.pop(var, None)
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     env["GIT_CONFIG_GLOBAL"] = os.devnull
+    env["GIT_CONFIG_COUNT"] = str(len(FIXTURE_GIT_CONFIG))
+    for n, (key, value) in enumerate(FIXTURE_GIT_CONFIG):
+        env[f"GIT_CONFIG_KEY_{n}"] = key
+        env[f"GIT_CONFIG_VALUE_{n}"] = value
     return env
+
+
+def clone_index_fixture(source, destination):
+    """Clone a fixture with the staged source, including an uncommitted merge.
+
+    Historical objects remain available, while the fixture HEAD identifies the
+    exact staged tree under test. Checkout and branch writes stay in the clone.
+    """
+    env = fixture_env()
+    tree = subprocess.check_output(['git', '-C', str(source), 'write-tree'], env=env, text=True).strip()
+    subprocess.run(['git', 'clone', '-q', '--shared', str(source), str(destination)],
+                   env=env, check=True, capture_output=True)
+    subprocess.run(['git', '-C', str(destination), 'read-tree', '--reset', '-u', tree],
+                   env=env, check=True, capture_output=True)
+    merge_path = Path(subprocess.check_output(
+        ['git', '-C', str(source), 'rev-parse', '--git-path', 'MERGE_HEAD'], env=env, text=True).strip())
+    if not merge_path.is_absolute():
+        merge_path = Path(source) / merge_path
+    if merge_path.exists():
+        (Path(destination) / '.git/MERGE_HEAD').write_bytes(merge_path.read_bytes())
+    message = Path(destination) / '.git/fixture-message'
+    message.write_text('Staged source fixture\n')
+    subprocess.run(['git', '-C', str(destination), '-c', 'user.name=Fixture', '-c',
+                    'user.email=fixture@example.invalid', 'commit', '-q', '--allow-empty', '-F', str(message)],
+                   env=env, check=True, capture_output=True)

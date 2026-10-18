@@ -1,14 +1,6 @@
 #!/usr/bin/env python3
 """registry_ext.py — the room-bridge's additive fields on hermes-desks.json.
 
-desks.py (moved here unmodified from spikes/hermes-dispatch) owns the base
-desk shape: kind, socket/model, cwd, thread_id. The room bridge needs two more
-facts per desk that dispatch.py never needed and that desks.Registry.register()
-deliberately has no parameter for, so this file does not touch desks.py at all
-(rule a8c55a47 cuts the other way here: dispatch.py's register() is a complete,
-tested contract for ITS job, and bolting room-bridge concerns onto it would mix
-two callers' concerns in one signature) —
-
   room_seat      which partner-room seat this desk speaks for (claude, codex,
                  grok, sol, ...). This is what makes echo suppression and reply
                  attribution possible: a turn whose seat matches a desk's own
@@ -16,15 +8,10 @@ two callers' concerns in one signature) —
                  and a captured reply is posted back under this seat.
   last_seen      ISO timestamp, stamped by the bridge on every successful poll
                  or delivery cycle that touched this desk (register/refresh/
-                 heartbeat also stamp it by hand) — the health signal Program
-                 4's convention would otherwise get from launchd cadence alone,
-                 which only proves the BRIDGE ran, not that a given DESK is
-                 still answering.
+                 heartbeat also stamp it by hand).
 
 Both are stored as plain extra keys on the same desk entry in the same file.
-dispatch.py's Registry ignores keys it did not write, so this is additive and
-safe for both readers to share the one file (rule a8c55a47 again: one file,
-one schema, two sets of readers).
+dispatch.py's Registry ignores keys it did not write.
 """
 
 from __future__ import annotations
@@ -57,8 +44,7 @@ def _save(path: Path, data: dict) -> None:
 def set_seat(name: str, seat: str, *, path: Path = DEFAULT_REGISTRY) -> dict:
     """Stamp a desk's room-bridge seat. Refuses a desk that isn't registered
     yet — set_seat is metadata ON an entry, never a way to create one; use
-    desks.Registry.register() first (desk_cli.py's `register` does both in
-    one call)."""
+    desks.Registry.register() first."""
     data = _load(path)
     entry = data.get("desks", {}).get(name)
     if entry is None:
@@ -120,9 +106,7 @@ def get_profile(name: str, *, path: Path = DEFAULT_REGISTRY) -> str | None:
 
 
 def stamp_heartbeat(name: str, *, live: bool, path: Path = DEFAULT_REGISTRY) -> dict:
-    """Record 'this desk was checked, and here is what we found' — called by
-    the bridge every cycle and by `desk_cli.py heartbeat` on demand, so the
-    manual and automated paths are the same write (rule a8c55a47). Silently a
+    """Record 'this desk was checked, and here is what we found'. Silently a
     no-op if the desk has been forgotten between the caller resolving it and
     this call landing — a heartbeat racing a `forget` should never resurrect
     the entry."""
@@ -137,9 +121,7 @@ def stamp_heartbeat(name: str, *, live: bool, path: Path = DEFAULT_REGISTRY) -> 
 
 
 def stamp_auth(name: str, *, auth: bool | None, path: Path = DEFAULT_REGISTRY) -> dict:
-    """Record this cycle's sign-in probe for one desk (spec section 17). Stored
-    beside last_seen for the same reason: the heartbeat receipt reads the
-    registry file, so a probe result has to LAND there to reach the wire. Three
+    """Record this cycle's sign-in probe for one desk (spec section 17). Three
     valued — None means the vendor CLI could not answer, which is written as a
     null rather than collapsed to false (see auth_control's own header). Same
     no-op-on-forgotten-desk stance as stamp_heartbeat."""

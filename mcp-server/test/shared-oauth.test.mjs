@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
 import * as policy from "../src/oauth-policy.js";
 import { OAuthConsentState } from "../src/oauth-consent-state.js";
@@ -142,6 +142,12 @@ test("verified identity reaches client-specific consent before any grant and app
   assert.equal(tokens.resource, `${ORIGIN}/mcp`);
   assert.equal((await access(f, tokens.access_token, "/mcp")).status, 200);
   assert.equal((await approve(f)).status, 400);
+});
+test("consent page lets the browser send its Origin on the approval POST", async () => {
+  // Fetch standard: a form POST from a no-referrer page carries `Origin: null`,
+  // which the Origin check refuses. Chrome confirmed 2026-10-06 (Dell's reconnect).
+  const f = await consentFixture();
+  assert.equal(f.response.headers.get("referrer-policy"), "same-origin");
 });
 test("consent rejects absent/wrong browser cookie, cross-site POST, tampered nonce, expiry and GET", async () => {
   const f = await consentFixture();
@@ -472,8 +478,8 @@ test("denial completes the registered client attempt with access_denied and orig
 });
 
 test("Chrome completes approve and deny at an external client while consent form stays restricted", { timeout: 90000 }, async t => {
-  const chrome = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
-  if (!chrome) { t.skip("Chrome is unavailable"); return; }
+  const chrome = await findDisposableChromium();
+  if (!chrome) { t.skip("Chrome for Testing/Playwright Chromium is unavailable"); return; }
   const browser = await launchChrome(chrome);
   const socket = new WebSocket(browser.pageWsUrl);
   const servers = [];
@@ -519,8 +525,12 @@ test("Chrome completes approve and deny at an external client while consent form
         if (req.method === "POST") {
           posts++;
           const chunks = []; for await (const chunk of req) chunks.push(chunk);
+          // Forward the Origin Chrome actually sent, mapped from this test host to ORIGIN.
+          // A page policy that makes Chrome send `null` must fail here.
+          const sent = req.headers.origin;
+          const origin = sent === `http://127.0.0.1:${server.address().port}` ? ORIGIN : String(sent);
           response = await syntheticOidc.handleConsent(new Request(`${ORIGIN}/consent`, { method: "POST",
-            headers: { cookie: f.cookie, origin: ORIGIN, "content-type": req.headers["content-type"] }, body: Buffer.concat(chunks) }), f.env);
+            headers: { cookie: f.cookie, origin, "content-type": req.headers["content-type"] }, body: Buffer.concat(chunks) }), f.env);
         } else response = new Response(f.html, { headers: f.response.headers });
         res.writeHead(response.status, Object.fromEntries(response.headers)); res.end(await response.text());
       } catch (error) { serverError = error; res.writeHead(500).end(); }

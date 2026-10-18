@@ -9,10 +9,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+import sys
 import uuid
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+from lib import record_call  # noqa: E402
 FIELDS = {"lead", "native_ref", "counterparty_address", "kind", "occurred_at",
           "draft_body_sha256", "ended_at", "attended", "automated", "first_contact_draft_id", "lead_stage_signal", "follow_up_after", "archive_reason"}
 INVOICE_FIELDS = {"native_ref", "from_address", "deal_name", "client_name", "property_address", "occurred_at"}
@@ -42,18 +44,12 @@ def run_job(call, *, dry_run=False, evidence=None, time_zone="America/Chicago"):
 
 
 def call_verb(verb, args):
-    try:
-        result = subprocess.run([str(REPO / "run.sh"), "call", verb, json.dumps(args)],
-                                cwd=REPO, text=True, capture_output=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(f"{verb} failed (timeout)") from None
-    except OSError:
-        raise RuntimeError(f"{verb} failed (launch)") from None
-    if result.returncode:
+    result = record_call.call_verb(verb, args, timeout=120)
+    if not result.ok:
         # Errors may contain source identifiers. Console carries only operation
-        # and exit status; no captured source text is echoed into a public log.
-        raise RuntimeError(f"{verb} failed (exit {result.returncode})")
-    return json.loads(result.stdout)
+        # and outcome; no captured source text is echoed into a public log.
+        raise RuntimeError(f"{verb} failed ({result.kind})")
+    return result.reply
 
 
 def main():

@@ -45,7 +45,7 @@ from lib.rule_delivery_preuse import (  # noqa:E402
     POSTWRITE_RECEIPT_SCHEMA, digest, postwrite_reviewer_digest, receipt_id,
     validate_postwrite_receipt,
 )
-from lib.rule_delivery_shadow import file_sha256  # noqa:E402
+from lib.rule_delivery_preuse import file_sha256  # noqa:E402
 try:                                    # telemetry only — never load-bearing
     import hook_meter
     LOG = hook_meter.guard_log_path(os.path.expanduser("~/carr-system"))
@@ -387,12 +387,12 @@ def code_review(payload):
         }))
 
 
-def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
 
+
+@decision(failure="raise")
+def decide(payload):
     # The receipt half fails open too (ops/lint-gate-selftest.py): a payload
     # with no session_id, or a tool_input that is not a dict, used to raise
     # out of here with a traceback and exit 1 -- before the lint ever ran.
@@ -457,5 +457,9 @@ def main():
         sys.exit(0)
 
 
+def main():
+    sys.exit(run(decide))
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -2,13 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
 
 const projection = "10000000-0000-4000-8000-000000000001";
 const tour = "20000000-0000-4000-8000-000000000001";
 const comment = "A long synthetic comment about parking, frontage and access. ".repeat(6);
-const chrome = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean).find(existsSync);
+const chrome = await findDisposableChromium();
 class DevTools {
   constructor(url) {
     this.serial = 0; this.pending = new Map(); this.socket = new WebSocket(url);
@@ -19,7 +19,7 @@ class DevTools {
   async evaluate(expression) { const value = await this.call("Runtime.evaluate", {expression,returnByValue:true,awaitPromise:true}); if(value.exceptionDetails) throw new Error(JSON.stringify(value.exceptionDetails)); return value.result.value; }
 }
 async function browserFixture(t) {
-  if (!chrome) { t.skip("Chrome is unavailable"); return; }
+  if (!chrome) { t.skip("Chrome for Testing/Playwright Chromium is unavailable"); return; }
   const server = createServer(async (request, response) => {
     try {
       const path = new URL(request.url,"http://127.0.0.1").pathname;

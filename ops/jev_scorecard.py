@@ -10,6 +10,8 @@ import sys
 import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO, "tools"))
+import flashlib
 DEFAULT_SUITE = os.path.join(REPO, "ops", "config", "flash-scorecard-tasks.v1.json")
 
 DEFAULT_ENDPOINT = "http://127.0.0.1:8000"
@@ -124,7 +126,7 @@ def _chat(messages, *, endpoint, model, temperature, reasoning_effort, max_token
         headers={"Content-Type": "application/json"})
     send = opener or urllib.request.urlopen
     try:
-        with send(request, timeout=timeout) as response:
+        with flashlib.request_scope(endpoint, opener=opener), send(request, timeout=timeout) as response:
             resp = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as err:
         detail = ""

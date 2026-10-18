@@ -1,0 +1,210 @@
+{
+  "version": "model-routing-expectations/v3",
+  "baseline_ref": "9a6d255308abe154913657c3482103a8dae94ae6",
+  "cases": {
+    "train-default-off": {
+      "split": "train",
+      "input": {
+        "network_access": false,
+        "thread_id": null,
+        "sandbox": "workspace-write",
+        "cwd": null
+      },
+      "input_sha256": "37829d73f8a08d5a9acce29da4ca1a0a4d9585c481c7849226a6ca1101586c3e",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "boot-refused-no-readonly-network",
+        "turn_status": "failed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "workspace-write"
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<boot task>"
+                }
+              ],
+              "approvalPolicy": "never"
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Production Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default read-only runtime could not fetch standing context."
+    },
+    "train-fresh-opt-in": {
+      "split": "train",
+      "input": {
+        "network_access": true,
+        "thread_id": null,
+        "sandbox": "read-only",
+        "cwd": null
+      },
+      "input_sha256": "7d881665262c992592efed5d66b439e704430b7497198afe53be2adf50b362b6",
+      "should_not_fire": false,
+      "expected_wire": {
+        "outcome": "synthetic-boot-accepted",
+        "turn_status": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "ephemeral": true
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<boot task>"
+                }
+              ],
+              "approvalPolicy": "never",
+              "sandboxPolicy": {
+                "type": "readOnly",
+                "networkAccess": true
+              }
+            }
+          }
+        ]
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
+    },
+    "train-resume-refused": {
+      "split": "train",
+      "input": {
+        "network_access": true,
+        "thread_id": "prior-thread",
+        "sandbox": "read-only",
+        "cwd": null
+      },
+      "input_sha256": "2be9e7953d01768543121ebdba4858a3165de86f7fa592fc978e75c82c934508",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "network_access_requires_fresh_thread",
+        "turn_status": null,
+        "requests": []
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
+    },
+    "test-readonly-default-off": {
+      "split": "test",
+      "input": {
+        "network_access": false,
+        "thread_id": null,
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
+      },
+      "input_sha256": "f15d4a7c55587363ad472ace1d1a04ad5667f058cb38f851a722fba8c202077c",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "boot-refused-no-readonly-network",
+        "turn_status": "failed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "cwd": "/synthetic/carr-system"
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<boot task>"
+                }
+              ],
+              "approvalPolicy": "never"
+            }
+          }
+        ]
+      },
+      "source": "production_trace",
+      "source_ref": "Production Model Room boot probe 67399d09-d964-40ba-a242-8c987632c9c5: default read-only runtime could not fetch standing context."
+    },
+    "test-cwd-fresh-opt-in": {
+      "split": "test",
+      "input": {
+        "network_access": true,
+        "thread_id": null,
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
+      },
+      "input_sha256": "23f2b1631875a0baccb6c607e2d9a39e1128475bf65540e4742a7fc2c9903603",
+      "should_not_fire": false,
+      "expected_wire": {
+        "outcome": "synthetic-boot-accepted",
+        "turn_status": "completed",
+        "requests": [
+          {
+            "method": "thread/start",
+            "params": {
+              "approvalPolicy": "never",
+              "sandbox": "read-only",
+              "ephemeral": true,
+              "cwd": "/synthetic/carr-system"
+            }
+          },
+          {
+            "method": "turn/start",
+            "params": {
+              "threadId": "synthetic-thread",
+              "input": [
+                {
+                  "type": "text",
+                  "text": "<boot task>"
+                }
+              ],
+              "approvalPolicy": "never",
+              "sandboxPolicy": {
+                "type": "readOnly",
+                "networkAccess": true
+              }
+            }
+          }
+        ]
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
+    },
+    "test-cwd-resume-refused": {
+      "split": "test",
+      "input": {
+        "network_access": true,
+        "thread_id": "prior-thread",
+        "sandbox": "read-only",
+        "cwd": "/synthetic/carr-system"
+      },
+      "input_sha256": "36fe3228e2ad71b0e4dbf40e0dd1b7e822f183c1094c372720d85c27a51d7b62",
+      "should_not_fire": true,
+      "expected_wire": {
+        "outcome": "network_access_requires_fresh_thread",
+        "turn_status": null,
+        "requests": []
+      },
+      "source": "human_judged_hard_case",
+      "source_ref": "Independent PR 1780 review bf6: opt-in requires an ephemeral fresh thread; a network-enabled resume must refuse."
+    }
+  }
+}
