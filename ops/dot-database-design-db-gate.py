@@ -2,6 +2,8 @@
 # ci: db-gate
 # doctrine: playbook-review
 """Behavioral regressions for the Dot database review, on disposable Postgres only."""
+import hashlib
+import json
 import os
 import re
 import unittest
@@ -16,6 +18,112 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 ROOT = Path(__file__).resolve().parents[1]
+
+EXECUTION_ENVIRONMENT = "rehearsal"
+
+
+def sha(character: str) -> str:
+    return "sha256:" + character * 64
+
+
+def canonical_digest(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def design_contract(slice_row: dict) -> dict:
+    return {
+        "contract_version": "engineering-design-contract.v1",
+        "rationale": "The reproduction exercises the canonical ledgers end to end.",
+        "dependency_rationale": "No accepted predecessor slice is required.",
+        "code_model_decision": {
+            "rationale": "Every step is enumerable ledger behavior, so deterministic code owns it.",
+            "selection_basis": ["capability_gain", "quality_gain"],
+            "model_judgment_steps": [],
+        },
+        "routing": {
+            "executor_class": "deterministic_code",
+            "adapter_ref": "adapter:codex-desktop",
+            "fresh_session_required": True,
+        },
+        "authority": {
+            "capability_profile": "capability:engineering-repository-write",
+            "read_only": False,
+            "environment": EXECUTION_ENVIRONMENT,
+        },
+        "isolation": {"worktree_required": True, "branch_required": True, "shared_resource_refs": []},
+        "tests": {
+            "planned_check_refs": [check["check_ref"] for check in slice_row["planned_checks"]],
+            "verification_lanes": ["contract"],
+        },
+        "review": {"independent_review_required": True, "reviewer_class": "independent_agent"},
+        "failure": {"failure_modes": [{
+            "failure_ref": "failure:siep01-evidence-drift",
+            "detection": "Canonical evidence does not match the observation.",
+            "compensation": "Refuse closure and keep the Work Request unresolved.",
+        }]},
+        "evidence": {
+            "redaction_class": "metadata_only",
+            "retention": "material_redacted",
+            "evidence_refs": [{"ref": "evidence:siep01:design", "redaction_class": "metadata_only",
+                               "content_digest": sha("d")}],
+        },
+        "deployment": {"release_requirement": "not_required", "rollback_ref": None, "confirmation_required": False},
+        "completion": {
+            "completion_predicate": "Every planned check passes under independent review.",
+            "verified_by": "independent_review",
+        },
+        "seam_decision": {
+            "mode": "reuse",
+            "target_seam_ref": "seam:engineering-passport",
+            "measurement": {"basis": "complexity_reduction", "note": "The existing ledgers already carry this evidence."},
+            "new_module_justification": None,
+            "replaced_seam_refs": [],
+            "residual_authority_refs": [],
+        },
+        "full_design_refs": None,
+        "short_template": {
+            "template_ref": "template:short-governed-v1",
+            "objective_summary": "One bounded parallel-safe reproduction with no dependencies.",
+            "verification_ref": "verification:short-governed-v1",
+        },
+    }
+
+
+def typed_slice(slice_ref: str, ordinal: int) -> dict:
+    row: dict = {
+        "baseline_evidence_refs": [
+            {
+                "ref": f"evidence:siep01:{ordinal}",
+                "content_digest": sha(str(ordinal)),
+                "redaction_class": "metadata_only",
+            }
+        ],
+        "concurrency_posture": "parallel_safe",
+        "declared_component_refs": ["component:engineering-passport"],
+        "declared_plan_step_refs": [f"step:siep01:{ordinal}"],
+        "declared_resource_refs": [f"resource:canonical-ledgers:{ordinal}"],
+        "definition_of_done": "The exact canonical execution evidence is read back.",
+        "dependency_refs": [],
+        "forbidden_change_refs": ["forbidden:production-mutation"],
+        "manual_qa_required": False,
+        "objective": "Reproduce one bounded execution history.",
+        "ordinal": ordinal,
+        "planned_checks": [
+            {
+                "check_ref": f"check:siep01:{ordinal}",
+                "evidence_requirement": "metadata_only_sufficient",
+                "failure_condition": "Canonical evidence does not match the observation.",
+            }
+        ],
+        "release_requirement": "not_required",
+        "risk_class": "R1",
+        "scope_boundary": "Disposable source-test evidence only.",
+        "slice_ref": slice_ref,
+    }
+    row["design_contract"] = design_contract(row)
+    return row
+
 
 
 class DatabaseDesign(unittest.TestCase):
@@ -207,14 +315,13 @@ class DatabaseDesign(unittest.TestCase):
     def test_06_reader_cannot_register_engineering_plan(self):
         ref, _ = self.accepted_plan()
         source = self.one('select ops.engineering_admission_source(%s)', (ref,))
-        helpers = self.helper('siep-01-heavy-build-session-reproduction-local-pg-gate.py')
         plan = {
             'schema_version': 'engineering-slice-plan.v2',
             'accepted_plan_revision': {'id': source['accepted_plan']['plan_ref'], 'revision': source['accepted_plan']['revision'], 'digest': source['accepted_plan']['digest']},
             'work_request': {'id': source['work_request']['id'], 'state_version': source['work_request']['version'], 'canonical_record_digest': source['work_request']['canonical_record_digest']},
-            'slices': [helpers.typed_slice('slice:dot:reader', 1)],
+            'slices': [typed_slice('slice:dot:reader', 1)],
         }
-        digest = helpers.canonical_digest(plan)
+        digest = canonical_digest(plan)
         plan['plan_digest'] = digest
         self.c.execute('set local role carr_reader')
         refusal = self.refuses('select ops.engineering_register_slice_plan(%s,%s,%s,%s)', (ref, Jsonb(plan), digest, uuid.uuid4()))
