@@ -117,20 +117,30 @@ class RecoveryTests(unittest.TestCase):
             return self.wait(running=timeout)
         self.assertIn("unknown", self.main_with(wait))
 
-    def test_3_wedged_read_returns_cold_and_recovery_runs(self):
+    def test_3_wedged_read_is_bounded(self):
         with tempfile.TemporaryDirectory() as directory:
             fifo = Path(directory) / "wedged.xlsx"
             os.mkfifo(fifo)
             started = time.monotonic()
-            with redirect_stderr(io.StringIO()):
-                result = common.wait_for_provider([fifo], budget_seconds=.3, poll_seconds=.01,
-                                                 running=self.running, launch=self.launch)
-            self.assertLess(time.monotonic() - started, .8)
-            self.assertEqual(result.cold[0][0], fifo)
-            self.assertEqual(result.cold[0][1].errno, errno.ETIMEDOUT)
-            self.assertTrue(self.probes)
-            self.assertEqual(len(self.launches), 1)
-            self.main_with(lambda paths: result)
+            cold = common.probe_provider_files([fifo], timeout=.15)
+            # Process startup may consume the allowance on a loaded runner.
+            # This integration check proves that a blocked read is reaped;
+            # recovery's remaining-budget decisions use a controlled clock.
+            self.assertLess(time.monotonic() - started, 5)
+            self.assertEqual(cold[0][0], fifo)
+            self.assertEqual(cold[0][1].errno, errno.ETIMEDOUT)
+
+    def test_3_timed_out_read_reserves_time_for_recovery(self):
+        def wedged(paths, *, timeout):
+            self.clock.now += timeout
+            return [(p, OSError(errno.ETIMEDOUT, "wedged read")) for p in paths]
+
+        result = self.wait(probe=wedged)
+        self.assertEqual(result.cold[0][1].errno, errno.ETIMEDOUT)
+        self.assertTrue(self.probes)
+        self.assertEqual(len(self.launches), 1)
+        self.assertEqual(self.clock.now, 1)
+        self.main_with(lambda paths: result)
 
     def test_3_warm_and_missing_files_do_not_probe_or_launch(self):
         with tempfile.TemporaryDirectory() as directory:

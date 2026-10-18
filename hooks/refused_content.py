@@ -22,8 +22,7 @@ day, and then the hole is open again with a note saying it was tried.
 So the memory is SEQUENTIAL rather than positional. What is remembered is the
 content a gate just REFUSED; what is stopped is substantially the same content
 reappearing anywhere afterwards. A scratch write unrelated to any refusal stays
-free, which is almost all of them. Same shape as the resend check in
-conduct-stop-gate.py: keep what was blocked, compare the next attempt.
+free, which is almost all of them.
 
 MATCHING IS ON THE BODY, NOT THE BYTES. Whitespace, case and a swapped heading
 must not launder a record past this, so comparison is over normalised content

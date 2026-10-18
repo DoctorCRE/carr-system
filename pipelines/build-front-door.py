@@ -68,13 +68,11 @@ GROUPS = [
 
 def link(label):
     return "claude://cowork/new?q="+urllib.parse.quote(canonical_prompt(label),safe="")
-def fullprompt(label):
-    return canonical_prompt(label)
 def tiles_html(btns):
     out=[]
     for lbl,sub in btns:
-        href=link(lbl); pj=json.dumps(fullprompt(lbl))
-        assert len(urllib.parse.quote(fullprompt(lbl),safe=""))<14000, lbl
+        href=link(lbl); pj=json.dumps(canonical_prompt(lbl))
+        assert len(urllib.parse.quote(canonical_prompt(lbl),safe=""))<14000, lbl
         out.append(f'''<div class="tile"><a class="tile-main" target="_blank" rel="noopener" href="{html.escape(href)}"><span class="tile-label">{html.escape(lbl)}</span><span class="tile-sub">{html.escape(sub)}</span></a><button class="tile-copy" data-prompt={html.escape(pj,quote=True)} title="Copy the prompt">copy</button></div>''')
     return ''.join(out)
 def section(name,btns,cls="group"):

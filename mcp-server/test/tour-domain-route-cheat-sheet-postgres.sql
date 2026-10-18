@@ -190,4 +190,26 @@ begin
    raise exception 'review digest leaked an unnecessary direct execution door';
  end if;
 end $digest_acl$;
+set local session authorization carr_writer;
+set local carr.acting_actor_slug='tour-proof';
+select ops.create_tour_domain('tour-slice4-proof','subject-client','client','11111111-1111-4111-8111-111111111111','proof','{}','{}');
+do $subject_read$
+declare t uuid; detail jsonb;
+begin
+ select id into t from ops.tour where organization_tenant_id='tour-slice4-proof' and tour_name='typed';
+ detail:=ops.read_tour_internal_detail('tour-slice4-proof',t,'tour-proof');
+ if detail->>'subject_type' is distinct from 'work' or detail->>'subject_id' is distinct from 'opaque' then
+   raise exception 'internal detail lost the stored opaque subject binding';
+ end if;
+ select id into t from ops.tour where organization_tenant_id='tour-slice4-proof' and tour_name='subject-client';
+ detail:=ops.read_tour_internal_detail('tour-slice4-proof',t,'tour-proof');
+ if detail->>'subject_type' is distinct from 'client' or detail->>'subject_id' is distinct from '11111111-1111-4111-8111-111111111111' then raise exception 'client subject binding changed'; end if;
+ if ops.read_tour_internal_detail('other-synthetic-tenant',t,'tour-proof') is not null then raise exception 'subject binding crossed tenant boundary'; end if;
+ if ops.read_tour_internal_detail('tour-slice4-proof',t,' ') is not null then raise exception 'subject binding allowed a blank actor'; end if;
+end $subject_read$;
+reset session authorization;
+do $subject_acl$
+begin
+ if has_function_privilege('carr_reader','ops.read_tour_internal_detail(text,uuid,text)','execute') then raise exception 'internal subject read widened reader access'; end if;
+end $subject_acl$;
 rollback;

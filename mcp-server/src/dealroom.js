@@ -112,3 +112,49 @@ export async function pipelineChanges(request, client, actor, options = {}) {
   return json({ events: cleanEvents, presence: presence.rows.map(stripDealPlaceholders),
     capture_sessions: captureSessions.rows, cursor: nextCursor });
 }
+
+export const DEAL_ROOM_FIELDS = Object.freeze(["phase", "owner", "attention", "next_date", "operating_state"]);
+const PARKING_REASONS = Object.freeze(["prospect_never_active", "client_paused", "other"]);
+
+function dealRoomFieldError(field, value) {
+  if (!DEAL_ROOM_FIELDS.includes(field))
+    return { error: "field_not_patchable", field, allowed: DEAL_ROOM_FIELDS };
+  if (field === "attention" && typeof value !== "boolean")
+    return { error: "invalid_field_value", field, expected: "boolean" };
+  if (field === "phase" && (typeof value !== "string" || !value.trim()))
+    return { error: "invalid_field_value", field, expected: "non-empty string" };
+  if (field === "owner" && value !== null && !["joe", "dell"].includes(value))
+    return { error: "invalid_field_value", field, expected: "joe, dell, or null" };
+  if (field === "next_date" && value !== null &&
+      (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)))
+    return { error: "invalid_field_value", field, expected: "YYYY-MM-DD or null" };
+  if (field === "operating_state") {
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        !["active", "parked"].includes(value.state))
+      return { error: "invalid_field_value", field,
+        expected: "{state: active|parked, reason?: prospect_never_active|client_paused|other, note?: string}" };
+    if (value.state === "parked" && !PARKING_REASONS.includes(value.reason))
+      return { error: "parking_reason_required", allowed: PARKING_REASONS };
+    if (value.state === "active" && (value.reason != null || value.note != null))
+      return { error: "active_deal_has_no_parking_reason" };
+    if (value.note != null && (typeof value.note !== "string" || value.note.trim().length > 500))
+      return { error: "invalid_parking_note", max_length: 500 };
+  }
+  return null;
+}
+
+export function validDealRoomValue(field, value) {
+  return dealRoomFieldError(field, value) === null;
+}
+
+// Project only validated values, excluding any unrelated or sensitive keys.
+export function dealRoomEvidenceValue(field, value) {
+  if (!validDealRoomValue(field, value)) return null;
+  if (field !== "operating_state") return value;
+  return { state: value.state, reason: value.reason ?? null, note: value.note ?? null };
+}
+
+export function assertDealRoomField(field, value, ToolError) {
+  const error = dealRoomFieldError(field, value);
+  if (error) throw new ToolError(error);
+}

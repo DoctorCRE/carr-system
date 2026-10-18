@@ -4,6 +4,7 @@ runs in a real throwaway folder. No Flash server, no Jev, no network. The live r
 from __future__ import annotations
 
 import atexit
+from contextlib import ExitStack
 import functools
 import importlib.util
 import json
@@ -26,8 +27,8 @@ SANDBOXED = os.path.exists(fs.SANDBOX_EXEC)
 # The loop tests run real scripts. On the Mac they run inside the real sandbox; where there is no sandbox (Linux CI)
 # they opt out in code, never through the environment, because the CLI has no way to reach sandbox=False.
 RUNNER = fs.run_code if SANDBOXED else functools.partial(fs.run_code, sandbox=False)
-TEMPS: list[str] = []
-atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True) for d in TEMPS])
+TEMP_STACK = ExitStack()
+atexit.register(TEMP_STACK.close)
 
 
 def solve(*args, **kw):
@@ -35,9 +36,7 @@ def solve(*args, **kw):
 
 
 def tmpdir(prefix="fs-test-"):
-    d = tempfile.mkdtemp(prefix=prefix)
-    TEMPS.append(d)
-    return d
+    return TEMP_STACK.enter_context(tempfile.TemporaryDirectory(prefix=prefix))
 
 
 def check(label, fn):
@@ -113,18 +112,19 @@ def test_a_made_up_answer_is_marked_invented():
     assert log[-1]["support"] == "invented", log[-1]
 
 
-def test_jev_flag_becomes_a_reviewer_note():
+def test_jev_flag_is_logged_as_review_advice():
     flash = ScriptedFlash([fence("print('matched 1')"), fence("print('matched 900')"), "FINAL: 900"])
-    solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(flags=[{"misparsed": 0.9}]))
-    assert "Reviewer note" in flash.calls[1]["msgs"][-1]["content"]
+    _, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(flags=[{"misparsed": 0.9}]))
+    assert any(e.get("jev_flags", {}).get("misparsed") == .9 for e in log)
+    assert "Reviewer note" not in flash.calls[1]["msgs"][-1]["content"]
 
 
-def test_answer_ready_refuses_another_script_once():
+def test_answer_ready_cannot_refuse_another_script():
     flash = ScriptedFlash([fence("print('total 5')"), fence("print('again')"), "FINAL: 5"])
     answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash,
                            jev=FixedJev(flags=[{"answer_ready": 0.9}]))
-    assert answer == "5" and any(e.get("focus_enforced") for e in log), log
-    assert sum(1 for e in log if "run_s" in e) == 1
+    assert answer == "5" and not any(e.get("focus_enforced") for e in log), log
+    assert sum(1 for e in log if "run_s" in e) == 2
 
 
 def test_final_file_answer_is_read_from_the_working_folder_only():
@@ -141,11 +141,11 @@ def test_final_file_followed_by_code_runs_the_code_first():
     assert json.loads(answer) == [1, 2] and any(e.get("final_script_run") for e in log), log
 
 
-def test_count_gap_gets_one_free_fix_when_jev_agrees():
+def test_count_gap_semantics_routes_to_review_without_extra_script():
     flash = ScriptedFlash([fence("print('lines: 10')"), 'FINAL: {"a": 4, "b": 4}', fence("print('a 5 b 5')"),
                            'FINAL: {"a": 5, "b": 5}'])
     answer, log = solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(covers=0.9))
-    assert json.loads(answer) == {"a": 5, "b": 5}, answer
+    assert json.loads(answer) == {"a": 4, "b": 4}, answer
     assert any(e.get("count_gap") == [10, 8] or e.get("count_gap") == (10, 8) for e in log), log
 
 
@@ -155,10 +155,10 @@ def test_repeated_identical_script_stops():
     assert answer is None and log[-1].get("stuck"), log
 
 
-def test_semantic_question_gets_the_labelling_hint():
+def test_semantic_question_does_not_inject_uncalibrated_hint():
     flash = ScriptedFlash(["FINAL: 1"])
     solve("q", folder(["x"]), ["rows.txt"], chat_fn=flash, jev=FixedJev(pre={"semantic": 0.9}))
-    assert "labels depend on the meaning" in flash.calls[0]["msgs"][1]["content"]
+    assert "labels depend on the meaning" not in flash.calls[0]["msgs"][1]["content"]
 
 
 # --- isolation of model-written scripts (independent review of PR #1250) ---------------------------------------

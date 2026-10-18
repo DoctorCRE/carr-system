@@ -26,10 +26,11 @@ test('system switch fails explicitly while runtime remains pinned', async () => 
   assert.throws(() => providerFor('app_runtime', routing), e => e.payload.error === 'judge_runtime_pinned');
 });
 
-test('proxy validates class and never leaks routing fields into vendor payload', async () => {
-  const args = {session_id: 's', purpose: 'call', state: 'deal', questions: {q: {type: 'noul', instructions: 'fits?'}}};
+test('proxy validates class and forwards admission without routing fields', async () => {
+  const args = {idempotency_key: 'fixture-admission', session_id: 's', purpose: 'call', state: 'deal', questions: {q: {type: 'noul', instructions: 'fits?'}}};
   let request;
   assert.equal((await prefetchJevAnswer(args, async value => {request = value; return {}; }, 'app_runtime')).ok, true);
-  assert.deepEqual(request, {state: 'deal', model: 'jev-latest', questions: args.questions});
+  assert.deepEqual(request, {state: 'deal', model: 'jev-latest', questions: args.questions,
+    idempotency_key: args.idempotency_key, session_id: args.session_id});
   await assert.rejects(prefetchJevAnswer(args, async () => {}, 'typo'), /judge_class_invalid/);
 });

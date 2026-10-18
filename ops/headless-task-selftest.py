@@ -30,7 +30,7 @@ class HeadlessTests(unittest.TestCase):
                               'grace_seconds': 60}}}))
         prompt = self.home / '.claude/scheduled-tasks/test-task/SKILL.md'
         prompt.parent.mkdir(parents=True)
-        prompt.write_text('Run the test prompt.\n')
+        prompt.write_text(json.dumps({'acceptance_contract':{'criteria':[{'id':'output','kind':'contains','path':'{receipt}.artifact','text':'synthetic completed task artifact'}]}}))
         self.fakebin = self.home / 'fakebin'
         self.fakebin.mkdir()
         fake = self.fakebin / 'claude'
@@ -74,20 +74,12 @@ else:
 sys.exit(7 if mode == 'failure' else 0)
 ''')
         fake.chmod(0o755)
-        # Replace only the judgment provider in every synthetic subprocess.
-        # The runner still reads evidence, builds the question and checks the
-        # typed verdict. No test starts a live model or uses a credential.
+        # Any accidental vendor access in child processes fails this fixture.
         (self.fakebin/'sitecustomize.py').write_text(
-            f'import sys, os, time; sys.path.insert(0, {str(REPO)!r})\n'
+            f'import sys; sys.path.insert(0, {str(REPO)!r})\n'
             'from ops import jev_judge as j\n'
-            'def judge(subject, questions, **kwargs):\n'
-            ' time.sleep(float(os.environ.get("FAKE_JUDGE_DELAY", "0")))\n'
-            ' evidence = subject["evidence"]\n'
-            ' passed = all(item["content"] == "synthetic completed task artifact" for item in evidence)\n'
-            ' verdict = "completed" if passed else "failed"\n'
-            ' return {"model":"jev-fixture", "answers":{"completion":{"type":"choice",\n'
-            '  "choice":verdict,"confidence":1.0,"probabilities":{verdict:1.0}}}}\n'
-            'j.judge = judge\n')
+            'def forbidden(*args, **kwargs): raise AssertionError("paid judgment")\n'
+            'j.judge = forbidden\n')
         recorder = self.repo / 'run.sh'
         recorder.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -137,7 +129,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertEqual(args['argv'][args['argv'].index('--permission-prompts')+1], 'none')
         self.assertIn('--allowedTools', args['argv'])
         self.assertIn('<scheduled-task name="test-task">', args['prompt'])
-        self.assertIn('Run the test prompt.\n', args['prompt'])
+        self.assertIn('acceptance_contract', args['prompt'])
         self.assertIn('carr-headless-completion/v1', args['prompt'])
         self.assertEqual(Path(args['cwd']), self.repo.resolve())
         self.assertFalse((self.home / 'records.jsonl').exists())
@@ -433,11 +425,13 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
             (self.home/'ops-records.jsonl').read_text().splitlines()))
         self.assertEqual(self.run_task().returncode, 0, 'failure must not suppress real work')
 
-    def test_completion_judgment_uses_the_task_deadline(self):
-        self.env['FAKE_JUDGE_DELAY']='0.6'
-        result=self.run_task(timeout='0.4')
-        self.assertEqual(result.returncode,124,result.stderr)
-        self.assertFalse(any(r['status']=='success' for r in self.ledger()))
+    def test_completion_predicate_uses_the_task_deadline(self):
+        from lib.headless_tasks import verify_completion
+        self.assertEqual(self.run_task().returncode,0)
+        row=self.ledger()[-1]
+        receipt=Path(row['completion_receipt']) if 'completion_receipt' in row else self.repo/'out/headless/test-task'/(row['run_id']+'.completion.json')
+        with self.assertRaisesRegex(ValueError,'deadline'):
+            verify_completion(receipt,'test-task',row['run_id'],(self.home/'.claude/scheduled-tasks/test-task/SKILL.md').read_text(),deadline=time.monotonic()-1)
 
     def test_canonical_outage_replays_original_terminal_identity_without_work(self):
         self.env['FAKE_OPS_RECORD_FAIL']='1'
@@ -561,46 +555,29 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
     def test_completion_reads_artifact_digest_and_rejects_wrong_run(self):
         from lib.headless_tasks import verify_completion
         import hashlib
-        artifact=self.home/'artifact.json'; artifact.write_text('synthetic completed task artifact')
-        receipt=self.home/'receipt.json'
-        data={'schema':'carr-headless-completion/v1','task_id':'test-task','run_id':'this-run',
-              'outcome':'completed','artifacts':[{'path':str(artifact),'sha256':hashlib.sha256(artifact.read_bytes()).hexdigest()}]}
-        receipt.write_text(json.dumps(data))
-        prompt=self.home/'.claude/scheduled-tasks/test-task/SKILL.md'
-        answer={'model':'jev-fixture','answers':{'completion':{'type':'choice','choice':'completed',
-            'confidence':1.0,'probabilities':{'completed':1.0}}}}
-        with patch('ops.jev_judge.judge',return_value=answer) as judge:
-            self.assertEqual(verify_completion(receipt,'test-task','this-run',prompt.read_text()),'completed')
-            subject, questions = judge.call_args.args
-            self.assertEqual(subject['task_instructions'],prompt.read_text())
-            self.assertEqual(subject['evidence'][0]['content'],artifact.read_text())
-            self.assertIn('completion',questions)
-        with self.assertRaises(ValueError): verify_completion(receipt,'test-task','other-run',prompt.read_text())
-        artifact.write_text('tampered')
-        with self.assertRaises(ValueError): verify_completion(receipt,'test-task','this-run',prompt.read_text())
-
-    def test_completion_verdict_uncertainty_outage_and_noop_are_not_work_success(self):
-        from lib.headless_tasks import verify_completion
-        from ops.jev_judge import JudgeUnavailable
-        import hashlib
-        artifact=self.home/'output'; artifact.write_text('synthetic completed task artifact')
+        artifact=self.home/'artifact';artifact.write_text('expected')
         receipt=self.home/'receipt'
-        data={'schema':'carr-headless-completion/v1','task_id':'test-task','run_id':'this-run',
-              'outcome':'completed','artifacts':[{'path':str(artifact),'sha256':hashlib.sha256(artifact.read_bytes()).hexdigest()}]}
-        prompt=self.home/'.claude/scheduled-tasks/test-task/SKILL.md'
+        data={'schema':'carr-headless-completion/v1','task_id':'test-task','run_id':'r','outcome':'completed','artifacts':[{'path':str(artifact),'sha256':hashlib.sha256(artifact.read_bytes()).hexdigest()}]}
         receipt.write_text(json.dumps(data))
-        for verdict, confidence in [('completed',.5),('unproven',1.0),('failed',1.0),('noop',1.0)]:
-            answer={'model':'jev-fixture','answers':{'completion':{'type':'choice','choice':verdict,
-                'confidence':confidence,'probabilities':{verdict:confidence}}}}
-            with self.subTest(verdict=verdict,confidence=confidence), patch('ops.jev_judge.judge',return_value=answer):
-                with self.assertRaises(ValueError): verify_completion(receipt,'test-task','this-run',prompt.read_text())
-        with patch('ops.jev_judge.judge',side_effect=JudgeUnavailable('fixture outage')):
-            with self.assertRaises(ValueError): verify_completion(receipt,'test-task','this-run',prompt.read_text())
-        data['outcome']='noop';receipt.write_text(json.dumps(data))
-        answer={'model':'jev-fixture','answers':{'completion':{'type':'choice','choice':'noop',
-            'confidence':1.0,'probabilities':{'noop':1.0}}}}
-        with patch('ops.jev_judge.judge',return_value=answer):
-            self.assertEqual(verify_completion(receipt,'test-task','this-run',prompt.read_text()),'noop')
+        prompt=json.dumps({'acceptance_contract':{'criteria':[{'id':'output','kind':'contains','path':str(artifact),'text':'expected'}]}})
+        with patch('ops.jev_judge.judge',side_effect=AssertionError('paid')):
+            self.assertEqual(verify_completion(receipt,'test-task','r',prompt),'completed')
+        with self.assertRaises(ValueError):verify_completion(receipt,'test-task','wrong',prompt)
+        artifact.write_text('tampered')
+        with self.assertRaises(ValueError):verify_completion(receipt,'test-task','r',prompt)
+
+    def test_unknown_criteria_and_noop_require_separate_typed_acceptance(self):
+        from lib.headless_tasks import verify_completion
+        import hashlib
+        artifact=self.home/'output';artifact.write_text('expected')
+        receipt=self.home/'receipt'
+        data={'schema':'carr-headless-completion/v1','task_id':'test-task','run_id':'r','outcome':'noop','artifacts':[{'path':str(artifact),'sha256':hashlib.sha256(artifact.read_bytes()).hexdigest()}]}
+        receipt.write_text(json.dumps(data))
+        criterion={'id':'output','kind':'contains','path':str(artifact),'text':'expected'}
+        for prompt in ['Make it good',json.dumps({'acceptance_contract':{'criteria':[criterion]}})]:
+            with self.assertRaisesRegex(ValueError,'needs review'):verify_completion(receipt,'test-task','r',prompt)
+        prompt=json.dumps({'acceptance_contract':{'noop_criteria':[criterion]}})
+        self.assertEqual(verify_completion(receipt,'test-task','r',prompt),'noop')
 
     def test_hard_killed_wrapper_reconciles_orphan_before_retry(self):
         child=subprocess.Popen([str(REPO/'bin/headless-task'),'test-task','--repo',str(self.repo)],

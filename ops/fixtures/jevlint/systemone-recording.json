@@ -1,0 +1,41 @@
+{
+  "upstream": "73a7a94ab08a4e314709d68c2863687a4646f29b",
+  "payload": {
+    "model": "jev-1.13.0",
+    "state": {
+      "kind": "function",
+      "name": "_exact",
+      "language": "python",
+      "path": "tools/room-bridge/spatial_surface.py",
+      "source": "def _exact(value: Any, fields: set[str], name: str) -> dict:\n    return contract._expect_exact(value, fields, name)\n"
+    },
+    "questions": {
+      "wrapper-without-value": {
+        "type": "choice",
+        "instructions": "Does the code only forward identical arguments without adding policy, validation, transformation or error translation? Choose fail if it does; choose pass otherwise.",
+        "criteria": {
+          "pass": "Implements behavior or fixes a domain invariant",
+          "fail": "Forwards unchanged arguments only"
+        }
+      }
+    }
+  },
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "wrapper-without-value": {
+        "type": "choice",
+        "choice": "fail",
+        "confidence": 0.86,
+        "probabilities": {
+          "fail": 0.93,
+          "pass": 0.07
+        }
+      }
+    },
+    "usage": {
+      "input_tokens": 419,
+      "output_tokens": 35
+    }
+  }
+}

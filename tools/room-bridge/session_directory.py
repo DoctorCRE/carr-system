@@ -7,22 +7,12 @@ keeps one directory of them, probes every local session each cycle, expires the
 ones that stopped answering, and carries an @-addressed room turn into the
 session it names.
 
-WHY A SEPARATE FILE FROM hermes-desks.json. A desk is a place Hermes may
-dispatch work to, and desks.py refuses a pid socket as a desk on purpose (a pid
-is any window that happens to be open). A self-announced session is different:
-it published its own name, title and address, so it can be reached by an
-explicit @-mention from someone who read that name. Keeping the two in separate
-files keeps the queue, seat fan-out and the pid-socket refusal exactly as they
-were: nothing here is a dispatch target, nothing here hears unaddressed room
-chatter, and the bridge remains the only writer of both files.
-
 DELIVERY, by address:
   claude-socket  one NDJSON user turn over the session's own socket, the same
                  wire a claude-session desk uses (claude_wire.py)
   codex-thread   thread-follower-start-turn through the Codex Desktop IPC
                  router (codex_ipc.py) to the window that owns the thread
-  none           reported as no_inbound_address (Grok Build has no inbound
-                 channel; its sessions are listed so others can see them)
+  none           reported as no_inbound_address (its sessions are listed so others can see them)
 The session answers in its own window; a receipt in the room records whether
 the turn landed.
 
@@ -150,8 +140,10 @@ def refresh(data: dict, *, now: str, host: str, probe) -> list[str]:
         if entry["local"]:
             try:
                 live = bool(probe(entry))
-            except Exception:  # noqa: BLE001 — a failed probe is a dead probe
+            except Exception:
                 live = False
+            if entry.get("runtime") == "codex" and entry.get("surface") == "codex-cli":
+                live = live and _age(entry.get("beat_at"), now) <= LOCAL_STALE_S
             entry["live"] = live
             if live:
                 entry["last_live_at"] = now
@@ -181,12 +173,6 @@ def mentioned(data: dict, turn: dict) -> list[str]:
 
 
 def _session_message(turn: dict) -> dict | None:
-    """The {"to", "text"} of a `session-presence send` receipt, or None.
-
-    `send` posts a receipt rather than a turn because state.route_turn queues
-    every kind="turn" row onto every seated desk: a message meant for one
-    session would cost each desk a dispatch (PR #1345 review). Receipts reach
-    no desk; this router alone carries them."""
     if turn.get("kind") != "receipt":
         return None
     try:
@@ -249,7 +235,7 @@ def route(data: dict, turns: list[dict], state: dict, *, deliver, add_room_turn)
             else:
                 try:
                     result = deliver(entry, format_turn(turn), msg_id) or {}
-                except Exception as exc:  # noqa: BLE001 — contained to this delivery
+                except Exception as exc:
                     result = {"status": "failed", "detail": f"{exc.__class__.__name__}: {exc}"}
             outcome = {"handle": handle, "source_msg_id": msg_id, "source_seq": turn.get("seq"),
                        "status": str(result.get("status") or "failed"),
@@ -259,7 +245,7 @@ def route(data: dict, turns: list[dict], state: dict, *, deliver, add_room_turn)
                 add_room_turn(body=json.dumps({"session_delivery": outcome}, separators=(",", ":")),
                               seat="hermes", kind="receipt", msg_id=str(uuid.uuid4()))
             except RuntimeError:
-                pass  # the delivery already happened; a lost receipt is not a lost turn
+                pass
     del seen[:-DELIVERED_CAP]
     return outcomes
 
@@ -280,9 +266,6 @@ def make_deliverer(*, inject_claude=None, codex_start_turn=None):
         address = entry.get("address") or {}
         kind, value = address.get("kind"), address.get("value")
         if kind == "claude-socket" and address.get("auth") == "token":
-            # The socket drops any turn not preceded by the session's own
-            # token, silently. Only Claude's native peer messaging holds a
-            # route in; report that rather than claim a delivery that vanished.
             return {"status": "needs_sendmessage",
                     "detail": ("this Claude session's socket requires its own token; reach it "
                                "from a Claude session with SendMessage (Desktop session "

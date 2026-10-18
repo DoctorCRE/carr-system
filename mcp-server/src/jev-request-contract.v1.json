@@ -1,0 +1,22 @@
+{
+  "schema": "jev-request-contract/v1",
+  "min_questions": 1,
+  "max_questions": 64,
+  "question_types": {
+    "noul": {
+      "criteria": "object",
+      "optional": true,
+      "min_items": 0
+    },
+    "choice": {
+      "criteria": "object",
+      "optional": false,
+      "min_items": 2
+    },
+    "score": {
+      "criteria": "array",
+      "optional": false,
+      "min_items": 2
+    }
+  }
+}

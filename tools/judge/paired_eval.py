@@ -124,7 +124,7 @@ def run(corpus, jev, decisions, *, rates=None, repeats=1, clock=time.perf_counte
     ts = _client()
     rows = []
     aggregates = {name: {"latency": [], "tokens": [], "brier": [], "confidence": [],
-                         "errors": 0, "models": set()} for name in ("jev", "decisions")}
+                         "errors": 0, "cache_hits": 0, "models": set()} for name in ("jev", "decisions")}
     same = paired = total_questions = 0
     for repeat in range(repeats):
         for index, case in enumerate(corpus["cases"]):
@@ -145,6 +145,16 @@ def run(corpus, jev, decisions, *, rates=None, repeats=1, clock=time.perf_counte
                                      for qid, q in request["questions"].items()}
                     if not all(d["distribution_complete"] for d in distributions.values()):
                         raise ValueError("incomplete probability distribution")
+                    if result.get("cache_hit"):
+                        metrics["cache_hits"] += 1
+                        metrics["models"].add(result["model"])
+                        rows.append({"receipt_id": case["receipt_id"], "repeat": repeat, "provider": name,
+                                     "status": "reused_observation", "model": result["model"],
+                                     "cache_read_ms": elapsed, "usage": {"input_tokens": 0, "output_tokens": 0},
+                                     "cached_observation": result.get("cached_observation") or {
+                                         "usage": result["usage"], "latency_ms": result.get("latency_ms")},
+                                     "answers": result["answers"]})
+                        continue
                     briers, confidence = [], []
                     for qid, gold in case.get("gold", {}).items():
                         d = distributions[qid]
@@ -191,13 +201,14 @@ def run(corpus, jev, decisions, *, rates=None, repeats=1, clock=time.perf_counte
                     ece += abs(sum(p for p, _ in group) - sum(c for _, c in group)) / len(confidences)
         rate = (rates or {}).get(name)
         cost = None
-        if rate is not None and m["tokens"]:
+        if rate is not None:
             if (set(rate) != {"input_usd_per_million", "output_usd_per_million"} or
                     any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in rate.values())):
                 raise ValueError("invalid explicit token prices")
             cost = sum(u["input_tokens"] * rate["input_usd_per_million"] +
                        u["output_tokens"] * rate["output_usd_per_million"] for u in m["tokens"]) / 1e6
         providers[name] = {"models": sorted(m["models"]), "successes": len(m["latency"]), "errors": m["errors"],
+                           "cache_hits": m["cache_hits"],
                            "p50_latency_ms": percentile(m["latency"], .5), "p95_latency_ms": percentile(m["latency"], .95),
                            "brier": sum(m["brier"]) / len(m["brier"]) if m["brier"] else None,
                            "labelled_questions": len(m["brier"]), "ece": ece, "cost_usd": cost,
@@ -218,7 +229,12 @@ def cli(argv=None):
     args = parser.parse_args(argv)
     ts = _client()
     def live_jev(state, questions, **options):
-        return ts._ask_jev(state, questions, caller="judge_paired_eval", cache_ttl_seconds=0, **options)
+        if options.get("model") != "jev-1.13.0":
+            raise ValueError("paired eval requires pinned jev-1.13.0 corpus")
+        spec = importlib.util.spec_from_file_location("jev_semantic", ROOT / "ops" / "jev_semantic.py")
+        semantic = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(semantic)
+        return semantic.ask(state, questions, transport=ts._ask_jev, caller="judge_paired_eval", version="paired-v1")
     report = run(freeze(json.loads(Path(args.receipts).read_text())), live_jev,
                  ts.JUDGE.provider_decisions, repeats=args.repeats,
                  rates=json.loads(Path(args.rates).read_text()) if args.rates else None)

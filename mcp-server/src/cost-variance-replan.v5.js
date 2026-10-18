@@ -130,9 +130,8 @@ export const V5_HUMAN_ESCALATION_CHANGE_KINDS = Object.freeze([
 ]);
 
 /**
- * Q115.D1's five measured dimensions, named on the cost basis of
- * `expected-total-cost.v5.js`. Held here as the list Q115 asks to be measured,
- * so a reader can see the sentence and the field names line up.
+ * Q115.D1's measured dimensions, held here as the list Q115 asks to be
+ * measured so a reader can see the sentence and the field names line up.
  */
 export const V5_Q115_MEASURED_DIMENSIONS = Object.freeze([
   "adjudication_cost_units",
@@ -824,7 +823,7 @@ export function v5CostVarianceProjection() {
     unimplemented_dependencies: [
       "an automated review runner: Q115.D1 says a major estimate error triggers automated review AND replan; this module produces the replan directive and names the review as owed, but running a review needs dispatch (V5-F06/V5-F07) and an assurance runner, neither of which exists in this repository",
       "an incident opener: an overdrawn hierarchy requires an incident, and open-incident is an authority-bound record-layer verb no pure module can call; the requirement is reported on every overdrawn projection and never satisfied here",
-      "a qualification-state feed: this module takes qualification_state as a declared input and cannot itself tell a currently-qualified route from one whose record expired; that judgement belongs to expected-total-cost.v5.js's admission, which in turn needs the trusted verifier that does not exist yet",
+      "a qualification-state feed: this module takes qualification_state as a declared input and cannot itself tell a currently-qualified route from one whose record expired; authenticating current qualification requires a trusted verifier and admission integration that this slice does not implement",
       "a durable directive record: nothing this module returns is persisted, so a replan it directs leaves no trace the next process could read",
       "a durable signal record: a fired warning or replan is returned to the committing caller (commitLedgerOperation carries it) with a deterministic id, but no table stores it yet; persisting it needs its own migration and SCAC successor seal",
     ],

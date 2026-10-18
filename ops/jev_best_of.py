@@ -1,70 +1,8 @@
-"""jev_best_of.py — pick the right candidate out of N attempts, with evidence.
-
-THE EXPERIMENT THIS EXISTS BECAUSE OF. A comparison run captured in the session
-scratchpad (jevx/results/all_compare.json, 16 held-out coding tasks, 3
-low-effort local-model attempts per task) tested best-of-3 selection two ways.
-
-Given raw code alone plus a spec, Jev's pick was no better than a coin flip on
-this corpus — the same failure ops/jev_precheck.py's docstring documents for a
-different judgment: a thin state produces a confident meaningless answer. Given
-the SAME candidates but with each one's DETERMINISTIC PROBE EVIDENCE attached
-(concrete inputs run against the actual candidate code, real outputs and
-exceptions, never the hidden grading tests) as named state fields, the picture
-changed. Across all 16 tasks, at least one of the 3 attempts passed the hidden
-tests — "raw best-of-3" has a 16/16 ceiling — and the evidence-based choice hit
-that ceiling closely enough to be worth building this module.
-
-THE CONFIDENCE GATE THAT SEEMED OBVIOUS WAS WRONG, MEASURED. The comparison run
-gated on confidence < 0.6 and, on a miss, fell back to attempt 1 — "the first
-thing generated, untested against anything" — as though a low-confidence choice
-were worse than no evidence at all. It was not: of 16 fixed-style choices, 13
-picked a candidate that actually passed the hidden tests, and RIGHT and WRONG
-confidences overlap almost entirely —
-
-    right picks (13): 0.19 0.22 0.23 0.28 0.29 0.32 0.33 0.35 0.41 0.50 0.57 0.59 0.69
-    wrong picks (3):  0.18 0.19 0.38
-    median right = 0.33   median wrong = 0.19
-
-— so a right pick was, if anything, slightly MORE likely to look unconfident
-than a wrong one, and the generic 0.6 floor from ops/typesafe_client.py.decide()
-would have escalated (and, under the old fallback rule, discarded) 12 of the 13
-picks that were actually correct. That is the concrete case behind the standing
-lesson: never default to attempt 1 on low confidence, and treat confidence here
-as a flag for a human to look, not as permission to override the choice.
-CONF_ESCALATE_AT below is a PROVISIONAL floor derived from that same run (see
-its definition) — re-derive it once ops/jev-best-of.jsonl has real traffic.
-
-WHAT "EVIDENCE" MEANS HERE, so a caller does not reach for bare code. Every
-candidate is judged on: `test_output` (what actually happened when it ran,
-including a hard pass/fail), `probe_results` (named, deterministic input ->
-observed-output/exception pairs, run against exactly this candidate), and only
-then its code or diff. A candidate with none of that is still judged — Jev is
-asked with whatever state exists rather than skipped — but the module's own
-measurement says accuracy degrades toward the coin flip the first experiment
-found, and a caller that CAN produce test/probe evidence should.
-
-ONE CHOICE, NOT ONE NOUL PER CANDIDATE. Candidates compete for a single slot —
-exactly the "competing for one slot" test in ops/jev_judge.py's docstring — so
-this is a Choice over all candidates plus an explicit "none of these is right"
-option, never a Noul per candidate. A "none" verdict escalates; it is not
-silently coerced into a candidate id.
-
-DETERMINISTIC PRE-FILTER FIRST. When exactly one candidate's own test run
-exited 0, that fact alone settles it — asking Jev to re-derive what a test
-runner already proved is exactly the kind of question code should own per
-ops/typesafe_client.py's "keep arithmetic in code" doctrine, generalised to
-"keep verifiable facts in code". Jev is asked only when the deterministic facts
-do not already decide it: zero candidates pass, or more than one does.
-
-IT IS A LIBRARY AND MUST STAY ONE. No shebang and no main guard: either turns a
-.py file into a registered script entrypoint in the sealed source inventory,
-moves the frontier, and owes a forward-only registry successor. The detector is
-a regex over the whole file with no notion of docstrings, so the construct is
-described here and never spelled. ops/typesafe_client.py carries the long form.
-"""
+"""Run deterministic test prefilters first. One bounded cached Choice compares the remaining candidate evidence. A semantic recommendation always escalates for review; only the unique deterministic passing candidate is selected without asking."""
 
 import importlib.util
 import os
+import json
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -75,15 +13,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # code does by reading all of it again.
 CODE_CHARS = 3000
 TEST_OUTPUT_CHARS = 1500
+PROBE_CHARS = 4000
+CANDIDATE_CAP = 8
 
-# PROVISIONAL, measured on the 16-task comparison run described above (13
-# right / 3 wrong evidence-based choices). The two distributions overlap
-# almost completely — median right 0.33, median wrong 0.19, and a wrong pick
-# at 0.38 sits ABOVE five right picks — so this floor cannot cleanly separate
-# right from wrong on this sample size; it exists so a caller has a concrete
-# number to route low-signal picks to a human rather than trusting them
-# silently, not because confidence below it is known to be more often wrong.
-# Re-derive from out/jev-best-of.jsonl once real traffic accumulates.
+# Existing callers may pass a display floor; execution always requires review.
 CONF_ESCALATE_AT = 0.40
 
 NONE_RIGHT = "none of these candidates is correct"
@@ -105,7 +38,7 @@ def _sibling(name):
 def _passing_ids(candidates):
     """Candidates whose OWN test run exited 0. A fact, not a judgment."""
     return [c["id"] for c in candidates
-            if c.get("test_exit_code") == 0]
+            if type(c.get("test_exit_code")) is int and c["test_exit_code"] == 0]
 
 
 def _has_evidence(candidate):
@@ -118,7 +51,7 @@ def _candidate_state(candidate):
     the lesson this whole module exists to apply."""
     state = {"id": candidate["id"]}
     if candidate.get("probe_results"):
-        state["probe_results"] = candidate["probe_results"]
+        state["probe_results_excerpt"] = json.dumps(candidate["probe_results"], sort_keys=True)[:PROBE_CHARS]
     if candidate.get("test_output"):
         state["test_output"] = candidate["test_output"][:TEST_OUTPUT_CHARS]
     if "test_exit_code" in candidate:
@@ -167,10 +100,10 @@ def select_candidate(task_text, candidates, *, client=None, judge=None,
     forbid asking.
 
     Returns {"check": "best_of", "verdict": <candidate id> | "none" |
-    "unavailable", "confidence": float | None, "escalate": bool,
+    "unavailable" | "review_required", "confidence": float | None, "escalate": bool,
     "detail": {...}}. NEVER raises. NEVER defaults to "the first candidate" on
     low confidence or on a "none" verdict — escalate=True means a human or a
-    larger model looks; it is not this function's job to guess on their behalf.
+    larger model looks. Semantic IDs are returned only in detail.advisory_candidate_id.
     """
     judge = judge or _sibling("jev_judge")
     candidates = list(candidates)
@@ -191,6 +124,10 @@ def select_candidate(task_text, candidates, *, client=None, judge=None,
         return {"check": "best_of", "verdict": chosen, "confidence": 1.0,
                 "escalate": False, "detail": detail}
 
+    if len(candidates) > CANDIDATE_CAP or len({c["id"] for c in candidates}) != len(candidates):
+        return {"check":"best_of", "verdict":"unavailable", "confidence":None, "escalate":True,
+                "detail":{"reason":"review candidate count or duplicate IDs before semantic comparison"}}
+
     subject = {
         "task_text": (task_text or "")[:6000],
         "candidates": [_candidate_state(c) for c in candidates],
@@ -199,7 +136,7 @@ def select_candidate(task_text, candidates, *, client=None, judge=None,
     question = {"pick": _choice_question(candidates, tsc)}
 
     try:
-        answer = judge.judge(subject, question, client=client)
+        answer = _sibling("jev_semantic").ask(subject, question, client=client, caller="jev_best_of", version="vendor-v1", transport=judge.judge)
     except Exception as exc:  # judge.JudgeUnavailable and anything else
         judge_mod = judge
         try:
@@ -219,12 +156,11 @@ def select_candidate(task_text, candidates, *, client=None, judge=None,
     confidence = None if confidence is None else float(confidence)
 
     verdict = "none" if choice_val in (None, NONE_RIGHT) else choice_val
-    escalate = verdict == "none" or confidence is None or confidence < conf_escalate_at
+    escalate = True  # candidate choice is advisory until validated on labeled tasks
     if verdict == "none":
         confidence_note = "verdict is 'none': caller decides, never coerced to a candidate id"
     else:
-        confidence_note = ("below the provisional CONF_ESCALATE_AT floor"
-                            if escalate else "at/above the provisional floor")
+        confidence_note = "independent review required; confidence is not calibrated action authority"
 
     detail = {
         "reason": "evidence-based Jev choice",
@@ -232,8 +168,9 @@ def select_candidate(task_text, candidates, *, client=None, judge=None,
         "any_evidence": any(_has_evidence(c) for c in candidates),
         "confidence_note": confidence_note,
         "model": answer.get("model"),
+        "advisory_candidate_id": None if verdict == "none" else verdict,
     }
     judge.record("supervise.best_of", task_text[:200] if task_text else None,
                  answer, existing_decision=None, log_path=log_path or judge.SHADOW_LOG)
-    return {"check": "best_of", "verdict": verdict, "confidence": confidence,
+    return {"check": "best_of", "verdict": "review_required", "confidence": confidence,
             "escalate": escalate, "detail": detail}

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import subprocess
 import sys
@@ -16,7 +17,10 @@ CLAUDE = ROOT / "CLAUDE.md"
 CONFIG_AS_CODE = ROOT / "ops" / "config-as-code.py"
 
 script = SCRIPT.read_text(encoding="utf-8")
-claude = CLAUDE.read_text(encoding="utf-8")
+claude_boot = CLAUDE.read_text(encoding="utf-8")
+packet = json.loads((ROOT / "ops/config/task-boot/dell-migration.json").read_text())
+assert "ops/config/task-boot/dell-migration.json" in claude_boot
+claude = packet["instructions"]
 config_as_code = CONFIG_AS_CODE.read_text(encoding="utf-8")
 combined = script + "\n" + claude
 flat_script = re.sub(r"\s+", " ", script)
@@ -159,7 +163,7 @@ require(
 )
 require(
     "preflight executes this selftest from the pulled packet",
-    "context-handoff-gate corpus-render-gate config-as-code migrate-dell" in script,
+    "git-writer-gate \\\n           corpus-render-gate config-as-code migrate-dell" in script,
 )
 require(
     "fresh-machine preflight exercises the actual Claude-only installer",

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Selftest for ops/receipt-integrity-health.py's interpretation of the
-read-jev-call-receipt-integrity answer (no network, no database)."""
+read-jev-call-receipt-integrity answer (no network, no database). Each case
+replays what `./run.sh call` prints through the check's injectable runner."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
 import pathlib
+import subprocess
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -37,17 +39,22 @@ CASES = [
     ("verb not deployed is a skip", (1, "", 'TOOL ERROR {"error": "unknown_tool", "name": "x"}'), "SKIP"),
     ("any other error fails", (1, "", "could not reach the deployed Worker"), "FAIL"),
     ("garbage output fails", (0, "not json", ""), "FAIL"),
+    ("a refusal on exit 0 fails", (0, json.dumps({"ok": False, "error": "forbidden"}), ""), "FAIL"),
 ]
+
+
+def replay(rc: int, out: str, err: str):
+    return lambda argv, **_kw: subprocess.CompletedProcess(argv, rc, out, err)
 
 
 def main() -> int:
     failures = 0
     for label, (rc, out, err), want in CASES:
-        got, message = mod.interpret(rc, out, err)
+        got, message = mod.check(replay(rc, out, err))
         ok = got == want
         failures += 0 if ok else 1
         print(f"{'PASS' if ok else 'FAIL'}  {label}: {got} ({message})")
-    disabled = mod.interpret(0, audit(enabled=False), "")[1]
+    disabled = mod.check(replay(0, audit(enabled=False), ""))[1]
     ok = "jev_call_receipt_append_only" in disabled
     failures += 0 if ok else 1
     print(f"{'PASS' if ok else 'FAIL'}  a disabled trigger is named: {disabled}")

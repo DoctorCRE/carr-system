@@ -8,10 +8,15 @@ staging) and rolls every mutation back.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import os
 import pathlib
 import re
-import sys
 import json
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -49,7 +54,7 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def tier1() -> None:
     print("TIER 1 — static program and authority contract")
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = read_migration(MIGRATION.parent.parent, MIGRATION.name)
     rows = re.findall(
         r"\(\s*(\d+)\s*,\s*'carr-ai-engineering-suite-v1'\s*,\s*'(WR-AI-\d+)'\s*,\s*'([^']+)'\s*,\s*'(build|extend|adopt|decline)'\s*,[\s\S]*?'(\{[^']+\})'::jsonb,\s*'joe',\s*'joe'\)",
         sql,
@@ -84,7 +89,7 @@ def tier1() -> None:
               all(isinstance(context.get(key), list) for key in ["non_goals", "prerequisites", "evidence"]),
               str(context))
 
-    reorder_sql = REPRIORITIZATION.read_text(encoding="utf-8")
+    reorder_sql = read_migration(REPRIORITIZATION.parent.parent, REPRIORITIZATION.name)
     expected_refs = ["WR-AI-006"] + [f"WR-AI-{n:03d}" for n in range(1, 6)] + [f"WR-AI-{n:03d}" for n in range(7, 52)]
     proof_match = re.search(r"expected text\[\] := array\[([\s\S]*?)\];", reorder_sql)
     effective_refs = re.findall(r"'(WR-AI-\d+)'", proof_match.group(1)) if proof_match else []

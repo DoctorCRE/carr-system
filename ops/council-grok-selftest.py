@@ -20,14 +20,14 @@ FAKE_GROK = '#!/bin/sh\necho \'{"type":"end","stopReason":"cancelled","modelUsag
 
 @unittest.skipUnless(ZSH, "council-lib.sh is zsh")
 class CouncilGrokTests(unittest.TestCase):
-    def chair(self, fixture):
+    def chair(self, fixture, brief="brief"):
         with tempfile.TemporaryDirectory(prefix="council-grok-") as tmp:
             tmp = Path(tmp)
             (tmp / "bin").mkdir()
             fake = tmp / "bin/grok"
             fake.write_text(FAKE_GROK)
             fake.chmod(0o755)
-            (tmp / "brief.md").write_text("brief")
+            (tmp / "brief.md").write_text(brief)
             env = dict(os.environ, PATH=f"{tmp / 'bin'}:{os.environ['PATH']}",
                        GROK_RUN_FAKE_NDJSON=str(FIXTURES / fixture))
             run = subprocess.run(
@@ -42,6 +42,13 @@ class CouncilGrokTests(unittest.TestCase):
         code, text, rejected = self.chair("good.ndjson")
         self.assertEqual(code, 0)
         self.assertTrue(text and not text.lstrip().startswith("{"), text)
+        self.assertFalse(rejected)
+
+    def test_linked_council_brief_keeps_the_prose_chair_answer(self):
+        code, text, rejected = self.chair("good.ndjson",
+            "Weigh https://github.com/example/repo/pull/1 and answer in prose.")
+        self.assertEqual(code, 0)
+        self.assertEqual(text, "Hello world\n")
         self.assertFalse(rejected)
 
     def test_cancelled_run_is_rejected_and_never_left_as_the_answer(self):

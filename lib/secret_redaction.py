@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from pathlib import Path
+
+# Retain import-time provenance; a later checkout update does not reload code.
+SOURCE_BYTES = Path(__file__).read_bytes()
 
 MASK = "[REDACTED]"
 
@@ -30,6 +34,7 @@ _URI_WITH_CREDENTIALS = re.compile(
 _PREFIXED_TOKEN = re.compile(
     r"\bsk-[A-Za-z0-9_\-]{16,}"
     r"|\bgh[pousr]_[A-Za-z0-9_\-]{16,}"
+    r"|\bgithub_pat_[A-Za-z0-9_\-]{16,}"
     r"|\bxox[baprs]-[A-Za-z0-9_\-]{10,}"
     r"|\bAKIA[A-Z0-9]{12,}")
 

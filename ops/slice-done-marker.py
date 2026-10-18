@@ -36,8 +36,8 @@ WHAT ONE RUN DOES, per catalog slice (the catalog is doctrine
      wording (ops.slice_criterion_allowed_kinds), and the bind door refuses
      anything else. For a criterion still unbound (and never bound by a
      partner): a live_check / accepted_record kind is bound as allowed; a
-     shipped_release kind is bound only to ONE release member that Jev
-     evidence_matching picks for that exact criterion, and that binding is a
+     shipped_release kind is proposed only when the slice has exactly ONE
+     shipped release member, and that binding is a
      PROPOSAL the server never treats as effective until a partner confirms
      it (the Worker holds no GitHub credential, so the server cannot verify
      the PR itself). An empty allowlist (refusals, runtime outcomes) binds
@@ -82,6 +82,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO))
+from lib.record_call import call_verb  # noqa: E402
+
 CATALOG_DOC = "doctorcre-v5-astra-integration-review"
 CATALOG_SECTION = "v5-reviewed-implementation-slice-catalog-and-parallel-groups-2026-09-09"
 # Commits before this cannot belong to the 2026-09-09 catalog's slices.
@@ -91,7 +94,6 @@ PARKED = {"V5-D03": "parked by Joe", "V5-D04": "parked by Joe"}
 BARE_ID = re.compile(r"(?<![\w-])((?:F|A|S)\d{2}|J\d{3})(?![\w-])")
 PR_NUMBER = re.compile(r"\(#(\d+)\)\s*$")
 NAMESPACE = uuid.UUID("8f0b3a52-5f0e-4c55-9d7c-6b1a0f3e2d11")
-MATCH_MIN = 0.70
 OUT_DIR = REPO / "out" / "slice-done-marker"
 
 # The one portfolio the accepted-record sources resolve against.
@@ -127,18 +129,11 @@ def attribute(subject: str, catalog_ids: set[str]) -> list[tuple[str, str]]:
 # ── adapters (replaced by fakes in ops/slice-done-marker-selftest.py) ─────────
 
 def run_sh_call(verb: str, args: dict) -> dict:
-    """The sanctioned Bash door, as ops/release-pipeline.py uses it."""
-    proc = subprocess.run([str(REPO / "run.sh"), "call", verb, json.dumps(args)], cwd=str(REPO),
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=300)
-    text = (proc.stdout or "").strip()
-    try:
-        body = json.loads(text) if text else {}
-    except ValueError:
-        raise MarkerError(f"{verb}: unparseable reply (exit {proc.returncode}): {text[:300]}") from None
-    if proc.returncode != 0 or (isinstance(body, dict) and body.get("ok") is False) \
-            or (isinstance(body, dict) and body.get("error")):
-        raise MarkerError(f"{verb}: {json.dumps(body)[:600] if body else (proc.stderr or '')[-300:]}")
-    return body
+    """The sanctioned Bash door, through lib/record_call: anything but ok raises."""
+    result = call_verb(verb, args, timeout=300)
+    if not result.ok:
+        raise MarkerError(result.describe())
+    return result.reply
 
 
 def git(*args: str) -> str:
@@ -147,16 +142,6 @@ def git(*args: str) -> str:
     if proc.returncode != 0:
         raise MarkerError(f"git {args[0]}: {(proc.stderr or '').strip()[:300]}")
     return proc.stdout
-
-
-def jev_ask(state: dict, questions: dict, facets: list[str]) -> dict:
-    sys.path.insert(0, str(REPO / "ops"))
-    from typesafe_client import ask  # noqa: PLC0415 — only a live run needs the vendor client
-    return ask(state, questions, facets=facets).get("answers", {})
-
-
-def jev_choice(instructions: str, options: dict[str, str]) -> dict:
-    return {"type": "choice", "instructions": instructions, "criteria": dict(options)}
 
 
 # ── the marker ────────────────────────────────────────────────────────────────
@@ -172,17 +157,8 @@ class SliceOutcome:
 
 class Marker:
     def __init__(self, *, call: Callable[[str, dict], dict], git_run: Callable[..., str],
-                 ask: Callable[[dict, dict, list[str]], dict] | None, dry_run: bool = False,
-                 out: Callable[[str], None] = print, cache_path: Path | None = None):
-        self.call, self.git, self.ask, self.dry_run, self.out = call, git_run, ask, dry_run, out
-        self.cache_path = cache_path
-        self.cache: dict[str, Any] = {}
-        if cache_path and cache_path.exists():
-            try:
-                self.cache = json.loads(cache_path.read_text())
-            except ValueError:
-                self.cache = {}
-
+                 dry_run: bool = False, out: Callable[[str], None] = print):
+        self.call, self.git, self.dry_run, self.out = call, git_run, dry_run, out
     # -- catalog -----------------------------------------------------------
     def catalog(self) -> list[dict]:
         doc = self.call("read-doctrine", {"document": CATALOG_DOC})
@@ -199,19 +175,17 @@ class Marker:
     # -- membership ----------------------------------------------------------
     def attributed_commits(self, catalog_ids: set[str]) -> list[dict]:
         raw = self.git("log", "--first-parent", f"--since={HISTORY_SINCE}",
-                       "--format=%H%x1f%s%x1f%b%x1e", "origin/main")
+                       "--format=%H%x1f%s%x1e", "origin/main")
         commits = []
         for rec in raw.split("\x1e"):
             parts = rec.strip("\n").split("\x1f")
             if len(parts) < 2 or not re.fullmatch(r"[0-9a-f]{40}", parts[0].strip()):
                 continue
             sha, subject = parts[0].strip(), parts[1].strip()
-            body = parts[2].strip() if len(parts) > 2 else ""
             for sid, how in attribute(subject, catalog_ids):
                 pr = PR_NUMBER.search(subject)
                 commits.append({"slice_id": sid, "commit_sha": sha, "subject": subject[:400],
-                                "pr_number": int(pr.group(1)) if pr else None, "attribution": how,
-                                "body": body[:600]})
+                                "pr_number": int(pr.group(1)) if pr else None, "attribution": how})
         return commits
 
     def sync_membership(self, catalog_ids: set[str], known: set[tuple[str, str, str]],
@@ -244,47 +218,20 @@ class Marker:
                 "idempotency_key": ikey("members", key, sorted((m["slice_id"], m["commit_sha"]) for m in members)),
                 "release_key": key, "members": members})
             written += len(members)
-        self._bodies = {c["commit_sha"]: c["body"] for c in commits}
         return written
 
-    # -- Jev ---------------------------------------------------------------
-    def _cached_ask(self, kind: str, state: dict, questions: dict, facets: list[str]) -> dict:
-        if not questions:
-            return {}
-        key = hashlib.sha256(json.dumps([kind, state, questions], sort_keys=True).encode()).hexdigest()
-        if key in self.cache:
-            return self.cache[key]
-        if self.ask is None:
-            return {}
-        answers = self.ask(state, questions, facets)
-        self.cache[key] = answers
-        return answers
-
     @staticmethod
-    def _pick(answer: dict | None, floor: float) -> str | None:
-        if not answer or answer.get("type") != "choice":
-            return None
-        choice = answer.get("choice")
-        prob = (answer.get("probabilities") or {}).get(choice)
-        if prob is None:
-            prob = answer.get("confidence") or 0.0
-        return choice if float(prob) >= floor else None
+    def match(item: dict, criteria: list[str], members: list[dict]) -> dict[str, str | None]:
+        """Propose the slice's sole shipped release member for each criterion.
 
-    def match(self, item: dict, criteria: list[str], members: list[dict]) -> dict[str, str | None]:
-        opts = {f"m{j}": f"PR #{m.get('pr_number') or '?'}: {m['subject']} -- "
-                         f"{getattr(self, '_bodies', {}).get(m['commit_sha'], '')[:300]}"
-                for j, m in enumerate(members)}
-        opts["none"] = "No listed shipped change implements this criterion."
-        state = {"slice": {"id": item.get("proposed_id"), "title": item.get("title")}, "criteria": criteria}
-        questions = {f"evidence_matching_{i}": jev_choice(
-            f"Which shipped change implements criterion `criteria[{i}]` of this slice? Choose `none` unless "
-            "the change clearly implements that exact criterion.", opts) for i in range(len(criteria))}
-        answers = self._cached_ask("match", state, questions, ["evidence_matching"])
-        out: dict[str, str | None] = {}
-        for i, c in enumerate(criteria):
-            pick = self._pick(answers.get(f"evidence_matching_{i}"), MATCH_MIN)
-            out[c] = members[int(pick[1:])]["id"] if pick and pick != "none" else None
-        return out
+        The server already scopes members to this slice; their subjects are
+        membership hints, never acceptance. A proposal is not effective until
+        a partner confirms it, and two or more members are ambiguous, so the
+        criterion stays unbound for review.
+        """
+        ids = [m.get("id") for m in members]
+        sole = ids[0] if len(ids) == 1 and isinstance(ids[0], str) and ids[0] else None
+        return {c: sole for c in criteria}
 
     # -- one slice ---------------------------------------------------------
     def read(self, slice_id: str) -> dict:
@@ -330,7 +277,7 @@ class Marker:
             allowed = kinds[c].get("allowed_kinds") or []
             if "shipped_release:" in allowed:
                 if matched.get(c):
-                    self._bind(sid, c, "shipped_release", None, "Jev evidence_matching: proposed PR, "
+                    self._bind(sid, c, "shipped_release", None, "sole shipped member of the slice: proposed PR, "
                                "awaiting partner confirmation", member=matched[c])
                     bound_any = True
                     would[c] = f"a shipped_release proposal on member {matched[c]}"
@@ -372,7 +319,7 @@ class Marker:
                     and k.get("binding_source") == "registration":
                 # Still waiting on a shipped change: in progress, not blocked.
                 refs[c] = None
-                missing.append(f"{c} -> no shipped change of this slice was matched to it yet")
+                missing.append(f"{c} -> no sole shipped change of this slice to propose yet")
             elif kind == "unbound":
                 refs[c] = None
                 unbound.append(f"{c} -> " + ("unbound by a partner" if k.get("binding_source") == "binding:authority"
@@ -442,9 +389,6 @@ class Marker:
                 outcomes.append(self.mark_slice(item))
             except MarkerError as exc:
                 outcomes.append(SliceOutcome(item["proposed_id"], "error", str(exc)[:400], "error"))
-        if self.cache_path and not self.dry_run:
-            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self.cache_path.write_text(json.dumps(self.cache, sort_keys=True))
         return outcomes
 
 
@@ -453,10 +397,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true", help="compute and print; write nothing")
     ap.add_argument("--slices", default="", help="comma-separated slice ids (default: every catalog slice)")
     ap.add_argument("--release-key", default="", help="the release that just shipped (logged)")
-    ap.add_argument("--no-jev", action="store_true", help="match nothing new (cached answers only)")
+
     args = ap.parse_args(argv)
-    marker = Marker(call=run_sh_call, git_run=git, ask=None if args.no_jev else jev_ask,
-                    dry_run=args.dry_run, cache_path=OUT_DIR / "jev-cache.json")
+    marker = Marker(call=run_sh_call, git_run=git, dry_run=args.dry_run)
     if args.release_key:
         print(f"slice-done-marker: after release {args.release_key}")
     try:

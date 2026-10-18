@@ -1,0 +1,62 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["npm", "pip_requirements", "github-actions"],
+  "timezone": "America/Chicago",
+  "schedule": ["before 6am on monday"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "separateMinorPatch": true,
+  "osvVulnerabilityAlerts": true,
+  "labels": ["dependencies"],
+  "ignorePaths": ["plugins/**", "_to_delete/**"],
+  "pip_requirements": {
+    "managerFilePatterns": ["/(^|/)requirements\\.lock$/"]
+  },
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["patch"],
+      "groupName": "patch dependencies",
+      "addLabels": ["dependency-patch"]
+    },
+    {
+      "matchUpdateTypes": ["minor"],
+      "groupName": "minor dependencies",
+      "addLabels": ["dependency-minor"]
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "addLabels": ["dependency-major"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["pin", "digest"],
+      "addLabels": ["dependency-patch"]
+    },
+    {
+      "matchFileNames": ["requirements.txt"],
+      "enabled": false,
+      "description": "Loose declarations are inputs to ci-dep-check; update the installed resolution in requirements.lock."
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": [],
+    "groupName": null,
+    "labels": ["dependencies", "dependency-security"],
+    "automerge": false,
+    "platformAutomerge": false
+  },
+  "postUpgradeTasks": {
+    "commands": ["python3 ops/dependency-update-repin.py --write"],
+    "fileFilters": ["control-room/contracts/fixtures/execution-fabric/assurance-compiler.valid.v1.json"],
+    "executionMode": "branch"
+  },
+  "prBodyNotes": [
+    "The orchestrator owns merges. Patch and non-major security PRs receive dependency-queue only after required checks pass; independent exact-head review remains required. Majors stay for review.",
+    "Use the orchestrator's self-hosted Renovate runner with the exact postUpgradeTasks command allowlisted. The task repins requirements.lock's fixture binding, computes ownership and contract digests through the assurance compiler, recompiles and reads back before writing. Do not edit fixture digests by hand. Run tools/test-assurance-slice-compiler.py in the locked runtime. If requirements.txt changes, materialize its dependency environment and run ops/ci-dep-check.py --write-lock before repinning. npm changes retain package-lock.json and must pass npm ci."
+  ]
+}

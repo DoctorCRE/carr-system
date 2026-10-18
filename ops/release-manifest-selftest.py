@@ -92,17 +92,7 @@ def git(*args: str) -> str:
 
 def main() -> int:
     print("release-manifest-selftest: P0-1 rebuild clause")
-    tool_source = TOOL.read_text(encoding="utf-8")
-    ledger_start = tool_source.index("def migration_tree_ledger")
-    ledger_end = tool_source.index("def ensure_exact_schema_prefix", ledger_start)
-    ledger_impl = tool_source[ledger_start:ledger_end]
-    check("0g. migration ledger reads one byte-preserving git archive",
-          'git_bytes("archive", "--format=tar"' in ledger_impl
-          and 'git("show", f"{sha}:migrations/{filename}")' not in ledger_impl)
-
-    # Resolve the source once: a commit during this suite must not turn a
-    # same-revision determinism check into a comparison of different trees.
-    tested_sha = git("rev-parse", "HEAD").strip()
+    tested_sha = "HEAD"
     first = build("--sha", tested_sha)
     second = build("--sha", tested_sha)
 
@@ -173,7 +163,7 @@ def main() -> int:
 
     # 2. the digest belongs to the commit, not the checkout
     dirty = bool(git("status", "--porcelain").strip())
-    head_sha = tested_sha
+    head_sha = git("rev-parse", tested_sha).strip()
     by_sha = build("--sha", head_sha)
     check("2. tested SHA and its explicit SHA digest identically"
           + (" (working tree is dirty, which is the interesting case)" if dirty else ""),

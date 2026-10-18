@@ -36,5 +36,9 @@
     <string>/tmp/carr-run-spool-flush.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/carr-run-spool-flush.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key><string>/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    </dict>
 </dict>
 </plist>

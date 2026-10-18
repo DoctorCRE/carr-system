@@ -23,6 +23,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -224,9 +225,9 @@ check("failed exact write takes precedence without leaking call output",
           "new@example.test", "known@example.test", "C-TEST", "Synthetic meeting")))
 
 # Multiple synthetic meetings must each reach client, lead and vendor records.
-# Use the real matcher and workbook reader, rather than precomputed proposals.
+# Use the real matcher and its record-view reader, rather than precomputed
+# proposals. The stub exporters.common.connect serves the three export views.
 import datetime
-import openpyxl
 root, stub = fixture(appends="events scanned: 9; carrying attendees: 9\nexit=0",
                      dump_json=json.dumps({"schema": "calendar-events/v2", "events": [
                          {"event_id": f"synthetic-{i}", "start_at": (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1, hours=i)).isoformat(),
@@ -243,23 +244,31 @@ shutil.copy2(REPO / "tools/calendar-intake-gate.py", root / "tools/calendar-inta
 (root / ".venv").symlink_to(sys.prefix, target_is_directory=True)
 (root / "exporters").mkdir()
 (root / "exporters/__init__.py").write_text("")
-(root / "exporters/common.py").write_text(f"EXPORT_HOME = {str(root / 'exports')!r}\n")
-for rel, sheet, headers, row in [
-    ("DNA/Clients/client-roster.xlsx", "Clients", ["Client ID", "Name", "Practice / Entity", "Email"],
-     ["C-TEST", "Synthetic Client", "Synthetic Clinic", "client@clinic.example.test"]),
-    ("DNA/Leads/lead-registry.xlsx", "Registry", ["Lead ID", "Contact Name", "Practice", "Email"],
-     ["L-TEST", "Synthetic Lead", "Synthetic Practice", "lead@practice.example.test"]),
-    ("DNA/Network/vendors.xlsx", "Vendors", ["ID", "Name", "Company", "Email"],
-     ["V-TEST", "Synthetic Vendor", "Synthetic Service", "vendor@service.example.test"]),
-]:
-    path = root / "exports" / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet
-    ws.append(headers)
-    ws.append(row)
-    wb.save(path)
+VIEW_ROWS = {
+    "v_export_clients": [{"Client ID": "C-TEST", "Name": "Synthetic Client",
+                          "Practice / Entity": "Synthetic Clinic", "Email": "client@clinic.example.test"}],
+    "v_export_leads": [{"Lead ID": "L-TEST", "Contact Name": "Synthetic Lead",
+                        "Practice": "Synthetic Practice", "Email": "lead@practice.example.test"}],
+    "v_export_vendors": [{"ID": "V-TEST", "Name": "Synthetic Vendor",
+                          "Company": "Synthetic Service", "Email": "vendor@service.example.test"}],
+}
+(root / "exporters/common.py").write_text(
+    "import contextlib\n"
+    f"ROWS = {VIEW_ROWS!r}\n"
+    "class _Cursor:\n"
+    "    def execute(self, sql):\n"
+    "        rows = ROWS[sql.rsplit(' ', 1)[1]]\n"
+    "        self.description = [(c,) for c in rows[0]]\n"
+    "        self._rows = [tuple(r.values()) for r in rows]\n"
+    "    def fetchall(self):\n"
+    "        return self._rows\n"
+    "class _Conn:\n"
+    "    @contextlib.contextmanager\n"
+    "    def cursor(self):\n"
+    "        yield _Cursor()\n"
+    "@contextlib.contextmanager\n"
+    "def connect():\n"
+    "    yield _Conn()\n")
 (root / "run.sh").write_text(
     "#!/usr/bin/env python3\nimport json,sys\n"
     "with open('out/activity-args.jsonl','a') as f: f.write(sys.argv[3]+'\\n')\n"
@@ -286,19 +295,18 @@ check("dry-run reports would-write count without a canonical call or identity ou
       and len(arg_path.read_text().splitlines()) == 16
       and not any(x in p.stdout + p.stderr for x in ("@", "C-TEST", "L-TEST", "V-TEST", "Synthetic meeting")))
 
-# Execute the actual nightly calendar block with a fake step wrapper; no other
-# nightly step, scheduler, database or credential is run.
-nightly = (REPO / "bin/nightly.sh").read_text()
-block = nightly[nightly.index("# Added 2026-08-06 (loop #180)"):nightly.index("# MAIL, loop #169")]
+# Exercise the native capture command independently of nightly maintenance.
+import plistlib
+native = plistlib.loads((REPO / "ops/launchd/com.carr.calendar-eventkit.plist").read_bytes())
+args = native["ProgramArguments"]
+start = next(i for i, value in enumerate(args) if value.endswith("/bin/calendar-eventkit-capture.sh"))
 shutil.copy2(SCRIPT, root / "bin/calendar-eventkit-capture.sh")
 (root / "bin/calendar-eventkit-capture.sh").chmod(0o755)
-(root / "bin/archive-calendar.sh").write_text("#!/bin/sh\nexit 0\n")
-(root / "bin/archive-calendar.sh").chmod(0o755)
+command = [value.replace("{{REPO}}", str(root)) for value in args[start:]]
 env = {**os.environ, "CARR_REPO": str(root), "PATH": str(stub) + os.pathsep + os.environ.get("PATH", ""),
        "CARR_CALENDAR_CAPTURE_WAIT_SECONDS": "1"}
-p = subprocess.run(["/bin/zsh", "-c", 'step() { shift; "$@"; }\n' + block],
-                   cwd=root, env=env, capture_output=True, text=True, timeout=15)
-check("nightly calendar step executes the capture and continues with unmatched pending",
+p = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True, timeout=15)
+check("native calendar job executes the capture and continues with unmatched pending",
       p.returncode == 0 and "source=eventkit mode=live" in p.stdout
       and len(arg_path.read_text().splitlines()) == 24)
 
@@ -372,40 +380,38 @@ check("failed reader cannot write from a stale dump", p.returncode == 1 and "log
 
 # Regression 5: a second capture must not complete the paused first reader.
 root, stub = fixture(matcher_json=json.dumps(exact_only))
+reader_started = root / "out/reader-started"
+reader_release = root / "out/reader-release"
 (stub / "open").write_text(
-    "#!/bin/sh\n"
-    'if [ "${CALCAP_TEST_HOLD_READER:-0}" = "1" ]; then\n'
-    '  touch "$CARR_REPO/out/reader-started"\n'
-    '  while [ ! -f "$CARR_REPO/out/release-reader" ]; do sleep 0.01; done\n'
-    'else\n'
-    '  for target do :; done\n'
-    '  mkdir -p "$target"\n'
-    '  echo {} > "$target/calendar-attendees.json"\n'
-    '  echo exit=0 >> "$target/calendar-access.log"\n'
-    'fi\n')
-# Delayed process startup reproduces a loaded CI runner before lock acquisition.
-(stub / "python3").write_text(
-    "#!/bin/sh\n"
-    'if [ "${CALCAP_TEST_DELAY_START:-0}" = "1" ]; then sleep 1; fi\n'
-    f'exec "{sys.executable}" "$@"\n')
-(stub / "python3").chmod(0o755)
+    "#!/usr/bin/env python3\nimport os,sys,time\nfrom pathlib import Path\n"
+    "if os.environ.get('CALCAP_TEST_PAUSE_READER') == '1':\n"
+    f" Path({str(reader_started)!r}).touch()\n"
+    " deadline = time.monotonic() + 10\n"
+    f" while not Path({str(reader_release)!r}).exists():\n"
+    "  if time.monotonic() >= deadline: sys.exit(1)\n"
+    "  time.sleep(0.01)\n"
+    "else:\n"
+    " target = Path(sys.argv[-1])\n"
+    " (target / 'calendar-attendees.json').write_text('{}')\n"
+    " with (target / 'calendar-access.log').open('a') as log: log.write('exit=0\\n')\n")
 env = dict(os.environ, CARR_REPO=str(root), PATH=f"{stub}:{os.environ['PATH']}",
-           CARR_CALENDAR_CAPTURE_WAIT_SECONDS="3", CALCAP_TEST_DELAY_START="1",
-           CALCAP_TEST_HOLD_READER="1")
-a = subprocess.Popen(["sh", str(SCRIPT), "--dry-run"], env=env,
-                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-import time
-# Wait for the reader itself, then keep it paused while the competing invocation
-# reaches the lock. Process launch time is not evidence of lock acquisition.
+           CARR_CALENDAR_CAPTURE_WAIT_SECONDS="3", CALCAP_TEST_PAUSE_READER="1")
+# Model a slow process start so a wall-clock guess cannot establish ordering.
+a = subprocess.Popen([
+    sys.executable, "-c",
+    "import os,sys,time; time.sleep(1); os.execvp('sh',['sh',*sys.argv[1:]])",
+    str(SCRIPT), "--dry-run",
+], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 try:
+    # The bundle launch follows lock acquisition. Hold it there so scheduling
+    # cannot let the first capture finish before the competing capture starts.
     deadline = time.monotonic() + 10
-    started = root / "out/reader-started"
-    while not started.exists() and a.poll() is None and time.monotonic() < deadline:
+    while not reader_started.exists() and a.poll() is None and time.monotonic() < deadline:
         time.sleep(0.01)
-    assert started.exists(), "first capture never reached its reader"
-    b = run(root, stub)
+    assert reader_started.exists(), "first capture never reached the paused reader"
+    b = run(root, stub, extra_env={"CALCAP_TEST_PAUSE_READER": "0"})
 finally:
-    (root / "out/release-reader").touch()
+    reader_release.touch()
     aout, aerr = a.communicate(timeout=10)
 check("concurrent dry/live capture cannot acknowledge another read",
       a.returncode == 1 and "read did not finish" in aerr
@@ -459,22 +465,10 @@ edited["exact"][0]["events"][0]["title"] = "Edited title"
 p = run(root, stub)
 check("title edits preserve the same captured occurrence", p.returncode == 0 and len(json.loads((root / "out/store.json").read_text())) == 1)
 
-# Regression 3: malformed evidence fails the actual nightly step, not EX_CONFIG skip.
-nightly_step = nightly[nightly.index('step() {'):nightly.index('\ntombstone() {')]
+# Malformed evidence fails the native capture job rather than becoming an EX_CONFIG skip.
 (root / "out/calendar-intake-evidence.json").write_text("not-json")
-shutil.copy2(SCRIPT, root / "bin/calendar-eventkit-capture.sh")
-(root / "bin/calendar-eventkit-capture.sh").chmod(0o755)
-harness = """rc_total=0; seam_blocked=0; LOG=out/nightly-test.log
-say() { print -r -- "$@"; }
-record_run() { print -r -- "state=$2"; }
-carr_step_timeout_prefix() { CARR_STEP_TIMEOUT_ARGV=(); }
-carr_step_timeout_for() { print 10; }
-carr_routine_exec() { "$@"; }
-""" + nightly_step + "\nstep calendar ./bin/calendar-eventkit-capture.sh\nprint -r -- \"rc_total=$rc_total\"\n"
-p = subprocess.run(["/bin/zsh", "-c", harness], cwd=root,
-    env=dict(os.environ, CARR_REPO=str(root), PATH=f"{stub}:{os.environ['PATH']}"),
-    capture_output=True, text=True, timeout=15)
-check("damaged evidence is a nightly failure", "rc_total=1" in p.stdout and "state=failed" in p.stdout)
+p = run(root, stub)
+check("damaged evidence fails the capture job", p.returncode != 0 and p.returncode != 78)
 
 # R1: private reader output must also reach the existing triage consumer through
 # a completed snapshot, without letting a failed reader replace the last one.

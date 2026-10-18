@@ -2,12 +2,16 @@
 """Contract tests for atomic retirement of the duplicate Notes schedulers."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import hashlib
 import json
-import sys
 from copy import deepcopy
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
 
 REPO = Path(__file__).resolve().parent.parent
@@ -178,7 +182,7 @@ def main() -> int:
         post_disable_observations=[claude_disabled], human_approval_ref="legacy-disable:notes-group",
         approval_verifier=lambda _ref: forged, now=NOW))
 
-    migration = (REPO / "migrations/0184_notes_duplicate_schedule_cutover.sql").read_text(encoding="utf-8").lower()
+    migration = read_migration(REPO, "0184_notes_duplicate_schedule_cutover.sql").lower()
     check("migration records canonical duplicate group and four immutable native refs",
           all(token in migration for token in (
               "duplicate_group", "sibling_surface_id", "sibling_locator",

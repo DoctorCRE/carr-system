@@ -93,6 +93,13 @@ test("the census route is authenticated, flag-gated, GET-only and a pass-through
     cursor: "abc", limit: "25", kinds: "loop,work_request", statuses: "superseded",
   });
 
+  response = await handler.fetch(new Request(`https://${HOST}${WORK_INVENTORY_PATH}?system=true&source=public.loop_item&age=7&text=Synthetic&live_library=true`, { headers: { cookie: session } }), environment, {});
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).params_echo, {
+    cursor: null, limit: null, kinds: null, statuses: null, system: 'true',
+    source: 'public.loop_item', age: '7', text: 'Synthetic', live_library: 'true',
+  });
+
   // An unknown parameter is a refusal, not a silently ignored field.
   response = await handler.fetch(new Request(`https://${HOST}${WORK_INVENTORY_PATH}?viewer=dell`, { headers: { cookie: session } }), environment, {});
   assert.equal(response.status, 403);

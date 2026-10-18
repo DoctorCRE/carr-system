@@ -1,6 +1,8 @@
 import { ToolError } from "./tool-error.js";
 import { organizationTenantForActor } from "./identity.js";
+import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";
 import { partnerAuthoritySlugForActor } from "./partner-authority.js";
+import { integerFields, normalizedEnvelope } from "./safe-integer.js";
 
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,26 +70,36 @@ function sponsor(actor) {
   return slug;
 }
 
+// The board publisher owns task_counts: it counts every card, including ones
+// trimmed from `tasks`, so the directory relays it rather than recounting.
 export function progressBoardSummary(row) {
   const data = row.snapshot_json ?? {};
-  const tasks = data.tasks && typeof data.tasks === "object" && !Array.isArray(data.tasks)
-    ? Object.values(data.tasks) : [];
-  const counts = new Map();
-  for (const task of tasks) {
-    if (!task || typeof task !== "object" || Array.isArray(task)) continue;
-    const status = typeof task.status === "string" && task.status.trim() ? task.status : "queued";
-    counts.set(status, (counts.get(status) ?? 0) + 1);
-  }
+  const counts = data.task_counts && typeof data.task_counts === "object" && !Array.isArray(data.task_counts)
+    ? Object.entries(data.task_counts).filter(([status, count]) => status.trim() && Number.isInteger(count) && count >= 0)
+    : [];
   return {
     board_id: row.board_id,
     title: typeof data.title === "string" && data.title.trim() ? data.title : row.board_id,
     project: typeof data.project === "string" && data.project.trim() ? data.project : row.board_id,
     updated_at: row.updated_at,
-    task_counts: Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b))),
+    task_counts: Object.fromEntries(counts.sort(([a], [b]) => a.localeCompare(b))),
   };
 }
 
-export function boardAnswerTools({ withEnvelope, writeEvent }) {
+function boardResponse(result) {
+  const record = row => integerFields(row,
+    ["version", "revision", "question_revision", "answer_version"], "board_version_invalid",
+    { nullable: ["answer_version"] });
+  const normalized = { ...result };
+  for (const field of ["snapshot", "question", "answer"])
+    if (field in result) normalized[field] = record(result[field]);
+  for (const field of ["questions", "answers"])
+    if (field in result) normalized[field] = result[field].map(record);
+  return normalized;
+}
+
+export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
+  const withEnvelope = normalizedEnvelope(envelope, boardResponse);
   return {
     "publish-board-snapshot": {
       write: true,
@@ -167,6 +179,7 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
         const board = ref(args.board_id, "board_id");
         const id = ref(args.question_id, "question_id");
         version(args.base_version, 1);
+        const nextRevision = version(args.base_version + 1, 1);
         const q = question(args);
         const principal = sponsor(actor);
         return withEnvelope(c, actor, "revise-board-question", args, async () => {
@@ -181,10 +194,10 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
             `insert into board_question (organization_tenant_id,sponsoring_human_slug,board_id,question_id,revision,current,
                prompt,choices,allow_free_text,default_answer,asker_ref,asked_by_actor_id)
              values ($1,$2,$3,$4,$5,true,$6,$7::jsonb,$8,$9,$10,$11) returning *`,
-            [tenant, principal, board, id, args.base_version + 1, q.prompt, JSON.stringify(q.choices),
+            [tenant, principal, board, id, nextRevision, q.prompt, JSON.stringify(q.choices),
              q.allow_free_text, q.default_answer, q.asker_ref, actor.id]);
           await writeEvent(c, actor, "revise-board-question", "board_question", rows.rows[0].id,
-            { new: { board_id: board, question_id: id, revision: args.base_version + 1 },
+            { new: { board_id: board, question_id: id, revision: nextRevision },
               idempotency_key: args.idempotency_key });
           return { ok: true, question: rows.rows[0] };
         });
@@ -199,9 +212,9 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
         const tenant = organizationTenantForActor(actor), principal = sponsor(actor);
         const result = await c.query(
           `select board_id,snapshot_json,updated_at from board_snapshot
-            where organization_tenant_id=$1 and sponsoring_human_slug=$2
+            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id <> $3
             order by case when board_id='carr-v5' then 0 else 1 end,board_id`,
-          [tenant, principal]);
+          [tenant, principal, NEEDS_JOE_LOCAL_BOARD]);
         return { ok: true, schema: "progress-board-directory.v1", boards: result.rows.map(progressBoardSummary) };
       },
     },
@@ -228,7 +241,7 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
               and a.question_id=q.question_id and a.question_revision=q.revision
             where q.organization_tenant_id=$1 and q.sponsoring_human_slug=$2 and q.board_id=$3 and q.current=true
             order by q.asked_at,q.question_id`, [tenant, principal, board]);
-        return { ok: true, snapshot: snapshot.rows[0] ?? null, questions: questions.rows };
+        return boardResponse({ ok: true, snapshot: snapshot.rows[0] ?? null, questions: questions.rows });
       },
     },
 
@@ -295,8 +308,8 @@ export function boardAnswerTools({ withEnvelope, writeEvent }) {
                and a.sponsoring_human_slug=$2 and a.asker_ref=$3
                and a.cursor > $4 order by a.cursor limit $5`,
           [organizationTenantForActor(actor), principal, asker, args.after_cursor, limit]);
-        return { ok: true, answers: rows.rows,
-          next_cursor: rows.rows.length ? rows.rows.at(-1).cursor : args.after_cursor };
+        return boardResponse({ ok: true, answers: rows.rows,
+          next_cursor: rows.rows.length ? rows.rows.at(-1).cursor : args.after_cursor });
       },
     },
 

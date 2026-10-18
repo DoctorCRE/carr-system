@@ -49,6 +49,7 @@ REPO = Path(__file__).resolve().parents[1]
 PLIST_DIR = REPO / "ops" / "launchd"
 SCOPE = REPO / "ops" / "config" / "ci-check-scope.json"
 SELF = Path(__file__).name
+HOMEBREW_BIN = "/opt/homebrew/bin"
 
 failures: list[str] = []
 checked = 0
@@ -81,6 +82,20 @@ def main() -> int:
             parsed = False
             detail = f"{type(exc).__name__}: {exc}"
         check(f"{path.name} parses with plistlib, not just plutil", parsed, detail)
+        if not parsed:
+            continue
+        # launchd's default PATH is /usr/bin:/bin:/usr/sbin:/sbin. A job that
+        # reaches gh, node, npm, jq or any other Homebrew tool without its own
+        # PATH fails "No such file or directory" only under launchd, never in
+        # the terminal that tested it: com.carr.job-watchdog shipped that way
+        # (#1431) and flooded every prompt with false evidence errors. Position is
+        # deliberately unchecked: job-watchdog puts Homebrew first, the older jobs
+        # append it so every binary they already resolved keeps resolving the same.
+        with open(path, "rb") as handle:
+            env = plistlib.load(handle).get("EnvironmentVariables") or {}
+        check(f"{path.name} declares a PATH that reaches Homebrew",
+              HOMEBREW_BIN in str(env.get("PATH", "")).split(":"),
+              f"EnvironmentVariables.PATH is {env.get('PATH')!r}")
 
     # THE FENCE GUARD, and the reason this file protects itself rather than
     # trusting a convention. The defect above was not a wrong assertion; it was

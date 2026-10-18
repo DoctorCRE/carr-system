@@ -520,6 +520,24 @@ test("a failed feedback read can be retried and then works", async () => {
   assert.equal(w.doc.querySelector("#retry-feedback").hidden, true);
 });
 
+test("a pending feedback request aborts exactly when the browser deadline advances", async () => {
+  const { env, w } = await setup();
+  let signal;
+  env.intercept = { "/api/share/feedback": async (_call, options) => {
+    signal = options.signal;
+    return new Promise(() => {});
+  } };
+  const list = await openShare(w, { waitFeedback: false });
+  await until(() => Boolean(signal), "feedback request started");
+  w.clock.advance(7999);
+  assert.equal(signal.aborted, false, "request remains live before its deadline");
+  assert.equal(list.children.length, 2, "packet remains available during feedback read");
+  w.clock.advance(1);
+  assert.equal(signal.aborted, true, "deadline aborts without waiting for wall-clock time");
+  await until(() => list.dataset.feedbackState === "unavailable", "timeout shown");
+  assert.equal(list.children.length, 2, "timeout preserves the packet");
+});
+
 test("rotation: the old link stops working for writes and a new link gets fresh, working controls", async () => {
   const { env, w, surface } = await setup();
   const list = await openShare(w);

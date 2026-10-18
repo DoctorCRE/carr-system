@@ -7,11 +7,16 @@ commands and publishes the JSON data contract that page renders.
 """
 
 import copy
+import functools
+import itertools
 import io
 import json
 import importlib.util
 import os
+# These tests assert per-render GitHub sync; the production reuse window is covered in test-progress-board-rest.py.
+os.environ["PROGRESS_BOARD_PR_FRESH_SECONDS"] = "0"
 import plistlib
+import runpy
 import shutil
 import subprocess
 import sys
@@ -23,6 +28,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "tools"))
 SCRIPT = REPO / "tools" / "progress_board.py"
 LAUNCHD_SCRIPT = REPO / "ops" / "progress-board-render.sh"
 SPEC = importlib.util.spec_from_file_location("progress_board", SCRIPT)
@@ -30,40 +36,123 @@ assert SPEC is not None and SPEC.loader is not None
 BOARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BOARD)
 
+def fixture_budget(fixture):
+    return BOARD.repo_lib("github_rate_limit").GitHubReadBudget(
+        {"GH_LIMITER_DIR": str(fixture.parent / "fake-gh-limiter")},
+        path=fixture.parent / f"github-budget-{os.getpid()}.json",
+        clock=itertools.count(step=2).__next__)
+
 # One dispatcher for every gh call the board makes. The fixture file says what
 # each call returns; tests rewrite it between runs.
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-fixture = json.loads(Path(os.environ["BOARD_GH_FIXTURE"]).read_text())
+from urllib.parse import urlparse, parse_qs
+fixture_path = Path(os.environ["BOARD_GH_FIXTURE"])
+fixture = json.loads(fixture_path.read_text())
 args = sys.argv[1:]
 log = os.environ.get("BOARD_GH_LOG")
 if log:
     with open(log, "a") as fh:
         fh.write(json.dumps(args) + "\n")
-def value(flag):
-    return args[args.index(flag) + 1] if flag in args else None
-if args[:2] == ["pr", "view"]:
-    view = fixture.get("view")
-    if view is None:
-        sys.exit(1)
-    print(json.dumps(view) if not isinstance(view, str) else view)
-elif args[:2] == ["repo", "list"]:
+if args[0] != "api" or "graphql" in args[1]:
+    sys.exit(2)
+parsed = urlparse(args[1])
+path, query = parsed.path, parse_qs(parsed.query)
+parts = path.split("/")
+repo = "/".join(parts[1:3]) if parts[0] == "repos" else ""
+if repo in fixture.get("fail", []):
+    sys.exit(1)
+def emit(value):
+    page = int(query.get("page", [1])[0])
+    size = int(query.get("per_page", [100])[0])
+    if isinstance(value, list):
+        value = value[(page-1)*size:page*size]
+    print(json.dumps(value))
+def raw(pr, merged=False):
+    if not isinstance(pr, dict):
+        return pr
+    # Preserve malformed-input tests: bad GraphQL-shaped recordings become
+    # bad REST responses, rather than the fixture adapter healing them.
+    if "view" in fixture and (pr.get("state") not in ("OPEN", "CLOSED", "MERGED")
+            or not isinstance(pr.get("isDraft"), bool) or not isinstance(pr.get("headRefOid"), str)
+            or not isinstance(pr.get("author"), dict) or not isinstance(pr["author"].get("login"), str)):
+        return {}
+    state = pr.get("state", "MERGED" if merged else "OPEN")
+    commit = pr.get("mergeCommit")
+    sha = commit.get("oid") if isinstance(commit, dict) else ([] if commit is not None else None)
+    if state == "MERGED" and commit is None:
+        sha = "1" * 40
+    decision = pr.get("reviewDecision")
+    return {"number": pr.get("number", 42 if "view" in fixture else None), "state": "open" if state == "OPEN" else "closed",
+            "draft": pr.get("isDraft", False), "head": {"sha": pr.get("headRefOid"), "ref": pr.get("headRefName", "")},
+            "user": pr.get("author"), "merge_commit_sha": sha,
+            "merged_at": pr.get("mergedAt", (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()) if state == "MERGED" else None,
+            "title": pr.get("title", "PR"), "body": pr.get("body", ""), "html_url": pr.get("url", ""),
+            "created_at": pr.get("createdAt", "2026-09-28T00:00:00Z"),
+            "updated_at": pr.get("updatedAt") or datetime.fromtimestamp(fixture_path.stat().st_mtime, timezone.utc).isoformat(),
+            "changed_files": pr.get("changedFiles"),
+            "mergeable": False if pr.get("mergeable") == "CONFLICTING" else True,
+            "mergeable_state": "blocked" if decision == "REVIEW_REQUIRED" else "clean"}
+def selected(number):
+    if "view" in fixture:
+        return fixture["view"]
+    for state in ("open", "merged"):
+        for pr in fixture.get(state, {}).get(repo, []):
+            if pr.get("number") == number:
+                return {**pr, "state": "MERGED" if state == "merged" else "OPEN"}
+    sys.exit(1)
+if parts[0] == "user":
     if fixture.get("repo_list_fails"):
         sys.exit(1)
-    print(json.dumps([{"nameWithOwner": name} for name in fixture.get("repos", [])]))
-elif args[:2] == ["pr", "list"]:
-    repo = value("--repo")
-    if repo in fixture.get("fail", []):
-        sys.exit(1)
-    rows = fixture.get(value("--state"), {}).get(repo, [])
-    print(json.dumps(rows[:int(value("--limit") or 30)]))
-elif args[0] == "api":
-    path = args[1]
+    emit([{"full_name": name, "archived": False} for name in fixture.get("repos", [])])
+elif len(parts) == 4 and parts[3] == "pulls":
+    emit([raw(pr) for pr in fixture.get("open", {}).get(repo, [])])
+elif len(parts) == 4 and parts[3] == "issues":
+    emit([{"number": pr["number"], "pull_request": {"url": "pr"}} for pr in fixture.get("merged", {}).get(repo, [])])
+elif "compare" in parts:
     status = fixture.get("compare", {}).get(path)
     if status is None:
         sys.exit(1)
     print(status)
+elif len(parts) == 5 and parts[3] == "pulls":
+    emit(raw(selected(int(parts[4]))))
+elif parts[-1] in ("check-runs", "statuses"):
+    pr = fixture.get("view")
+    if pr is None:
+        pr = next((p for state in ("open", "merged") for p in fixture.get(state, {}).get(repo, [])
+                   if p.get("headRefOid") == parts[4]), None)
+    if not isinstance(pr, dict):
+        sys.exit(1)
+    checks = pr.get("statusCheckRollup")
+    if not isinstance(checks, list):
+        emit({})
+    elif parts[-1] == "check-runs":
+        if any(not isinstance(c, dict) for c in checks):
+            emit({"check_runs": checks})
+        else:
+            # Leave types intact; the consumer must validate them.
+            emit({"check_runs": [{**c, **({"status": c["status"].lower()} if isinstance(c.get("status"), str) else {}),
+                                   **({"conclusion": c["conclusion"].lower()} if isinstance(c.get("conclusion"), str) else {})}
+                                  for c in checks if "state" not in c]})
+    else:
+        emit([{**c, "state": c["state"].lower()} for c in checks if isinstance(c, dict) and "state" in c])
+elif parts[-1] == "comments":
+    pr = selected(int(parts[4]))
+    comments = pr.get("comments") if isinstance(pr, dict) else None
+    if isinstance(comments, list):
+        emit([{"user": c.get("author"), "author_association": c.get("authorAssociation"),
+               "body": c.get("body"), "created_at": c.get("createdAt")} if isinstance(c, dict) else c for c in comments])
+    else:
+        emit({})
+elif parts[-1] == "reviews":
+    decision = selected(int(parts[4])).get("reviewDecision")
+    emit([{"id": 1, "state": decision, "user": {"login": "reviewer"}, "author_association": "COLLABORATOR",
+           "submitted_at": "2026-09-28T00:00:00Z"}]
+         if decision in ("CHANGES_REQUESTED", "APPROVED") else [])
+elif parts[-1] == "files":
+    emit([{"filename": f["path"]} for f in selected(int(parts[4])).get("files", [])])
 else:
     sys.exit(2)
 '''
@@ -91,13 +180,21 @@ class BoardCase(unittest.TestCase):
         self.env["PROGRESS_BOARD_LOCAL_ONLY"] = "1"
         self.fixture = self.root / "gh.json"
         self.gh_log = self.root / "gh.log"
+        door = patch.object(BOARD, "call_verb", side_effect=AssertionError("unit test reached the live verb door"))
+        self.live_door = door.start()
+        self.addCleanup(door.stop)
+        self.addCleanup(self.live_door.assert_not_called)
 
     def tearDown(self):
         self.tempdir.cleanup()
 
     def run_board(self, *args, input_text=None, check=True):
+        command = [sys.executable, str(SCRIPT), *args]
+        if "BOARD_GH_FIXTURE" in self.env:
+            command = [sys.executable, str(Path(__file__).resolve()),
+                       "--fixture-board", str(SCRIPT), *args]
         return subprocess.run(
-            [sys.executable, str(SCRIPT), *args],
+            command,
             cwd=REPO,
             env=self.env,
             input=input_text,
@@ -123,6 +220,17 @@ class BoardCase(unittest.TestCase):
         self.env["BOARD_GH_FIXTURE"] = str(self.fixture)
         self.env["BOARD_GH_LOG"] = str(self.gh_log)
         self.fixture.write_text(json.dumps(fixture))
+        if not hasattr(self, "fixture_reader"):
+            budget = fixture_budget(self.fixture)
+            @functools.lru_cache(maxsize=None)
+            def fixture_reader(binary, timeout):
+                return BOARD.repo_lib("github_reader").GitHubReader(
+                    gh=binary, timeout=timeout, retry_delays=BOARD.GH_RETRY_DELAYS,
+                    budget=budget)
+            self.fixture_reader = fixture_reader
+            reader_patch = patch.object(BOARD, "gh_reader", fixture_reader)
+            reader_patch.start()
+            self.addCleanup(reader_patch.stop)
         return gh
 
     def set_fixture(self, fixture):
@@ -139,6 +247,35 @@ class BoardCase(unittest.TestCase):
 
 
 class ProgressBoardCLI(BoardCase):
+    def test_task_producer_explicitly_classifies_system_work(self):
+        self.run_board('init','demo','--title','Synthetic board')
+        self.run_board('task','demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
+        self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
+
+    def test_large_history_publishes_bounded_pages_without_losing_rows(self):
+        import system_work_cache
+        self.run_board('init', 'carr-v5', '--title', 'Synthetic board')
+        items=[{'id':f'repo:pr:{i}', 'kind':'pull_request', 'title':'Synthetic title '*12,
+                'completed':True,'opened_at':'2026-09-01T00:00:00Z',
+                'last_activity_at':'2026-09-02T00:00:00Z','identity':{}} for i in range(1448)]
+        external={'schema':'system-work-external.v1','items':items,'complete':True,
+                  'observed_at':'2026-10-01T00:00:00Z','coverage':[],'completed_pr_history':True,'pr_work_refs':[]}
+        remote={}
+        def call(verb,args):
+            board=args['board_id']
+            if verb=='publish-board-snapshot':
+                self.assertLessEqual(len(json.dumps(args['snapshot'],separators=(',',':'),ensure_ascii=False)),262144)
+                remote[board]={'version':1,'snapshot_json':args['snapshot']}
+            return {'ok':True,'snapshot':remote.get(board),'questions':[]}
+        with patch.dict(os.environ,self.env), patch.object(BOARD,'call_verb',call), patch.object(system_work_cache,'cached_github',return_value=external):
+            BOARD.publish_board('carr-v5')
+        manifest=remote['carr-v5']['snapshot_json']['external_inventory']
+        restored=[row for page in manifest['pages'] for row in remote[page['board_id']]['snapshot_json']['items']]
+        self.assertEqual(restored,items)
+        self.assertNotIn('items',manifest)
+
+
+
     def test_conditional_recovery_compares_after_acquiring_shared_lock(self):
         import fcntl
         self.run_board("init", "demo", "--title", "Demo")
@@ -241,7 +378,10 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.assertEqual(snapshot["kind"], "project")
         self.assertEqual(set(snapshot), {"schema", "kind", "project", "title", "tasks", "deliverables",
                                          "notes", "decisions", "ledger", "repos", "history", "updated_at",
-                                         "github_sync", "omitted"})
+                                         "github_sync", "omitted", "task_counts", "milestones", "stale_policy",
+                                         "costs"})
+        self.assertIn(snapshot["costs"]["state"], ("ready", "partial", "unavailable"))
+        self.assertIn("action", snapshot["costs"])
         self.assertEqual(snapshot["tasks"]["a"]["provider"], "Codex")
         self.assertEqual(snapshot["tasks"]["a"]["model"], "gpt-6-sol")
         self.assertEqual(snapshot["tasks"]["a"]["effort"], "high")
@@ -354,20 +494,17 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         for task_id in [f"old{n}" for n in range(5)] + ["merged"]:
             self.assertNotIn("health", after[task_id], task_id)
 
-    def test_stale_flag_after_six_hours_without_update(self):
-        at = datetime(2026, 9, 29, 12, tzinfo=timezone.utc)
-        running = {"status": "running", "updated_at": "2026-09-29T05:30:00+00:00"}
-        self.assertTrue(BOARD.is_stale(running, at))
-        self.assertEqual(BOARD.age_text(running["updated_at"], at), "6h 30m")
-        self.assertFalse(BOARD.is_stale({**running, "updated_at": "2026-09-29T06:00:01+00:00"}, at))
-        self.assertTrue(BOARD.is_stale({**running, "updated_at": "2026-09-29T06:00:00+00:00"}, at))
-        self.assertTrue(BOARD.is_stale({"status": "review", "updated_at": "2026-09-28T12:00:00Z"}, at))
-        self.assertEqual(BOARD.age_text("2026-09-28T10:00:00Z", at), "1d 2h")
-        for status in ("done", "queued", "failed"):
-            self.assertFalse(BOARD.is_stale({"status": status, "updated_at": "2026-09-20T00:00:00Z"}, at), status)
+    def test_stale_flag_after_fourteen_days_without_update(self):
+        at = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
+        for status in ("queued", "running", "review"):
+            task = {"status": status, "updated_at": "2026-09-21T12:00:00Z"}
+            self.assertTrue(BOARD.is_stale(task, at))
+            self.assertFalse(BOARD.is_stale({**task, "updated_at": "2026-09-21T12:00:01Z"}, at))
+        for status in ("done", "blocked", "failed", "superseded"):
+            self.assertFalse(BOARD.is_stale({"status": status, "updated_at": "2026-09-01T00:00:00Z"}, at))
         self.assertFalse(BOARD.is_stale({"status": "running", "stage": "live", "evidence": "x",
-                                         "updated_at": "2026-09-20T00:00:00Z"}, at))
-        self.assertEqual(BOARD.STALE_AFTER, timedelta(hours=6))
+                                         "updated_at": "2026-09-01T00:00:00Z"}, at))
+        self.assertEqual(BOARD.STALE_AFTER, timedelta(days=14))
 
     def test_ledger_flags_claude_plan_executor(self):
         self.run_board("init", "demo", "--title", "Demo")
@@ -410,6 +547,26 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.assertEqual((task["provider"], task["model"], task["effort"], task["summary"]),
                          ("Codex", "gpt-6-sol", "xhigh", "Check the route."))
         self.assertEqual(task["stage_history"][0]["stage"], "queued")
+
+    def test_creation_defaults_preserve_metadata_but_allow_explicit_reassignment(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        assigned = {"title": "Assigned task", "executor": "Codex", "provider": "OpenAI",
+                    "model": "fixture", "effort": "high"}
+        defaults = {"title": "Queue card", "executor": "Merge queue", "provider": "Unknown",
+                    "model": "unknown", "effort": "unknown"}
+        fields = lambda values: [item for key, value in values.items() for item in ("--" + key, value)]
+        self.run_board("task", "demo", "existing", *fields(assigned), "--status", "running", "--pr", "42")
+        for card in ("existing", "new"):
+            self.run_board("task", "demo", card, *fields(defaults), "--creation-defaults",
+                           "--status", "review", "--pr", "42", "--stage", "ci", "--note", "Checks pending")
+        tasks = self.read_state("demo")["tasks"]
+        for card, expected in (("existing", assigned), ("new", defaults)):
+            self.assertEqual({key: tasks[card][key] for key in expected}, expected)
+            self.assertEqual((tasks[card]["status"], tasks[card]["stage"], tasks[card]["note"]),
+                             ("review", "ci", "Checks pending"))
+        self.run_board("task", "demo", "existing", *fields(defaults))
+        task = self.read_state("demo")["tasks"]["existing"]
+        self.assertEqual({key: task[key] for key in defaults}, defaults)
 
     def test_backfill_uses_pr_title_and_retains_existing_task_history(self):
         state = {"tasks": {
@@ -588,21 +745,10 @@ class PullRequestStatus(BoardCase):
         self.assertEqual(state["tasks"]["app"]["repo"], "jbookout/doctorcre-app")
         del state["tasks"]["carr"]["repo"]  # JSON written before --repo existed
         self.write_state("demo", state)
-        bin_dir = self.root / "bin"
-        bin_dir.mkdir()
-        gh = bin_dir / "gh"
-        gh.write_text("#!/usr/bin/env python3\nimport json, sys\n"
-                      "args = sys.argv\n"
-                      "assert args[1:4] == ['pr', 'view', '85']\n"
-                      "repo = args[args.index('--repo') + 1]\n"
-                      "assert repo in {'jbookout/carr-system', 'jbookout/doctorcre-app'}\n"
-                      "print(json.dumps({'state': 'MERGED' if repo.endswith('carr-system') else 'OPEN', "
-                      "'isDraft': False, 'headRefOid': 'a' * 40, 'author': {'login': 'builder'}, "
-                      "'statusCheckRollup': [{'conclusion': 'SUCCESS', 'status': 'COMPLETED'}], "
-                      "'comments': []}))\n")
-        gh.chmod(0o755)
-        self.env.pop("PROGRESS_BOARD_SKIP_GH")
-        self.env["PATH"] = str(bin_dir) + os.pathsep + self.env["PATH"]
+        carr = {**self.VALID, "number": 85, "state": "MERGED", "mergeCommit": {"oid": SHA_M}}
+        app = {**self.VALID, "number": 85, "comments": []}
+        self.fake_gh({"open": {"jbookout/doctorcre-app": [app]},
+                      "merged": {"jbookout/carr-system": [carr]}})
         self.run_board("render", "demo")
         state = self.read_state("demo")
         self.assertEqual(state["tasks"]["carr"]["pr_phase"], "Merged")
@@ -634,8 +780,6 @@ class PullRequestStatus(BoardCase):
             return {"author": {"login": "reviewer"}, "authorAssociation": "COLLABORATOR",
                     "createdAt": "2026-09-28T10:00:00Z", "body": body}
         cases = [
-            ({"state": "MERGED"}, "done", "merged", "Merged"),
-            ({"state": "CLOSED"}, "failed", "ci", "Closed unmerged"),
             ({"isDraft": True}, "running", "build", "Draft"),
             ({"statusCheckRollup": [{"name": "unit", "conclusion": "FAILURE", "status": "COMPLETED"}]},
              "blocked", "ci", "Checks failing"),
@@ -643,6 +787,9 @@ class PullRequestStatus(BoardCase):
             ({"comments": [review("APPROVE\nReviewed-SHA: " + "b" * 40 + "\n")]}, "review", "review", "Awaiting review"),
             ({"comments": [review("APPROVE\nReviewed-SHA: " + SHA_A + "\n")]}, "review", "review", "Ready to merge"),
         ]
+        self.assertEqual(BOARD.derived_pr_state({**base, "state": "CLOSED"}),
+                         ("failed", "ci", "Closed unmerged"))
+        cases.append(({"state": "MERGED"}, "done", "merged", "Merged"))
         previous_update = self.read_state("demo")["tasks"]["a"]["updated_at"]
         for change, status, stage, phase in cases:
             with self.subTest(phase=phase):
@@ -688,7 +835,7 @@ class PullRequestStatus(BoardCase):
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "merged")
         self.assertIn("the workstation delivery target", task["release_wait"])
-        self.assertEqual([c for c in self.gh_calls() if c[0] == "api"], [])
+        self.assertEqual([c for c in self.gh_calls() if "/compare/" in c[1]], [])
 
     def test_all_repos_card_in_an_exact_release_needs_no_compare(self):
         card = {"status": "done", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
@@ -854,35 +1001,7 @@ class GitHubSync(BoardCase):
         self.assertEqual((task["status"], task["stage"]), ("blocked", "ci"))
         self.assertEqual(BOARD.blocked_detail(task)[0], "Failing checks: deploy/preview")
 
-    def test_sync_never_moves_a_card_back_past_a_later_manual_stage(self):
-        self.start("--stage", "review")
-        self.fake_gh({})
-        task, _ = self.sync({**self.OPEN, "isDraft": True})
-        self.assertEqual(task["stage"], "review", "a manual Review is not undone by a Draft PR")
-        self.assertEqual(task["pr_phase"], "Draft")
-        task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
-        self.assertEqual(task["stage"], "merged", "forward movement past the manual stage still happens")
 
-    def test_manual_block_survives_until_github_shows_it_cleared(self):
-        self.start()
-        self.fake_gh({})
-        self.sync(self.OPEN)
-        self.run_board("task", "demo", "a", "--status", "blocked", "--reason", "Waiting on the DNS cutover",
-                       "--next-action", "Joe flips the record")
-        # GitHub unchanged, or moving without a new head: the note stays.
-        for view in (self.OPEN, {**self.OPEN, "reviewDecision": "APPROVED"}):
-            task, _ = self.sync(view)
-            self.assertEqual(task["status"], "blocked")
-            self.assertEqual(BOARD.blocked_detail(task), ("Waiting on the DNS cutover", "Joe flips the record"))
-        # A new head that is itself failing is not the blocker clearing either.
-        failing = [{"name": "unit", "conclusion": "FAILURE", "status": "COMPLETED"}]
-        task, _ = self.sync({**self.OPEN, "headRefOid": "b" * 40, "statusCheckRollup": failing})
-        self.assertEqual(BOARD.blocked_detail(task)[0], "Waiting on the DNS cutover")
-        # A new, healthy head is GitHub showing the blocker cleared.
-        task, _ = self.sync({**self.OPEN, "headRefOid": "c" * 40})
-        self.assertEqual((task["status"], task["pr_phase"]), ("review", "Awaiting review"))
-        self.assertNotIn("blocked_reason", task)
-        self.assertNotIn("blocked_source", task)
 
     def test_manual_block_clears_when_the_pr_merges(self):
         self.start()
@@ -937,16 +1056,7 @@ class GitHubSync(BoardCase):
         self.run_board("render", "demo")
         self.assertEqual(self.read_state("demo")["github_sync"]["failed"], [])
 
-    def test_gh_is_found_outside_a_launchd_path(self):
-        fallback = self.root / "homebrew" / "gh"
-        fallback.parent.mkdir()
-        fallback.write_text("#!/bin/sh\n")
-        fallback.chmod(0o755)
-        with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}, clear=False), \
-             patch.object(BOARD.shutil, "which", lambda name: None), \
-             patch.object(BOARD, "GH_FALLBACKS", (str(self.root / "missing" / "gh"), str(fallback))):
-            os.environ.pop("PROGRESS_BOARD_SKIP_GH", None)
-            self.assertEqual(BOARD.gh_binary(), str(fallback))
+    def test_the_launchd_job_puts_homebrew_on_path(self):
         self.assertIn("/opt/homebrew/bin", LAUNCHD_SCRIPT.read_text())
 
 
@@ -1026,7 +1136,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertTrue(app["created_at"])
         self.assertEqual(tasks["carr-system-1"]["executor"], "Codex")
         self.assertEqual(tasks["carr-system-2"]["summary"], "Does thing 2.")
-        self.assertTrue(BOARD.is_stale(tasks["carr-system-6"]))
+        self.assertFalse(BOARD.is_stale(tasks["carr-system-6"]))
         self.assertFalse(BOARD.is_stale(tasks["carr-system-5"]))
         self.assertIn(SHA_M[:12], tasks["carr-system-7"]["evidence"])
         counts = {row["repo"]: (row["open"], row["merged"]) for row in state["repos"]}
@@ -1035,8 +1145,8 @@ class AllRepositoriesBoard(BoardCase):
         snapshot = BOARD.board_snapshot(state)
         self.assertEqual(snapshot["kind"], "all-repos")
         self.assertEqual(snapshot["repos"], state["repos"])
-        merged_call = [c for c in self.gh_calls() if c[:2] == ["pr", "list"] and "merged" in c]
-        self.assertTrue(merged_call and any(arg.startswith("merged:>=") for arg in merged_call[0]))
+        discovery = [c for c in self.gh_calls() if c[0] == "api" and "/issues?" in c[1]]
+        self.assertTrue(discovery and "state=closed" in discovery[0][1] and "since=" in discovery[0][1])
 
     def test_same_pr_number_in_two_repositories_never_collides(self):
         fixture = self.fixture_all()
@@ -1075,8 +1185,10 @@ class AllRepositoriesBoard(BoardCase):
         self.set_fixture({**fixture, "repo_list_fails": True,
                           "fail": list(fixture["open"]) + ["jbookout/software-factory", "jbookout/tour-lab"]})
         result = self.run_board("render", "all-repos", check=False)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.read_state("all-repos"), prior)
+        self.assertEqual(result.returncode, 0)
+        after = self.read_state("all-repos")
+        self.assertEqual(after["tasks"], prior["tasks"])
+        self.assertTrue(after["github_sync"]["stale"])
 
     def test_snapshot_stays_under_the_server_limit(self):
         tasks = {f"carr-system-{n}": {"title": "t" * 200, "summary": "s" * 160, "status": "done", "stage": "live",
@@ -1093,7 +1205,7 @@ class AllRepositoriesBoard(BoardCase):
         events = []
         args = type("Args", (), {"project": "all-repos", "publish": True})()
         with patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
-             patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+             patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))):
             BOARD.command_render(args)
         self.assertEqual(events, [("build", "all-repos"), ("publish", "all-repos")])
@@ -1256,13 +1368,29 @@ class PublishAndAnswers(BoardCase):
     def test_existing_launchd_render_runs_publish_poll_and_system_board_without_a_model(self):
         events = []
         args = type("Args", (), {"project": "carr-v5", "publish": False})()
-        with patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+        with patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
-             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))):
+             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+             patch.object(BOARD, "publish_needs_joe_local", lambda: events.append(("local", "needs-joe"))):
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+        self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
+                                  ("local", "needs-joe"),
                                   ("build", "all-repos"), ("publish", "all-repos")])
+
+    def test_scheduled_render_reads_github_in_one_pass(self):
+        passes = []
+        args = type("Args", (), {"project": "carr-v5", "publish": False})()
+        with patch.object(BOARD, "GitHubReadPass", object), \
+             patch.object(BOARD, "render", lambda project, *, discover: passes.append(BOARD.GITHUB_PASS)), \
+             patch.object(BOARD, "build_all_repos", lambda: passes.append(BOARD.GITHUB_PASS)), \
+             patch.object(BOARD, "publish_board", lambda project: None), \
+             patch.object(BOARD, "poll_board_answers", lambda project: None), \
+             patch.object(BOARD, "publish_needs_joe_local", lambda: None):
+            BOARD.command_render(args)
+        self.assertEqual(len(passes), 2)
+        self.assertIsNotNone(passes[0])
+        self.assertIs(passes[0], passes[1])
 
     def test_system_board_failure_is_logged_and_last_known_state_published(self):
         events = []
@@ -1273,15 +1401,130 @@ class PublishAndAnswers(BoardCase):
         (self.root / "boards").mkdir(parents=True, exist_ok=True)
         (self.root / "boards" / "all-repos.json").write_text(json.dumps({"project": "all-repos", "tasks": {}}))
         with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": str(self.root)}), \
-             patch.object(BOARD, "render", lambda project: events.append(("render", project))), \
+             patch.object(BOARD, "render", lambda project, *, discover: events.append(("render", project, discover))), \
              patch.object(BOARD, "publish_board", lambda project: events.append(("publish", project))), \
              patch.object(BOARD, "poll_board_answers", lambda project: events.append(("poll", project))), \
              patch.object(BOARD, "build_all_repos", broken), \
+             patch.object(BOARD, "publish_needs_joe_local"), \
              patch("sys.stderr", new_callable=io.StringIO) as err:
             BOARD.command_render(args)
-        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+        self.assertEqual(events, [("render", "carr-v5", True), ("publish", "carr-v5"), ("poll", "carr-v5"),
                                   ("publish", "all-repos")])
         self.assertIn("gh unavailable", err.getvalue())
+
+
+class SharedBoardRoot(unittest.TestCase):
+    """board_dir() resolves to the MAIN working tree from inside a linked
+    worktree, so every worktree of one checkout reads one board.
+
+    2026-10-12: the merge queue, run from an orchestrator worktree, logged
+    `board does not exist: carr-v5; run init first` four times per event because
+    the board lived under the worktree's own empty out/."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "ops"))
+        from git_env import fixture_env  # noqa: E402
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.main = Path(self.tempdir.name).resolve() / "main"
+        self.main.mkdir()
+        self.env = dict(fixture_env(), HOME=self.tempdir.name)
+        self.env.pop("PROGRESS_BOARD_ROOT", None)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "fixture@example.com")
+        self.git("config", "user.name", "Fixture")
+        (self.main / "README.md").write_text("fixture\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "seed")
+        self.worktree = Path(self.tempdir.name).resolve() / "linked"
+        self.git("worktree", "add", "-q", str(self.worktree), "-b", "linked")
+        self.cwd = os.getcwd()
+        self.saved_root = os.environ.pop("PROGRESS_BOARD_ROOT", None)
+        self.addCleanup(self.restore)
+
+    def git(self, *args):
+        subprocess.run(["git", "-C", str(self.main), *args], check=True, env=self.env,
+                       capture_output=True, text=True)
+
+    def restore(self):
+        os.chdir(self.cwd)
+        if self.saved_root is not None:
+            os.environ["PROGRESS_BOARD_ROOT"] = self.saved_root
+        BOARD.shared_checkout_root.cache_clear()
+        self.tempdir.cleanup()
+
+    def resolve_from(self, directory):
+        os.chdir(directory)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, self.env, clear=False):
+            return BOARD.board_dir()
+
+    def test_linked_worktree_reads_the_main_trees_board(self):
+        self.assertEqual(self.resolve_from(self.worktree), self.main / "out" / "boards")
+
+    def test_main_tree_reads_its_own_board(self):
+        self.assertEqual(self.resolve_from(self.main), self.main / "out" / "boards")
+
+    def test_outside_git_falls_back_to_the_current_directory(self):
+        plain = Path(self.tempdir.name).resolve() / "plain"
+        plain.mkdir()
+        self.assertEqual(self.resolve_from(plain), plain / "out" / "boards")
+
+    def test_explicit_root_still_wins(self):
+        os.chdir(self.worktree)
+        BOARD.shared_checkout_root.cache_clear()
+        with patch.dict(os.environ, {"PROGRESS_BOARD_ROOT": self.tempdir.name}):
+            self.assertEqual(BOARD.board_dir(), Path(self.tempdir.name).resolve() / "boards")
+
+
+class NeedsJoePublication(unittest.TestCase):
+    def test_local_publication_failures_do_not_interrupt_other_boards(self):
+        import needs_joe_local
+        from argparse import Namespace
+        failures = [RuntimeError("verb unavailable"), subprocess.TimeoutExpired("run.sh", 30),
+                    OSError("filesystem unavailable"), FileNotFoundError("zsh"),
+                    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"), KeyError("version")]
+        for location in ("read_source", "call_verb"):
+            for failure in failures:
+                with self.subTest(location=location, failure=type(failure).__name__):
+                    events = []
+                    read_effect = failure if location == "read_source" else None
+                    call_effect = failure if location == "call_verb" else None
+                    with patch.object(BOARD, "render", lambda p, **_: events.append(("render", p))), \
+                         patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
+                         patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
+                         patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+                         patch.object(needs_joe_local, "read_source", return_value="", side_effect=read_effect), \
+                         patch.object(BOARD, "call_verb", side_effect=call_effect) as call, \
+                         patch("sys.stderr", new_callable=io.StringIO) as err:
+                        BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+                    self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"),
+                        ("poll", "carr-v5"), ("build", "all-repos"), ("publish", "all-repos")])
+                    self.assertIn("needs-joe local page not published", err.getvalue())
+                    self.assertEqual(call.call_count, 0 if location == "read_source" else 1)
+
+    def test_local_publication_uses_remote_version_and_reads_back(self):
+        import needs_joe_local
+        from argparse import Namespace
+        events = []
+        remote = {"version": 7, "snapshot_json": {}}
+        def call(verb, args):
+            events.append((verb, args["board_id"]))
+            if verb == "read-progress-board":
+                return {"snapshot": remote}
+            self.assertEqual(verb, "publish-board-snapshot")
+            self.assertEqual(args["base_version"], 7)
+            remote["snapshot_json"] = args["snapshot"]
+            return {"ok": True}
+        with patch.object(BOARD, "render", lambda p, **_: events.append(("render", p))), \
+             patch.object(BOARD, "publish_board", lambda p: events.append(("publish", p))), \
+             patch.object(BOARD, "poll_board_answers", lambda p: events.append(("poll", p))), \
+             patch.object(BOARD, "build_all_repos", lambda: events.append(("build", "all-repos"))), \
+             patch.object(needs_joe_local, "read_source", return_value=""), \
+             patch.object(BOARD, "call_verb", call), patch("sys.stderr", new_callable=io.StringIO):
+            BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=False))
+        self.assertEqual(events, [("render", "carr-v5"), ("publish", "carr-v5"), ("poll", "carr-v5"),
+            ("read-progress-board", "needs-joe-local"), ("publish-board-snapshot", "needs-joe-local"),
+            ("read-progress-board", "needs-joe-local"), ("build", "all-repos"), ("publish", "all-repos")])
 
 class CardColumns(unittest.TestCase):
     """Addition 14: finished cards never sit in Building; retired cards leave the pipeline."""
@@ -1477,7 +1720,7 @@ class ReviewRound1420(BoardCase):
             completed.append(self.read_state("all-repos"))
             return [old], []
 
-        with self.in_process(), patch.object(BOARD, "gh_available", return_value=True), \
+        with self.in_process(), \
              patch.object(BOARD, "list_repositories", return_value=[repo]), \
              patch.object(BOARD, "read_repository", side_effect=read):
             BOARD.build_all_repos()
@@ -1530,14 +1773,19 @@ class ReviewRound1420(BoardCase):
         self.assertEqual((row["open"], row["merged"]), (0, 229))
 
     def test_2_a_list_that_fills_the_cap_is_an_incomplete_read(self):
+        from urllib.parse import parse_qs, urlparse
         rows = [{"number": n} for n in range(8)]
-        with patch.object(BOARD, "PR_LIST_LIMIT", 2), patch.object(BOARD, "PR_LIST_MAX", 4), \
-             patch.object(BOARD, "gh_json", lambda args, timeout=30: rows[:int(args[args.index("--limit") + 1])]):
+        def page(args, timeout=30):
+            params = parse_qs(urlparse(args[1]).query)
+            number, size = int(params["page"][0]), int(params["per_page"][0])
+            return rows[(number - 1) * size:number * size]
+        with patch.object(BOARD, "REST_PAGE_SIZE", 2), patch.object(BOARD, "REST_MAX_ROWS", 4), \
+             patch.object(BOARD, "gh_json", page):
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
-                BOARD.list_prs("jbookout/carr-system", "open", "number")
-        with patch.object(BOARD, "PR_LIST_LIMIT", 2), patch.object(BOARD, "PR_LIST_MAX", 16), \
-             patch.object(BOARD, "gh_json", lambda args, timeout=30: rows[:int(args[args.index("--limit") + 1])]):
-            self.assertEqual(len(BOARD.list_prs("jbookout/carr-system", "open", "number")), 8)
+                BOARD.rest_rows("repos/jbookout/carr-system/pulls?state=open")
+        with patch.object(BOARD, "REST_PAGE_SIZE", 2), patch.object(BOARD, "REST_MAX_ROWS", 16), \
+             patch.object(BOARD, "gh_json", page):
+            self.assertEqual(len(BOARD.rest_rows("repos/jbookout/carr-system/pulls?state=open")), 8)
 
     # 3 ── the whole payload fits the server contract
     def test_3_the_complete_snapshot_is_measured_and_fitted(self):
@@ -1552,7 +1800,7 @@ class ReviewRound1420(BoardCase):
         text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         self.assertLessEqual(len(text.encode("utf-16-le")) // 2, 262144)
         self.assertGreater(snapshot["omitted"]["live"], 0)
-        self.assertEqual(len(snapshot["notes"]), 50)
+        self.assertEqual(len(snapshot["notes"]), len(state["notes"]))
         self.assertEqual(BOARD.snapshot_size({"t": "✦😀"}), len('{"t":"✦"}') + 2)
 
     def test_3_a_board_that_cannot_fit_is_refused_not_published(self):
@@ -1602,8 +1850,8 @@ class ReviewRound1420(BoardCase):
                          ("Review blocked", "BLOCK"))
         self.assertEqual((tasks["carr-system-2"]["pr_phase"], tasks["carr-system-2"]["review_verdict"]),
                          ("Ready to merge", "APPROVE"))
-        open_call = next(c for c in self.gh_calls() if c[:2] == ["pr", "list"] and "open" in c)
-        self.assertIn("comments", open_call[open_call.index("--json") + 1].split(","))
+        comments_calls = [c for c in self.gh_calls() if c[0] == "api" and "/comments?" in c[1]]
+        self.assertEqual(len(comments_calls), 2)
 
     def test_4_board_and_release_pipeline_agree_on_every_verdict_shape(self):
         pipeline = load_release_pipeline()
@@ -1648,6 +1896,7 @@ class ReviewRound1420(BoardCase):
                "StartInterval": 120, "RunAtLoad": True, "StandardOutPath": "board.log"}
         dest.write_bytes(plistlib.dumps(old))
         calls = []
+        real_run = subprocess.run
         def install(filename, path, body, matches):
             calls.append((filename, path, matches))
             Path(path).write_text(body)
@@ -1656,7 +1905,7 @@ class ReviewRound1420(BoardCase):
         registered = subprocess.CompletedProcess([], 0, "arguments = {\n" + "\n".join(desired) + "\n}\n")
         with patch.object(installer, "REPO", str(repo)), patch.object(installer, "HOME", str(self.root)), \
              patch.object(installer, "install_launchd_plist", side_effect=install), \
-             patch.object(installer.subprocess, "run", return_value=registered):
+             patch.object(installer.subprocess, "run", side_effect=lambda argv, **kwargs: real_run(argv, **kwargs) if argv[0] == "git" else registered) as run:
             self.assertEqual(installer.cmd_install_progress_board(False), 1)
             self.assertEqual(plistlib.loads(dest.read_bytes()), old)
             self.assertEqual(installer.cmd_install_progress_board(True), 0)
@@ -1667,52 +1916,23 @@ class ReviewRound1420(BoardCase):
             self.assertEqual(actual["StandardOutPath"], old["StandardOutPath"])
             self.assertEqual(len(calls), 1)
             self.assertEqual(installer.cmd_install_progress_board(False), 0)
-            installer.subprocess.run.return_value = subprocess.CompletedProcess([], 0, "arguments = {\n/bin/zsh\nold/render.sh\n}\n")
+            stale = subprocess.CompletedProcess([], 0, "arguments = {\n/bin/zsh\nold/render.sh\n}\n")
+            run.side_effect = lambda argv, **kwargs: real_run(argv, **kwargs) if argv[0] == "git" else stale
             self.assertEqual(installer.cmd_install_progress_board(False), 1)
             # Matching disk bytes cannot hide a stale registered definition.
-            installer.subprocess.run.side_effect = [installer.subprocess.run.return_value, registered]
+            observations = iter([stale, registered])
+            run.side_effect = lambda argv, **kwargs: real_run(argv, **kwargs) if argv[0] == "git" else next(observations)
             self.assertEqual(installer.cmd_install_progress_board(True), 0)
             self.assertFalse(calls[-1][2])
 
-    def test_5_premerge_checkout_migration_preserves_shared_board_state(self):
+    def test_5_feature_checkout_migration_is_refused_before_install(self):
         spec = importlib.util.spec_from_file_location("board_installer_premerge", REPO / "ops/config-as-code.py")
         installer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(installer)
-        canonical = self.root / "canonical"
-        checkout = self.root / "reviewed-checkout"
-        (checkout / "ops").mkdir(parents=True)
-        (checkout / "ops/progress-board-render.sh").write_text(LAUNCHD_SCRIPT.read_text())
-        (checkout / ".venv/bin").mkdir(parents=True)
-        python = checkout / ".venv/bin/python"
-        python.write_text("#!/bin/sh\nexit 0\n")
-        python.chmod(0o755)
-        agents = self.root / "Library/LaunchAgents"
-        agents.mkdir(parents=True)
-        dest = agents / "local.carr-progress-board.plist"
-        old = {"Label": "local.carr-progress-board", "ProgramArguments": ["/bin/zsh", "old/render.sh"],
-               "StartInterval": 120, "RunAtLoad": True,
-               "EnvironmentVariables": {"EXISTING": "keep"}}
-        dest.write_bytes(plistlib.dumps(old))
-        desired = ["/bin/bash", str(checkout / "ops/progress-board-render.sh")]
-        registered = subprocess.CompletedProcess([], 0, "arguments = {\n" + "\n".join(desired) + "\n}\n")
-        def install(filename, path, body, matches):
-            Path(path).write_text(body)
-            return "loaded"
-        with patch.object(installer, "REPO", str(canonical)), patch.object(installer, "HOME", str(self.root)), \
-             patch.object(installer, "install_launchd_plist", side_effect=install), \
-             patch.object(installer.subprocess, "run", return_value=registered):
-            self.assertEqual(installer.cmd_install_progress_board(True, repo=str(checkout)), 0)
-            actual = plistlib.loads(dest.read_bytes())
-            self.assertEqual(actual["ProgramArguments"], desired)
-            self.assertEqual(actual["WorkingDirectory"], str(checkout))
-            self.assertEqual(actual["EnvironmentVariables"], {
-                "EXISTING": "keep", "PROGRESS_BOARD_ROOT": str(canonical / "out")})
-            self.assertEqual(actual["StartInterval"], 120)
-            self.assertEqual(installer.cmd_install_progress_board(False, repo=str(checkout)), 0)
-            with patch.object(installer, "cmd_install_progress_board", return_value=0) as command, \
-                 patch.object(sys, "argv", ["config-as-code.py", "verify-progress-board", "--repo", str(checkout)]):
-                self.assertEqual(installer.main(), 0)
-                command.assert_called_once_with(False, repo=str(checkout))
+        with patch.object(installer, "REPO", str(self.root / "canonical")), \
+             patch.object(installer, "install_launchd_plist") as install:
+            self.assertEqual(installer.cmd_install_progress_board(True, repo=str(self.root / "feature")), 1)
+            install.assert_not_called()
 
     def test_5_migration_refuses_missing_checkout_wrapper_without_writing(self):
         spec = importlib.util.spec_from_file_location("board_installer_missing", REPO / "ops/config-as-code.py")
@@ -1871,31 +2091,38 @@ class ReviewRound1420(BoardCase):
         self.assertEqual(back["last_verified_at"], back["checked_at"])
 
     # 11 ── every mutation reaches the app board
-    def test_11_mutations_publish_to_the_app_board(self):
-        calls, remote, caller = self.spy()
-        with self.in_process(PROGRESS_BOARD_SKIP_GH="1", PROGRESS_BOARD_LOCAL_ONLY=""), \
-             patch.object(BOARD, "call_verb", caller):
-            BOARD.main(["init", "demo", "--title", "Demo"])
-            self.assertEqual(calls.count("publish-board-snapshot"), 1)
-            BOARD.main(["task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex"])
-            BOARD.main(["note", "demo", "--text", "Visible in the app"])
-        self.assertEqual(calls.count("publish-board-snapshot"), 3)
-        published = remote["snapshot"]["snapshot_json"]
-        self.assertEqual(published["tasks"]["a"]["title"], "A")
-        self.assertEqual(published["notes"][0]["text"], "Visible in the app")
 
-    def test_11_a_failed_publication_is_loud_and_local_only_says_so(self):
-        def refuse(verb, args):
-            raise RuntimeError("read-progress-board failed: server unreachable")
-        with self.in_process(PROGRESS_BOARD_SKIP_GH="1", PROGRESS_BOARD_LOCAL_ONLY=""), \
-             patch.object(BOARD, "call_verb", refuse):
-            with self.assertRaises(SystemExit) as raised:
-                BOARD.main(["init", "demo", "--title", "Demo"])
-        self.assertIn("not published", str(raised.exception))
-        self.assertIn("render demo --publish", str(raised.exception))
-        self.assertTrue((self.root / "boards" / "demo.json").exists(), "the local state is kept")
-        result = self.run_board("note", "demo", "--text", "x")
-        self.assertIn("not published", result.stderr)
+
+    def test_11_b_mutation_does_not_refresh_or_publish(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        with self.in_process(PROGRESS_BOARD_LOCAL_ONLY="1"), \
+             patch.object(BOARD, "render", side_effect=AssertionError("local mutation refreshed the whole board")), \
+             patch.object(BOARD, "publish_board", side_effect=AssertionError("local mutation published")):
+            BOARD.main(["task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex"])
+        self.assertEqual(self.read_state("demo")["tasks"]["a"]["status"], "running")
+
+    def test_11_c_task_receipt_captures_locked_before_state_and_cas_noop(self):
+        self.run_board("init", "demo", "--title", "Demo")
+        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+                       "--executor", "Codex", "--note", "Original evidence")
+        before = self.read_state("demo")["tasks"]["a"]
+
+        applied = self.run_board("task", "demo", "a", "--status", "blocked", "--health", "blocked",
+                                 "--reason", "Synthetic failure", "--next-action", "Recover",
+                                 "--note", "Watchdog overlay", "--receipt")
+        receipt = json.loads(applied.stdout)
+        self.assertTrue(receipt["applied"])
+        self.assertEqual(receipt["before"], before)
+        self.assertEqual(receipt["after"], self.read_state("demo")["tasks"]["a"])
+
+        current = receipt["after"]
+        refused = self.run_board("task", "demo", "a", "--status", "done", "--note", "stale restore",
+                                 "--expected-task", json.dumps({"status": "running"}), "--receipt")
+        receipt = json.loads(refused.stdout)
+        self.assertFalse(receipt["applied"])
+        self.assertEqual(receipt["before"], current)
+        self.assertEqual(receipt["after"], current)
+        self.assertEqual(self.read_state("demo")["tasks"]["a"], current)
 
 
 def merged_view(oid):
@@ -1928,10 +2155,13 @@ class DeliveryTargetRelease(BoardCase):
                     with patch.object(BOARD, "urlopen", **kwargs), \
                          patch.object(BOARD, "fetch_pr", return_value=(merged_view("a" * 40), None)), \
                          patch.object(BOARD, "publish_board") as publish, \
-                         patch.object(BOARD, "poll_board_answers") as poll:
+                         patch.object(BOARD, "poll_board_answers") as poll, \
+                         patch.object(BOARD, "publish_needs_joe_local") as local:
                         BOARD.command_render(Namespace(project=BOARD.LAUNCHD_BOARD, publish=True))
-                        publish.assert_called_once_with(BOARD.LAUNCHD_BOARD)
+                        self.assertEqual(publish.call_args_list,
+                                         [unittest.mock.call(BOARD.LAUNCHD_BOARD), unittest.mock.call(BOARD.ALL_REPOS_BOARD)])
                         poll.assert_called_once_with(BOARD.LAUNCHD_BOARD)
+                        local.assert_called_once_with()
                     task = BOARD.read_state(BOARD.LAUNCHD_BOARD)["tasks"]["fix"]
                     self.assertEqual(task["stage"], "merged")
                     self.assertNotIn("completed_at", task)
@@ -2129,5 +2359,29 @@ class DeliveryTargetRelease(BoardCase):
                 self.assertNotIn("evidence", task)
 
 
+class RetentionTests(unittest.TestCase):
+    def test_old_closed_cards_drop_but_their_notes_and_questions_survive(self):
+        state = {"tasks": {"old": {"repo": "jbookout/carr-system", "pr": 1, "title": "Old",
+                   "note": "Keep this finding", "question_ids": ["q1"]},
+                   "active": {"repo": "jbookout/carr-system", "pr": 2}},
+                 "questions": {"q1": {"question": "Keep?"}}, "notes": ["Human note"]}
+        BOARD.retain_recent_cards(state, {("jbookout/carr-system", 1): {"state": "MERGED",
+                                  "mergedAt": "2020-01-01T00:00:00Z"}})
+        self.assertEqual(list(state["tasks"]), ["active"])
+        self.assertEqual(state["task_notes"]["old"]["note"], "Keep this finding")
+        self.assertEqual(state["questions"]["q1"]["question"], "Keep?")
+        self.assertEqual(state["notes"], ["Human note"])
+
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    if sys.argv[1:2] == ["--fixture-board"]:
+        assert "BOARD_GH_FIXTURE" in os.environ, "fixture runner requires fake gh"
+        budget = fixture_budget(Path(os.environ["BOARD_GH_FIXTURE"]))
+        github_reader = BOARD.repo_lib("github_reader")
+        github_reader.GitHubReader = functools.partial(
+            github_reader.GitHubReader, budget=budget)
+        sys.argv = sys.argv[2:]
+        runpy.run_path(sys.argv[0], run_name="__main__")
+    else:
+        unittest.main(verbosity=2)

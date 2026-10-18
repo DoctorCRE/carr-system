@@ -172,34 +172,40 @@ REASON = (
 )
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _parse_error(exc):
+    dlog(f"ALLOW(parse-error) {exc}")
+    return 0
+
+
+def _decision_error(exc):
+    dlog(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    tool = payload.get("tool_name") or payload.get("toolName") or ""
+    if not CHROME_TOOL.match(tool or ""):
+        sys.exit(0)
+
+    tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+    for text in texts(tool_input):
+        host = banned_host(text)
+        if host:
+            dlog(f"DENY {tool} -> {host}")
+            print(REASON.format(host=host), file=sys.stderr)
+            sys.exit(2)
+
+    sys.exit(0)
+
+
 def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:                                  # noqa: BLE001
-        dlog(f"ALLOW(parse-error) {exc}")
-        sys.exit(0)
-
-    try:
-        tool = payload.get("tool_name") or payload.get("toolName") or ""
-        if not CHROME_TOOL.match(tool or ""):
-            sys.exit(0)
-
-        tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-        for text in texts(tool_input):
-            host = banned_host(text)
-            if host:
-                dlog(f"DENY {tool} -> {host}")
-                print(REASON.format(host=host), file=sys.stderr)
-                sys.exit(2)
-
-        sys.exit(0)
-
-    except SystemExit:
-        raise
-    except Exception as exc:                                  # noqa: BLE001
-        dlog(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+    sys.exit(run(decide, parse_error=_parse_error))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

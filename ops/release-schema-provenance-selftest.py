@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Static contract checks for migration 0301's release schema provenance gate."""
 
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 
 REPO = Path(__file__).resolve().parents[1]
 MIGRATION = REPO / "migrations" / "0301_release_schema_provenance_gate.sql"
@@ -20,8 +25,8 @@ def check(name: str, condition: bool, detail: str = "") -> None:
 
 def main() -> int:
     print("release-schema-provenance-selftest: 0301 database gate")
-    check("1. migration exists", MIGRATION.is_file())
-    sql = MIGRATION.read_text(encoding="utf-8") if MIGRATION.is_file() else ""
+    check("1. migration exists", MIGRATION.name in migration_names(MIGRATION.parent.parent))
+    sql = read_migration(MIGRATION.parent.parent, MIGRATION.name) if MIGRATION.name in migration_names(MIGRATION.parent.parent) else ""
 
     check("2. derived provenance view exposes declared and live evidence",
           "ops.v_release_schema_provenance" in sql
@@ -84,7 +89,7 @@ def main() -> int:
           and "completed release DELETE was accepted" in canary
           and "ops.v_release_schema_provenance" in canary
           and "rollback;" in canary)
-    repair = (COLLATION_REPAIR.read_text(encoding="utf-8")
+    repair = (read_migration(COLLATION_REPAIR.parent.parent, COLLATION_REPAIR.name)
               if COLLATION_REPAIR.is_file() else "")
     check("10. forward-only repair makes Python/SQL ordering locale-stable",
           COLLATION_REPAIR.is_file()

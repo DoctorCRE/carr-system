@@ -6,6 +6,8 @@
 // its injected record-layer seams. MapLibre is self-hosted and consumes only
 // the separately scoped, entrance-verified public map projection.
 
+import { APP_STAGING_HOST, CARR_STAGING_HOST, isStagingBrowserEnvironment } from "./staging-browser.js";
+
 export const REPORTS_ORIGIN = "https://reports.doctorcre.com";
 export const REPORTS_ASSET_DIRECTORY = "../dealroom/reports";
 
@@ -53,9 +55,14 @@ function json(body, status = 200, additions = {}) {
   });
 }
 
-function reportsRequest(request) {
-  try { return new URL(request.url).origin === REPORTS_ORIGIN; }
-  catch { return false; }
+function reportsOrigin(request, env) {
+  try {
+    const origin = new URL(request.url).origin;
+    if (origin === REPORTS_ORIGIN) return origin;
+    if (isStagingBrowserEnvironment(env) && (origin === `https://${CARR_STAGING_HOST}` ||
+      env.DOCTORCRE_APP_HOST === APP_STAGING_HOST && origin === `https://${APP_STAGING_HOST}`)) return origin;
+  } catch {}
+  return null;
 }
 
 function cookieValue(request, name) {
@@ -88,8 +95,8 @@ function newSessionToken() {
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-function sameOriginPost(request) {
-  return request.headers.get("origin") === REPORTS_ORIGIN && request.headers.get("sec-fetch-site") === "same-origin";
+function sameOriginPost(request, env) {
+  return request.headers.get("origin") === reportsOrigin(request, env) && request.headers.get("sec-fetch-site") === "same-origin";
 }
 
 function isJsonContentType(value) {
@@ -150,7 +157,7 @@ async function staticAsset(env, request, pathname) {
 }
 
 async function exchange(request, env, ctx, dependencies) {
-  if (!sameOriginPost(request)) return json({ error: "forbidden" }, 403);
+  if (!sameOriginPost(request, env)) return json({ error: "forbidden" }, 403);
   const body = await jsonBody(request);
   if (body.error) return body.error;
   if (Object.keys(body.value).length !== 1 || typeof body.value.token !== "string" || !SHARE_BEARER.test(body.value.token)) {
@@ -185,7 +192,7 @@ async function read(request, env, ctx, dependencies, dependencyName) {
 }
 
 async function writeFeedback(request, env, ctx, dependencies, pathname) {
-  if (!sameOriginPost(request)) return json({ error: "forbidden" }, 403);
+  if (!sameOriginPost(request, env)) return json({ error: "forbidden" }, 403);
   const session = cookieValue(request, SESSION_COOKIE);
   if (!session) return json({ error: "unauthorized" }, 401);
   const parsed = await jsonBody(request);
@@ -228,7 +235,7 @@ function withSecurityHeaders(response) {
 }
 
 async function handleRequest(request, env, ctx, dependencies) {
-  if (!reportsRequest(request)) return json({ error: "not_found" }, 404);
+  if (!reportsOrigin(request, env)) return json({ error: "not_found" }, 404);
   const pathname = new URL(request.url).pathname;
   const asset = STATIC_ASSETS.get(pathname);
   if (asset) return request.method === "GET" ? staticAsset(env, request, asset) : methodNotAllowed("GET");
@@ -246,12 +253,13 @@ export function createReportsWebHandler(overrides = {}) {
   return { fetch: async (request, env, ctx) => withSecurityHeaders(await handleRequest(request, env, ctx, dependencies)) };
 }
 
-export function isReportsRequest(request) {
-  if (!reportsRequest(request)) return false;
+export function isReportsRequest(request, env) {
+  if (!reportsOrigin(request, env)) return false;
   const pathname = new URL(request.url).pathname;
   return STATIC_ASSETS.has(pathname) || API_METHODS.has(pathname);
 }
 
-export function isReportsHostRequest(request) {
-  return reportsRequest(request);
+export function isReportsHostRequest(request, env) {
+  const origin = reportsOrigin(request, env);
+  return origin === REPORTS_ORIGIN || origin !== null && isReportsRequest(request, env);
 }

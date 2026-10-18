@@ -18,7 +18,7 @@ CAPABILITIES = frozenset({
 })
 HUMAN_ONLY = frozenset({"merge-approve", "production", "external-send", "destructive", "credential"})
 TRUSTED_BROWSER_ACTORS = frozenset({"joe", "dell"})
-AUTO_TARGET = "auto"  # the Model Room picks the target (QueueService.route_auto)
+AUTO_TARGET = "auto"
 STATUSES = frozenset({"triage", "todo", "ready", "scheduled", "running", "review", "blocked", "done"})
 PRIORITIES = {f"P{n}": 4 - n for n in range(5)}
 SLUG = re.compile(r"^[a-z][a-z0-9-]{0,79}$")
@@ -75,7 +75,6 @@ def _target(fields: dict, catalog: dict) -> tuple[dict | None, ParseResult | Non
 
 
 def _origin(turn: dict) -> tuple[str | None, ParseResult | None]:
-    """Classify authority from server-owned room provenance, never `seat`."""
     channel = turn.get("origin_channel")
     actor = turn.get("origin_actor")
     if channel == "mcp" and isinstance(actor, str) and actor:
@@ -104,11 +103,7 @@ def _parse_enqueue(turn: dict, head: str, body: str, catalog: dict) -> ParseResu
     missing = [name for name in ("cap",) if name not in fields]
     if missing:
         return _reject("field_required", f"required field(s) missing: {', '.join(missing)}")
-    # No target named: the Model Room routes it (Joe 2026-09-26, agreed with the Orchestrator session). A named
-    # target is never rewritten, so a pinned dispatch stays exactly where its sender put it.
     fields.setdefault("target", AUTO_TARGET)
-    # target=auto: the Model Room routes the task (ops/jev_model_route.py via QueueService) after parsing, so the
-    # grammar checks everything except the target here and the service checks the target it picks.
     auto = fields["target"] == AUTO_TARGET
     entry: dict | None = {"capabilities": list(CAPABILITIES - HUMAN_ONLY)} if auto else None
     if not auto:
@@ -157,8 +152,6 @@ def _parse_enqueue(turn: dict, head: str, body: str, catalog: dict) -> ParseResu
         "priority_label": priority, "runtime": runtime, "key": key, "after": after,
         "finish": finish, "title": title, "body": body, "idempotency_key": idempotency,
         "manual": bool(entry.get("adapter") == "manual" and cap in HUMAN_ONLY),
-        # server-owned provenance, already validated present by _origin; carried so routing can gate a Flash code
-        # run on a trusted origin (kanban_adapter.route_auto), never on `seat`.
         "origin_channel": turn.get("origin_channel"), "origin_actor": turn.get("origin_actor"),
     })
 

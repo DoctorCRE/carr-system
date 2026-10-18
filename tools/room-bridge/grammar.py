@@ -43,11 +43,7 @@ from datetime import datetime, timezone
 
 AUTHORIZED_SEATS = frozenset({"human"})
 
-# a seat name, same shape partner-room.js enforces server-side (SLUG)
 _SEAT = r"[a-z][a-z0-9-]{0,31}"
-# a ref token: letters/digits/dash/underscore, must start with a letter —
-# deliberately generic (WR-123, L-508, C-9, ...) since this bridge does not
-# yet know which record family will end up owning it (see module docstring)
 _REF = r"[A-Za-z][A-Za-z0-9_-]{0,40}"
 
 _LOOSE_TRIGGER = re.compile(rf"^@\S+\s+(assign|claim)\b", re.IGNORECASE)
@@ -61,9 +57,6 @@ def _now() -> str:
 def classify(turn: dict) -> tuple[str, dict | None, str | None]:
     """(outcome, parsed, reason). parsed is {"verb","target_seat","ref","title"}."""
     body = str(turn.get("body") or "")
-    # strict grammar: the WHOLE turn is one line matching the pattern exactly —
-    # a multi-line body never qualifies, deliberately, so a command cannot
-    # hide inside a longer message a model would have to interpret.
     line = body.strip()
     if "\n" in body.strip("\n"):
         if _LOOSE_TRIGGER.match(line.splitlines()[0] if line else ""):

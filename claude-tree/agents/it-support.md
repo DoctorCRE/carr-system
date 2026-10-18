@@ -193,7 +193,7 @@ ruling on the baseline, not a repair.
 ### 6. Absence in a partial search is not absence.
 
 Four independent readers made this error in one day, in both directions. Counting tombstones as
-live: a `find` reported 17 duplicate Henry Schein orgs when exactly 1 was live. Searching too
+live: a `find` reported 17 duplicate Example Organization 25 orgs when exactly 1 was live. Searching too
 shallow: a `-maxdepth 2` scan "proved" six files were gone when they sat at depth 3.
 
 **Check the FULL collection, and state the search's boundary alongside the result.** "I did not

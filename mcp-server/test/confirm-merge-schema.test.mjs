@@ -1,7 +1,8 @@
+import { restoreEventIdentity } from './helpers/snapshot-schema.mjs';
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -11,9 +12,6 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const schema = readFileSync(path.join(root, "db/schema.sql"), "utf8");
 const tables = ["party", "lead", "client", "vendor", "deal", "activity", "deal_participant",
   "party_link", "record_flag", "tool_call", "event"];
-// Execute the relevant current-schema table definitions, rather than a SQL fake
-// that answers marker comments and cannot detect nonexistent columns. No remote
-// DB, environment credential, production fixture, or schema data is used.
 const ddl = tables.map(name => {
   const match = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\(.*?\\n\\);`, "s"));
   assert.ok(match, `current schema must define ${name}`);
@@ -40,24 +38,24 @@ function pgBin() {
 
 test("confirm-merge executes against the current activity schema", async t => {
   const bin = pgBin();
-  const out = path.join(root, "out");
-  mkdirSync(out, { recursive: true });
-  const cluster = mkdtempSync(path.join(out, "wr182-pg-"));
-  const data = path.join(cluster, "data");
+  let postgresFixture, cluster, data;
   // Short socket path avoids macOS's Unix socket length limit for worktrees.
   const socket = "/tmp";
   const port = 20000 + process.pid % 30000;
-  const run = (command, args) => execFileSync(path.join(bin, command), args, { encoding: "utf8", stdio: "pipe" });
+  const run = (command, args) => postgresFixture.run(path.join(bin, command), args);
   let db;
-  let startAttempted = false;
+  const releaseBudget = await acquirePostgresFixtureGroup();
   try {
-    run("initdb", ["-D", data, "-U", "carr_fixture", "--auth=trust", "--encoding=UTF8", "--no-locale"]);
-    startAttempted = true;
-    run("pg_ctl", ["-D", data, "-l", path.join(cluster, "postgres.log"), "-o",
+    postgresFixture = await acquireDisposablePostgres({ prefix: "wr182-pg-", pgCtl: path.join(bin, "pg_ctl") });
+    cluster = postgresFixture.root;
+    data = path.join(cluster, "data");
+    await run("initdb", ["-D", data, "-U", "carr_fixture", "--auth=trust", "--encoding=UTF8", "--no-locale"]);
+    await run("pg_ctl", ["-D", data, "-l", path.join(cluster, "postgres.log"), "-o",
       `-h '' -k ${socket} -p ${port}`, "-w", "start"]);
     db = new pg.Client({ host: socket, port, user: "carr_fixture", database: "postgres" });
     await db.connect();
     await db.query(ddl);
+    await restoreEventIdentity(db, schema);
     const refView = schema.match(/CREATE VIEW public\.v_ref_index AS\n.*?;\n/s);
     assert.ok(refView, "current schema must define v_ref_index");
     await db.query(refView[0]);
@@ -89,7 +87,6 @@ test("confirm-merge executes against the current activity schema", async t => {
 
     for (const endpoint of ["from", "to", "via"]) {
       await t.test(`graph attachments on the losing ${endpoint} endpoint refuse without stranding refs`, () => fixture(async () => {
-        // The loser can be either graph end or the third-party broker.
         const ends = endpoint === "from" ? [loser, unrelated, survivor]
           : endpoint === "to" ? [unrelated, loser, survivor] : [survivor, unrelated, loser];
         await db.query(`insert into party_link (from_party,to_party,via_party,kind,note,source,created_by)
@@ -146,7 +143,6 @@ test("confirm-merge executes against the current activity schema", async t => {
         const pid = (await second.query("select pg_backend_pid() as pid")).rows[0].pid;
         firstCall = executeRegisteredTool(wrapped, actor, "confirm-merge", options);
         await ready;
-        // Change the winner after T1 read its score, exactly as in the review.
         await second.query(`insert into activity (occurred_at,actor_id,kind,summary,client_id)
           values (now(),$1,'note','Synthetic interleaving activity',$2)`, [actor.id, role(2)]);
         let settled = false;
@@ -154,7 +150,6 @@ test("confirm-merge executes against the current activity schema", async t => {
           ...options, idempotency_key: "synthetic-reverse-merge",
           survivor_party: loser, merged_party: survivor,
         }).then(result => ({ result }), error => ({ error })).then(outcome => { settled = true; return outcome; });
-        // Observe the PostgreSQL wait, rather than assuming a sleep means blocked.
         const deadline = Date.now() + 3000;
         let waiting = false;
         while (!settled && Date.now() < deadline) {
@@ -232,10 +227,10 @@ test("confirm-merge executes against the current activity schema", async t => {
       assert.equal(Number((await db.query("select count(*) from party where merged_into is not null")).rows[0].count), 0);
     }));
   } finally {
-    if (db) await db.end();
-    if (startAttempted) run("pg_ctl", ["-D", data, "-m", "fast", "-w", "stop"]);
-    const staged = path.join(out, "_to_delete");
-    mkdirSync(staged, { recursive: true });
-    renameSync(cluster, path.join(staged, path.basename(cluster)));
+    try {
+      if (db) await db.end();
+    } finally {
+      try { await postgresFixture?.close(); } finally { await releaseBudget(); }
+    }
   }
 });

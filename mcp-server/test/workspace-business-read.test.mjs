@@ -51,9 +51,9 @@ const CLOCK = () => new Date("2026-09-10T15:00:00.000Z");
 
 // Relations as the repository's grant audit reads them: whatever follows FROM
 // or JOIN. The two CTE names are not relations and are excluded by name.
-const CTE_NAMES = new Set(["filtered", "ordered"]);
+const CTE_NAMES = new Set(["filtered", "ordered", "t", "lateral", "jsonb_to_recordset"]);
 const BASE_RELATIONS = ["client", "client_status", "client_type", "party", "vendor", "vendor_category",
-  "vendor_disposition", "vendor_relationship_level", "vendor_stage", "actor"];
+  "vendor_disposition", "vendor_relationship_level", "vendor_stage", "actor", "activity", "party_link", "deal"];
 function relationsIn(sql) {
   return [...sql.matchAll(/\b(?:from|join)\s+([A-Za-z_][A-Za-z0-9_.]*)/g)]
     .map((match) => match[1]).filter((name) => !CTE_NAMES.has(name));
@@ -106,10 +106,10 @@ test("every base relation this module reads is schema-qualified, in every statem
   // The exact dependency list, and nothing else appearing unannounced.
   const relations = [...new Set(statements.flatMap(relationsIn))].sort();
   assert.deepEqual(relations, [
-    "public.actor", "public.client", "public.client_status", "public.client_type", "public.party",
+    "public.activity", "public.deal", "public.party_link", "public.party_link_deal", "public.actor", "public.client", "public.client_status", "public.client_type", "public.party",
     "public.vendor", "public.vendor_category", "public.vendor_disposition",
     "public.vendor_relationship_level", "public.vendor_stage",
-  ]);
+  ].sort());
   // And not one of them is reachable in its bare form anywhere.
   for (const sql of statements) {
     for (const name of BASE_RELATIONS) {
@@ -125,11 +125,11 @@ test("every base relation this module reads is schema-qualified, in every statem
 
 test("the query parser bounds every filter and refuses anything it does not own", () => {
   const defaults = listQuery();
-  assert.deepEqual(defaults, { dataset: "clients", scope: "team", q: null, sort: "name", page: 1, page_size: PAGE_SIZE, status: null, type: null, pipeline: "any" });
+  assert.deepEqual(defaults, { dataset: "clients", scope: "team", q: null, owner: "all", territory: null, sort: "name", page: 1, page_size: PAGE_SIZE, status: null, type: null, pipeline: "any" });
   assert.equal(parseBusinessQuery("vendors", new URLSearchParams({ scope: "mine", stage: "warm" }), "joe").stage, "warm");
   // An owner selector does not exist on this wire at all; "mine" is the only
   // way to ask for a personal list and it resolves server-side.
-  for (const params of [{ owner: "dell" }, { owner_id: ID }, { limit: "500" }, { offset: "10" }, { tenant: "other" }]) {
+  for (const params of [{ owner: "other" }, { owner_id: ID }, { limit: "500" }, { offset: "10" }, { tenant: "other" }]) {
     assert.throws(() => listQuery(params), /QUERY_INVALID/, JSON.stringify(params));
   }
   assert.throws(() => listQuery({ viewer: "dell" }), /AUTHORIZATION_REFUSED/);

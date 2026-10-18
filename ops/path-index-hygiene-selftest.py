@@ -107,6 +107,19 @@ def main() -> int:
           not PATHS.violations(["ops/config/policy.v1.json"]), failures)
     check("ordinary descriptive filename passes", not PATHS.violations(["ops/report-2026.json"]), failures)
 
+    check("declared vendor-tree depth passes",
+          not PATHS.violations(["plugins/pstack/skills/why/references/sources/linear.md"]), failures)
+    check("vendor-tree prefix does not exempt neighboring paths",
+          bool(PATHS.violations(["plugins/pstack/skills-other/a/b/c/file.md"])), failures)
+    check("vendor-tree exception preserves filename checks",
+          bool(PATHS.violations(["plugins/pstack/skills/a/b/report_final.md"])), failures)
+    check("vendor-tree exception refuses parent traversal",
+          bool(PATHS.violations(["plugins/pstack/skills/../../a/b/c/file.md"])), failures)
+    check("vendor-tree exception refuses whitespace aliases",
+          bool(PATHS.violations(["plugins/pstack/skills/why/references/sources/linear.md "])), failures)
+    check("vendor-tree exception refuses backslash aliases",
+          bool(PATHS.violations(["plugins/pstack/skills\\why/references/sources/linear.md"])), failures)
+
     with tempfile.TemporaryDirectory(prefix="path-index-hygiene-") as tmp:
         root = Path(tmp)
         git(root, "init", "-q")

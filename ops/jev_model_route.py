@@ -1,18 +1,4 @@
-"""Which model runs this task, at what effort, under which protocol? Jev reads the task first, code decides.
-
-Joe 2026-09-24 (decisions 81f6bcf7, 3c5a58e9, 79110363): routing sits at the very start of the chain, so work that
-does not suit Flash never reaches Flash; the Model Room is its one home; every route names a model, an effort and
-that model's own protocol. The policy is data, ops/config/model-routes.v1.json, so the Mac callers (flash-run today,
-the Model Room claim step next) and the cloud stamp for Dr. CRE app requests all read the same questions, cutoffs
-and roster.
-
-Jev answers one yes/no question per route about the task. Code applies the cutoffs in the policy's order and the
-first to clear wins; when none clears, the policy's abstain route runs as a logged fallback. After a Flash route
-finishes, handoff_reason() decides from facts alone whether its answer goes to the route's `then` desk.
-
-Fails open by construction: when Jev cannot be reached the decision is the abstain route with jev_error set, never
-an exception, so a caller behaves as it did before this existed.
-"""
+"""Pinned policy routes first. One cached semantic batch advises the route; absent labeled threshold validation, execution retains the policy abstention route."""
 
 from __future__ import annotations
 
@@ -27,7 +13,7 @@ POLICY_PATH = os.path.join(REPO, "ops", "config", "model-routes.v1.json")
 LOG_PATH = os.path.join(REPO, "out", "model-routes.jsonl")
 CATALOG_PATH = os.path.join(REPO, "tools", "room-bridge", "queue-targets.json")
 TIMEOUT_SECONDS = 30.0
-MAX_TASK_CHARS = 12000
+MAX_TASK_CHARS = 4000
 
 
 def _sibling(name):
@@ -83,12 +69,13 @@ def decide(task, context="", *, flash_free=True, policy=None, judge=None, client
     scores, error = {}, None
     try:
         client = client or judge._client()
-        answer = judge.judge({"task": (task or "")[:MAX_TASK_CHARS], "context": (context or "")[:MAX_TASK_CHARS]},
-                             questions(policy, client), timeout=TIMEOUT_SECONDS, client=client)
+        answer = _sibling("jev_semantic").ask({"task": (task or "")[:MAX_TASK_CHARS], "context": (context or "")[:MAX_TASK_CHARS]},
+                             questions(policy, client), timeout=TIMEOUT_SECONDS, client=client, caller="jev_model_route", version="vendor-v1", transport=judge.judge)
         scores = {k: round(float(v["noul"]), 3) for k, v in answer["answers"].items()}
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"[:300]
-    picked = pick_route(scores, policy) if scores else None
+    advisory_route = pick_route(scores, policy) if scores else None
+    picked = None  # no labeled threshold receipt: policy abstention is the executable route
     route = picked or policy["abstain_route"]
     entry = dict(policy["routes"][route])
     overflow = entry.get("model") == "flash" and not flash_free
@@ -96,7 +83,7 @@ def decide(task, context="", *, flash_free=True, policy=None, judge=None, client
         entry.update(model=policy["overflow"]["model"], effort=policy["overflow"]["effort"])
     row = {"route": route, "model": entry.get("model"), "effort": entry.get("effort"),
            "protocol": entry.get("protocol"), "desk": entry.get("desk"), "then": entry.get("then"),
-           "scores": scores, "fallback": picked is None, "overflow": overflow,
+           "scores": scores, "advisory_route": advisory_route, "review_required": bool(scores), "fallback": picked is None, "overflow": overflow,
            "audit": rng() < policy.get("audit_rate", 0.0), "jev_error": error}
     if log_path:
         try:
@@ -162,6 +149,7 @@ def dispatch(task, context="", *, pin=None, audit_pin=False, flash_free=True,
         effort = policy["dispatch_targets"][target]["effort"]
     out = {"route": row["route"], "target": target, "desk": catalog["targets"][target].get("desk"),
            "subagent_model": subagent_model, "effort": effort,
+           "advisory_route": row.get("advisory_route"), "review_required": row.get("review_required", False),
            "pin": pin, "pin_reason": reason, "routed": routed, "scores": row["scores"], "fallback": row["fallback"],
            "overflow": overflow, "audit": row["audit"], "jev_error": row["jev_error"]}
     if log_path:

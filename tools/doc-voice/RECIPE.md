@@ -109,8 +109,8 @@ what the regeneration was made from.
 
 ## Delivery screening (mandatory on every rendered phrase)
 
-Roll N takes per sentence, score terminal f0 slope (librosa pyin, last ~25 voiced
-frames per phrase; see bin/screen-endings-reference-implementation.py), reject
+Roll N takes per sentence, score terminal f0 slope
+(see render-doc.py:terminal_slope), reject
 rising finals. Falling, settled endings are Doc's signature (and doctrine law —
 no upspeak on statements).
 

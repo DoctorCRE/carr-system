@@ -1,28 +1,3 @@
-// The Model Room observatory's two doors onto the partner room, proved without
-// Google, a database, or a browser (Joe's ruling 0892c539).
-//
-// WHAT THESE TESTS ARE ACTUALLY GUARDING, in the order the risk runs:
-//
-//   THE WIRE IS NOT PUBLIC. Both endpoints sit behind the same cookie session
-//   as the rest of this host, and an unauthenticated caller gets a JSON 401
-//   rather than a login redirect — an API that redirects a fetch() to Google is
-//   an API that looks broken instead of expired.
-//
-//   ATTRIBUTION IS SERVER-DERIVED, WHICH MEANS THE REQUEST BODY CANNOT TOUCH
-//   IT. This is the one property the whole partner room rests on. A caller may
-//   send seat, sponsor, kind, room or msg_id; none of them are consulted, and
-//   the assertion below is written against the values that reach the database
-//   layer rather than against the response, because a response can echo
-//   anything.
-//
-//   THE READ IS THE VERB'S READ. The pagination arguments the browser sends are
-//   clamped by partner-room.js's own normalizer, so the panel's cursor and a
-//   desk's cursor can never come to mean two different things (rule a8c55a47).
-//
-//   THE CONTROL PATH IS AN ALLOWLIST. The RECONNECT button can ask for exactly
-//   one action on a desk name shaped like a desk name, and the Worker rebuilds
-//   the receipt body from those two validated values rather than echoing what
-//   the page sent.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -60,7 +35,7 @@ const TURNS = [
 ];
 
 function handlerWith(overrides = {}) {
-  const calls = { reads: [], writes: [] };
+  const calls = { reads: [], latest: [], writes: [] };
   const handler = createDealroomHandler({
     exchangeGoogleCodeFn: async () => ({ id_token: "stub" }),
     verifyGoogleIdTokenFn: async () => ({ email: JOE, email_verified: true, sub: `sub:${JOE}` }),
@@ -74,6 +49,11 @@ function handlerWith(overrides = {}) {
       return { ok: true, room: "partner-line", turns,
         latest_seq: turns.length ? turns.at(-1).seq : after, more: false };
     },
+    roomLatestFn: async (_env, params) => {
+      calls.latest.push(params);
+      return { ok: true, room: "model-room", mode: params.mode, turns: TURNS,
+        latest_seq: "71", before_seq: "70", more: false };
+    },
     roomWriteFn: async (_env, params) => {
       calls.writes.push(params);
       return { ok: true, room: "partner-line", seq: 99, at: "2026-08-22T15:00:00+00:00",
@@ -84,6 +64,19 @@ function handlerWith(overrides = {}) {
   });
   return { handler, calls };
 }
+
+test("newest room endpoint is authenticated and returns a fresh window", async () => {
+  const { handler, calls } = handlerWith();
+  const environment = env();
+  assert.equal((await handler.fetch(new Request(`${ORIGIN}/api/room/latest`), environment, {})).status, 401);
+  const cookie = await signedIn(handler, environment);
+  const response = await handler.fetch(new Request(`${ORIGIN}/api/room/latest?limit=80&mode=conversation`,
+    { headers: { cookie } }), environment, {});
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.deepEqual(calls.latest[0], { before_seq: undefined, limit: 80, mode: "conversation" });
+  assert.equal((await response.json()).latest_seq, "71");
+});
 
 async function signedIn(handler, environment) {
   const start = await handler.fetch(new Request(`${ORIGIN}/auth/login?return_to=/room.html`), environment, {});
@@ -212,10 +205,6 @@ test("posting a turn ignores every caller-supplied attribution and mints its own
 });
 
 test("a retry of a post whose response was never seen cannot land a second turn", async () => {
-  // THE FAILURE THIS GUARDS is not a double click — it is a response the
-  // browser never received. The turn landed; the composer showed a failure
-  // toast; the reader pressed retry. A random id per request would post it
-  // twice and there would be no way to tell the two apart afterwards.
   const { handler, calls } = handlerWith();
   const environment = env();
   const cookie = await signedIn(handler, environment);
@@ -233,8 +222,6 @@ test("a retry of a post whose response was never seen cannot land a second turn"
   assert.equal(calls.writes[0].msgId, calls.writes[1].msgId,
     "and they carry the same message id, so the room's uniqueness collapses the retry");
 
-  // A DIFFERENT body from the same session is a different turn, and the same
-  // body from a different session is too — the id is not a hash of the text.
   await handler.fetch(new Request(`${ORIGIN}/api/room/turn`, {
     method: "POST", headers: postHeaders(cookie, csrf),
     body: JSON.stringify({ body: "the release gate wants four approval values." }),
@@ -252,7 +239,6 @@ test("a retry of a post whose response was never seen cannot land a second turn"
   assert.notEqual(calls.writes[3].msgId, calls.writes[0].msgId,
     "two sessions saying the same thing are two turns");
 
-  // The window is a minute, not forever: a genuine repeat later still lands.
   const later = handlerWith({ now: () => 1_800_000_000_000 + 120_000 });
   const laterEnv = env();
   const laterCookie = await signedIn(later.handler, laterEnv);
@@ -318,7 +304,6 @@ test("the room's 20,000-character body cap is enforced server-side, on character
 test("the RECONNECT control is an allowlist, and its receipt body is rebuilt rather than echoed", async () => {
   assert.deepEqual(roomControlTurn({ action: "login", desk: "joe-desk" }),
     { kind: "receipt", body: '{"control":{"action":"login","desk":"joe-desk"}}' });
-  // extra keys are dropped, never carried onto the wire
   assert.deepEqual(roomControlTurn({ action: "login", desk: "joe-desk", cmd: "rm -rf /", seat: "claude" }),
     { kind: "receipt", body: '{"control":{"action":"login","desk":"joe-desk"}}' });
   for (const control of [null, {}, { action: "logout", desk: "joe-desk" }, { action: "login" },

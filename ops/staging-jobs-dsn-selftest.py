@@ -37,8 +37,6 @@ from lib.loadpy import load_module_from_path  # noqa: E402
 
 SJ = load_module_from_path("staging_jobs_dsn", os.path.join(REPO, "tools/staging_jobs_dsn.py"))
 OPS_RECORD = load_module_from_path("sjd_ops_record", os.path.join(REPO, "tools/ops-record.py"))
-RUN_SCHEDULED = load_module_from_path(
-    "sjd_run_scheduled_selftest", os.path.join(REPO, "ops/run-scheduled-selftest.py"))
 SCHEDULED_RECORD = load_module_from_path(
     "sjd_scheduled_run_record_selftest", os.path.join(REPO, "ops/scheduled-run-record-selftest.py"))
 
@@ -126,9 +124,8 @@ def main() -> int:
     names = OPS_RECORD.credential_names()
     check("the recorder declares at least the jobs and owner names",
           "CARR_DB_JOBS_URL" in names and "DATABASE_URL" in names, str(names))
-    for label, built in (("ops/run-scheduled-selftest.py", RUN_SCHEDULED.unreachable_env()),
-                          ("ops/scheduled-run-record-selftest.py",
-                           SCHEDULED_RECORD.unreachable_db_env())):
+    for label, built in (("ops/scheduled-run-record-selftest.py",
+                           SCHEDULED_RECORD.unreachable_db_env()),):
         missing = [n for n in names if n not in built]
         check(f"{label} sets every one of them (deleting a name is what let "
               f"db.env's setdefault re-supply production)", not missing, str(missing))

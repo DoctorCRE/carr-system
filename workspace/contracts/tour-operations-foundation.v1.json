@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.doctorcre.com/workspace/tour-operations-foundation.v1.json",
   "contract": "carr-tour-operations-foundation",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "status": "foundation_contract_not_a_client_surface",
   "canonical_record_policy": {
     "source_of_truth": "versioned CARR records; projections, providers, routes, exports, and models are never canonical facts",
@@ -38,6 +38,7 @@
     "parity_rule": "web packet, map cards, ordered itinerary, and PDF render from the same approved PublicTourProjection version; a PDF must have exactly one property page per selected property or fail QC"
   },
   "state_machines": {"share_grant": ["active", "revoked", "expired", "rotated"], "projection": ["draft", "qc_blocked", "approved", "published", "superseded", "quarantined", "rolled_back"], "publication": ["draft", "pending_qc", "approved", "published", "quarantined", "rolled_back"], "qc_finding": ["open", "accepted_risk", "resolved", "superseded"], "conflict": ["open", "resolved", "superseded"]},
+  "internal_detail_subject": {"read_function": "ops.read_tour_internal_detail(text,uuid,text)", "fields": ["subject_type", "subject_id"], "rule": "Return the stored opaque subject unchanged, including null for unbound legacy tours. Consumers may bind client notes only when subject_type is client and subject_id is a valid client identity. This internal read does not authorize a note write or expose subject fields in public projections."},
   "non_goals": ["MLS or CoStar ingestion", "client UI", "map renderer", "PDF renderer", "native iPad application", "autonomous publication"],
   "governing_contracts": ["workspace/contracts/market-map-route-planning.v1.json", "workspace/contracts/business-entity-api-contracts.v1.json", "workspace/contracts/retention-redaction.v1.json"]
 }

@@ -87,7 +87,14 @@ def _write_json(path, data):
 def cmd_label(args, gl, tsc):
     cases, rules = read_cases(args.cases), read_rules(args.corpus)
     probs = _read_json(args.probs, {})
-    todo = [c for c in cases if c["id"] not in probs or set(probs[c["id"]]) != {r["id"] for r in rules}]
+    coverage_path = args.probs + ".coverage.json"
+    coverage = _read_json(coverage_path, {})
+    roster = {r["id"] for r in rules}
+    todo = [c for c in cases if (c["id"] not in probs or
+            set(coverage.get(c["id"], {}).get("judged", [])) != set(probs[c["id"]]) or
+            set(probs[c["id"]]) | set(coverage.get(c["id"], {}).get("unjudged", [])) != roster or
+            coverage.get(c["id"], {}).get("case_binding") != gl.adjudication_case_binding(c) or
+            coverage.get(c["id"], {}).get("roster_binding") != gl.roster_binding(rules))]
     spent = {"input_tokens": 0, "requests": 0}
 
     def one(case):
@@ -95,11 +102,16 @@ def cmd_label(args, gl, tsc):
     with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
         for n, (cid, (p, usage)) in enumerate(pool.map(one, todo), 1):
             probs[cid] = p
+            coverage[cid] = {"judged": sorted(p), "unjudged": sorted(usage.get("unjudged") or []),
+                             "case_binding": gl.adjudication_case_binding(next(c for c in cases if c["id"] == cid)),
+                             "roster_binding": gl.roster_binding(rules)}
             spent["input_tokens"] += usage["input_tokens"]
             spent["requests"] += usage["requests"]
             if n % 10 == 0:
                 _write_json(args.probs, probs)
+                _write_json(coverage_path, coverage)
     _write_json(args.probs, probs)
+    _write_json(coverage_path, coverage)
     print(json.dumps({"labelled": len(todo), "cases": len(probs), **spent}))
 
 
@@ -200,7 +212,7 @@ def cmd_second(args, gl, tsc):
                                       calls_log=args.calls_log)
             out.update(p)
             spent["input_tokens"] += usage["input_tokens"]
-            spent["requests"] += 1
+            spent["requests"] += usage["requests"]
         return rid, out
     with cf.ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
         for rid, out in pool.map(one, sorted(by_rule.items())):
@@ -285,6 +297,10 @@ def cmd_build(args, gl):
             # ("<document id>#<section id>").
             "gold_doctrine": dgold.get(cid, []),
             "adjudicated": sorted(rid for (c, rid) in decided if c == cid),
+            "judged_rules": sorted(set(case_probs[cid]) | set(plan["settled_labels"].get(cid) or {})),
+            "unjudged_rules": sorted(set(rules) - set(case_probs[cid]) - set(plan["settled_labels"].get(cid) or {})),
+            "disputed": sorted(set(draft.get("disputed") or [])),
+            "doctrine_judged": sorted(dprobs.get(cid) or {}),
         })
     doc = {"schema": FIXTURE_SCHEMA, "provenance": PROVENANCE,
            "labelling": {"scheme": "case as state, one Jev noul per live rule "
@@ -338,7 +354,7 @@ def cmd_build(args, gl):
                                 for s in ("train", "test")}},
            "note": "Tuning may read only split == train. Gold ids are live rules on the "
                    "labelling date; re-label rather than edit a case to fit a path.",
-           "targets": {"gold": "live rule short ids (labelled, dense over every live rule)",
+           "targets": {"gold": "independently adjudicated or policy-settled rules; judged_rules bounds each case",
                        "gold_doctrine": "doctrine section refs '<document id>#<section id>' "
                                         "(store ids, not slugs: slugs and section keys carry "
                                         "names; resolve with read-doctrine). Second target "

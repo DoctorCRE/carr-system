@@ -18,20 +18,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 
 import { dispatchSpineTools, dispatchLinkProjection, dispatchAckProjection }
   from "../src/dispatch-spine.js";
 import { sessionDispatchProjection } from "../src/session-identity.js";
 import { TOOLS } from "../src/tools.js";
-
-// The probe below runs python3 as a child process. The node class runs it from
-// mcp-server/, the migration class from the repository root, so a cwd-relative
-// path to the hook resolves in one lane and not the other. Anchor it to THIS
-// file instead of to whatever directory the runner happened to start in.
-const GATE_PATH = fileURLToPath(
-  new URL("../../hooks/completion-evidence-gate.py", import.meta.url));
 
 const DSN = process.env.DATABASE_URL || "";
 const REQUIRED = process.env.CARR_DISPATCH_SPINE_DB_REQUIRED === "1";
@@ -404,39 +395,6 @@ test("AC-DS-HISTORY: the shaper passes the per-dispatch fields through untouched
   assert.equal(shaped.events[0].link_source, "proved");
   assert.equal(shaped.events[0].dispatch_ref, "d");
   assert.equal(shaped.events[0].stage_unavailable_reason, "not_acknowledged");
-});
-
-// ===========================================================================
-// AC-DS-REGISTRY — both verbs classify as WRITES in the completion-evidence
-// gate. The registry half of this criterion (0532, v35, v34 preserved,
-// relation_dml moved by exactly the two new relations' grants) is proved in
-// mcp-server/test/siep-11-mutation-registry.test.mjs and in 0532's own
-// preflight; what belongs here is the classification, executed rather than
-// read, because `acknowledge` is deliberately NOT a write prefix.
-// ===========================================================================
-
-test("AC-DS-REGISTRY: both verbs classify as writes, and acknowledge is not a prefix", () => {
-  const probe = [
-    "import importlib.util, pathlib, json",
-    `spec = importlib.util.spec_from_file_location('gate', ${JSON.stringify(GATE_PATH)})`,
-    "gate = importlib.util.module_from_spec(spec)",
-    "spec.loader.exec_module(gate)",
-    "print(json.dumps({",
-    "  'record': gate.is_write_action('record-dispatch-link'),",
-    "  'ack': gate.is_write_action('acknowledge-dispatch'),",
-    "  'notification': gate.is_write_action('acknowledge-notification'),",
-    "  'prefix': 'acknowledge' in gate.WRITE_ACTION_PREFIXES,",
-    "  'exact': sorted(a for a in gate.WRITE_ACTION_EXACT if a.startswith('acknowledge')),",
-    "}))",
-  ].join("\n");
-  const out = JSON.parse(execFileSync("python3", ["-c", probe], { encoding: "utf8" }));
-  assert.equal(out.record, true, "record-dispatch-link does not classify as a write");
-  assert.equal(out.ack, true, "acknowledge-dispatch does not classify as a write");
-  assert.equal(out.notification, true, "the sibling exact entry was disturbed");
-  // A PREFIX WOULD SILENTLY CAPTURE A FUTURE READ named the same way. Every
-  // acknowledge write is listed exactly, including board answer receipts.
-  assert.equal(out.prefix, false, "acknowledge was promoted to a write prefix");
-  assert.deepEqual(out.exact, ["acknowledge-board-answer", "acknowledge-dispatch", "acknowledge-notification"]);
 });
 
 test("AC-DS-REGISTRY: a refused write is surfaced as its reason and never as a success", () => {

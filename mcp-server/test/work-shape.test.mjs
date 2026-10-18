@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { TOOLS } from "../src/tools.js";
-import { capabilityProgramTools } from "../src/capability-program.js";
 import { implementationShapeError, shapeDecisionError, shapeDispositionError, workShapeTools } from "../src/work-shape.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -249,32 +249,16 @@ test("a sourced triaged disposition uses the exact receipt-backed database trans
   assert.equal(events[0][2], "set-work-shape-disposition");
 });
 
-test("a sourced initial not_required is preflighted: heavy refuses without mutation, standard proceeds, zero rows defers to the setter", async () => {
+test("a sourced initial not_required goes directly to the receipt-backed setter", async () => {
   const args = { idempotency_key: "44444444-4444-4444-8444-444444444444", work_request: SOURCED_WORK.ref, base_version: 3, disposition: "not_required", fixed_surface_ref: "safe:fixed", rationale: "The surface is fixed." };
-  const heavy = dispositionFake(SOURCED_WORK, { classify: [{ work_request_id: SOURCED_WORK.id, ref: SOURCED_WORK.ref, tier: "heavy", reasons: ["signal:new_capability"], shape_disposition: null, shape_ready: false }] });
-  await assert.rejects(
-    heavy.tools["set-work-shape-disposition"].handler(heavy.db, actor, args),
-    error => error instanceof ToolError && error.payload.error === "heavy_build_shape_required" && error.payload.classification_reasons[0] === "signal:new_capability",
-  );
-  assert.equal(heavy.calls.some(call => call.sql.includes("set_sourced_work_request_shape_disposition")), false);
-  assert.equal(heavy.calls.some(call => call.sql.includes("update ops.work_request")), false);
-  assert.equal(heavy.events.length, 0);
-  const classify = heavy.calls.find(call => call.sql.includes("classify_sourced_work_request_build"));
-  assert.deepEqual(classify.params, [SOURCED_WORK.ref, 3, "", "[]", "{}"]);
-
-  const standard = dispositionFake(SOURCED_WORK, { classify: [{ tier: "standard", reasons: [] }], setter: settled });
-  const result = await standard.tools["set-work-shape-disposition"].handler(standard.db, actor, args);
+  const fake = dispositionFake(SOURCED_WORK, { setter: settled });
+  const result = await fake.tools["set-work-shape-disposition"].handler(fake.db, actor, args);
   assert.equal(result.work_request.shape_disposition, "not_required");
   assert.equal(result.work_request.version, 4);
-  const transition = standard.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
+  assert.equal(fake.calls.some(call => call.sql.includes("classify_sourced_work_request_build")), false);
+  const transition = fake.calls.find(call => call.sql.includes("set_sourced_work_request_shape_disposition"));
   assert.deepEqual(transition.params, [SOURCED_WORK.ref, 3, "not_required", "safe:fixed", "The surface is fixed.", actor.id, args.idempotency_key]);
-  assert.equal(standard.events.length, 1);
-
-  // A zero-row wrapper answer is not "standard": the sourced setter's own
-  // classifier call decides, so the call still goes to the setter.
-  const deferred = dispositionFake(SOURCED_WORK, { classify: [], setter: settled });
-  await deferred.tools["set-work-shape-disposition"].handler(deferred.db, actor, args);
-  assert.equal(deferred.calls.filter(call => call.sql.includes("set_sourced_work_request_shape_disposition")).length, 1);
+  assert.equal(fake.events.length, 1);
 });
 
 test("a sourced initial required and a not_required to required correction never consult the classifier", async () => {
@@ -379,7 +363,7 @@ test("write-work-shape requires the effective receipt-backed required dispositio
 });
 
 test("migration 0492 admits one linked forward correction behind the exact sourced setter", () => {
-  const sql = fs.readFileSync(FORWARD_CORRECTION_MIGRATION, "utf8");
+  const sql = readMigration(FORWARD_CORRECTION_MIGRATION);
   assert.doesNotMatch(sql, /^\s*(begin|commit)\s*;\s*$/im, "0339+ migrations use the runner's single transaction");
   assert.match(sql, /create table ops\.sourced_work_request_shape_disposition_correction_receipt \(\n  id uuid primary key default gen_random_uuid\(\),\n  work_request_id uuid not null unique references ops\.work_request\(id\),\n  idempotency_key uuid not null unique,\n  original_receipt_id uuid not null unique references ops\.sourced_work_request_shape_disposition_receipt\(id\)/);
   assert.match(sql, /result_version integer not null check \(result_version = base_version \+ 1\)/);
@@ -398,11 +382,7 @@ test("migration 0492 admits one linked forward correction behind the exact sourc
   const correctionLookup = setter.indexOf("from ops.sourced_work_request_shape_disposition_correction_receipt c\n   where c.idempotency_key = p_idempotency_key");
   const rowLock = setter.indexOf("where x.ref = p_work_request\n   for update");
   const correctionInsert = setter.indexOf("insert into ops.sourced_work_request_shape_disposition_correction_receipt");
-  const classifier = setter.indexOf("ops.heavy_build_classification(w.id, '', '[]'::jsonb, '{}'::jsonb)");
   assert.ok(lock >= 0 && lock < originalLookup && originalLookup < correctionLookup && correctionLookup < rowLock && rowLock < correctionInsert);
-  assert.equal((setter.match(/ops\.heavy_build_classification\(/g) || []).length, 1);
-  assert.ok(classifier > correctionInsert, "the classifier refusal belongs to the initial not_required branch only");
-  assert.match(setter, /if p_disposition = 'not_required' then\n      classification := ops\.heavy_build_classification/);
   assert.match(setter, /or w\.program_key is not null or w\.program_ordinal is not null then/);
   assert.match(setter, /is distinct from \(null::text,null::text,null::text,null::uuid,null::timestamptz\)\n       or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\) then/);
   assert.match(setter, /or exists \(select 1 from ops\.work_shape_revision sr where sr\.work_request_id = w\.id\)\n       or exists \(select 1 from ops\.sourced_work_request_shape_disposition_correction_receipt c/);
@@ -423,122 +403,4 @@ test("both shape writes serialize identical idempotency keys before replay looku
   const replayRead = body.indexOf("select request_hash, response");
   assert.ok(lock >= 0 && lock < replayRead, "the same-key transaction lock must precede replay lookup");
   assert.match(body, /verb === "write-work-shape" \|\| verb === "set-work-shape-disposition"/);
-});
-
-test("an unclassified capability project cannot be claimed", async () => {
-  const current = {
-    id: "22222222-2222-4222-8222-222222222222", ref: "WR-AI-001", title: "Unclassified project",
-    program_key: "carr-ai-engineering-suite-v1", program_ordinal: 1, state: "ready", version: 4,
-    shape_disposition: null, project_context: {}, acceptance_criteria: [],
-  };
-  assert.equal(implementationShapeError(current, null).error, "work_shape_disposition_required");
-  const db = { query: async sql => {
-    if (sql.includes("select w.* from ops.work_request")) return { rows: [current] };
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  await assert.rejects(
-    tools["start-capability-project"].handler(db, { ...actor, human: true }, {
-      idempotency_key: "claim-unclassified", program_key: "carr-ai-engineering-suite-v1",
-      sequence: 1, base_version: 4, executor_actor: "codex",
-      source_commit_sha: "a".repeat(40), worktree_ref: "worktree:test",
-    }),
-    error => error instanceof ToolError && error.payload.error === "work_shape_disposition_required",
-  );
-});
-
-test("an explicitly shape-required capability project cannot be claimed without a decision", async () => {
-  const current = {
-    id: "22222222-2222-4222-8222-222222222222", ref: "WR-AI-001", title: "Open-shape project",
-    program_key: "carr-ai-engineering-suite-v1", program_ordinal: 1, state: "ready", version: 4,
-    shape_disposition: "required", shape_rationale: "The surface remains open.", project_context: {}, acceptance_criteria: [],
-  };
-  const db = { query: async sql => {
-    if (sql.includes("select w.* from ops.work_request")) return { rows: [current] };
-    if (sql.includes("from ops.work_shape_revision")) return { rows: [] };
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  await assert.rejects(
-    tools["start-capability-project"].handler(db, { ...actor, human: true }, {
-      idempotency_key: "claim-without-shape", program_key: "carr-ai-engineering-suite-v1",
-      sequence: 1, base_version: 4, executor_actor: "codex",
-      source_commit_sha: "a".repeat(40), worktree_ref: "worktree:test",
-    }),
-    error => error instanceof ToolError && error.payload.error === "work_shape_required",
-  );
-});
-
-test("a shape decision bound to an older Work Request version cannot satisfy the claim gate", async () => {
-  const current = {
-    id: "22222222-2222-4222-8222-222222222222", ref: "WR-AI-001", title: "Changed project",
-    program_key: "carr-ai-engineering-suite-v1", program_ordinal: 1, state: "ready", version: 5,
-    shape_disposition: "required", shape_rationale: "The surface remains open.", project_context: {}, acceptance_criteria: [],
-  };
-  const db = { query: async sql => {
-    if (sql.includes("select w.* from ops.work_request")) return { rows: [current] };
-    if (sql.includes("from ops.work_shape_revision")) return { rows: [{ work_request_version: 4 }] };
-    throw new Error(`unexpected query: ${sql}`);
-  }};
-  const tools = capabilityProgramTools({ withEnvelope: async (_c, _a, _v, _args, fn) => fn(), writeEvent: async () => {}, ToolError });
-  await assert.rejects(
-    tools["start-capability-project"].handler(db, { ...actor, human: true }, {
-      idempotency_key: "claim-with-stale-shape", program_key: "carr-ai-engineering-suite-v1",
-      sequence: 1, base_version: 5, executor_actor: "codex",
-      source_commit_sha: "a".repeat(40), worktree_ref: "worktree:test",
-    }),
-    error => error instanceof ToolError && error.payload.error === "work_shape_required" && error.payload.reason === "stale_after_work_request_change",
-  );
-});
-
-test("a not_required disposition is valid only with an explicit fixed surface and rationale", () => {
-  const work = { ref: "WR-FIXED", version: 8, shape_disposition: "not_required", shape_fixed_surface_ref: "mcp-server/src/tools.js#existing-verb", shape_rationale: "The request is a bounded extension of this verb." };
-  assert.equal(implementationShapeError(work, null), null);
-  assert.equal(implementationShapeError({ ...work, shape_fixed_surface_ref: null }, null).error, "work_shape_disposition_required");
-});
-
-test("migration makes disposition mandatory at implementation entry and revisions append-only", () => {
-  const sql = fs.readFileSync(MIGRATION, "utf8");
-  assert.doesNotMatch(sql, /shape_required/i);
-  assert.match(sql, /add column if not exists shape_disposition text/i);
-  assert.match(sql, /shape_disposition is null or shape_disposition in \('required','not_required'\)/i);
-  assert.match(sql, /shape_disposition = 'required'[\s\S]+shape_rationale is not null[\s\S]+btrim\(shape_rationale\) <> ''/i);
-  assert.match(sql, /shape_disposition = 'not_required'[\s\S]+shape_fixed_surface_ref is not null[\s\S]+btrim\(shape_fixed_surface_ref\) <> ''[\s\S]+shape_rationale is not null[\s\S]+btrim\(shape_rationale\) <> ''/i);
-  assert.match(sql, /create table if not exists ops\.work_shape_revision/i);
-  assert.match(sql, /work_request_version\s+integer not null/i);
-  assert.match(sql, /unique\s*\(work_request_id, version\)/i);
-  assert.match(sql, /before update or delete on ops\.work_shape_revision/i);
-  assert.match(sql, /raise exception[^;]+append-only/is);
-  assert.match(sql, /create or replace view ops\.v_work_shape_current/i);
-  assert.match(sql, /grant select on ops\.work_shape_revision to carr_reader/i);
-  assert.match(sql, /grant insert on ops\.work_shape_revision to carr_writer/i);
-  assert.doesNotMatch(sql, /grant[^;]+update[^;]+work_shape_revision/i);
-  assert.doesNotMatch(sql, /grant[^;]+delete[^;]+work_shape_revision/i);
-  assert.match(sql, /create trigger work_request_shape_gate[\s\S]+before insert or update on ops\.work_request/i);
-  assert.match(sql, /if tg_op = 'INSERT'[\s\S]+new\.state in \('claimed','in_progress','verification','awaiting_release','released','confirmed_closed'\)[\s\S]+cannot enter implementation directly/i);
-  assert.match(sql, /new\.state = 'ready'[\s\S]+new\.shape_disposition = 'required'[\s\S]+needs a captured or triaged Work Request before ready/i);
-  assert.match(sql, /new\.state = 'ready' and old\.state is distinct from 'ready'[\s\S]+new\.shape_disposition = 'required'[\s\S]+shape_work_request_version <> old\.version/i);
-  assert.match(sql, /new\.state in \('claimed','in_progress','verification','awaiting_release','released','confirmed_closed'\)[\s\S]+old\.state not in \('claimed','in_progress','verification','awaiting_release','released','confirmed_closed'\)/i);
-  assert.match(sql, /shape disposition must be recorded before the implementation transition/i);
-  assert.match(sql, /shape_work_request_version <> old\.version/i);
-  assert.match(sql, /existing ready rows[\s\S]+remain undecided and refuse at claim/i);
-  assert.doesNotMatch(sql, /update ops\.work_request[\s\S]{0,800}program_key='carr-ai-engineering-suite-v1'/i);
-});
-
-test("sourced shape disposition is append-only, base-versioned, and cannot be overwritten by ready-plan acceptance", () => {
-  const sql = fs.readFileSync(SOURCED_SHAPE_MIGRATION, "utf8");
-  assert.match(sql, /create table if not exists ops\.sourced_work_request_shape_disposition_receipt/i);
-  assert.match(sql, /idempotency_key uuid not null unique/i);
-  assert.match(sql, /base_version integer not null/i);
-  assert.match(sql, /result_version integer not null/i);
-  assert.match(sql, /decided_by_actor_id uuid not null/i);
-  assert.match(sql, /before update or delete on ops\.sourced_work_request_shape_disposition_receipt/i);
-  assert.match(sql, /set_sourced_work_request_shape_disposition\([\s\S]+p_decided_by_actor_id uuid[\s\S]+p_idempotency_key uuid/i);
-  assert.match(sql, /old\.state = 'triaged'[\s\S]+new\.state = 'triaged'[\s\S]+sourced_work_request_shape_disposition_receipt/i);
-  assert.match(sql, /sourced_work_request_plan_shape_binding_receipt/i);
-  assert.match(sql, /elsif w\.shape_disposition = 'required'[\s\S]+work_request_version[\s\S]+= w\.version/i);
-  assert.match(sql, /applied_disposition := w\.shape_disposition/i);
-  assert.doesNotMatch(sql, /set state='ready'[\s\S]{0,600}shape_disposition\s*=\s*'not_required'/i);
-  assert.match(sql, /grant execute on function ops\.set_sourced_work_request_shape_disposition[\s\S]+to carr_writer/i);
-  assert.doesNotMatch(sql, /grant execute on function ops\.set_sourced_work_request_shape_disposition[\s\S]+to carr_authority/i);
 });

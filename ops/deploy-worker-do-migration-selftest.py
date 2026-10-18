@@ -126,6 +126,24 @@ if argv[:2] == ["versions", "upload"]:
     if state.get("latest_tag") and state.get("applied_tag") != state["latest_tag"]:
         print("X [ERROR] This Worker has a pending Durable Object migration, which cannot be "
               "applied by `wrangler versions upload`."); sys.exit(1)
+    # upload_failures: the outputs of the first N uploads, each exiting 1, before
+    # the ordinary success. "network" is the exact shape wrangler 4.137 printed on
+    # 2026-10-02 when its first API read timed out (nothing was uploaded).
+    failures = state.get("upload_failures") or []
+    seen = state.get("uploads_seen", 0)
+    state["uploads_seen"] = seen + 1
+    save()
+    if seen < len(failures):
+        kind = failures[seen]
+        if kind == "network":
+            print("X [WARNING] A fetch request failed, likely due to a connectivity issue.")
+            print("X [ERROR] fetch failed")
+        elif kind == "network_after_version":
+            print("Worker Version ID: " + os.environ["FAKE_V1"])
+            print("X [ERROR] fetch failed")
+        else:
+            print("X [ERROR] A request to the Cloudflare API failed. Authentication error [code: 10000]")
+        sys.exit(1)
     print("Worker Version ID: " + os.environ["FAKE_V1"]); sys.exit(0)
 print("fake wrangler: unexpected " + " ".join(argv), file=sys.stderr); sys.exit(2)
 '''
@@ -323,6 +341,7 @@ def run(source: str, *, tags: list[str], state: dict, toml: str | None = None,
             "EXPECTED_SCHEMA_HIGHEST_MIGRATION": "0590_selftest.sql",
             "EXPECTED_SCHEMA_APPLIED_COUNT": "5",
             "CARR_READBACK_ATTEMPTS": "2", "CARR_READBACK_SLEEP": "0",
+            "CARR_UPLOAD_RETRY_SLEEP": "0",
             "FAKE_STATE": str(tmp / "state.json"), "FAKE_CALLS": str(calls),
             "FAKE_TOKEN": TOKEN, "FAKE_V0": V0, "FAKE_V1": V1, "FAKE_VS": VS,
             "REAL_OPS_RECORD": str(REPO / "tools" / "ops-record.py"),
@@ -545,6 +564,34 @@ def main() -> int:
               and why in (sp.get("reason") or "") and (rc.get("refusal") or "").startswith("staging precheck:")
               and sp.get("tag_moved") is moved and sp.get("deploy_exit") == s_exit
               and res["receipt_valid"] and "DO migration" not in res["out"], json.dumps(rc))
+
+    # U. a connectivity failure on the upload is retried; nothing else is.
+    # 2026-10-02: wrangler's first API read timed out once and the pipeline
+    # burned release bde9be154445 for good, with nothing wrong in the release.
+    res = run(source, tags=[], state={"upload_failures": ["network"]})
+    check("U1. one connectivity failure, then success: the retried upload is the candidate",
+          res["rc"] == 0 and len(wrangler_calls(res, "versions", "upload")) == 2
+          and f"provider version: {V1}" in res["out"]
+          and "attempt 1/3 hit a connectivity failure" in res["out"], res["all"][-700:])
+    res = run(source, tags=[], state={"upload_failures": ["network"] * 5})
+    check("U2. connectivity failure every time: refused after exactly 3 attempts",
+          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 3
+          and "Cloudflare version upload failed after 3 attempt(s)" in res["err"]
+          and "provider version:" not in res["out"], res["all"][-700:])
+    res = run(source, tags=[], state={"upload_failures": ["auth"]})
+    check("U3. a non-connectivity failure is never retried",
+          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1
+          and "Cloudflare version upload failed after 1 attempt(s)" in res["err"], res["all"][-700:])
+    res = run(source, tags=[], state={"upload_failures": ["network_after_version"]})
+    check("U4. a failure after Cloudflare named a version is never retried",
+          res["rc"] == 1 and len(wrangler_calls(res, "versions", "upload")) == 1, res["all"][-700:])
+    res = run(source, tags=[TAG1], state={"applied_tag": TAG1, "upload_failures": ["network"]},
+              env_extra={"PROBE_TOKENS_FILE": "/private/probe-tokens.json"})
+    uploads = wrangler_calls(res, "versions", "upload")
+    check("U5. the retry carries the same secrets file and stamps as the first attempt",
+          res["rc"] == 0 and len(uploads) == 2 and uploads[0] == uploads[1]
+          and arg(uploads[1], "--secrets-file") == "/private/probe-tokens.json"
+          and f"GIT_SHA:{HEAD_SHA}" in uploads[1], json.dumps(uploads))
 
     # F. a failure AFTER the upload branch reports what traffic actually did
     res = run(source, tags=[TAG1], state={"applied_tag": None, "bind_fail": True})

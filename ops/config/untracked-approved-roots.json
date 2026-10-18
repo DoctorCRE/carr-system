@@ -21,12 +21,12 @@
     {
       "root": ".claude/worktrees/",
       "why": "registered worktrees — each is a live CHECKOUT of this repo carrying its own .git file, not content of it. Also in .gitignore.",
-      "authority": ".gitignore; rule 308ef1de (nested-checkout sweep hazard)"
+      "authority": ".gitignore; registered nested-checkout sweep boundary"
     },
     {
       "root": ".codex-worktrees/",
       "why": "registered worktrees for Codex seats; same nested-checkout reasoning as .claude/worktrees/.",
-      "authority": "git worktree registry; rule 308ef1de"
+      "authority": "git worktree registry; nested checkouts are separate repositories"
     },
     {
       "root": "__pycache__/",

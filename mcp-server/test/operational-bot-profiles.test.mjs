@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const sql = fs.readFileSync(path.join(ROOT, "migrations/0300_operational_hermes_bot_profiles.sql"), "utf8");
+const sql = readMigration(path.join(ROOT, "migrations/0300_operational_hermes_bot_profiles.sql"));
 
 test("0300 staffs the fixed eight-profile Hermes roster with advisory model rulings", () => {
   for (const key of ["doc", "deal-steward", "intake-clerk", "marketing-ops", "system-watch",

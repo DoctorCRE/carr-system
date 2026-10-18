@@ -1,40 +1,13 @@
 #!/usr/bin/env python3
-"""flash-run.py — run one coding task on the local Flash-Next model, supervised by Jev.
+"""Run one coding task through the supervised Flash path.
 
-WHY THIS EXISTS. The 2026-09-23 stress test made Qwen3.8-Flash-Next the everyday
-coding workhorse (decision ab0dc622) and the Jev experiment that followed found
-what makes it reliable (decision cb56f652): several low-effort attempts, the
-tests run against each, and ONE Jev choice over the candidates with that
-evidence in named state fields. With evidence the raw best-of-3 went 16/16.
-The generic 0.6 confidence gate was wrong for it: it fell back to attempt 1 and
-lost. This file is that finding turned into the command Joe actually runs.
+When Flash is enabled, the command checks ambiguity, runs isolated attempts,
+tests each candidate, applies the selected patch, and tests the result again.
+Failures follow the configured Model Room escalation mode. When Flash is
+switched off, the command skips every local-model step and starts with that
+same escalation path. Every run appends one row to out/flash-runs.jsonl.
 
-THE FLOW for `flash-run "<task>" --test "<command>"`:
-  1. intake (ops/jev_intake.py): the ambiguity stop (#3), the escalation router
-     (#5), the effort picker (#2), the context picker (#1), the worked-example
-     picker (#23), and the mistake notebook's recall (#15).
-  2. up to N attempts (default 3 with a test command, else 1), each in its own
-     copy of the working tree, by the `flash` launcher. The in-session checks ride
-     along through hooks/jev-supervisor.py in advise mode (~/.claude-local
-     settings). SPEED TUNING (2026-09-24, measured on the 16-task scorecard):
-     the first attempt of low-effort work runs without model thinking; the run
-     stops at the first attempt whose tests pass (--all-attempts for full
-     best-of-N); each retry gets the previous attempt's failing test output;
-     and an attempt is cut off at ten minutes.
-  3. the tests run in every copy; ops/jev_best_of.py picks one candidate or
-     "none". A single passing candidate is taken without asking Jev.
-  4. the chosen patch is applied to the real tree and the tests run again there.
-     Review triage (#17) scores the risk of the change.
-  5. on failure: the mistake is written to the notebook and a handoff pack (#10)
-     is written; --escalate auto sends it through the Model Room (2026-09-24,
-     Flash replaces Sonnet for scoped coding): a failed task to the Sol fixer desk,
-     whose change is applied only if the test passes; a task routed away as a
-     design/judgment call to the Opus desk. Never a direct model call.
-
-Every run appends one row to out/flash-runs.jsonl, the real-use record the week
-of tracking reads (`flash-run stats`).
-
-OTHER SUBCOMMANDS
+Other subcommands:
   flash-run plan <file>        route each step of a plan local/escalate (#18)
   flash-run scorecard          the standing model scorecard (#25)
   flash-run stats              summarize out/flash-runs.jsonl
@@ -59,6 +32,9 @@ import uuid
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+sys.path.insert(0, os.path.join(REPO, "tools"))
+import flashlib
 OUT = os.path.join(REPO, "out")
 RUNS_LOG = os.path.join(OUT, "flash-runs.jsonl")
 EXAMPLES_LOG = os.path.join(OUT, "flash-examples.jsonl")
@@ -472,17 +448,25 @@ RULE_SITUATION = ("A local coding model (Flash) is about to write code for ONE s
                   "applies the patch). It only reads, edits and runs tests. The task: ")
 
 
-def pick_rules(task, selector=None):
-    """Jev's pick of the taught rules that bind to this one task: (rules, error_note).
+def pick_rules(task, situation=RULE_SITUATION, **judge):
+    """Return authoritative rules and a visible note for pending semantic advice.
 
-    Fails open: a Jev outage or a partially judged roster costs the attempt its rules,
-    never the attempt itself, and the note lands in the run log so the gap is visible."""
+    Flash has no boot load or enforcing hooks, so the selector considers the whole
+    active corpus. Injected judgment arguments use the same bounded batch interface.
+    """
     try:
-        selector = selector or _lib("jev_rule_select")
-        rules = selector.advise(RULE_SITUATION + task)
-        return list(rules)[:MAX_TASK_RULES], None
-    except Exception as exc:
-        return [], f"{type(exc).__name__}: {exc}"[:300]
+        from lib.rule_scope_lookup import lookup
+        result = lookup({'hook_event_name': 'UserPromptSubmit', 'task': situation + task},
+                        judge=judge.get('judge'))
+        if len(json.dumps(result['rules'])) > 90000:
+            return [], 'selected rule text exceeds the task context budget'
+        note = None
+        if not result['complete']:
+            gaps = result.get('data_defects', []) + result.get('unresolved', [])
+            note = 'advisory: rule selection incomplete: ' + json.dumps(gaps, sort_keys=True)
+        return result['rules'], note
+    except Exception:
+        return [], 'rule scope catalog unavailable'
 
 
 def rules_block(rules):
@@ -491,10 +475,8 @@ def rules_block(rules):
         return None
     lines = ["RULES FOR THIS TASK (picked from the practice's taught rules for this task alone; "
              "follow them):"]
-    for rule in rules[:MAX_TASK_RULES]:
+    for rule in rules:
         text = (rule.get("statement") or rule.get("gist") or "").strip()
-        if len(text) > RULE_STATEMENT_CHARS:
-            text = text[:RULE_STATEMENT_CHARS].rsplit(" ", 1)[0] + " ..."
         lines.append(f"- [{rule.get('id')}] {rule.get('gist', '').strip()}: {text}")
     return "\n".join(lines)
 
@@ -563,17 +545,21 @@ def run_attempt(n, cwd, prompt, test_cmd, effort, workdir, think=True, rules_tex
             "--tools", *ATTEMPT_TOOLS, *extra, "--allowedTools", *allowed]
     reads, execs, port = _dep_reads(cwd), [os.path.join(cwd, ".venv", "bin")], flash_port()
     gitdir = gitdir_for(dest)
-    if sandbox:
-        execs = [*execs, *agent_execs()]
-        # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
-        # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
-        # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
-        argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
-        env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
-    else:
-        env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
-        code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    try:
+        with flashlib.request_scope(os.environ.get("CARR_FLASH_URL", flashlib.LOCAL_URL)):
+            if sandbox:
+                execs = [*execs, *agent_execs()]
+                # The agent runs model-driven code, so it is sandboxed: writes only inside this attempt copy (never git
+                # metadata), no reads under home except its deps and its read-only git dir, network only to the local Flash
+                # port. A throwaway HOME keeps its config writable. It runs contained, so nothing it starts outlives it.
+                argv = sandbox_wrap(argv, dest, reads=[*reads, gitdir], execs=execs, port=port)
+                env = dict(_sandbox_env(env or os.environ, dest), GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = bounded_run(argv, dest, ATTEMPT_TIMEOUT, env=env)
+            else:
+                env = dict(env or os.environ, GIT_DIR=gitdir, GIT_WORK_TREE=dest)
+                code, transcript = _sh(argv, dest, ATTEMPT_TIMEOUT, env=env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        code, transcript = 1, f"Flash unavailable: {exc}"
     elapsed = round(time.monotonic() - started, 1)
     test_code, test_out = (None, "")
     if test_cmd:
@@ -738,6 +724,14 @@ def cmd_run(a):
     task = a.task
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     row = {"run_id": run_id, "at": _now(), "cwd": cwd, "task": task[:2000], "test": a.test}
+    if flashlib.is_switched_off():
+        _say(flashlib.OFF_REASON)
+        row["outcome"] = "routed_escalate"
+        row["escalation"] = escalate(task, cwd, run_id, None, [], a.escalate,
+                                     test_cmd=a.test, kind="code")
+        row["handoff"] = row["escalation"]["handoff"]
+        _append(RUNS_LOG, row)
+        return 0 if row["escalation"]["outcome"] == "fixed_by_desk" else 4
     intake = _lib("jev_intake")
     notebook = _lib("jev_notebook")
 
@@ -754,6 +748,11 @@ def cmd_run(a):
 
     amb = intake.check_ambiguity(task)
     row["ambiguity"] = amb.get("verdict")
+    if amb.get("verdict") in ("review_required", "unavailable") or (amb.get("escalate") and amb.get("verdict") != "ambiguous"):
+        row.update(outcome="intake_review_required", intake_advice=amb)
+        _say("ambiguity judgment requires review: " + json.dumps(amb.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 3
     if amb.get("verdict") == "ambiguous" and not a.force:
         _say("the task looks ambiguous: " + json.dumps(amb.get("detail"))[:600])
         _say("clarify it, or pass --force to run anyway")
@@ -764,6 +763,11 @@ def cmd_run(a):
     files = [f for f in _tracked_files(cwd)][:4000]
     route = intake.route_task(task, files=None, has_tests=bool(a.test))
     row["route"] = route.get("verdict")
+    if route.get("verdict") in ("review_required", "unavailable") or (route.get("escalate") and route.get("verdict") != "escalate"):
+        row.update(outcome="route_review_required", intake_advice=route)
+        _say("route judgment requires review: " + json.dumps(route.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 4
     if route.get("verdict") == "escalate" and not a.force:
         _say("routed away from the local model: " + json.dumps(route.get("detail"))[:600])
         row["outcome"] = "routed_escalate"
@@ -772,7 +776,13 @@ def cmd_run(a):
         _append(RUNS_LOG, row)
         return 4
 
-    effort = a.effort or intake.pick_effort(task).get("verdict")
+    effort_check = None if a.effort else intake.pick_effort(task)
+    if effort_check and (effort_check.get("escalate") or effort_check.get("verdict") not in ("low", "medium", "high")):
+        row.update(outcome="effort_review_required", intake_advice=effort_check)
+        _say("effort judgment requires review: " + json.dumps(effort_check.get("detail"))[:600])
+        _append(RUNS_LOG, row)
+        return 4
+    effort = a.effort or effort_check.get("verdict")
     if effort not in ("low", "medium", "high"):
         effort = "low"
     ctx = intake.pick_context(task, cwd)
@@ -793,6 +803,8 @@ def cmd_run(a):
     row["rules"] = [r.get("id") for r in rules]
     if rules_error:
         row["rules_error"] = rules_error
+        if not a.no_rules:
+            _say(rules_error)
     if rules:
         _say("rules for this task: " + ", ".join(f"{r.get('id')} {r.get('gist', '')[:50]}"
                                                   for r in rules))
@@ -822,8 +834,14 @@ def cmd_run(a):
         chosen_id = best.get("verdict")
         row["selection"] = {"verdict": chosen_id, "confidence": best.get("confidence"),
                             "escalate": best.get("escalate"),
+                            "advice": best.get("detail"),
                             "attempts": [{"id": c["id"], "test_exit_code": c["test_exit_code"],
                                           "elapsed_s": c["elapsed_s"]} for c in candidates]}
+        if best.get("escalate") or chosen_id == "review_required":
+            row["outcome"] = "selection_review_required"
+            _say("candidate selection requires review; evidence retained in the run log")
+            _append(RUNS_LOG, row)
+            return 5
         chosen = next((c for c in candidates if c["id"] == chosen_id), None)
         if chosen is None and attempts == 1 and candidates and candidates[0]["patch"].strip() \
                 and not a.test:
@@ -912,6 +930,9 @@ def cmd_plan(a):
 
 
 def cmd_scorecard(a):
+    if flashlib.is_switched_off():
+        _say(flashlib.OFF_REASON)
+        return 4
     sc = _lib("jev_scorecard")
     suite = sc.load_suite(a.suite)
     results = []
@@ -995,7 +1016,7 @@ def main(argv):
     if not a.cmd:
         p.print_help()
         return 2
-    if a.cmd == "run" and not os.path.exists(FLASH):
+    if a.cmd == "run" and not flashlib.is_switched_off() and not os.path.exists(FLASH):
         _say(f"the flash launcher is missing ({FLASH})")
         return 2
     return {"run": cmd_run, "plan": cmd_plan, "scorecard": cmd_scorecard,

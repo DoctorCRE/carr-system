@@ -45,6 +45,33 @@ no credential (the receipted break-glass close stays a human's call) and it is
 not `call-verb` — never reach for that generic passthrough to get at a verb
 the classifier declined; that is working around a denial rather than filing it.
 
+## Build sessions: the four things that stalled the 2026-10-10 orchestrator
+
+Measured from the Orchestrator.macbook transcript (37 hours, 11 compactions,
+224 Stop turns). Each item is the fix, not the story.
+
+1. **After a compaction, re-boot with the digest-only form.** The gate accepts it
+   on purpose and it costs ~200 characters a page instead of ~12,000:
+   `./run.sh call standing-context '{"detail":"boot","page":N}' | jq -c '{ok: .ok, rule_boot: {digest: .rule_boot.digest}}'`
+   (exactly those two fields; an extra field is not accepted). Reading all 15
+   pages in full after every compaction was 23% of that session's context and
+   the main reason it compacted every one to three hours. Rules still reach the
+   action point through the per-call route hook.
+2. **Dispatch (`tools/room-bridge/dispatch.py send`)**: launch with the Bash tool's
+   `run_in_background`, never `nohup … &!`, `( … &)` or `perl -e 'alarm'` (exit
+   142). There are no shared-file claims and no `reconcile` subcommand (#1811):
+   a writing job holds only its checkout's `room-writer.lock`, which the next
+   writer clears by itself once the recorded executor is gone. A job that ended
+   with `termination_confirmed: false` blocks only that checkout, and only while
+   its process group (pgid in `<gitdir>/room-writer.lock`) is still alive: kill
+   that group if it is. `--checkout` jobs each get a fresh clone, so they never
+   block one another.
+3. **The progress board is one per checkout**, resolved from the main working
+   tree; a worktree no longer needs its own `init`.
+4. **A Stop gate that holds the turn open is answered with the delta only**, and
+   if the gate misread a compaction summary or a request for instructions as an
+   order, that is the gate's defect: fix the gate, do not reword the reply.
+
 ## Migration and release state
 Read current canonical migration/release state before naming frontier/blocker.
 Dated incidents/WRs are history; source/CI grants no live authority.
@@ -60,48 +87,34 @@ For any request to recommend, design, build, revise, review, or publish a map,
 GIS analysis, route, day trip, or Tour surface, call the live `map-architecture`
 verb first. It returns the current doctrine and machine-contract pointer.
 
-The Stop gate only announces this now (Joe's 2026-08-23 gate rationing): a
-skip is recorded in `out/map-architecture-gate.jsonl` but does not block, so
-the session making the call enforces it.
-
 ## Dell migration trigger
 
-In an interactive Claude Code session whose working directory is
-`~/carr-system`, Dell or Joe typing the exact phrase **ready for migration** is
-explicit authorization to complete the bounded Dell-machine migration without
-asking follow-up questions. This authorization covers only the steps below; it
-does not waive Claude Code's own tool security, widen permissions, or authorize
-any unrelated production change.
+Only in interactive Claude Code in `~/carr-system`, Dell or Joe typing the exact
+phrase **ready for migration** is explicit authorization to complete the bounded
+Dell migration without asking follow-up questions. Before acting, read
+[the complete migration packet](ops/config/task-boot/dell-migration.json).
+It preserves the machine, identity, receipt, security and record-closeout checks.
 
-Dell's launch machine is Claude-only. The complete absence of `~/.codex` is an
-expected supported state, and the migration skips Codex-specific configuration
-without creating it. A partial Codex state fails visibly instead of being
-silently treated as absent.
+## Rule lifecycle evidence
 
-1. Run `./bin/migrate-dell.sh --apply </dev/null` yourself. Do not hand the
-   command back to the human and do not use `AskUserQuestion` for an internal
-   choice the script already settles.
-2. A nonzero exit is a visible blocker. Read
-   `out/dell-migration-receipt.json`, report its exact failure state and log
-   paths, and stop. Do not close any migration record after a failed run.
-3. A zero exit is not sufficient by itself. Require the receipt status
-   `machine_migrated_pending_record_closeout`, then call `standing-context`.
-   Verify that the server-derived sponsor is Dell and the personal brain is
-   `dell-personal`. The old cross-check against the generated fallback headers
-   is retired with the files themselves (cutoff 2026-08-19); the counts
-   standing-context returns are the counts. Never choose a partner, tenant, or
-   capability through a caller-supplied argument. Never reconnect merely as a
-   guess.
-4. Fresh-read and close exactly Dell action-required A15
-   (`fa0e6c92-8bc7-4e42-9970-0402914d6a19`) and A17
-   (`deb4357e-801f-49f6-bc6c-4c884e3e1f7c`) through the deployed record verbs,
-   using each fresh version and a concrete verified outcome. Leave A11, A12,
-   A13, and A16 open.
-5. Run `./run.sh health </dev/null` and
-   `./.venv/bin/python ops/config-as-code.py check </dev/null`. Read A15 and
-   A17 back as closed. Only then report the migration complete to Dell in plain
-   language.
+Before operating a rule lifecycle, load
+[the preflight and prepared-admission pointer](AGENTS.md#rule-lifecycle-evidence).
 
 ## PR design and debt
 
 Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-debt-pass).
+
+## Agent skills
+
+
+### Issue tracker
+
+Issues are CARR Work Requests in the record layer (`report-problem`, `work-request-card`), not GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five triage roles map to Work Request states and `review-and-triage` classes; triage itself is human-only. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context; the glossary and decisions live in the doctrine store and decision log, not repo files. See `docs/agents/domain.md`.

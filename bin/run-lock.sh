@@ -84,7 +84,6 @@
 # waiting on a child: zsh does not run its TERM handler until that child returns,
 # so the polite signal frequently does nothing at all and the escalation is the
 # path actually taken. Configurable for the same reason the bound above is —
-# ops/nightly-tombstone-selftest.py exercises the real escalation and should not
 # spend ten seconds of every CI run proving that a sleep ignores TERM.
 : ${CARR_LOCK_TERM_GRACE_SECONDS:=10}
 

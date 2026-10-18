@@ -1,0 +1,81 @@
+{
+  "sources": [
+    {
+      "file": "carr-before.py",
+      "repository": "jbookout/carr-system",
+      "sha": "2f531c295f37757899ca432dfb04a9b95e8d5184",
+      "path": "tools/room-bridge/spatial_surface.py",
+      "start_line": 20,
+      "end_line": 21,
+      "sha256": "25dbbb963c2d6dcbc7c74888511ec534b2631ab6f05815baf4cd2a0b15c41a0e"
+    },
+    {
+      "file": "carr-after.py",
+      "repository": "jbookout/carr-system",
+      "sha": "cb1ccbfeddbb6450953cd6beadbf428b67167566",
+      "path": "tools/room-bridge/execution_contract.py",
+      "start_line": 149,
+      "end_line": 158,
+      "sha256": "67d0a38497c9fdf588619821ccffe1bc4983aac8d67bd84304474fb56a75a6a9"
+    },
+    {
+      "file": "app-before.mjs",
+      "repository": "jbookout/doctorcre-app",
+      "sha": "764e6cb76c54052f8e2c287b96e26203bb6dbe3e",
+      "path": "js/field-write-reconciliation.mjs",
+      "start_line": 332,
+      "end_line": 334,
+      "sha256": "40de59daf652d9bb4f71534efef76a261bcc4694781d731166a117bb22a14c54"
+    },
+    {
+      "file": "app-after.mjs",
+      "repository": "jbookout/doctorcre-app",
+      "sha": "04db92208f651b60b42d8a47aefaf429ea255c5d",
+      "path": "js/command-feedback.mjs",
+      "start_line": 305,
+      "end_line": 307,
+      "sha256": "ff00a6f8ff96856e5b4490566c591355ad34c00fa373a5a5b8412862b51a3a72"
+    },
+    {
+      "file": "invariant-good.py",
+      "repository": "jbookout/carr-system",
+      "sha": "cb1ccbfeddbb6450953cd6beadbf428b67167566",
+      "path": "tools/room-bridge/spatial_surface.py",
+      "start_line": 20,
+      "end_line": 21,
+      "sha256": "bde7e21c7c85cf62d8950db1e2c241d5091af716adb3fa8e9f0fb7e9255df9a0"
+    },
+    {
+      "file": "digest-before.py",
+      "repository": "jbookout/carr-system",
+      "sha": "2f531c295f37757899ca432dfb04a9b95e8d5184",
+      "path": "tools/room-bridge/spatial_surface.py",
+      "start_line": 24,
+      "end_line": 25,
+      "sha256": "aa0d1544bb59226f249a1b1ca8b420a37d9f0953844f09f72b80e03097f0f566"
+    },
+    {
+      "file": "digest-after.py",
+      "repository": "jbookout/carr-system",
+      "sha": "cb1ccbfeddbb6450953cd6beadbf428b67167566",
+      "path": "tools/room-bridge/execution_contract.py",
+      "start_line": 175,
+      "end_line": 178,
+      "sha256": "f4b00373b203b098e51bf57b3f4d6477e5091302650c4530c4c1e39d1865bcfc"
+    },
+    {
+      "file": "judge-invariant-good.py",
+      "repository": "jbookout/carr-system",
+      "sha": "cb1ccbfeddbb6450953cd6beadbf428b67167566",
+      "path": "tools/jev-value-report.py",
+      "start_line": 172,
+      "end_line": 173,
+      "sha256": "5f899974077a329036290eddc9abb09a293a51e70e0e36879c47483c35607e70"
+    }
+  ],
+  "reports": [
+    "out/orch/matt/retro-report.md coding standards item10",
+    "out/orch/matt/del-carr-system-report.md findings1,13"
+  ],
+  "notes": "Exact declaration excerpts, not rewritten examples. Before wrappers were removed; after declarations are the canonical implementations now called."
+}

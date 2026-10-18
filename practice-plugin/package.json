@@ -19,8 +19,8 @@
   "devDependencies": {
     "ajv": "8.18.0",
     "esbuild": "0.28.2",
-    "miniflare": "5.20260930.0-alpha",
+    "miniflare": "5.20261006.1-alpha",
     "playwright-core": "1.63.0",
-    "wrangler": "4.145.0"
+    "wrangler": "4.149.0"
   }
 }

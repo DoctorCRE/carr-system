@@ -5,8 +5,6 @@ NOTHING HERE REACHES THE NETWORK. Every request is served by an injected
 opener, so this suite runs on a GitHub runner with no credential, no allowlist
 entry and no spend. A test that needed the live service would be a test CI
 could not run.
-Offline transport fixtures must also own temporary paid-call accounting; a
-mocked HTTP response must never reserve capacity in the machine's live ledger.
 
 The load-bearing case is test_module_is_a_library_and_must_stay_one. The client
 is safe to import from anywhere precisely because it is not a script
@@ -42,6 +40,21 @@ SPEC = importlib.util.spec_from_file_location("typesafe_client", MODULE_PATH)
 assert SPEC and SPEC.loader
 client = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(client)
+# The call-site registry, attribution and fixture refusal are exercised by
+# ops/jev-call-sites-selftest.py. This suite tests the transport beneath them,
+# so every fixture caller is admitted as a budget-free scheduled job. Bound on
+# this suite's private module copy, not as module patches: a nested TestSuite
+# run (OfflineBudgetIsolationTests) runs module cleanups and would stop them.
+_PERMISSIVE_SITE = {"caller": "*", "trigger": "selftest", "runs_in": "selftest",
+                    "attribution": "session_or_job", "unattended": "allowed",
+                    "hourly_budget": 10**9, "daily_budget": 10**9, "owner": "selftest",
+                    "value": "selftest", "sources": ["ops/typesafe_client.py"]}
+setattr(client, "load_call_sites", lambda path=None: {"hourly_paid_call_cap": 10**9,
+                                                     "sites": {"*": _PERMISSIVE_SITE}})
+setattr(client, "call_site", lambda caller, registry: _PERMISSIVE_SITE)
+for _name in ("CARR_JEV_OFFLINE", "CARR_HOOK_FIXTURE", "CARR_JEV_WORKER"):
+    os.environ.pop(_name, None)
+os.environ["CARR_JEV_JOB"] = "typesafe-client-selftest"
 REAL_ALERT_SINK = client._emit_spend_alert
 REAL_MAIL_SINK = getattr(client, "_email_spend_alert", None)
 _CAP_ROOT = tempfile.TemporaryDirectory()
@@ -54,6 +67,10 @@ def setUpModule():
     patcher = patch.object(client, "JEV_DAILY_CAP_LOG", os.path.join(_CAP_ROOT.name, "calls.jsonl"))
     patcher.start()
     unittest.addModuleCleanup(patcher.stop)
+    # Paid Worker attempts sign with a fixture admission secret, never a real one.
+    secret = patch.object(client, "read_admission_secret", lambda: "offline-admission")
+    secret.start()
+    unittest.addModuleCleanup(secret.stop)
 
 
 class FakeResponse(io.BytesIO):
@@ -357,6 +374,414 @@ class WorkerDailyCapTests(unittest.TestCase):
         self.assertEqual(sorted(alert["threshold"] for alert in alerts), [50, 80, 100])
 
 
+def vendor_refusal(status):
+    def opener(request, timeout=None):
+        raise urllib.error.HTTPError("https://fixture.invalid", status, "refused",
+                                     {}, io.BytesIO(b'{"error":"fixture"}'))
+    return opener
+
+
+def worker_vendor_failure(status, reason):
+    payload = json.dumps({"error": "jev_upstream_failed", "status": status, "reason": reason},
+                         indent=2)
+    return f"local-verb identity -> fixture\nTOOL ERROR {payload}\n"
+
+
+class UnusableResponseTests(unittest.TestCase):
+    """Each failure class behind 2026-09-28..10-04's 30% unusable rate.
+
+    Replayed from out/jev-calls.jsonl: 16,927 non-cached calls came back HTTP
+    402 (credits exhausted) in two windows of 22h and 18h. The client logged
+    each as schema_valid=false and kept sending. The 1,405
+    vendor_failed_at_worker rows were the Worker's single paid_once vendor
+    attempt failing (the vendor was throttling: 429), each then paid again
+    direct. Zero rows ever had HTTP 200 with an answer that failed validation.
+    """
+    ask = DailyCapTests.ask
+    worker = WorkerDailyCapTests.worker
+    count = WorkerDailyCapTests.count
+
+    def setUp(self):
+        DailyCapTests.setUp(self)
+        client.JEV_COST_CONFIG["daily_paid_call_cap"] = 1000
+        self.options["cache_ttl_seconds"] = 60
+
+    def rows(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def use_worker(self, stderr=None):
+        WorkerDailyCapTests.setUp(self)
+        client.JEV_COST_CONFIG["daily_paid_call_cap"] = 1000
+        if stderr is not None:
+            def failing(argv, **kwargs):
+                mode = json.loads(argv[3]).get("transport_mode")
+                self.worker_calls.append(mode)
+                if mode == "cache_only":
+                    return subprocess.CompletedProcess(argv, 1, "", '{"error":"jev_cache_miss"}')
+                return subprocess.CompletedProcess(argv, 1, "", stderr)
+            self.options["server_runner"] = failing
+
+    # -- Class 1: HTTP 402, logged as a schema failure and never stopped ----
+
+    def test_vendor_402_is_logged_as_a_refusal_with_its_status_not_a_schema_failure(self):
+        with patch.object(client.urllib.request, "urlopen", vendor_refusal(402)):
+            with self.assertRaisesRegex(client.TypeSafeError, "HTTP 402"):
+                self.ask("credit gone")
+        [row] = self.rows()
+        self.assertEqual(row["http_status"], 402)
+        self.assertIsNone(row["schema_valid"], "no answer came back, so nothing was validated")
+        self.assertIsNone(row["usage"])
+        self.assertFalse(row["usable"])
+
+    def test_vendor_402_stops_further_requests_until_the_credit_hold_lapses(self):
+        sent = []
+        def refused(request, timeout=None):
+            sent.append(1)
+            return vendor_refusal(402)(request, timeout)
+        with patch.object(client.urllib.request, "urlopen", refused):
+            with self.assertRaisesRegex(client.TypeSafeError, "HTTP 402"):
+                self.ask("first")
+            for i in range(50):
+                with self.assertRaises(client.JevCallRefused) as caught:
+                    self.ask(f"burst {i}")
+                self.assertEqual(caught.exception.code, "vendor_credit_exhausted")
+        self.assertEqual(len(sent), 1, "one 402 is enough to know the account is empty")
+        refusals = [r for r in self.rows() if r.get("error") == "vendor_credit_exhausted"]
+        self.assertEqual(len(refusals), 1, "the hold is logged once per hour, not per call")
+        self.assertEqual(client._logged_attempts(str(self.log), "2026-10-02"), 1,
+                         "refusals never count toward the daily cap")
+        # The hold lapses on a clock; then exactly one probe goes out.
+        client._open_hold("credit_hold", 0)
+        self.ask("credit restored")
+        self.assertEqual(len(self.requests), 1)
+
+    def test_cached_answers_are_still_served_during_a_credit_hold(self):
+        self.ask("answered earlier")
+        with patch.object(client.urllib.request, "urlopen", vendor_refusal(402)):
+            with self.assertRaises(client.TypeSafeError):
+                self.ask("credit gone")
+        self.assertTrue(self.ask("answered earlier")["cache_hit"])
+
+    def test_expired_credit_hold_admits_only_one_concurrent_probe(self):
+        client._open_hold("credit_hold", 0)
+        start = threading.Barrier(8)
+        entered = threading.Event()
+        release = threading.Event()
+        sent = []
+        def transport(request, timeout=None):
+            sent.append(1)
+            entered.set()
+            release.wait(3)
+            return vendor_refusal(402)(request, timeout)
+        def attempt(i):
+            start.wait(3)
+            try:
+                self.ask(f"concurrent probe {i}")
+            except client.TypeSafeError:
+                pass
+        with patch.object(client.urllib.request, "urlopen", transport):
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                futures = [pool.submit(attempt, i) for i in range(8)]
+                self.assertTrue(entered.wait(3))
+                # The other admissions finish while the exclusive probe waits.
+                time.sleep(0.2)
+                release.set()
+                for future in futures:
+                    future.result(5)
+        self.assertEqual(len(sent), 1)
+
+    def test_hold_opened_between_preflight_and_transaction_refuses_transport(self):
+        original = client._daily_cap_limit
+        def open_before_admission():
+            client._open_hold("credit_hold", 300)
+            return original()
+        with patch.object(client, "_daily_cap_limit", open_before_admission):
+            with self.assertRaises(client.TypeSafeError):
+                self.ask("hold opened at admission")
+        self.assertEqual(self.requests, [])
+
+    def test_abandoned_credit_probe_has_a_bounded_lease(self):
+        client._open_hold("credit_hold", 0)
+        # A process can die after reserving and before any transport outcome.
+        client._reserve_paid_call({"q": client.noul("Fixture")}, None,
+                                  "cap-test", "noul", "fixture")
+        with self.assertRaises(client.TypeSafeError):
+            self.ask("probe abandoned")
+        self.assertEqual(self.requests, [])
+        with patch.object(client.time, "time", return_value=time.time() + 3600):
+            self.ask("probe lease expired")
+        self.assertEqual(len(self.requests), 1)
+        self.ask("recovery verified")
+        self.assertEqual(len(self.requests), 2, "success clears the recovered hold")
+
+    def test_credit_read_storage_error_refuses_paid_transport(self):
+        client._open_hold("credit_hold", 300)
+        self.options["cache_ttl_seconds"] = 0
+        connect = client.sqlite3.connect
+        calls = []
+        def fail_first(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                raise client.sqlite3.OperationalError("offline fixture")
+            return connect(*args, **kwargs)
+        with patch.object(client.sqlite3, "connect", fail_first):
+            with self.assertRaises(client.TypeSafeError):
+                self.ask("untrusted credit read")
+        self.assertEqual(self.requests, [])
+
+    def test_credit_write_storage_error_survives_storage_recovery(self):
+        with patch.object(client.sqlite3, "connect",
+                          side_effect=client.sqlite3.OperationalError("offline fixture")):
+            with self.assertRaises(client.TypeSafeError):
+                client._open_hold("credit_hold", 300)
+        self.assertTrue(client._credit_marker().exists())
+        client._CREDIT_STATE_UNSAFE.discard(client._cap_db_path())
+        with self.assertRaises(client.TypeSafeError):
+            self.ask("storage restored after lost credit write")
+        self.assertEqual(self.requests, [])
+
+    def test_first_worker_credit_failure_still_serves_existing_local_cache(self):
+        self.ask("answered earlier")
+        self.options.pop("api_key")
+        self.enterContext(patch.dict(os.environ, CARR_JEV_IN_HOOK="0"))
+        self.enterContext(patch.object(client, "read_api_key", return_value="offline-fixture"))
+        worker_calls = []
+        def worker(argv, **kwargs):
+            mode = json.loads(argv[3])["transport_mode"]
+            worker_calls.append(mode)
+            error = ('{"error":"jev_cache_miss"}' if mode == "cache_only"
+                     else worker_vendor_failure(402, "http_status"))
+            return subprocess.CompletedProcess(argv, 1, "", error)
+        self.options["server_runner"] = worker
+        result = self.ask("answered earlier")
+        self.assertTrue(result["cache_hit"])
+        self.assertEqual(worker_calls, ["cache_only", "paid_once"])
+        self.assertEqual(len(self.requests), 1, "only the cache-priming transport")
+
+    def test_builders_copy_criteria_before_returning(self):
+        options = {"a": "A", "b": "B"}
+        levels = ["a", "b"]
+        choice = client.choice("Fixture", options)
+        score = client.score("Fixture", levels)
+        options.clear()
+        levels.clear()
+        self.assertEqual(len(choice["criteria"]), 2)
+        self.assertEqual(len(score["criteria"]), 2)
+
+    def test_request_contract_matches_worker_and_builders(self):
+        cases = [
+            ({"type": "choice", "instructions": "Fixture", "criteria": {"a": "A"}}, False),
+            ({"type": "choice", "instructions": "Fixture"}, False),
+            ({"type": "score", "instructions": "Fixture", "criteria": ["a"]}, False),
+            ({"type": "score", "instructions": "Fixture"}, False),
+            ({"type": "noul", "instructions": "Fixture", "criteria": []}, False),
+            ({"type": "choice", "instructions": "Fixture", "criteria": {"a": "A", "b": "B"}}, True),
+            ({"type": "score", "instructions": "Fixture", "criteria": ["a", "b"]}, True),
+            ({"type": "noul", "instructions": "Fixture"}, True),
+            ({"type": "noul", "instructions": " "}, False),
+            ({"type": "unknown", "instructions": "Fixture"}, False),
+            ({"type": ["noul"], "instructions": "Fixture"}, False),
+        ]
+        requests = [{"state": "fixture", "questions": {"q": question},
+                     "purpose": "call", "session_id": "fixture"} for question, _ in cases]
+        script = """import {validateAskJevArgs} from './mcp-server/src/jev-call-receipt.js';
+          let data=''; for await (const chunk of process.stdin) data+=chunk;
+          console.log(JSON.stringify(JSON.parse(data).map(args=>{
+            try {validateAskJevArgs(args); return true;} catch {return false;}
+          })));"""
+        result = subprocess.run(["node", "--input-type=module", "-e", script],
+                                input=json.dumps(requests), text=True, capture_output=True,
+                                cwd=MODULE_PATH.parent.parent, check=True)
+        expected = [valid for _, valid in cases]
+        self.assertEqual(json.loads(result.stdout), expected)
+        self.assertEqual([client.malformed_request("fixture", {"q": q}) is None
+                          for q, _ in cases], expected)
+        for builder, criteria in [(client.choice, {"a": "A"}), (client.score, ["a"])]:
+            with self.assertRaises(client.TypeSafeError):
+                builder("Fixture", criteria)
+
+    def test_malformed_question_diagnostics_never_echo_caller_fields(self):
+        sentinel = "CONFIDENTIAL_fixture_sentinel"
+        for question in [{"type": "noul", "instructions": ""},
+                         {"type": sentinel, "instructions": "Fixture"}]:
+            with self.assertRaises(client.TypeSafeError) as caught:
+                client.ask("fixture", {sentinel: question}, **self.options)
+            self.assertNotIn(sentinel, str(caught.exception))
+        # Judge logs persist the same exception text; exercise that sink too.
+        spec = importlib.util.spec_from_file_location("jev_judge", MODULE_PATH.with_name("jev_judge.py"))
+        judge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(judge)
+        with self.assertRaises(judge.JudgeUnavailable) as caught:
+            judge.judge("fixture", {sentinel: {"type": "noul", "instructions": ""}},
+                        client=client, api_key="offline-fixture")
+        log = self.log.with_name("judge-errors.jsonl")
+        judge.record("fixture", "fixture", None, error=str(caught.exception), log_path=log)
+        self.assertNotIn(sentinel, log.read_text())
+
+    # -- Class 2: vendor_failed_at_worker, then a second paid direct attempt -
+
+    def test_worker_402_refuses_without_a_second_paid_attempt(self):
+        self.use_worker(worker_vendor_failure(402, "http_status"))
+        with self.assertRaisesRegex(client.TypeSafeError, "HTTP 402"):
+            self.ask("worker credit gone")
+        self.assertEqual(self.requests, [], "no direct call after a 402")
+        self.assertEqual(self.count(), 1)
+        [row] = self.rows()
+        self.assertEqual(row["http_status"], 402)
+        self.assertEqual(row["server_error"], "vendor_failed_at_worker")
+        with self.assertRaises(client.JevCallRefused):
+            self.ask("next call")
+        self.assertEqual(self.worker_calls.count("paid_once"), 1)
+
+    def test_worker_daily_cap_is_not_retried_and_holds_every_paid_route_until_reset(self):
+        self.use_worker('local-verb identity -> fixture\nTOOL ERROR {"error": "jev_worker_daily_cap", '
+                        '"cap": 300, "count": 300, "resets_at": "2026-10-16T00:00:00.000Z"}\n')
+        with self.assertRaises(client.JevCallRefused) as caught:
+            self.ask("past the worker ceiling")
+        self.assertEqual(caught.exception.code, "jev_worker_daily_cap")
+        resets_at = "2026-10-03T00:00:00Z"  # the fixture clock's next UTC midnight
+        self.assertEqual(caught.exception.resets_at, resets_at)
+        self.assertEqual(self.requests, [], "no direct call past the Worker's ceiling")
+        [row] = self.rows()
+        self.assertEqual(row["server_error"], "worker_daily_cap")
+        with self.assertRaises(client.JevCallRefused) as caught:
+            self.ask("the next question")
+        self.assertEqual(caught.exception.code, "jev_worker_daily_cap")
+        self.assertEqual(self.worker_calls.count("paid_once"), 1, "the held route is not asked again")
+        self.assertEqual(self.requests, [])
+        self.assertEqual(client.active_pause(), {"scope": "jev_worker_daily_cap", "resets_at": resets_at})
+
+    def test_worker_throttle_gets_one_bounded_direct_retry(self):
+        self.use_worker(worker_vendor_failure(429, "http_status"))
+        result = self.ask("throttled at the worker")
+        self.assertEqual(result["answers"]["q"]["noul"], 0.91)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.count(), 2, "the Worker attempt and the one retry")
+        worker_row, direct_row = self.rows()
+        self.assertEqual(worker_row["http_status"], 429)
+        self.assertEqual(worker_row["upstream_reason"], "http_status")
+        self.assertTrue(direct_row["usable"])
+
+    def test_worker_timeout_is_not_paid_for_twice(self):
+        # The vendor may have answered and billed after the Worker gave up.
+        self.use_worker(worker_vendor_failure(None, "timeout"))
+        with self.assertRaises(client.JevCallRefused) as caught:
+            self.ask("slow at the worker")
+        self.assertEqual(caught.exception.code, "vendor_spend_unknown")
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.count(), 1)
+        [row] = self.rows()
+        self.assertEqual(row["upstream_reason"], "timeout")
+
+    def test_worker_answer_with_bad_shape_is_not_paid_for_twice(self):
+        self.use_worker(worker_vendor_failure(200, "invalid_answer_shape"))
+        with self.assertRaises(client.JevCallRefused):
+            self.ask("garbled at the worker")
+        self.assertEqual(self.requests, [])
+
+    def test_request_the_vendor_rejected_at_the_worker_is_not_resent(self):
+        for status in (400, 413, 422):
+            with self.subTest(status=status):
+                self.use_worker(worker_vendor_failure(status, "http_status"))
+                with self.assertRaisesRegex(client.TypeSafeError, f"HTTP {status}"):
+                    self.ask(f"rejected {status}")
+                self.assertEqual(self.requests, [])
+
+    def test_worker_error_detail_is_parsed_from_local_verb_stderr(self):
+        self.assertEqual(client._worker_upstream(worker_vendor_failure(429, "http_status")),
+                         (429, "http_status"))
+        self.assertEqual(client._worker_upstream(worker_vendor_failure(None, "network")),
+                         (None, "network"))
+        self.assertEqual(client._worker_upstream("could not reach the deployed Worker"),
+                         (None, None))
+        self.assertEqual(client._worker_upstream('TOOL ERROR {"error":"jev_upstream_failed",'
+                                                 '"status":"500","reason":"http_status"}'),
+                         (None, "http_status"), "a non-integer status is not trusted")
+
+    # -- Class 3: malformed requests were sent and paid for -----------------
+
+    def test_malformed_requests_are_refused_before_any_transport(self):
+        self.use_worker()
+        cases = {
+            "unknown type": {"q": {"type": "rank", "instructions": "x"}},
+            "empty instructions": {"q": {"type": "noul", "instructions": "  "}},
+            "one-option choice": {"q": {"type": "choice", "instructions": "x", "criteria": {"a": "A"}}},
+            "choice without options": {"q": {"type": "choice", "instructions": "x"}},
+            "one-level score": {"q": {"type": "score", "instructions": "x", "criteria": ["low"]}},
+            "noul criteria not a map": {"q": {"type": "noul", "instructions": "x", "criteria": ["yes"]}},
+            "too many questions": {f"q{i}": client.noul("x") for i in range(65)},
+            "question not a map": {"q": "is it?"},
+        }
+        for name, questions in cases.items():
+            with self.subTest(name):
+                with self.assertRaisesRegex(client.TypeSafeError, "malformed"):
+                    client.ask("state", questions, **self.options)
+        with self.assertRaisesRegex(client.TypeSafeError, "malformed"):
+            client.ask(["not", "a", "string", "or", "map"], {"q": client.noul("x")}, **self.options)
+        self.assertEqual(self.worker_calls, [])
+        self.assertEqual(self.requests, [])
+        self.assertFalse(self.log.exists())
+
+    # -- The validator is not the cause, and stays strict -------------------
+
+    def test_every_valid_answer_kind_validates(self):
+        questions = {"n": client.noul("x", true="yes", false="no"),
+                     "c": client.choice("x", {"a": "A", "b": "B"}),
+                     "s": client.score("x", ["low", "mid", "high"])}
+        answer = {"model": "jev-1.13.0", "usage": {"input_tokens": 9, "output_tokens": 3},
+                  "answers": {"n": {"type": "noul", "noul": 0.0},
+                              "c": {"type": "choice", "choice": "b", "confidence": 1},
+                              "s": {"type": "score", "score": 2, "confidence": 0.4}}}
+        for keys in (("n",), ("c",), ("s",), ("n", "c"), ("n", "c", "s")):
+            with self.subTest(keys=keys):
+                subset = {k: questions[k] for k in keys}
+                self.assertTrue(client.usable_judgment(
+                    {**answer, "answers": {k: answer["answers"][k] for k in keys}}, subset))
+
+    def test_real_bad_answers_still_fail_validation(self):
+        questions = {"c": client.choice("x", {"a": "A", "b": "B"})}
+        base = {"model": "jev-1.13.0", "usage": {"input_tokens": 1, "output_tokens": 1}}
+        for bad in ({"type": "choice", "choice": "z", "confidence": 0.9},
+                    {"type": "choice", "choice": "a"},
+                    {"type": "noul", "noul": 0.5}):
+            with self.subTest(bad=bad):
+                self.assertFalse(client.usable_judgment({**base, "answers": {"c": bad}}, questions))
+
+    # -- Replay of the logged request shapes --------------------------------
+
+    def test_replayed_402_window_sends_one_request_instead_of_every_call(self):
+        """The 2026-10-02 window in miniature: a credit outage across mixed
+        question kinds, then credit restored. Before this fix every call in
+        the window was sent and came back 402, so usable/sent was 0 inside it."""
+        shapes = [{"q": client.noul("x")},
+                  {"q": client.choice("x", {"a": "A", "b": "B"})},
+                  {"q": client.noul("x"), "r": client.choice("x", {"a": "A", "b": "B"})}]
+        sent = []
+        def outage(request, timeout=None):
+            sent.append(1)
+            raise urllib.error.HTTPError("https://fixture.invalid", 402, "refused", {}, io.BytesIO(b""))
+        with patch.object(client.urllib.request, "urlopen", outage):
+            for i in range(300):
+                with self.assertRaises(client.TypeSafeError):
+                    client.ask(f"window {i}", shapes[i % 3], **self.options)
+        self.assertEqual(len(sent), 1)
+        client._open_hold("credit_hold", 0)
+        by_kind = {"noul": {"type": "noul", "noul": 0.7},
+                   "choice": {"type": "choice", "choice": "a", "confidence": 0.8}}
+        def restored(request, timeout=None):
+            asked = json.loads(request.data)["questions"]
+            sent.append(1)
+            return FakeResponse(json.dumps({**ANSWER, "answers": {
+                key: by_kind[question["type"]] for key, question in asked.items()}}).encode())
+        with patch.object(client.urllib.request, "urlopen", restored):
+            for i in range(30):
+                client.ask(f"after {i}", shapes[i % 3], **self.options)
+        paid = [r for r in self.rows() if not r.get("cache_hit")
+                and r.get("error") not in client.REFUSAL_CODES]
+        self.assertEqual(len(paid), 31)
+        self.assertEqual(sum(1 for r in paid if r["usable"]), 30)
+
+
 class DailyCapMailTests(unittest.TestCase):
     ask = DailyCapTests.ask
 
@@ -495,11 +920,15 @@ class DailyCapMailTests(unittest.TestCase):
             self.assertEqual(command[2:4], ["--to", "joe"])
             self.assertEqual(kwargs["timeout"], 35)
             self.assertTrue(kwargs["check"])
-            self.assertEqual(kwargs["stderr"], subprocess.DEVNULL)
+            # stderr is read for a fixed failure category, never logged raw.
+            self.assertEqual(kwargs["stderr"], subprocess.PIPE)
             with patch.object(os.sys, "argv", command[1:]), patch.object(handover, "creds", return_value=("fixture@example.invalid", "fixture")), patch.object(handover.smtplib, "SMTP", FakeSMTP), patch("sys.stdout", io.StringIO()):
                 handover.main()
         alert = {"message": "Jev daily cap 50% · 5/10 paid calls", "threshold": 50}
-        with patch.dict(handover.ALLOWED, joe="self-config@carr.us"), patch.object(client.subprocess, "run", run):
+        with tempfile.NamedTemporaryFile() as configured, \
+                patch.object(client, "GMAIL_ENV_PATH", configured.name), \
+                patch.dict(os.environ, {client.ALERT_SINK_ENV: ""}), \
+                patch.dict(handover.ALLOWED, joe="self-config@carr.us"), patch.object(client.subprocess, "run", run):
             REAL_MAIL_SINK(alert)
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["To"], "self-config@carr.us")
@@ -795,12 +1224,8 @@ class SpendHealthTests(unittest.TestCase):
 
     def test_loaded_nightly_chain_runs_the_spend_alarm_and_preflights_its_sources(self):
         nightly = (MODULE_PATH.parent.parent / "bin" / "nightly.sh").read_text()
-        self.assertTrue('step "Jev daily spend alarm"' in nightly
-                        and './.venv/bin/python tools/health-check.py --section jev-spend' in nightly,
-                        "nightly chain does not invoke the narrow Jev spend alarm")
-        preflight = nightly.split('if [ "${1:-}" = "--preflight" ]; then', 1)[1].split('missing=0', 1)[0]
-        self.assertIn("tools/health-check.py", preflight)
-        self.assertIn("ops/jev_spend_health.py", preflight)
+        self.assertIn('./run.sh costs --publish --alerts', nightly)
+        self.assertFalse('step "Jev daily spend alarm"' in nightly)
 
     def test_nightly_alarm_has_a_narrow_exit_status(self):
         health = (MODULE_PATH.parent.parent / "tools" / "health-check.py").read_text()
@@ -827,9 +1252,7 @@ class SpendHealthTests(unittest.TestCase):
             state = Path(d) / "loop.json"
             now = __import__("datetime").datetime(2026, 9, 28,
                 tzinfo=__import__("datetime").timezone.utc)
-            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, lambda *_: None, now=now,
-                worker_usage=lambda _day: {"calls": 0, "input_tokens": 0,
+            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=now, worker_usage=lambda _day: {"calls": 0, "input_tokens": 0,
                                             "unknown": 1, "pending_attempts": 1})
             self.assertIn("1 call or attempt missing usage", line)
             self.assertEqual(spend.nightly_exit_status(line), 0)
@@ -838,9 +1261,7 @@ class SpendHealthTests(unittest.TestCase):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
         SPEND_SPEC.loader.exec_module(spend)
         with tempfile.TemporaryDirectory() as d:
-            line = spend.check_spend(Path(d) / "absent", MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                Path(d) / "loop", lambda *_: None,
-                worker_usage=lambda _day: {"calls": 0, "input_tokens": 0, "unknown": 0,
+            line = spend.check_spend(Path(d) / "absent", MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", worker_usage=lambda _day: {"calls": 0, "input_tokens": 0, "unknown": 0,
                     "pending_attempts": 1, "abandoned_attempts": 2, "abandon_after_seconds": 3600})
             self.assertIn("2 abandoned attempts", line)
             self.assertIn("older than 3600s", line)
@@ -853,7 +1274,7 @@ class SpendHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             log = Path(d) / "calls.jsonl"
             log.write_bytes(b"\xff")
-            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", Path(d) / "loop")
+            line = spend.check_spend(log, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json")
             self.assertIn("UNAVAILABLE", line)
             self.assertIn("owner orchestrator", line)
             self.assertEqual(spend.nightly_exit_status(line), 1)
@@ -896,7 +1317,7 @@ class SpendHealthTests(unittest.TestCase):
                              "verify the next run", "auto-clear after three healthy runs"):
                 self.assertIn(required, missing.stdout)
 
-    def test_daily_spend_warns_and_dedups_one_loop_then_auto_clears(self):
+    def test_daily_spend_observation_warns_then_recovers_without_writing(self):
         self.assertTrue(SPEND_SPEC and SPEND_SPEC.loader)
         spend = importlib.util.module_from_spec(SPEND_SPEC)
         SPEND_SPEC.loader.exec_module(spend)
@@ -911,6 +1332,7 @@ class SpendHealthTests(unittest.TestCase):
                 if name == "read-loop":
                     return {"loop_id": payload["loop_id"], "version": 1}
                 return {"ok": True, "loop_id": "loop-1", "number": "901"}
+            spend._run_verb = verb
 
             def row(ts, tokens, **other):
                 return json.dumps({"ts": ts, "ok": True, "usage": {"input_tokens": tokens,
@@ -920,26 +1342,23 @@ class SpendHealthTests(unittest.TestCase):
                            row("2026-09-27T02:00:00Z", 90_000_000) +
                            row("2026-09-28T03:00:00Z", 10_000_000, cache_hit=True))
             day = __import__("datetime").datetime(2026, 9, 28, 4, tzinfo=__import__("datetime").timezone.utc)
-            first = spend.check_spend(log, config, state, verb, now=day)
+            first = spend.check_spend(log, config, now=day)
             self.assertIn("WARN", first)
             self.assertIn("$0.50", first)
             self.assertIn("owner orchestrator", first)
             self.assertIn("find caller in jev usage log", first)
             self.assertIn("auto-clear", first)
-            self.assertEqual([x[0] for x in events], ["add-loop"])
-            self.assertEqual(events[0][1]["owner"], "claude")
-            spend.check_spend(log, config, state, verb, now=day)
-            self.assertEqual(len(events), 1)
+            self.assertEqual(events, [])
+            spend.check_spend(log, config, now=day)
+            self.assertEqual(events, [])
             log.write_text(log.read_text() + row("2026-09-28T04:00:00Z", 5_000_000))
-            spend.check_spend(log, config, state, verb, now=day)
-            self.assertEqual([x[0] for x in events], ["add-loop", "read-loop", "update-loop"])
-            self.assertEqual(events[-1][1]["base_version"], 1)
+            spend.check_spend(log, config, now=day)
+            self.assertEqual(events, [])
             next_day = day.replace(day=29)
-            cleared = spend.check_spend(log, config, state, verb, now=next_day)
+            cleared = spend.check_spend(log, config, now=next_day)
             self.assertIn("OK", cleared)
-            self.assertEqual([x[0] for x in events], ["add-loop", "read-loop", "update-loop",
-                                                  "read-loop", "close-loop"])
-            self.assertEqual(events[-1][1]["base_version"], 1)
+            self.assertEqual(events, [])
+            self.assertFalse(state.exists())
 
     def test_success_without_usage_is_unknown_and_preserves_spend_warning(self):
         self.assertTrue(SPEND_SPEC and SPEND_SPEC.loader)
@@ -954,23 +1373,23 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "warning-1"}
+            spend._run_verb = verb
 
             day = __import__("datetime").datetime(2026, 9, 28, tzinfo=__import__("datetime").timezone.utc)
             log.write_text(json.dumps({"ts": "2026-09-28T01:00:00Z", "ok": True,
                                        "usage": {"input_tokens": 12_000_000}}) + "\n")
-            self.assertIn("WARN", spend.check_spend(log, config, state, verb, now=day))
-            self.assertEqual(events, ["add-loop"])
+            self.assertIn("WARN", spend.check_spend(log, config, now=day))
+            self.assertEqual(events, [])
             log.write_text(log.read_text() + json.dumps({
                 "ts": "2026-09-29T01:00:00Z", "ok": True, "usage": None,
             }) + "\n")
-            unknown = spend.check_spend(log, config, state, verb,
-                                        now=day.replace(day=29))
+            unknown = spend.check_spend(log, config, now=day.replace(day=29))
             self.assertIn("UNKNOWN", unknown)
             self.assertIn("missing usage", unknown)
             self.assertNotIn("OK", unknown)
             self.assertNotIn("$0.000", unknown)
-            self.assertEqual(events, ["add-loop"])
-            self.assertEqual(json.loads(state.read_text())["loop_id"], "warning-1")
+            self.assertEqual(events, [])
+            self.assertFalse(state.exists())
 
     def test_daily_alarm_adds_factory_and_worker_receipts_once(self):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
@@ -993,13 +1412,12 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "spend-warning"}
-            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, verb, now=day, extra_logs=[factory],
-                worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
+            spend._run_verb = verb
+            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=day, extra_logs=[factory], worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
             self.assertIn("WARN", result)
             self.assertIn("$0.546", result)
             self.assertIn("4 calls", result)
-            self.assertEqual(events, ["add-loop"])
+            self.assertEqual(events, [])
 
     def test_daily_alarm_works_before_local_log_exists(self):
         spend = importlib.util.module_from_spec(SPEND_SPEC)
@@ -1015,12 +1433,11 @@ class SpendHealthTests(unittest.TestCase):
             def verb(name, payload):
                 events.append(name)
                 return {"ok": True, "loop_id": "spend-warning"}
-            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json",
-                state, verb, now=day, extra_logs=[factory],
-                worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
+            spend._run_verb = verb
+            result = spend.check_spend(local, MODULE_PATH.parent / "config" / "jev-cost-guard.v1.json", now=day, extra_logs=[factory], worker_usage=lambda _day: {"calls": 1, "input_tokens": 6_000_000, "unknown": 0})
             self.assertIn("WARN", result)
             self.assertIn("$0.546", result)
-            self.assertEqual(events, ["add-loop"])
+            self.assertEqual(events, [])
 
 
 class LibraryShapeTests(unittest.TestCase):
@@ -1053,11 +1470,6 @@ class LibraryShapeTests(unittest.TestCase):
 
 
 class DispatchOwnershipTests(unittest.TestCase):
-    def setUp(self):
-        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.quota_log = root / 'quota.jsonl'
-        self.enterContext(patch.object(client, 'JEV_DAILY_CAP_LOG', str(self.quota_log)))
-
     def test_tests_never_reserve_against_the_canonical_daily_cap(self):
         canonical = os.path.join(client.CANONICAL_REPO, "out")
         self.assertNotEqual(os.path.commonpath([os.path.abspath(client.JEV_DAILY_CAP_LOG), canonical]),
@@ -1095,7 +1507,7 @@ import importlib.util, io, json, sys
 from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('standalone_client', sys.argv[1])
 client = importlib.util.module_from_spec(spec); spec.loader.exec_module(client)
-client.JEV_DAILY_CAP_LOG = sys.argv[3]
+client.JEV_DAILY_CAP_LOG = sys.argv[2]
 class Response(io.StringIO):
     status = 200
     def __init__(self):
@@ -1104,10 +1516,11 @@ class Response(io.StringIO):
             'usage':{'input_tokens':20,'output_tokens':6}}))
 with patch.object(client.urllib.request, 'urlopen', lambda *a, **k: Response()):
     client.ask('state', {'architecture_or_design':client.noul('judge design')},
-               api_key='offline', cache_ttl_seconds=0, calls_log=sys.argv[2])
+               api_key='offline', cache_ttl_seconds=0, calls_log=sys.argv[2],
+               caller='adhoc:standalone-owner-fixture')
 """
             result = subprocess.run([__import__('sys').executable, '-c', code,
-                                     str(MODULE_PATH.resolve()), str(log), str(self.quota_log)],
+                                     str(MODULE_PATH.resolve()), str(log)],
                 cwd=directory, env={**os.environ, "CODEX_THREAD_ID": session,
                                     "CARR_JEV_TRANSCRIPT_PATH": str(transcript)},
                 capture_output=True, text=True, timeout=10)
@@ -1155,6 +1568,29 @@ with patch.object(client.urllib.request, 'urlopen', lambda *a, **k: Response()):
                 self.assertIsInstance(rows[0]['human_turn_id'], str)
                 self.assertIsNone(rows[1]['human_turn_id'])
                 self.assertTrue(all(row['ok'] for row in rows))
+
+
+class OfflineBudgetIsolationTests(unittest.TestCase):
+    def test_ownership_fixtures_never_reserve_the_workstation_budget(self):
+        canonical_budget = os.path.join(client.CANONICAL_REPO, "out", "jev-calls.jsonl")
+        reserve = client._reserve_paid_call
+        destinations = []
+
+        def isolated_reservation(*args, **kwargs):
+            destinations.append(client.JEV_DAILY_CAP_LOG)
+            self.assertNotEqual(client.JEV_DAILY_CAP_LOG, canonical_budget,
+                                "fake transport must use a disposable quota")
+            return reserve(*args, **kwargs)
+
+        result = unittest.TestResult()
+        # TestCase.run, not a top-level TestSuite.run: the latter runs this
+        # module's cleanups and would undo setUpModule's isolation mid-run.
+        with patch.object(client, "_reserve_paid_call", isolated_reservation):
+            for name in ("test_runtime_router_preserves_explicit_transcript_owner",
+                         "test_ask_discovers_exact_native_session_and_keeps_unknown_owner_unbound"):
+                DispatchOwnershipTests(name).run(result)
+        self.assertTrue(result.wasSuccessful(), result.errors + result.failures)
+        self.assertEqual(len(destinations), 5)
 
 
 class CredentialTests(unittest.TestCase):
@@ -1350,7 +1786,7 @@ class CallReceiptTests(unittest.TestCase):
             self.assertFalse(row["ok"])
             self.assertFalse(row["schema_valid"])
 
-    def test_new_receipts_hash_question_ids_and_preserve_facet_credit(self):
+    def test_new_receipts_hash_question_ids_and_preserve_facet_labels(self):
         name = "private_semantic_creation_question"
         with tempfile.TemporaryDirectory() as d:
             log = Path(d) / "calls.jsonl"
@@ -1364,12 +1800,7 @@ class CallReceiptTests(unittest.TestCase):
         self.assertNotIn(name, raw)
         self.assertNotIn("question_ids", row)
         self.assertEqual(row["question_ids_sha256"], [hashlib.sha256(name.encode()).hexdigest()])
-        reader_path = MODULE_PATH.parent.parent / "lib" / "jev_required_actions.py"
-        spec = importlib.util.spec_from_file_location("jev_required_actions", reader_path)
-        assert spec and spec.loader
-        reader = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(reader)
-        self.assertTrue(reader._call_covers_facet(row, "semantic_creation"))
+        self.assertIn("semantic_creation", row["facets"])
 
     def test_real_call_receipt_includes_usage_and_no_response_id(self):
         # This exercises _append_call_receipt directly with a real-shaped
@@ -1514,7 +1945,7 @@ class CallReceiptTests(unittest.TestCase):
         """A call made through `opener` (the offline selftest/mock path) must
         NOT leave a receipt — a mock response was never actually seen by the
         vendor, and a receipt for it would let running THIS selftest suite
-        count as a real turn's Jev evidence in lib/jev_required_actions.py."""
+        count as vendor evidence in the diagnostic ledger."""
         with tempfile.TemporaryDirectory() as d:
             log = str(Path(d) / "jev-calls.jsonl")
             client.ask("s", {"q": client.noul("?")}, api_key="k",

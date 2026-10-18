@@ -1,0 +1,205 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "rule": "unnecessary-abstraction",
+      "file": "carr-before.py",
+      "expect": "fail"
+    },
+    {
+      "rule": "unnecessary-abstraction",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "unnecessary-abstraction",
+      "file": "app-before.mjs",
+      "expect": "fail"
+    },
+    {
+      "rule": "unnecessary-abstraction",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "unnecessary-abstraction",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "speculative-generalization",
+      "file": "carr-before.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "speculative-generalization",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "speculative-generalization",
+      "file": "app-before.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "speculative-generalization",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "speculative-generalization",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "carr-before.py",
+      "expect": "fail"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "app-before.mjs",
+      "expect": "fail"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "wrapper-without-value",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "function-name-behavior-mismatch",
+      "file": "carr-before.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "function-name-behavior-mismatch",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "function-name-behavior-mismatch",
+      "file": "app-before.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "function-name-behavior-mismatch",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "function-name-behavior-mismatch",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "coincidental-abstraction",
+      "file": "carr-before.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "coincidental-abstraction",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "coincidental-abstraction",
+      "file": "app-before.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "coincidental-abstraction",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "coincidental-abstraction",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "swallowed-errors",
+      "file": "carr-before.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "swallowed-errors",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "swallowed-errors",
+      "file": "app-before.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "swallowed-errors",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "swallowed-errors",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "invariant-helper",
+      "file": "carr-before.py",
+      "expect": "fail"
+    },
+    {
+      "rule": "invariant-helper",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "invariant-helper",
+      "file": "app-before.mjs",
+      "expect": "fail"
+    },
+    {
+      "rule": "invariant-helper",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "invariant-helper",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "causal-value-evidence",
+      "file": "carr-before.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "causal-value-evidence",
+      "file": "carr-after.py",
+      "expect": "pass"
+    },
+    {
+      "rule": "causal-value-evidence",
+      "file": "app-before.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "causal-value-evidence",
+      "file": "app-after.mjs",
+      "expect": "pass"
+    },
+    {
+      "rule": "causal-value-evidence",
+      "file": "invariant-good.py",
+      "expect": "pass"
+    }
+  ]
+}

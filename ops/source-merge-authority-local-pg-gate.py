@@ -45,7 +45,7 @@ def main() -> int:
             if (row is None or row[0] is not True or any(value is not False for value in row[1:7])
                     or row[7] is not True or row[8] != "v"):
                 raise RuntimeError(f"source-merge projection privilege posture invalid: {row!r}")
-            if row[9] != ["search_path=pg_catalog, ops, public"]:
+            if row[9] != ["search_path=pg_catalog, ops, public, pg_temp"]:
                 raise RuntimeError(f"source-merge projection search_path invalid: {row[9]!r}")
             if row[10] is not True or row[11] is not True:
                 raise RuntimeError(f"source-merge projection owner cannot read protected evidence: {row!r}")

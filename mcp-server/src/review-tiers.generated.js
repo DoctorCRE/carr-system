@@ -8,10 +8,11 @@
 // this is a checked-in module.
 
 export const REVIEW_TIERS_SOURCE = "ops/config/review-tiers.v1.json";
-export const REVIEW_TIERS_DIGEST = "sha256:49558124dd3086bf178522a23edaa94d24eb33393b7222af5d07ec97083de288";
+export const REVIEW_TIERS_DIGEST = "sha256:731c9b99162294ba83c76c03cf9cfc095e6f3d3b45f39595ccfd5a96ad57fb6a";
 
 export const REVIEW_TIERS = Object.freeze({
   default_tier: 1,
+  tunable_scalars: Object.freeze([{"path": "ops/config/jev-cost-guard.v1.json", "field": "daily_paid_call_cap", "minimum": 0, "maximum": 3000}]),
   rules: Object.freeze([
     Object.freeze({"id": "hooks", "tier": 3, "class": "protected", "match": "prefix", "pattern": "hooks/"}),
     Object.freeze({"id": "ops", "tier": 3, "class": "protected", "match": "prefix", "pattern": "ops/"}),
@@ -83,4 +84,33 @@ export const REVIEW_TIERS = Object.freeze({
   never_exclude: Object.freeze([
     Object.freeze({"id": "migrations", "match": "prefix", "pattern": "migrations/"}),
   ]),
+  test_files: Object.freeze([
+    Object.freeze({"id": "test-root", "match": "prefix", "pattern": "test/"}),
+    Object.freeze({"id": "test-nested", "match": "contains", "pattern": "/test/"}),
+    Object.freeze({"id": "tests-root", "match": "prefix", "pattern": "tests/"}),
+    Object.freeze({"id": "tests-nested", "match": "contains", "pattern": "/tests/"}),
+    Object.freeze({"id": "__tests__-root", "match": "prefix", "pattern": "__tests__/"}),
+    Object.freeze({"id": "__tests__-nested", "match": "contains", "pattern": "/__tests__/"}),
+    Object.freeze({"id": "__snapshots__-root", "match": "prefix", "pattern": "__snapshots__/"}),
+    Object.freeze({"id": "__snapshots__-nested", "match": "contains", "pattern": "/__snapshots__/"}),
+    Object.freeze({"id": "e2e-root", "match": "prefix", "pattern": "e2e/"}),
+    Object.freeze({"id": "e2e-nested", "match": "contains", "pattern": "/e2e/"}),
+    Object.freeze({"id": "journeys-root", "match": "prefix", "pattern": "journeys/"}),
+    Object.freeze({"id": "journeys-nested", "match": "contains", "pattern": "/journeys/"}),
+    Object.freeze({"id": "fixtures-root", "match": "prefix", "pattern": "fixtures/"}),
+    Object.freeze({"id": "fixtures-nested", "match": "contains", "pattern": "/fixtures/"}),
+    Object.freeze({"id": "python-test-root", "match": "prefix", "pattern": "test_"}),
+    Object.freeze({"id": "python-test-nested", "match": "contains", "pattern": "/test_"}),
+    Object.freeze({"id": "python-test-hyphenated", "match": "suffix", "pattern": ".py", "basename_prefix": "test-"}),
+    Object.freeze({"id": "python-selftest", "match": "suffix", "pattern": "-selftest.py"}),
+    Object.freeze({"id": "python-test-suffix", "match": "suffix", "pattern": "_test.py"}),
+    Object.freeze({"id": "test-js", "match": "suffix", "pattern": ".test.js"}),
+    Object.freeze({"id": "test-mjs", "match": "suffix", "pattern": ".test.mjs"}),
+    Object.freeze({"id": "test-cjs", "match": "suffix", "pattern": ".test.cjs"}),
+    Object.freeze({"id": "test-ts", "match": "suffix", "pattern": ".test.ts"}),
+    Object.freeze({"id": "test-tsx", "match": "suffix", "pattern": ".test.tsx"}),
+    Object.freeze({"id": "test-jsx", "match": "suffix", "pattern": ".test.jsx"}),
+    Object.freeze({"id": "spec-files", "match": "contains", "pattern": ".spec."}),
+  ]),
+  change_size: Object.freeze({"small_max_code_lines": 50, "medium_max_code_lines": 200}),
 });

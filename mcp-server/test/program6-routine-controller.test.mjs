@@ -39,8 +39,7 @@ test("read endpoint is exact and returns registered durable card readback", asyn
 });
 
 test("current endpoint is a fixed authenticated collection read with no browser filters", async () => {
-  const advisory = { schema: "jev_c13_decision_queue_advisory/v1", status: "unavailable", reason: "jev_unavailable", items: [] };
-  const { controller, calls } = subject({ needsJoeAdvisoryFn: async () => advisory,
+  const { controller, calls } = subject({
     callToolFn: async (_env, actor, name, args, profile) => {
     calls.push({ actor, name, args, profile });
     return { ok: true, items: [{ human_ref: REF, state: "captured", source: { freshness: "current" } }] };
@@ -49,50 +48,10 @@ test("current endpoint is a fixed authenticated collection read with no browser 
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.deepEqual(body.data.items, [{ human_ref: REF, state: "captured", source: { freshness: "current" } }]);
-  assert.deepEqual({ ...body.data.advisory, read_elapsed_ms: undefined }, { ...advisory, read_elapsed_ms: undefined });
-  assert.ok(Number.isInteger(body.data.advisory.read_elapsed_ms));
+  assert.equal(Object.hasOwn(body.data, "advisory"), false);
   assert.deepEqual(calls, [{ actor: ACTOR, name: "current-work-requests", args: {}, profile: "full" }]);
   const withQuery = await controller.fetch(request("/api/system-work/current?state=ready"), {}, {}, ACTOR, SESSION);
   assert.equal(withQuery.status, 200, "query parameters cannot select collection scope");
-});
-
-test("Jev failure does not change the canonical queue or fail its read", async () => {
-  const canonical = { ok: true, items: [{ human_ref: REF, title: "Keep the source order", state: "ready" }] };
-  const { controller } = subject({ callToolFn: async () => canonical,
-    needsJoeAdvisoryFn: async () => { throw Error("vendor failure"); } });
-  const response = await controller.fetch(request("/api/system-work/current"), {}, {}, ACTOR, SESSION);
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.deepEqual(body.data.items, canonical.items);
-  assert.equal(body.data.advisory.status, "unavailable");
-  assert.deepEqual(canonical, { ok: true, items: [{ human_ref: REF, title: "Keep the source order", state: "ready" }] });
-});
-
-test("slow advice returns the queue promptly while its receipted call completes", async () => {
-  let finishCall;
-  const completed = new Promise(resolve => { finishCall = resolve; });
-  const waits = [];
-  const calls = [];
-  const controller = createProgram6RoutineController({
-    advisoryDeadlineMs: 5,
-    callToolFn: async (_env, _actor, name, args) => {
-      calls.push({ name, args });
-      if (name === "ask-jev") return completed;
-      return { ok: true, items: [{ human_ref: REF, title: "Queue", state: "ready" }] };
-    },
-    needsJoeAdvisoryFn: async (_queue, { askJev }) => askJev({
-      model: "jev-1.13.0", state: {}, questions: { q: { type: "noul", question: "Check" } },
-    }),
-  });
-  const response = await controller.fetch(request("/api/system-work/current"),
-    { TYPESAFE_API_KEY: "offline" }, { waitUntil: promise => waits.push(promise) }, ACTOR, SESSION);
-  const body = await response.json();
-  assert.equal(body.data.advisory.status, "unavailable");
-  assert.equal(calls[1].name, "ask-jev");
-  assert.equal(calls[1].args.purpose, "call");
-  assert.equal(waits.length, 1);
-  finishCall({ model: "jev-1.13.0", answers: {} });
-  await waits[0];
 });
 
 test("report route admits only the capture material and never a caller-selected verb or authority", async () => {
@@ -157,4 +116,25 @@ test("authorization refusal is returned before a registered mutation and tool er
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error, "reauth_required");
   assert.equal(calls.length, 0);
+});
+
+test("current GET never requests Jev or schedules annotation even with vendor credentials", async () => {
+  const calls = [];
+  const canonical = { ok: true, items: [{ human_ref: REF, state: "ready" }] };
+  const controller = createProgram6RoutineController({
+    callToolFn: async (_env, _actor, name) => {
+      calls.push(name);
+      assert.equal(name, "current-work-requests");
+      return canonical;
+    },
+  });
+  const waits = [];
+  for (let i = 0; i < 2; i++) {
+    const response = await controller.fetch(request("/api/system-work/current"),
+      { TYPESAFE_API_KEY: "fake" }, { waitUntil: promise => waits.push(promise) }, ACTOR, SESSION);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, data: canonical });
+  }
+  assert.deepEqual(calls, ["current-work-requests", "current-work-requests"]);
+  assert.deepEqual(waits, []);
 });

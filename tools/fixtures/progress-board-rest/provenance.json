@@ -1,0 +1,11 @@
+{
+  "repo": "jbookout/carr-system",
+  "number": 1510,
+  "source": "out/watchdog/pr-cache.json",
+  "collected_at": 1791126726.8494048,
+  "version": [
+    "2dcc0fd51c5139dca1d2e648a7e7392e5e1c1a6e",
+    "2026-10-04T06:45:36Z"
+  ],
+  "capture_note": "Recorded gh-pr-view output from the live watchdog, 2026-10-04; fresh GraphQL capture refused because its pool is exhausted. Contact fields and commit-message contact trailers are sanitized to synthetic example.invalid addresses; behavior fields retain the recorded source version."
+}

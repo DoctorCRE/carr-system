@@ -58,12 +58,12 @@ class NeverDeniesTests(AttendedFixture):
     """A probabilistic refusal in front of every shell call turns a model's
     uncertainty into a blocked session. This must never happen."""
 
-    def test_worker_flagged_hook_skips_automatic_judgment(self):
-        with mock.patch.dict(os.environ, {"CARR_JEV_WORKER": "off"}), \
-                mock.patch.object(hook, "check") as check:
+    def test_worker_flagged_hook_runs_the_same_free_check(self):
+        with mock.patch.dict(os.environ, {"CARR_JEV_WORKER": "off", "CARR_PRECHECK": "1"}), \
+                mock.patch.object(hook, "check", return_value=(None, {}, {})) as check:
             self.assertEqual(run({"tool_name": "exec_command", "tool_input": {
                 "cmd": "./ops/ci.sh --nope"}}), (0, ""))
-        check.assert_not_called()
+        check.assert_called_once()
 
     def test_normal_attended_hook_still_calls_judgment(self):
         with mock.patch.dict(os.environ, {"CARR_JEV_WORKER": "", "CARR_PRECHECK": "1"}), \
@@ -108,9 +108,9 @@ class NeverDeniesTests(AttendedFixture):
 
     def test_the_warning_names_the_reason(self):
         _, out = run({"tool_name": "Bash", "tool_input": {"command": "x"}},
-                     check=lambda command, repo=None: (0.95, {"guard_refusals": ["the guard refuses this"]}, {"guard_refusal": 0.95}),
+                     check=lambda command, repo=None: (0.95, {"paths_that_do_not_exist": ["ops/gone-for-good.py"]}, {"missing_path": 0.95}),
                      _log=lambda record: None)
-        self.assertIn("the guard refuses this", out,
+        self.assertIn("ops/gone-for-good.py", out,
                       "a warning without its reason is noise a session learns to skip")
 
 
@@ -135,7 +135,7 @@ class FailsOpenTests(AttendedFixture):
         def boom(record):
             raise OSError("disk full")
         code, _ = run({"tool_name": "Bash", "tool_input": {"command": "git push"}},
-                      check=lambda command, repo=None: (0.99, {"guard_refusals": ["y"]}, {"guard_refusal": 0.99}), _log=boom)
+                      check=lambda command, repo=None: (0.99, {"paths_that_do_not_exist": ["y"]}, {"missing_path": 0.99}), _log=boom)
         self.assertEqual(code, 0)
 
 
@@ -162,17 +162,12 @@ class SpendsNothingUnnecessarilyTests(AttendedFixture):
         self.assertEqual(called, [])
 
     def test_no_facts_means_no_request_was_made(self):
-        """With nothing on disk contradicting the command there is nothing to
-        ask about, and asking anyway is what produced the measured 0.44."""
         asked = []
-        precheck = importlib.util.module_from_spec(
-            importlib.util.spec_from_file_location("p", REPO / "ops" / "jev_precheck.py"))
         self.assertEqual(hook.check.__module__, "command_precheck")
         with mock.patch.object(hook, "_sibling", side_effect=lambda n: asked.append(n) or _Facts()):
             probability, facts, reasons = hook.check("git push origin HEAD")
         self.assertIsNone(probability)
-        self.assertEqual(asked, ["jev_precheck"],
-                         "the judging modules must not even be loaded")
+        self.assertEqual(asked, ["jev_precheck"])
 
     def test_the_kill_switch_stops_everything(self):
         called = []
@@ -188,21 +183,14 @@ class ModelRoomRouteTests(AttendedFixture):
         with tempfile.TemporaryDirectory() as other_checkout:
             self.assertIn("Model Room", hook.model_room_rule(other_checkout))
 
-    def test_direct_model_work_pulls_rule_before_command(self):
-        class _Client:
-            @staticmethod
-            def noul(*args, **kwargs): return "question"
-        class _Judge:
-            @staticmethod
-            def judge(state, questions, timeout):
-                self_rule = state["model_room_rule"]
-                assert "Model Room" in self_rule
-                return {"answers": {"direct_model_work": {"noul": 0.99}}}
-        with mock.patch.object(hook, "_sibling", side_effect=lambda name:
-                               _Judge if name == "jev_judge" else _Client):
+    def test_direct_model_work_pulls_rule_before_command_without_jev(self):
+        """The route is deterministic text. The paid direct-work score it used
+        to append fired on reads such as a grep for "codex exec" and changed
+        nothing the rule did not already say (2026-10-04 audit)."""
+        with mock.patch.object(hook, "_sibling", side_effect=AssertionError("no Jev call")):
             note = hook.advisory({"tool_name": "Bash", "tool_input": {"command": "claude -p 'review this'"}})
         self.assertIn("MODEL ROOM ROUTE", note)
-        self.assertIn("Jev direct-work score 0.99", note)
+        self.assertNotIn("Jev direct-work score", note)
         # The rule text is word-wrapped, so compare on collapsed whitespace.
         flat = " ".join(note.split())
         self.assertIn("cheapest tier still qualified", flat)
@@ -230,6 +218,71 @@ class _Facts:
     @staticmethod
     def environment_facts(command, repo=None):
         return {}
+
+
+def _facts(found):
+    class Gatherer:
+        @staticmethod
+        def environment_facts(command, repo=None):
+            return dict(found)
+    return Gatherer
+
+
+class DeterministicCheckTests(AttendedFixture):
+    """The precheck never asks Jev (2026-10-04 audit: 25,000+ paid calls a week,
+    11% of them warned, and the facts that warned were already deterministic).
+    Each warning is a predicate over the facts the gatherer found."""
+
+    def check(self, command, found):
+        with mock.patch.object(hook, "_sibling",
+                               side_effect=lambda n: _facts(found) if n == "jev_precheck"
+                               else (_ for _ in ()).throw(AssertionError(f"loaded {n}"))):
+            return hook.check(command, "/repo")
+
+    def test_a_missing_path_the_command_reads_warns(self):
+        p, facts, reasons = self.check("rg -n foo mcp-server/src/gone.js",
+                                       {"paths_that_do_not_exist": ["mcp-server/src/gone.js"]})
+        self.assertEqual(p, 1.0)
+        self.assertEqual(reasons, {"missing_path": 1.0})
+        self.assertEqual(facts["paths_that_do_not_exist"], ["mcp-server/src/gone.js"])
+
+    def test_a_glob_prefix_is_not_a_missing_path(self):
+        p, _, _ = self.check("rg -n jev tools/jev* ops/x.py", {"paths_that_do_not_exist": ["tools/jev"]})
+        self.assertIsNone(p)
+
+    def test_a_path_inside_a_heredoc_is_not_a_shell_operand(self):
+        command = "python3 - <<'PY'\nprint('ops/gone.py')\nPY"
+        p, _, _ = self.check(command, {"paths_that_do_not_exist": ["ops/gone.py"]})
+        self.assertIsNone(p)
+
+    def test_a_command_that_creates_the_path_is_silent(self):
+        for command in ("mkdir -p out/new && ls out/new", "echo x > out/new.txt; cat out/new.txt",
+                        "git checkout origin/main -- ops/gone.py && cat ops/gone.py"):
+            missing = [w for w in command.replace(";", " ").split() if "/" in w][-1]
+            p, _, _ = self.check(command, {"paths_that_do_not_exist": [missing]})
+            self.assertIsNone(p, command)
+
+    def test_a_guard_refusal_is_left_to_the_guard(self):
+        """jev_precheck's guard list is a regex copy that over-reads the real
+        guard (it flags sudo and scratch-zone rm -rf, which the guard allows),
+        and where the guard does refuse, its own PreToolUse denial already says
+        so. Jev warned on this fact 6 times in 7 days; a predicate here would
+        warn on every rm -rf."""
+        p, _, reasons = self.check("rm -rf /tmp/scratch-x", {"guard_refusals": ["the guard refuses rm -rf"]})
+        self.assertEqual((p, reasons), (None, {}))
+
+    def test_interface_import_and_option_facts_alone_say_nothing(self):
+        """Jev warned on 0 of 394 undeclared-option facts and 2% of interface
+        facts; a warning nobody acts on trains sessions to skip warnings."""
+        p, _, _ = self.check("python3 ops/x.py --nope", {
+            "undeclared_options": ["--nope"], "import_notes": ["ops/ is not a package"],
+            "module_interfaces": {"ops/x.py": ["main()"]}})
+        self.assertIsNone(p)
+
+    def test_the_library_never_loads_the_jev_client(self):
+        source = HOOK_PATH.read_text(encoding="utf-8")
+        self.assertNotIn('_sibling("jev_judge")', source)
+        self.assertNotIn('_sibling("typesafe_client")', source)
 
 
 class RepoRootTests(AttendedFixture):
@@ -303,7 +356,7 @@ class ThresholdTests(AttendedFixture):
     def test_below_the_floor_is_silent_but_still_logged(self):
         logged = []
         code, out = run({"tool_name": "Bash", "tool_input": {"command": "git push"}},
-                        check=lambda command, repo=None: (hook.WARN_AT - 0.01, {"guard_refusals": ["b"]}, {"guard_refusal": hook.WARN_AT - 0.01}),
+                        check=lambda command, repo=None: (hook.WARN_AT - 0.01, {"paths_that_do_not_exist": ["b"]}, {"missing_path": hook.WARN_AT - 0.01}),
                         _log=logged.append)
         self.assertEqual(out, "", "below the floor nothing is said")
         self.assertEqual(len(logged), 1, "but it is recorded, so the floor can be re-derived")
@@ -311,7 +364,7 @@ class ThresholdTests(AttendedFixture):
 
     def test_the_floor_is_inclusive(self):
         _, out = run({"tool_name": "Bash", "tool_input": {"command": "git push"}},
-                     check=lambda command, repo=None: (hook.WARN_AT, {"guard_refusals": ["b"]}, {"guard_refusal": hook.WARN_AT}),
+                     check=lambda command, repo=None: (hook.WARN_AT, {"paths_that_do_not_exist": ["b"]}, {"missing_path": hook.WARN_AT}),
                      _log=lambda record: None)
         self.assertIn("PRE-CHECK", out)
 

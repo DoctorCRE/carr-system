@@ -207,15 +207,15 @@ def _questions(tsc: Any, deal_options: dict[str, str], attributed: str | None) -
     }
 
 
-def _check_item(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str | None,
+def _item_request(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str | None,
                  item: dict[str, Any], deals: list[Any], segments: list[Any],
-                 context: dict[str, Any]) -> dict[str, Any]:
+                 context: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     evidence = item.get("evidence", "")
     matched = _evidence_segments(evidence, segments)
     candidates = _candidate_deals(item.get("deal_id"), deals, matched)
 
     deal_options: dict[str, str] = {}
-    for index, deal in enumerate(candidates):
+    for index, deal in enumerate(sorted(candidates, key=lambda d: str(d.get("id")))):
         raw_id = deal.get("id")
         deal_id: str = raw_id if isinstance(raw_id, str) and raw_id else f"deal-{index}"
         deal_options[deal_id] = str(deal.get("name") or deal_id)
@@ -225,13 +225,13 @@ def _check_item(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str 
     state = {
         "item": {
             "kind": kind, "attributed_partner": attributed,
-            "fields": _text_fields(kind, item), "evidence_excerpt": evidence,
+            "fields": _text_fields(kind, item), "evidence_excerpt": str(evidence)[:1200],
         },
         "transcript_excerpt": [
             {
                 "speaker": segment.get("speaker", ""),
                 "partner": _resolve_partner(segment.get("speaker"), context),
-                "text": segment.get("text", ""),
+                "text": str(segment.get("text", ""))[:600],
             }
             for segment in matched
         ],
@@ -240,7 +240,10 @@ def _check_item(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str 
         ],
     }
 
-    response = ask(state, _questions(tsc, deal_options, attributed))
+    return state, _questions(tsc, deal_options, attributed)
+
+
+def _item_checks(tsc, item, response):
     answers = response.get("answers") if isinstance(response, dict) else None
     if not isinstance(answers, dict):
         raise RuntimeError("Jev omitted answers for a post-call check")
@@ -261,7 +264,9 @@ def _check_item(tsc: Any, ask: Callable[..., Any], kind: str, list_partner: str 
     if not details_pass:
         reasons.append(_reason("Right details", details_decided))
 
+    reasons.append("Semantic checks are advisory; independent review is required.")
     return {
+        "advisory_only": True,
         "deal": {**deal_decided, "pass": deal_pass},
         "speaker": {**speaker_decided, "pass": speaker_pass},
         "details": {**details_decided, "pass": details_pass},
@@ -311,7 +316,7 @@ def topic_cut(segments: list[Any], options: list[int], *,
             return None
         tsc = _client()
         live_ask = ask if ask is not None else (
-            lambda state, questions: tsc.ask(state, questions, work_class="app_runtime",
+            lambda state, questions: _semantic().ask(state, questions, client=tsc, caller="post_call_jev", version="topic-v1", work_class="app_runtime",
                 timeout=TOPIC_CUT_BUDGET_SECONDS, deadline=deadline, retries=0)
         )
         state = {"boundaries": {
@@ -338,7 +343,7 @@ def topic_cut(segments: list[Any], options: list[int], *,
                 best = (probability, k)
         if best is None or best[0] < TOPIC_CUT_MIN:
             return None
-        return best[1]
+        return None  # unvalidated topic threshold cannot change transcript partition
     except Exception:
         return None
 
@@ -385,10 +390,7 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
         tsc = _client()
     except Exception:
         tsc = None
-    live_ask = ask if ask is not None else (
-        (lambda state, questions: tsc.ask(state, questions, work_class="app_runtime")) if tsc is not None else None
-    )
-
+    live_ask = ask if ask is not None else (tsc.ask if tsc is not None else None)
     if tsc is None or live_ask is None:
         for list_name, _kind in lists:
             for item in result.get(list_name, []):
@@ -401,16 +403,40 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
         return result
 
     any_unavailable = False
+    state: dict[str, Any] = {"checks": {}}
+    questions: dict[str, Any] = {}
+    pending: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     for list_name, kind in lists:
-        list_partner = _LIST_PARTNER.get(list_name)
         for item in result.get(list_name, []):
-            try:
-                item["checks"] = _check_item(
-                    tsc, live_ask, kind, list_partner, item, deals, segments, context,
-                )
-            except Exception:
+            if len(pending) >= 20 or not item.get("evidence"):
+                item["checks"] = {"advisory_only": True, "flagged": True,
+                                  "reasons": ["No bounded evidence available; independent review required."]}
+                continue
+            label = "i"+str(len(pending))
+            local_state, local_questions = _item_request(tsc, live_ask, kind, _LIST_PARTNER.get(list_name),
+                                                       item, deals, segments, context)
+            state["checks"][label] = local_state
+            for name,q in local_questions.items():
+                q = dict(q)
+                instruction = q["instructions"]
+                for field in ("item", "transcript_excerpt", "candidate_deals"):
+                    instruction = instruction.replace(field, "checks."+label+"."+field)
+                q["instructions"] = instruction
+                questions[label+":"+name] = q
+            pending.append((label,item,local_questions))
+    if pending:
+        try:
+            # A supplied fake keeps its simple signature; production still enters budget admission.
+            transport = (lambda st, qs, **kw: ask(st, qs)) if ask is not None else live_ask
+            response = _semantic().ask(state, questions, transport=transport,
+                                       caller="post_call_jev", version="recording-v1", work_class="app_runtime")
+            for label,item,local_questions in pending:
+                item["checks"] = _item_checks(tsc,item,{"answers":{name:response["answers"][label+":"+name]
+                                                                  for name in local_questions}})
+        except Exception:
+            for _,item,_ in pending:
                 item["checks"] = _unavailable()
-                any_unavailable = True
+            any_unavailable = True
 
     if any_unavailable:
         result.setdefault("review_questions", []).append({
@@ -419,3 +445,10 @@ def check_distillation(result: dict[str, Any], context: dict[str, Any],
             "resolved": False,
         })
     return result
+
+
+def _semantic():
+    spec = importlib.util.spec_from_file_location("jev_semantic", os.path.join(REPO, "ops", "jev_semantic.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

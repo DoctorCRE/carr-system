@@ -10,9 +10,37 @@ from __future__ import annotations
 from typing import Any
 
 import execution_contract as contract
-from evaluation_rubrics import rubric_for
 import design_kernel
 import policy_learning
+
+
+WORKFLOW_RUBRICS = {
+    "workflow:job-passport": {
+        "rubric_id": "rubric:job-passport-visual",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection", "visual_interaction_accessibility", "evidence_promotion_display"},
+        "critical_dimensions": {"receipt_integrity", "freshness_integrity", "visual_accessibility", "visual_comprehension", "telemetry_truth", "layout_authority_separation"},
+    },
+    "workflow:claude-desktop-readonly": {
+        "rubric_id": "rubric:claude-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"native_hook_attribution", "receipt_integrity"},
+    },
+    "workflow:codex-desktop-readonly": {
+        "rubric_id": "rubric:codex-desktop-readonly",
+        "stages": {"typed_receipt_ingestion", "freshness_cas_selection", "projection"},
+        "critical_dimensions": {"adapter_configuration_binding", "freshness_integrity"},
+    },
+    "workflow:hermes-orchestration": {
+        "rubric_id": "rubric:hermes-orchestration",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"profile_staffing_separation", "handoff_checkpoint"},
+    },
+    "workflow:grok-x-native-retrieval": {
+        "rubric_id": "rubric:grok-x-native-retrieval",
+        "stages": {"typed_receipt_ingestion", "projection"},
+        "critical_dimensions": {"x_native_provenance", "retrieval_evidence_binding"},
+    },
+}
 
 
 class EvalPortfolioError(contract.ContractError):
@@ -52,7 +80,7 @@ BEHAVIOR_FINDING_FIELDS = {"finding_id", "root_cause_key", "failure_mode_id", "e
 
 def _exact(value: Any, fields: set[str], label: str) -> dict[str, Any]:
     try:
-        return contract._expect_exact(value, fields, label)  # shared strict contract primitive
+        return contract._expect_exact(value, fields, label)
     except contract.ContractError as exc:
         raise EvalPortfolioError(str(exc)) from exc
 
@@ -133,7 +161,7 @@ def validate_eval_portfolio(raw: Any, projection: Any | None = None) -> dict[str
     workflow = _exact(value["workflow"], WORKFLOW_FIELDS, "evaluation workflow rubric")
     for field in ("workflow_id", "rubric_id", "rubric_version"):_id(workflow[field], f"evaluation workflow {field}")
     for field in ("rubric_digest", "case_set_digest"): _digest(workflow[field], f"evaluation workflow {field}")
-    rubric = rubric_for(workflow["workflow_id"])
+    rubric = WORKFLOW_RUBRICS.get(workflow["workflow_id"])
     if rubric is None or rubric["rubric_id"] != workflow["rubric_id"]:
         raise EvalPortfolioError("evaluation workflow/rubric is not registered")
     policy = _exact(value["policy"], POLICY_FIELDS, "evaluation policy")
@@ -369,8 +397,7 @@ def critical_dimension_blockers(dimension_results: Any) -> list[str]:
     """Name every critical dimension that blocks, whatever any overall score did.
 
     The same no-aggregate rule the portfolio applies, exposed for callers that
-    hold dimension rows but not a whole portfolio (ops/check-eval-receipt.py,
-    the LLM-steering eval receipt). A critical dimension blocks when it failed,
+    hold dimension rows but not a whole portfolio. A critical dimension blocks when it failed,
     was blocked, or regressed against baseline. Rows are validated against
     DIMENSION_FIELDS; extra measurement fields are the caller's to strip.
     """
@@ -390,13 +417,6 @@ def critical_dimension_blockers(dimension_results: Any) -> list[str]:
 
 
 def _active_case(value: dict[str, Any], case: dict[str, Any]) -> bool:
-    """Return whether a case has current accepted golden-set membership.
-
-    Lifecycle history is retained for audit and validation, but only an
-    accepted case whose case id is still present in its golden set is usable
-    as admission evidence.  Retired cases may remain in the portfolio and in
-    the append-only golden-set history; they are not active evidence.
-    """
     if case["lifecycle"] != "accepted":
         return False
     golden_ref = case["golden_set_ref"]
@@ -407,11 +427,6 @@ def _active_case(value: dict[str, Any], case: dict[str, Any]) -> bool:
 
 
 def _risk_gate_reasons(value: dict[str, Any], requirement: dict[str, Any], as_of: str | None) -> list[str]:
-    """Apply explicit sample, evaluator, confidence, and critical-failure gates.
-
-    This is intentionally a reason-code projection.  It never emits an
-    aggregate score and it treats immature or missing evidence as unknown.
-    """
     reasons: list[str] = []
     active_case_ids = {case["case_id"] for case in value["cases"] if _active_case(value, case)}
     held_out = [case for case in value["cases"] if case["case_id"] in active_case_ids and case["split"] == "held_out"]
@@ -504,8 +519,6 @@ def admission_decision(kernel: Any, *, as_of: str | None = None, visual_gate_rep
             raise EvalPortfolioError(str(exc)) from exc
     if policy_learning_assessment is not None:
         try:
-            # This is a reason-code projection, not a score contribution: a
-            # learning refusal cannot be averaged away by other dimensions.
             reasons.extend(policy_learning.evaluation_kernel_blockers(policy_learning_assessment))
         except policy_learning.PolicyLearningError as exc:
             raise EvalPortfolioError(str(exc)) from exc
@@ -524,7 +537,5 @@ def admission_decision(kernel: Any, *, as_of: str | None = None, visual_gate_rep
     }
 
 
-# Canonical shared names. The legacy aliases below keep the prior Job Passport
-# call sites read-compatible while migrations are in progress.
 validate_evaluation_kernel = validate_eval_portfolio
 evaluate_admission = admission_decision

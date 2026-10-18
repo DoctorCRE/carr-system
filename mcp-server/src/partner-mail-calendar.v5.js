@@ -65,8 +65,7 @@
 //
 // TAINT IS NEVER LOWERED AT THIS SEAM. Outlook is a registered authoritative
 // home and a mailbox item's custody is corporate, but the VALUE crossing here
-// describes correspondence authored outside CARR. Following the precedent
-// context-assembly-source.v5.js set for adapter boundaries, every candidate
+// describes correspondence authored outside CARR. Every candidate
 // takes `untrusted_external` and the caller cannot supply a taint class at all —
 // a field it could set would be a laundering seam.
 //

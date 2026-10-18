@@ -138,9 +138,7 @@ name and the exact-match guard is a mitigation, not a preference. The partner no
 - **Palette.** Partner notes carry `#partner` (plus `#owner-joe` / `#owner-dell`).
   `.obsidian/graph.json` has no colour group for `partner`, so the two nodes render in the default
   colour. That is a vault file, not a repo file.
-- **Files-mode parity.** `tools/parity-records.py` diffs the whole `Graph/` tree between
-  `--files` and `--records` and requires it byte-identical. It is already MISMATCH before this
-  change, by design: the intro graph is records-only, so every vendor note carrying an edge already
-  differs between modes. `partners/` adds two more records-only paths to that existing set. If
-  graph parity is meant to be enforceable again, the gate needs to exclude the records-only intro
-  surface explicitly rather than pretend it does not exist.
+- **Files-mode parity.** Whole-tree equality between `--files` and `--records` is not
+  an acceptance criterion: the intro graph is records-only, so vendor notes carrying an edge
+  differ between modes. `partners/` adds records-only paths to that set. Any future parity
+  check must compare shared surfaces separately from the records-only intro surface.

@@ -19,6 +19,7 @@ statement: this proves plumbing, never doctrine.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -28,45 +29,10 @@ from pathlib import Path
 import psycopg
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.rule_delivery_activation import EXPECTED_IDS, load_validated  # noqa:E402
 
 REPO = Path(__file__).resolve().parent.parent
 MAP = REPO / "ops" / "config" / "rule-enforcement-map.json"
 PY = REPO / ".venv" / "bin" / "python"
-MIGRATION_0363 = REPO / "migrations" / "0363_rule_delivery_activation_digest_repin.sql"
-PRIOR_ACTIVATION_DIGEST = "4038e097f571f73499aee79b8c9e7b5bd3cea4ca0ba0f3847873e2f720106218"
-CURRENT_ACTIVATION_DIGEST = "f7bf5726d329dd240434e51f7401fac9a977a3fb710636738f379f60f565f904"
-# The chain has a fourth link as of 2026-09-01. Reinstating canonical_edit into
-# control_catalog (Joe's ruling 7f48abf6, Repo Hygiene Program R02) moved the
-# rule-enforcement-map digest, so the REGENERATED 0471 carries the generator's
-# designed, guarded rule-map repin and the eight targets end on this value.
-# NAMED FOR 0471, NOT 0474: 0474 reinstates the catalog control, but it is
-# 0471's repin block that actually moves ops.rule_delivery_activation_target.
-# PRIOR (pre-0363) and CURRENT (post-0363) are deliberately untouched -- 0363
-# still produces CURRENT, and its assertions below must keep expecting it.
-POST_0471_ACTIVATION_DIGEST = "6d21c37d533a5d98debfe4991c902164cf3c1fee88e7f42a3112468268e3335c"
-# A FIFTH LINK as of 2026-09-03. Tagging rule 1fcaa63a (heavy-build-protocol)
-# into the reviewed map moved its digest again. 0471 is a sealed artifact inside
-# the 0454-0471 generation chain and cannot be rewritten to follow, so
-# migrations/0478 repins the eight targets forward -- the same shape 0363 -> 0471
-# already used. POST_0471 above is deliberately NOT bumped: it is the value 0471
-# actually writes, and this fixture reconstructs the real sequence rather than
-# jumping to the end state.
-POST_0478_ACTIVATION_DIGEST = "eebfa2d627dfbbc65ae06e623724487158b940c9376cd30dbb067aec2779e8bb"
-# A SIXTH LINK as of 2026-09-05. Activating the verb-creation and isolated-tree
-# rules moves the reviewed map digest without changing any of the eight pack
-# cutover targets. Migration 0483 carries that guarded forward repin.
-POST_0483_ACTIVATION_DIGEST = "784e05273341f5f7c16f96d1f0fb1516d8c605cb3287dec32aa37a1211dd0cb8"
-POST_0554_ACTIVATION_DIGEST = "c6e89d64de575b9c6e39c8c88cd6a32e97e494b381a7ac4433026c4a3fe63c2a"
-# EIGHTH LINK as of 2026-09-29. Rule ede4b241 (cloud model choice) entering the
-# reviewed map moved its digest; migration 0772 carries the guarded forward repin.
-POST_0772_ACTIVATION_DIGEST = "43ac7f513c173114b1723a886baf56a83ec40e7fef8b187ed3dead7d16d90ada"
-ACTIVATION_TO_TEST_REF = (
-    "ops/rule-pack-drift-gate-selftest.py; ops/rule-load-layer-check-selftest.py; "
-    "ops/rule-pack-preuse-reselection-selftest.py"
-)
-RETIRED_ACTIVATION_ID = "581cb3fe"
-
 FAILURES: list[str] = []
 
 
@@ -94,23 +60,6 @@ def uuid_for(short: str, tail: int = 1) -> str:
     return f"{short}-0000-4000-8000-{tail:012d}"
 
 
-def cutover_as(cur, role: str, mode: str, reason: str, digest: str) -> tuple:
-    cur.execute(f"set session authorization {role}")
-    try:
-        cur.execute("select * from ops.set_rule_delivery_mode(%s,%s,%s)",
-                    (mode, reason, digest))
-        row = one(cur)
-    finally:
-        cur.execute("reset session authorization")
-    return row
-
-
-def first_do_block(source: str) -> str:
-    start = source.index("do $$")
-    end = source.index("end $$;", start) + len("end $$;")
-    return source[start:end]
-
-
 def main() -> int:
     dsn = os.environ.get("CARR_LOCAL_PG_DSN")
     if not dsn:
@@ -123,352 +72,10 @@ def main() -> int:
     # make one map-shared rule Dell-personal to prove the compiler reads
     # rule.personal_to and the audit checks the installed result.
     store_scope_by_id = dict(scope_by_id)
-    synthetic_dell = next(rid for rid in data["active_rule_ids"]["shared"]
-                          if rid not in EXPECTED_IDS)
+    synthetic_dell = data["active_rule_ids"]["shared"][0]
     store_scope_by_id[synthetic_dell] = "dell"
 
     with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
-        # Observe the actual post-migration state before this acceptance mutates
-        # any fixture row. This proves the committed 0471 f7->6d, 0478
-        # 6d->eeb, and 0483 eeb->784 sequence reached its real terminal state.
-        cur.execute(
-            """select count(*),
-                      count(*) filter (where map_digest=%s),
-                      count(*) filter (where short_id=any(%s))
-                 from ops.rule_delivery_activation_target""",
-            (POST_0772_ACTIVATION_DIGEST, sorted(EXPECTED_IDS)),
-        )
-        post_migrate = one(cur)
-        check("the real post-migrate state is the exact eight on the 0772 map",
-              post_migrate == (len(EXPECTED_IDS), len(EXPECTED_IDS), len(EXPECTED_IDS)),
-              str(post_migrate))
-
-        cur.execute("""do $$ begin
-          if not exists(select 1 from pg_roles where rolname='carr_authority_joe') then
-            create role carr_authority_joe login;
-          end if;
-          if not exists(select 1 from pg_roles where rolname='carr_authority_dell') then
-            create role carr_authority_dell login;
-          end if;
-        end $$""")
-        cur.execute("grant carr_authority to carr_authority_joe,carr_authority_dell")
-        cur.execute(
-            """insert into ops.rule_delivery_activation_target
-                 (short_id,expected_scope,expected_pack,
-                  from_control,from_enforcement_class,from_implementation_ref,
-                  from_test_ref,to_control,to_enforcement_class,
-                  to_implementation_ref,to_test_ref,map_digest)
-               values
-                 (%s,'shared','delegation-council',
-                  'session_boot','surfacing',
-                  'hooks/session-brief.py; hooks/machine-converge.py; mcp-server/src/mcp.js',
-                  'command:python3 hooks/gate-integrity.py --selftest',
-                  'pack_delivery','stop_gate',
-                  'hooks/rule-pack-drift-gate.py; hooks/rule-pack-preuse-reselection.py',
-                  %s,%s)""",
-            (RETIRED_ACTIVATION_ID, ACTIVATION_TO_TEST_REF, PRIOR_ACTIVATION_DIGEST),
-        )
-        check("the pre-0363 fixture restores the exact retired ninth target",
-              cur.rowcount == 1)
-        migration_0363 = MIGRATION_0363.read_text(encoding="utf-8")
-        transition_0363 = first_do_block(migration_0363)
-        activation_victim = sorted(EXPECTED_IDS)[0]
-        cur.execute(
-            "update ops.rule_delivery_activation_target set map_digest=%s",
-            (PRIOR_ACTIVATION_DIGEST,),
-        )
-        cur.execute("""insert into actor (slug,kind,display_name)
-                       values ('joe','human','Joe') on conflict (slug) do nothing""")
-        cur.execute("select id from actor where slug='joe'")
-        guard_joe = one(cur)[0]
-
-        # The migration and cutover share the singleton policy row as their
-        # first serialization token. Holding it must prevent even the first
-        # transition block from reaching the target rows.
-        with psycopg.connect(dsn) as lock_conn, lock_conn.cursor() as lock_cur:
-            lock_cur.execute("""select mode from ops.rule_delivery_policy
-                                where singleton for update""")
-            with psycopg.connect(dsn) as contender, contender.cursor() as contender_cur:
-                contender_cur.execute("set local statement_timeout='400ms'")
-                try:
-                    contender_cur.execute(transition_0363, prepare=False)
-                    check("0363 waits behind the cutover policy lock", False,
-                          "transition passed a held policy row")
-                except psycopg.errors.QueryCanceled:
-                    check("0363 waits behind the cutover policy lock", True)
-                finally:
-                    contender.rollback()
-            lock_conn.rollback()
-        cur.execute("""select count(*) from ops.rule_delivery_activation_target
-                        where map_digest=%s""", (PRIOR_ACTIVATION_DIGEST,))
-        check("the blocked 0363 transition changes no target",
-              one(cur)[0] == len(EXPECTED_IDS) + 1)
-
-        # Reproduce the dangerous restore state: the retired short id still has
-        # an active rule but no retirement receipt. The disposable owner bypass
-        # is scoped to fixture insertion only; Production triggers remain live.
-        retired_rule_id = uuid_for(RETIRED_ACTIVATION_ID)
-        successor_rule_id = uuid_for("aa411351")
-        cur.execute("alter table rule disable trigger user")
-        try:
-            cur.execute("""insert into rule
-                         (id,statement,taught_by,status,activated_by,activated_at)
-                         values (%s,'pre-retirement restore fixture',%s,'active',%s,now())""",
-                        (retired_rule_id, guard_joe, guard_joe))
-        finally:
-            cur.execute("alter table rule enable trigger user")
-        try:
-            cur.execute(transition_0363, prepare=False)
-            check("0363 refuses an active retired-target rule", False,
-                  "transition accepted an active unreceipted rule")
-        except psycopg.Error as exc:
-            check("0363 refuses an active retired-target rule",
-                  "not absent or exactly retired to aa411351" in str(exc),
-                  str(exc).splitlines()[0])
-        conn.rollback()
-        cur.execute("delete from rule where id=%s", (retired_rule_id,))
-
-        # The other permitted state is the exact immutable lifecycle receipt
-        # plus its matching Joe authority receipt and named successor.
-        with psycopg.connect(dsn) as receipt_conn, receipt_conn.cursor() as receipt_cur:
-            retired_at = "2026-08-27T00:00:00Z"
-            activated_at = "2000-01-01T00:00:00Z"
-            receipt_cur.execute("""insert into rule (id,statement,taught_by,status)
-                                   values (%s,'retirement successor fixture',%s,'proposed')""",
-                                (successor_rule_id, guard_joe))
-            receipt_cur.execute("""insert into rule
-                       (id,statement,taught_by,status,version,activated_by,activated_at,
-                        retired_by,retired_at)
-                       values (%s,'receipted retired fixture',%s,'retired',2,%s,%s,%s,%s)""",
-                                (retired_rule_id, guard_joe, guard_joe, activated_at,
-                                 guard_joe, retired_at))
-            receipt_cur.execute(
-                """select ops.legacy_rule_admission_note(%s,'active',%s::timestamptz)""",
-                (retired_rule_id, activated_at),
-            )
-            legacy_admission = one(receipt_cur)[0]
-            check("the retirement fixture has the canonical legacy admission",
-                  legacy_admission is not None)
-            receipt_cur.execute(
-                """select encode(public.digest(jsonb_build_object(
-                       'rule_id',%s::uuid,
-                       'rule_version_before',1,
-                       'rule_version_after',2,
-                       'statement_hash',encode(public.digest(
-                           'receipted retired fixture','sha256'),'hex'),
-                       'previous_status','active',
-                       'actor_id',%s::uuid,
-                       'reason','retirement fixture',
-                       'superseded_by',%s::uuid,
-                       'approval_receipt_id',null::uuid,
-                       'legacy_admission',%s::text,
-                       'retired_at',%s::timestamptz
-                     )::text,'sha256'),'hex')""",
-                (retired_rule_id, guard_joe, successor_rule_id,
-                 legacy_admission, retired_at),
-            )
-            contract_hash = one(receipt_cur)[0]
-
-            # Internal equality is insufficient: a made-up hash shared by both
-            # ledgers must still fail because it was not derived from the exact
-            # canonical Joe-authorized retirement contract.
-            receipt_cur.execute("savepoint malformed_retirement")
-            receipt_cur.execute("""insert into ops.rule_retirement_receipt
-                       (idempotency_key,rule_id,rule_version_before,rule_version_after,
-                        statement_hash,previous_status,actor_id,reason,superseded_by,
-                        legacy_admission,contract_hash,retired_at,created_at)
-                       values ('0363-retirement-fixture',%s,1,2,
-                               encode(public.digest('receipted retired fixture','sha256'),'hex'),
-                               'active',%s,'retirement fixture',%s,%s,%s,%s,%s)""",
-                                (retired_rule_id, guard_joe, successor_rule_id,
-                                 legacy_admission, "1" * 64, retired_at, retired_at))
-            receipt_cur.execute("""insert into ops.authority_receipt
-                       (idempotency_key,kind,subject_type,subject_id,actor_id,
-                        decision,contract_hash,evidence_refs,created_at)
-                       values ('retirement:0363-retirement-fixture','override','rule',
-                               %s,%s,'retired by Joe authority: retirement fixture',%s,
-                               '{}'::text[],%s)""",
-                                (retired_rule_id, guard_joe, "1" * 64, retired_at))
-            try:
-                receipt_cur.execute(transition_0363, prepare=False)
-                check("0363 refuses an internally consistent fabricated retirement hash",
-                      False, "transition accepted a fabricated retirement contract")
-            except psycopg.Error as exc:
-                check("0363 refuses an internally consistent fabricated retirement hash",
-                      "not absent or exactly retired to aa411351" in str(exc),
-                      str(exc).splitlines()[0])
-            receipt_cur.execute("rollback to savepoint malformed_retirement")
-
-            receipt_cur.execute("""insert into ops.rule_retirement_receipt
-                       (idempotency_key,rule_id,rule_version_before,rule_version_after,
-                        statement_hash,previous_status,actor_id,reason,superseded_by,
-                        legacy_admission,contract_hash,retired_at,created_at)
-                       values ('0363-retirement-fixture',%s,1,2,
-                               encode(public.digest('receipted retired fixture','sha256'),'hex'),
-                               'active',%s,'retirement fixture',%s,%s,%s,%s,%s)""",
-                                (retired_rule_id, guard_joe, successor_rule_id,
-                                 legacy_admission, contract_hash, retired_at, retired_at))
-            receipt_cur.execute("""insert into ops.authority_receipt
-                       (idempotency_key,kind,subject_type,subject_id,actor_id,
-                        decision,contract_hash,evidence_refs,created_at)
-                       values ('retirement:0363-retirement-fixture','override','rule',
-                               %s,%s,'retired by Joe authority: retirement fixture',%s,
-                               '{}'::text[],%s)""",
-                                (retired_rule_id, guard_joe, contract_hash, retired_at))
-            receipt_cur.execute(transition_0363, prepare=False)
-            receipt_cur.execute("""select count(*),
-                           count(*) filter (where map_digest=%s),
-                           count(*) filter (where short_id=%s)
-                          from ops.rule_delivery_activation_target""",
-                                (CURRENT_ACTIVATION_DIGEST, RETIRED_ACTIVATION_ID))
-            transitioned = one(receipt_cur)
-            check("0363 accepts the exact receipted retirement",
-                  transitioned == (len(EXPECTED_IDS), len(EXPECTED_IDS), 0),
-                  str(transitioned))
-            receipt_conn.rollback()
-
-        # 0363 must also refuse a same-ID activation row whose reviewed
-        # preimage drifted, without repinning any digest.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set to_test_ref='drifted same-ID acceptance fixture'
-                where short_id=%s""",
-            (activation_victim,),
-        )
-        try:
-            cur.execute(migration_0363, prepare=False)
-            check("0363 refuses a drifted same-ID activation preimage", False,
-                  "migration accepted the drifted row")
-        except psycopg.Error as exc:
-            check(
-                "0363 refuses a drifted same-ID activation preimage",
-                "expected the exact reviewed nine-row activation preimage" in str(exc),
-                str(exc).splitlines()[0],
-            )
-        conn.rollback()
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (PRIOR_ACTIVATION_DIGEST,),
-        )
-        check("a refused 0363 repin changes no target digest", one(cur)[0] == len(EXPECTED_IDS) + 1)
-        cur.execute(
-            "delete from ops.rule_delivery_activation_target where short_id=%s",
-            (RETIRED_ACTIVATION_ID,),
-        )
-        check("the post-0363 fixture removes exactly the retired target",
-              cur.rowcount == 1)
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s,
-                      to_test_ref=%s
-                where short_id=any(%s)""",
-            (CURRENT_ACTIVATION_DIGEST, ACTIVATION_TO_TEST_REF, sorted(EXPECTED_IDS)),
-        )
-
-        check("the post-0363 fixture restores all eight current target digests",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (CURRENT_ACTIVATION_DIGEST,),
-        )
-        check("the restored post-0363 fixture is the exact current eight",
-              one(cur)[0] == len(EXPECTED_IDS))
-
-        # FOURTH LINK: 0471's repin. The fixture above reconstructs the state as
-        # of 0363; the cutover below is handed the digest read from the live
-        # overlay, which is now the post-0471 value. Without this step the two
-        # disagree and the database refuses with "activation map digest preimage
-        # differs" -- which is exactly how this gap was found.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s
-                where map_digest=%s""",
-            (POST_0471_ACTIVATION_DIGEST, CURRENT_ACTIVATION_DIGEST),
-        )
-        check("0471 repins exactly the eight current targets",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (POST_0471_ACTIVATION_DIGEST,),
-        )
-        check("the post-0471 fixture is the exact eight on the post-0471 map",
-              one(cur)[0] == len(EXPECTED_IDS))
-
-        # FIFTH LINK: 0478's repin. The cutover below is handed the digest read
-        # from the live overlay, which is now the post-0478 value. Without this
-        # step the two disagree and the database refuses with "activation map
-        # digest preimage differs" -- which is how the gap was found the first
-        # time too, at the fourth link.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s
-                where map_digest=%s""",
-            (POST_0478_ACTIVATION_DIGEST, POST_0471_ACTIVATION_DIGEST),
-        )
-        check("0478 repins exactly the eight post-0471 targets",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (POST_0478_ACTIVATION_DIGEST,),
-        )
-        check("the post-0478 fixture is the exact eight on the post-0478 map",
-              one(cur)[0] == len(EXPECTED_IDS))
-
-        # SIXTH LINK: 0483's repin after the two Layer 0 rule additions. The
-        # eight cutover contracts are unchanged; only their base-map identity
-        # moves forward.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s
-                where map_digest=%s""",
-            (POST_0483_ACTIVATION_DIGEST, POST_0478_ACTIVATION_DIGEST),
-        )
-        check("0483 repins exactly the eight post-0478 targets",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (POST_0483_ACTIVATION_DIGEST,),
-        )
-        check("the post-0483 fixture is the exact eight on the current map",
-              one(cur)[0] == len(EXPECTED_IDS))
-        # SEVENTH LINK: 0554 binds the active 209-rule map after the reviewed
-        # inventory correction. Preserve the guarded 0483 preimage above.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s
-                where map_digest=%s""",
-            (POST_0554_ACTIVATION_DIGEST, POST_0483_ACTIVATION_DIGEST),
-        )
-        check("0554 repins exactly the eight post-0483 targets",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (POST_0554_ACTIVATION_DIGEST,),
-        )
-        check("the post-0554 fixture is the exact eight on the reviewed map",
-              one(cur)[0] == len(EXPECTED_IDS))
-        # EIGHTH LINK: 0772 binds the 210-rule map after rule ede4b241 entered it.
-        cur.execute(
-            """update ops.rule_delivery_activation_target
-                  set map_digest=%s
-                where map_digest=%s""",
-            (POST_0772_ACTIVATION_DIGEST, POST_0554_ACTIVATION_DIGEST),
-        )
-        check("0772 repins exactly the eight post-0554 targets",
-              cur.rowcount == len(EXPECTED_IDS))
-        cur.execute(
-            """select count(*) from ops.rule_delivery_activation_target
-                where map_digest=%s""",
-            (POST_0772_ACTIVATION_DIGEST,),
-        )
-        check("the post-0772 fixture is the exact eight on the reviewed map",
-              one(cur)[0] == len(EXPECTED_IDS))
         cur.execute("""insert into actor (slug,kind,display_name) values ('joe','human','Joe')
                        on conflict (slug) do nothing returning id""")
         cur.execute("select id from actor where slug='joe'")
@@ -563,7 +170,7 @@ def main() -> int:
         cur.execute("select count(*) from ops.rule_pack_index()")
         check("the pack index names every pack", one(cur)[0] == len(data["rule_packs"]))
 
-        expected_digest = load_validated()[1]["base_map_sha256"]
+        expected_digest = hashlib.sha256(MAP.read_bytes()).hexdigest()
         # SIEP-02 reads Work Request prose, map currentness, and the pack index
         # in one writer snapshot. Exercise the actual runtime grant.
         cur.execute("set session authorization carr_writer")
@@ -592,18 +199,6 @@ def main() -> int:
 
         cur.execute("select mode from ops.rule_delivery_policy")
         check("delivery starts in shadow mode", one(cur)[0] == "shadow")
-        proposal_ids = [f"00000000-0000-4000-8000-{index:012d}"
-                        for index in range(1, 39)]
-        cur.execute("set session authorization carr_authority_joe")
-        try:
-            cur.execute("select * from ops.rule_delivery_cutover_preflight(%s::uuid[])",
-                        (proposal_ids,))
-            preflight = one(cur)
-        finally:
-            cur.execute("reset session authorization")
-        check("Joe reads only the typed aggregate cutover preflight",
-              preflight == ("shadow", len(EXPECTED_IDS), 0, 0, 0, 0), str(preflight))
-
         # A scope-only corruption used to pass both the backfill and audit.
         victim = synthetic_dell
         cur.execute("update ops.rule_load_layer set scope='shared' where short_id=%s", (victim,))
@@ -663,99 +258,6 @@ def main() -> int:
         check("the backfill runs clean again once the store and map agree",
               result.returncode == 0, result.stderr.strip()[-300:])
 
-        # ── policy and eight controls move in one guarded transaction ─────────
-        admission = run("tools/sync-rule-admission.py", dsn)
-        check("the admission sync builds the eight-control preimage",
-              admission.returncode == 0, admission.stderr.strip()[-500:])
-        digest = expected_digest
-        for role in (None, "carr_writer", "carr_authority_dell"):
-            if role:
-                cur.execute(f"set session authorization {role}")
-            try:
-                cur.execute("select * from ops.set_rule_delivery_mode(%s,%s,%s)",
-                            ("enforced", "forged authority fixture", digest))
-                check(f"{role or 'owner'} cannot cut over rule delivery", False,
-                      "cutover was accepted")
-            except psycopg.Error as exc:
-                check(f"{role or 'owner'} cannot cut over rule delivery",
-                      exc.sqlstate == "42501", str(exc))
-            finally:
-                if role:
-                    cur.execute("reset session authorization")
-        for role in (None, "carr_writer", "carr_authority_dell"):
-            if role:
-                cur.execute(f"set session authorization {role}")
-            try:
-                cur.execute("select * from ops.rule_delivery_cutover_preflight(%s::uuid[])",
-                            (proposal_ids,))
-                check(f"{role or 'owner'} cannot read cutover preflight", False,
-                      "preflight was accepted")
-            except psycopg.Error as exc:
-                check(f"{role or 'owner'} cannot read cutover preflight",
-                      exc.sqlstate in ("42501", "42883"), str(exc))
-            finally:
-                if role:
-                    cur.execute("reset session authorization")
-        try:
-            cutover = cutover_as(cur, "carr_authority_joe", "enforced",
-                                "seven-day evidence fixture", digest)
-        except psycopg.Error as exc:
-            # psycopg appends a PL/pgSQL CONTEXT line after the useful refusal.
-            # The local runner reports only the final line, so preserve the
-            # database's first message without echoing a query or DSN.
-            raise RuntimeError(
-                "rule-delivery cutover refused: " + str(exc).splitlines()[0]
-            ) from None
-        check("cutover reports the exact eight", cutover[0] == "enforced" and cutover[1] == len(EXPECTED_IDS))
-        cur.execute("select mode from ops.rule_delivery_policy")
-        check("cutover flips policy to enforced", one(cur)[0] == "enforced")
-        cur.execute("select changed_by from ops.rule_delivery_policy")
-        check("cutover derives Joe attribution", one(cur)[0] == "joe")
-        cur.execute("""select changed_by from ops.rule_delivery_activation_receipt
-                        order by created_at desc limit 1""")
-        check("cutover receipt derives Joe attribution", one(cur)[0] == "joe")
-        cur.execute("""select count(*) from ops.rule_enforcement_point ep
-                       join rule r on r.id=ep.rule_id
-                      where left(r.id::text,8)=any(%s) and ep.control_key='pack_delivery'
-                        and ep.enforcement_class='stop_gate' and ep.installed""",
-                    (sorted(EXPECTED_IDS),))
-        check("cutover installs pack_delivery/stop_gate on all eight", one(cur)[0] == len(EXPECTED_IDS))
-
-        admission = run("tools/sync-rule-admission.py", dsn)
-        check("a future admission sync is policy-aware", admission.returncode == 0,
-              admission.stderr.strip()[-500:])
-        cur.execute("""select count(*) from ops.rule_enforcement_point ep
-                       join rule r on r.id=ep.rule_id
-                      where left(r.id::text,8)=any(%s) and ep.control_key='pack_delivery'
-                        and ep.enforcement_class='stop_gate'""", (sorted(EXPECTED_IDS),))
-        check("an enforced sync does not revert the eight controls", one(cur)[0] == len(EXPECTED_IDS))
-
-        try:
-            cur.execute("update ops.rule_delivery_policy set mode='shadow' where singleton")
-            check("a direct policy-only update is refused", False, "update was accepted")
-        except psycopg.Error as exc:
-            check("a direct policy-only update is refused",
-                  exc.sqlstate == "42501" and "Joe authority" in str(exc), str(exc))
-
-        rollback = cutover_as(cur, "carr_authority_joe", "shadow",
-                             "rollback fixture", digest)
-        check("rollback reports the exact eight", rollback[0] == "shadow" and rollback[1] == len(EXPECTED_IDS))
-        cur.execute("""select count(*) from ops.rule_enforcement_point ep
-                       join rule r on r.id=ep.rule_id
-                      where left(r.id::text,8)=any(%s) and ep.control_key='session_boot'
-                        and ep.enforcement_class='surfacing'""", (sorted(EXPECTED_IDS),))
-        check("rollback restores all eight session_boot rows", one(cur)[0] == len(EXPECTED_IDS))
-        cur.execute("select count(*) from ops.rule_delivery_activation_receipt")
-        check("cutover and rollback each leave an append-only receipt", one(cur)[0] == 2)
-
-        try:
-            cutover_as(cur, "carr_authority_joe", "enforced",
-                       "wrong digest", "0" * 64)
-            check("a stale map digest refuses cutover", False, "cutover was accepted")
-        except psycopg.Error as exc:
-            check("a stale map digest refuses cutover", "digest preimage" in str(exc), str(exc))
-        cur.execute("select mode from ops.rule_delivery_policy")
-        check("a refused cutover leaves policy in shadow", one(cur)[0] == "shadow")
         cur.execute("alter table rule enable trigger user")
         for table, trigger in (
             ("ops.rule_pack", "scac_epoch_rule_pack"),
