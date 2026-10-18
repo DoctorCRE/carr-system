@@ -62,10 +62,6 @@ the advertised tip. A superseded PR closes only after its merged successor is
 read back. Dry runs and action receipts go to out/orch. The shared maintenance
 lock remains out/worktree-reap.lock.
 
-hooks/*.py are covered by the gate-integrity.py baseline (rule: a session
-that adds or edits a hook re-blesses the baseline in the same commit) — this
-file was blessed alongside its addition; see ops/config/gate-baseline.json.
-
 FAIL-SOFT, ALWAYS. A boot-time convenience must never fail or block a
 session: any error anywhere in here is swallowed and the hook prints
 nothing, same discipline as hooks/session-brief.py's own nightly/loose-work
@@ -79,6 +75,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run, Event
 import time
 
 # __file__ resolves through the absolute canonical path this hook is always
@@ -379,27 +377,8 @@ def maybe_spawn_reaper(canon, current_wt):
     return cands
 
 
-def main():
-    sys.path.insert(0, REPO)
-    if os.environ.get("CARR_GROK_RUN_READ_ONLY") == "1":
-        try:
-            from hooks.grok_invocation import bounded_grok_read_only
-            if bounded_grok_read_only():
-                return 0
-        except ImportError:
-            pass  # an unavailable optional probe retains ordinary processing
-    if "--reap" in sys.argv[1:]:
-        # Detached child (or a hand/selftest run) — no SessionStart payload.
-        try:
-            return reap_main(sys.argv[1:])
-        except Exception:
-            return 0                         # fail-soft, like the hook itself
-
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        payload = {}
-
+@decision(failure="raise")
+def decide(payload):
     try:
         cwd = resolve_cwd(payload)
         if not cwd or not os.path.isdir(cwd):
@@ -437,11 +416,25 @@ def main():
                         "— a door other than run.sh worktree created it. Applied: "
                         + "; ".join(applied)
                     )
-                # A non-zero exit (not a registered worktree, or some other
-                # refusal) is deliberately silent here — the boot hook proposes
-                # the fix, it does not surface --plumb's own refusal reasoning
-                # at every session start; run `./run.sh worktree --plumb` by
-                # hand to see it.
+                else:
+                    # 2026-10-12: a refusal used to be silent here, and that
+                    # silence cost every session on this MacBook its .venv for
+                    # weeks (out/worktree-venv-guard.jsonl: refused, refused,
+                    # refused; nobody told). The session that pays for the
+                    # missing runtime is the one that must hear why, in one
+                    # line, with the remedy --plumb itself names.
+                    said = [ln.strip() for ln in plumb.stdout.splitlines()
+                            if ln.strip().startswith("!!") or "./run.sh worktree --install" in ln
+                            or "requirements.lock" in ln or "npm --prefix" in ln]
+                    print(
+                        "worktree self-plumb REFUSED: this session's worktree "
+                        f"({os.path.basename(toplevel)}) is missing {', '.join(missing)} "
+                        "and the shared runtime could not be linked. Selftests and the "
+                        "pre-push floor will fail here until one of these runs: "
+                        + (" | ".join(said[:4]) if said else plumb.stdout.strip()[-400:] or "run ./run.sh worktree --plumb to see the reason")
+                        + " | to repair the SHARED runtime instead: in the canonical checkout, "
+                        ".venv/bin/python -m pip install -r requirements.lock and npm --prefix mcp-server ci"
+                    )
 
         # The orphan reaper runs for canonical AND worktree sessions — the
         # canonical tree is where a human most often sits, and its sessions
@@ -456,6 +449,23 @@ def main():
     except Exception:
         pass  # fail-soft: this must never block or fail a session
     return 0
+
+
+def main():
+    sys.path.insert(0, REPO)
+    if os.environ.get("CARR_GROK_RUN_READ_ONLY") == "1":
+        try:
+            from hooks.grok_invocation import bounded_grok_read_only
+            if bounded_grok_read_only():
+                return 0
+        except ImportError:
+            pass  # an unavailable optional probe retains ordinary processing
+    if "--reap" in sys.argv[1:]:
+        try:
+            return reap_main(sys.argv[1:])
+        except Exception:
+            return 0
+    return run(decide, invalid_event={})
 
 
 if __name__ == "__main__":

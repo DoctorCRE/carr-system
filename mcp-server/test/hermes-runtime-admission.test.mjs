@@ -1,8 +1,9 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 
-const migration = await readFile(new URL("../../migrations/0304_hermes_runtime_admission.sql", import.meta.url), "utf8");
+
+const migration = await readMigration(new URL("../../migrations/0304_hermes_runtime_admission.sql", import.meta.url));
 
 test("Hermes admission projects the existing envelope and does not create a parallel runtime store", () => {
   assert.match(migration, /create or replace function ops\.hermes_runtime_admission_for_brief/i);

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 from typing import Any
+from git_env import fixture_env
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOL = REPO / "ops" / "migration-shadow.py"
@@ -85,13 +86,63 @@ check("unadmitted timestamps remain bound", bool(shadow.differences(snapshot("se
 from unittest.mock import patch
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)
+    repo = work / 'repo'
+    repo.mkdir()
+    env = fixture_env()
+    env['GITHUB_BASE_REF'] = ''
+    message = work / 'commit-message'
+    message.write_text('Synthetic migration base fixture\n')
+    def git(*args):
+        return subprocess.run(['git', *args], cwd=repo, env=env,
+                              capture_output=True, text=True, check=True).stdout.strip()
+    def commit(path):
+        (repo / path).write_text(path)
+        git('add', path)
+        git('commit', '-q', '-F', str(message))
+    git('init', '-q', '-b', 'topic')
+    git('config', 'user.name', 'Fixture')
+    git('config', 'user.email', 'fixture@example.invalid')
+    git('config', 'core.hooksPath', '/dev/null')
+    commit('base.txt')
+    base = git('rev-parse', 'HEAD')
+    git('branch', 'main')
+    commit('topic.txt')
+    git('checkout', '-q', 'main')
+    commit('main.txt')
+    main = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', main)
+    git('checkout', '-q', 'topic')
+    with patch.object(shadow, 'REPO', repo), patch.dict(shadow.os.environ, env, clear=True):
+        check('an unmerged branch shadows from its common base', shadow.default_base() == base)
+        git('merge', '--no-commit', 'main')
+        check('a pending main merge shadows from the main it incorporated', shadow.default_base() == main)
+
+# A CHECK constraint can hold a literal carriage return (the SCAC ingress_key
+# checks do). Universal-newline text IO rewrites it to a line feed, which then
+# loads into the shadow cluster and lands in db/schema.sql as a different
+# constraint. Every snapshot read and write must keep the bytes.
+CR = "CREATE TABLE ops.k (k text CHECK (k !~ '[\n\r\t]'));\n"
+print("byte fidelity")
+with tempfile.TemporaryDirectory() as tmp:
+    path = pathlib.Path(tmp) / 'schema.sql'
+    shadow.write_snapshot(path, snapshot(CR, R1))
+    check("a written snapshot keeps a carriage return", b"\r" in path.read_bytes())
+    check("a read snapshot keeps a carriage return", "\r" in shadow.read_snapshot(path))
+
+with tempfile.TemporaryDirectory() as tmp:
+    work = pathlib.Path(tmp)
     def fake_run(command, env, label, log):
         if label == "bin/schema-snapshot.sh":
             (work / 'candidate.sql').write_text(snapshot(T, R1))
         return ''
     def fake_process(command, **kwargs):
         if command[0] == 'git':
-            return subprocess.CompletedProcess(command, 0, snapshot(T, R1), '')
+            out = snapshot(CR, R1)
+            if kwargs.get('text') or kwargs.get('universal_newlines'):
+                # What a text-mode pipe really returns: universal newlines.
+                return subprocess.CompletedProcess(
+                    command, 0, out.replace('\r\n', '\n').replace('\r', '\n'), '')
+            return subprocess.CompletedProcess(command, 0, out.encode(), '')
         if pathlib.Path(command[0]).name == 'initdb':
             data = pathlib.Path(command[command.index('-D') + 1])
             data.mkdir(parents=True, exist_ok=True)
@@ -105,6 +156,8 @@ with tempfile.TemporaryDirectory() as tmp:
             check("failed shutdown fails the shadow result", True)
         else:
             check("failed shutdown fails the shadow result", False)
+    check("the base snapshot loads with its carriage return intact",
+          b"\r" in (work / 'base.sql').read_bytes())
 
 with tempfile.TemporaryDirectory() as tmp:
     bins = pathlib.Path(tmp)

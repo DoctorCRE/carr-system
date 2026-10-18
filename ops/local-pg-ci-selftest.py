@@ -153,6 +153,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove,
 ):
     result = mod.run_local_ci(
@@ -162,7 +163,8 @@ check("discovered binaries reach the scrubbed Linux child PATH",
       all(env.get("PATH", "").split(os.pathsep)[0] == "/fake" for env in child_envs))
 check("successful lane returns zero", result == 0)
 check("initdb is first PostgreSQL operation", events[0][0] == "/fake/initdb")
-check("server binds loopback", "-h 127.0.0.1 -p 55432" in events[1])
+check("server binds loopback and private socket",
+      f"-h 127.0.0.1 -p 55432 -k {fake_root / 'socket'}" in events[1])
 check("server output is detached from runner pipes", "-l" in events[1] and "postgres.log" in events[1][events[1].index("-l") + 1])
 check("database is created locally", events[2][0] == "/fake/createdb")
 check("fixture owner role is created", events[3][0] == "/fake/psql" and "neondb_owner" in events[3][-1])
@@ -177,6 +179,8 @@ check(
 )
 check("true pre-0450 fingerprint is captured", events[8][-1] == "--fingerprint-only")
 check("migration class runs through canonical CI", events[9][-2:] == ("--only", "migration"))
+check("migration gates discover the selected PostgreSQL binaries in the scrubbed child",
+      child_envs[9]["PATH"].split(os.pathsep)[0] == "/fake")
 check(
     "F03 PostgreSQL acceptance runs immediately after canonical CI",
     events[10][-1].endswith("tools/test-f03-production-migration.py"),
@@ -285,6 +289,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree"),
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="strict", port=55432, runner=FakeRunner())
@@ -352,6 +357,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree"),
 ):
     assurance_stderr = io.StringIO()
@@ -399,6 +405,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
@@ -416,6 +423,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_continuity_failure,
 ):
     continuity_stderr = io.StringIO()
@@ -441,6 +449,7 @@ with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
     patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_start_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,

@@ -163,7 +163,7 @@ require(
 )
 require(
     "preflight executes this selftest from the pulled packet",
-    "context-handoff-gate corpus-render-gate config-as-code migrate-dell" in script,
+    "git-writer-gate \\\n           corpus-render-gate config-as-code migrate-dell" in script,
 )
 require(
     "fresh-machine preflight exercises the actual Claude-only installer",

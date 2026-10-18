@@ -1,0 +1,23 @@
+{
+  "schema": "rule-retirements/v1",
+  "note": "Confirmed rule retirements supplied in the PR 1840 repair instruction. Pending retirements remain active until confirmed. Historical replay fixtures and their input hashes remain unchanged.",
+  "rules": {
+    "0f38532e": "2026-10-17",
+    "113b3833": "2026-10-17",
+    "1d50a3bb": "2026-10-17",
+    "1fddcffb": "2026-10-17",
+    "1fcaa63a": "2026-10-16",
+    "308ef1de": "2026-10-17",
+    "4402973a": "2026-10-17",
+    "4f7c348f": "2026-10-17",
+    "58b44ccb": "2026-10-17",
+    "99e951b9": "2026-10-17",
+    "a2e78f48": "2026-10-17",
+    "bbffc139": "2026-10-17",
+    "c1547ed1": "2026-10-17",
+    "d5dcfe26": "2026-10-17",
+    "e8868cbe": "2026-10-17",
+    "fb110a39": "2026-10-17",
+    "fb2b263d": "2026-10-17"
+  }
+}

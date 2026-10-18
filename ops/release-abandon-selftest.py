@@ -387,10 +387,7 @@ def _cases(dsn: str) -> None:
 
 
 def run_cases(dsn: str) -> None:
-    """Every assertion, against whatever Postgres was handed in."""
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("the schema loads so the rest can run", False)
-        return
+    """Run current release cases on the prepared pristine database."""
     mig = subprocess.run([sys.executable, str(REPO / "tools" / "migrate.py"),
                           "--apply", "--yes"], capture_output=True, text=True,
                          timeout=1800, env={**os.environ, "DATABASE_URL": dsn})
@@ -403,6 +400,22 @@ def run_cases(dsn: str) -> None:
     _cases(dsn)
 
 
+def clone_fixture_database(dsn: str, database: str) -> str:
+    """Copy the restored fixture without revalidating the entire snapshot.
+
+    Both databases stay in this test's owned cluster. WAL_LOG avoids the
+    forced checkpoint of FILE_COPY; rows and schema remain separate copies.
+    """
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
+    if str(params.get("host") or "") not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("release-abandon clone requires loopback PostgreSQL")
+    maintenance = psycopg.conninfo.make_conninfo(dsn, dbname="template1")
+    with psycopg.connect(maintenance, autocommit=True) as connection:
+        connection.execute(sql.SQL("create database {} with template {} strategy WAL_LOG").format(
+            sql.Identifier(database), sql.Identifier(str(params.get("dbname") or "postgres"))))
+    return psycopg.conninfo.make_conninfo(dsn, dbname=database)
+
+
 def legacy_approval_receipt_refusal(dsn: str) -> None:
     """Exercise 0205 against a populated 0202-shaped receipt table.
 
@@ -411,9 +424,6 @@ def legacy_approval_receipt_refusal(dsn: str) -> None:
     migration file directly; its schema_migrations ledger is intentionally not
     consulted, because raw file application is the behavior under test.
     """
-    if psql(dsn, "-f", str(REPO / "db" / "schema.sql")).returncode != 0:
-        check("0205 legacy-receipt fixture schema loads", False)
-        return
     receipt_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     receipt_columns = psql(dsn, "-At", "-c",
                            "select count(*) from information_schema.columns "
@@ -494,9 +504,13 @@ def main() -> int:
     if ci_dsn:
         print("release-abandon-selftest: using an owned disposable PostgreSQL cluster")
         try:
-            with isolated_ci_database(ci_dsn) as legacy_dsn:
-                legacy_approval_receipt_refusal(legacy_dsn)
             with isolated_ci_database(ci_dsn) as isolated_dsn:
+                loaded = psql(isolated_dsn, "-f", str(REPO / "db" / "schema.sql"))
+                check("the pristine schema loads for both release fixtures", loaded.returncode == 0)
+                if loaded.returncode:
+                    return 1
+                legacy_dsn = clone_fixture_database(isolated_dsn, "abandon_legacy")
+                legacy_approval_receipt_refusal(legacy_dsn)
                 run_cases(isolated_dsn)
         except Exception:
             print("release-abandon-selftest: disposable PostgreSQL fixture unavailable",

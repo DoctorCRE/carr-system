@@ -1,3 +1,4 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-F01 — the live door (recordSourceAuthorityStoreTools) and the numbered
 // migration, proved offline.
 //
@@ -13,7 +14,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -210,10 +211,10 @@ test("the door refuses to build without the shared envelope and ToolError", () =
 // ---------------------------------------------------------------------------
 
 function f01Migration() {
-  const names = readdirSync(resolve(REPO, "migrations"))
+  const names = listMigrationNames()
     .filter(name => /^\d{4}_f01_record_source_authority\.sql$/.test(name));
   assert.equal(names.length, 1, "exactly one numbered F01 migration exists");
-  return readFileSync(resolve(REPO, "migrations", names[0]), "utf8");
+  return readMigration(resolve(REPO, "migrations", names[0]));
 }
 
 test("the migration embeds domain.sql verbatim, then the document-source hunk verbatim but for its psql line", () => {

@@ -19,6 +19,7 @@
 import { personalScopeForActor } from "./identity.js";
 import { appendRoomTurn, OBSERVATORY_ROOM } from "./partner-room.js";
 import { ToolError } from "./tool-error.js";
+import { safeInteger, integerFields, normalizedEnvelope } from "./safe-integer.js";
 
 const PROFILE_STATUSES = ["active", "unstaffed", "parked"];
 const KEY_SHAPE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
@@ -45,7 +46,13 @@ async function rulingIdentity(c, actor) {
   return { ruledBy: found.rows[0].id, basis: "standing_delegation" };
 }
 
-export function agentProfileTools({ withEnvelope, writeEvent, ToolError }) {
+function profileRecord(row) {
+  return integerFields(row, ["version"], "profile_version_invalid");
+}
+
+export function agentProfileTools({ withEnvelope: envelope, writeEvent, ToolError }) {
+  const withEnvelope = normalizedEnvelope(envelope, result => ({ ...result,
+    profile: profileRecord(result.profile) }));
   return {
     "read-profiles": {
       description: "The named-agent roster: every persistent agent identity (Builder, Designer, Reviewer, Doc) with its charter as a skills list, the model currently staffing it, its desk if any, and its status (active / unstaffed / parked). The NAME is the thing partners learn; the model underneath is interchangeable staffing detail. Read-only and open — a profile is presentation and routing, never authority.",
@@ -55,7 +62,7 @@ export function agentProfileTools({ withEnvelope, writeEvent, ToolError }) {
           `select profile_key, display_name, charter, current_model, current_desk,
                   sponsor_scope, status, version
              from agent_profile order by profile_key`);
-        return { ok: true, profiles: r.rows, total: r.rows.length };
+        return { ok: true, profiles: r.rows.map(profileRecord), total: r.rows.length };
       },
     },
 
@@ -71,77 +78,80 @@ export function agentProfileTools({ withEnvelope, writeEvent, ToolError }) {
         base_version: { type: "integer", description: "current version from a fresh read-profiles" },
         note: { type: "string", description: "one line of why, kept in the history row" },
       }, required: ["idempotency_key", "profile_key", "status", "base_version"] },
-      handler: async (c, actor, args) => withEnvelope(c, actor, "assign-profile", args, async () => {
-        if (!KEY_SHAPE.test(String(args.profile_key || "")))
-          throw new ToolError({ error: "profile_key_invalid" });
-        if (!PROFILE_STATUSES.includes(args.status))
-          throw new ToolError({ error: "profile_status_invalid", allowed: PROFILE_STATUSES });
-        const model = args.model === undefined || args.model === null || args.model === ""
-          ? null : String(args.model);
-        const desk = args.desk === undefined || args.desk === null || args.desk === ""
-          ? null : String(args.desk);
-        if (args.status === "active" && model === null)
-          throw new ToolError({ error: "profile_active_needs_model",
-            hint: "an active profile is a staffed one — name the model, or set status unstaffed/parked" });
+      handler: async (c, actor, args) => {
+        safeInteger(args.base_version, "profile_base_version_invalid", { allowString: false });
+        return withEnvelope(c, actor, "assign-profile", args, async () => {
+          if (!KEY_SHAPE.test(String(args.profile_key || "")))
+            throw new ToolError({ error: "profile_key_invalid" });
+          if (!PROFILE_STATUSES.includes(args.status))
+            throw new ToolError({ error: "profile_status_invalid", allowed: PROFILE_STATUSES });
+          const model = args.model === undefined || args.model === null || args.model === ""
+            ? null : String(args.model);
+          const desk = args.desk === undefined || args.desk === null || args.desk === ""
+            ? null : String(args.desk);
+          if (args.status === "active" && model === null)
+            throw new ToolError({ error: "profile_active_needs_model",
+              hint: "an active profile is a staffed one — name the model, or set status unstaffed/parked" });
 
-        const { ruledBy, basis } = await rulingIdentity(c, actor);
+          const { ruledBy, basis } = await rulingIdentity(c, actor);
 
-        const updated = await c.query(
-          `update agent_profile
-              set current_model=$1, current_desk=$2, status=$3,
-                  version=version+1, updated_at=now()
-            where profile_key=$4 and version=$5
-            returning id, profile_key, display_name, charter, current_model,
-                      current_desk, sponsor_scope, status, version`,
-          [model, desk, args.status, args.profile_key, args.base_version]);
-        if (!updated.rows.length) {
-          const current = await c.query(
-            `select version from agent_profile where profile_key=$1`, [args.profile_key]);
-          if (!current.rows.length)
-            throw new ToolError({ error: "profile_not_found", profile_key: args.profile_key,
-              hint: "read-profiles lists the roster; new profiles are a migration, not a verb" });
-          throw new ToolError({ error: "version_conflict",
-            current_version: Number(current.rows[0].version),
-            hint: "re-read the roster and retry with the fresh version" });
-        }
-        const profile = updated.rows[0];
+          const updated = await c.query(
+            `update agent_profile
+                set current_model=$1, current_desk=$2, status=$3,
+                    version=version+1, updated_at=now()
+              where profile_key=$4 and version=$5
+              returning id, profile_key, display_name, charter, current_model,
+                        current_desk, sponsor_scope, status, version`,
+            [model, desk, args.status, args.profile_key, args.base_version]);
+          if (!updated.rows.length) {
+            const current = await c.query(
+              `select version from agent_profile where profile_key=$1`, [args.profile_key]);
+            if (!current.rows.length)
+              throw new ToolError({ error: "profile_not_found", profile_key: args.profile_key,
+                hint: "read-profiles lists the roster; new profiles are a migration, not a verb" });
+            throw new ToolError({ error: "version_conflict",
+              current_version: safeInteger(current.rows[0].version, "profile_version_invalid"),
+              hint: "re-read the roster and retry with the fresh version" });
+          }
+          const profile = updated.rows[0];
 
-        const history = await c.query(
-          `insert into agent_profile_assignment
-             (profile_id, model, desk, status, ruled_by, ruling_basis, note, idempotency_key)
-           values ($1,$2,$3,$4,$5,$6,$7,$8)
-           returning id`,
-          [profile.id, model, desk, args.status, ruledBy, basis,
-           args.note ? String(args.note) : null, args.idempotency_key]);
+          const history = await c.query(
+            `insert into agent_profile_assignment
+               (profile_id, model, desk, status, ruled_by, ruling_basis, note, idempotency_key)
+             values ($1,$2,$3,$4,$5,$6,$7,$8)
+             returning id`,
+            [profile.id, model, desk, args.status, ruledBy, basis,
+             args.note ? String(args.note) : null, args.idempotency_key]);
 
-        await writeEvent(c, actor, "assign-profile", "agent_profile", profile.id, {
-          profile_key: profile.profile_key, model, desk, status: args.status,
-          ruling_basis: basis, idempotency_key: args.idempotency_key,
+          await writeEvent(c, actor, "assign-profile", "agent_profile", profile.id, {
+            profile_key: profile.profile_key, model, desk, status: args.status,
+            ruling_basis: basis, idempotency_key: args.idempotency_key,
+          });
+
+          // The wire receipt, in the SAME transaction as the change: the
+          // observatory's constraint is that profile truth must reach any feed
+          // window, and a receipt that can be lost between a commit and a
+          // separate poster is a receipt that will eventually be lost. It lands in
+          // the room the panel reads (OBSERVATORY_ROOM).
+          const scope = personalScopeForActor(actor);
+          const sponsor = actor?.human === true ? actor.slug : scope.sponsor;
+          const receipt = await appendRoomTurn(c, {
+            room: OBSERVATORY_ROOM, sponsor, seat: "claude", kind: "receipt",
+            body: JSON.stringify({ agent_profile: {
+              key: profile.profile_key, name: profile.display_name,
+              model: profile.current_model, desk: profile.current_desk,
+              status: profile.status,
+            } }),
+            msgId: crypto.randomUUID(),
+            originChannel: "mcp", originActor: actor.slug,
+          });
+          if (receipt.ok !== true)
+            throw new ToolError({ error: "profile_receipt_failed", detail: receipt.error });
+
+          return { ok: true, profile, assignment_id: history.rows[0].id,
+                   ruled_by: ruledBy, ruling_basis: basis, receipt_seq: receipt.seq };
         });
-
-        // The wire receipt, in the SAME transaction as the change: the
-        // observatory's constraint is that profile truth must reach any feed
-        // window, and a receipt that can be lost between a commit and a
-        // separate poster is a receipt that will eventually be lost. It lands in
-        // the room the panel reads (OBSERVATORY_ROOM).
-        const scope = personalScopeForActor(actor);
-        const sponsor = actor?.human === true ? actor.slug : scope.sponsor;
-        const receipt = await appendRoomTurn(c, {
-          room: OBSERVATORY_ROOM, sponsor, seat: "claude", kind: "receipt",
-          body: JSON.stringify({ agent_profile: {
-            key: profile.profile_key, name: profile.display_name,
-            model: profile.current_model, desk: profile.current_desk,
-            status: profile.status,
-          } }),
-          msgId: crypto.randomUUID(),
-          originChannel: "mcp", originActor: actor.slug,
-        });
-        if (receipt.ok !== true)
-          throw new ToolError({ error: "profile_receipt_failed", detail: receipt.error });
-
-        return { ok: true, profile, assignment_id: history.rows[0].id,
-                 ruled_by: ruledBy, ruling_basis: basis, receipt_seq: receipt.seq };
-      }),
+      },
     },
   };
 }

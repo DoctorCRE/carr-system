@@ -22,6 +22,16 @@ class RequirementsTests(unittest.TestCase):
     def test_prose_is_needs_review_without_probability_or_model(self):
         result=req.check({},[human('Fix the output and verify it.')])
         self.assertEqual(result['status'],'needs_review');self.assertEqual(result['unmet'],[])
+        # Nothing to announce: the clauses go to receipts, never to Joe's screen.
+        self.assertNotIn('advisory',result);self.assertEqual(result['needs_review'],['Fix the output and verify it.'])
+
+    def test_malformed_explicit_contract_announces_needs_review(self):
+        for criteria in ('report must say ready', [], None, {}, 0, ''):
+            with self.subTest(criteria=criteria):
+                prompt=json.dumps({'acceptance_contract':{'criteria':criteria}})
+                result=req.check({},[human(prompt)])
+                self.assertEqual(result['status'],'needs_review')
+                self.assertEqual(result.get('advisory'),'Acceptance needs review.')
 
     def test_current_typed_contract_reads_current_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:

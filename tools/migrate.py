@@ -31,6 +31,10 @@ import sys
 from pathlib import Path
 from typing import NoReturn
 
+import migration_0882
+
+from migration_baseline import MANIFEST, MigrationBaseline
+
 from migration_number_contract import (
     LEGACY_APPLIED_ALIASES,
     MigrationNumberError,
@@ -86,6 +90,14 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "on every database; all 0248 adds here is a binding to the autonomy rule, "
         "which this database does not carry",
     ),
+    "0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql": (
+        "select 1 where exists (select 1 from ops.enforcement_control_catalog "
+        "where control_key='pack_delivery' and installed) "
+        "or exists (select 1 from ops.rule_control_binding b join public.rule r on r.id=b.rule_id "
+        "where b.control_key='pack_delivery' and r.status='active')",
+        "the text-delivery control is no longer installed and backs no active rule; "
+        "the frozen refresh has no live control to update",
+    ),
 }
 
 # ── MIGRATIONS WHOSE INTERMEDIATE CATALOG MUST NEVER COMMIT ────────────────
@@ -99,13 +111,142 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
 # SQL bodies and both immutable ledger rows commit together, and the deferred
 # trigger observes only the final v11 state. A caller may not cut this group in
 # half with --through.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
-from registry_chain import registry_chain
-
-REGISTRY_CHAIN = registry_chain()
-ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["atomic_groups"])
-STRICT_ATOMIC_MIGRATION_GROUPS = tuple(tuple(group) for group in REGISTRY_CHAIN["strict_atomic_groups"])
-
+ATOMIC_MIGRATION_GROUPS = (('0480_codex_continuity.sql', '0481_codex_continuity_registry_activation.sql'),
+ ('0485_claude_continuity.sql', '0486_claude_continuity_registry_activation.sql'),
+ ('0502_gate_zero_read_only_outcome.sql', '0503_gate_zero_outcome_and_scac_successor.sql'),
+ ('0508_foundation_assurance_minimum_receipt.sql',
+  '0509_journey_one_clock_store.sql',
+  '0510_journey_one_clock_input_store.sql',
+  '0511_foundation_assurance_minimum_outcome.sql',
+  '0512_foundation_assurance_scac_successor.sql'),
+ ('0517_program_controller_seams.sql', '0518_program_controller_seams_scac_successor.sql'),
+ ('0519_producer_cost_ledger.sql',
+  '0520_doc_conversation_store.sql',
+  '0521_r03_notifications.sql',
+  '0522_producer_trio_scac_successor.sql'),
+ ('0523_doc_conversation_write_doors.sql', '0524_doc_conversation_write_doors_scac_successor.sql'),
+ ('0525_doc_conversation_list.sql', '0526_doc_conversation_list_scac_successor.sql'),
+ ('0527_notification_preferences.sql', '0528_notification_preferences_scac_successor.sql'),
+ ('0529_session_identity_reads.sql', '0530_session_identity_scac_successor.sql'),
+ ('0531_room_dispatch_spine.sql', '0532_room_dispatch_spine_scac_successor.sql'),
+ ('0532a_canonical_ownership_lease_activation.sql',
+  '0532b_ready_plan_amendment_scac_successor.sql'),
+ ('0538_canonical_ownership_assurance_binding.sql',
+  '0539_canonical_ownership_assurance_scac_successor.sql'),
+ ('0540_release_readiness_without_repeat_approval.sql',
+  '0541_release_readiness_scac_successor.sql'),
+ ('0542_model_role_store.sql', '0543_model_role_store_scac_successor.sql'),
+ ('0546_read_doc_outcome_cards_successor.sql', '0547_read_doc_outcome_cards_scac_successor.sql'),
+ ('0556_meeting_mode_store.sql', '0557_meeting_mode_scac_successor.sql'),
+ ('0565_tour_property_registration.sql', '0566_tour_property_registration_scac_successor.sql'),
+ ('0575_answer_needs_joe_work_request.sql',
+  '0576_answer_needs_joe_work_request_scac_successor.sql'),
+ ('0580_resource_observation.sql', '0581_resource_observation_scac_successor.sql'),
+ ('0587_jev_call_receipt.sql', '0588_jev_call_receipt_scac_successor.sql'),
+ ('0602_doctorcre_r02_workflow_cutover_and_caller_inventory.sql',
+  '0603_doctorcre_r02_scac_successor.sql'),
+ ('0617_delivery_cadence_a05.sql', '0618_delivery_cadence_a05_scac_successor.sql'),
+ ('0626_f01_record_source_authority.sql', '0627_f01_record_source_authority_scac_successor.sql'),
+ ('0628_doctorcre_slice_done_marker.sql', '0629_doctorcre_slice_done_marker_scac_successor.sql'),
+ ('0700_governed_correspondence_store.sql', '0701_governed_correspondence_scac_successor.sql'),
+ ('0704_cre_lifecycle.sql', '0705_cre_lifecycle_scac_successor.sql'),
+ ('0706_amend_closed_loop.sql', '0707_amend_closed_loop_scac_successor.sql'),
+ ('0708_action_class_successor_registry.sql',
+  '0709_action_class_successor_registry_scac_successor.sql'),
+ ('0717_assurance_health_evidence_store.sql',
+  '0718_assurance_health_evidence_store_scac_successor.sql'),
+ ('0719_doctorcre_a03_review_store.sql', '0720_doctorcre_a03_review_scac_successor.sql'),
+ ('0721_a02_rule_enforcement_coverage.sql',
+  '0722_a02_rule_enforcement_coverage_scac_successor.sql'),
+ ('0724_f05_live_rule_context.sql', '0725_f05_live_rule_context_scac_successor.sql'),
+ ('0726_salesforce_reconciliation_rw02_store.sql',
+  '0727_salesforce_reconciliation_rw02_scac_successor.sql'),
+ ('0733_salesforce_rw02_safe_stop_run_store.sql',
+  '0734_salesforce_rw02_safe_stop_scac_successor.sql'),
+ ('0738_industry_events.sql', '0739_industry_events_scac_successor.sql'),
+ ('0740_board_answers.sql', '0741_board_answers_scac_successor.sql'),
+ ('0744_doc_suggestions.sql', '0745_doc_suggestions_scac_successor.sql'),
+ ('0749_tour_client_feedback.sql', '0750_tour_client_feedback_scac_successor.sql'),
+ ('0754_tour_property_evidence.sql', '0755_property_evidence_scac_successor.sql'),
+ ('0757_progress_directory_scac_successor.sql',),
+ ('0765_doc_whats_new.sql',
+  '0766_doc_whats_new_repair.sql',
+  '0767_doc_whats_new_scac_successor.sql'),
+ ('0785_rule_teach_supersession.sql', '0786_find_rule_scac_successor.sql'),
+ ('0811_lead_stage_automation.sql', '0812_lead_automation_scac_successor.sql'),
+ ('0826_system_work_census_read_scope.sql', '0827_system_work_scac_successor.sql'),
+ ('0839_relationship_deal_links.sql', '0840_relationship_scac_successor.sql'),
+ ('0841_invoice_tracker.sql', '0842_invoice_tracker_scac_successor.sql'),
+ ('0843_automation_reason_undo_archive_invoice.sql', '0844_automation_undo_scac_successor.sql'),
+ ('0845_lead_archived_stage.sql', '0846_leads_scac_successor.sql'),
+ ('0847_lead_score_owner_reader_repair.sql', '0848_lead_score_owner_scac_successor.sql'),
+ ('0849_research_site.sql', '0850_research_site_scac_successor.sql'),
+ ('0852_party_identity_correction_view.sql', '0853_party_identity_scac_successor.sql'),
+ ('0854_dot_security_definer_hardening.sql',
+  '0855_completion_tenant_security_barriers.sql',
+  '0856_qualify_security_definer_dependencies.sql',
+  '0857_dot_hardening_scac_successor.sql'),
+ ('0868_loop_blocker_residue_comment.sql', '0869_loop_residue_scac_successor.sql'),
+ ('0872_self_closing_records.sql', '0873_self_closing_records_scac_successor.sql'))
+STRICT_ATOMIC_MIGRATION_GROUPS = (('0532a_canonical_ownership_lease_activation.sql',
+  '0532b_ready_plan_amendment_scac_successor.sql'),
+ ('0538_canonical_ownership_assurance_binding.sql',
+  '0539_canonical_ownership_assurance_scac_successor.sql'),
+ ('0540_release_readiness_without_repeat_approval.sql',
+  '0541_release_readiness_scac_successor.sql'),
+ ('0542_model_role_store.sql', '0543_model_role_store_scac_successor.sql'),
+ ('0546_read_doc_outcome_cards_successor.sql', '0547_read_doc_outcome_cards_scac_successor.sql'),
+ ('0556_meeting_mode_store.sql', '0557_meeting_mode_scac_successor.sql'),
+ ('0565_tour_property_registration.sql', '0566_tour_property_registration_scac_successor.sql'),
+ ('0575_answer_needs_joe_work_request.sql',
+  '0576_answer_needs_joe_work_request_scac_successor.sql'),
+ ('0580_resource_observation.sql', '0581_resource_observation_scac_successor.sql'),
+ ('0587_jev_call_receipt.sql', '0588_jev_call_receipt_scac_successor.sql'),
+ ('0602_doctorcre_r02_workflow_cutover_and_caller_inventory.sql',
+  '0603_doctorcre_r02_scac_successor.sql'),
+ ('0617_delivery_cadence_a05.sql', '0618_delivery_cadence_a05_scac_successor.sql'),
+ ('0626_f01_record_source_authority.sql', '0627_f01_record_source_authority_scac_successor.sql'),
+ ('0628_doctorcre_slice_done_marker.sql', '0629_doctorcre_slice_done_marker_scac_successor.sql'),
+ ('0700_governed_correspondence_store.sql', '0701_governed_correspondence_scac_successor.sql'),
+ ('0704_cre_lifecycle.sql', '0705_cre_lifecycle_scac_successor.sql'),
+ ('0706_amend_closed_loop.sql', '0707_amend_closed_loop_scac_successor.sql'),
+ ('0708_action_class_successor_registry.sql',
+  '0709_action_class_successor_registry_scac_successor.sql'),
+ ('0717_assurance_health_evidence_store.sql',
+  '0718_assurance_health_evidence_store_scac_successor.sql'),
+ ('0719_doctorcre_a03_review_store.sql', '0720_doctorcre_a03_review_scac_successor.sql'),
+ ('0721_a02_rule_enforcement_coverage.sql',
+  '0722_a02_rule_enforcement_coverage_scac_successor.sql'),
+ ('0724_f05_live_rule_context.sql', '0725_f05_live_rule_context_scac_successor.sql'),
+ ('0726_salesforce_reconciliation_rw02_store.sql',
+  '0727_salesforce_reconciliation_rw02_scac_successor.sql'),
+ ('0733_salesforce_rw02_safe_stop_run_store.sql',
+  '0734_salesforce_rw02_safe_stop_scac_successor.sql'),
+ ('0738_industry_events.sql', '0739_industry_events_scac_successor.sql'),
+ ('0740_board_answers.sql', '0741_board_answers_scac_successor.sql'),
+ ('0744_doc_suggestions.sql', '0745_doc_suggestions_scac_successor.sql'),
+ ('0749_tour_client_feedback.sql', '0750_tour_client_feedback_scac_successor.sql'),
+ ('0754_tour_property_evidence.sql', '0755_property_evidence_scac_successor.sql'),
+ ('0757_progress_directory_scac_successor.sql',),
+ ('0765_doc_whats_new.sql',
+  '0766_doc_whats_new_repair.sql',
+  '0767_doc_whats_new_scac_successor.sql'),
+ ('0785_rule_teach_supersession.sql', '0786_find_rule_scac_successor.sql'),
+ ('0811_lead_stage_automation.sql', '0812_lead_automation_scac_successor.sql'),
+ ('0826_system_work_census_read_scope.sql', '0827_system_work_scac_successor.sql'),
+ ('0839_relationship_deal_links.sql', '0840_relationship_scac_successor.sql'),
+ ('0841_invoice_tracker.sql', '0842_invoice_tracker_scac_successor.sql'),
+ ('0843_automation_reason_undo_archive_invoice.sql', '0844_automation_undo_scac_successor.sql'),
+ ('0845_lead_archived_stage.sql', '0846_leads_scac_successor.sql'),
+ ('0847_lead_score_owner_reader_repair.sql', '0848_lead_score_owner_scac_successor.sql'),
+ ('0849_research_site.sql', '0850_research_site_scac_successor.sql'),
+ ('0852_party_identity_correction_view.sql', '0853_party_identity_scac_successor.sql'),
+ ('0854_dot_security_definer_hardening.sql',
+  '0855_completion_tenant_security_barriers.sql',
+  '0856_qualify_security_definer_dependencies.sql',
+  '0857_dot_hardening_scac_successor.sql'),
+ ('0868_loop_blocker_residue_comment.sql', '0869_loop_residue_scac_successor.sql'),
+ ('0872_self_closing_records.sql', '0873_self_closing_records_scac_successor.sql'))
 
 FORBIDDEN_MIGRATION_FILENAMES = frozenset({
     "0535_ready_plan_amendment.sql",
@@ -315,12 +456,22 @@ def fail(msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def load_baseline() -> MigrationBaseline | None:
+    repository = MIGRATIONS_DIR.parent
+    return MigrationBaseline.load(repository) if (repository / MANIFEST).exists() else None
+
+
 def load_migrations() -> list[tuple[str, str, str]]:
     """Return [(filename, sql, sha256)] sorted by filename."""
-    if not MIGRATIONS_DIR.is_dir():
+    try:
+        baseline = load_baseline()
+    except ValueError as exc:
+        fail(str(exc))
+    if not MIGRATIONS_DIR.is_dir() and (MIGRATIONS_DIR.exists() or baseline is None):
         fail(f"no migrations directory at {MIGRATIONS_DIR}")
     out: list[tuple[str, str, str]] = []
-    for p in sorted(MIGRATIONS_DIR.iterdir()):
+    paths = sorted(MIGRATIONS_DIR.iterdir()) if MIGRATIONS_DIR.is_dir() else []
+    for p in paths:
         if p.suffix == ".sql":
             if p.name in FORBIDDEN_MIGRATION_FILENAMES:
                 fail(f"stale WR122 migration filename is permanently refused: {p.name}")
@@ -343,13 +494,14 @@ def load_migrations() -> list[tuple[str, str, str]]:
                     f"{OUTER_TRANSACTION_MIGRATION} onward must use the runner's single transaction"
                 )
             out.append((p.name, sql, digest))
-    if not out:
-        fail("no .sql files in migrations/")
     try:
-        validate_migration_names(
-            (name for name, _sql, _digest in out), require_frozen=True
-        )
-    except MigrationNumberError as exc:
+        identities = {name: digest for name, _sql, digest in out}
+        if baseline is not None:
+            identities = baseline.ledger_with_hashes(identities)
+        if not identities:
+            fail("no .sql files in migrations/")
+        validate_migration_names(identities, require_frozen=True)
+    except (MigrationNumberError, ValueError) as exc:
         fail(str(exc))
     return out
 
@@ -365,6 +517,7 @@ def migrations_through(
     migrations: list[tuple[str, str, str]],
     pending: list[tuple[str, str, str]],
     through: str | None,
+    baseline: MigrationBaseline | None = None,
 ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str, str]]]:
     """Split pending migrations into the authorized prefix and held-back tail.
 
@@ -376,7 +529,9 @@ def migrations_through(
     """
     if through is None:
         return pending, []
-    names = [name for name, _sql, _digest in migrations]
+    names = {name for name, _sql, _digest in migrations}
+    if baseline is not None:
+        names.update(name for name, _digest in baseline.migrations)
     if through not in names:
         raise ValueError(
             f"--through target is not an exact checked-in migration filename: {through}"
@@ -426,7 +581,8 @@ class AppliedMigrationLedgerError(ValueError):
 
 
 def validate_applied_ledger(
-    migrations: list[tuple[str, str, str]], applied: dict[str, str]
+    migrations: list[tuple[str, str, str]], applied: dict[str, str],
+    baseline: MigrationBaseline | None = None,
 ) -> None:
     """Refuse missing, edited, or reordered ledger state.
 
@@ -436,6 +592,18 @@ def validate_applied_ledger(
     applying the hole now would reorder history and may violate dependencies.
     """
     current = {name: digest for name, _sql, digest in migrations}
+    if baseline is not None:
+        try:
+            if set(dict(baseline.migrations)) - set(current):
+                baseline.validate_coverage(applied)
+            current = baseline.ledger_with_hashes(current)
+        except ValueError as exc:
+            raise AppliedMigrationLedgerError(str(exc)) from exc
+    validate_ledger_identities(current, applied)
+
+
+def validate_ledger_identities(current: dict[str, str], applied: dict[str, str]) -> None:
+    """Validate filename/hash history independently of executable SQL."""
     missing = sorted(set(applied) - set(current))
     unknown_missing = [name for name in missing if name not in LEGACY_APPLIED_ALIASES]
     if unknown_missing:
@@ -474,7 +642,7 @@ def validate_applied_ledger(
             )
     first_hole: str | None = None
     later_applied: list[str] = []
-    for name, _sql, _digest in migrations:
+    for name in sorted(current):
         if name not in effective_applied:
             first_hole = first_hole or name
         elif first_hole is not None:
@@ -509,24 +677,30 @@ def main() -> None:
         fail("psycopg not installed: pip install 'psycopg[binary]'")
 
     migrations = load_migrations()
+    baseline = load_baseline()
 
     with psycopg.connect(url) as conn:
         host = conn.info.host
         with conn.cursor() as cur:
-            cur.execute(BOOTSTRAP)
-            conn.commit()
-            cur.execute("select filename, sha256 from schema_migrations")
-            applied: dict[str, str] = dict(cur.fetchall())
+            cur.execute("select to_regclass('schema_migrations')")
+            ledger_table = cur.fetchone()
+            if ledger_table is None:
+                fail("cannot determine whether the migration ledger exists")
+            if ledger_table[0] is None:
+                applied: dict[str, str] = {}
+            else:
+                cur.execute("select filename, sha256 from schema_migrations")
+                applied = dict(cur.fetchall())
 
         try:
-            validate_applied_ledger(migrations, applied)
+            validate_applied_ledger(migrations, applied, baseline)
         except AppliedMigrationLedgerError as exc:
             fail(str(exc))
 
         all_pending = pending_migrations(migrations, applied)
         try:
             pending, held_back = migrations_through(
-                migrations, all_pending, args.through
+                migrations, all_pending, args.through, baseline
             )
         except ValueError as exc:
             fail(str(exc))
@@ -565,6 +739,9 @@ def main() -> None:
             if answer != host:
                 fail("confirmation did not match host; nothing applied")
 
+        with conn.cursor() as cur:
+            cur.execute(BOOTSTRAP)
+        conn.commit()
         print(f"lock_timeout: {LOCK_TIMEOUT}   statement_timeout: {STATEMENT_TIMEOUT}")
         for batch in migration_batches(pending):
             staged: list[tuple[str, str]] = []
@@ -594,7 +771,15 @@ def main() -> None:
                     cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
                     cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
                     try:
-                        cur.execute(sql)
+                        execution_sql = sql
+                        if name == migration_0882.FILENAME:
+                            execution_sql = migration_0882.retirement_sql(cur, sql, digest)
+                            if execution_sql != sql:
+                                print('retained retired-v3 historical controls; '
+                                      f'source sha256={digest}; execution sha256='
+                                      + hashlib.sha256(execution_sql.encode()).hexdigest(),
+                                      end=' ... ', flush=True)
+                        cur.execute(execution_sql)
                     except psycopg.errors.LockNotAvailable:
                         conn.rollback()
                         fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "

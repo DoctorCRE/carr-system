@@ -12,9 +12,6 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const schema = readFileSync(path.join(root, "db/schema.sql"), "utf8");
 const tables = ["party", "lead", "client", "vendor", "deal", "activity", "deal_participant",
   "party_link", "record_flag", "tool_call", "event"];
-// Execute the relevant current-schema table definitions, rather than a SQL fake
-// that answers marker comments and cannot detect nonexistent columns. No remote
-// DB, environment credential, production fixture, or schema data is used.
 const ddl = tables.map(name => {
   const match = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\(.*?\\n\\);`, "s"));
   assert.ok(match, `current schema must define ${name}`);
@@ -90,7 +87,6 @@ test("confirm-merge executes against the current activity schema", async t => {
 
     for (const endpoint of ["from", "to", "via"]) {
       await t.test(`graph attachments on the losing ${endpoint} endpoint refuse without stranding refs`, () => fixture(async () => {
-        // The loser can be either graph end or the third-party broker.
         const ends = endpoint === "from" ? [loser, unrelated, survivor]
           : endpoint === "to" ? [unrelated, loser, survivor] : [survivor, unrelated, loser];
         await db.query(`insert into party_link (from_party,to_party,via_party,kind,note,source,created_by)
@@ -147,7 +143,6 @@ test("confirm-merge executes against the current activity schema", async t => {
         const pid = (await second.query("select pg_backend_pid() as pid")).rows[0].pid;
         firstCall = executeRegisteredTool(wrapped, actor, "confirm-merge", options);
         await ready;
-        // Change the winner after T1 read its score, exactly as in the review.
         await second.query(`insert into activity (occurred_at,actor_id,kind,summary,client_id)
           values (now(),$1,'note','Synthetic interleaving activity',$2)`, [actor.id, role(2)]);
         let settled = false;
@@ -155,7 +150,6 @@ test("confirm-merge executes against the current activity schema", async t => {
           ...options, idempotency_key: "synthetic-reverse-merge",
           survivor_party: loser, merged_party: survivor,
         }).then(result => ({ result }), error => ({ error })).then(outcome => { settled = true; return outcome; });
-        // Observe the PostgreSQL wait, rather than assuming a sleep means blocked.
         const deadline = Date.now() + 3000;
         let waiting = false;
         while (!settled && Date.now() < deadline) {

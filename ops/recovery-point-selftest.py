@@ -23,6 +23,8 @@ backups/ directory would pass or fail depending on the day it is run.
 from __future__ import annotations
 
 import importlib.util
+import functools
+import itertools
 import json
 import os
 import stat
@@ -137,9 +139,14 @@ def cloud_fixture(fixture: dict) -> tuple[dict, list[list[str]]]:
             "CARR_TEST_GH_LOG": str(log_path),
             "GITHUB_REPOSITORY": "jbookout/carr-system",
         })
+        from lib.github_rate_limit import GitHubReadBudget
+        budget = GitHubReadBudget(
+            {"GH_LIMITER_DIR": str(root / "fake-gh-limiter")},
+            path=root / "github-budget.json", clock=itertools.count(step=2).__next__)
         try:
             try:
-                result = rp.cloud_path(repo=str(root))
+                with mock.patch.object(rp, "GitHubReader", functools.partial(rp.GitHubReader, budget=budget)):
+                    result = rp.cloud_path(repo=str(root))
             except Exception as exc:  # a malformed provider response is unknown, never a crashed chain
                 result = {"path": "cloud", "state": "crashed", "detail": repr(exc)}
         finally:
@@ -424,8 +431,20 @@ def main() -> int:
           and all(f'"{k}"' in src for k in codes))
 
     # ── the module actually runs end to end ──────────────────────────────────
-    proc = subprocess.run([sys.executable, str(MODULE_PATH), "--hours"],
-                          capture_output=True, text=True, timeout=60)
+    with tempfile.TemporaryDirectory(prefix="carr-rpo-cli-") as raw:
+        root = Path(raw)
+        fake_gh(root / "gh")
+        fixture = root / "fixture.json"
+        fixture.write_text(json.dumps({"artifacts": []}), encoding="utf-8")
+        proc = subprocess.run([sys.executable, str(MODULE_PATH), "--hours"],
+                              capture_output=True, text=True, timeout=60, env={
+                                  "PATH": str(root),
+                                  "CARR_TEST_GH_FIXTURE": str(fixture),
+                                  "CARR_TEST_GH_LOG": str(root / "calls.jsonl"),
+                                  "GITHUB_REPOSITORY": "jbookout/carr-system",
+                                  "CARR_GITHUB_READ_BUDGET": str(root / "github-budget.json"),
+                                  "GH_LIMITER_DIR": str(root / "fake-gh-limiter"),
+                              })
     printed = (proc.stdout or "").strip()
     check("--hours prints a whole number or the word 'unknown'",
           printed == "unknown" or printed.isdigit())

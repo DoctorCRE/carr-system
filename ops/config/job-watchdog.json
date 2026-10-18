@@ -2,6 +2,26 @@
   "schema_version": 1,
   "protected_branches": ["main", "master", "develop"],
   "job_silence_policies": {"branch-janitor": "until_run_limit"},
+  "vendor_release_watches": [
+    {
+      "id": "openai-decisions",
+      "match": "decisions",
+      "finding_kind": "decisions_docs_live",
+      "card": "decisions-docs-live",
+      "interval_seconds": 3600,
+      "timeout_seconds": 20,
+      "max_bytes": 2097152,
+      "sources": [
+        "https://developers.openai.com/api/reference/llms.txt",
+        "https://openai.com/index/devday-2026-recap/"
+      ],
+      "reference_prefixes": [
+        "https://developers.openai.com/api/reference/",
+        "https://platform.openai.com/docs/api-reference/"
+      ],
+      "next_action": "Orchestrator: evaluate the published Decisions contract and key readiness before switching the provider."
+    }
+  ],
   "thresholds": {
     "scan_seconds": 120,
     "scan_grace_seconds": 300,
@@ -31,6 +51,7 @@
   },
   "paths": {
     "registry": "out/jobs/registry.jsonl",
+    "vendor_release_ledger": "out/watchdog/vendor-releases.jsonl",
     "job_logs": "out/jobs/logs",
     "findings": "out/watchdog/findings.jsonl",
     "actions": "out/watchdog/actions.jsonl",
@@ -45,7 +66,7 @@
     "release_log": "out/release-pipeline.log"
   },
   "board": "carr-v5",
-  "needs_joe_lane": "needs-joe",
+  "board_github_enabled": false,
   "hang_patterns": [
     "(?m)^Reading additional input from stdin(?:\\.\\.\\.)?\\s*$",
     "(?mi)^Waiting for (?:user input|approval|authentication)(?:\\.\\.\\.)?\\s*$"
@@ -84,8 +105,8 @@
     "rate_limited": "Wait for the named reset; PR findings keep their last state until GitHub answers again.",
     "environment": "Install the named tool or put it on the job's launchd PATH; findings it feeds remain open.",
     "action_error": "Verify the recorded action intent and any process before retrying.",
-    "record_error": "Restore record-layer access and retry the same idempotency key.",
-    "board_error": "Restore progress-board reporting and replay the finding."
+    "record_error": "Read the reason: repair the request the record layer or board refused, or restore the one that was unreachable; then retry the same idempotency key.",
+    "vendor_release_fetch_error": "Orchestrator: restore access to the named vendor source; the next hourly fetch clears this error on success."
   },
   "fixer": {
     "model": "gpt-6.1-sol",

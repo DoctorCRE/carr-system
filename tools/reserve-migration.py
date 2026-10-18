@@ -50,11 +50,15 @@ import json
 import os
 import socket
 import sys
+from pathlib import Path
+
+from migration_reservations import read_reservation_rows, reservation_paths
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-LEDGER = os.path.join(REPO, "out", "migration-reservations.jsonl")
-LOCK = LEDGER + ".lock"
+# Optional isolated ledger overrides for the command's selftests.
+LEDGER = None
+LOCK = None
 RESERVATION_TTL_DAYS = 14
 
 
@@ -67,24 +71,12 @@ def _load_next_migration():
     return mod
 
 
-def read_reservations():
+def read_reservations(nm=None):
     """Every reservation ever recorded, oldest first. Missing file = none."""
-    rows = []
-    try:
-        with open(LEDGER, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except ValueError:
-                    continue  # a torn last line from a killed process; skip it
-                if isinstance(row, dict) and isinstance(row.get("number"), int):
-                    rows.append(row)
-    except OSError:
-        pass
-    return rows
+    if LEDGER is not None:
+        return read_reservation_rows([LEDGER])
+    nm = nm or _load_next_migration()
+    return read_reservation_rows(reservation_paths(nm.worktree_paths()))
 
 
 def _age_days(row):
@@ -101,19 +93,18 @@ def _scan_claims(nm):
     claims = {}
     warnings = []
 
-    remote = nm.run(["git", "ls-tree", "--name-only", "origin/main", "migrations/"])
-    remote_names = [os.path.basename(n.strip()) for n in remote.splitlines() if n.strip()]
+    remote_names = nm.migration_names(Path(REPO), "origin/main")
     nm.merge(claims, nm.numbers_from_names(remote_names), "origin/main")
 
     here = os.path.realpath(REPO)
     for wt in nm.worktree_paths():
         mdir = os.path.join(wt, "migrations")
-        if not os.path.isdir(mdir):
+        if not os.path.isdir(mdir) and not (Path(wt) / nm.MANIFEST).is_file():
             continue
         label = "this tree" if os.path.realpath(wt) == here else f"worktree {os.path.basename(wt)}"
-        nm.merge(claims, nm.numbers_from_names(os.listdir(mdir)), label)
+        nm.merge(claims, nm.numbers_from_names(nm.migration_names(Path(wt))), label)
 
-    for row in read_reservations():
+    for row in read_reservations(nm):
         num = row["number"]
         claims.setdefault(num, {}).setdefault(
             row.get("name") or f"reserved-by-{row.get('owner', '?')}", set()
@@ -144,11 +135,17 @@ def main():
                   f"{row.get('branch', '?')}{stale}")
         return 0
 
-    os.makedirs(os.path.dirname(LEDGER), exist_ok=True)
-    with open(LOCK, "w") as lock_fh:
+    ledger = LEDGER or str(reservation_paths(nm.worktree_paths())[0])
+    lock = LOCK or ledger + ".lock"
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    with open(lock, "a") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
         try:
-            claims, _ = _scan_claims(nm)
+            try:
+                claims, _ = _scan_claims(nm)
+            except ValueError as exc:
+                print(f"ERROR: cannot read migration identities: {exc}", file=sys.stderr)
+                return 1
 
             nxt = (max(claims) + 1) if claims else 1
             wanted = args.number if args.number is not None else nxt
@@ -186,14 +183,14 @@ def main():
                 "pid": os.getpid(),
                 "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
-            with open(LEDGER, "a", encoding="utf-8") as fh:
+            with open(ledger, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, sort_keys=True) + "\n")
         finally:
             fcntl.flock(lock_fh, fcntl.LOCK_UN)
 
     print(f"reserved migration number {wanted:04d}"
           + (f" for {name}" if name else "")
-          + f"\n  ledger: {os.path.relpath(LEDGER, REPO)}"
+          + f"\n  ledger: {os.path.relpath(ledger, REPO)}"
           + "\n  Create migrations/%04d_<slug>.sql next — the number is now yours "
             "and every other session's next-migration sees it claimed." % wanted)
     return 0

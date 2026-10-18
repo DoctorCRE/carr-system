@@ -29,16 +29,6 @@ const EVIDENCE_STATES = new Set([
 ]);
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const WORK_REQUEST = /^WR-[0-9]{1,12}$/;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const BASIS = Object.freeze({
-  artifact_assessment: "independent_artifact_review",
-  execution_assessment: "attempt_receipt_execution_evidence",
-  controller_assessment: "controller_readback",
-  candidate_outcome_oracle: "candidate_outcome_oracle_receipt",
-  activation_readback: "activation_readback",
-  actual_business_outcome: "accepted_sourced_outcome_feedback_receipt",
-});
-
 function sameScope(a, b) {
   return a?.workflow_key === b?.workflow_key
     && a?.workflow_version === b?.workflow_version
@@ -126,7 +116,7 @@ export function validateAssuranceHealthProjection(projection, requestedScope, Er
   return projection;
 }
 
-export function assuranceHealthStoreTools({ ToolError, withEnvelope }) {
+export function assuranceHealthStoreTools({ ToolError }) {
   if (typeof ToolError !== "function") throw new TypeError("ToolError is required");
   return {
     "read-assurance-health": {
@@ -159,62 +149,6 @@ export function assuranceHealthStoreTools({ ToolError, withEnvelope }) {
           [workflow_key, workflow_version, work_request_id],
         )).rows[0]?.projection;
         return validateAssuranceHealthProjection(projection, args.scope, ToolError);
-      },
-    },
-    "record-assurance-health-evidence": {
-      write: true,
-      description: "Append one independently assessed V5-A01 evidence receipt for one exact scope and layer. Tenant, evaluator and record time come from the authenticated transaction; callers cannot submit a health label, green state or capability stage. The read projection remains fail-closed until all six distinct, current, exact-scope layers pass.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          scope: {
-            type: "object", additionalProperties: false,
-            properties: {
-              workflow_key: { type: "string", minLength: 1, maxLength: 255 },
-              workflow_version: { type: "integer", minimum: 1 },
-              work_request_id: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
-            }, required: ["workflow_key", "workflow_version"],
-          },
-          evidence: {
-            type: "object", additionalProperties: false,
-            properties: {
-              layer: { type: "string", enum: [...ASSURANCE_HEALTH_LAYERS] },
-              basis: { type: "string", enum: Object.values(BASIS) },
-              status: { type: "string", enum: ["pass", "fail", "skipped", "untested", "error", "conflicting"] },
-              subject_ref: { type: "string", minLength: 1, maxLength: 255 },
-              evidence_ref: { type: "string", minLength: 1, maxLength: 255 },
-              evidence_digest: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" },
-              observed_at: { type: "string", minLength: 1, maxLength: 64 },
-              expires_at: { type: "string", minLength: 1, maxLength: 64 },
-              detail: { type: "object" },
-              incident_refs: { type: "array", maxItems: 64, items: { type: "string", minLength: 1, maxLength: 255 }, uniqueItems: true },
-              recovery_refs: { type: "array", maxItems: 64, items: { type: "string", minLength: 1, maxLength: 255 }, uniqueItems: true },
-            },
-            required: ["layer", "basis", "status", "subject_ref", "evidence_ref", "evidence_digest", "observed_at", "expires_at", "detail", "incident_refs", "recovery_refs"],
-          },
-          idempotency_key: { type: "string" },
-        },
-        required: ["scope", "evidence", "idempotency_key"],
-      },
-      handler: async (c, actor, args) => {
-        if (typeof withEnvelope !== "function") throw new ToolError({ error: "assurance_health_writer_unavailable" });
-        // The evaluator is the authenticated actor and nothing else: no field of
-        // args can name it, and an actor without a slug cannot record evidence.
-        if (typeof actor?.slug !== "string" || actor.slug.length === 0)
-          throw new ToolError({ error: "assurance_health_actor_required" });
-        if (!validScope(args?.scope) || !args?.evidence || typeof args.evidence !== "object"
-            || BASIS[args.evidence.layer] !== args.evidence.basis || !UUID.test(args.idempotency_key ?? ""))
-          throw new ToolError({ error: "assurance_health_evidence_invalid" });
-        return withEnvelope(c, actor, "record-assurance-health-evidence", args, async () => {
-          await c.query("select set_config('carr.acting_actor_slug',$1::text,true) /* record-assurance-health-evidence:actor */", [actor.slug]);
-          const receipt = (await c.query(
-            "select ops.record_assurance_health_evidence($1::jsonb,$2::jsonb,$3::uuid) as receipt /* record-assurance-health-evidence */",
-            [JSON.stringify(args.scope), JSON.stringify(args.evidence), args.idempotency_key],
-          )).rows[0]?.receipt;
-          if (!receipt) throw new ToolError({ error: "assurance_health_evidence_not_recorded" });
-          return receipt;
-        });
       },
     },
   };

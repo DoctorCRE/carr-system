@@ -35,10 +35,30 @@ LOCAL_URL = "http://127.0.0.1:8000"
 IDLE_SECONDS = 15 * 60
 ENSURE_TIMEOUT = 180
 STOP_TIMEOUT = 4 * 15 + 30
+OFF_REASON = "flash is switched off"
+
+
+class FlashSwitchedOff(RuntimeError):
+    pass
 
 
 def state_dir():
     return Path(os.environ.get("CARR_FLASH_STATE_DIR", str(Path.home() / ".local/state/carr/flash")))
+
+
+def off_switch_path():
+    override = os.environ.get("CARR_FLASH_STATE_DIR")
+    directory = Path(override) if override else Path.home() / ".config/carr"
+    return directory / "flash.off"
+
+
+def is_switched_off():
+    return os.path.isfile(off_switch_path())
+
+
+def _require_enabled():
+    if is_switched_off():
+        raise FlashSwitchedOff(OFF_REASON)
 
 
 @contextlib.contextmanager
@@ -62,6 +82,8 @@ def lifecycle_lock(*, shared=False, blocking=True, deadline=None, clock=time.mon
 
 
 def is_ready(url=LOCAL_URL, *, timeout=2):
+    if is_switched_off():
+        return False
     try:
         with urllib.request.urlopen(url.rstrip("/") + "/v1/models", timeout=timeout) as response:
             return response.status == 200
@@ -108,10 +130,16 @@ def _stop(*, launch=_launch):
 def ensure(*, timeout=ENSURE_TIMEOUT, ready=is_ready, launch=_launch,
            clock=time.monotonic, sleep=time.sleep):
     """Start once across concurrent callers, with bounded cold readiness."""
+    if is_switched_off():
+        print(OFF_REASON, file=sys.stderr)
+        return False
     deadline = clock() + timeout
     if ready(timeout=min(2, max(0.01, deadline - clock()))):
         return True
     with lifecycle_lock(deadline=deadline, clock=clock, sleep=sleep):
+        if is_switched_off():
+            print(OFF_REASON, file=sys.stderr)
+            return False
         if clock() >= deadline:
             return False
         if ready(timeout=min(2, deadline - clock())):
@@ -130,6 +158,7 @@ def ensure(*, timeout=ENSURE_TIMEOUT, ready=is_ready, launch=_launch,
 
 
 def ensure_server(url=LOCAL_URL, *, timeout=ENSURE_TIMEOUT):
+    _require_enabled()
     if url.rstrip("/") != LOCAL_URL:
         return
     try:
@@ -141,12 +170,15 @@ def ensure_server(url=LOCAL_URL, *, timeout=ENSURE_TIMEOUT):
 
 
 def ensure_desk(ready, *, launch=_launch, clock=time.monotonic, sleep=time.sleep):
+    _require_enabled()
     ensure_server()
     deadline = clock() + 120
     with lifecycle_lock(shared=True, deadline=deadline, clock=clock, sleep=sleep):
+        _require_enabled()
         if ready():
             return
     with lifecycle_lock(deadline=deadline, clock=clock, sleep=sleep):
+        _require_enabled()
         if ready():
             return
         try:
@@ -164,6 +196,7 @@ def ensure_desk(ready, *, launch=_launch, clock=time.monotonic, sleep=time.sleep
 
 @contextlib.contextmanager
 def activity_scope():
+    _require_enabled()
     with lifecycle_lock(shared=True):
         activity = state_dir() / "last-request"
         activity.touch()
@@ -176,6 +209,7 @@ def activity_scope():
 @contextlib.contextmanager
 def request_scope(url=LOCAL_URL, *, opener=None):
     """Injected transports and sandbox children do not control launchd."""
+    _require_enabled()
     if (url.rstrip("/") != LOCAL_URL
             or (opener is not None and opener is not urllib.request.urlopen)
             or os.environ.get("CARR_FLASH_PREPARED") == "1"):
@@ -272,6 +306,8 @@ def health_row(*, now=None, started=server_started):
               "if still resident · verify launchctl print gui/$UID/local.ds4-flash-next reports no running pid "
               "· auto-clear when stopped or a request arrives · response health finding flash_residency "
               "deduplicated by release pipeline; com.carr.flash-idle-stop every 5m")
+    if is_switched_off():
+        return f"OK flash residency · switched off (by choice) · accepted state flash.off · {action}"
     try:
         with lifecycle_lock(blocking=False):
             now = time.time() if now is None else now
@@ -289,6 +325,9 @@ def health_row(*, now=None, started=server_started):
 def main(command, *, timeout=ENSURE_TIMEOUT):
     try:
         if command == "ensure":
+            if is_switched_off():
+                print(OFF_REASON, file=sys.stderr)
+                return 1
             if ensure(timeout=timeout):
                 return 0
             print(f"flash-ensure: readiness timed out after {timeout:g} seconds", file=sys.stderr)

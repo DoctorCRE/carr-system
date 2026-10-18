@@ -365,12 +365,6 @@ test("Deal Room gate admits exactly both partner identities with their existing 
     const api = await identityHandler(email).fetch(new Request("https://dealroom.doctorcre.com/mcp",
       { method: "POST", headers: { cookie: session, origin: "https://dealroom.doctorcre.com" } }), environment, {});
     assert.equal(api.status, 200);
-    // human_slug (loop #227) is null on this path by design: the Deal Room cookie
-    // authenticates a partner directly, so the actor already IS the human and there
-    // is no outside-model grant standing in front of them. Asserted explicitly
-    // rather than dropped from the comparison — the point of this test is that the
-    // cookie path mints an ordinary partner identity, and "no agent behind it" is
-    // part of that claim, not an incidental field.
     assert.deepEqual((await api.json()).actor,
       { slug, display, human: true, via: "dealroom-cookie", client_id: "dealroom-pwa",
         human_slug: null, sponsoring_human_slug: null, sponsor_required: false });
@@ -490,14 +484,10 @@ test("reauthentication is session-bound, and approval challenges are one-time an
     if (!String(key).startsWith("dealroom_action_challenge:")) await kvDelete(key);
   };
 
-  // The injected typed controller has no workflow implementation in this test;
-  // it exercises the reusable boundary by asking it to authorize a supplied target.
   const redeemed = new Set();
   const controller = createDealroomHandler({
     ...identityOverrides("joe.bookout.carr.us@gmail.com", clock),
     program6Handler: async (request, envArg, _ctx, actor, sessionState) => {
-      // The concrete controller must parse first to route/validate the typed
-      // body. The header-only browser guard remains valid after that consume.
       const parsed = await request.json();
       const { authorizeProgram6Action } = await import("../src/dealroom-web.js");
       const refusal = await authorizeProgram6Action({ request, env: envArg, actor, session: sessionState,
@@ -573,12 +563,6 @@ test("manifest and service worker are public with PWA-safe headers and offline t
   assert.match(sw, /DATA_PATHS/);
   assert.match(sw, /state: "reconnecting"/);
   assert.match(sw, /Deliberately no Cache API fallback/);
-  // EVERY live surface takes the no-cache path, not just the two that existed
-  // when this worker was written. A GET to /api/system-work/session or
-  // /api/room/turns used to fall through to the shell-asset branch, which
-  // caches the response and serves it back when the network fails — a Model
-  // Room showing an hour-old roster with a healthy pulse reads as live and is
-  // worse than showing nothing.
   assert.match(sw, /function isLiveData/);
   assert.match(sw, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(sw, /if \(isLiveData\(url\.pathname\)\)/);

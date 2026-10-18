@@ -9,6 +9,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -100,23 +101,24 @@ ready = [
 ]
 check("a ready machine emits no failure report", prerequisite_failure_report(ready) == "")
 
-config_path = ROOT / "ops" / "config-as-code.py"
-spec = importlib.util.spec_from_file_location("machine_prereq_config_integration", config_path)
-assert spec and spec.loader
-config = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(config)
-setattr(config, "codex_configuration_state", lambda: "absent")
-setattr(config, "pairs", lambda: [])
-setattr(config, "hook_scripts_untracked", lambda: [])
-setattr(config, "secondary_scheduled_task_violations", lambda: [])
-setattr(config, "PREREQUISITE_CHECK", lambda _repo: [
-    Requirement("postgres-client", "PostgreSQL client", False, "missing fixture", "install fixture"),
-])
-with contextlib.redirect_stdout(io.StringIO()) as captured:
-    config_rc = config.cmd_check()
-config_output = captured.getvalue()
-check("config check refuses a clean render on an unprovisioned machine",
-      config_rc == 1 and config_output.startswith("config-as-code: PREREQUISITES MISSING"))
+with tempfile.TemporaryDirectory() as config_home, patch.dict(os.environ, {"HOME": config_home}):
+    config_path = ROOT / "ops" / "config-as-code.py"
+    spec = importlib.util.spec_from_file_location("machine_prereq_config_integration", config_path)
+    assert spec and spec.loader
+    config = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config)
+    setattr(config, "codex_configuration_state", lambda: "absent")
+    setattr(config, "pairs", lambda holds=None: [])
+    setattr(config, "hook_scripts_untracked", lambda: [])
+    setattr(config, "secondary_scheduled_task_violations", lambda: [])
+    setattr(config, "PREREQUISITE_CHECK", lambda _repo: [
+        Requirement("postgres-client", "PostgreSQL client", False, "missing fixture", "install fixture"),
+    ])
+    with contextlib.redirect_stdout(io.StringIO()) as captured:
+        config_rc = config.cmd_check()
+    config_output = captured.getvalue()
+    check("config check refuses a clean render on an unprovisioned machine",
+          config_rc == 1 and config_output.startswith("config-as-code: PREREQUISITES MISSING"))
 
 print(f"machine-prerequisites-selftest: {len(failed)} failed")
 raise SystemExit(bool(failed))

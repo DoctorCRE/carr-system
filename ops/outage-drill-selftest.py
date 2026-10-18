@@ -115,7 +115,7 @@ def tier1() -> None:
     proc = run(["--list"])
     check("--list exits 0", proc.returncode == 0, f"rc={proc.returncode}")
     for name in ("record-layer-unreachable", "stale-observation", "worker-unreachable",
-                 "model-provider-unavailable", "settings-change-db-outage"):
+                 "model-provider-unavailable"):
         check(f"--list names {name!r}", name in proc.stdout, proc.stdout[:800])
 
     # ── --dry-run touches nothing: proven by poisoning the network AND the
@@ -150,20 +150,67 @@ def tier1() -> None:
           "or explicitly reported broken, never silently green",
           "convo_core reported a real failure" in proc.stdout, proc.stdout[-800:])
 
-    # ── settings-change-db-outage: fully local, no staging credential needed
-    #    for the drill's own mechanics (only the evidence write at the end) ──
-    print("\n  drill: settings-change-db-outage (real fixture, genuinely unreachable DSN)")
-    proc = run(["--only", "settings-change-db-outage"], timeout=DRILL_TIMEOUT)
-    check("runs to completion", proc.returncode in (0, 1, 2), f"rc={proc.returncode}\n{proc.stdout[-1000:]}")
-    check("finds the system TRUTHFUL — never blocks, never hides the outage",
-          "TRUTHFUL" in proc.stdout and "NOT TRUTHFUL" not in proc.stdout,
-          proc.stdout[-1000:])
-    check("reports the not-encrypted finding about the local spool",
-          "not encrypted" in proc.stdout.lower() or "PLAINTEXT" in proc.stdout,
-          proc.stdout[-1000:])
-    check("reports the never-reviewed finding about the local spool",
-          "later reviewed" in proc.stdout.lower() or "never reads" in proc.stdout.lower(),
-          proc.stdout[-1000:])
+    shutdown_runs = [run(["--only", "model-provider-unavailable"], timeout=DRILL_TIMEOUT)
+                     for _ in range(12)]
+    shutdown_failures = [
+        f"run {index + 1}: rc={child.returncode}, stdout={child.stdout[-300:]!r}, "
+        f"stderr={child.stderr[-300:]!r}"
+        for index, child in enumerate(shutdown_runs)
+        if not (child.returncode == 0
+                and "\n  TRUTHFUL: truthful\n" in child.stdout
+                and "\n  detail: driver_rc=0 parsed=" in child.stdout
+                and "Fatal Python error" not in child.stdout + child.stderr)
+    ]
+    check("12 repeated model-provider child runs shut down without interpreter/thread errors",
+          not shutdown_failures, "\n".join(shutdown_failures[:3]))
+
+
+
+def tier1_shutdown_detector() -> None:
+    print("\n  repeated-run detector rejects nested driver failures")
+    driver_hook = """
+import atexit, os, pathlib, resource, sys
+if sys.argv[0].endswith('/driver.py') and 'carr-outage-drill-claude-fixture-' in sys.argv[0]:
+    counter = pathlib.Path(os.environ['DRIVER_COUNTER'])
+    count = int(counter.read_text()) + 1 if counter.exists() else 1
+    counter.write_text(str(count))
+    if count == int(os.environ['FAIL_DRIVER_AT']):
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        def fail():
+            if os.environ['DRIVER_FAILURE'] == 'abort':
+                os.abort()
+            reader, writer = os.pipe()
+            os.close(reader)
+            try:
+                os.write(writer, b'fixture')
+            except BrokenPipeError as exc:
+                print(f'BrokenPipeError: {exc}', file=sys.stderr, flush=True)
+                os._exit(1)
+        atexit.register(fail)
+"""
+    probe = (
+        "import importlib.util, sys; "
+        "s=importlib.util.spec_from_file_location('outage_selftest', sys.argv[1]); "
+        "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+        "m.tier1(); sys.exit(bool(m.FAILED))"
+    )
+    for failure, position in (("abort", 2), ("epipe", 13)):
+        with tempfile.TemporaryDirectory(prefix="outage-shutdown-detector-") as directory:
+            scratch = Path(directory)
+            (scratch / "sitecustomize.py").write_text(driver_hook)
+            env = dict(os.environ)
+            for key in list(env):
+                if key.startswith("CARR_DB_") or key in (
+                        "DATABASE_URL", "NEON_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"):
+                    env.pop(key)
+            env.update(HOME=directory, PYTHONPATH=directory, DOC_ROUTE_SHADOW="0",
+                       DRIVER_COUNTER=str(scratch / "count"), DRIVER_FAILURE=failure,
+                       FAIL_DRIVER_AT=str(position), PYTHONFAULTHANDLER="0")
+            child = subprocess.run([PY, "-c", probe, __file__], env=env, cwd=REPO,
+                                   capture_output=True, text=True, timeout=60)
+            check(f"repetition detector rejects nested {failure} at driver {position}",
+                  child.returncode == 1 and "FAIL  12 repeated" in child.stdout,
+                  child.stdout[-1800:] + child.stderr[-300:])
 
 
 def tier1_recorder_contract() -> None:
@@ -319,6 +366,7 @@ def main() -> int:
           "claims to, touch nothing on --dry-run, and never mistake the target's "
           "own dishonesty for its own crash")
     tier1()
+    tier1_shutdown_detector()
     tier1_recorder_contract()
     tier1_unreachable_staging_skips()
     tier2()

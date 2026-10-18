@@ -55,8 +55,17 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Renewal Safe", city: "Pensacola", est_lease_event: "2027-01-01",
           tier_status: "t1", flag_status: "clear", has_channel: true },
       ] };
-      if (sql.includes("from board_snapshot")) return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
+      if (sql.includes("from board_snapshot") && params[2] === "system-costs")
+        return { rows: costs === null ? [] : [{ snapshot_json: { costs } }] };
       if (sql.includes("ops.v5_a05_assurance_cadence_batch")) return { rows: [{ batch: [] }] };
+      if (sql.includes("read_governance_queue")) return { rows: [{ queue: { pending_rule_approvals: [
+        { rule_id: "rule-1", statement: "Name the deal in every question box.", admitted_at: "2026-10-01T00:00:00Z" },
+      ] } }] };
+      if (sql.includes("from ops.work_request")) return { rows: [] };
+      if (sql.includes("from board_question")) return { rows: [] };
+      if (sql.includes("from board_snapshot")) return { rows: [
+        { snapshot_json: { schema: "needs-joe-local.v1", items: [] }, updated_at: new Date().toISOString() },
+      ] };
       throw new Error(`unexpected query: ${sql}`);
     },
   };
@@ -68,7 +77,8 @@ test("morning-brief derives Joe's sponsor from authenticated context and compose
   assert.equal(result.state, "ready");
   assert.equal(result.sponsor, "joe");
   assert.deepEqual(Object.keys(result.sections).sort(),
-    ["claim_card", "deals", "renewals", "today", "loops", "assurance_cadence", "costs"].sort());
+    ["needs_joe", "claim_card", "deals", "renewals", "today", "loops", "assurance_cadence", "costs"].sort());
+  assert.equal(Object.keys(result.sections)[0], "needs_joe", "the list of what waits on Joe leads the brief");
   assert.equal(result.sections.renewals.state, "ready");
   assert.equal(result.sections.renewals.items[0].display_name, "Renewal Safe");
   const sql = c.queries.map(({ sql }) => sql).join("\n");
@@ -87,6 +97,7 @@ test("morning-brief derives Dell separately; no caller field may select an audie
   const c = client();
   const dell = await executeRegisteredTool(c, DELL, "morning-brief", {});
   assert.equal(dell.sponsor, "dell");
+  assert.equal(dell.sections.needs_joe, undefined, "Joe's desk is not Dell's brief");
   for (const args of [{ sponsor: "joe" }, { audience: "joe" }, { partner: "joe" }]) {
     await assert.rejects(
       executeRegisteredTool(client(), DELL, "morning-brief", args),
@@ -109,6 +120,22 @@ test("morning-brief filters accounts by authenticated sponsor rather than exposi
   assert.doesNotMatch(JSON.stringify(dell), /Joe Account/);
   assert.doesNotMatch(JSON.stringify(joe), /Unowned Account/);
   assert.doesNotMatch(JSON.stringify(dell), /Unowned Account/);
+});
+
+test("Joe's brief leads with the needs-Joe list, read through governance-queue", async () => {
+  const result = await executeRegisteredTool(client(), JOE, "morning-brief", {});
+  const section = result.sections.needs_joe;
+  assert.equal(section.state, "ready");
+  assert.equal(section.schema, "needs-joe.v1");
+  assert.ok(section.items.some((item) => item.title.includes("Name the deal in every question box")));
+  assert.ok(section.items.every((item) => item.why && item.action && item.blocks));
+  assert.equal(typeof section.excluded.count, "number");
+});
+
+test("a needs-Joe list with a failed source and no items is unavailable, never empty", async () => {
+  const result = await executeRegisteredTool(client({ unavailable: "read_governance_queue" }), JOE, "morning-brief", {});
+  assert.equal(result.sections.needs_joe.state, "unavailable");
+  assert.equal(result.state, "unavailable");
 });
 
 test("morning-brief refuses an unsponsored runtime rather than selecting a shared or caller-supplied brain", async () => {

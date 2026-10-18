@@ -84,7 +84,10 @@ class DisposablePostgres:
             if main_launch:
                 _main_launches += 1
             try:
-                kwargs.setdefault('env', self.env)
+                # A caller-supplied env (e.g. a scrubbed one with no locale) must
+                # not drop LC_ALL: PostgreSQL 17 on recent macOS refuses to start
+                # ("postmaster became multithreaded") without a valid locale.
+                kwargs['env'] = {**(kwargs.get('env') or self.env), 'LC_ALL': 'C'}
                 return (self.runner or subprocess.run)(args, **kwargs)
             finally:
                 if main_launch:
@@ -93,7 +96,9 @@ class DisposablePostgres:
                         signum, _pending_signal = _pending_signal, None
                         _on_signal(signum, None)
 
-    def close(self):
+    def close(self, *, remove_root=True):
+        # remove_root=False keeps evidence when the caller cannot prove it owned
+        # every process; closing still deregisters it from the exit hook.
         with self._lock:
             if self._closed:
                 return
@@ -108,7 +113,7 @@ class DisposablePostgres:
                         status = run([str(self.pg_ctl), '-D', str(data), 'status'], **kwargs)
                         if status.returncode != 3 and (data / 'PG_VERSION').exists():
                             raise RuntimeError('postmaster shutdown not verified')
-                if self.root.exists():
+                if remove_root and self.root.exists():
                     if self.root.is_symlink() or self.root.stat().st_ino != self._identity:
                         raise RuntimeError('temporary root identity changed')
                     shutil.rmtree(self.root)

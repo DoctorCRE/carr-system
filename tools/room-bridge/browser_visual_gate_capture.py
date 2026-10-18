@@ -5,6 +5,8 @@ No Playwright/Puppeteer dependency is required: Chrome's built-in DevTools
 Protocol drives a temporary, loopback-only rendered artifact.  A missing or
 unlaunchable browser emits a valid ``browser_unavailable`` report whose
 critical gates are ``not_verified``; it never guesses a pass from source code.
+``--model-room`` measures the real Model Room bundle plus one synthetic typed
+wire turn from ``model_room_preview_server`` instead of a single artifact file.
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
@@ -33,10 +36,32 @@ import design_kernel
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CHROME_CANDIDATES = [
-    Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-    Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
-]
+SYSTEM_CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+
+
+def _disposable_chrome_candidates() -> list[Path]:
+    candidates = []
+    for name in ("CHROME_FOR_TESTING_PATH", "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"):
+        if os.environ.get(name):
+            candidates.append(Path(os.environ[name]))
+    cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")) if os.environ.get(
+        "PLAYWRIGHT_BROWSERS_PATH") else Path.home() / "Library/Caches/ms-playwright"
+    releases = [path for path in cache.glob("chromium-*")
+                if path.name.removeprefix("chromium-").isdigit()]
+    for release in sorted(
+            releases,
+            key=lambda path: int(path.name.removeprefix("chromium-")),
+            reverse=True):
+        candidates.extend([
+            release / "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+            release / "chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+            release / "chrome-linux/chrome",
+            release / "chrome-linux64/chrome",
+        ])
+    return candidates
+
+
+CHROME_CANDIDATES = _disposable_chrome_candidates()
 INTERACTIVE = "button,summary,[href],input,select,textarea,[tabindex]"
 
 
@@ -44,13 +69,30 @@ def now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _accepted_chrome(candidate: str | Path | None) -> str | None:
+    if not candidate:
+        return None
+    path = Path(candidate)
+    try:
+        if not path.is_file() or path.resolve() == SYSTEM_CHROME.resolve():
+            return None
+    except OSError:
+        return None
+    return str(path)
+
+
 def chrome_binary(explicit: str | None) -> str | None:
     if explicit:
-        return explicit if Path(explicit).is_file() else None
+        return _accepted_chrome(explicit)
     for path in CHROME_CANDIDATES:
-        if path.is_file():
-            return str(path)
-    return shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+        accepted = _accepted_chrome(path)
+        if accepted:
+            return accepted
+    for name in ("google-chrome", "chromium", "chromium-browser"):
+        accepted = _accepted_chrome(shutil.which(name))
+        if accepted:
+            return accepted
+    return None
 
 
 class _SilentHandler(http.server.SimpleHTTPRequestHandler):
@@ -245,6 +287,33 @@ def _unavailable_report(kernel: dict[str, Any], args: argparse.Namespace, reason
     }
 
 
+@contextlib.contextmanager
+def serving_target(args: argparse.Namespace) -> Iterator[str]:
+    @contextlib.contextmanager
+    def _loopback(handler: Any) -> Iterator[http.server.ThreadingHTTPServer]:
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield server
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    if args.model_room:
+        import model_room_preview_server
+
+        with _loopback(model_room_preview_server.PreviewHandler) as server:
+            yield f"http://127.0.0.1:{server.server_port}/room.html"
+        return
+    artifact = Path(args.artifact).resolve()
+    if not artifact.is_file():
+        raise FileNotFoundError(f"artifact does not exist: {artifact}")
+    with tempfile.TemporaryDirectory(prefix="carr-visual-gate-") as directory:
+        (Path(directory) / "artifact.html").write_bytes(artifact.read_bytes())
+        with _loopback(partial(_SilentHandler, directory=directory)) as server:
+            yield f"http://127.0.0.1:{server.server_port}/artifact.html"
+
+
 def capture(args: argparse.Namespace) -> dict[str, Any]:
     kernel = design_kernel.validate_design_kernel(json.loads(Path(args.kernel).read_text()))
     if not any(row["intent_id"] == args.intent for row in kernel["design_intents"]):
@@ -252,17 +321,8 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
     browser = chrome_binary(args.chrome)
     if browser is None:
         return _unavailable_report(kernel, args, "chrome_not_found")
-    artifact = Path(args.artifact).resolve()
-    if not artifact.is_file():
-        raise FileNotFoundError(f"artifact does not exist: {artifact}")
-    with tempfile.TemporaryDirectory(prefix="carr-visual-gate-") as directory:
-        root = Path(directory)
-        rendered = root / "artifact.html"
-        rendered.write_bytes(artifact.read_bytes())
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), partial(_SilentHandler, directory=str(root)))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        profile = root / "chrome-profile"
+    with tempfile.TemporaryDirectory(prefix="carr-visual-gate-") as directory, serving_target(args) as url:
+        profile = Path(directory) / "chrome-profile"
         command = [browser, "--headless=new", "--no-first-run", "--disable-gpu", "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"]
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cdp: DevTools | None = None
@@ -283,12 +343,11 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
                 return _unavailable_report(kernel, args, "chrome_page_target_missing")
             cdp = DevTools(target["webSocketDebuggerUrl"])
             cdp.call("Page.enable")
-            url = f"http://127.0.0.1:{server.server_port}/artifact.html"
             narrow = {width: _capture(cdp, url, width, tab=(width == 280)) for width in (280, 320, 414)}
             light = _capture(cdp, url, 1024, dark=False)
             dark = _capture(cdp, url, 1024, dark=True)
             reduced = _capture(cdp, url, 1024, reduced=True)
-        except Exception as exc:  # truthful unavailable report is more useful than an aborted review
+        except Exception as exc:
             return _unavailable_report(kernel, args, "browser_measurement_failed:" + re.sub(r"[^a-z0-9_-]+", "_", str(exc).lower())[:80])
         finally:
             if cdp is not None:
@@ -296,8 +355,6 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
             process.terminate()
             with contextlib.suppress(Exception):
                 process.wait(timeout=3)
-            server.shutdown()
-            server.server_close()
 
     profile = next(row["evaluation_profile"] for row in kernel["design_intents"] if row["intent_id"] == args.intent)
     required = next(row["required_gates"] for row in kernel["visual_gate_portfolio"]["profiles"] if row["profile_id"] == profile)
@@ -356,7 +413,12 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture exact-bound real-browser CARR visual gate evidence")
-    parser.add_argument("--artifact", required=True, type=Path)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--artifact", type=Path)
+    target.add_argument("--model-room", action="store_true",
+                        help="serve the real Model Room bundle plus one synthetic typed wire turn from "
+                             "tools/room-bridge/model_room_preview_server.py on an ephemeral loopback port "
+                             "(test-only; never writes a room turn)")
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--kernel", default=ROOT / "design" / "carr-design-kernel.v1.json", type=Path)
     parser.add_argument("--intent", default="intent:job-passport")

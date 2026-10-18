@@ -5,6 +5,7 @@ import signal
 import select
 import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 
@@ -14,6 +15,25 @@ from lib import disposable_pg_fixture as fixture
 
 
 class Lifecycle(unittest.TestCase):
+    def test_unproven_ownership_stops_clusters_and_retains_root_past_exit(self):
+        stops = []
+
+        def runner(command, **kwargs):
+            stops.append(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        pg = fixture.DisposablePostgres('carr-local-pg-ci.retain-', '/fake/pg_ctl', runner=runner,
+                                        directory=tempfile.gettempdir())
+        try:
+            pg.register(pg.root / 'data')
+            pg.close(remove_root=False)
+            self.assertEqual(stops, [['/fake/pg_ctl', '-D', str(pg.root / 'data'), '-m', 'fast', '-w', 'stop']])
+            self.assertTrue(pg.root.is_dir())
+            fixture._close_all()  # the atexit hook must not delete a retained root
+            self.assertTrue(pg.root.is_dir())
+        finally:
+            os.rmdir(pg.root)
+
     def test_sigterm_stops_postmaster_and_removes_owned_directory(self):
         with fixture.postgres_fixture_group():
             child = subprocess.Popen([sys.executable, '-u', '-c', textwrap.dedent('''

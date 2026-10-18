@@ -129,6 +129,7 @@
     "party_link": "party relationship records — business data",
     "prospect_pool": "prospect records — business data",
     "record_flag": "flags raised against business rows — per-row history",
+    "research_site": "the research-site index: useful sources tagged by topic, added and removed at runtime by any caller through add-research-site and remove-research-site, with per-row history. 0849 seeds a starting set of public source hosts; a rebuild without them loses only suggestions (no access depends on this table), so it is runtime data, not configuration",
     "system_config": "operational settings, not vocabulary, and the kind of table where a value that should never be committed can appear; staging sets its own",
     "tool_call": "the verb call ledger — runtime history"
   },

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""The calendar matcher reads the LIVE exports and refuses an empty book.
+"""The calendar matcher reads record contacts from the record layer's export views.
 
-Regression for 2026-09-27: the matcher read the exporters' draft directory
-(out/exports), which the live nightly chain never writes, so every run loaded
-0 record contacts and reported every attendee as unknown. Fixture workbooks
-only; example.test addresses.
+Regression for 2026-10-07/08: the matcher read the OneDrive xlsx projections, and
+when OneDrive evicted lead-registry.xlsx to an online-only placeholder every read
+returned EDEADLK, openpyxl raised BadZipFile, and calendar capture failed two
+days running. Contacts now come from v_export_clients / v_export_leads /
+v_export_vendors; an unreachable view fails closed and nothing falls back to a
+file. Earlier regression (2026-09-27): an empty contact book must refuse loudly.
+Fixture rows only; example.test addresses.
 """
 import datetime
 import json
@@ -19,8 +22,6 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-import openpyxl
-
 REPO = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("calendar_touch_matcher", REPO / "tools" / "calendar-touch-matcher.py")
 assert spec is not None and spec.loader is not None
@@ -28,91 +29,141 @@ matcher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(matcher)
 
 
-def workbook(path, sheet, header, rows):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = sheet
-    ws.append(header)
-    for row in rows:
-        ws.append(row)
-    wb.save(path)
+def live_views():
+    return {
+        "v_export_clients": [{"Client ID": "C-1", "Name": "Client One",
+                              "Practice / Entity": "Practice A", "Email": "one@clinic-a.example.test"}],
+        "v_export_leads": [{"Lead ID": "L-1", "Contact Name": "Lead Two",
+                            "Practice": "Practice B", "Email": "two@gmail.com"}],
+        "v_export_vendors": [],
+    }
 
 
-class LiveExports(unittest.TestCase):
+def reader_for(views):
+    def read(view):
+        value = views[view]
+        if isinstance(value, BaseException):
+            raise value
+        cols = list(value[0]) if value else [
+            *next(fields[1:] for fields in matcher.RECORD_VIEWS if fields[0] == view), "Email"]
+        return cols, value
+    return read
+
+
+class RecordViewSchema(unittest.TestCase):
+    def test_empty_view_with_wrong_columns_fails_closed(self):
+        sys.path.insert(0, str(REPO))
+        for malformed in ("v_export_clients", "v_export_leads", "v_export_vendors"):
+            with self.subTest(view=malformed):
+                views = live_views()
+                views[malformed] = []
+                columns = {
+                    "v_export_clients": ["Client ID", "Name", "Practice / Entity", "Email"],
+                    "v_export_leads": ["Lead ID", "Contact Name", "Practice", "Email"],
+                    "v_export_vendors": ["ID", "Name", "Company", "Email"],
+                }
+                columns[malformed] = ["Email"]
+                cursor = mock.MagicMock()
+                def execute(sql):
+                    view = sql.rsplit(" ", 1)[1]
+                    cursor.description = [(name,) for name in columns[view]]
+                    cursor.fetchall.return_value = [
+                        tuple(row.get(name) for name in columns[view]) for row in views[view]]
+                cursor.execute.side_effect = execute
+                conn = mock.MagicMock()
+                conn.__enter__.return_value.cursor.return_value.__enter__.return_value = cursor
+                with mock.patch("exporters.common.connect", return_value=conn), \
+                        self.assertRaises(matcher.NoRecordContacts) as caught:
+                    matcher.load_record_contacts()
+                self.assertIn(f"{malformed} (required columns missing)", str(caught.exception))
+
+
+class RecordViews(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
+        self.views = live_views()
+        patcher = mock.patch.object(matcher, "read_view", side_effect=lambda v: reader_for(self.views)(v))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def seed_live(self):
-        workbook(self.root / matcher.ROSTER_REL, "Clients",
-                 ["Client ID", "Name", "Practice / Entity", "Email"],
-                 [["C-1", "Client One", "Practice A", "one@clinic-a.example.test"]])
-        workbook(self.root / matcher.REGISTRY_REL, "Registry",
-                 ["Lead ID", "Contact Name", "Practice", "Email"],
-                 [["L-1", "Lead Two", "Practice B", "two@gmail.com"]])
-        workbook(self.root / matcher.VENDORS_REL, "Vendors",
-                 ["ID", "Name", "Company", "Email"], [])
-
-    def test_partial_export_failure_refuses_even_with_client_contacts(self):
-        self.seed_live()
-        for damage in ("missing", "sheet", "headers"):
-            path = self.root / matcher.VENDORS_REL
-            if damage == "missing":
-                path.unlink()
-            elif damage == "sheet":
-                workbook(path, "Wrong", ["ID", "Name", "Company", "Email"], [])
-            elif damage == "headers":
-                workbook(path, "Vendors", ["Email"], [["vendor@service.example.test"]])
-            with self.subTest(damage=damage), self.assertRaises(matcher.NoRecordContacts):
-                matcher.load_record_contacts(root=str(self.root))
-
-    def test_relative_paths_match_the_exporters(self):
-        text = (REPO / "exporters" / "targets.py").read_text(encoding="utf-8")
-        self.assertIn(f'ROSTER_REL = "{matcher.ROSTER_REL}"', text)
-        self.assertIn(f'REGISTRY_REL = "{matcher.REGISTRY_REL}"', text)
-        self.assertIn(f'VENDORS_REL = "{matcher.VENDORS_REL}"', text)
-
-    def test_default_root_is_the_exporters_export_home(self):
-        with mock.patch.dict(os.environ, {"CARR_EXPORT_HOME": str(self.root)}):
-            sys.modules.pop("exporters.common", None)
-            sys.modules.pop("exporters", None)
-            self.assertEqual(matcher.export_home(), str(self.root))
-        sys.modules.pop("exporters.common", None)
-
-    def test_loads_contacts_from_the_live_layout(self):
-        self.seed_live()
-        by_email, by_domain = matcher.load_record_contacts(root=str(self.root))
+    def test_loads_contacts_from_the_record_views(self):
+        by_email, by_domain = matcher.load_record_contacts()
         self.assertEqual(sorted(by_email), ["one@clinic-a.example.test", "two@gmail.com"])
+        self.assertEqual(by_email["one@clinic-a.example.test"], "C-1 / Client One")
         # Freemail never becomes a domain match.
         self.assertEqual(sorted(by_domain), ["clinic-a.example.test"])
 
-    def test_vendor_export_is_an_exact_contact_source(self):
-        self.seed_live()
-        workbook(self.root / "DNA/Network/vendors.xlsx", "Vendors",
-                 ["ID", "Name", "Company", "Email"],
-                 [["V-1", "Synthetic Vendor", "Synthetic Service", "vendor@service.example.test"]])
-        emails, domains = matcher.load_record_contacts(root=str(self.root))
+    def test_vendor_view_is_an_exact_contact_source(self):
+        self.views["v_export_vendors"] = [
+            {"ID": "V-1", "Name": "Synthetic Vendor", "Company": "Synthetic Service",
+             "Email": "vendor@service.example.test", "_out_of_market": False},
+            {"ID": "V-2", "Name": "Far Vendor", "Company": "Elsewhere",
+             "Email": "far@elsewhere.example.test", "_out_of_market": True}]
+        emails, domains = matcher.load_record_contacts()
         self.assertEqual(emails.get("vendor@service.example.test"), "V-1 / Synthetic Vendor")
         self.assertIn("service.example.test", domains)
+        # Out-of-market vendors never reach the Vendors sheet, so not here either.
+        self.assertNotIn("far@elsewhere.example.test", emails)
 
-    def test_draft_flat_layout_is_not_read(self):
-        workbook(self.root / "client-roster.xlsx", "Clients",
-                 ["Client ID", "Name", "Practice / Entity", "Email"],
-                 [["C-1", "Client One", "Practice A", "one@clinic-a.example.test"]])
+    def test_any_unreachable_view_fails_closed(self):
+        for view in ("v_export_clients", "v_export_leads", "v_export_vendors"):
+            for failure in (OSError(11, "Resource deadlock avoided"), RuntimeError("connection refused"),
+                            SystemExit("no CARR_DB_EXPORTER_URL")):
+                self.views = live_views()
+                self.views[view] = failure
+                with self.subTest(view=view, failure=type(failure).__name__), \
+                        self.assertRaises(matcher.NoRecordContacts) as caught:
+                    matcher.load_record_contacts()
+                self.assertIn(view, str(caught.exception))
+                self.assertIn("unreachable", str(caught.exception))
+
+    def test_view_missing_required_columns_fails_closed(self):
+        self.views["v_export_leads"] = [{"Email": "two@gmail.com"}]
         with self.assertRaises(matcher.NoRecordContacts) as caught:
-            matcher.load_record_contacts(root=str(self.root))
-        self.assertIn("absent", str(caught.exception))
+            matcher.load_record_contacts()
+        self.assertIn("v_export_leads (required columns missing)", str(caught.exception))
+
+    def test_never_falls_back_to_the_xlsx_projection(self):
+        # A perfectly readable projection on disk must not rescue an unreachable view.
+        source = (REPO / "tools" / "calendar-touch-matcher.py").read_text(encoding="utf-8")
+        self.assertNotIn("openpyxl", source)
+        self.assertNotIn(".xlsx", source)
+        self.assertNotIn("EXPORT_HOME", source)
+        self.views["v_export_clients"] = OSError(11, "Resource deadlock avoided")
+        with mock.patch.dict(os.environ, {"CARR_EXPORT_HOME": str(self.root)}), \
+                self.assertRaises(matcher.NoRecordContacts):
+            matcher.load_record_contacts()
+
+    def test_views_and_columns_match_the_exporters(self):
+        sys.path.insert(0, str(REPO))
+        from exporters import targets
+        text = (REPO / "exporters" / "targets.py").read_text(encoding="utf-8")
+        columns = {"v_export_clients": targets.ROSTER_COLS, "v_export_leads": targets.REGISTRY_COLS,
+                   "v_export_vendors": targets.VENDORS_COLS}
+        for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
+            with self.subTest(view=view):
+                self.assertIn(f"from {view}", text)
+                self.assertLessEqual({id_col, name_col, org_col, "Email"}, set(columns[view]))
+
+    def test_unreachable_view_message_carries_no_address_or_dsn(self):
+        self.views["v_export_clients"] = RuntimeError(
+            "postgresql://carr_exporter:secret@host/db rejected one@clinic-a.example.test")  # ci-secret-scan: allow (synthetic fixture)
+        with self.assertRaises(matcher.NoRecordContacts) as caught:
+            matcher.load_record_contacts()
+        message = str(caught.exception)
+        self.assertNotIn("postgresql://", message)
+        self.assertIsNone(re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", message))
 
     def test_empty_book_refuses_loudly_without_addresses(self):
+        self.views = {"v_export_clients": [], "v_export_leads": [], "v_export_vendors": []}
         dump = self.root / "dump.json"
         dump.write_text('{"Meeting|2026-09-25": ["someone@else.example.test"]}', encoding="utf-8")
         err = io.StringIO()
-        with mock.patch.object(matcher, "export_home", return_value=str(self.root)), \
-                mock.patch.object(sys, "argv", ["matcher", "7", "--json", "--from-dump", str(dump)]), \
+        with mock.patch.object(sys, "argv", ["matcher", "7", "--json", "--from-dump", str(dump)]), \
                 redirect_stderr(err):
             code = matcher.main()
         self.assertEqual(code, 5)
@@ -120,7 +171,6 @@ class LiveExports(unittest.TestCase):
         self.assertIsNone(re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", err.getvalue()))
 
     def test_newest_touch_and_nearest_future_event_are_reported(self):
-        self.seed_live()
         today = datetime.date.today()
         old = (today - datetime.timedelta(days=3)).isoformat()
         latest = (today - datetime.timedelta(days=1)).isoformat()
@@ -134,23 +184,20 @@ class LiveExports(unittest.TestCase):
             f"Far synthetic meeting|{far}": ["one@clinic-a.example.test"],
         }))
         output = io.StringIO()
-        with mock.patch.object(matcher, "export_home", return_value=str(self.root)), \
-                mock.patch.object(sys, "argv", ["matcher", "7", "--json", "--from-dump", str(dump)]), \
+        with mock.patch.object(sys, "argv", ["matcher", "7", "--json", "--from-dump", str(dump)]), \
                 redirect_stdout(output), redirect_stderr(io.StringIO()):
             self.assertEqual(matcher.main(), 0)
         proposal = json.loads(output.getvalue())["exact"][0]
         self.assertEqual(proposal["last_seen"], latest)
         self.assertEqual([e["day"] for e in proposal["events"]], [latest, old])
         output = io.StringIO()
-        with mock.patch.object(matcher, "export_home", return_value=str(self.root)), \
-                mock.patch.object(sys, "argv", ["matcher", "7", "--from-dump", str(dump)]), \
+        with mock.patch.object(sys, "argv", ["matcher", "7", "--from-dump", str(dump)]), \
                 redirect_stdout(output):
             self.assertEqual(matcher.main(), 0)
         self.assertIn("Near synthetic meeting", output.getvalue())
         self.assertNotIn("Far synthetic meeting", output.getvalue())
 
     def test_nearest_same_day_future_meeting_uses_start_instant(self):
-        self.seed_live()
         now = datetime.datetime(2026, 10, 2, 12, tzinfo=datetime.timezone.utc)
         # Offset spellings deliberately reverse lexical and instant ordering.
         for near, far in (("2026-10-02T13:00:00+00:00", "2026-10-02T18:00:00+00:00"),
@@ -167,7 +214,6 @@ class LiveExports(unittest.TestCase):
                     dump.write_text(json.dumps({"schema": "calendar-events/v2", "events": ordered}))
                     output = io.StringIO()
                     with mock.patch.object(matcher.time, "time", return_value=now.timestamp()), \
-                            mock.patch.object(matcher, "export_home", return_value=str(self.root)), \
                             mock.patch.object(sys, "argv", ["matcher", "7", "--from-dump", str(dump)]), \
                             redirect_stdout(output), redirect_stderr(io.StringIO()):
                         self.assertEqual(matcher.main(), 0)

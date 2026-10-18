@@ -3,61 +3,41 @@
 # LaunchAgent.
 #
 # This script is what the orchestrator runs under supervision, after this
-# tool has merged into the main ~/carr-system checkout at the durable path
-# the plist references (/Users/booko/carr-system/tools/dictation-rig/...).
-# It is NOT run as part of the build pass that produced it — building the
-# files and installing them are separate, deliberately gated steps.
+# tool has merged into the canonical checkout at the durable path the plist
+# references. It is NOT run as part of the build pass that produced it —
+# building the files and installing them are separate, deliberately gated
+# steps.
 #
 # What it does:
-#   1. Copies com.carr.dictation-consent.plist into ~/Library/LaunchAgents/
-#   2. If the agent is already loaded, bootout first (clean reload, no
-#      "already bootstrapped" error on a re-install).
-#   3. Bootstraps the agent into the current user's GUI domain so WatchPaths
-#      is live against ~/Recordings.
+#   1. Warns if consent-watch.sh is not in the checkout yet.
+#   2. Hands the LaunchAgent to config-as-code, which owns this label, carries
+#      the per-machine home-path rewrite, and wraps the job in
+#      bin/run-scheduled.sh so a failure leaves a durable run result.
 #
-# Safe to re-run: bootout on an agent that isn't loaded is treated as a
-# no-op (its failure is swallowed), and bootstrap after a clean bootout
-# always succeeds.
+# It no longer copies tools/dictation-rig/launchd/com.carr.dictation-consent.plist
+# directly: that copy spells Joe's home literally, so on any other machine it
+# installed a job pointing at a nonexistent path while still reporting success.
+# See install-agent-via-config.sh for the full 2026-08-25 finding.
+#
+# Safe to re-run: config-as-code is idempotent.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 TOOL_DIR="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+REPO="$(cd "$TOOL_DIR/../.." >/dev/null 2>&1 && pwd)"
 
 LABEL="com.carr.dictation-consent"
-PLIST_SRC="$TOOL_DIR/launchd/$LABEL.plist"
-LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
-PLIST_DEST="$LAUNCH_AGENTS_DIR/$LABEL.plist"
-CONSENT_SCRIPT="/Users/booko/carr-system/tools/dictation-rig/bin/consent-watch.sh"
-
-if [ ! -f "$PLIST_SRC" ]; then
-    echo "install-consent.sh: plist not found at $PLIST_SRC" >&2
-    exit 1
-fi
+CONSENT_SCRIPT="$REPO/tools/dictation-rig/bin/consent-watch.sh"
 
 if [ ! -f "$CONSENT_SCRIPT" ]; then
     echo "install-consent.sh: WARNING — $CONSENT_SCRIPT does not exist yet." >&2
-    echo "The plist points at the durable main-checkout path. If this tool" >&2
-    echo "has not merged into ~/carr-system yet, launchd will fail to run" >&2
-    echo "the job even though bootstrap succeeds. Merge first, then install." >&2
+    echo "If this tool has not merged into the canonical checkout yet," >&2
+    echo "launchd will fail to run the job even though bootstrap succeeds." >&2
+    echo "Merge first, then install." >&2
 fi
 
-mkdir -p "$LAUNCH_AGENTS_DIR"
-cp "$PLIST_SRC" "$PLIST_DEST"
-echo "install-consent.sh: copied $PLIST_SRC -> $PLIST_DEST"
-
-UID_NUM="$(id -u)"
-DOMAIN_TARGET="gui/$UID_NUM"
-SERVICE_TARGET="$DOMAIN_TARGET/$LABEL"
-
-# Clean reload: bootout first if already loaded. launchctl bootout exits
-# non-zero if the service isn't loaded — that's expected on a first
-# install, so don't let it abort the script under set -e.
-launchctl bootout "$SERVICE_TARGET" >/dev/null 2>&1 || true
-
-launchctl bootstrap "$DOMAIN_TARGET" "$PLIST_DEST"
-echo "install-consent.sh: bootstrapped $LABEL into $DOMAIN_TARGET"
-
-launchctl print "$SERVICE_TARGET" >/dev/null 2>&1 \
-    && echo "install-consent.sh: verified $LABEL is loaded" \
-    || echo "install-consent.sh: WARNING — could not verify $LABEL is loaded"
+# The LaunchAgent comes from config-as-code, never from a bare copy of this
+# tool's own plist — that one spells Joe's home literally and omits the
+# bin/run-scheduled.sh wrapper. See install-agent-via-config.sh.
+sh "$TOOL_DIR/bin/install-agent-via-config.sh" "$LABEL"
