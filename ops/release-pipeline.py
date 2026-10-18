@@ -2082,16 +2082,31 @@ class Pipeline:
             return False
         raise StepFailed("release-key", res.rc, str(self.run_dir / "release-key.log"))
 
-    def schema_followup(self, wt: Path, sha: str, main_sha: str) -> str:
+    def schema_followup(self, wt: Path, sha: str, main_sha: str) -> str | None:
         """Branch from `main_sha`, the main object run_lane fetched by SHA. The
-        fetch never advances origin/main, so that ref can be stale."""
+        fetch never advances origin/main, so that ref can be stale. Returns the
+        PR URL, or None when main's snapshot already matches the migrations."""
         if not SHA_RE.fullmatch(main_sha):
             raise StepFailed("schema-worktree", 1, "", "no observed main SHA to branch the schema snapshot from")
         branch = f"{SCHEMA_SNAPSHOT_PREFIX}{sha[:8]}"
         fwt = self.store.root / "worktrees" / f"schema-{sha[:12]}"
         self.step("schema-worktree", ["git", "-C", str(self.repo), "worktree", "add", "-b", branch, str(fwt),
                                       main_sha], self.repo)
-        shutil.copyfile(wt / "db/schema.sql", fwt / "db/schema.sql")
+        # Regenerate the snapshot the way the CI migration gate does: PostgreSQL
+        # 18 shadow cluster, main's schema plus the migrations main carries.
+        # The file bin/migrate-prod.sh dumped from production is NOT used: the
+        # production server deparses CHECK expressions, views and ledger order
+        # differently from that gate, so a PR carrying it fails the gate on
+        # formatting alone and was closed instead of merged.
+        wt_py = wt / ".venv/bin/python"
+        self.step("schema-shadow", [str(wt_py) if wt_py.is_file() else sys.executable,
+                                    "ops/migration-shadow.py", "--write", "--base", main_sha], fwt)
+        if not self.step("schema-diff", ["git", "status", "--porcelain", "--", "db/schema.sql"], fwt).out.strip():
+            # main already carries exactly what the migrations produce: no PR.
+            self.step("schema-worktree-remove", ["git", "-C", str(self.repo), "worktree", "remove", "--force",
+                                                 str(fwt)], self.repo)
+            self.step("schema-branch-remove", ["git", "-C", str(self.repo), "branch", "-D", branch], self.repo)
+            return None
         self.step("schema-commit", ["git", "commit", "-m",
                                     f"Refresh db/schema.sql after the scripted release of {sha[:12]}\n\n"
                                     "bin/migrate-prod.sh regenerated it from production during the release; "
