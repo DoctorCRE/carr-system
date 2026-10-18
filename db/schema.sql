@@ -1253,7 +1253,7 @@ end $$;
 
 CREATE FUNCTION ops.add_meeting_note(p_meeting uuid, p_body text, p_revises_note_number integer, p_base_revision integer, p_client_instance text, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_who record; v_row ops.meeting%rowtype; v_prior ops.meeting_note%rowtype;
         v_number integer; v_revision integer; v_current integer;
@@ -1262,7 +1262,9 @@ begin
   select * into v_prior from ops.meeting_note where id = p_idempotency_key;
   if v_prior.id is not null then
     if v_prior.meeting_id is distinct from p_meeting or v_prior.body is distinct from p_body
-       or v_prior.author_actor is distinct from v_who.actor_id then
+       or v_prior.author_actor is distinct from v_who.actor_id
+       or (case when v_prior.revision=1 then null else v_prior.note_number end) is distinct from p_revises_note_number
+       or (case when v_prior.revision=1 then null else v_prior.revision-1 end) is distinct from p_base_revision then
       return jsonb_build_object('ok', false, 'reason_id', 'meeting_note_idempotency_key_reuse');
     end if;
     return jsonb_build_object('ok', true, 'deduplicated', true, 'meeting_id', p_meeting,
@@ -9117,8 +9119,8 @@ begin
   if found and j.definition_key='engineering-slice' then
     raise exception 'engineering jobs require scoped controller functions';
   end if;
-  if not found or j.state <> 'running' or j.lease_token <> p_lease_token
-     or j.leased_until < now() then
+  if not found or j.state <> 'running' or j.lease_token is distinct from p_lease_token
+     or p_lease_token is null or j.leased_until is null or j.leased_until < now() then
     raise exception 'job % does not hold this live lease',p_job_id;
   end if;
   update ops.job_attempt set state='succeeded',ended_at=now()
@@ -10673,7 +10675,7 @@ end $_$;
 
 CREATE FUNCTION ops.decide_doc_suggestion(p_id uuid, p_base integer, p_choice text, p_until date, p_work_ref text, p_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_actor uuid; v_row ops.doc_suggestion%rowtype; v_prior ops.doc_suggestion_decision%rowtype;
         v_request jsonb; v_result jsonb; v_work uuid; v_count integer;
@@ -10690,7 +10692,7 @@ begin
   select * into v_row from ops.doc_suggestion where id=p_id for update;
   if v_row.id is null or not ops.doc_suggestion_visible(v_row.conversation_id,v_actor) then
     return jsonb_build_object('ok',false,'reason_id','doc_suggestion_not_found'); end if;
-  if v_row.version<>p_base then
+  if v_row.version is distinct from p_base then
     return jsonb_build_object('ok',false,'reason_id','version_conflict','current',to_jsonb(v_row)); end if;
   if p_choice not in ('act','discuss','snooze','dismiss') then
     return jsonb_build_object('ok',false,'reason_id','choice_invalid'); end if;
@@ -10816,10 +10818,11 @@ end $_$;
 
 CREATE FUNCTION ops.decide_meeting_action(p_meeting uuid, p_action_number integer, p_decision text, p_base_revision integer, p_disposition text, p_assignee_slug text, p_client_instance text, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_who record; v_row ops.meeting%rowtype; v_head ops.meeting_action%rowtype;
         v_latest ops.meeting_action_revision%rowtype; v_assignee uuid; v_disposition text;
+        v_request jsonb; v_prior_request jsonb;
 begin
   select * into v_who from ops.meeting_mode_actor();
   if not coalesce(v_who.is_partner, false) then
@@ -10839,8 +10842,19 @@ begin
     return jsonb_build_object('ok', false, 'reason_id', 'meeting_action_not_found',
       'action_number', p_action_number);
   end if;
+  v_request:=jsonb_build_object('meeting_id',p_meeting,'action_number',p_action_number,
+    'decision',p_decision,'base_revision',p_base_revision,'disposition',p_disposition,
+    'assignee_slug',p_assignee_slug,'actor_id',v_who.actor_id);
+  select request into v_prior_request from ops.meeting_action_decision_request
+    where idempotency_key=p_idempotency_key;
+  if v_prior_request is not null and v_prior_request is distinct from v_request then
+    return jsonb_build_object('ok',false,'reason_id','meeting_action_idempotency_key_reuse');
+  end if;
   if exists (select 1 from ops.meeting_stream where idempotency_key = p_idempotency_key
                and kind in ('action_accepted', 'action_declined')) then
+    if v_prior_request is null then
+      return jsonb_build_object('ok',false,'reason_id','meeting_action_legacy_replay_unverifiable');
+    end if;
     return jsonb_build_object('ok', true, 'deduplicated', true, 'already', true,
       'meeting_id', p_meeting, 'action', ops.meeting_mode_action_view(p_meeting, p_action_number));
   end if;
@@ -10872,6 +10886,7 @@ begin
      where meeting_id = p_meeting and action_number = p_action_number;
     perform ops.meeting_mode_append(p_meeting, 'action_declined', v_who.actor_id,
       p_client_instance, null, p_action_number, v_head.current_revision, null, p_idempotency_key);
+    insert into ops.meeting_action_decision_request values(p_idempotency_key,v_request);
     return jsonb_build_object('ok', true, 'deduplicated', false, 'already', false,
       'meeting_id', p_meeting, 'action', ops.meeting_mode_action_view(p_meeting, p_action_number));
   end if;
@@ -10902,6 +10917,7 @@ begin
   end if;
   perform ops.meeting_mode_accept(p_meeting, p_action_number, v_head.current_revision,
     v_who.actor_id, v_disposition, v_assignee, p_client_instance, p_idempotency_key);
+  insert into ops.meeting_action_decision_request values(p_idempotency_key,v_request);
   return jsonb_build_object('ok', true, 'deduplicated', false, 'already', false,
     'resolved_once', true, 'meeting_id', p_meeting,
     'action', ops.meeting_mode_action_view(p_meeting, p_action_number));
@@ -11795,6 +11811,14 @@ begin
     return new;
   end if;
 
+  -- A fixed snapshot can omit a claim committed by the prior lock holder.
+  if current_setting('transaction_isolation') not in ('read committed','read uncommitted') then
+    raise exception using errcode='25001',
+      message='work-in-progress admission requires READ COMMITTED isolation';
+  end if;
+
+  -- All competing claims and reassignments share one admission lock.
+  perform pg_advisory_xact_lock(757, 1);
   already_in_flight := (tg_op = 'UPDATE' and old.state in ('claimed','in_progress'));
 
   -- SYSTEM-WIDE: entry only. A row already in flight is already counted, and
@@ -19714,7 +19738,7 @@ begin
       from changed
     on conflict (job_id,attempt,cache_key,observation_kind) do nothing
     returning 1
-  ) select count(*) into n from evidence;
+  ) select count(*) into n from changed;
   return n;
 end $$;
 
@@ -32098,7 +32122,9 @@ begin
      dependency_refs,validated_at,expires_at)
   values (p_cache_key,p_cognition_key,p_cognition_version,p_output_schema_version,p_proposal,
           coalesce(p_dependency_refs,'{}'),now(),now()+make_interval(secs=>p_ttl_seconds))
-  on conflict(cache_key) do update set proposal=excluded.proposal,
+  on conflict(cache_key) do update set cognition_key=excluded.cognition_key,
+    cognition_version=excluded.cognition_version,output_schema_version=excluded.output_schema_version,
+    proposal=excluded.proposal,
     dependency_refs=excluded.dependency_refs,validated_at=excluded.validated_at,
     expires_at=excluded.expires_at,invalidated_at=null;
   insert into ops.cognition_cache_observation
@@ -37955,13 +37981,13 @@ $$;
 
 CREATE FUNCTION ops.rename_doc_conversation(p_conversation uuid, p_base_version integer, p_title text, p_pinned boolean, p_archived boolean, p_idempotency_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_actor uuid; v_row ops.doc_conversation%rowtype; v_version integer;
 begin
   v_actor := ops.portfolio_writer_actor_id();
 
-  select * into v_row from ops.doc_conversation where id = p_conversation;
+  select * into v_row from ops.doc_conversation where id = p_conversation for update;
   if v_row.id is null
      or not (v_row.created_by_actor = v_actor
              or exists (select 1 from ops.doc_conversation_grant g
@@ -38545,18 +38571,31 @@ CREATE FUNCTION ops.reserve_job_cost(p_job_id uuid, p_lease_token uuid, p_route_
     AS $$
 declare j ops.job%rowtype; route ops.provider_route%rowtype; spent numeric; reserved numeric; rid uuid;
 begin
+  -- The route lock serializes admission, but a fixed snapshot can still
+  -- omit reservations committed by the prior lock holder.
+  if current_setting('transaction_isolation') not in ('read committed','read uncommitted') then
+    raise exception using errcode='25001',
+      message='provider route budget admission requires READ COMMITTED isolation';
+  end if;
   select * into j from ops.job where id=p_job_id for update;
   if not found or j.state<>'running' or j.lease_token<>p_lease_token or j.leased_until<now() then
     raise exception 'job % does not hold this live lease',p_job_id;
   end if;
-  select * into route from ops.provider_route where route_key=p_route_key and enabled;
+  select * into route from ops.provider_route where route_key=p_route_key and enabled for update;
   if not found then raise exception 'provider route % is not enabled',p_route_key; end if;
   if p_estimated_cost_usd<0 then raise exception 'estimated cost must be non-negative'; end if;
-  select coalesce(sum(a.cost_usd),0) into spent from ops.job_attempt a
-   where a.provider_route=p_route_key and a.started_at>=date_trunc('month',now());
+  -- Settlement time owns spend, not the attempt's start month. Preserve
+  -- legacy unreserved attempt costs without counting reserved costs twice.
+  select coalesce(sum(r.actual_cost_usd),0) into spent from ops.cost_reservation r
+   where r.route_key=p_route_key and r.state='settled'
+     and r.settled_at>=date_trunc('month',now());
+  select spent+coalesce(sum(a.cost_usd),0) into spent from ops.job_attempt a
+   where a.provider_route=p_route_key and a.started_at>=date_trunc('month',now())
+     and not exists(select 1 from ops.cost_reservation r where r.job_id=a.job_id
+       and r.attempt=a.attempt and r.state='settled');
   select coalesce(sum(r.estimated_cost_usd),0) into reserved from ops.cost_reservation r
    where r.route_key=p_route_key and r.state='reserved'
-     and r.created_at>=date_trunc('month',now());
+;
   if route.monthly_budget_usd is not null
      and spent+reserved+p_estimated_cost_usd>route.monthly_budget_usd then
     raise exception 'provider route % monthly budget would be exceeded',p_route_key;
@@ -62581,6 +62620,8 @@ begin
   if not found or r.job_id<>j.id or r.attempt<>j.attempt or r.state<>'reserved' then
     raise exception 'cost reservation does not belong to this live attempt';
   end if;
+  -- Serialize conversion from reserved to spent with admission on this route.
+  perform 1 from ops.provider_route where route_key=r.route_key for update;
   if p_actual_cost_usd<0 or p_actual_cost_usd>r.estimated_cost_usd then
     raise exception 'actual cost exceeds admitted reservation';
   end if;
@@ -65751,7 +65792,7 @@ end $$;
 
 CREATE FUNCTION ops.suggest_doc_work(p_conversation uuid, p_sequence integer, p_obligation_key text, p_polished text, p_uncertainty text, p_material jsonb, p_key uuid) RETURNS jsonb
     LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_turn ops.doc_conversation_turn%rowtype; v_row ops.doc_suggestion%rowtype;
         v_existing ops.doc_suggestion_contribution%rowtype; v_changed boolean;
@@ -65788,6 +65829,9 @@ begin
     if exists(select 1 from ops.doc_suggestion_contribution
         where suggestion_id=v_row.id and source_sequence=p_sequence) then
       return jsonb_build_object('ok',false,'reason_id','source_turn_already_contributed'); end if;
+    if p_sequence < v_row.source_sequence then
+      return jsonb_build_object('ok',false,'reason_id','stale_source_sequence','current_sequence',v_row.source_sequence);
+    end if;
     v_changed := v_row.material_facts is distinct from p_material;
     update ops.doc_suggestion set material_facts=p_material,
       material_version=material_version+case when v_changed then 1 else 0 end,
@@ -68139,7 +68183,7 @@ CREATE FUNCTION ops.v5_a03_tenant() RETURNS text
 
 CREATE FUNCTION ops.v5_a05_assurance_cadence_batch(p_recipient_slug text) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'pg_catalog', 'ops', 'public', 'pg_temp'
+    SET search_path TO 'pg_catalog', 'ops', 'public'
     AS $$
 declare v_result jsonb; v_recipient uuid;
 begin
@@ -70205,6 +70249,33 @@ end $$;
 
 
 --
+-- Name: enforce_allocation_tree(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.enforce_allocation_tree() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'public', 'pg_temp'
+    AS $$
+begin
+  -- The ancestor census must see commits made by the prior lock holder.
+  -- Fixed snapshots do not refresh after an advisory-lock wait.
+  if current_setting('transaction_isolation') not in ('read committed','read uncommitted') then
+    raise exception using errcode='25001',
+      message='commission allocation tree writes require READ COMMITTED isolation';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('commission-allocation:'||new.commission_id::text,757));
+  if new.parent_id is not null and exists (
+    with recursive ancestors as (
+      select a.id,a.parent_id from public.commission_allocation a where a.id=new.parent_id
+      union
+      select a.id,a.parent_id from public.commission_allocation a join ancestors p on a.id=p.parent_id
+    ) select 1 from ancestors where id=new.id
+  ) then raise exception using errcode='23514',message='commission allocation parent would create a cycle'; end if;
+  return new;
+end $$;
+
+
+--
 -- Name: log_retrieval_query(text, integer, uuid[], jsonb, text, bigint, boolean, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -70924,7 +70995,7 @@ CREATE FUNCTION public.trg_deal_participant_side() RETURNS trigger
     AS $$
 declare s text;
 begin
-  select side into s from participant_role where slug = new.role;
+  select side into s from public.participant_role where slug = new.role;
 
   if s = 'actor' then
     if new.actor_id is null then
@@ -76033,6 +76104,17 @@ CREATE TABLE ops.meeting_action (
     CONSTRAINT meeting_action_disposition_check CHECK ((disposition = ANY (ARRAY['execute'::text, 'delegate'::text]))),
     CONSTRAINT meeting_action_outcome_is_evidence CHECK ((((state = ANY (ARRAY['executed'::text, 'delegated'::text])) = (outcome IS NOT NULL)) AND ((state <> 'executed'::text) OR (disposition = 'execute'::text)) AND ((state <> 'delegated'::text) OR (disposition = 'delegate'::text)))),
     CONSTRAINT meeting_action_state_check CHECK ((state = ANY (ARRAY['proposed'::text, 'accepted'::text, 'executed'::text, 'delegated'::text, 'declined'::text])))
+);
+
+
+--
+-- Name: meeting_action_decision_request; Type: TABLE; Schema: ops; Owner: -
+--
+
+CREATE TABLE ops.meeting_action_decision_request (
+    idempotency_key uuid NOT NULL,
+    request jsonb NOT NULL,
+    CONSTRAINT meeting_action_decision_request_request_check CHECK ((jsonb_typeof(request) = 'object'::text))
 );
 
 
@@ -84145,6 +84227,7 @@ CREATE TABLE public.commission_allocation (
     kind text NOT NULL,
     fraction numeric(6,5) NOT NULL,
     computed_amount numeric(14,2),
+    CONSTRAINT allocation_not_own_parent CHECK ((parent_id IS DISTINCT FROM id)),
     CONSTRAINT commission_allocation_check CHECK (((actor_id IS NOT NULL) OR (party_id IS NOT NULL))),
     CONSTRAINT commission_allocation_fraction_check CHECK (((fraction > (0)::numeric) AND (fraction <= (1)::numeric))),
     CONSTRAINT commission_allocation_kind_check CHECK ((kind = ANY (ARRAY['referral_fee'::text, 'partner_split'::text, 'house'::text, 'other'::text])))
@@ -94551,6 +94634,14 @@ ALTER TABLE ONLY ops.legacy_schedule_surface_registry
 
 
 --
+-- Name: meeting_action_decision_request meeting_action_decision_request_pkey; Type: CONSTRAINT; Schema: ops; Owner: -
+--
+
+ALTER TABLE ONLY ops.meeting_action_decision_request
+    ADD CONSTRAINT meeting_action_decision_request_pkey PRIMARY KEY (idempotency_key);
+
+
+--
 -- Name: meeting_action meeting_action_meeting_id_dedupe_key_key; Type: CONSTRAINT; Schema: ops; Owner: -
 --
 
@@ -98963,6 +99054,14 @@ ALTER TABLE ONLY public.agreement
 
 
 --
+-- Name: commission_allocation allocation_id_commission_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_allocation
+    ADD CONSTRAINT allocation_id_commission_unique UNIQUE (id, commission_id);
+
+
+--
 -- Name: ammo_item ammo_item_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -101596,6 +101695,19 @@ CREATE INDEX action_class_successor_action_class_idx ON public.action_class_succ
 --
 
 CREATE INDEX activity_deal_idx ON public.activity USING btree (deal_id, occurred_at DESC);
+
+
+--
+-- Name: activity_subject_timeline; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX activity_subject_timeline ON public.activity USING btree ((
+CASE
+    WHEN (deal_id IS NOT NULL) THEN 'deal'::text
+    WHEN (client_id IS NOT NULL) THEN 'client'::text
+    WHEN (lead_id IS NOT NULL) THEN 'lead'::text
+    ELSE 'vendor'::text
+END), COALESCE(deal_id, client_id, lead_id, vendor_id), occurred_at DESC);
 
 
 --
@@ -107072,6 +107184,13 @@ CREATE TRIGGER agent_profile_assignment_append_only BEFORE DELETE OR UPDATE ON p
 --
 
 CREATE TRIGGER agreement_touch BEFORE UPDATE ON public.agreement FOR EACH ROW EXECUTE FUNCTION public.trg_touch_row();
+
+
+--
+-- Name: commission_allocation allocation_tree; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER allocation_tree BEFORE INSERT OR UPDATE OF parent_id, commission_id ON public.commission_allocation FOR EACH ROW EXECUTE FUNCTION public.enforce_allocation_tree();
 
 
 --
@@ -114436,6 +114555,14 @@ ALTER TABLE ONLY public.agreement
 
 
 --
+-- Name: commission_allocation allocation_parent_same_commission; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.commission_allocation
+    ADD CONSTRAINT allocation_parent_same_commission FOREIGN KEY (parent_id, commission_id) REFERENCES public.commission_allocation(id, commission_id);
+
+
+--
 -- Name: attachment attachment_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -118397,6 +118524,7 @@ revoke all on function public.assert_situation_retrieval_golden(p_suite_digest t
 revoke all on function public.capture_call_context(requested_deal_ids uuid[]) from public;
 revoke all on function public.defect_resolution_evidence_must_resolve() from public;
 revoke all on function public.defect_resolution_is_append_only() from public;
+revoke all on function public.enforce_allocation_tree() from public;
 revoke all on function public.log_retrieval_query(p_query text, p_result_count integer, p_section_ids uuid[], p_score_bands jsonb, p_policy_id text, p_policy_version bigint, p_explicit_hit boolean, p_scope_ref text) from public;
 revoke all on function public.loop_amendment_history(p_loop_id uuid) from public;
 revoke all on function public.party_reference_counts(p_party uuid, p_exclude uuid) from public;
@@ -118583,16 +118711,12 @@ grant select on table ops.device_evidence_principal to dot_reader;
 grant select on table ops.device_evidence_receipt to carr_jobs;
 grant select on table ops.device_evidence_receipt to dot_reader;
 grant select on table ops.doc_conversation to carr_authority;
-grant select on table ops.doc_conversation to carr_writer;
 grant select on table ops.doc_conversation to dot_reader;
 grant select on table ops.doc_conversation_grant to carr_authority;
-grant select on table ops.doc_conversation_grant to carr_writer;
 grant select on table ops.doc_conversation_grant to dot_reader;
 grant select on table ops.doc_conversation_title_revision to carr_authority;
-grant select on table ops.doc_conversation_title_revision to carr_writer;
 grant select on table ops.doc_conversation_title_revision to dot_reader;
 grant select on table ops.doc_conversation_turn to carr_authority;
-grant select on table ops.doc_conversation_turn to carr_writer;
 grant select on table ops.doc_conversation_turn to dot_reader;
 grant select on sequence ops.doc_conversation_turn_id_seq to dot_reader;
 grant select on table ops.doc_correction_proposal to dot_reader;
@@ -118899,6 +119023,7 @@ grant select on table ops.legacy_schedule_provider_contract to dot_reader;
 grant select on table ops.legacy_schedule_surface_registry to dot_reader;
 grant select on table ops.meeting to dot_reader;
 grant select on table ops.meeting_action to dot_reader;
+grant select on table ops.meeting_action_decision_request to dot_reader;
 grant select on table ops.meeting_action_revision to dot_reader;
 grant select on table ops.meeting_note to dot_reader;
 grant select on table ops.meeting_processing_lease to dot_reader;
@@ -122430,6 +122555,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
+0896_dot_database_design.sql	656a6bf98c3470d142df16951a5257ffa51b13e28d6e7c587fdff720b0cf9561	2026-10-18 06:47:49.612561+00
 \.
 
 
