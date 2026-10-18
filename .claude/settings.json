@@ -4,6 +4,16 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -d \"${HOME}/carr-system/hooks\" ]; then r=\"${HOME}/carr-system\"; else r=\"${CLAUDE_PROJECT_DIR:-}\"; fi; if [ ! -e \"$r/hooks/builder-agent-gate.py\" ] && [ ! -L \"$r/hooks/builder-agent-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script $r/hooks/builder-agent-gate.py; skipping\" >&2; exit 0; fi; exec /usr/bin/env python3 \"$r/hooks/builder-agent-gate.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Bash|Read|Grep|Glob|WebFetch|WebSearch",
         "hooks": [
           {
