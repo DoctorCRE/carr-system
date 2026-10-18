@@ -537,6 +537,7 @@ def run_local_ci(
                 return forward.returncode
             for test_file, dsn_key in (
                 ("find-rule-supersedes.test.mjs", "CARR_RULE_TEST_DATABASE_URL"),
+                ("one-step-rule-approval.test.mjs", "CARR_RULE_TEST_DATABASE_URL"),
                 ("catch-me-up-writer-route.test.mjs", "CARR_WRITER_READ_TEST_DATABASE_URL"),
             ):
                 consumer_env = dict(clean_env)
