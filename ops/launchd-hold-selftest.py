@@ -446,5 +446,28 @@ sys.exit(0 if m.install_launchd_plist({self.dest.name!r},{str(self.dest)!r},{sel
             self.assertFalse(any(c[0] == "bootstrap" for c in actual["calls"]))
 
 
+class DeclaredDisabledTests(unittest.TestCase):
+    """A tracked plist the scheduled-jobs manifest declares not installed must never be installed."""
+
+    def test_every_triggerless_tracked_plist_is_held_off_the_installer(self):
+        sys.path.insert(0, str(ROOT / "lib"))
+        sys.path.insert(0, str(ROOT / "ops"))
+        import scheduled_jobs
+        declared_off = {j["label"] for j in scheduled_jobs.native_manifest(ROOT)["jobs"]
+                        if j["scheduler"] == "launchd" and not j["expected_installed"]}
+        self.assertIn("com.carr.resource-collector", declared_off)
+        for label in sorted(declared_off):
+            if not label.startswith("com.carr."):
+                continue  # local.* agents are not in the fleet installer's com.carr. set
+            body = (ROOT / "ops/launchd" / (label + ".plist")).read_text()
+            # pairs() skips exactly the plists this returns a reason for.
+            self.assertTrue(cac.launchd_off_reason(label + ".plist", body, holds={}), label + " would be installed")
+
+    def test_fleet_sync_plan_does_not_install_the_resource_collector(self):
+        body = (ROOT / "ops/launchd/com.carr.resource-collector.plist").read_text()
+        self.assertTrue(cac.launchd_off_reason("com.carr.resource-collector.plist", body, holds={}))
+        self.assertIn("com.carr.resource-collector.plist", cac.launchd_hold.DEFINITION_ONLY)
+
+
 if __name__ == "__main__":
     unittest.main()
