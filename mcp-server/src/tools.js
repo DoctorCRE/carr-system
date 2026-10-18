@@ -5721,12 +5721,12 @@ export const TOOLS = {
             or exists(select 1 from vendor v where v.party_id=p.id and v.vendor_ref is not null) as has_business_ref,
            (select count(distinct rf.kind) from record_flag rf where rf.subject_type='party' and rf.subject_id=p.id
              and rf.kind in ('verified','address','phone','email','npi','specialty') and coalesce(rf.value->>'found','true') <> 'false') as verified_identity_fields,
-           -- Activities attach to role rows, which move with the party below.
-           -- EXISTS counts a multi-role activity once, without multiplying it.
            ((select count(*) from activity a
-              where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
-                 or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=p.id)
-                 or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=p.id))
+               where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=p.id)
+                  or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=p.id)
+                  or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=p.id)
+                  or exists(select 1 from deal d join client cl on cl.id=d.client_id
+                            where d.id=a.deal_id and cl.party_id=p.id))
              + (select count(*) from deal_participant dp where dp.party_id=p.id)
              + (select count(*) from party_link pl where pl.from_party=p.id or pl.to_party=p.id or pl.via_party=p.id)) as linked_records
           from party p where p.id = any($1::uuid[])`, [[surv.partyId, merg.partyId]]);
@@ -5744,6 +5744,8 @@ export const TOOLS = {
            where exists(select 1 from client cl where cl.id=a.client_id and cl.party_id=$1)
               or exists(select 1 from lead l where l.id=a.lead_id and l.party_id=$1)
               or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=$1)
+              or exists(select 1 from deal d join client cl on cl.id=d.client_id
+                        where d.id=a.deal_id and cl.party_id=$1)
          union all select 'deal_participant', count(*)::int from deal_participant where party_id=$1
          union all select 'record_flag', count(*)::int from record_flag where subject_type='party' and subject_id=$1
          union all select 'child_party', count(*)::int from party where org_id=$1`, [merg.partyId]);
