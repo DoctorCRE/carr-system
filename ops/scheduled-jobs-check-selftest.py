@@ -365,8 +365,6 @@ class ReportTests(unittest.TestCase):
         class Effects:
             def report(self, finding):
                 return {}
-            def clear(self, finding, active):
-                pass
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             effects = Effects()
@@ -380,6 +378,34 @@ class ReportTests(unittest.TestCase):
             prior = watchdog.read_latest(root / config["paths"]["findings"])[row["key"]]
             self.assertIsNotNone(prior["cleared_at"])
 
+    def test_complete_scan_closes_the_drift_loop_and_retries_a_failed_closure(self):
+        import job_watchdog as watchdog
+        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
+        row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
+               "subject": "canonical", "reason": "behind", "next_action": "repair fleet-sync",
+               "owner": "orchestrator", "needs_joe": None}
+        class Effects:
+            closed, fail = [], True
+            def report(self, finding):
+                return {"loop_id": "fixture-loop"}
+            def clear(self, finding):
+                if self.fail:
+                    raise RuntimeError("record layer down")
+                self.closed.append(finding["loop_id"])
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            effects = Effects()
+            watchdog.reconcile(root, config, [row], effects, 1000)
+            watchdog.reconcile(root, config, [], effects, 1001)
+            findings = watchdog.read_latest(root / config["paths"]["findings"])
+            self.assertIsNone(findings[row["key"]]["cleared_at"])
+            self.assertEqual(findings["record_error:" + row["key"]]["kind"], "record_error")
+            effects.fail = False
+            watchdog.reconcile(root, config, [], effects, 1002)
+            self.assertEqual(effects.closed, ["fixture-loop"])
+            findings = watchdog.read_latest(root / config["paths"]["findings"])
+            self.assertIsNotNone(findings[row["key"]]["cleared_at"])
+
     def test_recovery_closes_versioned_loop_and_recurrence_gets_a_new_episode(self):
         import job_watchdog as watchdog
         config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
@@ -392,12 +418,10 @@ class ReportTests(unittest.TestCase):
                      json.dumps({"ok": True, "loop_id": "fixture-loop-two"})]
         with tempfile.TemporaryDirectory() as raw:
             effects = watchdog.Effects(Path(raw), config)
-            with patch.object(effects, "show_finding", return_value={}), \
-                 patch.object(watchdog, "board_task"), \
-                 patch.object(watchdog, "command", side_effect=responses) as calls:
+            with patch.object(watchdog, "command", side_effect=responses) as calls:
                 receipt = effects.report(row)
                 self.assertEqual(receipt["loop_id"], "fixture-loop")
-                effects.clear({**row, **receipt}, [])
+                effects.clear({**row, **receipt})
                 payload = json.loads(calls.call_args_list[-1].args[0][-1])
                 self.assertEqual(payload["base_version"], 4)
                 self.assertEqual(payload["resolution"], "done")
