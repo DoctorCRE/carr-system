@@ -141,6 +141,15 @@ class DeliveryTests(unittest.TestCase):
         row['rules'][0]['statement']='Forged text'
         self.assertFalse(validate_lookup_receipt(row,repo=REPO))
 
+    def test_codex_response_item_user_message_is_the_task(self):
+        # Codex 0.159 rollouts carry user turns only as response_item messages.
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'rollout.jsonl'
+            msg=lambda role, text: json.dumps({'type':'response_item','payload':{'type':'message','role':role,
+                'content':[{'type':'input_text','text':text}]}})
+            path.write_text('\n'.join([msg('developer','skills'), msg('user','Desk task'), msg('developer','hook context')])+'\n')
+            self.assertEqual(hook.task_text({'transcript_path':str(path)}),'Desk task')
+
     def test_task_changes_and_child_transcripts_are_read_without_truncation(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'child.jsonl'
