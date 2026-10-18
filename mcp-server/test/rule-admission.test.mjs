@@ -126,8 +126,10 @@ test("approve-rule is one human authority act, not separate admission and activa
   // 2026-08-27) — see the admit-rule test above for the same retirement.
   assert.equal(tool.humanOnly, undefined);
   assert.equal(tool.authorityOnly, true);
+  // 0904: a taught gate rule derives policy_kind and control_keys from its
+  // teach record, so only the act itself is required.
   assert.deepEqual(new Set(tool.inputSchema.required), new Set([
-    "idempotency_key", "rule_id", "policy_kind", "control_keys", "reason",
+    "idempotency_key", "rule_id", "reason",
   ]));
   assert.deepEqual(tool.inputSchema.properties.policy_kind.enum,
     ["machine_enforceable", "human_only"]);

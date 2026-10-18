@@ -6354,19 +6354,19 @@ export const TOOLS = {
 
   "approve-rule": {
     write: true, authorityOnly: true,
-    description: "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself). The rule-approval worklist (./run.sh rule-approvals --apply) calls it on Joe's authority database connection only after ops/rule-admission-audit.py --preflight --rule-id reads the rule ready; Joe's recorded quote and ruling are the authority, not a live tap. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
+    description: "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself). The rule-approval worklist (./run.sh rule-approvals --apply) calls it on Joe's authority database connection only after ops/rule-admission-audit.py --preflight --rule-id reads the rule ready; Joe's recorded quote and ruling are the authority, not a live tap. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. A taught gate rule needs no separate admit-rule: when it has no admission, approval derives one from its teach record (machine_enforceable, its carrying_control, control-layer delivery), so policy_kind and control_keys may be omitted. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Full UUID or the short id printed by standing-context." },
       policy_kind: { type: "string", enum: ["machine_enforceable","human_only"] },
       control_keys: { type: "array", items: { type: "string" }, description: "Compiler-selected registered controls. Unknown or unverified controls refuse approval; callers cannot supply implementation or test evidence." },
       reason: { type: "string" },
-    }, required: ["idempotency_key","rule_id","policy_kind","control_keys","reason"] },
+    }, required: ["idempotency_key","rule_id","reason"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "approve-rule", args, async () => {
       args.rule_id = await resolveRuleId(c, args.rule_id);
       const approved = await c.query(
         "select ops.approve_rule($1,$2,$3,$4,$5) as result",
-        [args.rule_id,args.policy_kind,args.control_keys,args.idempotency_key,args.reason]);
+        [args.rule_id,args.policy_kind ?? null,args.control_keys ?? null,args.idempotency_key,args.reason]);
       const result = approved.rows[0]?.result;
       if (!result || result.policy_status !== "active")
         throw new ToolError({ error: "rule_approval_failed", rule_id: args.rule_id });
