@@ -76,6 +76,8 @@ import sys
 from datetime import datetime, timezone
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO)
+from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
 WORKFLOW = "backup-nightly.yml"
 RPO_HOURS = 24  # Joe's accepted objective, 2026-08-13.
 ARTIFACTS_PER_PAGE = 100
@@ -164,25 +166,10 @@ def _repository(repo: str) -> str:
 
 
 def _gh_api(path: str, repo: str, query: dict[str, object] | None = None) -> object:
-    command = ["gh", "api", path]
-    if query:
-        command.extend(["--method", "GET"])
-        for key, value in query.items():
-            command.extend(["-f", f"{key}={value}"])
     try:
-        result = subprocess.run(
-            command, cwd=repo, capture_output=True, text=True,
-            timeout=30, check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        raise CloudUnknown(f"could not reach the workflow API: {type(exc).__name__}") from exc
-    if result.returncode:
-        detail = (result.stderr or result.stdout or "").strip().splitlines()
-        raise CloudUnknown(detail[-1] if detail else f"gh exited {result.returncode}")
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise CloudUnknown("gh returned output that is not JSON") from exc
+        return GitHubReader(cwd=repo, timeout=30).api(path, fields=query)
+    except GitHubUnreadable as exc:
+        raise CloudUnknown(str(exc)) from exc
 
 
 def _array(response: object, key: str) -> list[dict]:

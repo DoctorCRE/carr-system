@@ -4,6 +4,16 @@ import { createHash } from "node:crypto";
 export const LEAD_AUTOMATION_CONTRACT = "lead-automation.v1";
 const bodyDigest = body => createHash("sha256").update(body).digest("hex");
 const ACTIVE = ["new", "qualified", "outreach_active", "engaged"];
+const ARCHIVABLE = [...ACTIVE, "nurture_drip", "opportunity"];
+const ARCHIVE_REASONS = { retired: "Retired", sold_to_platform: "Practice sold to a platform", another_broker: "Signed with another broker" };
+export function moveReason(activity, to) {
+  const m = metadata(activity);
+  const date = new Date(activity.occurred_at).toISOString().slice(0, 10);
+  const fact = to === "archived" ? ARCHIVE_REASONS[m.archive_reason] :
+    activity.kind === "email_in" ? "Reply received" : activity.kind === "email_out" ? "Approved first contact sent" :
+    activity.kind === "tour" ? "Tour held" : activity.kind === "call" ? "Call held" : "Meeting held";
+  return `${fact} ${date}`;
+}
 const MAIL = new Set(["mail_ingest", "local_mail"]);
 const CALENDAR = new Set(["calendar", "calendar_ingest"]);
 
@@ -35,11 +45,11 @@ export function planLeadMoves(leads, activities, drafts, now) {
   const clock = new Date(now).getTime();
   if (!Number.isFinite(clock)) throw new TypeError("invalid_clock");
   return leads.flatMap(lead => {
-    if (lead.suppressed || lead.party_merged || lead.party_suppressed || !ACTIVE.includes(lead.stage)) return [];
+    if (lead.suppressed || lead.party_merged || lead.party_suppressed || !ARCHIVABLE.includes(lead.stage)) return [];
     const evidence = activities.filter(a => a.lead_id === lead.id &&
       Number.isFinite(new Date(a.occurred_at).getTime()) && new Date(a.occurred_at).getTime() <= clock &&
       new Date(a.occurred_at).getTime() >= new Date(lead.created_at).getTime())
-      .sort((a, b) => new Date(a.occurred_at) - new Date(b.occurred_at) || a.id.localeCompare(b.id));
+      .sort((a, b) => Number(metadata(b).lead_stage_signal==="archived")-Number(metadata(a).lead_stage_signal==="archived") || new Date(a.occurred_at) - new Date(b.occurred_at) || a.id.localeCompare(b.id));
     let proposal = null;
     for (const a of evidence) {
       const m = metadata(a);
@@ -50,7 +60,10 @@ export function planLeadMoves(leads, activities, drafts, now) {
         m.attended === true && typeof m.ended_at === "string" && Number.isFinite(new Date(m.ended_at).getTime()) && new Date(m.ended_at).getTime() >= new Date(a.occurred_at).getTime() && new Date(m.ended_at).getTime() <= clock;
       const reply = mail && a.kind === "email_in" && m.automated === false;
       let to = null, strong = false;
-      if (lead.stage === "new" && (reply || meeting)) {
+      if (m.lead_stage_signal === "archived") {
+        if (!Object.hasOwn(ARCHIVE_REASONS,m.archive_reason) || !(reply || meeting)) continue;
+        to = "archived"; // Evidence can propose a permanent exit; only a partner applies it.
+      } else if (lead.stage === "new" && (reply || meeting)) {
         to = "qualified";
         strong = exact && lead.event_confidence === "high" && Number.isFinite(Date.parse(lead.est_lease_event || ""));
       } else if (lead.stage === "qualified" && mail && a.kind === "email_out") {
@@ -73,10 +86,10 @@ export function planLeadMoves(leads, activities, drafts, now) {
       }
       if (to) {
         const move = { lead_id: lead.id, party_id: lead.party_id, from_stage: lead.stage, to_stage: to,
-        base_version: lead.version, activity_id: a.id,
+        base_version: lead.version, activity_id: a.id, reason: moveReason(a, to),
         evidence_ref: m.evidence_ref || `activity:${a.id}`, strength: strong ? "strong" : "weak",
         status: strong ? "applied" : "proposed" };
-        if (strong) return [move];
+        if (to === "archived" || strong) return [move];
         proposal ??= move;
       }
     }
@@ -94,11 +107,11 @@ const LEADS_SQL = `select l.*, (p.merged_into is not null or p.deleted_at is not
 const ACTIVITIES_SQL = `select a.* from activity a join lead l on l.id=a.lead_id
   where a.source in ('mail_ingest','local_mail','calendar','calendar_ingest')
     and not exists(select 1 from lead_stage_move m where m.lead_id=l.id
-      and m.from_stage=l.stage and m.activity_id=a.id and m.status='applied')
+      and m.from_stage=l.stage and m.activity_id=a.id and m.status in ('applied','undone'))
   order by a.occurred_at,a.id`;
 const DRAFTS_SQL = `select * from lead_contact_draft order by created_at,id`;
 
-export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
+export function leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }) {
   const fail = error => { throw new ToolError({ error }); };
   const schema = properties => ({ type: "object", additionalProperties: false, properties });
   async function snapshot(c, lock = false) {
@@ -116,14 +129,14 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
     for (const move of planLeadMoves(s.leads, s.activities, s.drafts, s.now)) {
       await c.query("savepoint lead_stage_effect");
       const row = (await c.query(`insert into lead_stage_move
-        (lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by)
-        values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (lead_id,from_stage,to_stage,activity_id) do update
-        set strength=excluded.strength
+        (lead_id,from_stage,to_stage,activity_id,evidence_ref,strength,status,created_by,reason)
+        values ($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict (lead_id,from_stage,to_stage,activity_id) do update
+        set strength=excluded.strength,reason=excluded.reason
         where lead_stage_move.status='proposed' returning id`,
-      [move.lead_id, move.from_stage, move.to_stage, move.activity_id, move.evidence_ref, move.strength, "proposed", actor.id])).rows[0];
+      [move.lead_id, move.from_stage, move.to_stage, move.activity_id, move.evidence_ref, move.strength, "proposed", actor.id, move.reason])).rows[0];
       if (!row) { await c.query("release savepoint lead_stage_effect"); continue; }
       if (move.status === "proposed") {
-        moves.push(move);
+        moves.push({ ...move, move_id: row.id });
         await c.query("release savepoint lead_stage_effect");
         continue;
       }
@@ -136,8 +149,8 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
       }
       await c.query("update lead_stage_move set status='applied',strength='strong' where id=$1", [row.id]);
       await writeEvent(c, actor, "advance-leads", "lead", move.lead_id,
-        { field: "stage", old: { stage: move.from_stage }, new: { stage: move.to_stage, evidence_ref: move.evidence_ref, activity_id: move.activity_id, move_id: row.id }, cause: "automation_job" });
-      moves.push(move);
+        { recorded_at_after_lock: true, field: "stage", old: { stage: move.from_stage }, new: { stage: move.to_stage, evidence_ref: move.evidence_ref, activity_id: move.activity_id, move_id: row.id, reason: move.reason }, cause: "automation_job" });
+      moves.push({ ...move, move_id: row.id });
       await c.query("release savepoint lead_stage_effect");
     }
     // Includes human-qualified rows and heals an interrupted draft preparation.
@@ -160,7 +173,8 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
         schedule,timezone,actor.id]);
       draftsPrepared += prepared.rowCount;
     }
-    return { ok: true, contract: LEAD_AUTOMATION_CONTRACT, moves, drafts_prepared: draftsPrepared, sent: false };
+    const invoice_closes = await invoices.apply(c, actor, args);
+    return { ok: true, contract: LEAD_AUTOMATION_CONTRACT, moves, invoice_closes, drafts_prepared: draftsPrepared, sent: false };
   }
   return {
     "record-lead-contact": {
@@ -170,9 +184,10 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
         occurred_at:{type:"string",format:"date-time"},ended_at:{type:"string",format:"date-time"},
         attended:{type:"boolean"},automated:{type:"boolean"},first_contact_draft_id:{type:"string",format:"uuid"},
         draft_body_sha256:{type:"string",pattern:"^[0-9a-f]{64}$"},
-        follow_up_after:{type:"string",format:"date"},lead_stage_signal:{type:"string",enum:["nurture_drip","opportunity"]} }),
+        follow_up_after:{type:"string",format:"date"},lead_stage_signal:{type:"string",enum:["nurture_drip","opportunity","archived"]},archive_reason:{type:"string",enum:Object.keys(ARCHIVE_REASONS)} }),
         required:["idempotency_key","lead","native_ref","counterparty_address","kind","occurred_at"] },
       handler:(c,actor,args) => withEnvelope(c,actor,"record-lead-contact",args,async () => {
+        if ((args.lead_stage_signal === "archived") !== !!args.archive_reason) fail("archive_reason_required");
         const when = new Date(args.occurred_at).getTime();
         const now = new Date((await c.query("select now() as now")).rows[0].now).getTime();
         if (!Number.isFinite(when) || when>now || !args.native_ref?.trim() || args.native_ref.length>500) fail("invalid_contact_evidence");
@@ -189,7 +204,7 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
         const match=address===known ? "exact" : "unconfirmed";
         const detail={match,party_id:l.party_id,evidence_ref:args.native_ref,
           automated:args.automated ?? true,attended:args.attended ?? false,ended_at:args.ended_at,
-          first_contact_draft_id:args.first_contact_draft_id,draft_body_sha256:args.draft_body_sha256,lead_stage_signal:args.lead_stage_signal,follow_up_after:args.follow_up_after};
+          first_contact_draft_id:args.first_contact_draft_id,draft_body_sha256:args.draft_body_sha256,lead_stage_signal:args.lead_stage_signal,follow_up_after:args.follow_up_after,archive_reason:args.archive_reason};
         const a=(await c.query(`insert into activity
           (occurred_at,actor_id,kind,summary,detail,owed,lead_id,source)
           values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
@@ -202,7 +217,7 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
       write: false, description: "Dry run: list evidence-backed lead moves and weak proposals without changing business records or preparing drafts.",
       inputSchema: schema({}), handler: async c => {
         const s = await snapshot(c);
-        return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now) };
+        return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await invoices.preview(c) };
       },
     },
     "advance-leads": {
@@ -212,7 +227,7 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
         nextMorning(new Date(),args.time_zone || "America/Chicago"); // Validate before writing.
         if (args.dry_run) {
           const s = await snapshot(c);
-          return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), sent: false };
+          return { contract: LEAD_AUTOMATION_CONTRACT, dry_run: true, moves: planLeadMoves(s.leads,s.activities,s.drafts,s.now), invoice_closes: await invoices.preview(c), sent: false };
         }
         return withEnvelope(c,actor,"advance-leads",args,() => apply(c,actor,args));
       },
@@ -252,8 +267,41 @@ export function leadAutomationTools({ withEnvelope, writeEvent, ToolError }) {
         if (!m || m.version !== args.base_version || m.stage !== m.from_stage) fail("stale_lead_proposal");
         await c.query("update lead set stage=$1,updated_by=$2 where id=$3",[m.to_stage,actor.id,m.lead_id]);
         await c.query("update lead_stage_move set status='applied',approved_by=$2,approved_at=now() where id=$1",[m.id,actor.id]);
-        await writeEvent(c,actor,"approve-lead-move","lead",m.lead_id,{ field: "stage",old: {stage:m.from_stage},new: { stage:m.to_stage,evidence_ref:m.evidence_ref,activity_id:m.activity_id },cause:"human_stated" });
+        await writeEvent(c,actor,"approve-lead-move","lead",m.lead_id,{ recorded_at_after_lock: true, field: "stage",old: {stage:m.from_stage},new: { stage:m.to_stage,evidence_ref:m.evidence_ref,activity_id:m.activity_id,move_id:m.id,reason:m.reason },cause:"human_stated" });
         return { ok:true,stage:m.to_stage,evidence_ref:m.evidence_ref };
+      }),
+    },
+    "undo-lead-move": {
+      write: true, humanOnly: true, description: "Undo the latest applied lead stage move. Restore its prior stage and record who undid it; refuse newer stage work or a stale version.",
+      inputSchema: { ...schema({idempotency_key:{type:"string"},move_id:{type:"string",format:"uuid"},base_version:{type:"integer"}}), required:["idempotency_key","move_id","base_version"] },
+      handler:(c,actor,args) => withEnvelope(c,actor,"undo-lead-move",args,async()=>{
+        if (!actor.human) fail("human_approval_required");
+        const m=(await c.query(`select m.*,l.stage,l.version from lead_stage_move m join lead l on l.id=m.lead_id
+          where m.id=$1 for update of l,m`,[args.move_id])).rows[0];
+        if (!m || m.status!=="applied" || m.stage!==m.to_stage || m.version!==args.base_version) fail("stale_lead_undo");
+        const latest=(await c.query(`select id,new_value from event where subject_type='lead' and subject_id=$1 and field='stage'
+          order by recorded_at desc,id desc limit 1`,[m.lead_id])).rows[0];
+        let associated=latest?.new_value?.move_id===m.id;
+        if(latest && !Object.hasOwn(latest.new_value||{},"move_id")) {
+          // Delivered predecessor approvals had no move_id. Authenticate the
+          // latest event against the unique persisted approval, without changing
+          // history or accepting a later same-stage edit as that approval.
+          associated=(await c.query(`select count(*)=1 and bool_and(m.id=$2) as associated
+            from event e join lead_stage_move m on m.lead_id=e.subject_id
+            join actor a on a.id=e.actor_id and a.kind='human'
+            where e.id=$1 and e.verb='approve-lead-move' and e.cause='human_stated'
+              and m.status='applied' and m.approved_by=e.actor_id
+              and m.approved_at=e.occurred_at and e.recorded_at>=m.approved_at
+              and e.old_value->>'stage'=m.from_stage and e.new_value->>'stage'=m.to_stage
+              and e.new_value->>'activity_id'=m.activity_id::text
+              and e.new_value->>'evidence_ref'=m.evidence_ref`,[latest.id,m.id])).rows[0].associated;
+        }
+        if(!associated) fail("newer_stage_change_exists");
+        const changed=await c.query("update lead set stage=$1,updated_by=$2 where id=$3 returning id",[m.from_stage,actor.id,m.lead_id]);
+        if (changed.rowCount!==1) fail("lead_undo_not_applied");
+        await c.query("update lead_stage_move set status='undone',undone_at=now(),undone_by=$2 where id=$1",[m.id,actor.id]);
+        await writeEvent(c,actor,"undo-lead-move","lead",m.lead_id,{recorded_at_after_lock:true,field:"stage",old:{stage:m.to_stage},new:{stage:m.from_stage,undone_move_id:m.id,undone_by:actor.id,reason:`Undid: ${m.reason}`,evidence_ref:m.evidence_ref},cause:"human_correction"});
+        return {ok:true,stage:m.from_stage,undone_move_id:m.id,undone_by:actor.id};
       }),
     },
     "last-new-lead-search": {

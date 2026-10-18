@@ -18,3 +18,15 @@ test("the Chrome shim runs alone, and every other Node suite still runs exactly 
 test("a missing browser shim fails collection instead of silently dropping browser coverage", () => {
   assert.throws(() => suiteBatches(["a.test.mjs"]), /browser shim/);
 });
+
+test("private PostgreSQL clusters run alone without dropping or duplicating suites", () => {
+  const postgres = ["a02-rule-enforcement-postgres.test.mjs", "confirm-merge-schema.test.mjs",
+    "journey-one-clock-input-store.v5.test.mjs", "journey-one-clock-store.v5.test.mjs",
+    "lease-radar-postgres.test.mjs", "local-deals-store.test.mjs", "whats-new-store.test.mjs",
+    "self-closing-records-sql.test.mjs"];
+  const files = ["workspace-command-center-browser.test.mjs", "chrome-launch.test.mjs",
+    "ordinary.test.mjs", ...postgres];
+  const batches = suiteBatches(files);
+  for (const file of postgres) assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
+  assert.deepEqual(batches.flat().sort(), files.sort());
+});

@@ -141,86 +141,88 @@ def already_said(key, session):
     return False
 
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.hook_runtime import decision, run
+
+
+def _decision_error(exc):
+    dlog(f"ALLOW(internal-error) {exc}")
+    return 0
+
+
+@decision(on_error=_decision_error)
+def decide(payload):
+    ti = payload.get("tool_input") or payload.get("toolInput") or {}
+    cmd = ti.get("command") if isinstance(ti, dict) else None
+    if not isinstance(cmd, str) or not cmd.strip():
+        sys.exit(0)
+    if IS_EXPORT_RUN.search(cmd):
+        sys.exit(0)
+
+    names = READS_DRAFT.findall(cmd)
+    if not names:
+        sys.exit(0)
+
+    root = os.environ.get("CARR_DRAFT_EXPORT_ROOT") or REPO
+    drafts = os.path.join(root, "out", "exports")
+    if not os.path.isdir(drafts):
+        dlog("ALLOW(no-draft-dir)")
+        sys.exit(0)
+
+    now = time.time()
+    lines, reported = [], []
+    for name in names:
+        path = os.path.join(drafts, name)
+        if not os.path.exists(path):
+            continue
+        key = f"{payload.get('session_id')}::{name}"
+        if already_said(key, payload.get("session_id")):
+            continue
+        draft_age = age_phrase(now - os.path.getmtime(path))
+        row = f"  · out/exports/{name} — DRAFT, {draft_age}"
+        rel = LIVE_RENDER.get(name)
+        vroot = vault_root()
+        if rel and vroot:
+            live = os.path.join(vroot, rel)
+            if os.path.exists(live):
+                row += (f"\n      live render: {rel} — "
+                        f"{age_phrase(now - os.path.getmtime(live))}")
+        verb = STORE_VERB.get(name)
+        if verb:
+            row += f"\n      authoritative: {verb}"
+        lines.append(row)
+        reported.append(name)
+
+    if not lines:
+        sys.exit(0)
+
+    dlog(f"CONTEXT files={','.join(reported)}")
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "additionalContext": (
+                "out/exports/ IS A DRAFT DIRECTORY, NOT THE RECORD. "
+                "`run.sh export` writes there by default and only "
+                "CARR_EXPORT_LIVE=1 reaches the vault, so these files go "
+                "arbitrarily stale and nothing announces it — the directory "
+                "is gitignored, so no diff and no review ever shows the "
+                "drift.\n\n" + "\n".join(lines) +
+                "\n\nOn 2026-08-15 a session grepped a 32-hour-old draft of "
+                "decision-history, missed a ruling made four hours earlier, "
+                "and told Joe a whole Program 4 bullet had never been "
+                "scoped (defect 280b1b6c). Reading a draft is fine when you "
+                "mean to; deciding anything from one is the trap. If the "
+                "answer matters, ask the store."
+            ),
+        }
+    }))
+    sys.exit(0)
+
+
 def main():
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        sys.exit(0)
-
-    try:
-        ti = payload.get("tool_input") or payload.get("toolInput") or {}
-        cmd = ti.get("command") if isinstance(ti, dict) else None
-        if not isinstance(cmd, str) or not cmd.strip():
-            sys.exit(0)
-        if IS_EXPORT_RUN.search(cmd):
-            sys.exit(0)
-
-        names = READS_DRAFT.findall(cmd)
-        if not names:
-            sys.exit(0)
-
-        root = os.environ.get("CARR_DRAFT_EXPORT_ROOT") or REPO
-        drafts = os.path.join(root, "out", "exports")
-        if not os.path.isdir(drafts):
-            dlog("ALLOW(no-draft-dir)")
-            sys.exit(0)
-
-        now = time.time()
-        lines, reported = [], []
-        for name in names:
-            path = os.path.join(drafts, name)
-            if not os.path.exists(path):
-                continue
-            key = f"{payload.get('session_id')}::{name}"
-            if already_said(key, payload.get("session_id")):
-                continue
-            draft_age = age_phrase(now - os.path.getmtime(path))
-            row = f"  · out/exports/{name} — DRAFT, {draft_age}"
-            rel = LIVE_RENDER.get(name)
-            vroot = vault_root()
-            if rel and vroot:
-                live = os.path.join(vroot, rel)
-                if os.path.exists(live):
-                    row += (f"\n      live render: {rel} — "
-                            f"{age_phrase(now - os.path.getmtime(live))}")
-            verb = STORE_VERB.get(name)
-            if verb:
-                row += f"\n      authoritative: {verb}"
-            lines.append(row)
-            reported.append(name)
-
-        if not lines:
-            sys.exit(0)
-
-        dlog(f"CONTEXT files={','.join(reported)}")
-        print(json.dumps({
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "additionalContext": (
-                    "out/exports/ IS A DRAFT DIRECTORY, NOT THE RECORD. "
-                    "`run.sh export` writes there by default and only "
-                    "CARR_EXPORT_LIVE=1 reaches the vault, so these files go "
-                    "arbitrarily stale and nothing announces it — the directory "
-                    "is gitignored, so no diff and no review ever shows the "
-                    "drift.\n\n" + "\n".join(lines) +
-                    "\n\nOn 2026-08-15 a session grepped a 32-hour-old draft of "
-                    "decision-history, missed a ruling made four hours earlier, "
-                    "and told Joe a whole Program 4 bullet had never been "
-                    "scoped (defect 280b1b6c). Reading a draft is fine when you "
-                    "mean to; deciding anything from one is the trap. If the "
-                    "answer matters, ask the store."
-                ),
-            }
-        }))
-        sys.exit(0)
-
-    except SystemExit:
-        raise
-    except Exception as exc:
-        dlog(f"ALLOW(internal-error) {exc}")
-        sys.exit(0)
+    sys.exit(run(decide))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

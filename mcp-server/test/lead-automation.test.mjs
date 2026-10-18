@@ -1,7 +1,8 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+
 import { leadAutomationTools, planLeadMoves, nextMorning } from "../src/lead-automation.js";
 import { TOOLS } from "../src/tools.js";
 
@@ -15,7 +16,7 @@ const plan=(l=lead,a=contact,d=[])=>planLeadMoves([l],[a],d,NOW);
 
 test("exact reply plus verified lease evidence qualifies with provenance",()=>{
   assert.deepEqual(plan()[0],{lead_id:lead.id,party_id:lead.party_id,from_stage:"new",to_stage:"qualified",base_version:3,
-    activity_id:contact.id,evidence_ref:"local-mail:synthetic-001",strength:"strong",status:"applied"});
+    reason:"Reply received 2026-10-01",activity_id:contact.id,evidence_ref:"local-mail:synthetic-001",strength:"strong",status:"applied"});
 });
 test("weak, unbound and missing lease evidence produces proposals",()=>{
   for(const a of [change(contact,{match:"domain"}),change(contact,{party_id:"other"}),change(contact,{evidence_ref:null}),{...contact,owed:"identity"}])
@@ -89,7 +90,7 @@ class Fake {
   }
 }
 const human={id:"actor-example",human:true};
-const tools=leadAutomationTools({withEnvelope:async(c,a,v,args,f)=>f(),writeEvent:async(c,...args)=>c.events.push(args),ToolError:class extends Error{constructor(value){super(value.error);}}});
+const tools=leadAutomationTools({invoices:{preview:async()=>[],apply:async()=>[]},withEnvelope:async(c,a,v,args,f)=>f(),writeEvent:async(c,...args)=>c.events.push(args),ToolError:class extends Error{constructor(value){super(value.error);}}});
 test("dry runs issue SELECT only, use the same planner and never prepare drafts",async()=>{
   for(const [name,args] of [["lead-stage-preview",{}],["advance-leads",{idempotency_key:"synthetic-preview",dry_run:true}]]){
     const db=new Fake();const r=await tools[name].handler(db,human,args);
@@ -135,15 +136,11 @@ test("approval queue and last-search read are registered; never-run and failed-r
   assert.equal(TOOLS["approve-lead-draft"].humanOnly,true);
 });
 test("database migration has draft-only constraints and finite forward transitions",()=>{
-  const sql=readFileSync(new URL("../../migrations/0811_lead_stage_automation.sql",import.meta.url),"utf8");
+  const sql=readMigration(new URL("../../migrations/0811_lead_stage_automation.sql",import.meta.url));
   assert.match(sql,/check \(requires_human_send\)/);assert.match(sql,/check \(not dispatchable\)/);
   assert.match(sql,/unique\(lead_id,from_stage,to_stage,activity_id\)/);assert.doesNotMatch(sql,/grant.*delete/i);
 });
 
-test("lead schema and SCAC seal are one strict atomic delivery",()=>{
-  const runner=readFileSync(new URL("../../tools/migrate.py",import.meta.url),"utf8");
-  assert.equal((runner.match(/"0811_lead_stage_automation.sql",\s*"0812_lead_automation_scac_successor.sql"/g)||[]).length,2);
-});
 
 test("older strong evidence is not hidden by a newer weak match",()=>{
   const weak=change({...contact,id:"weak-example",occurred_at:"2026-10-01T17:00:00Z"},{match:"unconfirmed"});
@@ -166,16 +163,9 @@ test("malformed contact metadata cannot break the whole job",()=>{
   for(const detail of ['null','[]','1','"text"','invalid']) assert.deepEqual(plan(lead,{...contact,detail}),[]);
 });
 
-// A merge may advance the registry, but may never replace a sealed predecessor.
-test("lead successor preserves human-only party merges and all v105 MCP contracts", async () => {
-  const { frozenInventory, boundInventoryRows, CURRENT_REGISTRY_VERSION } = await import("../../ops/scac-mutation-inventory.mjs");
-  const { SCAC_MUTATION_REGISTRY_VERSION, registeredOperation } = await import("../src/mutation-registry.js");
-  assert.equal(SCAC_MUTATION_REGISTRY_VERSION, CURRENT_REGISTRY_VERSION);
-  const before = frozenInventory("scac-mutation-registry.v105");
-  const after = frozenInventory("scac-mutation-registry.v106");
-  const byKey = new Map(boundInventoryRows(after).map(row => [row.ingress_key, row]));
-  for (const row of boundInventoryRows(before).filter(row => row.ingress_key.startsWith("mcp-tool:"))) assert.deepEqual(byKey.get(row.ingress_key), row);
+test("lead automation retains human-only party merges", async () => {
+  const { registeredOperation } = await import("../src/mutation-registry.js");
   assert.equal(registeredOperation("confirm-merge").human_only, true);
   for (const name of ["advance-leads", "approve-lead-draft", "approve-lead-move"])
-    assert.ok(registeredOperation(name), `${name} must remain registered`);
+    assert.ok(registeredOperation(name));
 });

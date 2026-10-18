@@ -1,3 +1,4 @@
+import { readMigration, migrationNames as listMigrationNames } from "./migration-source.testhelper.mjs";
 // V5-F01 on REAL PostgreSQL: the migration, the two SQL fixtures, and the
 // registered verbs end to end.
 //
@@ -32,7 +33,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -327,11 +328,11 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
     const db = await copy("verbs");
 
     await t.test("re-applying the migration refuses rather than repairing", async () => {
-      const [file] = readdirSync(resolve(HERE, "../../migrations"))
+      const [file] = listMigrationNames()
         .filter(name => /^\d{4}_f01_record_source_authority\.sql$/.test(name));
       const client = await adminClient(pg, db);
       try {
-        await assert.rejects(client.query(readFileSync(resolve(HERE, "../../migrations", file), "utf8")),
+        await assert.rejects(client.query(readMigration(file)),
           error => /f01_already_installed/.test(error.message));
       } finally {
         await client.end();
@@ -339,9 +340,9 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
     });
 
     await t.test("the static reader/writer grant restatement is exactly what the loops granted", async () => {
-      const [file] = readdirSync(resolve(HERE, "../../migrations"))
+      const [file] = listMigrationNames()
         .filter(name => /^\d{4}_f01_record_source_authority\.sql$/.test(name));
-      const text = readFileSync(resolve(HERE, "../../migrations", file), "utf8");
+      const text = readMigration(file);
       const restated = text.split("\n")
         .filter(line => /^grant (execute on function|select on table) ops\.f01_\S.* to carr_(reader|writer);$/.test(line))
         .sort();
@@ -405,9 +406,9 @@ test("F01 on real PostgreSQL: migration, SQL fixtures and the registered verbs",
       // never saw. Tail 3 takes those grants back. Reproduce the production
       // moment on a copy: hand the logins direct grants the way the sources do,
       // run Tail 3 exactly as the migration spells it, and read the ACLs back.
-      const [file] = readdirSync(resolve(HERE, "../../migrations"))
+      const [file] = listMigrationNames()
         .filter(name => /^\d{4}_f01_record_source_authority\.sql$/.test(name));
-      const text = readFileSync(resolve(HERE, "../../migrations", file), "utf8");
+      const text = readMigration(file);
       const start = text.indexOf("DO $f01_authority_login_direct_grants$");
       const endMarker = "$f01_authority_login_direct_grants$;";
       const end = text.indexOf(endMarker, start + 1);

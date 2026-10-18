@@ -461,8 +461,8 @@ function checkRow(raw) {
 }
 
 const CHECK_ROWS = Object.freeze({
-  "main canary (gates, migration, types, freshness)": Object.freeze([checkRow({
-    name: "main canary (gates, migration, types, freshness)", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
+  "main canary": Object.freeze([checkRow({
+    name: "main canary", head_sha: FIXTURE_COMMIT_SHA, status: "completed",
     conclusion: "success", completed_at: T1, html_url: "https://github.test/run/1",
   })]),
   // A re-run: two completed runs, and the later one is what the merge gate acts on.

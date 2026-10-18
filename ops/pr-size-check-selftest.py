@@ -105,6 +105,17 @@ checks.append(("an ordinary source path is not excluded",
                check.is_excluded("ops/pr-size-check.py") is None
                and check.is_excluded("tools/outline.py") is None))
 
+report = check.assess([check.Change("lib/fix.py", 3, "M"),
+                       check.Change("tests/test_fix.py", 400, "A")], LIMIT_LINES, LIMIT_FILES)
+checks.append(("test evidence cannot inflate code size or code file count",
+               report.lines == 3 and report.files == 1 and not report.warn))
+report = check.assess([check.Change("ops/fix-selftest.py", 400, "A")], LIMIT_LINES, LIMIT_FILES)
+checks.append(("test-only evidence is reported separately",
+               report.lines == 0 and report.files == 0 and report.test_lines == 400 and report.test_files == 1))
+report = check.assess([check.Change("tests/moved.py", 400, "R", 95, "lib/code.py")], LIMIT_LINES, LIMIT_FILES)
+checks.append(("moving code into tests cannot hide a code change",
+               report.lines == 400 and report.files == 1))
+
 with tempfile.TemporaryDirectory(prefix="pr-size-check-") as tmp:
     repo = Path(tmp) / "repo"
     repo.mkdir()
@@ -127,6 +138,16 @@ with tempfile.TemporaryDirectory(prefix="pr-size-check-") as tmp:
         write(r, "lib/new.py", 5)
     rc, text = case(repo, "small", small)
     checks.append(("under both thresholds: silent, exit 0", rc == 0 and text == ""))
+
+    def hyphenated_evidence(r: Path) -> None:
+        write(r, "tools/progress_board.py", 3)
+        write(r, "tools/test-progress-board.py", 400)
+    rc, text = case(repo, "hyphenated-evidence", hyphenated_evidence)
+    checks.append(("hyphenated Python test evidence does not produce a size warning", rc == 0 and text == ""))
+    for name, path in (("suffix-near-miss", "tools/test-progress-board.py.bak"),
+                       ("directory-near-miss", "tools/test-progress-board/source.py")):
+        rc, text = case(repo, name, lambda r, path=path: write(r, path, LIMIT_LINES + 50))
+        checks.append((f"{name} counts as code and warns", rc == 0 and "hard to review in one piece" in text))
 
     def at_threshold(r: Path) -> None:
         per, extra = divmod(LIMIT_LINES, LIMIT_FILES)

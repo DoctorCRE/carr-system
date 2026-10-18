@@ -45,7 +45,7 @@
           "postgres_version": 18,
           "region_id": "aws-us-east-1",
           "compute_min_cu": 0.25,
-          "compute_max_cu": 8
+          "compute_max_cu": 2
         }
       },
       "worker": {"deployed": true, "name": "carr-mcp-staging", "config": "mcp-server/wrangler.toml [env.staging]"},

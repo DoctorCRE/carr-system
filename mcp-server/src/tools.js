@@ -1,5 +1,10 @@
+import { canonicalJson } from "./artifact-trust.js";
+import { safeInteger, integerFields } from "./safe-integer.js";
+import { invoiceTrackerTools } from "./invoice-tracker.js";
+import { isCalendarDate } from "./calendar-date.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
+import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
 // CARR MCP tool registry — Wave 1 verbs (tool-contracts-2026-07-30.md §2).
 // Every write runs the envelope: idempotency replay via tool_call, actor from
 // the verified token (never the payload), base_version conflicts ask and never
@@ -32,8 +37,10 @@ import { memoryTools } from "./memory.js";
 import { codexContinuityTools } from "./codex-continuity.js";
 import { claudeContinuityTools } from "./claude-continuity.js";
 import { incidentTools } from "./incident.js";
+import { defectResolutionTools } from "./defect-resolution.js";
 import { evidenceActivationTools } from "./evidence-activation.js";
 import { resourceObservationTools } from "./resource-observation.v5.js";
+import { invoiceAutomation } from "./invoice-automation.js";
 import { leadAutomationTools } from "./lead-automation.js";
 import { jevCallReceiptTools } from "./jev-call-receipt.js";
 import { workflowCutoverTools } from "./workflow-cutover.v5.js";
@@ -51,20 +58,6 @@ import { authenticatedIdentity, authorizationClassForActor, organizationTenantFo
          permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
-import { assertGateZeroReceipt, deriveGateZeroProducerSeat, gateZeroOracleSeatLane,
-         gateZeroOutcomeCandidateDigest, gateZeroOutcomeDigest,
-         GATE_ZERO_RECEIPT_SCHEMA } from "./gate-zero-outcome-store.v5.js";
-import { GATE_ZERO_WRITER_SECRET_NAME } from "./gate-zero-seat-connection.v5.js";
-import {
-  assertFoundationAssuranceOracleSeat,
-  foundationAssuranceOracleLane,
-} from "./foundation-assurance-minimum-registration.v5.js";
-// THE RECEIPT'S ONE SOURCE. The gate's producer seam is bound to Step A's
-// zero-argument producer, so this is how a receipt enters the write path: by
-// being produced, inside this call, from rows three ruled readers took from
-// three ruled stores. There is no other import that could supply one and no
-// argument that could carry one.
-import { emitGateZeroOutcome } from "./gate-zero-assurance.v5.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
 import { benchmarkAcceptanceStoreTools } from "./benchmark-acceptance-store.v5.js";
 import { modelRoleStoreTools } from "./model-role-store.v5.js";
@@ -78,8 +71,6 @@ import { salesforceReconciliationStoreTools } from
 // V5-RW02 safe stops: the server-side run-outcome ledger behind the
 // 5-consecutive-clean counter, and the humanOnly consent revocation.
 import { salesforceReadRunStoreTools } from "./salesforce-read-run-store-rw02.v5.js";
-import { foundationAssuranceMinimumTools } from
-  "./foundation-assurance-minimum-producer.v5.js";
 // V5-S01's live door: the settled global boundaries evaluated at the dispatch
 // seam below (shadow until Joe approves enforcement), and their read projection.
 import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } from
@@ -87,10 +78,12 @@ import { V5BoundaryDoorRefusal, globalBoundariesDoorTools, passBoundaryDoor } fr
 import { journeyOneClockDoorTools } from "./journey-one-clock-door.v5.js";
 import { governedCorrespondenceStoreTools } from "./governed-correspondence-store.v5.js";
 import { assuranceHealthStoreTools } from "./assurance-health-store.v5.js";
-import { completeSetReviewA03StoreTools } from "./independent-review-cycle-store.v5.js";
 import { ruleContextRuntimeTools } from "./rule-context-runtime.v5.js";
 import { systemWorkTools } from "./system-work-census.v5.js";
 import { BOARD_ANSWER_WRITE_VERBS, boardAnswerTools } from "./board-answers.js";
+import { RESEARCH_SITE_WRITE_VERBS, researchSiteTools } from "./research-sites.js";
+import { partyIdentityTools } from "./party-identity.js";
+import { readNeedsJoe } from "./needs-joe.js";
 import { scheduleBoardTools } from "./schedule-board.js";
 export { canExercisePartnerAuthority, partnerAuthoritySlugForActor };
 
@@ -337,17 +330,20 @@ async function withEnvelope(client, actor, verb, args, fn) {
     },
     args: { ...args, idempotency_key: undefined },
   });
-  // Shape and lead writes need same-key serialization before their replay read:
+  // Versioned writes need same-key serialization before their replay read:
   // otherwise two first calls can both see no tool_call row, and the loser
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move"].includes(verb) || verb === "teach" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "review-heavy-build-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "codex-record-event" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["record-lead-contact", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || (verb === "update-lead" && args.stage_review) || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
   if (prior.rows.length) {
     if (prior.rows[0].request_hash !== hash) throw new ToolError({ error: "key_reuse" });
-    return { replayed: true, ...prior.rows[0].response };          // A1: replay, no second write
+    const response = prior.rows[0].response;
+    if (verb === "add-industry-event" || verb === "update-industry-event")
+      return { replayed: true, ...response, event: industryEventRecord(response.event) };
+    return { replayed: true, ...response };                          // A1: replay, no second write
   }
   const result = await fn();                                        // inside the open transaction
   await client.query(
@@ -427,6 +423,28 @@ const INDUSTRY_EVENT_ATTENDANCE_INTENTS = ["considering", "plan_to_attend", "not
 const INDUSTRY_EVENT_STATUSES = ["planned", "attended", "skipped", "cancelled"];
 const PARTNER_SLUGS = ["joe", "dell"];
 
+const LEAD_SCORE_FIELDS = {
+  score: { type: ["integer", "null"], minimum: 0, maximum: 100 },
+  score_reason: { type: ["string", "null"] },
+  owner: { type: "string", enum: PARTNER_SLUGS },
+};
+
+function validateLeadScoreFields(fields) {
+  if (Object.hasOwn(fields, "score") && fields.score !== null &&
+      (!Number.isInteger(fields.score) || fields.score < 0 || fields.score > 100))
+    throw new ToolError({ error: "invalid_score", hint: "score must be an integer from 0 to 100, or null" });
+  if (Object.hasOwn(fields, "score_reason") && fields.score_reason !== null && typeof fields.score_reason !== "string")
+    throw new ToolError({ error: "invalid_score_reason", hint: "score_reason must be a string, or null" });
+  if (Object.hasOwn(fields, "owner") && !PARTNER_SLUGS.includes(fields.owner))
+    throw new ToolError({ error: "invalid_owner", valid: PARTNER_SLUGS });
+}
+
+async function resolveLeadOwner(client, slug) {
+  const owner = (await client.query("select id,slug,display_name from actor where slug=$1 and active", [slug])).rows[0];
+  if (!owner) throw new ToolError({ error: "actor_not_provisioned", slug });
+  return { owner: owner.slug, owner_id: owner.id, owner_label: owner.display_name };
+}
+
 function industryEventText(value, field, { optional = false, max = 1000 } = {}) {
   if ((value === undefined || value === null || value === "") && optional) return null;
   if (typeof value !== "string" || !value.trim() || value.trim().length > max)
@@ -491,6 +509,10 @@ function industryEventId(value) {
   if (typeof value !== "string" || !UUID_RE.test(value))
     throw new ToolError({ error: "industry_event_id_invalid" });
   return value;
+}
+
+function industryEventRecord(row) {
+  return integerFields(row, ["version"], "industry_event_version_invalid");
 }
 
 // [defect 18b12fda-b79c-43a1-86c4-51b9623e12fd, 2026-08-14] THE VIOLATION WAS OURS.
@@ -1036,6 +1058,29 @@ function fmtPhoneUS(v) {
   return `(${t.slice(0, 3)}) ${t.slice(3, 6)}-${t.slice(6)}`;
 }
 
+// The party a party-field write lands on: a P- ref, a role ref (V-/C-/L-/T-,
+// resolved to the PERSON under it) or a name. A merged party is a pointer, so
+// the write hops to its survivor; writing to a tombstone strands the fact.
+// Shared by update-party-contact and correct-party-identity.
+async function resolvePartyForWrite(c, ref) {
+  const s = await resolveSubject(c, ref);
+  if (s.type === "deal")
+    throw new ToolError({ error: "not_a_party", hint: "a deal has no party fields; pass the person or their role ref" });
+  let partyId;
+  if (s.type === "party") partyId = s.id;
+  else {
+    const r = await c.query(
+      "select party_id from v_ref_index where subject_type=$1 and subject_id=$2", [s.type, s.id]);
+    if (!r.rows.length || !r.rows[0].party_id)
+      throw new ToolError({ error: "no_party_under_ref", resolved: s });
+    partyId = r.rows[0].party_id;
+  }
+  const hop = await c.query("select merged_into from party where id=$1", [partyId]);
+  if (!hop.rows.length) throw new ToolError({ error: "not_found", table: "party", id: partyId });
+  const hopped = hop.rows[0].merged_into !== null;
+  return { partyId: hopped ? hop.rows[0].merged_into : partyId, hopped };
+}
+
 async function resolveSubject(client, ref) {
   // Accepts 'L-204', 'C-127', 'V-CPA-006', a deal name, or a party/practice name.
   //
@@ -1109,7 +1154,7 @@ async function resolveSubject(client, ref) {
   }
   // BARE PARTIES ARE A FALLBACK, NEVER A COMPETITOR (0056, 2026-08-02). Migration
   // 0056 put every party in v_ref_index, which is what finally makes an org like
-  // Henry Schein — 17 rows, no lead/client/vendor among them — resolvable at all.
+  // Example Organization 25 — 17 rows, no lead/client/vendor among them — resolvable at all.
   // But this is the WRITE path: folding parties into the query above would let a
   // bare party outrank the client or vendor a name resolves to today and quietly
   // move where writes land. So the role query runs first and unchanged, and this
@@ -1150,7 +1195,7 @@ async function resolveLoop(client, args, opts = {}) {
   if (args.loop_id) {
     const r = await client.query(
       `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-              li.close_outcome, lb.block_key as section
+              li.close_outcome, li.blocker_class, lb.block_key as section
          from loop_item li join loop_block lb on lb.id = li.block_id
         where li.id = $1`, [args.loop_id]);
     if (!r.rows.length) throw new ToolError({ error: "not_found", loop_id: args.loop_id });
@@ -1161,7 +1206,7 @@ async function resolveLoop(client, args, opts = {}) {
       hint: "pass loop_id, or number (plus kind when the number is shared across kinds)" });
   const r = await client.query(
     `select li.id, li.kind, li.number, li.status, li.marker, li.due_on,
-            li.close_outcome, lb.block_key as section, lb.rel_path
+            li.close_outcome, li.blocker_class, lb.block_key as section, lb.rel_path
        from loop_item li join loop_block lb on lb.id = li.block_id
       where li.number = $1 and (${anyStatus ? "true" : "li.status = 'open'"})
         and ($2::text is null or li.kind = $2)`, [args.number, args.kind || null]);
@@ -1230,7 +1275,7 @@ const WHO_PATH_CAP = 25;
 // [loop #132] How many RETIRED refs `find` lists per organisation group.
 //
 // A tombstone list is navigation, not an answer. 0059 consolidated 415 org rows
-// into 306 survivors plus 109 tombstones and one name alone (Henry Schein) carries
+// into 306 survivors plus 109 tombstones and one name alone (Example Organization 25) carries
 // sixteen of them; the useful facts are "sixteen exist" and "here is where to look
 // them up", not sixteen refs spending the whole payload. The COUNT is always exact
 // and never truncated — only the ref list is capped, and the row says so.
@@ -1945,6 +1990,31 @@ const RULE_ENFORCEMENT_FALLBACK_REFUSALS = Object.freeze(new Set([
   "rule_enforcement_fallback_receipts_append_only",
 ]));
 
+const RULE_SELECTION_FIELDS = [
+  "operation", "operations", "tool", "tools", "verb", "verbs",
+  "command", "command_pattern", "command_patterns", "bash_patterns",
+  "path", "path_pattern", "path_patterns", "path_globs",
+  "task", "tasks", "topic", "topics", "moment", "binding_moment", "applies_to",
+];
+const GENERIC_RULE_SELECTION = /^(?:\*|all|any|always|global|shared|personal|development|all (?:coding )?sessions|every session)$/i;
+
+export function hasUsableRuleScope(scope) {
+  if (!scope || typeof scope !== "object" || Array.isArray(scope)) return false;
+  const specific = value => typeof value === "string" && !!value.trim() &&
+    !GENERIC_RULE_SELECTION.test(value.trim());
+  return RULE_SELECTION_FIELDS.some(key => specific(scope[key]) ||
+    (Array.isArray(scope[key]) && scope[key].some(specific)));
+}
+
+export function validateRuleScope(scope, { requireUsable = false } = {}) {
+  if (scope !== undefined && (scope === null || typeof scope !== "object" || Array.isArray(scope)))
+    throw new ToolError({ error: "invalid_object", field: "scope",
+      hint: "scope must be a JSON object, e.g. {} or {\"section\":\"...\"}; omit scope to use the existing default" });
+  if (requireUsable && !hasUsableRuleScope(scope))
+    throw new ToolError({ error: "rule_scope_required", field: "scope",
+      hint: "scope must name an operation, tool, verb, command/path pattern, specific task/topic, or binding moment" });
+}
+
 async function resolveRuleId(c, value, field = "rule_id") {
   const raw = String(value || "").trim();
   if (!raw) throw new ToolError({ error: "rule_id_required", field });
@@ -2072,6 +2142,77 @@ const LOOP_KINDS = Object.freeze(["open_loop", "team_loop", "action_required", "
 const VAGUE_BLOCKER_RE =
   /\b(?:later|someday|some day|eventually|when (?:there(?:'s| is) )?(?:more )?time|when time (?:permits|allows)|time permitting|revisit|circle back|down the (?:road|line)|at some point|in (?:the )?future|future session|next session|tbd|to be determined|n\/?a|low priority|nice to have|opportunistically|as time allows|no rush|whenever)\b/i;
 
+// ── THE RESIDUE GATE (Joe 2026-10-12, decision cbe91287) ───────────────────
+// On 2026-10-12 the governance queue counted 150 loops labelled as waiting on
+// Joe, median age 53 days. 75 were filed human_only and 53 ruling, yet most
+// were internal engineering steps any session may take: nothing at filing time
+// asked what exactly only Joe can do, so the needs-Joe view had to exclude
+// them after the fact. Joe's ruling: only an act a provider or the OS reserves
+// to the account holder may wait on him. A write that claims a class which
+// waits on a person therefore names that act from this closed list, plus the
+// provider or host that reserves it.
+//
+// Internal work is system_decides: the session does it now, or files it under
+// a class that does not wait on Joe (other_lane, external_event, counterparty),
+// which the needs-Joe view already excludes. Rows filed before this gate are
+// not rewritten; the requirement binds when a write claims the class.
+const RESIDUE_KINDS = Object.freeze([
+  "provider_login",  // a login with two-factor that the provider reserves to the account holder
+  "os_password",     // an operating-system password or biometric prompt
+  "physical_act",    // a signature, a site visit, a device in hand
+  "money_movement",  // money is spent, paid or committed
+  "external_send",   // something leaves the house to a client, counterparty or the public
+  "joe_only_fact",   // a fact only Joe holds: what was said on a call, what he wants
+]);
+
+// The blocker classes that wait on a person. `credential` is not a stored
+// class: a credential block is filed as capability with residue_kind
+// provider_login or os_password.
+const RESIDUE_CLASSES = Object.freeze(["human_only", "ruling", "capability"]);
+
+const RESIDUE_FALLBACK_HINT =
+  "if no provider or OS reserves this act to the account holder, it is internal work and " +
+  "the system decides it (system_decides): do it now, or file it under a class that does " +
+  "not wait on Joe (other_lane, external_event, counterparty).";
+
+// Returns the residue a write must store for `blocker`, or null for a class
+// that carries none. Refuses a claimed class without a valid residue, and a
+// residue on a class that cannot carry one (stored-and-inert is a lie).
+function blockerResidue(blocker, args) {
+  const given = args.residue_kind !== undefined || args.residue_host !== undefined;
+  if (!RESIDUE_CLASSES.includes(blocker)) {
+    if (given)
+      throw new ToolError({ error: "residue_not_carried_by_class", blocker: blocker ?? null,
+        residue_classes: RESIDUE_CLASSES,
+        hint: `a residue names what still waits on Joe, so only ${RESIDUE_CLASSES.join(", ")} ` +
+              "carry one. Drop residue_kind and residue_host, or name the class it belongs to." });
+    return null;
+  }
+  if (args.residue_kind === undefined || args.residue_kind === null)
+    throw new ToolError({ error: "residue_required", blocker, residue_kinds: RESIDUE_KINDS,
+      hint: `blocker '${blocker}' says this waits on a person. Name the act a provider or the ` +
+            "OS reserves to the account holder in residue_kind, and who reserves it in " +
+            `residue_host. Otherwise ${RESIDUE_FALLBACK_HINT}` });
+  if (!RESIDUE_KINDS.includes(args.residue_kind))
+    throw new ToolError({ error: "unknown_residue_kind", got: args.residue_kind,
+      residue_kinds: RESIDUE_KINDS,
+      hint: `the list is closed. If none of these fits, ${RESIDUE_FALLBACK_HINT}` });
+  const host = typeof args.residue_host === "string" ? args.residue_host.trim() : "";
+  if (host.length < 2)
+    throw new ToolError({ error: "residue_host_required", got: host || null,
+      residue_kind: args.residue_kind,
+      hint: "name the provider or host that reserves the act: 'github.com', 'macOS on Joe's " +
+            "MacBook', 'Chase', 'Joe's call with Sanders'. A residue nobody can locate cannot be done." });
+  return { kind: args.residue_kind, host };
+}
+
+const RESIDUE_SCHEMA = {
+  residue_kind: { type: "string", enum: RESIDUE_KINDS,
+    description: "REQUIRED when blocker is human_only, ruling or capability: the act only the account holder can perform, from a closed list. provider_login = a login with two-factor the provider reserves · os_password = an OS password or biometric prompt · physical_act = a signature, site visit or device in hand · money_movement = money spent, paid or committed · external_send = something sent to a client, counterparty or the public · joe_only_fact = a fact only Joe holds. Internal work has no residue: the system decides it, so do it or file it under other_lane, external_event or counterparty." },
+  residue_host: { type: "string",
+    description: "REQUIRED with residue_kind: the provider or host that reserves the act, e.g. 'github.com', 'macOS on Joe's MacBook', 'Chase'." },
+};
+
 // ── THE OWNERSHIP GATE (Joe 2026-08-10) ────────────────────────────────────
 // Joe asked why the backlog never falls. The measured answer: intake is
 // autonomous and the drain is not. Audits, IT sweeps, council reviews and
@@ -2135,7 +2276,7 @@ async function latestFieldConflict(c, dealId, field, baseEventId) {
   let base = null;
   if (baseEventId !== null && baseEventId !== undefined) {
     const found = await c.query(
-      `select recorded_at, id from event
+      `select id from event
         where id=$1 and subject_type='deal' and subject_id=$2 and field=$3
         /* dealroom:base-event */`,
       [baseEventId, dealId, field],
@@ -2145,14 +2286,17 @@ async function latestFieldConflict(c, dealId, field, baseEventId) {
     base = found.rows[0];
   }
 
+  // The base's recorded_at stays inside SQL: read back through node-pg it is a
+  // millisecond Date, and the base event would then sort after its own bound.
   const newer = await c.query(
     `select e.id as event_id, e.actor_id, a.slug as actor, e.new_value -> $2 as value
        from event e join actor a on a.id=e.actor_id
       where e.subject_type='deal' and e.subject_id=$1 and e.field=$2
-        and ($3::timestamptz is null or (e.recorded_at, e.id) > ($3::timestamptz, $4::uuid))
+        and ($3::uuid is null or (e.recorded_at, e.id) >
+             (select b.recorded_at, b.id from event b where b.id=$3::uuid))
       order by e.recorded_at desc, e.id desc limit 1
       /* dealroom:latest-field-event */`,
-    [dealId, field, base?.recorded_at || null, base?.id || null],
+    [dealId, field, base?.id || null],
   );
   return newer.rows[0] || null;
 }
@@ -2316,13 +2460,70 @@ function findCatchUpCandidates(found) {
 // ---------- the registry ----------
 // Each: { description, inputSchema, write: bool, humanOnly?: bool, handler(client, actor, args) }
 
+// Project only the sanitized billing contract, never the board's raw JSON.
+// This consumer validates evidence; the collector owns every calculation.
+function morningCostSnapshot(value) {
+  const unavailable = { state: "unavailable", reason: "source_unavailable", items: [],
+    providers: [], months: [], alerts: [],
+    action: "owner orchestrator: run the cost collector, restore missing billing reads, and verify a fresh complete-day snapshot; auto-clear after a valid snapshot younger than 36 hours." };
+  const money = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
+  const text = (s) => typeof s === "string" && s.length > 0 && s.length <= 500;
+  const date = (s) => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && isCalendarDate(s);
+  const month = (s) => typeof s === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+  const amounts = (o) => {
+    if (!o || typeof o !== "object" || Array.isArray(o) || Object.keys(o).length > 500) throw Error("invalid cost map");
+    if (!Object.entries(o).every(([k, v]) => text(k) && money(v))) throw Error("invalid cost amount");
+    return Object.fromEntries(Object.entries(o));
+  };
+  try {
+    const age = Date.now() - Date.parse(value?.observed_at);
+    if (value?.schema !== "carr-system-costs.v1" || !["ready", "partial"].includes(value.state)
+        || !Number.isFinite(age) || age < -300000 || age > 36 * 3600000
+        || !month(value.month) || !date(value.through) || !text(value.action)
+        || !Array.isArray(value.providers) || value.providers.length > 30
+        || !Array.isArray(value.months) || value.months.length > 24
+        || !Array.isArray(value.alerts) || value.alerts.length > 100) return unavailable;
+    const providers = value.providers.map((row) => {
+      if (!text(row.provider) || !text(row.label) || !text(row.plan)
+          || !["ready", "partial", "unavailable"].includes(row.state)
+          || !(row.mtd_usd === null || money(row.mtd_usd))
+          || !(row.projection_usd === null || money(row.projection_usd))
+          || !(row.budget_usd === null || money(row.budget_usd))
+          || !(row.reason === null || text(row.reason))
+          || !Array.isArray(row.daily) || row.daily.length > 62) throw Error("invalid cost provider");
+      return { provider: row.provider, label: row.label, plan: row.plan, state: row.state,
+        reason: row.reason, mtd_usd: row.mtd_usd, projection_usd: row.projection_usd,
+        budget_usd: row.budget_usd, ...(typeof row.estimated === "boolean" ? { estimated: row.estimated } : {}),
+        call_sites: amounts(row.call_sites),
+        daily: row.daily.map((day) => {
+          if (!date(day.day) || !money(day.usd)) throw Error("invalid cost day");
+          return { day: day.day, usd: day.usd, drivers: amounts(day.drivers) };
+        }) };
+    });
+    const months = value.months.map((row) => {
+      if (!month(row.month) || !money(row.usd)) throw Error("invalid cost month");
+      return { month: row.month, usd: row.usd, providers: amounts(row.providers) };
+    });
+    const alerts = value.alerts.map((row) => {
+      if (!text(row.provider) || !text(row.driver) || !text(row.kind)
+          || !money(row.amount_usd) || !money(row.threshold_usd)) throw Error("invalid cost alert");
+      return { provider: row.provider, driver: row.driver, kind: row.kind,
+        amount_usd: row.amount_usd, threshold_usd: row.threshold_usd };
+    });
+    return { schema: value.schema, observed_at: value.observed_at, month: value.month,
+      through: value.through, state: value.state, providers, months, alerts, action: value.action, items: providers,
+      ...(money(value.budget_usd) ? { budget_usd: value.budget_usd } : {}),
+      ...(money(value.projection_usd) ? { projection_usd: value.projection_usd } : {}) };
+  } catch { return unavailable; }
+}
+
 export const TOOLS = {
 
   // ===== reads (carr_reader connection) =====
 
   "read-v5-a02-rule-enforcement-coverage": {
     write: false,
-    description: "Read DoctorCRE V5-A02's server-derived coverage of every active rule. The record layer enumerates active rules and checks that every control its current exact approval names is installed and bound, with test verification that is not future-dated and still equals the value the approval captured, and an immutable fallback receipt written on Joe's authority database connection (the receipt proves which authority connection recorded it, not that a human chose it). Empty input only: caller evidence cannot make coverage green. Each uncovered rule is a named gap (amended after approval, control unmapped, an approved control not installed, tests missing, test evidence future-dated or changed since approval, fallback absent); zero active rules reads coverage_state `empty`, never complete; an unreadable or inconsistent record is a fail-closed unavailable result.",
+    description: "Read DoctorCRE V5-A02's server-derived coverage of every active rule. The record layer enumerates active rules and checks that every control its current exact approval names is installed and bound, with test verification that is not future-dated and still equals the value the approval captured, and an immutable fallback receipt written on Joe's authority database connection (the receipt proves which authority connection recorded it, not that a human chose it). Since migration 0876 that receipt is not required when the rule's current exact approval is machine_enforceable/hard_enforced and every control it names is transactional_schema or implemented only by hooks/*.py files. What that gives up: for those rules there is no receipt saying what the system does when the installed control is unavailable (a disabled hook, the Worker down, catalog drift). It is acceptable because the system already answers that by machine: hooks/gate-integrity.py runs at every session start, hashing every hook against the blessed baseline and comparing the live hook wiring, and the `machine config` row of run.sh health repeats the wiring check, so a missing, changed or disabled gate is named the next time any session boots; a transactional_schema refusal runs inside the write itself, so an unavailable database or Worker means no write (refuse closed); and catalog drift is a named gap in this read. Every other control kind (githook, CI or script checks, any implementation outside hooks/) keeps the receipt, because nothing names its unavailability at boot. Empty input only: caller evidence cannot make coverage green. Each uncovered rule is a named gap (amended after approval, control unmapped, an approved control not installed, tests missing, test evidence future-dated or changed since approval, fallback absent); zero active rules reads coverage_state `empty`, never complete; an unreadable or inconsistent record is a fail-closed unavailable result.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     handler: async (c) => readRuleEnforcementCoverage(c),
   },
@@ -2350,8 +2551,8 @@ export const TOOLS = {
          order by merged, similarity(display_name,$1) desc limit 10`, [q, `%${q}%`]);
       // ORGS AND UNLINKED PEOPLE, GROUPED (0056, 2026-08-02). Until migration 0056
       // v_ref_index held only role records, so 415 org parties were invisible here:
-      // `find "Henry Schein"` returned "Henry Prescott" — a trigram hit on one word —
-      // and none of the 17 rows literally named Henry Schein.
+      // `find "Example Organization 25"` returned "Henry Prescott" — a trigram hit on one word —
+      // and none of the 17 rows literally named Example Organization 25.
       // GROUPED BY NAME ON PURPOSE. Those 17 rows are one company minted 17 times,
       // once per rep, and listing them raw would spend the whole 10-row budget on
       // copies of one answer and push every other match out. One row per name, with
@@ -2362,7 +2563,7 @@ export const TOOLS = {
       // LIVE AND RETIRED ARE COUNTED SEPARATELY, AND THE BLEND WAS THE BUG (loop
       // #132, 2026-08-02). This grouping shipped in b0fda91, BEFORE 0059 consolidated
       // the orgs, and it was never taught about merged_into. Afterwards it kept
-      // reporting `duplicate_rows: 17` for Henry Schein and `13` for Cadence Studio —
+      // reporting `duplicate_rows: 17` for Example Organization 25 and `13` for Cadence Studio —
       // both of which are ONE live row plus sixteen and twelve tombstones. That
       // number then read as "the book is still full of duplicates", which is the
       // opposite of what 0059 did, and every ref in the list read as a live target.
@@ -2639,13 +2840,13 @@ export const TOOLS = {
         // 'party' INCLUDED (0056, 2026-08-02). This block is the verb's honesty
         // guarantee — "exists but has no edges" must never collapse into "no such
         // person". Restricted to role records it was breaking exactly that promise:
-        // asked for Henry Schein, which is 17 party rows, it answered "No record and
+        // asked for Example Organization 25, which is 17 party rows, it answered "No record and
         // no graph node matches that name", which was simply false. A read-only
         // existence check has no reason to be narrower than the record.
         // MATCHING_RECORDS IS LIVE-ONLY, AND THE COUNT OF TOMBSTONES TRAVELS BESIDE
         // IT (loop #132). Unordered and capped at five, this block handed back five
-        // tombstones for "Cadence Studio" — P-0840, P-1044, P-0909, P-0796 — as
-        // selectable records while the survivor P-0111 never appeared. A caller that
+        // tombstones for "Cadence Studio" — P-900040, P-900048, P-900044, P-900039 — as
+        // selectable records while the survivor P-900029 never appeared. A caller that
         // links or writes to one of those defeats the merge. So: survivors in
         // matching_records, tombstones as a COUNT only (find lists them with their
         // refs; that is find's job, and it is where they stay navigable), and the
@@ -3005,7 +3206,7 @@ export const TOOLS = {
 
   "morning-brief": {
     write: false,
-    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes live triage, claim-card, deal-room, loop-board, and the redacted renewal decision queue. Every section reports ready, empty, or unavailable; unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
+    description: "The record-native morning brief for the authenticated Joe or Dell context. It composes live triage, claim-card, deal-room, loop-board, the redacted renewal decision queue, and published system costs. Costs reports ready, partial, or unavailable; other sections report ready, empty, or unavailable. Unavailable is never rewritten as empty. Takes no audience, sponsor, or partner argument.",
     inputSchema: { type: "object", properties: {} },
     handler: async (c, actor, args) => {
       // This is an audience boundary, not a convenience filter.  A shared-only
@@ -3105,11 +3306,29 @@ export const TOOLS = {
         const batch = result.rows[0]?.batch;
         return { items: Array.isArray(batch) ? batch : [] };
       });
-      const sections = { today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence };
+      // Joe's brief leads with the one list of what waits on him. A partial list
+      // with nothing in it is unavailable, never empty: a failed source could be
+      // hiding the item he needs to see.
+      const needsJoe = scope.sponsor === "joe" ? await section(async () => {
+        const { state: list_state, ...list } = (await executeRegisteredTool(c, actor, "governance-queue", {})).needs_joe;
+        if (list_state === "partial" && !list.items.length) throw new Error("needs-joe sources unavailable");
+        return { ...list, list_state };
+      }) : null;
+      const costs = { ...morningCostSnapshot(undefined), ...await section(async () => {
+        // Existing carr_reader grant and authenticated scope, like read-progress-board.
+        // Ordinary brief reads never call billing providers.
+        const result = await c.query(
+          `select snapshot_json from board_snapshot
+            where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=$3`,
+          [organizationTenantForActor(actor), scope.sponsor, "system-costs"]);
+        return morningCostSnapshot(result.rows[0]?.snapshot_json?.costs);
+      }) };
+      const sections = { ...(needsJoe ? { needs_joe: needsJoe } : {}),
+        today, claim_card: claimCard, deals, loops, renewals, assurance_cadence: assuranceCadence, costs };
       return {
         state: Object.values(sections).some((value) => value.state === "unavailable")
           ? "unavailable"
-          : "ready",
+          : Object.values(sections).some((value) => value.state === "partial") ? "partial" : "ready",
         sponsor: scope.sponsor,
         sections,
       };
@@ -3260,21 +3479,27 @@ export const TOOLS = {
   "lead-board": {
     write: false,
     description: "The complete, safe worked-lead board. All leads surface, including weak, suppressed, and terminal rows: qualification is the human's job and this read is never pre-qualified or silently truncated. Returns the authoritative base_version needed by update-lead, ordered stage vocabulary including empty stages, score/confidence/freshness signals, and no phone, email, address, notes, or raw source detail.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    handler: async (c) => {
+    inputSchema: LEAD_WORKSPACE_SCHEMA,
+    handler: async (c, _actor, args = {}) => {
+      if (args.workspace === "leads") return readLeadWorkspace(c, args);
       const stages = (await c.query(
         `select slug,label,sort
            from v_lead_board_stage
           order by sort,slug`)).rows;
       const leads = (await c.query(
         `select id,registry_ref,name,specialty,city,county,state,lane,stage,
-                (select party_id from lead where lead.id=v_lead_board.id) as party_id,
+                party_id,
                 stage_label,stage_sort,score,segment,suppressed,est_lease_event,
                 event_confidence,last_touch,next_action_date,owner,owner_label,
-                base_version,created_at,updated_at
+                base_version,created_at,updated_at,
+                (stage <> 'archived') as conversion_eligible,
+                converted,stage_moves
            from v_lead_board
           order by stage_sort,suppressed,score desc nulls last,name,registry_ref`)).rows;
-      return { generated_at: new Date().toISOString(), stages, leads };
+      const eligible=leads.filter(l=>l.stage!=="archived");
+      return { generated_at: new Date().toISOString(), stages, leads,
+        metrics:{nurture_count:eligible.filter(l=>l.stage==="nurture_drip" && !l.suppressed).length,
+          conversion_denominator:eligible.length,converted_count:eligible.filter(l=>l.converted).length} };
     },
   },
 
@@ -3858,9 +4083,6 @@ export const TOOLS = {
       if (!keys.length) throw new ToolError({ error: "no_updatable_fields", allowed });
       // A real calendar date: the pattern, then a round trip, so 2026-13-45 or
       // 2026-02-30 is refused here instead of failing later as a raw cast error.
-      const isCalendarDate = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-        !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) &&
-        new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
       if (keys.includes("invoiced_on") && args.fields.invoiced_on !== null &&
           !isCalendarDate(args.fields.invoiced_on))
         throw new ToolError({ error: "invalid_invoiced_on",
@@ -3879,7 +4101,7 @@ export const TOOLS = {
       for (const k of keys)
         await writeEvent(c, actor, "update-deal", "deal", s.id,
           { field: k, old: { [k]: old[k] }, new: { [k]: args.fields[k] },
-            recorded_at_after_lock: k === "phase", idempotency_key: args.idempotency_key });
+            recorded_at_after_lock: k === "phase" || k === "invoiced_on", idempotency_key: args.idempotency_key });
       return { ok: true, updated: keys,
                ...(guard.rebased ? { rebased: true, rebase_receipt: guard.rebase_receipt } : {}) };
     }),
@@ -4090,7 +4312,7 @@ export const TOOLS = {
       }
       // THE GENERATOR, CLOSED (0059, 2026-08-02). This line used to INSERT an org
       // unconditionally with no lookup, so every contact minted a private copy of
-      // their own employer: Henry Schein existed as 17 org rows, one per rep,
+      // their own employer: Example Organization 25 existed as 17 org rows, one per rep,
       // Patterson Dental as 10, and all 415 org rows had exactly one inbound person
       // — a distribution with a single bucket, which is the signature. That is why
       // "who do we know at X" could not be answered: there was no X, only copies.
@@ -4119,7 +4341,7 @@ export const TOOLS = {
         if (g.conflict)
           return { needs_confirm: true, candidates: g.conflict,
                    hint: "a live organisation with this exact normalised identity already exists — " +
-                         "reuse it, or disambiguate the NAME (the way 'Carr Riggs Ingram (advisory)' " +
+                         "reuse it, or disambiguate the NAME (the way 'Example Organization 116 (advisory)' " +
                          "does); the identity key is never weakened, even under force_new" };
         row = g.row;
       } else {
@@ -4303,14 +4525,16 @@ export const TOOLS = {
 
   "new-lead": {
     write: true,
-    description: "Create a lead over a new or existing party; mints the next L-ref atomically. Sets lead_stage and owner_id/owner_label. Stage must be an existing lead_stage slug (they were imported from the live registry).",
+    description: "Create a lead over a new or existing party; mints the next L-ref atomically. Accepts score (integer 0-100 or null), score_reason (string or null), and owner (joe|dell). Alabama parties default to Dell when owner is omitted; other parties default to the caller. Stage must be an existing lead_stage slug (they were imported from the live registry).",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       party_id: { type: "string", description: "from add-party or find" },
       stage: { type: "string" }, lane: { type: "string" }, segment: { type: "string" },
+      ...LEAD_SCORE_FIELDS,
       source_type: { type: "string" }, source_detail: { type: "string" } },
       required: ["idempotency_key","party_id","stage"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "new-lead", args, async () => {
+      validateLeadScoreFields(args);
       // stage and lane are FOREIGN KEYS (lead_stage.slug, lead_lane.slug). They used
       // to go straight into the insert, so a plausible-but-wrong value — `lane:
       // "referral"`, which reads like an obvious lane and is not one — came back as
@@ -4329,15 +4553,21 @@ export const TOOLS = {
             hint: `${field} is a foreign key into ${table}; pass one of the listed slugs. Inventing a plausible one fails at the database, not here.` });
         }
       }
+      const party = (await c.query("select state from party where id=$1", [args.party_id])).rows[0];
+      if (!party) throw new ToolError({ error: "party_not_found" });
+      const ownerSlug = args.owner ?? (party.state === "AL" ? "dell" : null);
+      const owner = ownerSlug ? await resolveLeadOwner(c, ownerSlug)
+        : { owner: actor.slug, owner_id: actor.id, owner_label: actor.display };
       const ref = (await c.query("select 'L-' || lpad(nextval('ref_lead_seq')::text, 3, '0') as r")).rows[0].r;
       const r = await c.query(
         `insert into lead (registry_ref, party_id, stage, lane, segment, source_type, source_detail,
-           owner_id, owner_label, created_by, updated_by)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$8,$8) returning id`,
+           owner_id, owner_label, created_by, updated_by, score, score_reason)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10,$11,$12) returning id`,
         [ref, args.party_id, args.stage, args.lane || null, args.segment || null,
-         args.source_type || null, args.source_detail || null, actor.id, actor.display]);
+         args.source_type || null, args.source_detail || null, owner.owner_id, owner.owner_label,
+         actor.id, args.score ?? null, args.score_reason ?? null]);
       await writeEvent(c, actor, "new-lead", "lead", r.rows[0].id,
-        { new: { ref }, idempotency_key: args.idempotency_key });
+        { new: { ref, score: args.score ?? null, score_reason: args.score_reason ?? null, ...owner }, idempotency_key: args.idempotency_key });
       return { ok: true, lead_id: r.rows[0].id, ref };
     }),
   },
@@ -4726,21 +4956,77 @@ export const TOOLS = {
   // do_not_contact -> do_not_contact) — there was no way to move a lead FORWARD
   // through its own funnel, or to correct one an import or a stuck drip left
   // behind. update-lead is that writer.
+  "claim-lead": {
+    write: true, humanOnly: true,
+    description: "Claim an unowned New lead for the authenticated human. Preserves stage, checks the current version and exact lifecycle links, and records the ownership change.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      idempotency_key: { type: "string" }, expected_actor: { type: "string", minLength: 1 }, lead: { type: "string" }, base_version: { type: "integer" }
+    }, required: ["idempotency_key","lead","base_version","expected_actor"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "claim-lead", args, async () => {
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_confirmation_required" });
+      const subject = await resolveSubject(c, args.lead);
+      if (subject.type !== "lead") throw new ToolError({ error: "not_a_lead" });
+      await versionGuard(c, "lead", subject.id, args.base_version);
+      const { current: row } = await lockLeadLifecycle(c, subject.id);
+      if (!row || !row.live_party || row.stage !== "new" || !row.contact_eligible || row.owner_id || row.client_id || row.is_client || row.linked_client)
+        throw new ToolError({ error: "lead_not_claimable" });
+      const owner = (await c.query("select id,slug,display_name from actor where slug=$1 and active", [partnerAuthoritySlugForActor(actor)])).rows[0];
+      if (!owner) throw new ToolError({ error: "human_owner_unavailable" });
+      await c.query("update lead set owner_id=$1,owner_label=$2,updated_by=$3 where id=$4", [owner.id, owner.display_name, actor.id, subject.id]);
+      await writeEvent(c, actor, "claim-lead", "lead", subject.id, { field: "owner_id", old: { owner_id: null },
+        new: { owner_id: owner.id }, idempotency_key: args.idempotency_key });
+      return { ok: true, lead_id: subject.id, owner: owner.slug };
+    }),
+  },
+
+  "link-lead-client": {
+    write: true, humanOnly: true,
+    description: "Confirm one lead belongs to an existing client, by exact IDs and an explicit human choice. Records the client pointer without merging parties or creating a client/deal. Refuses suppression, stale versions and an already linked lead.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      idempotency_key: { type: "string" }, expected_actor: { type: "string", minLength: 1 }, lead: { type: "string" }, base_version: { type: "integer" },
+      client_id: { type: "string" }, confirmed: { type: "boolean", const: true }
+    }, required: ["idempotency_key","lead","base_version","client_id","confirmed","expected_actor"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "link-lead-client", args, async () => {
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
+      if (!canExercisePartnerAuthority(actor) || args.confirmed !== true) throw new ToolError({ error: "human_confirmation_required" });
+      const subject = await resolveSubject(c, args.lead);
+      if (subject.type !== "lead") throw new ToolError({ error: "not_a_lead" });
+      await versionGuard(c, "lead", subject.id, args.base_version);
+      const { current, target } = await lockLeadLifecycle(c, subject.id, args.client_id);
+      if (!current || !current.live_party || current.is_client || !current.contact_eligible || current.client_id || current.linked_client)
+        throw new ToolError({ error: "lead_not_linkable" });
+      if (!target) throw new ToolError({ error: "client_not_found" });
+      await c.query("update lead set client_id=$1,updated_by=$2 where id=$3", [target.id, actor.id, subject.id]);
+      await writeEvent(c, actor, "link-lead-client", "lead", subject.id, { field: "client_id",
+        old: { client_id: null }, new: { client_id: target.id }, idempotency_key: args.idempotency_key });
+      return { ok: true, lead_id: subject.id, client_id: target.id };
+    }),
+  },
+
   "update-lead": {
     write: true,
-    description: "Field-level change to a lead (stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes_path, notes, event_source, event_confidence, report_back_due, drip_campaign, drip_added, sf_deal). stage and lane are FOREIGN KEYS into lead_stage/lead_lane; a wrong slug comes back with the full valid list rather than a bare internal error. do_not_contact is inseparable from suppressed=true, and only a human may clear an existing suppression instruction. base_version required from a fresh read; a conflict means someone else wrote — surface it to the human, never auto-retry. party_id (identity) and client_id (the lead-to-client conversion pointer) are deliberately absent from fields: neither is a field edit through this verb, the same posture update-deal takes on client_id and update-party-contact takes on identity fields generally (rule 5d44d3f3) — a discrepancy there is a different kind of correction, not a value to overwrite in place.",
+    description: "Field-level change to a lead (score, score_reason, owner, stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes_path, notes, event_source, event_confidence, report_back_due, drip_campaign, drip_added, sf_deal). stage and lane are FOREIGN KEYS into lead_stage/lead_lane; a wrong slug comes back with the full valid list rather than a bare internal error. do_not_contact is inseparable from suppressed=true, and only a human may clear an existing suppression instruction. base_version required from a fresh read; a conflict means someone else wrote — surface it to the human, never auto-retry. party_id (identity) and client_id (the lead-to-client conversion pointer) are deliberately absent from fields: neither is a field edit through this verb, the same posture update-deal takes on client_id and update-party-contact takes on identity fields generally (rule 5d44d3f3) — a discrepancy there is a different kind of correction, not a value to overwrite in place.",
     inputSchema: { type: "object", properties: {
-      idempotency_key: { type: "string" }, lead: { type: "string" },
+      idempotency_key: { type: "string" }, expected_actor: { type: "string", minLength: 1 }, lead: { type: "string" },
       base_version: { type: "integer" },
-      fields: { type: "object", description: "subset of: stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes_path, notes, event_source, event_confidence, report_back_due, drip_campaign, drip_added, sf_deal" } },
+      stage_review: { type: "object", additionalProperties: false, properties: { reason: { type: "string", minLength: 1, maxLength: 1000 }, evidence_ids: { type: "array", items: { type: "string" }, maxItems: 20 }, undo_event_id: { type: "string" }, human_quote: { type: "string", maxLength: 1000 } }, required: ["reason", "evidence_ids"] },
+      fields: { type: "object", properties: LEAD_SCORE_FIELDS, description: "subset of: score, score_reason, owner, stage, lane, segment, source_type, source_detail, suppressed, est_lease_event, next_action_date, notes_path, notes, event_source, event_confidence, report_back_due, drip_campaign, drip_added, sf_deal" } },
       required: ["idempotency_key","lead","base_version","fields"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-lead", args, async () => {
+      validateLeadScoreFields(args.fields);
+      const reviewed = Object.hasOwn(args, "stage_review") ? validateStageReview(args.stage_review, args.fields, ToolError) : null;
+      if (reviewed?.undo_event_id) {
+        if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_confirmation_required" });
+        if (!reviewed.human_quote?.trim()) throw new ToolError({ error: "undo_human_quote_required" });
+      }
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
       const s = await resolveSubject(c, args.lead);
       if (s.type !== "lead") throw new ToolError({ error: "not_a_lead", resolved: s });
-      await versionGuard(c, "lead", s.id, args.base_version);
+      const locked = await versionGuard(c, "lead", s.id, args.base_version);
       const allowed = ["stage","lane","segment","source_type","source_detail","suppressed",
                        "est_lease_event","next_action_date","notes_path","notes","event_source",
-                       "event_confidence","report_back_due","drip_campaign","drip_added","sf_deal"];
+                       "event_confidence","report_back_due","drip_campaign","drip_added","sf_deal","score","score_reason","owner"];
       const keys = Object.keys(args.fields).filter(k => allowed.includes(k));
       if (!keys.length) throw new ToolError({ error: "no_updatable_fields", allowed });
       // Pre-validate rather than letting the FK abort the transaction, same reason
@@ -4760,6 +5046,8 @@ export const TOOLS = {
       const current = (await c.query("select stage,suppressed from lead where id=$1", [s.id])).rows[0];
       const nextStage = keys.includes("stage") ? args.fields.stage : current.stage;
       const nextSuppressed = keys.includes("suppressed") ? args.fields.suppressed : current.suppressed;
+      if (keys.includes("stage") && (current.stage === "archived" || nextStage === "archived") && !canExercisePartnerAuthority(actor))
+        throw new ToolError({error:"archive_requires_partner"});
       if (nextStage === "do_not_contact" && nextSuppressed !== true) {
         throw new ToolError({ error: "do_not_contact_requires_suppression",
           hint: "do_not_contact is a standing instruction, not only a funnel label; pass stage='do_not_contact' and suppressed=true together" });
@@ -4772,13 +5060,38 @@ export const TOOLS = {
         throw new ToolError({ error: "suppression_clear_requires_human",
           hint: "a standing suppression instruction may be cleared only by an authenticated human" });
       }
-      const old = (await c.query(`select ${keys.join(",")} from lead where id=$1`, [s.id])).rows[0];
-      const sets = keys.map((k, i) => `${k}=$${i + 2}`).join(", ");
-      await c.query(`update lead set ${sets}, updated_by=$1 where id=$${keys.length + 2}`,
-        [actor.id, ...keys.map(k => args.fields[k]), s.id]);
+      let stageReview = null;
+      if (reviewed) {
+        const ids = reviewed.evidence_ids;
+        const evidence = ids.length ? (await c.query(
+          "select id,occurred_at,kind,connected from activity where lead_id=$1 and id=any($2::uuid[]) and occurred_at<=now()", [s.id, ids])).rows : [];
+        if (evidence.length !== ids.length) throw new ToolError({ error: "stage_evidence_mismatch" });
+        if (args.fields.stage === "engaged" && evidence.some(row => ["call","text"].includes(row.kind) && row.connected !== true))
+          throw new ToolError({ error: "stage_evidence_not_contact" });
+        if (reviewed.undo_event_id) {
+          const last = (await c.query(`select * from v_lead_stage_transition
+            where lead_id=$1 order by mutation_order desc limit 1`, [s.id])).rows[0];
+          if (!last || !last.automatic || last.event_id !== reviewed.undo_event_id.toLowerCase() || last.prior_stage !== args.fields.stage || last.stage !== current.stage)
+            throw new ToolError({ error: "undo_changed" });
+        }
+        stageReview = { ...reviewed, evidence_ids: ids,
+          evidence_date: evidence.map(row => new Date(row.occurred_at).toISOString()).sort().at(-1) || null };
+      }
+      const owner = keys.includes("owner") ? await resolveLeadOwner(c, args.fields.owner) : null;
+      const storage = Object.fromEntries(keys.filter(k => k !== "owner").map(k => [k, args.fields[k]]));
+      if (owner) Object.assign(storage, { owner_id: owner.owner_id, owner_label: owner.owner_label });
+      const columns = Object.keys(storage);
+      const old = (await c.query(`select ${columns.join(",")}${owner ? ",(select slug from actor where id=lead.owner_id) as owner" : ""} from lead where id=$1`, [s.id])).rows[0];
+      const sets = columns.map((k, i) => `${k}=$${i + 2}`).join(", ");
+      const updated = await c.query(`update lead set ${sets}, updated_by=$1 where id=$${columns.length + 2} returning version`,
+        [actor.id, ...Object.values(storage), s.id]);
+      const transitionProof = keys.includes("stage") ? { before_version: locked.version,
+        after_version: updated.rows[0].version, actor_slug: actor.slug } : null;
       for (const k of keys)
         await writeEvent(c, actor, "update-lead", "lead", s.id,
-          { field: k, old: { [k]: old[k] }, new: { [k]: args.fields[k] }, idempotency_key: args.idempotency_key });
+          { recorded_at_after_lock: k === "stage", field: k, old: { [k]: old[k], ...(k === "owner" ? { owner_id: old.owner_id, owner_label: old.owner_label } : {}) }, new: { [k]: args.fields[k], ...(k === "owner" ? owner : {}), ...(k === "stage" ? { transition_proof: transitionProof } : {}), ...(k === "stage" && stageReview ? { stage_review: stageReview } : {}) },
+            ...(k === "stage" && stageReview ? { cause: stageReview.undo_event_id ? "human_correction" : undefined,
+              human_quote: stageReview.human_quote, agent_rationale: stageReview.reason } : {}), idempotency_key: args.idempotency_key });
       return { ok: true, updated: keys };
     }),
   },
@@ -4790,7 +5103,7 @@ export const TOOLS = {
   // 8 verified facts stranded in record_flag.
   "update-party-contact": {
     write: true,
-    description: "Promote a VERIFIED contact fact onto a party: phone (office), cell (mobile), email, title, city, county — CONTACT FACTS ONLY. Identity fields (name, org, npi, specialty) are deliberately out of reach: a discrepancy there goes through record-finding's proposes_correction and is applied by the owning partner, never by this verb (rule 5d44d3f3). source is REQUIRED on every call — provenance is binding, and the usual value is the record-finding row or thread being promoted. Accepts any ref (P-####, V-/C-/L-/T-, or a name); a role ref resolves to the PERSON under it, and a merged party hops to its survivor (reported in the result). base_version is the PARTY's version, from a fresh read. Placeholder guard: a CARR agent's own number or any carr.us address in a client/vendor contact field is a placeholder, never data — refused, not stored.",
+    description: "Promote a VERIFIED contact fact onto a party: phone (office), cell (mobile), email, title, city, county — CONTACT FACTS ONLY. Identity fields are out of reach here: name, firm (org) and state are corrected through correct-party-identity, which records the prior value and never renames a shared org row. source is REQUIRED on every call — provenance is binding, and the usual value is the record-finding row or thread being promoted. Accepts any ref (P-####, V-/C-/L-/T-, or a name); a role ref resolves to the PERSON under it, and a merged party hops to its survivor (reported in the result). base_version is the PARTY's version, from a fresh read. Placeholder guard: a CARR agent's own number or any carr.us address in a client/vendor contact field is a placeholder, never data — refused, not stored.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       party: { type: "string", description: "P-#### ref, a role ref (V-/C-/L-/T-), or a name" },
@@ -4805,28 +5118,12 @@ export const TOOLS = {
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-party-contact", args, async () => {
       if (!args.source || !args.source.trim())
         throw new ToolError({ error: "missing_source", hint: "a contact fact without provenance is a rumour; say where it came from" });
-      const s = await resolveSubject(c, args.party);
-      if (s.type === "deal")
-        throw new ToolError({ error: "not_a_party", hint: "a deal has no contact fields; pass the person or their role ref" });
-      let partyId;
-      if (s.type === "party") partyId = s.id;
-      else {
-        const r = await c.query(
-          "select party_id from v_ref_index where subject_type=$1 and subject_id=$2", [s.type, s.id]);
-        if (!r.rows.length || !r.rows[0].party_id)
-          throw new ToolError({ error: "no_party_under_ref", resolved: s });
-        partyId = r.rows[0].party_id;
-      }
-      // A merged party is a pointer; writing to a tombstone strands the fact.
-      const hop = await c.query("select merged_into from party where id=$1", [partyId]);
-      if (!hop.rows.length) throw new ToolError({ error: "not_found", table: "party", id: partyId });
-      const hopped = hop.rows[0].merged_into !== null;
-      if (hopped) partyId = hop.rows[0].merged_into;
+      const { partyId, hopped } = await resolvePartyForWrite(c, args.party);
 
       const allowed = ["phone","cell","email","title","city","county"];
       const keys = Object.keys(args.fields).filter(k => allowed.includes(k));
       if (!keys.length) throw new ToolError({ error: "no_updatable_fields", allowed,
-        hint: "contact facts only; identity corrections go through record-finding proposes_correction" });
+        hint: "contact facts only; name, org and state corrections go through correct-party-identity" });
 
       // Placeholder rule 54e2bcb9: an agent's own details standing in for a contact
       // nobody had. Stored, they read as enriched while being emptier than a blank.
@@ -5352,6 +5649,9 @@ export const TOOLS = {
   "confirm-merge": {
     write: true,
     humanOnly: true,
+    // A merge is irreversible and needs a human looking at both records, so
+    // no machine holds it, attended or unattended, however it is sponsored.
+    humanCallerOnly: true,
     description: "HUMAN-confirmed merge of two duplicate parties: sets merged_into on the loser so it becomes a pointer to the survivor. Only after a human has looked at both records — the Hovanian rule means nothing auto-merges, ever.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, survivor_party: { type: "string" }, merged_party: { type: "string" },
@@ -5641,7 +5941,7 @@ export const TOOLS = {
 
   "record-finding": {
     write: true,
-    description: "Land ONE open-source research or enrichment finding as a record_flag row. This is the only path a verification result becomes part of the record — findings do not go into a markdown report (Joe, 2026-08-02: 'we dont write to markdown in the new system only the database'). IT NEVER EDITS AN IDENTITY FIELD. A finding is stored BESIDE the record with its source; a disagreement with name/phone/email/title/specialty is passed as proposes_correction, which is recorded as a proposal for the owning partner and applied by them, never by this verb. STORE NOTHING-FOUND TOO: pass found:false and the empty result becomes a real row, so a record nobody searched is distinguishable from one that was searched and came up dry — that difference is the whole meaning of a verified stamp. source is REQUIRED on every row; provenance is binding, and a finding without it is a rumour. Pass expires_on for anything volatile: title and company change with promotions and job moves, so an expired verification reads as unverified rather than as fact. Common kinds: verified (an identity pass, value lists what was checked), email, cell, office_phone, social, website, npi, license_status, title, entity_filing, address, discrepancy. A near-match on a similar name is contamination, not confirmation — record both candidates and pick neither. Also writes an event, so the finding shows up in catch-me-up without a second read surface. NOT ONLY PEOPLE SINCE 0066: subject_kind campaign / platform / pillar / format files a finding against a THING — a platform, a content pillar, a format, a campaign — which is how the marketing seat's measured conclusions finally get a home. Read them back through v_record_flag_subject, which resolves every branch to a name. AND NOT ONLY BUSINESS RECORDS SINCE 0101: a finding can be filed against CODE — pass 'commit:<sha>' (the one repo at that commit), 'owner/name@<sha>', or 'repo:owner/name' (the codebase itself) and the subject is minted on first use. That is how a code review's result — INCLUDING its failure finding, which is the one a reader most needs — becomes part of the record instead of surviving only in a local sidecar. Read code findings back through v_code_finding, which carries repo and commit_sha as their own columns.",
+    description: "Land ONE open-source research or enrichment finding as a record_flag row. This is the only path a verification result becomes part of the record — findings do not go into a markdown report (Joe, 2026-08-02: 'we dont write to markdown in the new system only the database'). IT NEVER EDITS AN IDENTITY FIELD. A finding is stored BESIDE the record with its source; a disagreement with name/phone/email/title/specialty is recorded here with proposes_correction carrying the prior and corrected values. This verb never applies it: when identity is confirmed (rule 578fdd91), apply the correction in the same run through correct-party-identity (name, org, state) or update-party-contact (contact facts). STORE NOTHING-FOUND TOO: pass found:false and the empty result becomes a real row, so a record nobody searched is distinguishable from one that was searched and came up dry — that difference is the whole meaning of a verified stamp. source is REQUIRED on every row; provenance is binding, and a finding without it is a rumour. Pass expires_on for anything volatile: title and company change with promotions and job moves, so an expired verification reads as unverified rather than as fact. Common kinds: verified (an identity pass, value lists what was checked), email, cell, office_phone, social, website, npi, license_status, title, entity_filing, address, discrepancy. A near-match on a similar name is contamination, not confirmation — record both candidates and pick neither. Also writes an event, so the finding shows up in catch-me-up without a second read surface. NOT ONLY PEOPLE SINCE 0066: subject_kind campaign / platform / pillar / format files a finding against a THING — a platform, a content pillar, a format, a campaign — which is how the marketing seat's measured conclusions finally get a home. Read them back through v_record_flag_subject, which resolves every branch to a name. AND NOT ONLY BUSINESS RECORDS SINCE 0101: a finding can be filed against CODE — pass 'commit:<sha>' (the one repo at that commit), 'owner/name@<sha>', or 'repo:owner/name' (the codebase itself) and the subject is minted on first use. That is how a code review's result — INCLUDING its failure finding, which is the one a reader most needs — becomes part of the record instead of surviving only in a local sidecar. Read code findings back through v_code_finding, which carries repo and commit_sha as their own columns.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       subject: { type: "string", description: "C-127 / L-204 / V-CPA-006 / P-0301, an exact deal name, or — when subject_kind is campaign/platform/pillar/format — a campaign name or a marketing_subject slug ('twitter', 'reel'). CODE (0101): 'commit:<sha>' files against the one repo at that commit, 'owner/name@<sha>' against another repo, 'repo:owner/name' against the codebase itself." },
@@ -5828,7 +6128,7 @@ export const TOOLS = {
 
   "teach": {
     write: true,
-    description: "Write a rule from the human's own words (status: proposed — after exact enforcement is built and verified, one explicit human approve-rule act atomically activates the enforced policy). Capture the verbatim quote. Personal-scope rules (voice, format) set personal_to. WHEN TO CALL IT — the test is 'would the system have to ask this again?', NOT whether the partner phrased it as 'always X' or 'never Y'. Standing lessons arrive as ordinary sentences: a modeling ruling ('cadence studio is one national account'), a correction to a fact in the record, a choice between options you offered with the reasoning attached, a rejection of a draft. Capture on the spot, never at 'session close' — the same event-not-session-close rule protocol 27b already settles. Pass supersedes when this rule replaces an earlier one; the old rule is retired with an immutable receipt in the same transaction. Superseding an ACTIVE rule requires a human caller and the same authority connection as retire-rule. ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10): every teach REQUIRES enforcement_home, one of 'gate' (a deny/stop control will carry it — name carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control ever will — say why_no_machine in one line). This is a refusal, not a default: a rule captured with nobody having said where it will live is exactly how guidance debt piled up before this slice, and a silent default would be indistinguishable from a considered choice. THIS IS CLERICAL WORK, NOT SELF-MODIFICATION, AND IT IS NEVER REFUSED ON THAT GROUND. Joe's ruling 2026-08-10, verbatim: 'You didn't make your own rule. You applied my rule to the system.' A session INVENTING a standing rule for itself would be self-modification and would be gated. A session TRANSCRIBING what a partner just said is the entire purpose of this verb, and the gate is already built into it: the rule lands as PROPOSED, binds nobody, and takes effect through one human approve-rule act only when enforcement is ready. A session that declines to record a partner's instruction because writing rules 'feels like' changing itself has not been careful, it has lost the instruction — which is the one outcome this verb exists to prevent. Recorded because a session hit exactly this on the day the ruling was made and stopped three routes early.",
+    description: "Write a rule from the human's own words (status: proposed — after exact enforcement is built and verified, approve-rule atomically activates the enforced policy; under decision cbe91287 (Joe, 2026-10-12) that approval is a technical-check act the rule-approval worklist performs after a ready rule-admission preflight, with the partner's recorded quote as its authority, not a live human tap). Capture the verbatim quote. Personal-scope rules (voice, format) set personal_to. WHEN TO CALL IT — the test is 'would the system have to ask this again?', NOT whether the partner phrased it as 'always X' or 'never Y'. Standing lessons arrive as ordinary sentences: a modeling ruling ('cadence studio is one national account'), a correction to a fact in the record, a choice between options you offered with the reasoning attached, a rejection of a draft. Capture on the spot, never at 'session close' — the same event-not-session-close rule protocol 27b already settles. Pass supersedes when this rule replaces an earlier one; the old rule is retired with an immutable receipt in the same transaction. Superseding an ACTIVE rule requires a human caller and the same authority connection as retire-rule. ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10): every teach REQUIRES enforcement_home, one of 'gate' (a deny/stop control will carry it — name carrying_control), 'jit' (delivered just-in-time by pack/moment), 'core' (always-loaded), or 'judgment_advisory' (no mechanical control ever will — say why_no_machine in one line). This is a refusal, not a default: a rule captured with nobody having said where it will live is exactly how guidance debt piled up before this slice, and a silent default would be indistinguishable from a considered choice. THIS IS CLERICAL WORK, NOT SELF-MODIFICATION, AND IT IS NEVER REFUSED ON THAT GROUND. Joe's ruling 2026-08-10, verbatim: 'You didn't make your own rule. You applied my rule to the system.' A session INVENTING a standing rule for itself would be self-modification and would be gated. A session TRANSCRIBING what a partner just said is the entire purpose of this verb, and the gate is already built into it: the rule lands as PROPOSED, binds nobody, and takes effect through approve-rule only when enforcement is built, verified and its preflight reads ready. A session that declines to record a partner's instruction because writing rules 'feels like' changing itself has not been careful, it has lost the instruction — which is the one outcome this verb exists to prevent. Recorded because a session hit exactly this on the day the ruling was made and stopped three routes early.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, statement: { type: "string" },
       human_quote: { type: "string" }, scope: { type: "object" },
@@ -5840,6 +6140,7 @@ export const TOOLS = {
       why_no_machine: { type: "string", description: "REQUIRED when enforcement_home is 'judgment_advisory'. One line: why no mechanical control can carry this rule." } },
       required: ["idempotency_key","statement","human_quote","enforcement_home"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "teach", args, async () => {
+      validateRuleScope(args.scope);
       // ENFORCEMENT-FIRST BIRTH (WR-000019 slice S10). See the description
       // above: a clear, named refusal rather than a silent default, so an
       // existing caller that has not been told about this yet gets an error
@@ -6049,7 +6350,7 @@ export const TOOLS = {
 
   "approve-rule": {
     write: true, authorityOnly: true,
-    description: "Approve one captured system rule in a single Joe-authority act. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
+    description: "Approve one captured system rule as a technical-check act (decision cbe91287, Joe, 2026-10-12: his approval is removed from everything the system can do itself). The rule-approval worklist (./run.sh rule-approvals --apply) calls it on Joe's authority database connection only after ops/rule-admission-audit.py --preflight --rule-id reads the rule ready; Joe's recorded quote and ruling are the authority, not a live tap. Approval means the server atomically verifies exact registered enforcement, records the immutable authority receipt, and activates the rule in the same transaction. There is no approved-but-inactive or active-but-pending state. If enforcement is missing, approval refuses so the system must build and verify the control before carrying Joe's already-recorded approval. Dell retains teaching, review and optional participation capability but cannot replace Joe as the required system authority. Advisory guidance is not mislabeled as an unbreakable rule.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Full UUID or the short id printed by standing-context." },
@@ -6114,9 +6415,9 @@ export const TOOLS = {
   // multi-table read.
   "governance-queue": {
     write: false,
-    description: "Read every pending governance decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, and retrieval proposals awaiting approve-retrieval-proposals — each with enough context to decide. Read-only; grants no authority and performs no decision itself.",
+    description: "Read every pending decision in one payload: rules admitted and awaiting approve-rule, guidance import batches staged and awaiting decide-guidance-import-batch, retrieval proposals awaiting approve-retrieval-proposals, and needs_joe — the ONE list of every open item waiting on Joe (action-required and Joe-owned loops, Work Requests in needs_joe, unanswered board questions, rule approvals, and the locally published PR and tabled items), each with a plain title, why only Joe can do it, the one action, link, age and what it blocks, ordered by what it blocks. Items the system can decide itself are excluded and counted by reason. Read-only; grants no authority and performs no decision itself.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
-    handler: async (c) => {
+    handler: async (c, actor, _args, { now } = {}) => {
       const row = (await c.query("select ops.read_governance_queue() as queue /* governance-queue */")).rows[0];
       const queue = row?.queue || {};
       const rules = queue.pending_rule_approvals || [];
@@ -6133,6 +6434,7 @@ export const TOOLS = {
           pending_retrieval_proposals: proposals.length,
           total: rules.length + batches.length + proposals.length,
         },
+        needs_joe: await readNeedsJoe(c, actor, queue, { now }),
       };
     },
   },
@@ -6265,7 +6567,7 @@ export const TOOLS = {
 
   "retire-rule": {
     write: true, authorityOnly: true,
-    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
+    description: "Joe-authority retirement of a proposed or active rule through one database transaction. It writes an immutable retirement receipt bound to the exact rule version, statement hash, prior approval or explicit missing-approval marker, reason and replacement before changing status. Direct writer updates cannot retire a rule. Retirement preserves the frozen rule text and history; a changed rule must be taught and approved separately.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string", description: "Accepts either the full 36-character uuid or the 8-character SHORT FORM the gist index and standing-context print (e.g. '179be4b8'); an ambiguous prefix returns the candidates rather than guessing." },
@@ -6293,9 +6595,16 @@ export const TOOLS = {
       }
 
       const was = cur.rows[0].status;
-      const retired = await c.query(
-        "select ops.retire_rule($1,$2,$3,$4) as result",
-        [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      let retired;
+      try {
+        retired = await c.query(
+          "select ops.retire_rule($1,$2,$3,$4) as result",
+          [args.rule_id, reason, args.superseded_by || null, args.idempotency_key]);
+      } catch (error) {
+        if (error.code !== "P0001") throw error;
+        throw new ToolError({ error: "rule_retirement_refused", rule_id: args.rule_id,
+          message: redact(error.message) });
+      }
       const result = retired.rows[0].result;
       await writeEvent(c, actor, "retire-rule", "rule", args.rule_id, {
         field: "status", old: { status: was }, new: { status: "retired" },
@@ -6323,7 +6632,7 @@ export const TOOLS = {
   // re-litigated; rules simply never got the same affordance.
   "amend-rule": {
     write: true, authorityOnly: true,
-    description: "Correct the WORDS of a rule in place, keeping its id, created_at, taught_by and quote. THE LINE: amend = same rule, better words; teach + retire = a different rule. A PROPOSED rule's statement, human_quote (fill-only) and scope may all be corrected directly, no authority principal required beyond the write itself. An ACTIVE rule's quote, scope, audience and enforcement preimage stay frozen — changing any of them would make the old approval receipt appear to bless new substance — but its STATEMENT ALONE may now be amended (WR-000019 slice S10) through a Joe-authority-guarded, receipted path (ops.amend_rule_statement): an append-only ops.rule_amendment_receipt hashes the prior words, and the enforced rule keeps reciting under its old approval. To change an active rule's scope, quote or audience, still teach and approve a corrected replacement, then retire this one. Requires base_version from a fresh read; a conflict is never retried blind.",
+    description: "Amend a rule in place, preserving its id, created_at, taught_by, quote and audience. Proposed rules may correct statement, fill an absent human_quote, or replace scope. Active rules may correct statement and add new scope keys while preserving every stored scope key and value, including provenance. Active changes require Joe authority and an immutable amendment receipt. Supply the full merged scope, a reason, idempotency_key and base_version from a fresh read. Non-additive active scope rewrites and active quote changes refuse. Retired rules are immutable.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       rule_id: { type: "string" },
@@ -6334,6 +6643,7 @@ export const TOOLS = {
       reason: { type: "string", description: "REQUIRED. Why the wording is being corrected — an unexplained edit to a binding rule is indistinguishable from drift." } },
       required: ["idempotency_key","rule_id","base_version","reason"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "amend-rule", args, async () => {
+      validateRuleScope(args.scope);
       const reason = String(args.reason || "").trim();
       if (!reason) throw new ToolError({ error: "reason_required",
         hint: "say in one line why the wording is wrong; a silent edit to a binding rule reads as drift later" });
@@ -6369,41 +6679,38 @@ export const TOOLS = {
       const changed = [];
       if (nextStatement !== row.statement) changed.push("statement");
       if (nextQuote !== row.human_quote) changed.push("human_quote");
-      if (JSON.stringify(nextScope) !== JSON.stringify(row.scope)) changed.push("scope");
+      if (canonicalJson(nextScope) !== canonicalJson(row.scope)) changed.push("scope");
       if (!changed.length) throw new ToolError({ error: "no_change",
         hint: "nothing was written; the rule already reads exactly this way" });
 
       if (row.status === "active") {
-        // The old approval's preimage — quote, scope, audience, enforcement —
-        // stays frozen exactly as before. Only the ONE axis the versioned
-        // amendment path exists to correct (statement) may move; a request
-        // that also touches scope or quote still refuses, same as always.
-        if (changed.includes("scope"))
+        if (changed.includes("scope") && !Object.entries(row.scope).every(([key, value]) =>
+          Object.hasOwn(nextScope, key) && canonicalJson(nextScope[key]) === canonicalJson(value)))
           throw new ToolError({ error: "active_rule_scope_frozen", rule_id: args.rule_id,
-            hint: "scope is part of the approval preimage and stays frozen on an active rule; teach the corrected rule, approve it, and retire this one to change scope" });
+            hint: "an active scope backfill must preserve every existing key and value; pass the stored scope merged with new selection keys" });
         if (changed.includes("human_quote"))
           throw new ToolError({ error: "active_rule_quote_frozen", rule_id: args.rule_id,
             hint: "the partner's words are testimony, not prose, and stay fixed once a rule is active" });
 
-        // changed is now exactly ["statement"] — ops.amend_rule_statement,
-        // guarded like ops.approve_rule (Joe authority, refuses a retired
-        // rule), writes the receipt and updates rule.statement atomically.
-        const amended = await c.query(
-          "select ops.amend_rule_statement($1,$2,$3,$4) as result",
-          [args.rule_id, nextStatement, args.idempotency_key, reason]);
+        const amended = changed.includes("scope")
+          ? await c.query("select ops.amend_rule_scope($1,$2::jsonb,$3,$4,$5,$6) as result",
+              [args.rule_id, JSON.stringify(nextScope), nextStatement, args.base_version,
+                args.idempotency_key, reason])
+          : await c.query("select ops.amend_rule_statement($1,$2,$3,$4) as result",
+              [args.rule_id, nextStatement, args.idempotency_key, reason]);
         const result = amended.rows[0]?.result;
         if (!result || !result.ok)
           throw new ToolError({ error: "rule_amendment_failed", rule_id: args.rule_id });
 
         await writeEvent(c, actor, "amend-rule", "rule", args.rule_id, {
-          field: "statement",
-          old: { statement: row.statement },
-          new: { statement: nextStatement },
+          field: changed.join(","),
+          old: { statement: row.statement, scope: row.scope },
+          new: { statement: nextStatement, scope: nextScope },
           agent_rationale: reason,
           idempotency_key: args.idempotency_key });
 
         return { ok: true, rule_id: args.rule_id, status: "active",
-                 changed: ["statement"], version: result.rule_version_after, reason,
+                 changed, version: result.rule_version_after, reason,
                  replayed: !!result.replayed,
                  amendment_receipt_id: result.amendment_receipt_id,
                  note: "amended under Joe authority and receipted; the rule stays active and keeps reciting under its old approval" };
@@ -6792,9 +7099,10 @@ export const TOOLS = {
       number: { type: "string", description: "override the auto-assigned ref. Only pass this to reproduce a number that already exists somewhere; the files already contain collisions." },
       since: { type: "string", description: "YYYY-MM-DD; defaults to today" },
       blocker: { type: "string", enum: BLOCKER_CLASSES,
-        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential, gate or verb this session cannot hold (name it). IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
+        description: "REQUIRED on kind open_loop: why THIS session cannot do the work now. Every value is a state of the world outside the session, and the list is closed on purpose — there is no value meaning 'later'. human_only = needs Joe or Dell in person (a call, a signature, a site visit, a login only he holds) · counterparty = waiting on someone outside (name the landlord, broker, client or vendor) · ruling = needs Joe's decision (state the question) · external_event = a dated event must arrive first (name the date) · other_lane = depends on another lane's in-flight deliverable (name it) · capability = a credential this session cannot hold (name it). human_only, ruling and capability also REQUIRE residue_kind and residue_host: only an act a provider or the OS reserves to the account holder may wait on Joe. IF NONE OF THESE FIT, DO NOT FILE THE LOOP — do the work. Not asked for team_loop or action_required (the blocker is the other partner by construction) or for idea (parked by design)." },
       blocker_detail: { type: "string",
-        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." } },
+        description: "REQUIRED whenever `blocker` is set: the SPECIFIC thing, named. 'the landlord' is not a counterparty; 'Sanders, the listing broker on C-112' is. 'a ruling' is not a ruling; 'whether the 3% escalation cap applies to renewal years' is." },
+      ...RESIDUE_SCHEMA },
       required: ["idempotency_key", "kind", "owner"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-loop", args, async () => {
       // kind decides EVERYTHING downstream — the deferral gate, the tier, and
@@ -6858,7 +7166,8 @@ export const TOOLS = {
       // (a write verb accepted a field and silently discarded it), found by the
       // sweep loop #476 asked for. Refuse instead: the caller either meant a
       // different kind or did not need the field.
-      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined))
+      if (!blockerGated && (args.blocker !== undefined || args.blocker_detail !== undefined
+          || args.residue_kind !== undefined || args.residue_host !== undefined))
         throw new ToolError({ error: "blocker_not_carried_by_kind",
           kind: args.kind, blocker: args.blocker || null,
           hint: "only an open_loop carries a blocker — on every other kind the field would be " +
@@ -6872,7 +7181,10 @@ export const TOOLS = {
         if (!BLOCKER_CLASSES.includes(args.blocker))
           throw new ToolError({ error: "unknown_blocker_class",
             got: args.blocker, classes: BLOCKER_CLASSES,
-            hint: "the list is closed — every entry is a state of the world outside this session" });
+            hint: args.blocker === "credential"
+              ? "a credential block is filed as blocker:'capability' with residue_kind " +
+                "'provider_login' or 'os_password' and the residue_host that holds it"
+              : "the list is closed — every entry is a state of the world outside this session" });
         const detail = (args.blocker_detail || "").trim();
         if (detail.length < 12)
           throw new ToolError({ error: "blocker_detail_required", got: detail || null,
@@ -6882,6 +7194,8 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_vague", matched: vague[0],
             hint: `"${vague[0]}" names a feeling about time, not a blocker. Say who or what has to happen first — and if nothing has to, do the work now instead of filing this.` });
       }
+      // ── THE RESIDUE GATE ── see RESIDUE_KINDS above.
+      const residue = blockerGated ? blockerResidue(args.blocker, args) : null;
       // capability_no_decider and internal_decision_parked (bypass audit
       // C33/C34, ported from hooks/blocker-decider-gate.py and
       // hooks/escalation-gate.py) are enforced in this module's
@@ -6932,6 +7246,17 @@ export const TOOLS = {
           hint: "the loop importer has not run for this kind — nothing to render into" });
       const block = b.rows[0];
 
+      // Monitor incident identity is shared across principals; envelope replay is not.
+      if (args.kind === "open_loop" && args.domain === "system" &&
+          args.source_note === "uptime-monitor:availability:v1") {
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [args.source_note]);
+        const incident = await c.query(
+          "select id, number from loop_item where source_note=$1 and kind='open_loop' and domain='system' and status='open' for update",
+          [args.source_note]);
+        if (incident.rows.length) return { ok: true, loop_id: incident.rows[0].id,
+          number: incident.rows[0].number, kind: args.kind, deduplicated: true };
+      }
+
       const num = args.number || await nextLoopNumber(c, args.kind);
       const seq = await nextRenderSeq(c, block.id);
       const tier = (args.kind === "open_loop" || args.kind === "idea") ? "personal" : "shared";
@@ -6941,15 +7266,17 @@ export const TOOLS = {
         `insert into loop_item (kind, number, block_id, render_seq, title, body, owner,
            since_text, unblocks, source_note, marker, marker_literal, due_on,
            drift_critical, status, tier, personal_to, created_by, updated_by, domain,
-           blocker_class, blocker_detail)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20)
+           blocker_class, blocker_detail, extra_cells)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'open',$15,$16,$17,$17,$18,$19,$20,
+                 $21::jsonb)
          returning id`,
         [args.kind, num, block.id, seq, args.title || null, args.body || null, args.owner,
          args.since || new Date().toISOString().slice(0, 10), args.unblocks || null,
          args.source_note || null, marker, literal, args.due_on || null,
          args.drift_critical === true, tier, personal, actor.id, args.domain || null,
          blockerGated ? args.blocker : null,
-         blockerGated ? args.blocker_detail.trim() : null]);
+         blockerGated ? args.blocker_detail.trim() : null,
+         JSON.stringify(residue ? { blocker_residue: residue } : {})]);
 
       // The blocker goes on the EVENT as well as the row: an open_loop that was
       // filed under a blocker which later turns out to be false is a thing Joe
@@ -6959,11 +7286,13 @@ export const TOOLS = {
         { new: { number: num, kind: args.kind, section: wantKey, marker,
                  due_on: args.due_on || null, owner: args.owner, domain: args.domain || null,
                  blocker_class: blockerGated ? args.blocker : null,
-                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null },
+                 blocker_detail: blockerGated ? args.blocker_detail.trim() : null,
+                 blocker_residue: residue },
           idempotency_key: args.idempotency_key });
       return { ok: true, loop_id: r.rows[0].id, number: num, kind: args.kind,
                section: wantKey, renders_into: block.rel_path,
-               blocker: blockerGated ? args.blocker : null };
+               blocker: blockerGated ? args.blocker : null,
+               ...(residue ? { residue } : {}) };
     }),
   },
 
@@ -6989,9 +7318,10 @@ export const TOOLS = {
         "the marker and is why a careful caller still walked into it — defect e34d2b88, 46 " +
         "writes lost on 2026-08-20." },
       drift_critical: { type: "boolean" },
-      blocker: { type: "string", enum: ["human_only","counterparty","ruling","external_event","other_lane","capability"],
-        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not." },
+      blocker: { type: "string", enum: BLOCKER_CLASSES,
+        description: "REVISE what the loop is waiting on. add-loop refuses a loop without a blocker, but until 2026-08-09 nothing could change one, so a blocker named on day one was permanent even after the real obstacle turned out to be different — found on loop #295, whose blocker read human_only until building it revealed the actual block was a missing corpus (other_lane). Changing this requires blocker_detail too: a reclassification with the old specifics attached is worse than the original, because it reads as current and is not. Reclassifying to human_only, ruling or capability also requires residue_kind and residue_host; reclassifying to any other class clears the stored residue." },
       blocker_detail: { type: "string", description: "the SPECIFIC thing, restated for the new class: which person, which ruling, which date, which prerequisite. Required whenever blocker changes; may also be passed alone to sharpen the detail without reclassifying." },
+      ...RESIDUE_SCHEMA,
       renumber_reason: { type: "string", description: "REQUIRED whenever number changes: why, and where the old number still appears. Rule 7105955b binds here — a renumbered row is not an abandoned one, and the note recording the change has to say so in its first words, because the old number lives on in other rows' prose and in every generated render." },
       last_surfaced: { type: "string", description: "IDEA ROWS ONLY: stamp the idea bank's 'Last surfaced' column, YYYY-MM-DD. This is what the monthly resurface writes when a parked idea is presented and KEPT — the column its own rotation reads to pick the oldest ideas next month. Blank or '—' means never surfaced, so leaving it unwritten is not neutral: it keeps re-presenting the same rows." },
       section: { type: "string", enum: ["hot", "backlog", "open"], description: "move the row to this section of its file" } },
@@ -7013,6 +7343,10 @@ export const TOOLS = {
       for (const f of ["title", "body", "owner", "unblocks", "source_note", "domain"])
         if (args[f] !== undefined) set(f, args[f]);
       if (args.drift_critical !== undefined) set("drift_critical", args.drift_critical === true);
+      // extra_cells is one jsonb column several fields merge into; each edit
+      // wraps this expression and it is assigned once, below.
+      const extraCellsBase = "coalesce(extra_cells,'{}'::jsonb)";
+      let extraCells = extraCellsBase;
 
       // A blocker may be REVISED, because what a loop is waiting on is a finding
       // and findings change. Reclassifying without restating the specifics is
@@ -7025,6 +7359,20 @@ export const TOOLS = {
           throw new ToolError({ error: "blocker_detail_required",
             hint: "changing the blocker class means restating the specific thing it is now waiting on. Pass blocker_detail in the same call." });
         set("blocker_class", args.blocker);
+      }
+      // THE RESIDUE GATE on the edit path, so a row cannot be filed clean and
+      // reclassified onto Joe without naming what only he can do. A residue
+      // passed alone (no reclassification) is checked against the row's
+      // current class: that is how a legacy human_only row gains one.
+      if (args.blocker !== undefined || args.residue_kind !== undefined
+          || args.residue_host !== undefined) {
+        const residue = blockerResidue(args.blocker !== undefined ? args.blocker : cur.blocker_class, args);
+        if (residue) {
+          vals.push(JSON.stringify(residue));
+          extraCells = `(${extraCells} || jsonb_build_object('blocker_residue', $${vals.length}::jsonb))`;
+        } else {
+          extraCells = `(${extraCells} - 'blocker_residue')`;
+        }
       }
       if (args.blocker_detail !== undefined) set("blocker_detail", args.blocker_detail);
 
@@ -7088,9 +7436,9 @@ export const TOOLS = {
             hint: "YYYY-MM-DD. The rotation sorts on this text, so a free-form date " +
                   "silently sorts wrong and the same ideas keep coming back." });
         vals.push(args.last_surfaced);
-        sets.push("extra_cells=coalesce(extra_cells,'{}'::jsonb) || " +
-                  `jsonb_build_object('last_surfaced', $${vals.length}::text)`);
+        extraCells = `(${extraCells} || jsonb_build_object('last_surfaced', $${vals.length}::text))`;
       }
+      if (extraCells !== extraCellsBase) sets.push(`extra_cells=${extraCells}`);
 
       if (args.marker !== undefined || args.due_on !== undefined) {
         const marker = args.marker !== undefined ? args.marker : cur.marker;
@@ -8109,253 +8457,6 @@ export const TOOLS = {
     }),
   },
 
-  // ===== the Gate Zero read-only outcome (DoctorCRE v5 slice V5-A02, Step B) =====
-  //
-  // ONE VERB, AND IT CARRIES THE FIRST NON-HUMAN, NON-SPONSORED AUTHORITY CLASS
-  // IN THIS REGISTRY. Every write verb before it either gated on a verified
-  // human partner (`humanOnly: true`) or admitted any sponsored agent. This one
-  // is neither: it refuses every actor except the single review-token seat that
-  // holds oracle:gate-producer:gate-zero-read-only, under Joe's 2026-09-13
-  // ruling d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70. The gate is enforced in
-  // executeRegisteredTool through the `oracleSeatOnly` flag AND again inside the
-  // handler through deriveGateZeroProducerSeat AND a third time in SQL by
-  // ops.gate_zero_producer_actor_id() -- three independent derivations of one
-  // fact, because a flag that nothing enforces is a label, which is exactly the
-  // defect WR-000021 found on humanOnly.
-  //
-  // WHY IT IS DEFINED HERE rather than in a store module of its own: the
-  // registry's source locator is part of the runtime mutation contract, and the
-  // contract for this verb should read from the same file every other inline
-  // verb's does. The receipt contract and the seat derivation live in
-  // gate-zero-outcome-store.v5.js, which registers no verb of its own.
-  "record-gate-zero-read-only-outcome": {
-    write: true, humanOnly: false, oracleSeatOnly: true,
-    description: "ORACLE-SEAT-ONLY, AND NOT A HUMAN ACT: record the DoctorCRE v5 Gate Zero read-only outcome as one consumer-gate-receipt.v1, its recomputed digest, the instant it was observed and the seat that produced it. It refuses every actor except the one review-token seat holding oracle:gate-producer:gate-zero-read-only — a partner is refused, a sponsored agent is refused, and a review-token seat on a DIFFERENT lane is refused by name rather than admitted by authority class. That shape exists because r7 registers this producer's role as independent_control_plane_oracle and Joe ruled on 2026-09-13 (decision d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70) that the seat records the row on its own authority with no partner countersign. THE HUMAN ACT IN THIS CHAIN IS UNCHANGED AND IS DOWNSTREAM: accept-benchmark-manifest-draft is still humanOnly and still derives its acceptor from a live verified partner. THE RECEIPT IS PRODUCED IN THIS CALL, NOT SUPPLIED: the verb takes ONE argument, idempotency_key, and invokes the bound producer seam — Step A's zero-argument Gate Zero producer — which derives its own run binding, aims the three ruled evidence readers at it and assembles one consumer-gate-receipt.v1 signed with the identity the server derived for this call. There is no receipt argument and no receipt-shaped argument: any other top-level field is refused as unregistered_operation_fields before the handler runs. NOTHING HERE IS A CALLER'S WORD FOR ANYTHING — the producing seat comes from the frozen registration, the actor from the authenticated bearer match, the three receipt identities from the authenticated call, and the outcome digest is RECOMPUTED by the record layer from the stored receipt, so no caller-supplied digest is accepted and none is sent. What the producer emits is still checked against the closed twenty-one-field r7 schema, against the twelve constants the producer registry fixes, against the closed three-field authenticated-receipt-identity.v1 shape, and against the identity rule that the producer and evaluator are this call while the subject maker is not. A producer refusal records nothing and is reported as gate_zero_outcome_not_produced with the reason the producer gave. RETRYABLE, IMMUTABLE FIRST OUTCOME: any later call for the same candidate returns the row already recorded rather than writing a second one. If the offered receipt differs because its session, instant, evidence or verdict moved, it converges onto that immutable row so the caller can heal a missing audit event; the result explicitly separates recorded and offered digests, statuses and producer reasons. candidate_scoped_digest is informational only; candidate_digest is the row arbiter. It grants no dispatch, activation or execution authority, accepts no benchmark and starts no clock.",
-    // ONE ARGUMENT, AND IT NAMES AN INTENDED ACT RATHER THAN A SUBJECT. The
-    // caller says "record the outcome, once, under this key"; WHAT gets recorded
-    // is produced here. A `receipt` property was in the first draft of this verb
-    // and is deliberately gone: the closed top-level check in mutation-registry.js
-    // refuses any key that is not in this list as `unregistered_operation_fields`,
-    // so `receipt`, `outcome`, `consumer_gate_receipt` and every other
-    // receipt-shaped spelling is refused BEFORE the handler runs.
-    inputSchema: {
-      type: "object", additionalProperties: false,
-      properties: {
-        idempotency_key: { type: "string" },
-      },
-      required: ["idempotency_key"],
-    },
-    handler: async (c, actor, args) => withEnvelope(c, actor, "record-gate-zero-read-only-outcome", args, async () => {
-      // ORDER IS DELIBERATE, and it is the same order the record layer uses.
-      //   1. The seat is derived from the LIVE actor and the frozen
-      //      registration. It runs FIRST, so an actor who may not write here
-      //      never reaches a contract check that could tell them about the
-      //      receipt shape.
-      //   2. The receipt is checked against the derived seat.
-      //   3. Only then does anything reach the database, where all three
-      //      derivations happen again as the function owner.
-      const seat = deriveGateZeroProducerSeat(actor);
-
-      // THE RECEIPT IS PRODUCED, NOT RECEIVED (2026-09-13, PR 1014 correction).
-      // `emitGateZeroOutcome` is the gate's bound producer seam: it calls Step
-      // A's zero-argument producer, which derives its own run binding, aims the
-      // three ruled readers at it, applies the three clauses over what came back
-      // and assembles one consumer-gate-receipt.v1 signed with the identity
-      // identity.js derived for THIS call. Nothing is handed in and nothing can
-      // be: the producer's arity is zero and this verb has no receipt argument.
-      //
-      // A REFUSAL IS NOT A ROW. The producer refuses when it cannot authenticate,
-      // when a row its binding stands on is absent, when a ruled seam returned no
-      // row for the address it derived, or when its own falsifiers did not fire.
-      // Each of those is a run that established nothing, so nothing is written
-      // and the reason is reported by name. A clause that was READ and did not
-      // hold is the opposite case: that is a real outcome with `status: "fail"`,
-      // and it is recorded.
-      const emitted = await emitGateZeroOutcome();
-      if (emitted?.decision !== "report" || emitted?.status !== "outcome_produced"
-          || !emitted?.receipt) {
-        throw new ToolError({ error: "gate_zero_outcome_not_produced",
-          reason_id: emitted?.reason_id ?? null,
-          unavailable_because: emitted?.unavailable_because ?? null,
-          decided_by: emitted?.decided_by ?? null,
-          owed_seams: emitted?.owed_seams ?? null,
-          producer_bound: emitted?.producer_bound ?? null,
-          hint: "the Gate Zero producer did not emit an outcome in this call, so there is nothing to record. " +
-                "This is a refusal by the producer over the rows it derived, not a caller error: no receipt " +
-                "argument exists and none would have changed it." });
-      }
-      // CHECKED ANYWAY, against the derived seat and this call's own identity.
-      // The producer already assembled the twenty-one fields, so this cannot be
-      // a caller's malformed object -- which is exactly why it is checked: the
-      // contract is the record layer's, not the producer's, and a producer that
-      // drifted from r7's shape must be refused at the write path rather than
-      // trusted because it is ours.
-      const receipt = assertGateZeroReceipt(emitted.receipt, seat);
-
-      // THE WRITE RUNS ON THE SEAT'S OWN CONNECTION, NOT ON `c` (2026-09-14,
-      // PR 1014 third correction, standing-rule amendment 9).
-      //
-      // `c` is the ordinary writer connection every other verb uses, and that is
-      // exactly why this call may not travel on it. Sol's finding 2: the record
-      // layer's seat test read carr.acting_actor_slug, a GUC any session can set
-      // on itself, so any carr_writer connection could have named the staffed
-      // lane and been believed. Migration 0502 now revokes EXECUTE from
-      // carr_writer, grants it to one capability bundle reachable by one login
-      // role, and derives the seat from session_user. This opens a connection
-      // that AUTHENTICATES as that role, with a secret used for nothing else.
-      //
-      // NO FALLBACK, BY DESIGN. A Worker that carries no such secret refuses here
-      // by name. Falling back to `c` would be a deployment in which the whole
-      // amendment is off and nothing said so — which is the failure this correction
-      // exists to close, not a degradation worth tolerating.
-      if (typeof c.seatConnection !== "function") {
-        throw new ToolError({ error: "gate_zero_seat_connection_unavailable",
-          required_secret: GATE_ZERO_WRITER_SECRET_NAME,
-          hint: "recording a Gate Zero outcome requires the dedicated producer connection. The ordinary " +
-                "writer connection is refused by the record layer and is not used as a fallback: provision " +
-                "the login role and its secret before this verb can record anything." });
-      }
-      // ONE TRANSACTION ON THAT CONNECTION, carrying the write and the readback
-      // together. The readback has to be inside it: on a FIRST call the row is
-      // this transaction's own and is not visible to any other connection until
-      // it commits.
-      const row = await c.seatConnection(async seat => {
-        const recordedId = (await seat.query(
-          `select ops.gate_zero_record_read_only_outcome($1::uuid,$2::jsonb) as id`,
-          [args.idempotency_key, JSON.stringify(receipt)])).rows[0].id;
-
-        // READ THE DIGEST BACK OUT OF THE ROW rather than reporting the one this
-        // process computed. The database recomputes it from the persisted receipt
-        // with ops.gate_zero_outcome_digest(); reporting our own value would let a
-        // caller believe a number the record layer never agreed to. The locally
-        // computed digest is compared, not returned, so a divergence between the
-        // two canonicalizations is a refusal here instead of a silent mismatch
-        // that only surfaces when a benchmark acceptance binds the wrong value.
-        //
-        // THE STORED RECEIPT COMES BACK TOO, AND THE CHECK IS AGAINST IT rather
-        // than against this call's object (PR 1014, second correction). On a
-        // RETRY the row is the earlier run's -- same candidate, different
-        // session_ref, different instants -- so comparing the row's digest with a
-        // digest of THIS call's receipt refused every genuine second call, which
-        // was the gateway half of Sol's finding 3. Recomputing from the persisted
-        // receipt asks the question the check was always meant to ask: do the
-        // record layer's canonical JSON and artifact-trust.js's agree about the
-        // bytes that are actually stored? That holds on a first call and a retry
-        // alike, and it is the stronger of the two readings.
-        return (await seat.query(
-          `select id, outcome_digest, candidate_scoped_digest, candidate_digest, status,
-                  producing_seat_ref, receipt,
-                  to_char(observed_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as observed_at,
-                  to_char(recorded_at at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') as recorded_at
-             from ops.gate_zero_read_only_outcome where id = $1::uuid`,
-          [recordedId])).rows[0];
-      });
-      const localDigest = gateZeroOutcomeDigest(row.receipt);
-      if (row.outcome_digest !== localDigest) {
-        throw new ToolError({ error: "gate_zero_outcome_digest_divergence",
-          recorded: row.outcome_digest, recomputed_here: localDigest,
-          hint: "the record layer's canonical JSON and artifact-trust.js's disagreed about the stored receipt. " +
-                "The recorded value is the database's; this is a contract defect, not a caller error." });
-      }
-      // AND THE TWO CANONICALIZATIONS AGREE ABOUT THE PROJECTION TOO, asked over
-      // the STORED receipt exactly as the full digest above is. This is the same
-      // contract question in the narrower place: does the record layer's
-      // projection-then-canonicalize produce the bytes artifact-trust.js's does?
-      // It is a property of the row alone, so it holds on a first write and on
-      // every retry that converges onto the immutable row.
-      const storedCandidateDigest = gateZeroOutcomeCandidateDigest(row.receipt);
-      if (row.candidate_scoped_digest !== storedCandidateDigest) {
-        throw new ToolError({ error: "gate_zero_outcome_candidate_digest_divergence",
-          recorded: row.candidate_scoped_digest, recomputed_here: storedCandidateDigest,
-          hint: "the record layer's candidate projection and artifact-trust.js's disagreed about the stored " +
-                "receipt. The recorded value is the database's; this is a contract defect, not a caller error." });
-      }
-      // KEEP THE OFFERED RECEIPT SEPARATE FROM THE RECORDED ONE. A normal retry
-      // necessarily carries fresh session and time bytes, and its evidence may
-      // have moved. The record layer returns the immutable row for the candidate
-      // so this outer transaction can heal a missing audit event; these digests
-      // make that convergence visible rather than describing the offered run as
-      // if it had been stored.
-      const offeredDigest = gateZeroOutcomeDigest(receipt);
-      const offeredCandidateDigest = gateZeroOutcomeCandidateDigest(receipt);
-      const convergedOntoRecorded = row.outcome_digest !== offeredDigest;
-
-      // ONE EVENT PER OUTCOME ROW, SERIALIZED ON THE OUTCOME. The retry is
-      // exactly what makes this necessary: it exists to heal a missing event, and
-      // an unguarded insert would instead write a second one every time a call
-      // got past the seat commit.
-      //
-      // THE LOCK BLOCKS, DELIBERATELY. A try-lock let a concurrent retry return
-      // `ok: true` without an event; if the holder then rolled back, the row was
-      // still eventless and only a THIRD call could repair it. That is eventually
-      // healable, not the unconditional second-call healing the refusal requires.
-      // In production the dependency graph has no cycle: each seat transaction
-      // commits before its caller reaches this lock, so a waiter holds no row the
-      // lock owner needs. The former test deadlock came from its harness awaiting
-      // the waiter before committing the owner transaction; the proof now stages
-      // the production order instead of weakening the production invariant.
-      await c.query(
-        "select pg_advisory_xact_lock(hashtextextended($1, 0))",
-        [`gate-zero-outcome-event:${row.id}`]);
-      const eventAlready = await c.query(
-        `select 1 from event
-          where verb = 'record-gate-zero-read-only-outcome'
-            and subject_type = 'gate_zero_outcome' and subject_id = $1::uuid
-          limit 1`, [row.id]);
-      if (!eventAlready.rows.length) {
-        await writeEvent(c, actor, "record-gate-zero-read-only-outcome", "gate_zero_outcome", row.id,
-          { field: "outcome_recorded",
-            new: { outcome_digest: row.outcome_digest,
-                   candidate_scoped_digest: row.candidate_scoped_digest,
-                   candidate_digest: row.candidate_digest,
-                   status: row.status, observed_at: row.observed_at,
-                   producing_seat_ref: row.producing_seat_ref },
-            idempotency_key: args.idempotency_key });
-      }
-
-      return {
-        ok: true, outcome_id: row.id,
-        step_ref: "step:gate-zero-read-only-outcome",
-        gate_id: "gate-zero-read-only-accepted",
-        receipt_schema: GATE_ZERO_RECEIPT_SCHEMA,
-        outcome_digest: row.outcome_digest,
-        // INFORMATIONAL PROJECTION OF THE RECORDED RECEIPT. candidate_digest,
-        // not this value, is the one-row-per-candidate arbiter.
-        candidate_scoped_digest: row.candidate_scoped_digest,
-        candidate_digest: row.candidate_digest,
-        converged_onto_recorded_outcome: convergedOntoRecorded,
-        offered_outcome_digest: offeredDigest,
-        offered_candidate_scoped_digest: offeredCandidateDigest,
-        status: row.status,
-        observed_at: row.observed_at,
-        recorded_at: row.recorded_at,
-        producing_seat_ref: row.producing_seat_ref,
-        producing_seat_charter_decision_ref: seat.charter_decision_ref,
-        producing_seat_staffing_decision_ref: seat.staffing_decision_ref,
-        producer_reason_id: convergedOntoRecorded ? null : emitted.reason_id,
-        receipt_status: row.receipt.status,
-        offered_producer_reason_id: emitted.reason_id,
-        offered_receipt_status: receipt.status,
-        // WHAT THIS ROW IS WORTH, said on the result so a consumer does not read
-        // more into it than it carries.
-        digest_recipe: "canonical-JSON sha256 over the TAGGED two-element array " +
-          "[\"consumer-gate-receipt.v1\", <receipt>], recomputed by the record layer. r7's " +
-          "receipt_payload_digest_rule declares that preimage for this schema (amended 2026-09-13) and states that " +
-          "a plain digest over the receipt alone does not satisfy it. candidate_scoped_digest is the UNTAGGED " +
-          "canonical-JSON sha256 over a projection of the receipt — without observed_at, ttl_expires_at and the " +
-          "per-call session_ref of each of its three identities — because that projection is not a " +
-          "consumer-gate-receipt.v1 and r7's rule does not speak about it. It is an informational comparison aid, " +
-          "not evidence or an admission key; candidate_digest is the one-row-per-candidate arbiter.",
-        effects: Object.freeze({
-          creates_effect: false, clock_started: false, benchmark_accepted: false,
-          note: "recording an outcome binds nothing on its own. Benchmark acceptance reads the current passing " +
-                "outcome and is still humanOnly; the Journey 1 clock still starts at the first passing " +
-                "foundation-assurance-minimum receipt, which this verb neither issues nor reaches.",
-        }),
-      };
-    }),
-  },
-
   "add-industry-event": {
     write: true,
     description: "Record a healthcare CRE industry event such as a conference, association meeting, trade show, or networking event. Timestamps must include their timezone; source and the owner partner are required. Tenant is server-derived.",
@@ -8383,7 +8484,7 @@ export const TOOLS = {
           [tenant, clean.title, clean.organizer, clean.kind, clean.starts_at, clean.ends_at,
            clean.location, clean.is_virtual, clean.url, clean.relevance_note, clean.attendance_intent,
            clean.owner_partner, clean.status, clean.source, actor.id]);
-        const event = inserted.rows[0];
+        const event = industryEventRecord(inserted.rows[0]);
         await writeEvent(c, actor, "add-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
@@ -8406,7 +8507,7 @@ export const TOOLS = {
            from industry_event
           where organization_tenant_id=$1
           order by starts_at, id limit $2`, [organizationTenantForActor(actor), limit]);
-      return { ok: true, events: result.rows, count: result.rows.length };
+      return { ok: true, events: result.rows.map(industryEventRecord), count: result.rows.length };
     },
   },
 
@@ -8424,8 +8525,7 @@ export const TOOLS = {
     }, required: ["idempotency_key", "event_id", "base_version"] },
     handler: async (c, actor, args) => {
       const eventId = industryEventId(args.event_id);
-      if (!Number.isInteger(args.base_version) || args.base_version < 1)
-        throw new ToolError({ error: "industry_event_base_version_invalid" });
+      safeInteger(args.base_version, "industry_event_base_version_invalid", { allowString: false });
       const clean = validateIndustryEventFields(args, { partial: true });
       const keys = ["title", "organizer", "kind", "starts_at", "ends_at", "location", "is_virtual",
         "url", "relevance_note", "attendance_intent", "owner_partner", "status", "source"]
@@ -8451,7 +8551,7 @@ export const TOOLS = {
         if (!result.rows.length)
           throw new ToolError({ error: "industry_event_version_conflict",
             hint: "read the event again and retry with its current version" });
-        const event = result.rows[0];
+        const event = industryEventRecord(result.rows[0]);
         await writeEvent(c, actor, "update-industry-event", "industry_event", event.id,
           { new: event, idempotency_key: args.idempotency_key });
         return { ok: true, event };
@@ -8559,6 +8659,30 @@ export async function assertRegisteredToolInput(name, tool, args = {}) {
   }
 }
 
+// THE UNATTENDED RUNNER'S AUTHORITY ALLOWLIST (PR #1727 review, finding 1).
+// Joe's 2026-10-12 ruling (decision cbe91287) takes his approval off the acts
+// the system can do itself: closing and adjudicating incidents, triage, lead
+// approvals and plan acceptance. It does not reach a rule that binds both
+// partners, a production schedule, a deal or lease fact, a guidance registry,
+// a consent, a share grant or an identity merge, so those stay with a session a
+// partner attends. An unattended runner ingests outside content (Model Room
+// desks, Hermes), so this is a closed list that fails shut: a humanOnly or
+// authorityOnly verb added later is refused to it until someone adds it here.
+// humanCallerOnly verbs never belong on it.
+export const UNATTENDED_AUTHORITY_VERBS = Object.freeze([
+  "close-incident", "adjudicate-incident",
+  "review-and-triage",
+  "approve-lead-move", "undo-lead-move", "approve-lead-draft",
+  "accept-ready-plan", "accept-ready-plan-amendment",
+]);
+const UNATTENDED_AUTHORITY_VERB_SET = new Set(UNATTENDED_AUTHORITY_VERBS);
+
+// Server-derived only: identity.js's unattended door is the one writer of both
+// fields, and either one is enough to treat the actor as unattended.
+function isUnattendedActor(actor) {
+  return actor?.unattended === true || actor?.via === "unattended-token";
+}
+
 export async function executeRegisteredTool(client, actor, name, args = {}) {
   const tool = TOOLS[name];
   if (!tool) throw new ToolError({ error: "unknown_tool", name });
@@ -8596,68 +8720,32 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // WR-000021 overcorrection: the ledger still keeps acting_actor_slug as the
   // actual machine actor while mcp.js separately records the verified sponsor.
   // The registry-wide test covers every present and future humanOnly verb.
+  //
+  // humanCallerOnly is the one carve-out (Joe's 2026-10-12 ruling, decision
+  // cbe91287): a verb carrying it requires the human caller even when a machine
+  // holds sponsor-scoped partner authority, attended or unattended. Every other
+  // humanOnly verb admits the sponsored native/local agent and the unattended
+  // runner alike.
   if (tool.humanOnly === true) {
     const actorClass = authorizationClassForActor(actor);
-    // Identity merges require the human caller even when a machine holds
-    // sponsor-scoped partner authority. Other partner-authority verbs retain
-    // their existing native/local agent route.
+    const humanCallerOnly = tool.humanCallerOnly === true;
     if (actorClass !== "verified_partner" &&
-        (name === "confirm-merge" || !canExercisePartnerAuthority(actor)))
+        (humanCallerOnly || !canExercisePartnerAuthority(actor)))
       throw new ToolError({ error: "human_only_verb_requires_verified_partner",
         verb: name, actor_class: actorClass,
-        hint: name === "confirm-merge" ? "confirm-merge requires a verified human partner; machine identities cannot confirm identity merges." :
+        hint: humanCallerOnly ? `${name} requires a verified human partner; machine identities cannot call it, however they are sponsored.` :
               "this verb records a partner-authority act and requires either the verified partner " +
               "or a server-verified native/local agent bound to that partner's sponsor-scoped " +
               "authority connection." });
   }
-  // ORACLE-SEAT-ONLY IS ENFORCED HERE, AND THIS IS THE ONLY PLACE THAT
-  // ENFORCES IT (2026-09-13, DoctorCRE v5 slice V5-A02 Step B). It is a THIRD
-  // authority shape beside humanOnly and the ordinary sponsored-agent surface,
-  // and it exists because r7 registers a producer whose role is
-  // `independent_control_plane_oracle` and whose seat is a machine: the
-  // independent Codex reviewer lane, whose derived class is `review_agent`.
-  // Joe ruled on 2026-09-13 (decision d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70)
-  // that this seat records the Gate Zero outcome on its own authority, with no
-  // partner countersign.
-  //
-  // IT IS THE MIRROR IMAGE OF humanOnly, not a relaxation of it. humanOnly
-  // refuses every machine; this refuses every human AND every machine but one.
-  // A verified partner is refused here on purpose: a partner signing an
-  // independent oracle's receipt is the exact thing the oracle exists to
-  // prevent, and the partner's own act in this chain sits downstream on the
-  // benchmark manifest, which is still humanOnly.
-  //
-  // THE CLASS IS NOT THE TEST. `grok-reviewer` authenticates through the same
-  // review-token door and derives the same `review_agent` class, so admitting
-  // the class would hand the Gate Zero signature to a lane nobody ruled on.
-  // deriveGateZeroProducerSeat checks the class AND the seat, reading the lane
-  // off the frozen registration's DERIVED holder ref -- so putting that seat
-  // back to unstaffed closes this door too, with nothing else touched.
-  //
-  // ENFORCED IN THREE INDEPENDENT PLACES, deliberately: here, again inside the
-  // handler, and a third time in SQL by ops.gate_zero_producer_actor_id(). The
-  // flag alone would be a label, which is the defect WR-000021 found on
-  // humanOnly between 2026-08-26 and 2026-09-11.
-  if (tool.oracleSeatOnly === true) {
-    const foundation = tool.oracleFamily === "foundation-assurance";
-    const lane = foundation ? foundationAssuranceOracleLane(name) : gateZeroOracleSeatLane();
-    const actorClass = authorizationClassForActor(actor);
-    if (lane === null || actorClass !== "review_agent" || actor?.human === true || actor?.slug !== lane)
-      throw new ToolError({ error: "oracle_seat_verb_requires_the_staffed_seat",
-        verb: name, actor_class: actorClass,
-        seat_staffed: lane !== null,
-        hint: "this verb records an independent control-plane oracle's receipt and refuses every actor except " +
-              "the one review-token seat that holds it — including verified partners, sponsored agents, and a " +
-              "second review-token lane deriving the same authority class. Report what you would have recorded " +
-              "and let the seat run it." });
-    if (foundation) {
-      try { assertFoundationAssuranceOracleSeat(actor, name); }
-      catch (error) {
-        throw new ToolError({ error: error.code || "foundation_assurance_oracle_seat_required",
-          ...(error.detail || {}) });
-      }
-    }
-  }
+  // The unattended runner holds partner authority only for the allowlisted
+  // verbs above; every other humanOnly/authorityOnly verb refuses it here, on
+  // every door, before schema validation or database access.
+  if ((tool.humanOnly === true || tool.authorityOnly === true) && isUnattendedActor(actor) &&
+      (tool.humanCallerOnly === true || !UNATTENDED_AUTHORITY_VERB_SET.has(name)))
+    throw new ToolError({ error: "unattended_runner_authority_not_admitted", verb: name,
+      hint: `${name} is not one of the partner-authority acts an unattended runner may perform; ` +
+            "leave it for a session a partner attends." });
   await assertRegisteredToolInput(name, tool, args);
   // TYPE COERCION AT THE CHOKE POINT (loop 353, 2026-08-13). See
   // coerceArgsToSchema above for what this fixes and why it is here rather than
@@ -8697,29 +8785,6 @@ export async function executeRegisteredTool(client, actor, name, args = {}) {
   // connection or driver fault) still surfaces as-is for the transport's own
   // generic handling.
   try {
-    // THE AUTHENTICATED CALL IS NOT ESTABLISHED HERE ANY MORE (amendment 9,
-    // 2026-09-14). It used to be: this line asked identity.js for THIS actor's
-    // dispatcher and ran the handler inside it. The fifth review round found
-    // what that required identity.js to publish — `dispatchFor(actor)`, a
-    // callable that enters a context — and that a probe composing it with the
-    // equally public review door ran its own code as `review_agent`.
-    //
-    // SO THE ENTRY MOVED INTO identity.js, where the bearer is matched and the
-    // context entered in one module-internal act — and since the sixth
-    // correction round (2026-09-15) what runs inside it is named rather than
-    // handed over: `serveAuthenticatedCall(bearer, correlationId, entryName)`
-    // resolves the name in a frozen map of the server's own entries. No verb
-    // dispatched through this function runs inside that context, including this
-    // one; nothing is threaded through here, so there is nothing here for a
-    // caller to aim.
-    //
-    // WHAT THAT NARROWS, stated rather than discovered later: a verb reached
-    // through any OTHER door — the OAuth grant path, the agent, Hermes,
-    // continuity and local bearers, `./run.sh call`, a direct import — runs with
-    // NO authenticated call at all, so r7's receipt surfaces refuse. That is
-    // correct for the Gate Zero producer, whose candidate is the deployed
-    // Worker's own build stamp (build-stamp.js) and which has nothing to say
-    // about a local checkout.
     return await tool.handler(client, actor, args);
   } catch (e) {
     if (e instanceof ToolError) throw e;
@@ -8754,11 +8819,13 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "resource-observation": "mcp-server/src/resource-observation.v5.js",
   "jev-call-receipt": "mcp-server/src/jev-call-receipt.js",
   "lead-automation": "mcp-server/src/lead-automation.js",
+  "invoice-automation": "mcp-server/src/invoice-automation.js",
   "workflow-cutover": "mcp-server/src/workflow-cutover.v5.js",
   "memory": "mcp-server/src/memory.js",
   "codex-continuity": "mcp-server/src/codex-continuity.js",
   "claude-continuity": "mcp-server/src/claude-continuity.js",
   "incident": "mcp-server/src/incident.js",
+  "defect-resolution": "mcp-server/src/defect-resolution.js",
   "engineering-runtime": "mcp-server/src/engineering-runtime.js",
   "work-portfolio": "mcp-server/src/work-portfolio.js",
   "tour-rights-projection": "mcp-server/src/tour-rights-projection.js",
@@ -8774,19 +8841,20 @@ const TOOL_REGISTRATION_SOURCE = Object.freeze({
   "cre-lifecycle": "mcp-server/src/cre-lifecycle-store.v5.js",
   "salesforce-reconciliation-rw02": "mcp-server/src/salesforce-reconciliation-store-rw02.v5.js",
   "salesforce-read-run-rw02": "mcp-server/src/salesforce-read-run-store-rw02.v5.js",
-  "foundation-assurance": "mcp-server/src/foundation-assurance-minimum-producer.v5.js",
   "global-boundaries-door": "mcp-server/src/global-boundaries-door.v5.js",
   "journey-one-clock-door": "mcp-server/src/journey-one-clock-door.v5.js",
   "governed-correspondence-store": "mcp-server/src/governed-correspondence-store.v5.js",
   "assurance-health-store": "mcp-server/src/assurance-health-store.v5.js",
   "action-class-successor-registry": "mcp-server/src/action-class-successor-registry.v5.js",
-  "complete-set-review-a03-store": "mcp-server/src/independent-review-cycle-store.v5.js",
   "rule-context-runtime": "mcp-server/src/rule-context-runtime.v5.js",
   "system-work-census": "mcp-server/src/system-work-census.v5.js",
   "board-answers": "mcp-server/src/board-answers.js",
+  "research-sites": "mcp-server/src/research-sites.js",
+  "party-identity": "mcp-server/src/party-identity.js",
   "schedule-board": "mcp-server/src/schedule-board.js",
   "doc-suggestions": "mcp-server/src/doc-suggestions.js",
   "whats-new": "mcp-server/src/whats-new.js",
+  "invoice-tracker": "mcp-server/src/invoice-tracker.js",
 });
 
 function bindToolSource(tool, source) {
@@ -8814,6 +8882,8 @@ function registerTools(additions, source) {
   for (const tool of Object.values(additions)) bindToolSource(tool, source);
   Object.assign(TOOLS, additions);
 }
+
+registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "invoice-tracker");
 
 // Deal Room contract. Durable writes use the same envelope and event helper as
 // the rest of this registry; the one explicit exception is the ephemeral lease.
@@ -9798,6 +9868,8 @@ registerTools({
 registerTools(doctrineTools({ withEnvelope, writeEvent, ToolError }), "doctrine");
 registerTools(systemWorkTools(), "system-work-census");
 registerTools(boardAnswerTools({ withEnvelope, writeEvent }), "board-answers");
+registerTools(researchSiteTools({ withEnvelope, writeEvent }), "research-sites");
+registerTools(partyIdentityTools({ withEnvelope, writeEvent, versionGuard, resolvePartyForWrite }), "party-identity");
 registerTools(scheduleBoardTools(), "schedule-board");
 
 // WR-AI-006: curation proposals are machine-callable; approval and retirement
@@ -9891,7 +9963,11 @@ registerTools(resourceObservationTools({ withEnvelope, ToolError }), "resource-o
 // server-timestamped receipt (migration 0587) before returning the answers, so
 // Jev gates credit only rows the gated model could not forge locally. See
 // src/jev-call-receipt.js.
-registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError }), "lead-automation");
+const invoices=invoiceAutomation({withEnvelope,writeEvent,ToolError,lockDealField,
+  updateDeal:(c,actor,args)=>TOOLS["update-deal"].handler(c,actor,args),
+  invoicingMailbox:process.env.CARR_INVOICING_MAILBOX});
+registerTools(invoices.tools,"invoice-automation");
+registerTools(leadAutomationTools({ withEnvelope, writeEvent, ToolError, invoices }), "lead-automation");
 registerTools(jevCallReceiptTools({ withEnvelope, ToolError }), "jev-call-receipt");
 // DoctorCRE V5-R02: workflow cutover, caller migration and retirement
 // readiness. Composes accept-workflow / disable-legacy-schedule rather than
@@ -9917,6 +9993,11 @@ registerTools(claudeContinuityTools({ withEnvelope, writeEvent, ToolError, asser
 // boundary into the grants and the verb surface should not be laxer than the
 // grants are. See migrations/0286 for the permission half.
 registerTools(incidentTools({ withEnvelope, writeEvent, ToolError, authorizationClassForActor }), "incident");
+
+// The defect log's close door (decision cbe91287). A close is an append-only
+// resolution receipt beside the defect, never a change to it: defects still
+// accumulate by class. See src/defect-resolution.js and migrations/0872.
+registerTools(defectResolutionTools({ withEnvelope, writeEvent, ToolError }), "defect-resolution");
 
 // Engineering Passport runtime: typed plan registration, server-derived
 // admission, and read-only closure projection over the canonical job ledger.
@@ -9953,18 +10034,9 @@ registerTools(salesforceReconciliationStoreTools({ withEnvelope, ToolError }),
 registerTools(salesforceReadRunStoreTools({ withEnvelope, ToolError }), "salesforce-read-run-rw02");
 registerTools(recordSourceAuthorityStoreTools({ withEnvelope, ToolError }),
   "record-source-authority");
-registerTools(foundationAssuranceMinimumTools({
-  withEnvelope, ToolError, authenticatedIdentity,
-}), "foundation-assurance");
 // V5-S01: read-only projection of the settled global boundaries and the
 // dispatch door's mode and shadow counters. No database access.
 registerTools(globalBoundariesDoorTools({ ToolError }), "global-boundaries-door");
-// DoctorCRE V5-M01: the live door to the Journey 1 clock runtime. The read verb
-// derives clock_started from the record; the advance verb takes only an
-// idempotency key and is registered WITHOUT an installation resolver, so it
-// refuses journey_one_clock_installation_unavailable before any query here. No
-// Worker can start, advance or pause the Journey 1 clock through it until a
-// verifier for the composed projection is installed by trusted server code.
 registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-one-clock-door");
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
@@ -9982,12 +10054,6 @@ registerTools(assuranceHealthStoreTools({ withEnvelope, ToolError }), "assurance
 // can ever produce a row this gate reads as allowed.
 registerTools(actionClassSuccessorRegistryTools({ withEnvelope, writeEvent, ToolError }),
   "action-class-successor-registry");
-// DoctorCRE V5-A03: append-only independent complete-set review. Every
-// participant registers only its authenticated actor/session duty; all eleven
-// dimensions precede one batch repair; regression checks cannot shrink; and a
-// stronger adjudicator is the only transition after two unresolved rounds.
-registerTools(completeSetReviewA03StoreTools({ withEnvelope, writeEvent, ToolError }),
-  "complete-set-review-a03-store");
 // DoctorCRE V5-F05: authenticated, actor-scoped rule-universe read plus the
 // Joe-authority typed-contract binder. The read uses the writer connection only
 // to receive server-established actor/sponsor transaction settings; its tool

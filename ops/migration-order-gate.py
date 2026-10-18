@@ -68,7 +68,9 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "tools"))
 # The one slot grammar the allocator and the runner share, so a lettered
 # interstitial slot (0532a_...) is a migration here exactly as it is there.
-from migration_number_contract import SLOT_RE  # noqa: E402
+from migration_number_contract import SLOT_RE, MigrationNumberError, validate_migration_names  # noqa: E402
+
+from migration_source import migration_names  # noqa: E402
 
 MIGRATIONS_DIR = "migrations"
 
@@ -106,10 +108,7 @@ def default_base(environ: Mapping[str, str]) -> str:
 
 
 def tree_paths(repo: pathlib.Path, ref: str) -> set[str]:
-    out = subprocess.run(
-        ["git", "ls-tree", "--name-only", f"{ref}:{MIGRATIONS_DIR}"],
-        cwd=repo, capture_output=True, text=True, check=True).stdout
-    return {f"{MIGRATIONS_DIR}/{line}" for line in out.splitlines() if line}
+    return {f"{MIGRATIONS_DIR}/{name}" for name in migration_names(repo, ref)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,9 +122,9 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         base_paths = tree_paths(repo, base)
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, ValueError) as exc:
         print(f"migration-order-gate: cannot read migrations/ at base {base!r}: "
-              f"{(exc.stderr or '').strip()}", file=sys.stderr)
+              f"{(getattr(exc, 'stderr', None) or str(exc)).strip()}", file=sys.stderr)
         print("  This is not a pass. Fetch the base (git fetch origin) and re-run.",
               file=sys.stderr)
         return 2
@@ -134,10 +133,16 @@ def main(argv: list[str] | None = None) -> int:
         fork = subprocess.run(["git", "merge-base", base, args.head], cwd=repo,
                               capture_output=True, text=True, check=True).stdout.strip()
         fork_paths = tree_paths(repo, fork)
-    except subprocess.CalledProcessError as exc:
+    except (subprocess.CalledProcessError, ValueError) as exc:
         print(f"migration-order-gate: cannot read migrations/ at {args.head!r} or its "
-              f"merge base with {base!r}: {(exc.stderr or '').strip()}", file=sys.stderr)
+              f"merge base with {base!r}: {(getattr(exc, 'stderr', None) or str(exc)).strip()}", file=sys.stderr)
         return 2
+
+    try:
+        validate_migration_names(path.rsplit("/", 1)[-1] for path in head_paths)
+    except MigrationNumberError as exc:
+        print(f"migration-order-gate: REFUSED — {exc}", file=sys.stderr)
+        return 1
 
     bad = violations(base_paths, fork_paths, head_paths)
     ceiling = highest_number(base_paths)

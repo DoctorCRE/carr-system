@@ -151,7 +151,10 @@ ${body}
   return new Response(html, {
     status,
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
-      "referrer-policy": "no-referrer", "x-frame-options": "DENY",
+      // same-origin, not no-referrer: a form POST from a no-referrer page sends
+      // `Origin: null`, which handleConsent's Origin check refuses. Cross-origin
+      // navigations (Google, the client handoff) still carry no Referer.
+      "referrer-policy": "same-origin", "x-frame-options": "DENY",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'" },
   });
 }

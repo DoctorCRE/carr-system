@@ -16,12 +16,16 @@ go green again.
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import migration_names, read_migration
+
+
 import importlib.util
 import json
 import os
-import sys
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 
@@ -547,7 +551,7 @@ def test_upsert_to_neon() -> None:
     # crashes on the UPDATE path. This is the guard that prevents a missing
     # version from going green again.
     mig_path = Path(HERE).parent / "migrations" / "0193_session_work.sql"
-    sql_text = mig_path.read_text()
+    sql_text = read_migration(mig_path.parent.parent, mig_path.name)
     if "version" not in sql_text:
         fail("upsert version column", "migration 0193 has no 'version' column — trg_touch_row will crash")
         return
@@ -560,11 +564,11 @@ def test_upsert_to_neon() -> None:
 def test_migration_exists() -> None:
     """The migration file exists and contains the session_work table."""
     mig_path = Path(HERE).parent / "migrations" / "0193_session_work.sql"
-    if not mig_path.exists():
+    if not mig_path.name in migration_names(mig_path.parent.parent):
         fail("migration exists", f"not found at {mig_path}")
         return
 
-    sql = mig_path.read_text()
+    sql = read_migration(mig_path.parent.parent, mig_path.name)
     required = [
         "create table if not exists session_work",
         "version     int not null default 1",

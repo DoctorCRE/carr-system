@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from lib.control_plane_collectors_audit import AUDIT_BUILDERS, SQL, audit_evidence_envelope, collect_audit_facts
-from lib.control_plane_inputs import InputUnavailable
+from lib.control_plane_inputs import InputUnavailable, NoEligibleRecords
 
 
 class Reader:
@@ -67,6 +67,13 @@ def main():
     except InputUnavailable: refused = True
     else: refused = False
     check("unmeasured destructive candidate refuses", refused)
+    # An empty actionable-loop queue is the normal state on most weekdays: it
+    # is "not needed right now" and must skip, never dead-letter (88e9b5eb).
+    try: collect_audit_facts("loops.next-actionable", Reader({**base, "loops": []}), **context)
+    except NoEligibleRecords: outcome = "skip"
+    except InputUnavailable: outcome = "refused"
+    else: outcome = "returned"
+    check("empty actionable-loop queue is a clean no-work skip", outcome == "skip")
     try: collect_audit_facts("not-registered", Reader(base), **context)
     except InputUnavailable: refused = True
     else: refused = False

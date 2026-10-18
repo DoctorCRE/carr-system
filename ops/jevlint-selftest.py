@@ -52,6 +52,7 @@ class AdmissionTests(unittest.TestCase):
         self.enterContext(patch.dict(ts.ask.__kwdefaults__, calls_log=str(self.log)))
         self.enterContext(patch.dict(ts.JEV_COST_CONFIG, daily_paid_call_cap=10))
         self.enterContext(patch.object(ts, "read_api_key", return_value="offline-recording"))
+        self.server_ask = ts.server_ask
         self.enterContext(patch.object(ts, "server_ask", return_value=(None, "offline")))
         self.enterContext(patch.object(ts, "_launch_spend_alert_worker", return_value=None))
         env = {k: v for k, v in os.environ.items() if k not in ts.SESSION_ID_ENV_KEYS and
@@ -207,11 +208,19 @@ print(json.dumps({'findings':[]}))
         registry = ts.load_call_sites()
         registry['sites']['jevlint_review'].update(hourly_budget=10, daily_budget=10)
         shim = review.Shim("fixture-session", "pr:fixture:head")
-        def worker(*args, **kwargs):
-            return None, "cache_miss" if kwargs['transport_mode'] == 'cache_only' else 'offline'
-        with patch.object(ts, 'load_call_sites', return_value=registry), patch.object(ts, 'server_ask', side_effect=worker):
+        calls = []
+        def worker(argv, **kwargs):
+            mode = json.loads(argv[3])['transport_mode']
+            calls.append(mode)
+            error = 'jev_cache_miss' if mode == 'cache_only' else 'jev_upstream_failed'
+            return subprocess.CompletedProcess(argv, 1, '', json.dumps({'error': error}))
+        with patch.object(ts, 'load_call_sites', return_value=registry), \
+                patch.object(ts, 'server_ask', self.server_ask), \
+                patch.object(ts, 'read_admission_secret', return_value='offline-admission'), \
+                patch.object(ts.subprocess, 'run', side_effect=worker):
             self.assertEqual(shim.evaluate(PAYLOAD), (200, RESPONSE))
             self.assertEqual(shim.evaluate(PAYLOAD), (200, RESPONSE))
+        self.assertEqual(calls, ['cache_only', 'paid_once'])
         self.assertEqual(shim.paid_attempts, 2)
         self.assertEqual(shim.cached, 1)
         self.assertEqual(self.transport.call_count, 1)

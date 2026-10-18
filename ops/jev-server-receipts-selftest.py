@@ -56,6 +56,12 @@ def _client():
             "value": "selftest", "sources": ["ops/typesafe_client.py"]}
     mod.load_call_sites = lambda path=None: {"hourly_paid_call_cap": 10**9, "sites": {"*": site}}
     mod.call_site = lambda caller, registry: site
+    # Hermetic credentials, as on a hosted runner: the Worker route signs with
+    # a fixture admission secret and no local vendor key exists to fall back on.
+    mod.read_admission_secret = lambda: "fixture-admission-secret"
+    def no_local_vendor_key(*_args):
+        raise mod.TypeSafeError("fixture holds no local vendor key")
+    mod.read_api_key = no_local_vendor_key
     return mod
 
 
@@ -91,7 +97,9 @@ def client_routes_through_the_worker():
     finally:
         os.unlink(log)
     ok = (seen.get("verb") == "ask-jev" and seen["args"]["purpose"] == "call"
-          and seen["args"]["facets"] == ["diagnosis"] and seen["args"]["idempotency_key"]
+          and seen["args"]["facets"] == ["diagnosis"]
+          and seen["args"]["idempotency_key"].startswith("jev1.")
+          and "fixture-admission-secret" not in json.dumps(seen)
           and result["server_receipt"]["receipt_id"] == "srv-1"
           and result["answers"]["diagnosis_q"]["noul"] == 0.7
           and result["usage"] == {"input_tokens": 3, "output_tokens": 1}
@@ -265,7 +273,7 @@ class ReviewRegressions(unittest.TestCase):
     def test_retired_stop_and_agent_cannot_load_transcript_facet_enforcement(self):
         # Findings 1-3: malformed IDs, duplicate IDs and ambiguous anchors
         # belonged to the retired prompt-facet checks, not boundary judgments.
-        for path in ("hooks/completion-evidence-gate.py", "hooks/executor-tier-gate.py"):
+        for path in ("hooks/executor-tier-gate.py",):
             with self.subTest(path=path):
                 source = (Path(REPO) / path).read_text()
                 self.assertFalse("from lib.jev_required_actions import" in source, path)

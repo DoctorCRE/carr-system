@@ -290,11 +290,13 @@ def test_neon_ambiguous_status_is_unknown_not_guessed_either_way():
         del os.environ["NEON_API_KEY"]
 
 
-def test_neon_default_url_is_api_keys_not_projects():
-    """The bare inventory default (no `url` override) must point at the
-    endpoint tools/rotate-credential.py's own neon() verification call
-    uses — /projects needed an org scope this key may not carry and
-    returned 400 for a good key."""
+def test_neon_default_url_is_the_org_scoped_projects_query():
+    """The bare inventory default (no `url` override) must ask the question
+    an ORGANIZATION key answers: NEON_API_KEY is minted by the credential
+    mint lane as an org key (2026-10-12), which /api_keys (personal keys)
+    does not serve. org_id is the part that matters — /projects without it
+    returned 400 for a good key — and it is the same query
+    tools/rotate-credential.py verifies a rotated key with."""
     captured = {}
 
     def spying_get(url, headers, timeout_s):
@@ -305,9 +307,14 @@ def test_neon_default_url_is_api_keys_not_projects():
     try:
         cred = _cred("neon-default-url", "neon_api", probe={"type": "neon_api", "timeout_s": 1})
         ch.evaluate_credential(cred)
-        check("neon_api's bare default URL is the /api_keys endpoint",
-              captured.get("url") == "https://console.neon.tech/api/v2/api_keys",
+        check("neon_api's bare default URL is the org-scoped /projects query",
+              captured.get("url") ==
+              "https://console.neon.tech/api/v2/projects?org_id=org-dry-dew-75906281&limit=1",
               captured.get("url"))
+        inventory = json.loads(ch.INVENTORY_PATH.read_text())
+        row = next(c for c in inventory["credentials"] if c["name"] == "neon-api-key")
+        check("the inventory's neon-api-key row asks the same org-scoped question",
+              row["probe"]["url"] == ch.NEON_PROBE_URL, row["probe"]["url"])
     finally:
         del os.environ["NEON_API_KEY"]
 
@@ -317,7 +324,7 @@ test_neon_file_present_but_key_missing_is_failed_not_env_fallback()
 test_neon_falls_back_to_env_when_file_absent()
 test_neon_401_is_failed()
 test_neon_ambiguous_status_is_unknown_not_guessed_either_way()
-test_neon_default_url_is_api_keys_not_projects()
+test_neon_default_url_is_the_org_scoped_projects_query()
 test_worker_bearer_reads_token_from_file_when_present()
 test_worker_bearer_file_present_but_key_missing_is_failed()
 test_worker_bearer_falls_back_to_env_when_file_absent()
@@ -644,13 +651,17 @@ def _write_claude_tokens_file(td, value=CLAUDE_TOKEN_FIXTURE, mode=0o600,
     return str(path)
 
 
+def _claude_stream(*events):
+    return "\n".join(json.dumps(event) for event in events) + "\n"
+
+
 def test_claude_token_active_readback_is_ok():
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
         ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
-            a, 0, stdout="PONG\n", stderr="")
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}), stderr="")
         cred = _claude_cred(path=path)
         r = ch.evaluate_credential(cred)
         check("claude cli token: shaped + PONG readback -> ok", r.bucket == "ok", r.bucket)
@@ -661,7 +672,8 @@ def test_claude_token_active_readback_is_ok():
 def test_claude_token_missing_file_is_unknown():
     ch.MINT_STATE = {}
     ch.WHICH = lambda name: "/usr/bin/claude"
-    ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="PONG")
+    ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+        a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
     cred = _claude_cred(path="/nonexistent/tokens.env")
     r = ch.evaluate_credential(cred)
     check("claude cli token: file missing -> unknown (can't verify at all)",
@@ -687,7 +699,8 @@ def test_claude_token_malformed_shape_never_calls_cli():
 
     def spying_run(*a, **k):
         calls.append((a, k))
-        return subprocess.CompletedProcess(a, 0, stdout="PONG")
+        return subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td, value="sk-ant-oat-too-short")
         ch.MINT_STATE = {}
@@ -738,6 +751,125 @@ def test_claude_token_readback_without_pong_is_failed():
               r.detail == "readback_failed", r.detail)
 
 
+def test_claude_token_rate_limit_is_unknown_not_auth_failure():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 1, stdout=_claude_stream({
+                "type": "system", "subtype": "api_retry", "error_status": 429,
+                "error": "rate_limit"}), stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: documented 429 rate_limit -> unknown, not failed",
+              r.bucket == "unknown" and r.detail == "rate_limited",
+              (r.bucket, r.detail))
+
+
+def test_claude_token_observed_rejected_seven_day_limit_is_unknown():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        stream = _claude_stream(
+            {"type": "rate_limit_event", "rate_limit_info": {
+                "status": "rejected", "rateLimitType": "seven_day",
+                "overageStatus": "rejected"}},
+            {"type": "result", "is_error": True, "api_error_status": 429,
+             "result": "[suppressed]"})
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 1, stdout=stream, stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: documented rejected rate-limit event -> unknown",
+              r.bucket == "unknown" and r.detail == "rate_limited",
+              (r.bucket, r.detail))
+
+
+def test_claude_token_auth_failure_dominates_rejected_rate_limit():
+    cases = (
+        (401, "authentication_failed", "authentication_failed"),
+        (403, "oauth_org_not_allowed", "credential_access_denied"),
+    )
+    for status, error, expected_detail in cases:
+        stream = _claude_stream(
+            {"type": "rate_limit_event", "rate_limit_info": {
+                "status": "rejected", "rateLimitType": "seven_day",
+                "overageStatus": "rejected"}},
+            {"type": "system", "subtype": "api_retry", "error_status": status,
+             "error": error},
+            {"type": "result", "is_error": True, "api_error_status": status,
+             "result": "[suppressed]"})
+        result = ch._classify_claude_cli_stream(stream, 1)
+        check(f"claude cli token: HTTP {status} auth rejection dominates quota event",
+              result.bucket == "failed" and result.detail == expected_detail,
+              (result.bucket, result.detail))
+
+
+def test_claude_token_error_marked_pong_cannot_pass():
+    result = ch._classify_claude_cli_stream(
+        _claude_stream({"type": "result", "result": "PONG", "is_error": True}), 0)
+    check("claude cli token: is_error PONG cannot prove authentication",
+          result.bucket == "failed" and result.detail == "readback_failed",
+          (result.bucket, result.detail))
+
+
+def test_claude_token_authentication_failure_remains_failed():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 1, stdout=_claude_stream({
+                "type": "system", "subtype": "api_retry", "error_status": 401,
+                "error": "authentication_failed"}), stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: documented authentication_failed -> hard failure",
+              r.bucket == "failed" and r.detail == "authentication_failed",
+              (r.bucket, r.detail))
+
+
+def test_claude_token_pong_in_non_result_event_cannot_pass():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream(
+                {"type": "assistant", "message": {"content": [
+                    {"type": "text", "text": "PONG"}]}},
+                {"type": "result", "result": "I could not verify the token.", "is_error": False}), stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: PONG outside the final result cannot pass",
+              r.bucket == "failed" and r.detail == "readback_failed",
+              (r.bucket, r.detail))
+
+
+def test_claude_token_missing_result_and_no_response_are_unknown_or_failed():
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 1, stdout=_claude_stream({
+                "type": "system", "subtype": "api_retry", "error_status": None,
+                "error": "unknown"}), stderr="network detail")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: no HTTP response -> unknown with fixed detail",
+              r.bucket == "unknown" and r.detail == "probe_network_error",
+              (r.bucket, r.detail))
+
+    with tempfile.TemporaryDirectory() as td:
+        path = _write_claude_tokens_file(td)
+        ch.MINT_STATE = {}
+        ch.WHICH = lambda name: "/usr/bin/claude"
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "system", "subtype": "init"}), stderr="")
+        r = ch.evaluate_credential(_claude_cred(path=path))
+        check("claude cli token: unexpected stream without result remains failed",
+              r.bucket == "failed" and r.detail == "readback_failed",
+              (r.bucket, r.detail))
+
+
 def test_claude_token_cli_timeout_is_unknown():
     def _raise(*a, **k):
         raise subprocess.TimeoutExpired(cmd="claude", timeout=1)
@@ -758,7 +890,8 @@ def test_claude_token_readback_runs_with_only_the_one_env_var_from_a_temp_cwd():
 
     def spying_run(argv, cwd=None, env=None, **k):
         calls.append({"argv": argv, "cwd": cwd, "env": dict(env or {})})
-        return subprocess.CompletedProcess(argv, 0, stdout="PONG", stderr="")
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}), stderr="")
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
         ch.MINT_STATE = {}
@@ -777,6 +910,8 @@ def test_claude_token_readback_runs_with_only_the_one_env_var_from_a_temp_cwd():
               call["cwd"] is not None and call["cwd"] != str(ch.REPO_ROOT), call["cwd"])
         check("claude cli token: the prompt asks for exactly PONG",
               "PONG" in " ".join(call["argv"]), call["argv"])
+        check("claude cli token: asks for documented machine-readable retry events",
+              call["argv"][-2:] == ["stream-json", "--verbose"], call["argv"])
 
 
 def test_claude_token_mint_date_recorded_on_first_sight():
@@ -784,7 +919,8 @@ def test_claude_token_mint_date_recorded_on_first_sight():
         path = _write_claude_tokens_file(td)
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
-        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="PONG")
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         ch.evaluate_credential(cred)
         entry = ch.MINT_STATE.get(cred["name"])
@@ -802,7 +938,8 @@ def test_claude_token_mint_date_persists_and_ages_toward_expiring_soon():
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
         ch.WHICH = lambda name: "/usr/bin/claude"
-        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="PONG")
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         fingerprint = ch._sha256_hex(CLAUDE_TOKEN_FIXTURE)
         old_mint = (datetime.now(timezone.utc) - timedelta(days=340)).date().isoformat()
@@ -822,7 +959,8 @@ def test_claude_token_rotation_resets_the_mint_clock():
     with tempfile.TemporaryDirectory() as td:
         path = _write_claude_tokens_file(td)
         ch.WHICH = lambda name: "/usr/bin/claude"
-        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="PONG")
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         stale_fingerprint = "0" * 64  # deliberately NOT this token's real fingerprint
         old_mint = (datetime.now(timezone.utc) - timedelta(days=400)).date().isoformat()
@@ -841,7 +979,8 @@ def test_claude_token_value_never_leaks():
         path = _write_claude_tokens_file(td)
         ch.MINT_STATE = {}
         ch.WHICH = lambda name: "/usr/bin/claude"
-        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="PONG")
+        ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, stdout=_claude_stream({"type": "result", "result": "PONG", "is_error": False}))
         cred = _claude_cred(path=path)
         rows = ch.run_all([cred])
         check("claude cli token: the token value never reaches run_all()'s rows",
@@ -863,6 +1002,13 @@ test_claude_token_key_missing_is_failed()
 test_claude_token_malformed_shape_never_calls_cli()
 test_claude_token_cli_not_found_is_unknown()
 test_claude_token_readback_without_pong_is_failed()
+test_claude_token_rate_limit_is_unknown_not_auth_failure()
+test_claude_token_observed_rejected_seven_day_limit_is_unknown()
+test_claude_token_auth_failure_dominates_rejected_rate_limit()
+test_claude_token_error_marked_pong_cannot_pass()
+test_claude_token_authentication_failure_remains_failed()
+test_claude_token_pong_in_non_result_event_cannot_pass()
+test_claude_token_missing_result_and_no_response_are_unknown_or_failed()
 test_claude_token_cli_timeout_is_unknown()
 test_claude_token_readback_runs_with_only_the_one_env_var_from_a_temp_cwd()
 test_claude_token_mint_date_recorded_on_first_sight()
@@ -1025,12 +1171,16 @@ test_write_jsonl_refuses_disallowed_keys()
 # deduplication
 # ═══════════════════════════════════════════════════════════════════════════
 
+# What `./run.sh call add-loop` prints when the loop was written.
+LOOP_FILED = b'{"ok": true, "id": 901}\n'
+
+
 def test_dedup_same_bucket_does_not_refile():
     calls = []
 
     def fake_run(*a, **k):
         calls.append(a)
-        return subprocess.CompletedProcess(a, 0, b"", b"")
+        return subprocess.CompletedProcess(a, 0, LOOP_FILED, b"")
     ch.SUBPROCESS_RUN = fake_run
     cred = _cred("dedup-cred", "shell_exit_status")
     state = {}
@@ -1047,7 +1197,7 @@ def test_dedup_bucket_change_refiles():
 
     def fake_run(*a, **k):
         calls.append(a)
-        return subprocess.CompletedProcess(a, 0, b"", b"")
+        return subprocess.CompletedProcess(a, 0, LOOP_FILED, b"")
     ch.SUBPROCESS_RUN = fake_run
     cred = _cred("dedup-cred-2", "shell_exit_status")
     state = {}
@@ -1071,8 +1221,19 @@ def test_dry_run_never_calls_subprocess():
           r == "dry_run" and len(calls) == 0, (r, len(calls)))
 
 
+def test_refused_filing_is_not_filed():
+    def refusing_run(*a, **k):
+        return subprocess.CompletedProcess(a, 0, b'{"ok": false, "error": "blocker_required"}\n', b"")
+    ch.SUBPROCESS_RUN = refusing_run
+    state = {}
+    r = ch.file_loop_if_needed(_cred("refused-cred", "shell_exit_status"), "failed", state)
+    check("a refused add-loop is file_failed, never filed",
+          r == "file_failed" and state["refused-cred"]["filed_ok"] is False, (r, state))
+
+
 test_dedup_same_bucket_does_not_refile()
 test_dedup_bucket_change_refiles()
+test_refused_filing_is_not_filed()
 test_dry_run_never_calls_subprocess()
 
 
@@ -1379,6 +1540,149 @@ def test_dedup_save_failure_is_non_fatal():
 test_write_jsonl_disk_failure_is_fatal_in_main()
 test_mint_state_save_failure_is_non_fatal()
 test_dedup_save_failure_is_non_fatal()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# root grants: verify-only, aged, never silent (PR #1725 review, finding 3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+ROOT_FIXTURE = "fake-root-grant-DO-NOT-LEAK"
+
+
+def _root_cred(**probe_extra):
+    probe = {"type": "root_grant", "store_name": "CLOUDFLARE_TOKEN_ROOT",
+             "url": "https://api.cloudflare.com/client/v4/user/tokens/verify",
+             "max_age_days": 90, "timeout_s": 1}
+    probe.update(probe_extra)
+    return _cred("root-fixture", "root_grant", probe=probe, expiring_soon_days=14)
+
+
+def _with_root_home(td, value=ROOT_FIXTURE, mode=0o600):
+    """Point HOME at a scratch dir; write the root's tokens.env line there."""
+    os.environ["HOME"] = td
+    if value is not None:
+        cfg = Path(td) / ".config" / "carr"
+        cfg.mkdir(parents=True, exist_ok=True)
+        path = cfg / "tokens.env"
+        path.write_text(f"CLOUDFLARE_TOKEN_ROOT={value}\n")
+        os.chmod(path, mode)
+
+
+def test_root_grant_probes():
+    from datetime import datetime, timedelta as _td, timezone
+    old_home = os.environ.get("HOME")
+    # UTC, like the checker's first-sight and expiry stamps; a local date fails
+    # every evening after 19:00 Central when the two calendars disagree.
+    today = datetime.now(timezone.utc).date()
+    try:
+        inventory = json.loads((REPO / "ops" / "config" / "credential-inventory.v1.json").read_text())
+        grants = json.loads((REPO / "ops" / "config" / "credential-root-grants.v1.json").read_text())
+        minted = {g["name"] for g in grants["grants"]
+                  if g.get("children") and not g.get("self_minting") and not g.get("deferred")}
+        roots = {r["root_grant"]: r for r in inventory["credentials"] if r.get("root_grant")}
+        check("every minted root grant has a root_grant health row",
+              set(roots) == minted, sorted(roots))
+        check("every root row probes with the root_grant probe and ages it",
+              all(r["probe"]["type"] == "root_grant" and r["probe"].get("max_age_days") for r in roots.values()))
+        check("no root row names a probe `path` (absent root stays a quiet unknown, no nightly loop)",
+              not any(ch._credential_file_exists(r) for r in roots.values()))
+
+        calls = []
+        def spying_get(url, headers, timeout_s):
+            calls.append(headers.get("Authorization"))
+            return 200, {"result": {"status": "active"}}
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td, value=None)
+            ch.HTTP_GET, ch.MINT_STATE = spying_get, {}
+            r = ch.evaluate_credential(_root_cred())
+            check("an absent root is unknown/root_grant_not_placed with no HTTP call",
+                  (r.bucket, r.detail) == ("unknown", "root_grant_not_placed") and calls == [],
+                  f"{r.bucket}/{r.detail} {calls}")
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td)
+            ch.HTTP_GET, ch.MINT_STATE = spying_get, {}
+            r = ch.evaluate_credential(_root_cred())
+            check("a placed root is verified with itself as Bearer",
+                  calls == [f"Bearer {ROOT_FIXTURE}"], calls)
+            check("a fresh root is ok and expires max_age_days after first sight",
+                  r.bucket == "ok" and r.expires_at == (today + _td(days=90)).isoformat(),
+                  f"{r.bucket} {r.expires_at}")
+            check("first sight is recorded by fingerprint, never the value",
+                  ROOT_FIXTURE not in json.dumps(ch.MINT_STATE)
+                  and ch.MINT_STATE["root-fixture"]["minted_at"] == today.isoformat())
+
+            sha = ch.MINT_STATE["root-fixture"]["token_sha256"]
+            ch.MINT_STATE = {"root-fixture": {"token_sha256": sha,
+                                              "minted_at": (today - _td(days=80)).isoformat()}}
+            r = ch.evaluate_credential(_root_cred())
+            check("a root seen 80 days ago is expiring_soon (14-day warning)",
+                  r.bucket == "expiring_soon", f"{r.bucket}/{r.detail}")
+            ch.MINT_STATE = {"root-fixture": {"token_sha256": sha,
+                                              "minted_at": (today - _td(days=100)).isoformat()}}
+            r = ch.evaluate_credential(_root_cred())
+            check("a root seen 100 days ago is failed past_expiry",
+                  (r.bucket, r.detail) == ("failed", "past_expiry"), f"{r.bucket}/{r.detail}")
+
+            soon = (today + _td(days=5)).isoformat()
+            ch.HTTP_GET = lambda *a, **k: (200, {"result": {"status": "active", "expires_on": soon + "T00:00:00Z"}})
+            ch.MINT_STATE = {}
+            r = ch.evaluate_credential(_root_cred())
+            check("a provider expires_on sooner than max age wins",
+                  r.expires_at == soon and r.bucket == "expiring_soon", f"{r.bucket} {r.expires_at}")
+
+            ch.HTTP_GET = lambda *a, **k: (401, None)
+            r = ch.evaluate_credential(_root_cred())
+            check("a refused root is failed", (r.bucket, r.detail) == ("failed", "root_grant_unauthorized"))
+
+        with tempfile.TemporaryDirectory() as td:
+            _with_root_home(td, mode=0o644)
+            calls.clear()
+            ch.HTTP_GET = spying_get
+            r = ch.evaluate_credential(_root_cred())
+            check("a loose tokens.env fails before the root is used",
+                  (r.bucket, r.detail) == ("failed", "insecure_file_permissions") and calls == [])
+    finally:
+        if old_home is not None:
+            os.environ["HOME"] = old_home
+
+
+def test_mint_lane_expiry_window():
+    """A child with no provider-side expiry goes amber, then red, when the
+    mint lane stops rotating it (PR #1725 review, low finding)."""
+    from datetime import datetime, timedelta as _td, timezone
+    # UTC, like the checker's first-sight and expiry stamps; a local date fails
+    # every evening after 19:00 Central when the two calendars disagree.
+    today = datetime.now(timezone.utc).date()
+    real = ch.MINT_LANE_STATE_PATH
+    ch.SUBPROCESS_RUN = lambda *a, **k: subprocess.CompletedProcess(a, 0, b"", b"")
+    cred = _cred("neon-api-key", "shell_exit_status",
+                 probe={"type": "shell_exit_status", "command": ["true"], "timeout_s": 1},
+                 expiry={"from_mint_state": True})
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            ch.MINT_LANE_STATE_PATH = Path(td) / "absent.json"
+            check("no mint-lane state leaves the probe's own result",
+                  ch.evaluate_credential(cred).bucket == "ok")
+            state = Path(td) / "state.json"
+            ch.MINT_LANE_STATE_PATH = state
+            for days, want in ((40, "ok"), (2, "expiring_soon"), (-1, "failed")):
+                state.write_text(json.dumps({"credentials": {"neon-api-key": {
+                    "expires_at": (today + _td(days=days)).isoformat() + "T08:00:00+00:00"}}}))
+                r = ch.evaluate_credential(cred)
+                check(f"mint-lane expiry {days:+d} days reads {want}", r.bucket == want, f"{r.bucket}/{r.detail}")
+        inventory = json.loads((REPO / "ops" / "config" / "credential-inventory.v1.json").read_text())
+        rows = {r["name"]: r for r in inventory["credentials"]}
+        check("neon and both Codex rows take their expiry from the mint lane",
+              all(rows[n]["expiry"].get("from_mint_state") is True
+                  for n in ("neon-api-key", "codex-cli-auth-studio", "codex-cli-auth-macbook")))
+    finally:
+        ch.MINT_LANE_STATE_PATH = real
+
+
+test_root_grant_probes()
+test_mint_lane_expiry_window()
 
 
 print(f"\ncredential-health-selftest: {PASSED}/{PASSED + len(FAILED)} passed")

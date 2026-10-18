@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- doctrine: repo-hygiene-program-build-plan -->
+<!--
+  com.carr.storage-hygiene: daily bounded cleanup of stale Chrome code-sign clones.
+
+  The job is intentionally source-only in this change. Installation is a
+  separate reviewed machine effect. It runs after the nightly record-layer
+  chain, uses run-scheduled.sh for durable ops.run evidence, and delegates all
+  selection, open-file checks, caps, ledger output and record-layer findings to
+  tools/storage_hygiene.py. The scheduled invocation selects only clones;
+  scratch and gate-replay cleanup require explicit command-line opt-in.
+
+  DONE: run-scheduled records launchd.run and the script appends one dated line
+  to out/storage-hygiene.jsonl after reading the previous line. FAILURE: any
+  uncaught scan, ledger or record-write error exits nonzero, which run-scheduled
+  records as failed instead of retry-looping. ACTIVATION: the installer watches
+  the first manual kickstart through that log, ledger and ops.run receipt before
+  leaving the cadence enabled. This source change does not install or load it.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.carr.storage-hygiene</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/bin/run-scheduled.sh</string>
+    <string>storage-hygiene</string>
+    <string>launchd.run</string>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>{{REPO}}/tools/storage_hygiene.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>{{REPO}}</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>4</integer>
+    <key>Minute</key><integer>10</integer>
+  </dict>
+  <key>RunAtLoad</key><false/>
+  <key>ThrottleInterval</key><integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{REPO}}/out/storage-hygiene.log</string>
+  <key>StandardErrorPath</key>
+  <string>{{REPO}}/out/storage-hygiene.log</string>
+</dict>
+</plist>

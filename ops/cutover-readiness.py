@@ -57,7 +57,6 @@ Exit 2 = at least one partner has an actual disagreement or an unreachable
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,9 +66,9 @@ sys.path.insert(0, str(REPO))
 
 from exporters.common import VAULT, connect          # noqa: E402
 from exporters.targets import _fetch_rules            # noqa: E402
+from lib import record_call                          # noqa: E402
 
 IDENTITY_FILE = Path.home() / ".config" / "carr" / "local-actor.json"
-CALL_VERB = REPO / "tools" / "call-verb.py"
 OUT_PATH = REPO / "out" / "cutover-readiness.json"
 
 PARTNERS = ("joe", "dell")
@@ -178,19 +177,8 @@ def call_verb(verb, args=None):
     through. Returns (ok, payload_or_error_str). Never raises — a verb call
     that fails is a finding, not a crash, same as every other check in this
     file's family (rules-live-check.py, guard-selftest.py)."""
-    try:
-        p = subprocess.run(
-            [sys.executable, str(CALL_VERB), verb, json.dumps(args or {})],
-            capture_output=True, text=True, timeout=60)
-    except Exception as e:
-        return False, f"subprocess failed: {type(e).__name__}: {e}"
-    if p.returncode != 0:
-        tail = (p.stderr or p.stdout or "").strip().splitlines()
-        return False, f"call-verb exit {p.returncode}: {tail[-1] if tail else '(no output)'}"
-    try:
-        return True, json.loads(p.stdout)
-    except ValueError:
-        return False, f"non-JSON stdout: {p.stdout[:200]!r}"
+    result = record_call.call_verb(verb, args or {}, timeout=60)
+    return (True, result.reply) if result.ok else (False, result.describe())
 
 
 def main():

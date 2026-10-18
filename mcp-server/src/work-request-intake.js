@@ -2,7 +2,7 @@
 // deterministic situation index, capture it, and expose a safe read card. It
 // does not own a lifecycle transition, an executor, or an approval.
 import { searchDoctrineSituations } from "./situation-retrieval.js";
-import { organizationTenantForActor } from "./identity.js";
+import { authorizationClassForActor, organizationTenantForActor } from "./identity.js";
 import { deriveRuleDeliverySource, normalizeRuleMapDigest } from "./rule-delivery-source.js";
 
 const FIELDS = new Set(["idempotency_key", "situation", "title", "desired_outcome", "acceptance_criteria"]);
@@ -13,27 +13,23 @@ const TRIAGE_CLASSES = new Set(["operational", "needs_judgment", "safety_review"
 const JOE_ANSWER_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "answer_text", "scope_confirmed", "evidence_ref"]);
 const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason"]);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
-const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
+const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
+  "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
+  "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
+const PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"]);
 const ACCEPT_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash"]);
-const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps","heavy_build"]);
+const AMEND_PLAN_FIELDS = new Set(["idempotency_key","human_ref","base_version","predecessor_plan_hash","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"]);
 const ACK_AMENDMENT_FIELDS = new Set(["idempotency_key","notice_id"]);
-const HEAVY_REVIEW_FIELDS = new Set(["idempotency_key","human_ref","plan_hash","admission_hash","verdict","reviewer_session_ref","review_summary","evidence_refs","gaps"]);
 const OUTCOME_PROPOSAL_FIELDS = new Set(["idempotency_key","human_ref","base_version","plan_hash","criterion_results","evidence_refs","blocker_code","result_summary","observed_minutes","interaction_surface","heavy_session_used","manual_context_transfers"]);
 const ACCEPT_OUTCOME_FIELDS = new Set(["idempotency_key","human_ref","base_version","feedback_hash"]);
 const SAFE_REF = /^safe:[a-z0-9][a-z0-9:_./-]*$/;
 const CRITERION_RESULT = new Set(["met", "not_met", "not_observed"]);
 const INTERACTION_SURFACE = new Set(["workspace", "control_room", "mcp", "codex", "claude_code", "other"]);
 const OUTCOME_BLOCKER = new Set(["none", "evidence_missing", "criterion_not_met", "external_dependency", "system_error"]);
-const SESSION_REF = /^session:[a-z0-9][a-z0-9:._/-]{8,199}$/;
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
-const HEAVY_RESEARCH_FIELDS = ["primary_sources", "maintained_repositories", "practitioner_evidence", "current_baseline", "failure_modes"];
-const HEAVY_MASTER_PLAN_FIELDS = ["product_goal", "non_goals", "architecture", "authority_boundaries", "dependency_dag", "planned_checks", "baseline_comparison", "release_strategy", "rollback_strategy", "observability_strategy", "fully_shipped_definition", "prerequisite_policy"];
-const EVIDENCE_CLASS = Object.freeze({ primary_sources: "primary_source", maintained_repositories: "maintained_repository",
-  practitioner_evidence: "practitioner_evidence", current_baseline: "current_baseline", failure_modes: "failure_mode" });
-
 function text(value) { return typeof value === "string" ? value.trim() : ""; }
 
-async function deliverySourceForPlan(c, actor, row, args, classified, admission) {
+async function deliverySourceForPlan(c, actor, row, args) {
   await c.query("savepoint siep02_rule_delivery_source");
   let registry;
   try {
@@ -85,16 +81,6 @@ async function deliverySourceForPlan(c, actor, row, args, classified, admission)
         observability_ref: args.observability_ref,
         caps: args.caps,
       },
-      heavyClassification: {
-        tier: admission ? "heavy" : classified.tier,
-        reasons: admission?.classifier_reasons || classified.reasons || [],
-      },
-      admittedHeavyContract: admission ? {
-        admission_ref: admission.admission_ref,
-        admission_hash: admission.admission_hash,
-        builder_session_ref: admission.builder_session_ref,
-        master_plan: args.heavy_build.master_plan,
-      } : null,
       packIndex: state.pack_index,
       mapDigest: digest,
     });
@@ -103,75 +89,6 @@ async function deliverySourceForPlan(c, actor, row, args, classified, admission)
       reason: "rule_delivery_source_invalid", detail: String(error?.message || error).slice(0, 160) };
   }
 }
-function exactKeys(value, keys) {
-  return value && typeof value === "object" && !Array.isArray(value) &&
-    Object.keys(value).sort().join(",") === [...keys].sort().join(",");
-}
-function boundedStrings(value, min, max, minLength = 10, maxLength = 1000) {
-  return Array.isArray(value) && value.length >= min && value.length <= max &&
-    value.every(item => text(item).length >= minLength && text(item).length <= maxLength);
-}
-
-function validateHeavyBuildContract(raw, ToolError) {
-  const fail = (field, detail) => { throw new ToolError({ error: "invalid_heavy_build_contract", field, detail }); };
-  if (!exactKeys(raw, ["builder_session_ref", "research_manifest", "master_plan"])) fail("heavy_build", "closed typed contract required");
-  if (!SESSION_REF.test(raw.builder_session_ref || "")) fail("builder_session_ref", "use session:<stable-fresh-context-ref>");
-  const research = raw.research_manifest;
-  if (!exactKeys(research, [...HEAVY_RESEARCH_FIELDS, "unresolved_contradictions", "conclusion"])) fail("research_manifest", "all research classes are required");
-  const seen = new Set();
-  for (const field of HEAVY_RESEARCH_FIELDS) {
-    const items = research[field];
-    const minimum = field === "maintained_repositories" ? 2 : 1;
-    if (!Array.isArray(items) || items.length < minimum || items.length > 12) fail(`research_manifest.${field}`, `requires ${minimum}-12 evidence items`);
-    for (const item of items) {
-      if (!exactKeys(item, ["source_ref", "source_class", "locator", "observed_at", "content_digest", "finding"])) fail(`research_manifest.${field}`, "evidence item shape is not exact");
-      if (!SAFE_REF.test(item.source_ref || "") || seen.has(item.source_ref)) fail(`research_manifest.${field}.source_ref`, "safe refs must be unique");
-      seen.add(item.source_ref);
-      if (item.source_class !== EVIDENCE_CLASS[field]) fail(`research_manifest.${field}.source_class`, `expected ${EVIDENCE_CLASS[field]}`);
-      let locator;
-      try { locator = new URL(String(item.locator || "")); } catch { fail(`research_manifest.${field}.locator`, "HTTPS source required"); }
-      if (locator.protocol !== "https:") fail(`research_manifest.${field}.locator`, "HTTPS source required");
-      const observed = new Date(String(item.observed_at || ""));
-      if (Number.isNaN(observed.getTime()) || observed.getTime() > Date.now() + 300000) fail(`research_manifest.${field}.observed_at`, "non-future timestamp required");
-      if (!SHA256.test(item.content_digest || "")) fail(`research_manifest.${field}.content_digest`, "exact sha256 digest required");
-      if (text(item.finding).length < 20 || text(item.finding).length > 1000) fail(`research_manifest.${field}.finding`, "20-1000 character finding required");
-    }
-  }
-  if (!boundedStrings(research.unresolved_contradictions, 0, 12, 10, 500) || text(research.conclusion).length < 20 || text(research.conclusion).length > 1000)
-    fail("research_manifest", "contradictions[] and a substantive conclusion are required");
-
-  const plan = raw.master_plan;
-  if (!exactKeys(plan, HEAVY_MASTER_PLAN_FIELDS)) fail("master_plan", "complete target-product plan required");
-  for (const field of ["product_goal", "baseline_comparison", "release_strategy", "rollback_strategy", "observability_strategy", "fully_shipped_definition", "prerequisite_policy"])
-    if (text(plan[field]).length < 20 || text(plan[field]).length > 2000) fail(`master_plan.${field}`, "20-2000 character statement required");
-  if (!boundedStrings(plan.non_goals, 1, 12) || !boundedStrings(plan.architecture, 2, 20) || !boundedStrings(plan.authority_boundaries, 1, 12))
-    fail("master_plan", "non-goals, architecture, and authority boundaries must be explicit");
-  if (!Array.isArray(plan.dependency_dag) || !plan.dependency_dag.length || plan.dependency_dag.length > 20) fail("master_plan.dependency_dag", "1-20 typed steps required");
-  const steps = new Set();
-  for (const step of plan.dependency_dag) {
-    if (!exactKeys(step, ["step_ref", "depends_on"]) || !/^step:[a-z0-9][a-z0-9:._/-]*$/.test(step.step_ref || "") || steps.has(step.step_ref) ||
-        !Array.isArray(step.depends_on) || step.depends_on.some(ref => !/^step:[a-z0-9][a-z0-9:._/-]*$/.test(ref) || ref === step.step_ref))
-      fail("master_plan.dependency_dag", "unique step refs and non-self dependencies required");
-    steps.add(step.step_ref);
-  }
-  if (plan.dependency_dag.some(step => step.depends_on.some(ref => !steps.has(ref)))) fail("master_plan.dependency_dag", "every dependency must name a declared step");
-  if (!Array.isArray(plan.planned_checks) || !plan.planned_checks.length || plan.planned_checks.length > 20 || plan.planned_checks.some(check =>
-      !exactKeys(check, ["artifact", "comparator", "failure_condition"]) || [check.artifact, check.comparator, check.failure_condition].some(value => text(value).length < 5 || text(value).length > 500)))
-    fail("master_plan.planned_checks", "each check must name artifact, comparator, and failure condition");
-  return raw;
-}
-
-function validateHeavyReview(args, ToolError) {
-  if (Object.keys(args).some(key => !HEAVY_REVIEW_FIELDS.has(key))) throw new ToolError({ error: "invalid_heavy_build_review_fields" });
-  if (!UUID.test(args.idempotency_key || "") || !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !SHA256.test(args.plan_hash || "") ||
-      !SHA256.test(args.admission_hash || "") || !new Set(["pass", "fail"]).has(args.verdict) || !SESSION_REF.test(args.reviewer_session_ref || "") ||
-      text(args.review_summary).length < 20 || text(args.review_summary).length > 1000 ||
-      !Array.isArray(args.evidence_refs) || !args.evidence_refs.length || args.evidence_refs.length > 12 || args.evidence_refs.some(ref => !SAFE_REF.test(ref || "")) ||
-      new Set(args.evidence_refs).size !== args.evidence_refs.length || !boundedStrings(args.gaps, 0, 12, 10, 500) ||
-      (args.verdict === "pass" && args.gaps.length) || (args.verdict === "fail" && !args.gaps.length))
-    throw new ToolError({ error: "invalid_heavy_build_review" });
-}
-
 function validate(args, ToolError) {
   if (Object.keys(args).some(key => !FIELDS.has(key)))
     throw new ToolError({ error: "invalid_report_problem_fields" });
@@ -316,7 +233,6 @@ function validatePlan(args, ToolError) {
         return lowerLeft < lowerRight ? -1 : lowerLeft > lowerRight ? 1 : left < right ? -1 : left > right ? 1 : 0;
       }))))
     throw new ToolError({ error: "invalid_source_merge_scope" });
-  if (args.heavy_build !== undefined) validateHeavyBuildContract(args.heavy_build, ToolError);
 }
 function validateAcceptPlan(args, ToolError) {
   if (Object.keys(args).some(k => !ACCEPT_PLAN_FIELDS.has(k))) throw new ToolError({ error: "invalid_accept_plan_fields" });
@@ -333,12 +249,6 @@ function validatePlanAmendment(args, ToolError) {
   validatePlan(plan, ToolError);
   if (!SHA256.test(predecessorPlanHash || ""))
     throw new ToolError({ error: "invalid_ready_plan_amendment_predecessor" });
-  // A successor replaces an already executable contract.  It therefore always
-  // carries its own closed heavy-build evidence; the DB records that evidence
-  // against the new immutable plan before any review or acceptance can see it.
-  if (!args.heavy_build) throw new ToolError({ error: "heavy_build_admission_required",
-    missing: ["research_manifest", "master_plan", "builder_session_ref"] });
-  validateHeavyBuildContract(args.heavy_build, ToolError);
 }
 
 function validateAmendmentAcknowledgement(args, ToolError) {
@@ -376,45 +286,64 @@ function validateOutcomeProposal(args, ToolError) {
     throw new ToolError({ error: "inconsistent_outcome_feedback" });
 }
 
+const BIND_EVIDENCE_FIELDS = new Set(["idempotency_key", "human_ref", "criterion_id", "receipt_ref"]);
+
+function validateCriterionEvidence(args, ToolError) {
+  if (Object.keys(args).some(k => !BIND_EVIDENCE_FIELDS.has(k)) || !UUID.test(args.idempotency_key || "") ||
+      !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") || !CRITERION_ID.test(args.criterion_id || "") ||
+      !text(args.receipt_ref) || text(args.receipt_ref).length > 300)
+    throw new ToolError({ error: "invalid_criterion_evidence",
+      hint: "bind one acceptance criterion (its id, e.g. SHIPPED) of a ready sourced Work Request (WR-000201) " +
+            "to one server receipt: ops.run:<uuid>, ops.deployment:<uuid>, defect-resolution:<uuid> or " +
+            "incident:<ref>. Nothing was written." });
+}
+
+// COMPLETION ON BOUND EVIDENCE (0872, decision cbe91287). The database decides,
+// in ops.complete_sourced_work_request_on_bound_evidence: it writes the
+// acceptance receipt only when the acting actor is a human or sponsored agent,
+// the latest proposal is criteria_met, and every acceptance criterion carries a
+// receipt that resolves now and is evidence for this request. Its one caller is
+// bind-work-request-criterion-evidence: propose-outcome-feedback sits on the
+// capture profile and completes nothing. This only reports what the database
+// answered; it never infers a completion the database did not write.
+async function completeOnBoundEvidence(c, actor, writeEvent, verb, ref, idempotencyKey) {
+  const row = (await c.query(
+    `select * from ops.complete_sourced_work_request_on_bound_evidence($1::text,$2::uuid)
+       /* work-request-intake:complete-on-bound-evidence */`, [ref, idempotencyKey])).rows[0];
+  const completed = row?.completed === true;
+  // The state the row actually holds. Completion writes an acceptance receipt
+  // and leaves the request's own state where it was, so nothing here may name
+  // a state the row never takes.
+  if (completed && row.replayed !== true)
+    await writeEvent(c, actor, verb, "ops_work_request", row.work_request_id, {
+      field: "outcome_feedback_completed_on_bound_evidence",
+      new: { receipt_id: row.receipt_id, feedback_ref: row.feedback_ref, feedback_hash: row.feedback_hash,
+        acceptance_basis: row.acceptance_basis, bound_receipt_refs: row.bound_receipt_refs },
+      idempotency_key: idempotencyKey,
+    });
+  return {
+    completed,
+    state: row?.state || null,
+    missing: completed ? [] : (Array.isArray(row?.missing) ? row.missing : []),
+    receipt_id: completed ? row.receipt_id : null,
+    feedback_ref: row?.feedback_ref || null,
+    feedback_hash: row?.feedback_hash || null,
+    acceptance_basis: completed ? row.acceptance_basis : null,
+    bound_receipt_refs: completed ? row.bound_receipt_refs : null,
+    accepted_by_actor_slug: completed ? row.accepted_by_actor_slug : null,
+    accepted_at: completed ? row.accepted_at : null,
+    summary: completed
+      ? `completed on bound evidence: ${(row.bound_receipt_refs || []).map(r => `${r.criterion_id}=${r.receipt_ref}`).join(", ")}`
+      : "not complete: every acceptance criterion needs a bound receipt and the latest proposal must be criteria_met",
+  };
+}
+
 function validateOutcomeAcceptance(args, ToolError) {
   if (Object.keys(args).some(k => !ACCEPT_OUTCOME_FIELDS.has(k))) throw new ToolError({ error: "invalid_accept_outcome_fields" });
   if (!UUID.test(args.idempotency_key || "") || !/^WR-[0-9]{1,12}$/.test(args.human_ref || "") ||
       !Number.isInteger(args.base_version) || args.base_version < 1 || !/^sha256:[0-9a-f]{64}$/.test(args.feedback_hash || ""))
     throw new ToolError({ error: "invalid_accept_outcome" });
 }
-
-const HEAVY_EVIDENCE_SCHEMA = { type: "object", additionalProperties: false,
-  required: ["source_ref", "source_class", "locator", "observed_at", "content_digest", "finding"], properties: {
-    source_ref: { type: "string", minLength: 6, maxLength: 300 }, source_class: { type: "string" },
-    locator: { type: "string", minLength: 8, maxLength: 1000 }, observed_at: { type: "string" },
-    content_digest: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" }, finding: { type: "string", minLength: 20, maxLength: 1000 },
-  } };
-function heavyEvidenceArray(minItems = 1) { return { type: "array", minItems, maxItems: 12, items: HEAVY_EVIDENCE_SCHEMA }; }
-const HEAVY_BUILD_SCHEMA = { type: "object", additionalProperties: false,
-  required: ["builder_session_ref", "research_manifest", "master_plan"], properties: {
-    builder_session_ref: { type: "string", minLength: 17, maxLength: 207 },
-    research_manifest: { type: "object", additionalProperties: false,
-      required: [...HEAVY_RESEARCH_FIELDS, "unresolved_contradictions", "conclusion"], properties: {
-        primary_sources: heavyEvidenceArray(), maintained_repositories: heavyEvidenceArray(2), practitioner_evidence: heavyEvidenceArray(),
-        current_baseline: heavyEvidenceArray(), failure_modes: heavyEvidenceArray(),
-        unresolved_contradictions: { type: "array", maxItems: 12, items: { type: "string", minLength: 10, maxLength: 500 } },
-        conclusion: { type: "string", minLength: 20, maxLength: 1000 },
-      } },
-    master_plan: { type: "object", additionalProperties: false, required: HEAVY_MASTER_PLAN_FIELDS, properties: {
-      product_goal: { type: "string", minLength: 20, maxLength: 2000 },
-      non_goals: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      architecture: { type: "array", minItems: 2, maxItems: 20, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      authority_boundaries: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 10, maxLength: 1000 } },
-      dependency_dag: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", additionalProperties: false,
-        required: ["step_ref", "depends_on"], properties: { step_ref: { type: "string" }, depends_on: { type: "array", items: { type: "string" } } } } },
-      planned_checks: { type: "array", minItems: 1, maxItems: 20, items: { type: "object", additionalProperties: false,
-        required: ["artifact", "comparator", "failure_condition"], properties: { artifact: { type: "string" }, comparator: { type: "string" }, failure_condition: { type: "string" } } } },
-      baseline_comparison: { type: "string", minLength: 20, maxLength: 2000 }, release_strategy: { type: "string", minLength: 20, maxLength: 2000 },
-      rollback_strategy: { type: "string", minLength: 20, maxLength: 2000 }, observability_strategy: { type: "string", minLength: 20, maxLength: 2000 },
-      fully_shipped_definition: { type: "string", minLength: 20, maxLength: 2000 }, prerequisite_policy: { type: "string", minLength: 20, maxLength: 2000 },
-    } },
-  } };
-
 
 // WHO ACTUALLY PERFORMED THE AUTHORITY ACTS ON THIS REQUEST.
 //
@@ -692,13 +621,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
         // exactly those or the SQL widening is dead code.
         if (!row || !["captured", "triaged", "ready", "needs_joe", "declined", "superseded"].includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const triaged = ["triaged", "ready"].includes(row.state);
-        // Withdrawal is CAPTURED-ONLY: branch 3 of work_request_sourced_capture_
-        // shape requires triage_classification, triaged_by_actor_id and
-        // triaged_at to all be null in these two states, and the immutability
-        // trigger admits the transition only from 'captured'. So a withdrawn row
-        // carries no triage, no plan and no shape, and every block below that is
-        // keyed on those columns correctly reads null. Nothing here has to
-        // special-case them; the constraint already did.
+        // A withdrawn row carries no plan and no shape: decline is captured-
+        // only, and 0888 supersedes a triaged row only when nothing downstream
+        // names it. A row superseded from triaged keeps its triage fields, so
+        // the triage block is keyed on the column rather than on the state.
         const withdrawn = ["declined", "superseded"].includes(row.state);
         let pendingOutcomeFeedback = null;
         if (row.state === "ready") {
@@ -730,7 +656,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           // would misreport absence as staleness. Same null-when-absent shape
           // as plan/shape below.
           source: row.doctrine_section_id ? sourceProjection(row) : null,
-          triage: triaged ? { classification: row.triage_classification, human_actor_slug: row.triaged_by_actor_slug,
+          triage: row.triaged_at ? { classification: row.triage_classification, human_actor_slug: row.triaged_by_actor_slug,
             triaged_at: row.triaged_at } : null,
           plan: row.plan_hash ? { plan_ref: row.plan_ref || null, plan_hash: row.plan_hash, runbook_ref: row.runbook_ref || null,
             scope_summary: row.scope_summary || null,
@@ -881,12 +807,11 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // decline instead of an error. 0426 splits the database functions for the
     // same reason; this is that split reaching the verb layer.
     //
-    // CAPTURED ONLY, and the verbs do not enforce it — ops.decline_/supersede_
-    // sourced_work_request select "for update" on state='captured' and version=
-    // p_base_version, so a triaged request raises and surfaces here as a version
-    // conflict. Withdrawing a triaged row would strand its triage receipt and may
-    // strand a shape disposition; that is the migration's reasoning, not a
-    // restriction this layer invented.
+    // The STATE RULE lives in the database, not here. ops.decline_sourced_work_
+    // request admits captured only. ops.supersede_sourced_work_request (0888)
+    // also admits triaged when ops.work_request_supersession_strands finds
+    // nothing downstream naming the request, and names each refusal so the
+    // handler below can surface it instead of an unhandled failure.
     //
     // NOT authorityOnly, unlike review-and-triage and accept-ready-plan. 0426
     // grants execute on both functions to carr_writer and nothing else, and the
@@ -945,7 +870,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "supersede-work-request": {
       write: true,
-      description: "Withdraw one sourced Work Request captured in error by superseding it into the request that replaces it, recording why. It works from captured and no later state; it never triages, assigns, dispatches, approves, executes, or changes the successor.",
+      description: "Withdraw one sourced Work Request by superseding it into the request that replaces it, recording why. It works from captured, or from triaged when nothing downstream (a plan, an admission, a shape, execution or outcome evidence) names the request; a triaged request keeps its triage receipt. It never triages, assigns, dispatches, approves, executes, or changes the successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
@@ -956,18 +881,32 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
       handler: async (c, actor, args) => {
         validateSupersede(args, ToolError);
         return withEnvelope(c, actor, "supersede-work-request", { ...args, _server_actor_id: actor.id }, async () => {
-          const result = await c.query(
-            `select * from ops.supersede_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::text, $6::uuid)
-               /* work-request-intake:supersede */`,
-            [args.human_ref, args.base_version, text(args.exit_reason), args.superseded_by, actor.slug, args.idempotency_key]);
+          let result;
+          try {
+            result = await c.query(
+              `select * from ops.supersede_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::text, $6::uuid)
+                 /* work-request-intake:supersede */`,
+              [args.human_ref, args.base_version, text(args.exit_reason), args.superseded_by, actor.slug, args.idempotency_key]);
+          } catch (error) {
+            // 0888 names every refusal "<name>: <sentence>". The database raises
+            // on each one and never returns an empty row.
+            const detail = String(error?.message || "");
+            const name = /^([a-z_]+):/.exec(detail)?.[1];
+            if (name === "work_request_not_supersedable")
+              throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
+                resolution: "re-read the Work Request card; only its current captured or triaged version may be superseded" });
+            if (SUPERSEDE_REFUSALS.has(name))
+              throw new ToolError({ error: name, human_ref: args.human_ref, superseded_by: args.superseded_by, detail });
+            throw error;
+          }
           const row = result.rows[0];
-          if (!row) throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
-            resolution: "re-read the Work Request card; only its current captured version may be withdrawn" });
+          // A superseded sourced row keeps triage fields only when it was
+          // superseded from triaged; the shape check forbids them otherwise.
           const subject = await c.query(
-            `select id from ops.work_request where ref = $1
+            `select id, triaged_at is not null as was_triaged from ops.work_request where ref = $1
                /* work-request-intake:withdrawn-subject */`, [row.ref]);
           await writeEvent(c, actor, "supersede-work-request", "ops_work_request", subject.rows[0].id, {
-            field: "state", old: { state: "captured", version: args.base_version },
+            field: "state", old: { state: subject.rows[0].was_triaged ? "triaged" : "captured", version: args.base_version },
             new: { state: "superseded", version: Number(row.version), exit_reason: row.exit_reason,
               superseded_by_ref: row.superseded_by_ref },
             idempotency_key: args.idempotency_key,
@@ -979,7 +918,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "propose-ready-plan": {
       write: true,
-      description: "Append one immutable, bounded ready-plan proposal to a triaged Work Request. The database derives whether the work is heavy from the request and plan size. Heavy work is refused until a current Work Shape plus a typed research manifest and complete master plan are bound to the proposal. It does not change request state, assign work, dispatch, execute, or approve.",
+      description: "Append one immutable, bounded ready-plan proposal to a triaged Work Request. It does not change request state, assign work, dispatch, execute, or approve.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" }, human_ref: { type: "string" }, base_version: { type: "integer", minimum: 1 },
         scope_summary: { type: "string", minLength: 1, maxLength: 1000 }, runbook_ref: { type: "string" },
@@ -998,26 +937,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               },
             },
           } },
-        heavy_build: HEAVY_BUILD_SCHEMA,
       }, required:["idempotency_key","human_ref","base_version","scope_summary","runbook_ref","dependency_refs","recovery_ref","observability_ref","caps"] },
       handler: async (c, actor, args) => {
         validatePlan(args, ToolError);
         return withEnvelope(c, actor, "propose-ready-plan", { ...args, _server_actor_id: actor.id }, async () => {
-          const classified = (await c.query(
-            `select * from ops.classify_sourced_work_request_build($1::text,$2::integer,$3::text,$4::jsonb,$5::jsonb)
-               /* work-request-intake:classify-ready-plan */`,
-            [args.human_ref, args.base_version, text(args.scope_summary), JSON.stringify(args.dependency_refs), JSON.stringify(args.caps)])).rows[0];
-          if (!classified) throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
-            resolution: "re-read the exact current triaged Work Request before proposing its plan" });
-          const reasons = Array.isArray(classified.reasons) ? classified.reasons : [];
-          const heavy = classified.tier === "heavy" || args.heavy_build !== undefined;
-          if (heavy && !classified.shape_ready) throw new ToolError({ error: "heavy_build_shape_required", human_ref: args.human_ref,
-            classification_reasons: reasons, shape_disposition: classified.shape_disposition || null,
-            resolution: "set Work Shape disposition to required and write the current evidence-backed Work Shape before proposing a heavy plan" });
-          if (heavy && !args.heavy_build) throw new ToolError({ error: "heavy_build_admission_required", human_ref: args.human_ref,
-            classification_reasons: reasons, missing: ["research_manifest", "master_plan", "builder_session_ref"],
-            resolution: "finish the research manifest and complete target-product master plan, then retry the same planning step" });
-
           const result = await c.query(
             `select * from ops.propose_sourced_work_request_plan($1::text,$2::integer,$3::text,$4::text,$5::jsonb,$6::text,$7::text,$8::jsonb,$9::uuid)
                /* work-request-intake:propose-ready-plan */`,
@@ -1025,101 +948,48 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
              args.recovery_ref, args.observability_ref, JSON.stringify(args.caps), args.idempotency_key]);
           const row = result.rows[0];
           if (!row) throw new ToolError({ error: "version_conflict" });
-          let admission = null;
-          if (heavy) {
-            const effectiveReasons = reasons.length ? reasons : ["caller:explicit-heavy-contract"];
-            admission = (await c.query(
-              `select * from ops.record_sourced_heavy_build_admission($1::uuid,$2::text,$3::integer,$4::jsonb,$5::jsonb,$6::uuid,$7::uuid)
-                 /* work-request-intake:record-heavy-admission */`,
-              [row.plan_id, args.human_ref, args.base_version, JSON.stringify(effectiveReasons), JSON.stringify(args.heavy_build), actor.id, args.idempotency_key])).rows[0];
-            if (!admission) throw new ToolError({ error: "heavy_build_admission_not_recorded" });
-          }
-          const ruleDeliverySource = await deliverySourceForPlan(c, actor, row, args, classified, admission);
+          const ruleDeliverySource = await deliverySourceForPlan(c, actor, row, args);
           await writeEvent(c, actor, "propose-ready-plan", "ops_work_request", row.work_request_id, {
             field: "ready_plan", new: { plan_ref: row.plan_ref, plan_hash: row.plan_hash, runbook_ref: row.runbook_ref,
-              build_tier: heavy ? "heavy" : "standard", admission_hash: admission?.admission_hash || null,
               rule_delivery_contract_digest: ruleDeliverySource.contract_digest || null }, idempotency_key: args.idempotency_key,
           });
           return { ok: true, human_ref: row.ref, state: row.state, version: Number(row.version), plan_ref: row.plan_ref,
             plan_hash: row.plan_hash, scope_summary: row.scope_summary, runbook_ref: row.runbook_ref,
             runbook_revision_id: row.runbook_revision_id, runbook_content_hash: row.runbook_content_hash,
-            build_admission: heavy ? { tier: "heavy", reasons: admission.classifier_reasons || reasons, required: true,
-              admission_ref: admission.admission_ref, admission_hash: admission.admission_hash,
-              next_required_action: "fresh independent plan review" } : { tier: "standard", reasons, required: false },
             rule_delivery_source: ruleDeliverySource };
-        });
-      },
-    },
-    "review-heavy-build-plan": {
-      write: true,
-      description: "Record a fresh-context independent review of one exact heavy-build admission and immutable plan. A passing receipt is required before human plan acceptance; this verb never accepts, dispatches, executes, or changes Work Request state.",
-      inputSchema: { type: "object", additionalProperties: false, properties: {
-        idempotency_key: { type: "string" }, human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
-        plan_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" }, admission_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
-        verdict: { type: "string", enum: ["pass", "fail"] }, reviewer_session_ref: { type: "string", minLength: 17, maxLength: 207 },
-        review_summary: { type: "string", minLength: 20, maxLength: 1000 },
-        evidence_refs: { type: "array", minItems: 1, maxItems: 12, items: { type: "string", minLength: 6, maxLength: 300 } },
-        gaps: { type: "array", maxItems: 12, items: { type: "string", minLength: 10, maxLength: 500 } },
-      }, required: ["idempotency_key", "human_ref", "plan_hash", "admission_hash", "verdict", "reviewer_session_ref", "review_summary", "evidence_refs", "gaps"] },
-      handler: async (c, actor, args) => {
-        validateHeavyReview(args, ToolError);
-        return withEnvelope(c, actor, "review-heavy-build-plan", { ...args, _server_actor_id: actor.id }, async () => {
-          const target = (await c.query(
-            `select * from ops.sourced_heavy_build_review_target($1::text,$2::text,$3::text)
-               /* work-request-intake:heavy-review-target */`,
-            [args.human_ref, args.plan_hash, args.admission_hash])).rows[0];
-          if (!target) throw new ToolError({ error: "heavy_build_review_target_not_found" });
-          if (target.builder_session_ref === args.reviewer_session_ref) throw new ToolError({ error: "heavy_build_review_context_not_fresh",
-            builder_session_ref: target.builder_session_ref,
-            resolution: "run the review in a genuinely fresh session and pass that session's distinct stable reference" });
-          const row = (await c.query(
-            `select * from ops.review_sourced_heavy_build_plan($1::text,$2::text,$3::text,$4::uuid,$5::text,$6::text,$7::text,$8::jsonb,$9::jsonb,$10::uuid)
-               /* work-request-intake:review-heavy-plan */`,
-            [args.human_ref, args.plan_hash, args.admission_hash, actor.id, args.verdict, args.reviewer_session_ref,
-             text(args.review_summary), JSON.stringify(args.evidence_refs), JSON.stringify(args.gaps), args.idempotency_key])).rows[0];
-          if (!row) throw new ToolError({ error: "heavy_build_review_not_recorded" });
-          await writeEvent(c, actor, "review-heavy-build-plan", "ops_work_request", row.work_request_id, {
-            field: "heavy_build_plan_review", new: { plan_hash: args.plan_hash, admission_hash: args.admission_hash,
-              review_ref: row.review_ref, review_hash: row.review_hash, verdict: row.verdict }, idempotency_key: args.idempotency_key,
-          });
-          return { ok: true, human_ref: row.ref, plan_hash: args.plan_hash, admission_ref: row.admission_ref,
-            admission_hash: row.admission_hash, review_ref: row.review_ref, review_hash: row.review_hash,
-            verdict: row.verdict, reviewer_session_ref: row.reviewer_session_ref,
-            status: row.verdict === "pass" ? "ready_for_human_plan_acceptance" : "revision_required" };
         });
       },
     },
     "propose-ready-plan-amendment": {
       write: true,
-      description: "Append one immutable same-Work-Request ready-plan successor proposal with its closed heavy-build contract. The caller binds the exact accepted predecessor hash; the database records successor build admission, serializes the lineage, preserves history, and creates no acceptance, cancellation, assignment, dispatch, or execution authority.",
+      description: "Append one immutable same-Work-Request ready-plan successor proposal with its bounded plan contract. The caller binds the exact accepted predecessor hash; the database serializes the lineage, preserves history, and creates no acceptance, cancellation, assignment, dispatch, or execution authority.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string" }, human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
         base_version: { type: "integer", minimum: 1 }, predecessor_plan_hash: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
         scope_summary: { type: "string", minLength: 1, maxLength: 1000 }, runbook_ref: { type: "string" },
         dependency_refs: { type: "array", maxItems: 12, items: { type: "string" } }, recovery_ref: { type: "string" },
-        observability_ref: { type: "string" }, caps: { type: "object" }, heavy_build: HEAVY_BUILD_SCHEMA,
-      }, required: ["idempotency_key", "human_ref", "base_version", "predecessor_plan_hash", "scope_summary", "runbook_ref", "dependency_refs", "recovery_ref", "observability_ref", "caps", "heavy_build"] },
+        observability_ref: { type: "string" }, caps: { type: "object" },
+      }, required: ["idempotency_key", "human_ref", "base_version", "predecessor_plan_hash", "scope_summary", "runbook_ref", "dependency_refs", "recovery_ref", "observability_ref", "caps"] },
       handler: async (c, actor, args) => {
         validatePlanAmendment(args, ToolError);
         return withEnvelope(c, actor, "propose-ready-plan-amendment", { ...args, _server_actor_id: actor.id }, async () => {
           const result = await c.query(
-            `select ops.propose_ready_plan_amendment($1::text,$2::integer,$3::text,$4::text,$5::text,$6::jsonb,$7::text,$8::text,$9::jsonb,$10::jsonb,$11::uuid,$12::uuid) as amendment
+            `select ops.propose_ready_plan_amendment($1::text,$2::integer,$3::text,$4::text,$5::text,$6::jsonb,$7::text,$8::text,$9::jsonb,$10::uuid,$11::uuid) as amendment
                /* work-request-intake:propose-ready-plan-amendment */`,
             [args.human_ref, args.base_version, args.predecessor_plan_hash, text(args.scope_summary), args.runbook_ref,
               JSON.stringify(args.dependency_refs), args.recovery_ref, args.observability_ref, JSON.stringify(args.caps),
-              JSON.stringify(args.heavy_build), actor.id, args.idempotency_key]);
+              actor.id, args.idempotency_key]);
           const row = result.rows[0]?.amendment;
-          if (!row?.ok || !row.work_request || !row.plan || !row.build_admission)
+          if (!row?.ok || !row.work_request || !row.plan)
             throw new ToolError({ error: row?.error || "ready_plan_amendment_proposal_refused" });
           await writeEvent(c, actor, "propose-ready-plan-amendment", "ops_work_request", row.work_request.id, {
             field: "ready_plan_successor_proposed",
             new: { predecessor_plan_hash: args.predecessor_plan_hash, plan_ref: row.plan.ref, plan_hash: row.plan.hash,
-              plan_version: row.plan.version, admission_hash: row.build_admission.admission_hash,
-              admission_ref: row.build_admission.admission_ref, replayed: row.replayed === true },
+              plan_version: row.plan.version, replayed: row.replayed === true },
             idempotency_key: args.idempotency_key,
           });
           return { ok: true, work_request: row.work_request, plan: row.plan,
-            build_admission: row.build_admission, replayed: row.replayed === true };
+            replayed: row.replayed === true };
         });
       },
     },
@@ -1223,7 +1093,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     },
     "propose-outcome-feedback": {
       write: true,
-      description: "Propose evidence-bound outcome feedback for one accepted sourced ready plan. It creates no success claim, state transition, execution, assignment, dispatch, approval, or completion.",
+      description: "Propose evidence-bound outcome feedback for one accepted sourced ready plan; it completes nothing. It creates no success claim, state transition, execution, assignment, dispatch, approval, or completion: the proposal waits for a human accept-outcome-feedback, or for bind-work-request-criterion-evidence (sponsored actors only) to complete the request on bound evidence. This verb is on the capture profile, so it must never be a completion door.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" }, base_version: { type: "integer", minimum: 1 },
@@ -1282,6 +1152,63 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
             result_summary: row.result_summary, observed_minutes: Number(row.observed_minutes), interaction_surface: row.interaction_surface,
             heavy_session_used: row.heavy_session_used, manual_context_transfers: Number(row.manual_context_transfers),
             accepted_by_actor_slug: row.accepted_by_actor_slug, accepted_at: row.accepted_at };
+        });
+      },
+    },
+    "bind-work-request-criterion-evidence": {
+      write: true,
+      description: "Technical-check completion for sponsored actors: bind ONE acceptance criterion of a ready sourced Work Request to ONE server receipt tied to that request. " +
+        "Only a human actor or a sponsored agent may call it (an unsponsored runtime is refused here and again by the database), and it is on no unattended profile. " +
+        "The receipt must resolve in the database AND be evidence for THIS request: ops.run:<uuid> that succeeded and belongs to a release recorded for the request or names it; ops.deployment:<uuid> that completed and ships a release slice member naming the request; defect-resolution:<uuid> (close-defect's receipt) closing a defect the request names; or incident:<ref>, resolved and linked to the request (link-incident-work-request). " +
+        "A caller's words never count; an unresolvable or unrelated receipt is refused with the reason. Append-only: one receipt per criterion and one criterion per receipt, ever; the same receipt again is the same act. " +
+        "THEN IT TRIES TO COMPLETE (decision cbe91287): when every acceptance criterion is bound and the latest outcome proposal (propose-outcome-feedback) is criteria_met, the database writes the acceptance receipt with 'completed_on_bound_evidence' and the receipt ids, with no human accept-outcome-feedback. If the proposal arrives after the last binding, binding any criterion again with its same receipt and a new key completes it. The completion field says either that or what is still missing; state is the state the row holds.",
+      inputSchema: { type: "object", additionalProperties: false, properties: {
+        idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
+        human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$" },
+        criterion_id: { type: "string", pattern: "^[A-Z][A-Z0-9-]{1,63}$" },
+        receipt_ref: { type: "string", minLength: 1, maxLength: 300 },
+      }, required: ["idempotency_key", "human_ref", "criterion_id", "receipt_ref"] },
+      handler: async (c, actor, args) => {
+        validateCriterionEvidence(args, ToolError);
+        // THE TECHNICAL CHECK REPLACES THE HUMAN, SO WHO RUNS IT MATTERS. Only a
+        // verified partner or a sponsored agent; the database refuses anyone
+        // else again (ops.work_request_completion_actor), whichever door called.
+        const authorizationClass = authorizationClassForActor(actor);
+        if (authorizationClass !== "verified_partner" && authorizationClass !== "sponsored_agent")
+          throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass,
+            hint: "binding evidence can complete a Work Request, so only a partner or a sponsored agent may do it. " +
+                  "Nothing was written." });
+        // Serialize a same-key first attempt before the envelope's replay read.
+        await c.query("select pg_advisory_xact_lock(hashtextextended($1,0))", [String(args.idempotency_key).toLowerCase()]);
+        return withEnvelope(c, actor, "bind-work-request-criterion-evidence", args, async () => {
+          let row;
+          try {
+            row = (await c.query(
+              `select * from ops.bind_work_request_criterion_evidence($1::text,$2::text,$3::text,$4::uuid)
+                 /* work-request-intake:bind-criterion-evidence */`,
+              [args.human_ref, args.criterion_id, text(args.receipt_ref), args.idempotency_key])).rows[0];
+          } catch (err) {
+            // The database names each refusal (receipt_not_evidence_for_work_request,
+            // receipt_already_bound, work_request_completion_requires_sponsored_actor, ...).
+            const detail = String(err?.message || err);
+            throw new ToolError({ error: "criterion_evidence_refused", human_ref: args.human_ref,
+              criterion_id: args.criterion_id, reason: /^([a-z_]+):/.exec(detail)?.[1] || null, detail });
+          }
+          if (!row) throw new ToolError({ error: "criterion_evidence_refused", human_ref: args.human_ref });
+          if (row.replayed !== true)
+            await writeEvent(c, actor, "bind-work-request-criterion-evidence", "ops_work_request", row.work_request_id, {
+              field: "criterion_evidence_bound",
+              new: { criterion_id: row.criterion_id, receipt_ref: row.receipt_ref, receipt_kind: row.receipt_kind,
+                binding_id: row.binding_id },
+              idempotency_key: args.idempotency_key,
+            });
+          const completion = await completeOnBoundEvidence(c, actor, writeEvent,
+            "bind-work-request-criterion-evidence", row.ref, args.idempotency_key);
+          return { ok: true, bound: true, human_ref: row.ref, criterion_id: row.criterion_id,
+            receipt_ref: row.receipt_ref, receipt_kind: row.receipt_kind, binding_id: row.binding_id,
+            bound_by_actor_slug: row.bound_by_actor_slug, bound_at: row.created_at,
+            already_bound: row.replayed === true,
+            state: completion.state, completion };
         });
       },
     },

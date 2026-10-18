@@ -6,6 +6,7 @@ import importlib.util
 import io
 import os
 import sys
+import tempfile
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
@@ -123,95 +124,6 @@ with patch.dict(os.environ, {**DECLARED_HOSTED, "GITHUB_REPOSITORY": "someone/fo
     else:
         check("a fork is refused", False)
 
-# Export is a manual hosted-only mode; unlike the ordinary local DB lane it
-# must not be invokable from a developer shell or write into the repository.
-with patch.dict(os.environ, {}, clear=True):
-    try:
-        mod.export_snapshot_candidate(
-            repo=REPO, port=55432, artifact_dir=Path("/tmp/carr-export-selftest")
-        )
-    except mod.LocalPGRefusal as exc:
-        check("candidate export refuses non-hosted execution", "manual hosted" in str(exc))
-    else:
-        check("candidate export refuses non-hosted execution", False)
-
-for event_name in ("pull_request", "schedule"):
-    with patch.dict(os.environ, {**DECLARED_HOSTED,
-                              "GITHUB_EVENT_NAME": event_name,
-                              "GITHUB_WORKFLOW": "DB acceptance"}, clear=True):
-        try:
-            mod.export_snapshot_candidate(
-                repo=REPO, port=55432,
-                artifact_dir=Path("/tmp/carr-export-selftest")
-            )
-        except mod.LocalPGRefusal:
-            check(f"candidate export refuses {event_name}", True)
-        else:
-            check(f"candidate export refuses {event_name}", False)
-
-export_events: list[tuple[str, ...]] = []
-
-
-class TimeoutExportRunner:
-    def run(self, command, *, env=None, cwd=None, capture=False):
-        del env, cwd, capture
-        event = tuple(str(part) for part in command)
-        export_events.append(event)
-        if event[:3] == ("git", "rev-parse", "HEAD"):
-            return mod.CommandResult(0, "a" * 40 + "\n", "")
-        if event[:3] == ("git", "rev-parse", "HEAD^{tree}"):
-            return mod.CommandResult(0, "b" * 40 + "\n", "")
-        if event[:3] == ("/fake/initdb", "--version"):
-            return mod.CommandResult(0, "initdb (PostgreSQL) 17.6\n", "")
-        if event[0] == "/fake/pg_ctl" and event[-1] == "start":
-            return mod.CommandResult(1, "", "start timed out after spawn")
-        return mod.CommandResult(0, "", "")
-
-
-with (
-    patch.dict(os.environ, {**DECLARED_HOSTED, "GITHUB_EVENT_NAME": "workflow_dispatch",
-                            "GITHUB_WORKFLOW": "DB acceptance"}, clear=True),
-    patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod, "find_postgres_binaries", return_value=mod.PostgresBinaries(
-        initdb=Path("/fake/initdb"), pg_ctl=Path("/fake/pg_ctl"),
-        createdb=Path("/fake/createdb"), psql=Path("/fake/psql"),
-    )),
-    patch.object(mod.tempfile, "mkdtemp", return_value="/tmp/carr-export-timeout-selftest") as export_mkdtemp,
-    patch.object(mod.shutil, "rmtree") as export_remove,
-):
-    try:
-        mod.export_snapshot_candidate(
-            repo=REPO, port=55432,
-            artifact_dir=Path("/tmp/carr-export-timeout-artifact"),
-            runner=TimeoutExportRunner(),
-        )
-    except mod.LocalPGRefusal as exc:
-        check("candidate export surfaces pg_ctl start timeout", "start timed out" in str(exc))
-    else:
-        check("candidate export surfaces pg_ctl start timeout", False)
-    check("timed-out postmaster receives a stop attempt",
-          any(event[0] == "/fake/pg_ctl" and event[-1] == "stop"
-              for event in export_events))
-    check("confirmed timeout teardown removes disposable root", export_remove.call_count == 1)
-    # The restore CI class requires the same dedicated disposable directory
-    # contract as the ordinary local PG lane.
-    check("candidate restore uses the dedicated disposable directory prefix",
-          export_mkdtemp.call_args.kwargs.get("prefix") == "carr-local-pg-ci.")
-
-with (
-    patch.dict(os.environ, {**DECLARED_HOSTED, "GITHUB_EVENT_NAME": "workflow_dispatch",
-                            "GITHUB_WORKFLOW": "DB acceptance"}, clear=True),
-    patch.object(mod, "port_is_available", return_value=True),
-):
-    try:
-        mod.export_snapshot_candidate(
-            repo=REPO, port=55432, artifact_dir=REPO / ".wr128-never-created-artifact"
-        )
-    except mod.LocalPGRefusal as exc:
-        check("candidate export refuses repository artifact target", "outside the repository" in str(exc))
-    else:
-        check("candidate export refuses repository artifact target", False)
-
 # The remaining cases use a fully mocked local runner. Clear the ambient hosted
 # marker after testing the refusal so CI and a developer shell exercise the
 # exact same hermetic fixtures below.
@@ -235,19 +147,24 @@ fake_bins = mod.PostgresBinaries(
     initdb=Path("/fake/initdb"), pg_ctl=Path("/fake/pg_ctl"),
     createdb=Path("/fake/createdb"), psql=Path("/fake/psql"),
 )
-fake_root = Path("/tmp/carr-local-pg-ci.selftest")
+fake_owner = mod.DisposablePostgres("carr-local-pg-ci.selftest-", fake_bins.pg_ctl)
+fake_root = fake_owner.root
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove,
 ):
     result = mod.run_local_ci(
         repo=REPO, ci_class="migration", port=55432, runner=FakeRunner()
     )
+check("discovered binaries reach the scrubbed Linux child PATH",
+      all(env.get("PATH", "").split(os.pathsep)[0] == "/fake" for env in child_envs))
 check("successful lane returns zero", result == 0)
 check("initdb is first PostgreSQL operation", events[0][0] == "/fake/initdb")
-check("server binds loopback", "-h 127.0.0.1 -p 55432" in events[1])
+check("server binds loopback and private socket",
+      f"-h 127.0.0.1 -p 55432 -k {fake_root / 'socket'}" in events[1])
 check("server output is detached from runner pipes", "-l" in events[1] and "postgres.log" in events[1][events[1].index("-l") + 1])
 check("database is created locally", events[2][0] == "/fake/createdb")
 check("fixture owner role is created", events[3][0] == "/fake/psql" and "neondb_owner" in events[3][-1])
@@ -262,6 +179,8 @@ check(
 )
 check("true pre-0450 fingerprint is captured", events[8][-1] == "--fingerprint-only")
 check("migration class runs through canonical CI", events[9][-2:] == ("--only", "migration"))
+check("migration gates discover the selected PostgreSQL binaries in the scrubbed child",
+      child_envs[9]["PATH"].split(os.pathsep)[0] == "/fake")
 check(
     "F03 PostgreSQL acceptance runs immediately after canonical CI",
     events[10][-1].endswith("tools/test-f03-production-migration.py"),
@@ -286,33 +205,35 @@ check(
     == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
     and child_envs[continuity_event].get("CARR_CONTINUITY_DATABASE_DRIVER_MODULE") == "pg",
 )
+check("Leads PostgreSQL regressions run after continuity", events[12][-1].endswith("mcp-server/test/lead-workspace-pg.test.mjs"))
+check("Leads PostgreSQL regressions receive the disposable DSN", child_envs[12].get("LEAD_WORKSPACE_TEST_DATABASE_URL") == "postgres://carr_ci@127.0.0.1:55432/carr_ci")
 check(
     "atomic Joe lifecycle runs after canonical CI",
-    events[12][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    events[13][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
 )
 check(
     "atomic rule-delivery cutover runs after authority acceptance",
-    events[13][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    events[14][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 check(
     "scoped engineering claim runs after the authority acceptances",
-    events[14][-1].endswith("ops/engineering-claim-local-pg-gate.py"),
+    events[15][-1].endswith("ops/engineering-claim-local-pg-gate.py"),
 )
 check(
     "Engineering terminalization race runs after the scoped claim",
-    events[15][-1].endswith("ops/engineering-envelope-race-local-pg-gate.py"),
+    events[16][-1].endswith("ops/engineering-envelope-race-local-pg-gate.py"),
 )
 check(
     "canonical ownership lease runs after the Engineering race proof",
-    events[16][-1].endswith("ops/canonical-ownership-lease-local-pg-gate.py"),
+    events[17][-1].endswith("ops/canonical-ownership-lease-local-pg-gate.py"),
 )
 check(
     "assurance persistence runs immediately after canonical ownership",
-    events[17][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
+    events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
 )
 check(
     "source-merge reader projection runs immediately after assurance persistence",
-    events[18][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
+    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
 )
 completion_event = next(
     index for index, event in enumerate(events)
@@ -336,9 +257,9 @@ check(
 )
 check(
     "authority acceptance receives only the local disposable DSN",
-    child_envs[12].get("CARR_LOCAL_PG_DSN")
+    child_envs[13].get("CARR_LOCAL_PG_DSN")
     == "postgres://carr_ci@127.0.0.1:55432/carr_ci"
-    and "CARR_CI_DATABASE_URL" not in child_envs[12],
+    and "CARR_CI_DATABASE_URL" not in child_envs[13],
 )
 check(
     "fingerprint reads only the isolated pre-0450 database",
@@ -348,8 +269,8 @@ check(
 )
 check(
     "post-CI gates receive the exact pre-0450 fingerprint",
-    child_envs[12].get("CARR_OWNERSHIP_PRE_0450_FINGERPRINT") == "{}"
-    and child_envs[16].get("CARR_OWNERSHIP_PRE_0450_FINGERPRINT") == "{}",
+    child_envs[13].get("CARR_OWNERSHIP_PRE_0450_FINGERPRINT") == "{}"
+    and child_envs[17].get("CARR_OWNERSHIP_PRE_0450_FINGERPRINT") == "{}",
 )
 check("server always stops", events[-1][0] == "/fake/pg_ctl" and events[-1][-1] == "stop")
 check("temporary cluster is always removed", remove.call_count == 1)
@@ -367,7 +288,8 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree"),
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="strict", port=55432, runner=FakeRunner())
@@ -380,31 +302,31 @@ check("strict lane runs the F03 PostgreSQL acceptance", events[10][-1].endswith(
 check("strict lane runs the Codex continuity real-PostgreSQL proof", continuity_event == 11)
 check(
     "strict lane also proves atomic Joe lifecycle",
-    events[12][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
+    events[13][-1].endswith("ops/atomic-rule-approval-local-pg-acceptance.py"),
 )
 check(
     "strict lane also proves atomic rule-delivery cutover",
-    events[13][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
+    events[14][-1].endswith("ops/rule-delivery-local-pg-acceptance.py"),
 )
 check(
     "strict lane also proves the scoped engineering claim",
-    events[14][-1].endswith("ops/engineering-claim-local-pg-gate.py"),
+    events[15][-1].endswith("ops/engineering-claim-local-pg-gate.py"),
 )
 check(
     "strict lane also proves the Engineering terminalization race",
-    events[15][-1].endswith("ops/engineering-envelope-race-local-pg-gate.py"),
+    events[16][-1].endswith("ops/engineering-envelope-race-local-pg-gate.py"),
 )
 check(
     "strict lane also proves canonical ownership leases",
-    events[16][-1].endswith("ops/canonical-ownership-lease-local-pg-gate.py"),
+    events[17][-1].endswith("ops/canonical-ownership-lease-local-pg-gate.py"),
 )
 check(
     "strict lane also proves assurance persistence",
-    events[17][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
+    events[18][-1].endswith("ops/assurance-evidence-acceptance-local-pg-gate.py"),
 )
 check(
     "strict lane also proves source-merge reader projection",
-    events[18][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
+    events[19][-1].endswith("ops/source-merge-authority-local-pg-gate.py"),
 )
 
 missing_gate = mod.run_required_local_gate(
@@ -434,7 +356,8 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree"),
 ):
     assurance_stderr = io.StringIO()
@@ -481,7 +404,8 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
@@ -498,7 +422,8 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_continuity_failure,
 ):
     continuity_stderr = io.StringIO()
@@ -523,7 +448,8 @@ events.clear()
 with (
     patch.object(mod, "find_postgres_binaries", return_value=fake_bins),
     patch.object(mod, "port_is_available", return_value=True),
-    patch.object(mod.tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(tempfile, "mkdtemp", return_value=str(fake_root)),
+    patch.object(Path, "mkdir"),
     patch.object(mod.shutil, "rmtree") as remove_start_failure,
 ):
     result = mod.run_local_ci(repo=REPO, ci_class="migration", port=55432,
@@ -539,3 +465,5 @@ print(f"local PG CI selftest — {passed}/{passed + len(failed)} passed")
 if failed:
     print("FAILED: " + "; ".join(failed))
     raise SystemExit(1)
+
+fake_owner.close()

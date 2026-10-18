@@ -574,7 +574,7 @@ if [ "$TARGET_ENV" != "production" ]; then
   fi
 fi
 
-# ---------- preflight 3: verb count did not shrink ----------
+# ---------- preflight 3: no unlisted verb retirement ----------
 
 # The count moved to ops/verb-count.sh on 2026-08-13 so that CI can run this same
 # guard at MERGE time, not only here at DEPLOY time. Same code, two callers
@@ -605,35 +605,35 @@ LEDGER_RC=0
 # /dev/null, so ops/last-deployed-verb-count.py could tell us the baseline was
 # stale and nobody would ever see it — the same "printed into a log nobody
 # opens" shape as the nightly steps that reported skipped for five days
-# (defect 3b21767e). stdout is still the number and nothing else.
+# (defect 3b21767e). stdout carries the source-bound registry JSON.
 BASELINE_STDERR="$(mktemp)"
-PREVIOUS="$("$PY" "$REPO/ops/last-deployed-verb-count.py" carr-mcp "$TARGET_ENV" 2>"$BASELINE_STDERR")" \
+PREVIOUS_REGISTRY="$("$PY" "$REPO/ops/last-deployed-verb-count.py" carr-mcp "$TARGET_ENV" --registry 2>"$BASELINE_STDERR")" \
   || LEDGER_RC=$?
 case "$LEDGER_RC" in
   0)
-    if [ -n "$PREVIOUS" ] && [ "$SHIPPING" -lt "$PREVIOUS" ]; then
+    PREVIOUS="$(printf '%s' "$PREVIOUS_REGISTRY" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["verb_count"])')"
+    if ! sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements "$PREVIOUS_REGISTRY" >/dev/null; then
       LOST=$((PREVIOUS - SHIPPING))
-      if [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
-        fail "this deploy would REMOVE $LOST verb(s) from $TARGET_ENV.
+      if [ "$LOST" -le 0 ] || [ "$RECOVERY_STEP" = "standalone" ] || [ "$TARGET_ENV" != "staging" ]; then
+        fail "this deploy fails the committed verb-retirement guard for $TARGET_ENV.
   last deployed: $PREVIOUS
   about to ship: $SHIPPING
 
-  Source and standalone deploys cannot waive the verb-loss guard. Only an
+  Every missing deployed name must be listed in ops/config/retired-verbs.v1.json. Only an
   exact prepared typed staging recovery step may temporarily shrink."
       fi
       prepare_typed_recovery_shrink
     else
-      echo "  OK  no verb loss (last deployed to $TARGET_ENV: $PREVIOUS)"
-    fi
-    if grep -q 'STALE BASELINE' "$BASELINE_STDERR" 2>/dev/null; then
-      echo "  !!  the number above is STALE and the guard above is weaker than it looks:" >&2
-      sed 's/^/      /' "$BASELINE_STDERR" >&2
+      echo "  OK  verb loss checked by name against deployed source and committed retirements ($TARGET_ENV: $PREVIOUS)"
     fi
     ;;
   3)
+    sh "$REPO/ops/verb-count.sh" "$WORKER_DIR" --check-retirements 0 >/dev/null \
+      || fail "registry import or retirement validation failed."
     echo "  --  no previous deployment recorded for $TARGET_ENV; this run establishes the baseline"
     ;;
   *)
+    cat "$BASELINE_STDERR" >&2
     # FAIL CLOSED, and no escape flag. Not caution: the Worker being deployed
     # needs Postgres for every verb it serves, so a deploy attempted while the
     # ledger is unreachable ships something that cannot work anyway. Refusing
@@ -1603,19 +1603,46 @@ if (live.get("git_sha") or {}).get("value")!=sha or (live.get("worker_version") 
   if [ -n "$DO_MIGRATION_VERSION_ID" ]; then
     PROVIDER_VERSION_ID="$DO_MIGRATION_VERSION_ID"
   else
-    set +e
     if [ -n "$PROBE_TOKENS_FILE" ]; then
       set -- --secrets-file "$PROBE_TOKENS_FILE"
     else
       set --
     fi
-    VERSION_UPLOAD_OUTPUT="$("$WRANGLER" versions upload "$@" --var "GIT_SHA:$HEAD_SHA" \
-      --var "CANDIDATE_MANIFEST:$CANDIDATE_MANIFEST" \
-      --var "CANDIDATE_MANIFEST_DIGEST:$CANDIDATE_MANIFEST_DIGEST" 2>&1)"
-    VERSION_UPLOAD_RC=$?
-    set -e
-    printf '%s\n' "$VERSION_UPLOAD_OUTPUT"
-    [ "$VERSION_UPLOAD_RC" -eq 0 ] || fail "Cloudflare version upload failed."
+    # A CONNECTIVITY FAILURE IS NOT A VERDICT ON THE RELEASE. On 2026-10-02
+    # wrangler's first API read (GET .../workers/services/carr-mcp) timed out
+    # once with `fetch failed`, before anything was uploaded, and the release
+    # pipeline marked bde9be154445 failed for good: it never retries a SHA, so
+    # one network blip burned a release that had nothing wrong with it.
+    # Retry ONLY that shape, and only while Cloudflare has named no version:
+    # an auth error, a refused build or a pending migration fails at once as
+    # before, and output carrying a Worker Version ID is never retried. A
+    # timeout after Cloudflare stored a version but before wrangler printed it
+    # leaves at most an extra version with no traffic, because promotion moves
+    # exactly the id parsed below.
+    UPLOAD_ATTEMPTS="${CARR_UPLOAD_ATTEMPTS:-3}"
+    UPLOAD_RETRY_SLEEP="${CARR_UPLOAD_RETRY_SLEEP:-30}"
+    UPLOAD_ATTEMPT=0
+    while :; do
+      UPLOAD_ATTEMPT=$((UPLOAD_ATTEMPT + 1))
+      set +e
+      VERSION_UPLOAD_OUTPUT="$("$WRANGLER" versions upload "$@" --var "GIT_SHA:$HEAD_SHA" \
+        --var "CANDIDATE_MANIFEST:$CANDIDATE_MANIFEST" \
+        --var "CANDIDATE_MANIFEST_DIGEST:$CANDIDATE_MANIFEST_DIGEST" 2>&1)"
+      VERSION_UPLOAD_RC=$?
+      set -e
+      printf '%s\n' "$VERSION_UPLOAD_OUTPUT"
+      [ "$VERSION_UPLOAD_RC" -ne 0 ] || break
+      [ "$UPLOAD_ATTEMPT" -lt "$UPLOAD_ATTEMPTS" ] || break
+      case "$VERSION_UPLOAD_OUTPUT" in
+        *"Worker Version ID:"*) break ;;
+        *"fetch failed"*|*ETIMEDOUT*|*ECONNRESET*|*ECONNREFUSED*|*ENOTFOUND*|*EAI_AGAIN*|*UND_ERR_*) ;;
+        *) break ;;
+      esac
+      echo "  version upload attempt $UPLOAD_ATTEMPT/$UPLOAD_ATTEMPTS hit a connectivity failure before Cloudflare named a version; retrying in ${UPLOAD_RETRY_SLEEP}s"
+      sleep "$UPLOAD_RETRY_SLEEP"
+    done
+    [ "$VERSION_UPLOAD_RC" -eq 0 ] \
+      || fail "Cloudflare version upload failed after $UPLOAD_ATTEMPT attempt(s)."
     PROVIDER_VERSION_ID="$(printf '%s\n' "$VERSION_UPLOAD_OUTPUT" \
       | sed -nE 's/^.*Worker Version ID:[[:space:]]*([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}).*$/\1/p' \
       | tail -n 1 | tr 'A-F' 'a-f')"

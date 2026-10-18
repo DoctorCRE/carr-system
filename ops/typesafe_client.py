@@ -47,7 +47,9 @@ TRUSTS A CALLER TO REMEMBER:
      code, then send only the fields the question needs.
 
 CREDENTIAL. Read from ~/.config/carr/typesafe.env, mode 600, outside the repo,
-recorded by name in secrets-inventory.md. The value is never logged, never
+recorded by name in secrets-inventory.md; only the direct transport reads it.
+The Worker route signs its admission with JEV_ADMISSION_SECRET from
+~/.config/carr/jev-admission.env instead. The value is never logged, never
 echoed into an exception, and never written to a receipt. On an HTTP error this
 module reports the status and a truncated response body, and deliberately does
 not report the request it sent, because the request carries the bearer token.
@@ -58,8 +60,10 @@ basis. Network reachability is separate and already granted: both hosts sit in
 KNOWN_HOSTS in hooks/guard-unattended.py.
 """
 
-import hashlib
+import base64
 import glob
+import hashlib
+import hmac
 import importlib.util
 import json
 import math
@@ -82,6 +86,10 @@ from functools import partial
 
 ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 KEY_PATH = os.path.expanduser("~/.config/carr/typesafe.env")
+# The Worker route's admission secret: shared by the Worker and the local
+# reservation owner only, so a Worker caller never needs the vendor key.
+ADMISSION_KEY_PATH = os.path.expanduser("~/.config/carr/jev-admission.env")
+ADMISSION_KEY_NAME = "JEV_ADMISSION_SECRET"
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Entry points may import with only ops/ on sys.path.
 if REPO not in sys.path:
@@ -196,7 +204,8 @@ class JevCallRefused(TypeSafeError):
 # global hourly cap. All four are checked before any transport and before
 # the daily reservation, fail closed, and are logged without being paid.
 JEV_CALL_SITES_PATH = os.path.join(REPO, "ops", "config", "jev-call-sites.v1.json")
-BUDGET_REFUSALS = ("hourly_paid_call_cap", "site_hourly_budget", "site_daily_budget")
+BUDGET_REFUSALS = ("hourly_paid_call_cap", "site_hourly_budget", "site_daily_budget",
+                   "jev_worker_daily_cap")
 POLICY_REFUSALS = ("fixture_offline", "unregistered_caller", "unattributed_call", "unattended_worker_off",
                    "call_site_registry_invalid")
 # Declined because of what the vendor already said: its account is out of
@@ -290,24 +299,34 @@ def _fixture_offline():
     return _truthy_env("CARR_JEV_OFFLINE") or _truthy_env("CARR_HOOK_FIXTURE")
 
 
-def read_api_key(path=KEY_PATH):
-    """The bearer token, from the 600-mode env file. Never logged."""
+def _read_secret(path, name):
+    """One named value from a 600-mode env file. Never logged."""
     try:
         with open(path, "r", encoding="utf-8") as handle:
             lines = handle.readlines()
     except OSError as err:
         raise TypeSafeError(
-            f"cannot read the TypeSafe credential at {path}: {err.strerror}. "
+            f"cannot read the {name} credential at {path}: {err.strerror}. "
             "Joe creates it by hand; no agent holds the value."
         ) from None
     for line in lines:
         line = line.strip()
-        if line.startswith(f"{KEY_NAME}="):
+        if line.startswith(f"{name}="):
             value = line.split("=", 1)[1].strip()
             if not value:
-                raise TypeSafeError(f"{path}: {KEY_NAME} is present but empty")
+                raise TypeSafeError(f"{path}: {name} is present but empty")
             return value
-    raise TypeSafeError(f"{path}: no {KEY_NAME} line")
+    raise TypeSafeError(f"{path}: no {name} line")
+
+
+def read_api_key(path=KEY_PATH):
+    """The vendor bearer token, used only by the direct transport."""
+    return _read_secret(path, KEY_NAME)
+
+
+def read_admission_secret():
+    """The secret that signs a Worker admission; never the vendor key."""
+    return _read_secret(ADMISSION_KEY_PATH, ADMISSION_KEY_NAME)
 
 
 def noul(instructions, true=None, false=None):
@@ -533,6 +552,9 @@ def _dispatch_binding(transcript_path=None, session=None):
 # On Worker failure the direct fallback uses the remaining caller budget and
 # records a fixed error category with no server receipt or raw error text.
 SERVER_VERB = "ask-jev"
+# A signed admission is single-use (the Worker's attempt ledger); this only
+# bounds how long an unused one stays valid.
+ADMISSION_TTL_SECONDS = 30
 # Hooks retain the direct route to stay within their timeout. An explicitly
 # requested build advisory can still use the server log; prompt intake defers it.
 IN_HOOK_ENV = "CARR_JEV_IN_HOOK"
@@ -571,6 +593,8 @@ def _server_error_category(stderr):
             ('"unknown_tool"', "verb_not_deployed"),
             ('"jev_proxy_unconfigured"', "worker_key_unbound"),
             ('"jev_upstream_failed"', "vendor_failed_at_worker"),
+            ('"jev_admission_required"', "admission_refused_at_worker"),
+            ('"jev_worker_daily_cap"', "worker_daily_cap"),
             ("could not reach the deployed Worker", "worker_unreachable"),
             ("no MCP token", "local_token_missing"),
             ("refusing MCP token file", "local_token_insecure")):
@@ -598,18 +622,47 @@ def _worker_upstream(stderr):
             reason if isinstance(reason, str) and re.fullmatch(r"[a-z_]{1,40}", reason) else None)
 
 
+def _admission_token(secret, idempotency_key, caller, session_id):
+    """The existing idempotency key, carrying one shared reservation. The
+    Worker verifies it and its attempt ledger consumes it once."""
+    payload = base64.urlsafe_b64encode(json.dumps(
+        [1, int(time.time()) + ADMISSION_TTL_SECONDS, idempotency_key, caller, session_id],
+        ensure_ascii=False, separators=(",", ":")).encode()).decode().rstrip("=")
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"jev1.{payload}.{signature}"
+
+
 def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
-               transport_mode, runner=None, upstream=None):
+               transport_mode, runner=None, upstream=None, caller=None, admission=None):
     """Ask the Worker's ask-jev verb. Returns (result, None) on success, where
     result is {"model", "answers", "usage", "server_receipt": {...}}, or
-    (None, <category>) on any failure. Never raises. When the Worker's own
-    vendor call failed, a passed `upstream` dict gets its status and reason."""
+    (None, <category>) on transport failure. A paid call is admitted (or uses
+    the caller's `admission`, the (registry, site) pair from _admit_paid_call)
+    and reserves its shared slot before transport; admission failures raise.
+    A passed `upstream` dict gets the Worker's vendor status and reason, and
+    `refusal` when no direct attempt may follow this one."""
     script = _local_verb_script()
     node = _node_binary()
     if runner is None and (script is None or node is None):
         return None, "node_or_local_verb_missing"
+    idempotency_key = str(uuid.uuid4())
+    probe = None
+    if transport_mode != "cache_only":
+        caller = caller or _caller_name()
+        kind = _question_kind(questions)
+        prompt = _prompt_sha256({"state": state, "model": model, "questions": questions})
+        registry, site = admission or _admit_paid_call(caller, session_id, questions, facets, kind, prompt)
+        try:
+            secret = read_admission_secret()
+        except TypeSafeError:
+            # Before the reservation: a machine without the secret takes the
+            # direct route's own reservation instead.
+            return None, "admission_secret_missing"
+        probe = _reserve_paid_call(questions, facets, caller, kind, prompt, registry, site,
+                                   session=session_id)
+        idempotency_key = _admission_token(secret, idempotency_key, caller, session_id)
     args = {
-        "idempotency_key": str(uuid.uuid4()),
+        "idempotency_key": idempotency_key,
         "session_id": session_id,
         "purpose": purpose,
         "state": state,
@@ -631,8 +684,30 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
         return None, "server_call_failed"
     if proc.returncode != 0:
         category = _server_error_category(proc.stderr)
-        if category == "vendor_failed_at_worker" and upstream is not None:
-            upstream["status"], upstream["reason"] = _worker_upstream(proc.stderr)
+        refusal = None
+        if category == "vendor_failed_at_worker":
+            status, reason = _worker_upstream(proc.stderr)
+            if upstream is not None:
+                upstream["status"], upstream["reason"] = status, reason
+            try:
+                _after_worker_vendor_failure(status, reason, caller)
+            except TypeSafeError as error:
+                refusal = error
+        elif category == "worker_daily_cap":
+            # The Worker's own ceiling binds every route this machine has: the
+            # direct key bills the same account, so hold paid calls until reset.
+            resets_at = _windows(datetime.now(timezone.utc))[3]
+            _hold_worker_daily_cap(resets_at)
+            refusal = JevCallRefused(f"Jev unavailable: jev_worker_daily_cap reached at the Worker; "
+                                     f"resets {resets_at}; not retried direct",
+                                     code="jev_worker_daily_cap", site=caller,
+                                     scope="jev_worker_daily_cap", resets_at=resets_at)
+        elif category == "admission_refused_at_worker":
+            # The reservation is spent; a direct retry would pay a second slot.
+            refusal = TypeSafeError("Jev unavailable: the Worker refused the admission "
+                                    "(jev_admission_required); not retried direct")
+        if upstream is not None and refusal is not None:
+            upstream["refusal"] = refusal
         return None, category
     try:
         out = json.loads(proc.stdout)
@@ -642,7 +717,7 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
             or not isinstance(out.get("answers"), dict)
             or not isinstance(out.get("receipt_id"), str)):
         return None, "server_response_malformed"
-    return {
+    result = {
         "model": out.get("model"),
         "answers": out["answers"],
         "usage": out.get("usage") if isinstance(out.get("usage"), dict) else None,
@@ -650,7 +725,10 @@ def server_ask(state, questions, *, model, facets, purpose, session_id, timeout,
         "server_receipt": {k: out.get(k) for k in (
             "receipt_id", "recorded_at", "purpose", "session_id",
             "state_sha256", "prompt_sha256")},
-    }, None
+    }
+    if transport_mode != "cache_only" and not result["cache_hit"] and usable_judgment(result, questions):
+        _finish_credit_probe(probe)
+    return result, None
 
 
 # Both transports consume the same maintained request policy. Adapter code
@@ -1403,6 +1481,19 @@ def _open_hold(table, seconds):
         # The Worker breaker is advisory; credit protection is mandatory.
 
 
+def _hold_worker_daily_cap(resets_at):
+    """Pause every paid route until the Worker's UTC day resets. Advisory: if
+    the pause cannot be written, the next paid call asks the Worker, which
+    refuses again before it reserves or spends."""
+    try:
+        with closing(sqlite3.connect(_cap_db_path(), timeout=1.0)) as db, db:
+            _budget_tables(db)
+            db.execute("INSERT OR IGNORE INTO budget_pause VALUES (?,?,?)",
+                       ("jev_worker_daily_cap", "*", resets_at))
+    except (OSError, sqlite3.Error):
+        pass
+
+
 def _finish_credit_probe(token):
     """Only a verified successful lease owner can clear the recovered hold."""
     if token is None:
@@ -1576,6 +1667,13 @@ def _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256,
             if row[0] >= cap and not row[1]:
                 notice = True
                 db.execute("UPDATE daily_cap SET notified=1 WHERE day=?", (day,))
+            if allowed:
+                held = db.execute("SELECT resets_at FROM budget_pause WHERE scope='jev_worker_daily_cap' "
+                                  "AND resets_at > ? ORDER BY resets_at DESC LIMIT 1",
+                                  (now.strftime("%Y-%m-%dT%H:%M:%SZ"),)).fetchone()
+                if held:
+                    allowed = False
+                    refused = ("jev_worker_daily_cap", "*", held[0])
             if allowed and registry is not None and site is not None:
                 hour_used = db.execute("SELECT COALESCE(SUM(count),0) FROM site_usage WHERE hour=?",
                                        (hour,)).fetchone()[0]
@@ -1676,7 +1774,8 @@ def active_pause(*, sites=None, now=None):
 PAUSE_WORDS = {"daily_paid_call_cap": "daily paid-call cap",
                "hourly_paid_call_cap": "hourly paid-call cap",
                "site_daily_budget": "this check's daily budget",
-               "site_hourly_budget": "this check's hourly budget"}
+               "site_hourly_budget": "this check's hourly budget",
+               "jev_worker_daily_cap": "the Worker's daily paid-call ceiling"}
 
 
 def pause_notice(session, *, sites=None, now=None):
@@ -1897,22 +1996,20 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
             server_error = "worker_breaker_open"
         elif served is None and server_error == "cache_miss":
             try:
-                worker_probe = _reserve_paid_call(questions, facets, caller, question_kind, prompt_sha256,
-                                                  registry, site, session=dispatch_binding[0])
+                remaining = server_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TypeSafeError("deadline passed before the paid Worker attempt")
+                upstream = {}
+                served, server_error = server_ask(
+                    state, questions, model=model, facets=facets, purpose=purpose,
+                    session_id=dispatch_binding[0] or "unbound", caller=caller,
+                    timeout=remaining, transport_mode="paid_once", runner=server_runner,
+                    upstream=upstream, admission=(registry, site))
             except TypeSafeError as error:
                 # A free direct-cache answer may still exist after a Worker
                 # cache miss. No transport may run if this reservation failed.
                 reservation_error = error
             else:
-                remaining = server_deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TypeSafeError("deadline passed during daily cap accounting")
-                upstream = {}
-                served, server_error = server_ask(
-                    state, questions, model=model, facets=facets, purpose=purpose,
-                    session_id=dispatch_binding[0] or "unbound",
-                    timeout=remaining, transport_mode="paid_once", runner=server_runner,
-                    upstream=upstream)
                 if served is None:
                     status, reason = upstream.get("status"), upstream.get("reason")
                     _append_call_receipt(questions, facets,
@@ -1920,11 +2017,7 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
                         dispatch_binding=dispatch_binding, caller=caller,
                         question_kind=question_kind, prompt_sha256=prompt_sha256,
                         ok=False, error=server_error, server_error=server_error, session=session_id)
-                    if server_error == "vendor_failed_at_worker":
-                        try:
-                            _after_worker_vendor_failure(status, reason, caller)
-                        except TypeSafeError as error:
-                            reservation_error = error
+                    reservation_error = upstream.get("refusal")
                 elif served.get("cache_hit") is True:
                     raise TypeSafeError("Jev unavailable: Worker paid-once contract violated")
         if served is not None:
@@ -1943,8 +2036,6 @@ def _ask_jev(state, questions, *, model=DEFAULT_MODEL, timeout=TIMEOUT_SECONDS,
                 ok=valid, cache_hit=cache_hit, calibration=calibration, session=session_id)
             if not valid:
                 raise TypeSafeError("TypeSafe returned an unusable judgment")
-            if not cache_hit:
-                _finish_credit_probe(worker_probe)
             served["calibration"] = calibration
             return served
         # Preserve the caller's total budget through the direct fallback.

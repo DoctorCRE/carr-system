@@ -1,0 +1,112 @@
+{
+  "version": "retrieval-real-misses-resolutions/v1",
+  "verified_on": "2026-10-06",
+  "route": "./run.sh call <verb> <json> against deployed api.doctorcre.com",
+  "resolutions": [
+    {
+      "refs": [
+        "P-0055"
+      ],
+      "verb": "find",
+      "args": {
+        "query": "Example Organization d21c02ee"
+      },
+      "readback": "organizations[Example Organization d21c02ee].refs; live_rows=1, retired_aliases=16",
+      "retired_refs": [
+        "P-0099",
+        "P-0117",
+        "P-0118"
+      ]
+    },
+    {
+      "refs": [
+        "deal:f705d193-1c43-45a4-a1ad-9a7a3bcf2c86",
+        "deal:8825a116-9bbf-4153-95b3-f5adf722f4d3",
+        "deal:9bee85b9-d005-47ee-80a3-08fc44357ce2"
+      ],
+      "verb": "deal-board",
+      "args": {},
+      "readback": "deals.id selected by client_ref C-112, C-182, C-166 respectively"
+    },
+    {
+      "refs": [
+        "decision:6052e3f6-fb8e-403a-a432-af6cd018a0f2"
+      ],
+      "verb": "find-precedent",
+      "args": {
+        "query": "national account",
+        "limit": 5
+      },
+      "readback": "rulings.decision_id; record_kind=settled_ruling"
+    },
+    {
+      "refs": [
+        "rule:3fa17fa0",
+        "rule:e313a3ca",
+        "rule:c864b8cb"
+      ],
+      "verb": "standing-context",
+      "args": {
+        "rule_ids": [
+          "3fa17fa0",
+          "e313a3ca",
+          "c864b8cb"
+        ]
+      },
+      "readback": "shared_rules/personal_rules.id and full statement. Used only to verify labels, never to populate route-probe candidates."
+    },
+    {
+      "refs": [
+        "section:13470051-d572-48fb-aeac-1b5f818f283a"
+      ],
+      "verb": "read-doctrine",
+      "args": {
+        "document": "doctrine-search-zero-hit-fallback"
+      },
+      "readback": "sections.section_id"
+    },
+    {
+      "refs": [
+        "section:3bb51d3e-2661-4ea2-a585-053540545b5d"
+      ],
+      "verb": "doctrine-sections",
+      "args": {
+        "section_ids": [
+          "3bb51d3e-2661-4ea2-a585-053540545b5d"
+        ]
+      },
+      "readback": "sections.id; current_version=2"
+    },
+    {
+      "refs": [
+        "section:2034440f-3373-4f1c-9f31-852b91f679c3"
+      ],
+      "verb": "read-doctrine",
+      "args": {
+        "document": "dr-cre-concept-2026-08-01"
+      },
+      "readback": "sections.section_id; section_key=the-name-ruled-2026-08-01-letters-first"
+    },
+    {
+      "refs": [
+        "decision:bd8ce310-55d5-5d85-b017-cfc36079c568"
+      ],
+      "verb": "find-precedent",
+      "args": {
+        "query": "session marker retires",
+        "limit": 5
+      },
+      "readback": "rulings.decision_id; ORDER 36 retirement"
+    },
+    {
+      "refs": [
+        "loop:c5da1212-a037-4452-acbd-df5c6b8d9f30"
+      ],
+      "verb": "read-loop",
+      "args": {
+        "number": "250"
+      },
+      "readback": "loop.loop_id; status=done, version=13. Locator for later work, not an original conversation."
+    }
+  ]
+}

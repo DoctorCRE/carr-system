@@ -44,6 +44,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SOURCE_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SOURCE_ROOT))
+from lib.github_reader import GitHubReader, GitHubUnreadable  # noqa: E402
 PRICE_CONFIG = SOURCE_ROOT / "ops" / "config" / "jev-cost-guard.v1.json"
 CI_SNAPSHOT = "jev-value-ci-snapshot.json"
 FETCH_HINT = "run tools/jev-value-report.py --fetch-ci to save GitHub CI run history"
@@ -86,7 +88,6 @@ NATURE = {
     "judge:post_write_task_fit_shadow": "per_turn",
     "judge:unattributed": "per_turn",
     "jev_build_advisory": "per_turn",
-    "jev_change_tolls": "per_turn",
     "legacy_unattributed": "per_turn",
     "judge:supervise.escalation_router": "judgment_point",
     "judge:supervise.effort_picker": "judgment_point",
@@ -327,7 +328,8 @@ def _denies_defect(message, noun):
         for denial in re.finditer(rf"\b{_denial(re.escape(noun))}\b", sentence, re.I):
             # A historical qualifier must attach to this non-detection.
             if (re.match(r"did\s+not\b", denial.group(0), re.I)
-                    and (re.search(r"\b(?:earlier|previously)\b\s*,?\s*"
+                    and (re.search(r"(?:\b(?:earlier|previously)\b\s+"
+                                   r"|^\s*(?:earlier|previously)\b\s*,\s*)"
                                    r"(?:(?:(?:our|the)\s+)?(?:tests?|checks?|reviews?|investigations?)\s*)?$",
                                    sentence[:denial.start()], re.I)
                          or re.match(r"\s+(?:earlier|previously|before\s+(?:this|the)\s+review)\b",
@@ -589,7 +591,8 @@ def read_commits(root, start, end):
 
 
 def _gh(args):
-    return subprocess.run(args, capture_output=True, text=True, check=True, cwd=SOURCE_ROOT, timeout=60).stdout
+    """`gh ...` stdout through lib/github_reader (retried, redacted, bounded)."""
+    return GitHubReader(cwd=str(SOURCE_ROOT), timeout=60).text(args[1:])
 
 
 def _gh_json(gh, endpoint):
@@ -717,7 +720,7 @@ def main(argv=None):
     if args.fetch_ci:
         try:
             path, ci = fetch_ci(root, start, end)
-        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        except (OSError, ValueError, subprocess.SubprocessError, GitHubUnreadable) as exc:
             print(f"CI fetch failed ({type(exc).__name__}); previous snapshot preserved", file=sys.stderr)
             return 1
         print(f"saved {len(ci['runs'])} runs and {len(ci['pulls'])} PRs to {path}", file=sys.stderr)

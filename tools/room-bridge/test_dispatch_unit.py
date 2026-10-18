@@ -111,6 +111,10 @@ class Listener:
             pass
 
 
+from test_codex_models_unit import catalog_fixture
+
+
+@catalog_fixture()
 def main() -> int:
     tmp = tempfile.TemporaryDirectory(prefix="hermes-dispatch-test-")
     root = Path(tmp.name)
@@ -301,7 +305,7 @@ def main() -> int:
         assert out["result"] == "the cheap model answered", out
         argv = json.loads(argv_log.read_text().splitlines()[0])
         assert argv[0] == "exec", argv
-        assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-5.1-codex-mini", argv
+        assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-6.1-sol", argv
         assert "-c" in argv and argv[argv.index("-c") + 1] == "model_reasoning_effort=low", argv
         assert "-C" in argv and argv[argv.index("-C") + 1] == str(root), argv
         assert argv[-1] == desks.DESK_INSTRUCTION + "\n\nrename the variable", argv
@@ -364,6 +368,92 @@ def main() -> int:
 
     check("a seat out of credit reports quota_exhausted, not success",
           codex_out_of_credit_is_its_own_status)
+
+    def finished_job_that_quotes_the_limit_text_is_completed():
+        """2026-10-08: a PR 185 fix finished, pushed and answered, yet came back
+        quota_exhausted because Codex had read dispatch.py, whose source holds
+        the limit phrase, and that command output rode stdout as a JSON event."""
+        quoting = fake_bin / "codex-quoting"
+        quoting.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json,sys\n"
+            "argv=sys.argv[1:]\n"
+            "tid = argv[-2] if 'resume' in argv[:2] else 'thread-first-0001'\n"
+            "print(json.dumps({'type':'thread.started','thread_id':tid}))\n"
+            "print(json.dumps({'type':'item.completed','item':{'type':'command_execution',"
+            "'aggregated_output':'QUOTA_HINT = re.compile(r\"hit your usage limit\", re.I)'}}))\n"
+            "out=None\n"
+            "for i,a in enumerate(argv):\n"
+            "    if a in ('-o','--output-last-message'): out=argv[i+1]\n"
+            "if out: open(out,'w').write('Fixed and pushed.')\n"
+            "print(json.dumps({'type':'turn.completed'}))\n"
+        )
+        shim = fake_bin / "codex"
+        saved = shim.read_text()
+        shim.write_text(quoting.read_text())
+        try:
+            env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}")
+            out = dispatch.dispatch(
+                "codex-desk", "anything", registry=reg,
+                results_path=root / "quoting-results.ndjson", env=env,
+            )
+            assert out["status"] == "completed", out
+            assert out["result"] == "Fixed and pushed.", out
+        finally:
+            shim.write_text(saved)
+            shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+
+    check("a finished job whose output quotes the limit text is completed",
+          finished_job_that_quotes_the_limit_text_is_completed)
+
+    def each_quota_signal_is_caught_on_its_own():
+        """PR 1660 review: the combined fixture let the JSON error win, so the
+        turn.failed path and the plain-line fallback were never tested alone."""
+        msg = ("You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+               "to purchase more credits or try again at 11:36 PM.")
+        shapes = {
+            "turn.failed only": f"print(json.dumps({{'type':'turn.failed','error':{{'message':{msg!r}}}}}))\n",
+            "plain line only": f"print('ERROR: ' + {msg!r})\n",
+            "stderr only": f"sys.stderr.write('ERROR: ' + {msg!r} + chr(10))\n",
+        }
+        shim = fake_bin / "codex"
+        saved = shim.read_text()
+        try:
+            for label, body in shapes.items():
+                shim.write_text("#!/usr/bin/env python3\nimport json,sys\n" + body
+                                + "raise SystemExit(0)\n")
+                shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+                env = dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}")
+                out = dispatch.dispatch("codex-desk", "anything", registry=reg,
+                                        results_path=root / "quota-shapes.ndjson", env=env)
+                assert out["status"] == "quota_exhausted", (label, out)
+                assert out["retry_after"] == "11:36 PM", (label, out)
+        finally:
+            shim.write_text(saved)
+            shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+
+    check("each quota signal is caught on its own",
+          each_quota_signal_is_caught_on_its_own)
+
+    def a_per_call_limit_reaches_the_codex_run():
+        """PR 1660 review: nothing proved dispatch() forwards codex_timeout_s."""
+        seen = {}
+        real = dispatch._to_codex
+
+        def recording(entry, task, env, *args, **kwargs):
+            seen["timeout_s"] = kwargs.get("timeout_s")
+            return {"status": "completed", "result": "ok"}
+
+        dispatch._to_codex = recording
+        try:
+            dispatch.dispatch("codex-desk", "anything", registry=reg,
+                              results_path=root / "limit.ndjson", codex_timeout_s=123)
+        finally:
+            dispatch._to_codex = real
+        assert seen.get("timeout_s") == 123, seen
+
+    check("a per-call Codex limit reaches the Codex run",
+          a_per_call_limit_reaches_the_codex_run)
 
     def codex_keeps_its_own_context():
         """The second task must land in the SAME thread as the first.
@@ -595,6 +685,18 @@ def main() -> int:
 
     check("an acknowledgement with no dispatch_ref is refused before it is sent",
           an_acknowledgement_names_the_dispatch_it_acknowledges)
+
+    def a_codex_job_gets_ninety_minutes_by_default():
+        # 2026-10-08: the old 900 s default killed four real build and review
+        # jobs mid-run; the Codex run dies when the dispatcher stops waiting.
+        env = {k: v for k, v in os.environ.items() if k != "CARR_HERMES_CODEX_TIMEOUT"}
+        out = subprocess.run(
+            [sys.executable, "-c", "import dispatch; print(dispatch.CODEX_TIMEOUT_S)"],
+            cwd=HERE, env=env, capture_output=True, text=True, check=True)
+        assert float(out.stdout.strip()) == 5400.0, out.stdout
+
+    check("a Codex job waits 90 minutes by default, not 15",
+          a_codex_job_gets_ninety_minutes_by_default)
 
     tmp.cleanup()
     print()

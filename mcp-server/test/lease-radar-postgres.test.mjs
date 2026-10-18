@@ -1,8 +1,9 @@
-import { acquirePostgresFixtureGroup } from './helpers/disposable-postgres.mjs';
+import { readMigration } from "./migration-source.testhelper.mjs";
+import { acquirePostgresFixtureGroup, acquireDisposablePostgres } from './helpers/disposable-postgres.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync,mkdtempSync,existsSync,mkdirSync,renameSync} from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import pg from 'pg';
 import {LEASE_RADAR_SQL, readLeaseRadar} from '../src/workspace-business-read.js';
@@ -12,18 +13,20 @@ if(!bin || !existsSync(path.join(bin,'postgres'))) for(const candidate of ['/opt
 const available=bin && existsSync(path.join(bin,'postgres'));
 const id=n=>`aa000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 test('real PostgreSQL projection covers horizon, missing dates, tombstones, holds and reader-only view grant',{skip:!available && 'PostgreSQL binaries unavailable'},async()=>{
-  const dir=mkdtempSync('/tmp/lease-radar-');let c,running=false;
+  let postgresFixture, dir, c;
   const releaseBudget = await acquirePostgresFixtureGroup();
   try{
-    execFileSync(path.join(bin,'initdb'),['-D',dir,'-U','fixture','--auth=trust','--no-locale'],{stdio:'pipe'});
-    execFileSync(path.join(bin,'pg_ctl'),['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h ''`,'-w','start'],{stdio:'pipe'});running=true;
+    postgresFixture = await acquireDisposablePostgres({ prefix: 'lease-radar-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+    dir = postgresFixture.root;
+    await postgresFixture.run(path.join(bin,'initdb'), ['-D',dir,'-U','fixture','--auth=trust','--no-locale']);
+    await postgresFixture.run(path.join(bin,'pg_ctl'), ['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h ''`,'-w','start']);
     c=new pg.Client({host:dir,user:'fixture',database:'postgres'});await c.connect();
     const schema=readFileSync(new URL('../../db/schema.sql',import.meta.url),'utf8');
     for(const name of ['actor','client','party','client_status','lease','next_action','critical_date']){
       const table=schema.match(new RegExp(`CREATE TABLE public.${name} \\([\\s\\S]*?\\n\\);`))?.[0];assert.ok(table,name);await c.query(table);
     }
     await c.query('create role carr_reader; grant usage on schema public to carr_reader;');
-    await c.query(readFileSync(new URL('../../migrations/0814_lease_radar_read.sql',import.meta.url),'utf8'));
+    await c.query(readMigration(new URL('../../migrations/0814_lease_radar_read.sql',import.meta.url)));
     await c.query("insert into actor(id,slug,display_name,kind) values ($1,'joe','Demo Broker','human')",[id(1)]);
     await c.query("insert into client_status(slug,label,sort) values ('past_client','Past client',1),('active_deal','Active deal',2)");
     for(let n=1;n<=9;n++){
@@ -71,27 +74,27 @@ test('real PostgreSQL projection covers horizon, missing dates, tombstones, hold
   } finally {
     try {
       try { await c?.end(); } finally {
-        if(running)execFileSync(path.join(bin,'pg_ctl'),['-D',dir,'-m','fast','-w','stop'],{stdio:'pipe'});
-        mkdirSync('/tmp/_to_delete',{recursive:true});
-        renameSync(dir,path.join('/tmp/_to_delete',path.basename(dir)));
+        await postgresFixture?.close();
       }
     } finally { await releaseBudget(); }
   }
 });
 
 test('database horizon changes both reported coverage and membership, including an empty ledger',{skip:!available && 'PostgreSQL binaries unavailable'},async()=>{
-  const dir=mkdtempSync('/tmp/lease-radar-policy-');let c,running=false;
+  let postgresFixture, dir, c;
   const releaseBudget = await acquirePostgresFixtureGroup();
   try{
-    execFileSync(path.join(bin,'initdb'),['-D',dir,'-U','fixture','--auth=trust','--no-locale'],{stdio:'pipe'});
-    execFileSync(path.join(bin,'pg_ctl'),['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h ''`,'-w','start'],{stdio:'pipe'});running=true;
+    postgresFixture = await acquireDisposablePostgres({ prefix: 'lease-radar-policy-', pgCtl: path.join(bin, 'pg_ctl'), dataName: '.' });
+    dir = postgresFixture.root;
+    await postgresFixture.run(path.join(bin,'initdb'), ['-D',dir,'-U','fixture','--auth=trust','--no-locale']);
+    await postgresFixture.run(path.join(bin,'pg_ctl'), ['-D',dir,'-l',path.join(dir,'server.log'),'-o',`-k ${dir} -h ''`,'-w','start']);
     c=new pg.Client({host:dir,user:'fixture',database:'postgres'});await c.connect();
     const schema=readFileSync(new URL('../../db/schema.sql',import.meta.url),'utf8');
     for(const name of ['actor','client','party','client_status','lease','next_action','critical_date']){
       const table=schema.match(new RegExp(`CREATE TABLE public.${name} \\([\\s\\S]*?\\n\\);`))?.[0];assert.ok(table,name);await c.query(table);
     }
     await c.query('create role carr_reader; grant usage on schema public to carr_reader;');
-    const migration=readFileSync(new URL('../../migrations/0814_lease_radar_read.sql',import.meta.url),'utf8');
+    const migration=readMigration(new URL('../../migrations/0814_lease_radar_read.sql',import.meta.url));
     await c.query(migration);
     await c.query("insert into actor(id,slug,display_name,kind) values ($1,'joe','Demo Broker','human')",[id(1)]);
     await c.query("insert into party(id,name,kind,created_by,updated_by) values ($1,'Demo Practice','person',$2,$2)",[id(11),id(1)]);
@@ -118,9 +121,7 @@ test('database horizon changes both reported coverage and membership, including 
   } finally {
     try {
       try { await c?.end(); } finally {
-        if(running)execFileSync(path.join(bin,'pg_ctl'),['-D',dir,'-m','fast','-w','stop'],{stdio:'pipe'});
-        mkdirSync('/tmp/_to_delete',{recursive:true});
-        renameSync(dir,path.join('/tmp/_to_delete',path.basename(dir)));
+        await postgresFixture?.close();
       }
     } finally { await releaseBudget(); }
   }

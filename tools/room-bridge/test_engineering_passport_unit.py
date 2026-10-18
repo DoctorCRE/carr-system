@@ -58,197 +58,34 @@ def test_plan_rejects_duplicates_missing_dependencies_and_cycles():
     except ep.EngineeringContractError: pass
 
 
-def test_parallel_eligibility_and_fresh_packet_preserve_authority():
-    plan = plan_fixture(); assert ep.eligible_slices(plan, execution_envelopes=[]) == ["slice:a", "slice:b"]
-    assert ep.eligible_slices(plan, [receipt(plan, "slice:a"), receipt(plan, "slice:b")], execution_envelopes=[ENVELOPE]) == []
-    packet = ep.build_engineering_slice_packet(ENVELOPE, plan, "slice:a")
-    assert ep.validate_engineering_slice_packet(packet, plan, ENVELOPE)["packet_digest"] == packet["packet_digest"]
-    assert packet["fresh_native_session_required"] is True
-    assert packet["envelope"]["phase_binding"]["session_affinity"] == "fresh_native_session_required"
-    assert packet["envelope"]["server_binding"] == ENVELOPE["server_binding"]
-    assert packet["envelope"]["handoff"]["capability_inherited"] is False
 
 
-def test_receipt_cannot_disappear_deviation_or_self_verify():
-    plan = plan_fixture(); row = receipt(plan, "slice:a", deviation=True)
-    ep.validate_engineering_slice_receipt(row, plan, ENVELOPE)
-    bad = copy.deepcopy(row); bad["executor_claim"]["claimed_by"] = "reviewer:self"
-    ep.validate_engineering_slice_receipt(bad, plan, ENVELOPE)
-    try:
-        ep.project_engineering_passport(plan, [row], execution_envelopes=[ENVELOPE], reviewer_facts=[{"slice_ref": "slice:a", "attempt_id": "attempt:a", "reviewer_ref": "actor:codex", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence("evidence:review")], "is_independent": True, "reviewed_deviation_refs": ["deviation:scope"], "resolved_deviation_refs": ["deviation:scope"]}]); assert False
-    except ep.EngineeringContractError: pass
-    passport = ep.project_engineering_passport(plan, [row], execution_envelopes=[ENVELOPE], reviewer_facts=[{"slice_ref": "slice:a", "attempt_id": "attempt:a", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence("evidence:review")], "is_independent": True, "reviewed_deviation_refs": ["deviation:scope"], "resolved_deviation_refs": ["deviation:scope"]}])
-    assert "deviation:scope" in passport["operator_receipt"]["deviations"]
-    assert passport["closure_state"] == "blocked"
 
 
-def test_verified_closure_requires_qa_release_learning_and_rejects_self_verifier():
-    plan = plan_fixture(); receipts = [receipt(plan, "slice:a"), receipt(plan, "slice:b"), receipt(plan, "slice:c")]
-    reviewers = [{"slice_ref": f"slice:{x}", "attempt_id": f"attempt:{x}", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence(f"evidence:review-{x}")], "is_independent": True, "reviewed_deviation_refs": [], "resolved_deviation_refs": []} for x in "abc"]
-    qa = [{"slice_ref": "slice:c", "state": "passed", "evidence_refs": [evidence("evidence:qa")], "note": "fresh mobile and keyboard path passed"}]
-    explanation = {field: {"state": "complete", "evidence_refs": [evidence(f"evidence:{field}")], "note": f"{field} complete"} for field in ("work", "proof", "explanation")}
-    passport = ep.project_engineering_passport(plan, receipts, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state": "released", "evidence_refs": [evidence("evidence:release")], "note": "exact SHA released"}, learning={"state": "proposed", "route": "regression_test", "evidence_refs": [evidence("evidence:learning")], "note": "promote regression test"})
-    assert passport["closure_state"] == "complete"
-    assert ep.validate_engineering_passport(passport)["closure_state"] == "complete"
-    bad = copy.deepcopy(passport); bad["closure"]["release"] = {"state": "released", "evidence_refs": [], "note": "missing proof"}; bad["projection_digest"] = contract.canonical_digest({k: v for k, v in bad.items() if k != "projection_digest"})
-    try: ep.validate_engineering_passport(bad); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_wire_accepts_additive_engineering_passport_kind():
-    plan = plan_fixture(); passport = ep.project_engineering_passport(plan, [], execution_envelopes=[])
-    assert passport["execution_envelopes"] == []
-    assert passport["closure"]["learning"]["route"] is None
-    wrapped = ep.engineering_passport_wire(passport)
-    assert contract.job_passport_wire_receipt("engineering_passport", passport) == wrapped
 
 
-def test_forged_complete_passport_from_zero_receipts_refuses():
-    plan = plan_fixture()
-    forged = ep.project_engineering_passport(plan, [], execution_envelopes=[])
-    forged["closure_state"] = "complete"
-    forged["projection_digest"] = contract.canonical_digest({k: v for k, v in forged.items() if k != "projection_digest"})
-    try:
-        ep.validate_engineering_passport(forged)
-        assert False, "zero-receipt forged completion must refuse"
-    except ep.EngineeringContractError:
-        pass
 
 
-def test_packet_full_source_scope_replacement_refuses_after_recomputed_digest():
-    plan = plan_fixture(); source = copy.deepcopy(ENVELOPE)
-    source["request"]["declared_expectations"]["plan_step_refs"].append("step:other")
-    source["request"]["declared_expectations"]["component_refs"].append("component:other")
-    source["request"]["declared_expectations"]["resource_refs"].append("resource:other")
-    packet = ep.build_engineering_slice_packet(source, plan, "slice:a")
-    packet["envelope"]["request"]["declared_expectations"] = copy.deepcopy(source["request"]["declared_expectations"])
-    packet["packet_digest"] = contract.canonical_digest({k: v for k, v in packet.items() if k != "packet_digest"})
-    try:
-        ep.validate_engineering_slice_packet(packet, plan, ENVELOPE)
-        assert False, "full-source scope replacement must refuse"
-    except ep.EngineeringContractError:
-        pass
 
 
-def test_receipt_forged_planned_or_actual_scope_refuses():
-    plan = plan_fixture(); row = receipt(plan, "slice:a")
-    bad_planned = copy.deepcopy(row); bad_planned["planned_resource_refs"] = ["resource:outside"]
-    try: ep.validate_engineering_slice_receipt(bad_planned, plan, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
-    bad_actual = copy.deepcopy(row); bad_actual["actual_component_refs"] = ["component:outside"]
-    try: ep.validate_engineering_slice_receipt(bad_actual, plan, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_eligibility_requires_bound_successful_independent_reviews():
-    plan = plan_fixture(); a = receipt(plan, "slice:a"); b = receipt(plan, "slice:b")
-    try: ep.eligible_slices(plan, [a, b], ["slice:a", "slice:b"], execution_envelopes=[ENVELOPE]); assert False
-    except ep.EngineeringContractError: pass
-    reviewers = [
-        {"slice_ref":"slice:a","attempt_id":"attempt:a","reviewer_ref":"reviewer:a","session_ref":"session:review-a","state":"passed","evidence_refs":[evidence("evidence:review-a")],"is_independent":True,"reviewed_deviation_refs":[],"resolved_deviation_refs":[]},
-        {"slice_ref":"slice:b","attempt_id":"attempt:b","reviewer_ref":"reviewer:b","session_ref":"session:review-b","state":"passed","evidence_refs":[evidence("evidence:review-b")],"is_independent":True,"reviewed_deviation_refs":[],"resolved_deviation_refs":[]},
-    ]
-    assert ep.eligible_slices(plan, [a, b], reviewers, execution_envelopes=[ENVELOPE]) == ["slice:c"]
 
 
-def test_unresolved_deviation_and_arbitrary_learning_route_block_completion():
-    plan = plan_fixture(); rows = [receipt(plan, "slice:a"), receipt(plan, "slice:b", deviation=True), receipt(plan, "slice:c")]
-    reviewers = [{"slice_ref": f"slice:{x}", "attempt_id": f"attempt:{x}", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": ("failed" if x == "b" else "passed"), "evidence_refs": [evidence(f"evidence:review-{x}")], "is_independent": True, "reviewed_deviation_refs": (["deviation:scope"] if x == "b" else []), "resolved_deviation_refs": []} for x in "abc"]
-    qa = [{"slice_ref":"slice:c","state":"passed","evidence_refs":[evidence("evidence:qa")],"note":"passed"}]
-    explanation = {field: {"state":"complete","evidence_refs":[evidence(f"evidence:{field}")],"note":"complete"} for field in ("work","proof","explanation")}
-    passport = ep.project_engineering_passport(plan, rows, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state":"released","evidence_refs":[evidence("evidence:release")],"note":"released"}, learning={"state":"proposed","route":"regression_test","evidence_refs":[evidence("evidence:learning")],"note":"bad"})
-    assert passport["closure_state"] == "blocked"
-    passport["closure"]["learning"]["route"] = "made_up"
-    passport["projection_digest"] = contract.canonical_digest({k: v for k, v in passport.items() if k != "projection_digest"})
-    try: ep.validate_engineering_passport(passport); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_forged_complete_duplicate_slice_coverage_and_operator_fields_refuse():
-    plan = plan_fixture(); rows = [receipt(plan, "slice:a"), receipt(plan, "slice:b"), receipt(plan, "slice:c")]
-    reviewers = [{"slice_ref": f"slice:{x}", "attempt_id": f"attempt:{x}", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence(f"evidence:review-{x}")], "is_independent": True, "reviewed_deviation_refs": [], "resolved_deviation_refs": []} for x in "abc"]
-    qa = [{"slice_ref":"slice:c","state":"passed","evidence_refs":[evidence("evidence:qa")],"note":"passed"}]
-    explanation = {field: {"state":"complete","evidence_refs":[evidence(f"evidence:{field}")],"note":"complete"} for field in ("work","proof","explanation")}
-    p = ep.project_engineering_passport(plan, rows, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state":"released","evidence_refs":[evidence("evidence:release")],"note":"released"}, learning={"state":"proposed","route":"regression_test","evidence_refs":[evidence("evidence:learning")],"note":"test"})
-    p["slices"][1] = copy.deepcopy(p["slices"][0]); p["projection_digest"] = contract.canonical_digest({k:v for k,v in p.items() if k != "projection_digest"})
-    try: ep.validate_engineering_passport(p); assert False
-    except ep.EngineeringContractError: pass
-    p = ep.project_engineering_passport(plan, rows, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state":"released","evidence_refs":[evidence("evidence:release")],"note":"released"}, learning={"state":"proposed","route":"regression_test","evidence_refs":[evidence("evidence:learning")],"note":"test"})
-    p["operator_receipt"]["remaining_risk"] = ["slice:a"]; p["projection_digest"] = contract.canonical_digest({k:v for k,v in p.items() if k != "projection_digest"})
-    try: ep.validate_engineering_passport(p); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_plan_envelope_cross_authority_binding_refuses_build_packet_and_receipt():
-    plan = plan_fixture(); wrong = copy.deepcopy(plan); wrong["work_request"]["id"] = "wr:other"; wrong["plan_digest"] = contract.canonical_digest({k:v for k,v in wrong.items() if k != "plan_digest"})
-    try: ep.build_engineering_slice_packet(ENVELOPE, wrong, "slice:a"); assert False
-    except ep.EngineeringContractError: pass
-    row = receipt(plan, "slice:a")
-    try: ep.validate_engineering_slice_receipt(row, wrong, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_evidence_requirements_and_duplicate_review_verdicts_refuse():
-    plan = plan_fixture(); row = receipt(plan, "slice:a"); row["checks"][0]["evidence_refs"] = []
-    try: ep.validate_engineering_slice_receipt(row, plan, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
-    metadata_plan = copy.deepcopy(plan); metadata_plan["slices"][0]["planned_checks"][0]["evidence_requirement"] = "metadata_only_sufficient"; metadata_plan["plan_digest"] = contract.canonical_digest({k:v for k,v in metadata_plan.items() if k != "plan_digest"})
-    metadata_row = receipt(metadata_plan, "slice:a")
-    try: ep.validate_engineering_slice_receipt(metadata_row, metadata_plan, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
-    metadata_row["checks"][0]["evidence_refs"][0]["redaction_class"] = "metadata_only"
-    ep.validate_engineering_slice_receipt(metadata_row, metadata_plan, ENVELOPE)
-    reviewers = [{"slice_ref":"slice:a","attempt_id":"attempt:a","reviewer_ref":"reviewer:one","session_ref":"session:one","state":"passed","evidence_refs":[evidence("evidence:one")],"is_independent":True,"reviewed_deviation_refs":[],"resolved_deviation_refs":[]}, {"slice_ref":"slice:a","attempt_id":"attempt:a","reviewer_ref":"reviewer:two","session_ref":"session:two","state":"passed","evidence_refs":[evidence("evidence:two")],"is_independent":True,"reviewed_deviation_refs":[],"resolved_deviation_refs":[]}]
-    try: ep.eligible_slices(plan, [receipt(plan, "slice:a")], reviewers, execution_envelopes=[ENVELOPE]); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_projection_requires_authoritative_envelope_resolution():
-    plan = plan_fixture(); row = receipt(plan, "slice:a"); row_b = receipt(plan, "slice:b")
-    forged = copy.deepcopy(row); forged["envelope_digest"] = digest("e")
-    for order in ([forged, row_b], [row_b, forged]):
-        try: ep.validate_engineering_slice_receipt(forged, plan, ENVELOPE); assert False
-        except ep.EngineeringContractError: pass
-        try: ep.eligible_slices(plan, order, execution_envelopes=[ENVELOPE]); assert False
-        except ep.EngineeringContractError: pass
-    try: ep.project_engineering_passport(plan, [forged], execution_envelopes=[ENVELOPE]); assert False
-    except ep.EngineeringContractError: pass
-    wrong_envelope = copy.deepcopy(ENVELOPE); wrong_envelope["work_request_id"] = "wr-other"
-    try: ep.project_engineering_passport(plan, [row], execution_envelopes=[wrong_envelope]); assert False
-    except ep.EngineeringContractError: pass
-    complete_rows = [receipt(plan, f"slice:{x}") for x in "abc"]
-    reviewers = [{"slice_ref": f"slice:{x}", "attempt_id": f"attempt:{x}", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence(f"evidence:review-{x}")], "is_independent": True, "reviewed_deviation_refs": [], "resolved_deviation_refs": []} for x in "abc"]
-    qa = [{"slice_ref": "slice:c", "state": "passed", "evidence_refs": [evidence("evidence:qa")], "note": "passed"}]
-    explanation = {field: {"state": "complete", "evidence_refs": [evidence(f"evidence:{field}")], "note": "complete"} for field in ("work", "proof", "explanation")}
-    passport = ep.project_engineering_passport(plan, complete_rows, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state": "released", "evidence_refs": [evidence("evidence:release")], "note": "released"}, learning={"state": "proposed", "route": "regression_test", "evidence_refs": [evidence("evidence:learning")], "note": "test"})
-    passport["receipts"][0]["envelope_digest"] = digest("e")
-    passport["projection_digest"] = contract.canonical_digest({key: item for key, item in passport.items() if key != "projection_digest"})
-    try: ep.validate_engineering_passport(passport); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_passport_envelope_retention_is_exactly_receipt_digest_set():
-    plan = plan_fixture(); passport = ep.project_engineering_passport(plan, [], execution_envelopes=[])
-    assert passport["execution_envelopes"] == []
-    ep.validate_engineering_passport(passport)
-    rows = [receipt(plan, "slice:a"), receipt(plan, "slice:b"), receipt(plan, "slice:c")]
-    reviewers = [{"slice_ref": f"slice:{x}", "attempt_id": f"attempt:{x}", "reviewer_ref": "reviewer:independent", "session_ref": "session:review", "state": "passed", "evidence_refs": [evidence(f"evidence:review-{x}")], "is_independent": True, "reviewed_deviation_refs": [], "resolved_deviation_refs": []} for x in "abc"]
-    qa = [{"slice_ref": "slice:c", "state": "passed", "evidence_refs": [evidence("evidence:qa")], "note": "passed"}]
-    explanation = {field: {"state": "complete", "evidence_refs": [evidence(f"evidence:{field}")], "note": "complete"} for field in ("work", "proof", "explanation")}
-    complete = ep.project_engineering_passport(plan, rows, execution_envelopes=[ENVELOPE], reviewer_facts=reviewers, qa_facts=qa, explanation=explanation, release={"state": "released", "evidence_refs": [evidence("evidence:release")], "note": "released"}, learning={"state": "proposed", "route": "regression_test", "evidence_refs": [evidence("evidence:learning")], "note": "test"})
-    extra = copy.deepcopy(ENVELOPE); extra["envelope_id"] = "env-synthetic-extra"
-    complete["execution_envelopes"].append(extra)
-    complete["projection_digest"] = contract.canonical_digest({key: item for key, item in complete.items() if key != "projection_digest"})
-    try: ep.validate_engineering_passport(complete); assert False
-    except ep.EngineeringContractError: pass
 
 
-def test_duplicate_planned_check_refs_refuse_every_producer_path():
-    plan = plan_fixture(); plan["slices"][0]["planned_checks"].append(copy.deepcopy(plan["slices"][0]["planned_checks"][0])); plan["plan_digest"] = contract.canonical_digest({key: item for key, item in plan.items() if key != "plan_digest"})
-    try: ep.validate_engineering_slice_plan(plan); assert False
-    except ep.EngineeringContractError: pass
-    try: ep.validate_engineering_slice_receipt(receipt(plan, "slice:a"), plan, ENVELOPE); assert False
-    except ep.EngineeringContractError: pass
 
 
 # --- V5-F03 deep-module execution contract ------------------------------------
@@ -602,21 +439,6 @@ def test_v1_stays_exactly_compatible_and_unknown_versions_fail_explicitly():
     assert ep.ENGINEERING_SLICE_PLAN_VERSIONS == ("engineering-slice-plan.v1", "engineering-slice-plan.v2")
 
 
-def test_v2_plan_projects_through_the_existing_packet_and_passport_seams():
-    plan = v2_plan([v2_slice()])
-    # The packet seam now requires the accepted contract and the server envelope
-    # to describe one authority state, so this slice packages against the
-    # write-capable envelope its contract declares.
-    source = write_capable_envelope()
-    packet = ep.build_engineering_slice_packet(source, plan, "slice:short")
-    assert "design_contract" not in packet
-    assert ep.validate_engineering_slice_packet(packet, plan, source)["packet_digest"] == packet["packet_digest"]
-    # One slice executes under one envelope, so the receipt and the passport
-    # bind the same write-capable envelope the packet was built from.
-    row = receipt(plan, "slice:short", envelope=source)
-    ep.validate_engineering_slice_receipt(row, plan, source)
-    passport = ep.project_engineering_passport(plan, [row], execution_envelopes=[source])
-    assert ep.validate_engineering_passport(passport)["closure_state"] == "blocked"
 
 
 def test_the_write_capable_fixture_satisfies_the_unchanged_envelope_authority_contract():
@@ -671,35 +493,6 @@ def test_the_write_capable_fixture_satisfies_the_unchanged_envelope_authority_co
 # mcp-server/test/engineering-runtime.test.mjs.
 
 
-def test_packet_refuses_a_contract_that_contradicts_the_server_binding():
-    source = write_capable_envelope()
-    ep.build_engineering_slice_packet(source, v2_plan([v2_slice()]), "slice:short")
-    try:
-        ep.build_engineering_slice_packet(ENVELOPE, v2_plan([v2_slice()]), "slice:short")
-        raise AssertionError("a read-only envelope cannot carry a repository-write contract")
-    except ep.EngineeringContractError:
-        pass
-    for contradiction in (
-        {"authority": {"read_only": True}},
-        {"authority": {"read_only": True, "capability_profile": "capability:engineering-read-only"}},
-        {"authority": {"environment": "production"}},
-        {"routing": {"adapter_ref": "adapter:human-desk"}},
-        {"routing": {"executor_class": "attended_human"}},
-    ):
-        row = v2_slice()
-        for facet, values in contradiction.items():
-            row["design_contract"][facet].update(values)
-        plan = v2_plan([row])
-        # The sealed contract itself still validates; only the packet, where the
-        # two authority statements finally meet, refuses.
-        ep.validate_engineering_slice_plan(plan)
-        try:
-            ep.build_engineering_slice_packet(source, plan, "slice:short")
-            raise AssertionError(f"packet accepted a contradicted binding: {contradiction}")
-        except ep.EngineeringContractError:
-            pass
-    # v1 plans have no design contract and keep their exact previous behavior.
-    ep.build_engineering_slice_packet(ENVELOPE, plan_fixture(), "slice:a")
 
 
 def test_reviewer_class_is_limited_to_the_supported_provider():

@@ -282,60 +282,39 @@ if PLIST.exists():
     check("plist is not KeepAlive (bounded periodic checks)", not d.get("KeepAlive"))
 check("agent is primary-only (the Studio is the hub)", "com.carr.tailscale-up.plist" in cac.PRIMARY_ONLY)
 check("agent is not definition-only (the normal install path loads it)",
-      "com.carr.tailscale-up.plist" not in cac.DEFINITION_ONLY)
+      "com.carr.tailscale-up.plist" not in cac.launchd_hold.DEFINITION_ONLY)
 services = json.loads((REPO / "ops/config/services.json").read_text())["services"]
 owners = [s for s in services if any(e.get("deploy_mechanism") ==
     "ops/launchd/com.carr.tailscale-up.plist" for e in s.get("environments", []))]
 check("live agent has exactly one service catalog owner", len(owners) == 1, owners)
 
-# Launchd rows remain auditable historical evidence, but no longer require a
-# registry successor on each source edit. The DB gate must use its sealed
-# service catalog while separately verifying today's source closure.
 sys.path.insert(0, str(REPO / "ops"))
 db_spec = importlib.util.spec_from_file_location("siep11_gate_ts",
     REPO / "ops/siep11-mutation-registry-local-pg-gate.py")
 assert db_spec and db_spec.loader
 db_gate = importlib.util.module_from_spec(db_spec)
 db_spec.loader.exec_module(db_gate)
-sealed_catalog = getattr(db_gate, "sealed_service_launchd", None)
-check("DB seal has an independent historical service catalog", callable(sealed_catalog))
-if callable(sealed_catalog):
-    historical_services = sealed_catalog("scac-mutation-registry.v99")
-    check("new live agent does not rewrite historical DB service authority",
-          all(row[0] != "tailscale-up" for row in historical_services), historical_services)
-    check("historical catalog retains deployed service authority",
-          ("rules-refresh", "production", "ops/launchd/com.carr.rules-refresh.plist")
-          in historical_services)
+live = [("old", "production", "ops/launchd/old.plist"),
+        ("new", "production", "ops/launchd/new.plist")]
+for fault in (None, "live_path", "environment", "retired"):
+    actual_services = [(*row, False) for row in live]
+    if fault == "live_path":
+        actual_services[-1] = ("new", "production", "ops/launchd/wrong.plist", False)
+    if fault == "environment":
+        actual_services[-1] = ("new", "local", "ops/launchd/new.plist", False)
+    if fault == "retired":
+        actual_services[-1] = (*live[-1], True)
+    cursor = Mock()
+    cursor.execute.side_effect = [
+        Mock(fetchall=Mock(return_value=actual_services)),
+        Mock(fetchall=Mock(return_value=[])),
+    ]
     try:
-        sealed_catalog("scac-mutation-registry.unreviewed")
-    except (ValueError, subprocess.CalledProcessError):
-        check("unreviewed historical catalog version refuses", True)
+        db_gate.validate_launchd_catalog(cursor, [], live)
+    except RuntimeError:
+        check(f"DB parity refuses {fault}", fault is not None)
     else:
-        check("unreviewed historical catalog version refuses", False)
-    historical = [("old", "production", "ops/launchd/old.plist")]
-    live = historical + [("new", "production", "ops/launchd/new.plist")]
-    for fault in (None, "historical_ref", "live_path"):
-        authority = [("launchd-workflow:old", "ops/launchd/old.plist",
-                      "ops.service_environment:old:production")]
-        actual_services = [(*row, False) for row in live]
-        if fault == "historical_ref":
-            authority = [(authority[0][0], authority[0][1],
-                          "ops.service_environment:forged:production")]
-        if fault == "live_path":
-            actual_services[-1] = ("new", "production", "ops/launchd/wrong.plist", False)
-        cursor = Mock()
-        cursor.execute.side_effect = [
-            Mock(fetchall=Mock(return_value=authority)),
-            Mock(fetchall=Mock(return_value=actual_services)),
-            Mock(fetchall=Mock(return_value=[])),
-        ]
-        try:
-            db_gate.validate_launchd_authority_refs(cursor, "scac-mutation-registry.v99",
-                                                  [], live, historical)
-        except RuntimeError:
-            check(f"DB parity refuses {fault}", fault is not None)
-        else:
-            check("new live service coexists with unchanged historical seal", fault is None)
+        check("DB parity matches the current service catalog", fault is None)
 
 print(f"tailscale-health-selftest: {'FAIL ' + str(len(FAILS)) if FAILS else 'all passed'}")
 sys.exit(1 if FAILS else 0)

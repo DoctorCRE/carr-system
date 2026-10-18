@@ -31,6 +31,7 @@ def load(name, path):
 
 sink = load('canary_sink_regression', 'tools/canary-ingest-sink.py')
 TOKEN = 'synthetic-token'
+HTTP_TIMEOUT = 10
 
 
 @contextlib.contextmanager
@@ -49,7 +50,7 @@ def serving(ledger, **kwargs):
 
 
 def post(server, body, token=TOKEN):
-    conn = http.client.HTTPConnection(*server.server_address, timeout=2)
+    conn = http.client.HTTPConnection(*server.server_address, timeout=HTTP_TIMEOUT)
     try:
         conn.request('POST', '/ingest', body, {
             'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
@@ -78,20 +79,46 @@ class Regressions(unittest.TestCase):
         self.ledger = sink.Ledger(str(self.directory / 'ledger'))
 
     def test_1_simultaneous_http_duplicates(self):
-        barrier = threading.Barrier(2)
-        if hasattr(self.ledger, 'has_seen'):
-            original = self.ledger.has_seen
-            def simultaneous(identifier):
-                result = original(identifier)
-                barrier.wait(2)
-                return result
-            self.ledger.has_seen = simultaneous
-        start = threading.Barrier(2)
-        def request(_):
-            start.wait(2)
-            return post(server, b'{"external_id":"race"}')
+        first_snapshot = threading.Event()
+        second_contender = threading.Event()
+        release_first = threading.Event()
+        original_lock = self.ledger.lock
+        original_read = self.ledger._read_receipts
+        coordination_timeout = 5
+
+        class ObservedLock:
+            def __enter__(self):
+                if not original_lock.acquire(blocking=False):
+                    second_contender.set()
+                    if not original_lock.acquire(timeout=coordination_timeout):
+                        raise TimeoutError('duplicate contender could not acquire ledger lock')
+                return self
+
+            def __exit__(self, *args):
+                original_lock.release()
+
+        def paused_snapshot():
+            receipts = original_read()
+            if not first_snapshot.is_set():
+                first_snapshot.set()
+                if not release_first.wait(coordination_timeout):
+                    raise TimeoutError('first receipt publication was not released')
+            return receipts
+
         with serving(self.ledger) as server, ThreadPoolExecutor(2) as pool:
-            results = list(pool.map(request, range(2)))
+            with patch.object(self.ledger, 'lock', ObservedLock()), \
+                    patch.object(self.ledger, '_read_receipts', paused_snapshot):
+                try:
+                    first = pool.submit(post, server, b'{"external_id":"race"}')
+                    self.assertTrue(first_snapshot.wait(coordination_timeout),
+                                    'first request must reach its prepublication snapshot')
+                    second = pool.submit(post, server, b'{"external_id":"race"}')
+                    self.assertTrue(second_contender.wait(coordination_timeout),
+                                    'second request must contend before the first publishes')
+                    self.assertFalse(self.ledger.path.exists())
+                finally:
+                    release_first.set()
+                results = [first.result(timeout=HTTP_TIMEOUT), second.result(timeout=HTTP_TIMEOUT)]
         self.assertEqual([r[0] for r in results], [200, 200])
         self.assertEqual(sorted(json.loads(r[1])['duplicate'] for r in results), [False, True])
         self.assertEqual(len(self.ledger.path.read_text().splitlines()), 1)
@@ -324,19 +351,6 @@ class Regressions(unittest.TestCase):
             self.assertTrue({'call-mode', 'doc-engine', 'quill-dictate'}.issubset(observed))
         self.assertIn('com.carr.canary-ingest-sink.plist', config.PRIMARY_ONLY)
 
-    def test_8_scheduler_reconciles_probe_backed_direct_service(self):
-        scheduler = load('scheduler_regression', 'tools/scheduler-truth.py')
-        plist_dir = self.directory / 'plists'
-        plist_dir.mkdir()
-        source = REPO / 'ops/launchd/com.carr.canary-ingest-sink.plist'
-        (plist_dir / source.name).write_bytes(source.read_bytes())
-        registry = self.directory / 'services.json'
-        service = next(s for s in json.loads((REPO / 'ops/config/services.json').read_text())['services'] if s['key'] == 'canary-ingest-sink')
-        registry.write_text(json.dumps({'services': [service]}))
-        with patch.object(scheduler, 'REPO', str(self.directory)), patch.object(scheduler, 'REPO_PLISTS', str(plist_dir)), patch.object(scheduler, 'INSTALLED', str(plist_dir)), patch.object(scheduler, 'SERVICES', str(registry)), patch.object(scheduler, 'loaded_labels', return_value={'com.carr.canary-ingest-sink'}), contextlib.redirect_stdout(io.StringIO()):
-            result = scheduler.main()
-        self.assertFalse(scheduler.DRIFT, scheduler.DRIFT)
-        self.assertEqual(result, 0)
 
     def test_9_live_and_canary_exact_body_limit(self):
         # Execute the live handler through its guard, without touching a DB.

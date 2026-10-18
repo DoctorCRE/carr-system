@@ -1,0 +1,17 @@
+#!/bin/zsh
+set -eu
+REPO="${0:A:h:h}"
+"$REPO/bin/flash-ensure"
+export CLAUDE_CONFIG_DIR="$HOME/.claude-local"
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8000"
+export ANTHROPIC_API_KEY="local"
+export ANTHROPIC_MODEL="qwen3.8-flash-next"
+export ANTHROPIC_SMALL_FAST_MODEL="qwen3.8-flash-next"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+cd "$HOME/flash-desk"
+PYTHON="$REPO/.venv/bin/python"
+[[ -x "$PYTHON" ]] || PYTHON=python3
+"$PYTHON" "$REPO/tools/room-bridge/dispatch.py" start flash
+exec "$PYTHON" "$REPO/tools/room-bridge/desk_cli.py" register flash \
+  --kind claude-session --socket /tmp/cc-socks/flash.sock --seat flash --room-listen mention

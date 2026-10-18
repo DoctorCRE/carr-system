@@ -19,28 +19,6 @@ DEPLOY = ROOT / "bin" / "deploy-worker.sh"
 WRANGLER = ROOT / "mcp-server" / "node_modules" / ".bin" / "wrangler"
 RUNTIME = ROOT / "mcp-server" / "node_modules"
 FIXTURE_ENV = fixture_env()
-
-
-def fixture_git_env() -> dict[str, str]:
-    """Keep Git's automatic maintenance inside the fixture command lifetime.
-
-    The fixture `git commit` may start `git maintenance run --auto`, which
-    detaches by default and keeps writing `.git/objects` after
-    subprocess.run() returns; TemporaryDirectory cleanup then fails with
-    ENOTEMPTY. Same fixture-only rule as ops/machine-converge-selftest.py.
-    """
-    env = fixture_env()
-    env.update({
-        "GIT_CONFIG_COUNT": "2",
-        "GIT_CONFIG_KEY_0": "maintenance.autoDetach",
-        "GIT_CONFIG_VALUE_0": "false",
-        "GIT_CONFIG_KEY_1": "gc.autoDetach",
-        "GIT_CONFIG_VALUE_1": "false",
-    })
-    return env
-
-
-FIXTURE_GIT_ENV = fixture_git_env()
 RECOVERY_ARGS = (
     "--env", "staging",
     "--release-key", "candidate",
@@ -58,9 +36,14 @@ def make_source(*, mismatch: bool = False, broken_attachment: bool = False,
                 ) -> tuple[tempfile.TemporaryDirectory[str], Path, str]:
     holder = tempfile.TemporaryDirectory(prefix="exact-recovery-source-")
     root = Path(holder.name)
-    shutil.copytree(ROOT / "mcp-server", root / "mcp-server",
-                    ignore=shutil.ignore_patterns("node_modules"))
-    shutil.copytree(ROOT / "dealroom", root / "dealroom")
+    tracked = subprocess.check_output(
+        ["git", "-C", str(ROOT), "ls-files", "-z", "--", "mcp-server", "dealroom"],
+        env=FIXTURE_ENV,
+    ).decode().split("\0")
+    for relative in filter(None, tracked):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / relative, destination, follow_symlinks=False)
     assert not (root / "mcp-server" / "node_modules").exists()
     if mismatch:
         lock = root / "mcp-server" / "package-lock.json"
@@ -74,22 +57,22 @@ def make_source(*, mismatch: bool = False, broken_attachment: bool = False,
     if legacy_without_stamp:
         (root / "mcp-server" / "bin" / "seal-candidate-manifest.mjs").unlink()
         (root / "mcp-server" / "src" / "build-stamp.js").unlink()
-    subprocess.run(["git", "init", "-q", str(root)], check=True, env=FIXTURE_GIT_ENV)
+    subprocess.run(["git", "init", "-q", str(root)], check=True, env=FIXTURE_ENV)
     subprocess.run(["git", "-C", str(root), "config", "user.email", "selftest@example.invalid"],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "selftest"],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     subprocess.run(["git", "-C", str(root), "add", "mcp-server", "dealroom"],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     sha = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                  text=True, env=FIXTURE_GIT_ENV).strip()
+                                  text=True, env=FIXTURE_ENV).strip()
     subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", sha],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     if broken_attachment:
         subprocess.run(["git", "-C", str(root), "update-ref",
-                        "refs/remotes/origin/main", sha], check=True, env=FIXTURE_GIT_ENV)
+                        "refs/remotes/origin/main", sha], check=True, env=FIXTURE_ENV)
     return holder, root, sha
 
 
@@ -97,9 +80,9 @@ def historical_source(sha: str) -> tuple[tempfile.TemporaryDirectory[str], Path]
     holder = tempfile.TemporaryDirectory(prefix="exact-historical-source-")
     root = Path(holder.name) / "repo"
     subprocess.run(["git", "clone", "-q", "--no-checkout", str(ROOT), str(root)],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", sha],
-                   check=True, env=FIXTURE_GIT_ENV)
+                   check=True, env=FIXTURE_ENV)
     return holder, root
 
 
@@ -247,17 +230,17 @@ def test_post_introduction_deletion_cannot_claim_legacy(source: str) -> None:
     holder, exact_root = historical_source(STAMP_INTRODUCTION_SHA)
     try:
         subprocess.run(["git", "-C", str(exact_root), "config", "user.email",
-                        "selftest@example.invalid"], check=True, env=FIXTURE_GIT_ENV)
+                        "selftest@example.invalid"], check=True, env=FIXTURE_ENV)
         subprocess.run(["git", "-C", str(exact_root), "config", "user.name", "selftest"],
-                       check=True, env=FIXTURE_GIT_ENV)
+                       check=True, env=FIXTURE_ENV)
         subprocess.run(["git", "-C", str(exact_root), "rm", "-q",
                         "mcp-server/bin/seal-candidate-manifest.mjs",
-                        "mcp-server/src/build-stamp.js"], check=True, env=FIXTURE_GIT_ENV)
+                        "mcp-server/src/build-stamp.js"], check=True, env=FIXTURE_ENV)
         subprocess.run(["git", "-C", str(exact_root), "commit", "-qm",
-                        "delete both stamp files"], check=True, env=FIXTURE_GIT_ENV)
+                        "delete both stamp files"], check=True, env=FIXTURE_ENV)
         exact_sha = subprocess.check_output(
             ["git", "-C", str(exact_root), "rev-parse", "HEAD"],
-            text=True, env=FIXTURE_GIT_ENV).strip()
+            text=True, env=FIXTURE_ENV).strip()
         with tempfile.TemporaryDirectory(prefix="post-stamp-delete-") as raw:
             root = Path(raw)
             harness = root / "harness.sh"
@@ -276,7 +259,7 @@ def test_post_introduction_deletion_cannot_claim_legacy(source: str) -> None:
                 encoding="utf-8",
             )
             result = subprocess.run(["sh", str(harness)], capture_output=True,
-                                    text=True, check=False, env=FIXTURE_GIT_ENV)
+                                    text=True, check=False, env=FIXTURE_ENV)
             assert result.returncode != 0, (result.stdout, result.stderr)
             assert "candidate sealer is missing" in result.stderr
     finally:
@@ -348,7 +331,21 @@ def test_declared_candidate_stamp_contract_requires_sealer(source: str) -> None:
         assert result.returncode != 0
         assert "candidate sealer is missing" in result.stderr
 
+def test_source_fixture_excludes_ignored_runtime_inputs() -> None:
+    runtime = ROOT / "mcp-server" / ".wrangler"
+    runtime.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="exact-fixture-", dir=runtime) as raw:
+        ignored = Path(raw) / "runtime.json"
+        ignored.write_text('{}\n', encoding="utf-8")
+        holder, root, _sha = make_source()
+        try:
+            assert not (root / ignored.relative_to(ROOT)).exists(), "runtime state entered the exact source fixture"
+        finally:
+            holder.cleanup()
+
+
 def main() -> int:
+    test_source_fixture_excludes_ignored_runtime_inputs()
     source = DEPLOY.read_text(encoding="utf-8")
     assert 'cmp -s "$CURRENT_PACKAGE_LOCK" "$EXACT_PACKAGE_LOCK"' in source
     assert source.index("validate-exact-recovery-source.py") < source.index("cmp -s")

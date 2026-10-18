@@ -1,11 +1,10 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import fs from "node:fs";
 
-const migration = fs.readFileSync(
-  new URL("../../migrations/0453_siep06a_evidence_graph.sql", import.meta.url),
-  "utf8",
-);
+const migration = readMigration(
+  new URL("../../migrations/0453_siep06a_evidence_graph.sql", import.meta.url));
 const gate = fs.readFileSync(
   new URL("../../ops/siep-evidence-graph-local-pg-gate.py", import.meta.url),
   "utf8",

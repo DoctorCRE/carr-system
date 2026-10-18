@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "cpu_threshold": 50.0,
+  "min_age_seconds": 1800,
+  "term_grace_seconds": 10,
+  "max_sample_gap_seconds": 450,
+  "max_targets": 32
+}

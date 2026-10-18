@@ -71,7 +71,6 @@ import auth_control  # noqa: E402
 import claude_desktop_wire  # noqa: E402
 import desks  # noqa: E402
 import dispatch  # noqa: E402
-import execution_contract  # noqa: E402
 import flash_wire  # noqa: E402
 import grammar  # noqa: E402
 import kanban_adapter  # noqa: E402
@@ -161,57 +160,6 @@ def _validated_reconciliation(value: object) -> kanban_adapter.ReconciliationRes
 # process far more often than five minutes and an unthrottled heartbeat would
 # bury the conversation it is supposed to annotate.
 HEARTBEAT_INTERVAL_S = float(os.environ.get("CARR_ROOM_BRIDGE_HEARTBEAT_INTERVAL", "300"))
-
-
-def publish_job_passport_fact(kind: str, payload: dict, *, add_room_turn) -> dict:
-    """Publish one controller-validated, redacted Job Passport fact to the wire.
-
-    This is intentionally narrower than a dispatcher: it does not select a
-    model, derive identity, create authority, or persist any transcript. The
-    bridge is merely the existing server-attributed wire transport. The fixed
-    Hermes seat says that a deterministic orchestration host relayed the fact;
-    it does not turn Hermes into an authority source.
-    """
-    wire = execution_contract.job_passport_wire_receipt(kind, payload)
-    result = add_room_turn(
-        body=json.dumps(wire, separators=(",", ":")), seat="hermes", kind="receipt",
-        msg_id=str(uuid.uuid4()),
-    )
-    return {"kind": kind, "attempt_id": wire["job_passport"]["payload"].get("attempt_id"),
-            "result": result}
-
-
-def rehearse_job_passport(envelope: dict, receipt: dict, events: list[dict], profile: dict, *, evaluation_kernel: dict | None = None, spatial_surface: dict | None = None, telemetry_measurements: list[dict] | None = None, add_room_turn) -> dict:
-    """Exercise the full typed wire path using only synthetic, read-only facts.
-
-    This is a rehearsal helper, never an autonomous runtime: caller-supplied
-    material must already be a synthetic v1 envelope with server-derived
-    read-only authority. It emits the exact envelope, progress, receipt, and
-    deterministic Observatory projection shapes the Model Room consumes. An
-    optional shared evaluation kernel is relayed as evidence, never promoted.
-    """
-    bound = execution_contract.validate_execution_envelope(envelope)
-    if bound["request"]["data_class"] != "synthetic_only" or bound["server_binding"]["authority"]["read_only"] is not True:
-        raise execution_contract.ContractError("Job Passport rehearsal is synthetic and read-only only")
-    completed = execution_contract.validate_attempt_receipt(receipt, bound)
-    projection = execution_contract.project_observatory_attempt(bound, completed, events, profile)
-    published = [publish_job_passport_fact("execution_envelope", bound, add_room_turn=add_room_turn)]
-    published.extend(publish_job_passport_fact("progress_event", event, add_room_turn=add_room_turn) for event in events)
-    published.append(publish_job_passport_fact("attempt_receipt", completed, add_room_turn=add_room_turn))
-    published.append(publish_job_passport_fact("observatory_projection", projection, add_room_turn=add_room_turn))
-    if evaluation_kernel is not None:
-        published.append(publish_job_passport_fact("evaluation_kernel", evaluation_kernel, add_room_turn=add_room_turn))
-    if spatial_surface is not None:
-        from spatial_surface import validate_spatial_surface
-        published.append(publish_job_passport_fact("spatial_surface", validate_spatial_surface(spatial_surface, projection), add_room_turn=add_room_turn))
-    from spatial_surface import measurements_from_attempt_receipt, validate_telemetry_measurement
-    for measurement in telemetry_measurements if telemetry_measurements is not None else measurements_from_attempt_receipt(completed):
-        validated = validate_telemetry_measurement(measurement)
-        if validated["attribution"]["attempt_id"] != completed["attempt_id"]:
-            raise execution_contract.ContractError("telemetry measurement does not bind rehearsal attempt")
-        published.append(publish_job_passport_fact("telemetry_measurement", validated, add_room_turn=add_room_turn))
-    return {"mode": "synthetic_read_only_rehearsal", "work_request_id": bound["work_request_id"],
-            "attempt_id": completed["attempt_id"], "projection": projection, "published": published}
 
 
 # WR-000119 — THE BRIDGE MINTS THE LINK, AND ONLY THE BRIDGE.
@@ -335,11 +283,12 @@ def scan_for_result(log_path: Path, offset: int) -> str | None:
 
 def probe_live(entry: dict) -> bool:
     kind = entry.get("kind")
+    if kind == "claude-session" and entry.get("room_seat") == "flash":
+        return True  # Demand dispatch starts this desk; probes must not load it.
     if kind in ("claude-session", "codex-live"):
         return desks.is_live(entry.get("socket", ""))
     if kind == "flash-local":
-        # the Flash server is a local process with a health endpoint; a queue task waits while it is down
-        return flash_wire.is_up()
+        return True  # A claimed task, rather than a bridge heartbeat, starts Flash.
     # claude-desktop and codex-session are durable rather than live
     # (dispatch.py's own framing) —
     # there is no process to probe between dispatches, so "live" here means
@@ -541,7 +490,9 @@ def deliver(name: str, entry: dict, seat: str, queued_turn: dict, *, state: dict
             return {"desk": name, "outcome": "replied_sync"}
         add_room_turn(
             body=json.dumps({"desk": name, "status": status,
-                             "detail": row.get("detail")}, separators=(",", ":")),
+                             "detail": row.get("detail"),
+                             **({key: row[key] for key in ("next_route", "diagnostic_path") if key in row}
+                                if kind == "grok-cli" else {})}, separators=(",", ":")),
             seat="hermes", kind="receipt", msg_id=str(uuid.uuid4()),
         )
         return {"desk": name, "outcome": f"failed:{status}"}
@@ -714,6 +665,13 @@ def settle_restarts(desk_entries: dict, auth_by_desk: dict, state: dict, *,
         settled.append({"desk": desk, **{k: v for k, v in result.items() if k != "detail"}})
     return settled
 
+
+
+def queue_dispatch_kwargs(entry: dict) -> dict:
+    """A Codex job from the queue gets a limit inside its claim, never the router default."""
+    if entry.get("kind") in ("codex-session", "codex-live"):
+        return {"codex_timeout_s": kanban_adapter.QUEUE_CODEX_TIMEOUT_S}
+    return {}
 
 def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAULT_STATE,
              room: str = DEFAULT_ROOM, results_path: Path | None = None,
@@ -925,7 +883,8 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
 
                     def dispatch_queue(prompt: str) -> dict:
                         return dispatch_fn(
-                            name, prompt, registry=registry, results_path=results_path)
+                            name, prompt, registry=registry, results_path=results_path,
+                            **queue_dispatch_kwargs(entry))
 
                     # Flash and Grok have no MCP tools of their own. Their
                     # synchronous answers must reach the room through this

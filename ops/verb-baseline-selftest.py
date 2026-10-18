@@ -133,8 +133,8 @@ def main() -> int:
           not re.search(r"last-deployed-verb-count\.py\" [^\n]*2>/dev/null", text),
           "the reader's stale-baseline warning is thrown away before anyone sees it")
     check("a stale baseline is surfaced in the preflight output",
-          "STALE BASELINE" in text,
-          "nothing in the deploy surfaces a frozen baseline to the operator")
+          'cat "$BASELINE_STDERR" >&2' in text and '"$TARGET_ENV" --registry' in text,
+          "the deploy must refuse stale registry evidence and show the reader's error")
 
     htext_early = HELPER.read_text()
     # DEFINED **AND CALLED**, matched at a word boundary. A substring test passes

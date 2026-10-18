@@ -190,19 +190,19 @@ def _terminate_group(proc: subprocess.Popen) -> None:
     # Reaping the direct child is NOT the same as emptying the group: on
     # 2026-08-23 the wrapper exited while its python grandchild kept the dead
     # socket open. Signal 0 delivers nothing and only asks whether anyone is
-    # still in the group, so a group that really is empty stops here instead of
-    # taking a blind SIGKILL at a process-group id that may since have been
-    # recycled onto something unrelated.
+    # still in the group. Only signal a group that still exists, but continue
+    # killing escaped descendants even when their original group is empty.
     try:
         os.killpg(pgid, 0)
     except OSError:
-        return
-
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except OSError:
         pass
-    _signal_tree(_descendants(proc.pid) or tree, signal.SIGKILL)
+    else:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
+
+    _signal_tree(list(set(_descendants(proc.pid)) | set(tree)), signal.SIGKILL)
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:

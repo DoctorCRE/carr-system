@@ -15,15 +15,9 @@
 // could not reach, including the four gaps that are structural today, so an
 // incomplete atlas is never mistaken for a complete one.
 //
-// This module is deliberately a library, not a program: it takes no arguments
-// from a process, has no interpreter line and no self-execution guard. The
-// sealed frontier predicate in ops/scac-mutation-inventory.mjs matches on
-// PLAIN TEXT, so even naming those constructs in a comment here would move the
-// frontier and cost a registry successor. That lesson was paid for once.
-
 import { organizationTenantForActor } from "./identity.js";
 import { TOOLS } from "./tools.js";
-import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.v35.generated.js";
+import { SCAC_MUTATION_OPERATIONS } from "./scac-mutation-registry.current.generated.js";
 import { SCAC_MUTATION_REGISTRY_DIGEST, SCAC_MUTATION_REGISTRY_VERSION } from "./mutation-registry.js";
 import { AUTHENTICATED_SURFACES, WORKSPACE_ROUTES } from "./workspace-surface-inventory.js";
 

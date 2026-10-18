@@ -33,7 +33,7 @@ rules hold the line:
   4. THE COMMENT PROSE IS RENDERED VERBATIM, and that is the one place a name can
      reach this file, because a migration author is free to name a real example in
      their own documentation. One does today: 0056's note on `v_ref_index` cites
-     "17 live Henry Schein rows" to explain the bug it fixed. That is authored
+     "17 live Example Organization 25 rows" to explain the bug it fixed. That is authored
      documentation, not a row read out of the record, and it goes no further than
      the migration already does — this file lands in `DNA/`, which is exactly the
      Joe-and-Dell share, and both of them already see every one of those rows in
@@ -43,7 +43,7 @@ rules hold the line:
 
   Verified 2026-08-02 against 3,354 live values (name, org, email, phone) pulled
   from v_export_vendors, v_export_leads, v_export_clients, v_export_deals and
-  v_ref_index: one match, the authored "Henry Schein" above. No email address, no
+  v_ref_index: one match, the authored "Example Organization 25" above. No email address, no
   phone number and no dollar figure appears anywhere in the render.
 
 WHERE IT LANDS, and why. `DNA/Team/` is the shared tier's how-this-works shelf —
