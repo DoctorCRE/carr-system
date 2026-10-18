@@ -45,6 +45,15 @@ PRIMARY_ONLY = frozenset(name for name, where in PLACEMENT.items() if where == "
 SECONDARY_ONLY = frozenset(name for name, where in PLACEMENT.items() if where == "secondary")
 
 
+# MacBook rehearsal remains scheduled after promotion; host identity owns it.
+HOST_ONLY = {"com.carr.studio-failover-rehearsal.plist": "macbook"}
+
+
 def allowed_on_machine(filename: str, primary: bool) -> bool:
+    if filename in HOST_ONLY:
+        import socket
+        from pathlib import Path
+        config = json.loads((Path(__file__).resolve().parents[1] / "ops/config/studio-failover.v1.json").read_text())
+        return socket.gethostname() == config["hosts"][HOST_ONLY[filename]]["hostname"]
     return not ((filename in PRIMARY_ONLY and not primary)
                 or (filename in SECONDARY_ONLY and primary))
