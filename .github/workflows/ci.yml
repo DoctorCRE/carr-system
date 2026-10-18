@@ -18,7 +18,7 @@
 # group rather than the sum. The `checks` job keeps the required context NAME
 # and is now a gate: it needs every class job, runs even when one is red, and
 # fails unless all of them succeeded. Nothing that pins the context (the
-# ruleset, the automerge pilot, the backup workflow) had to move.
+# ruleset, the backup workflow) had to move.
 # ops/ci-selftest.py proves every CLASS_ORDER class runs in exactly one group.
 #
 # The paragraph that stood here until 2026-08-20 said the opposite — that CI
@@ -76,9 +76,8 @@ name: CI
 # the merge endpoint conditionally binds only the PR head SHA, so strict mode is
 # the protected-main half of that transaction — if main moves after the checks
 # ran, GitHub marks the PR out of date and refuses the merge. The source-merge
-# controller (mcp-server/src/source-merge-policy.js) and the automerge pilot
-# (ops/automerge_pilot.py) both refuse with ruleset_strict_update_missing if it
-# is ever switched off. Do not turn it off to save CI minutes.
+# controller refuses ruleset_strict_update_missing if strict mode is disabled.
+# Do not turn it off to save CI minutes.
 #
 # THE COST IT CARRIES, which PR #379 predicted correctly: every open PR has to be
 # brought up to date and re-run CI each time main moves before it can merge. That
@@ -90,20 +89,20 @@ name: CI
 # PR from breaking main; it does not catch main going red on its own (a moved
 # dependency, a date-sensitive test) while nobody is opening PRs. Weekends are not
 # workdays for either partner, so that is exactly the window with no other cover.
+#
+# ready_for_review runs every class; historical draft retries stay isolated.
+# After a base retarget, reopen the PR to test its new merge ref.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   schedule:
     # 06:20 UTC daily. Sits after the nightly backup (02:35 UTC) and the 05:10
-    # edge-liveness slot, and before the automerge pilot (08:30 UTC weekdays), so
-    # the pilot has a fresh answer on main before it considers merging anything.
+    # edge-liveness slot.
     - cron: "20 6 * * *"
   workflow_dispatch:
 
 concurrency:
-  # PR validation supersedes by workflow + PR. Non-PR verdicts are independent:
-  # sharing a non-cancelling group would still replace older pending runs.
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.event.pull_request.draft && 'draft' || 'ready' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -112,24 +111,26 @@ permissions:
 jobs:
   classes:
     name: ops/ci.sh --strict --only ${{ matrix.classes }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         # 2026-10-01 run 36928008916: this combined group took 310s (unit
         # 228s, types 36s, secret 33s, other classes 13s), below ten minutes.
-        # Keep gates, real-fixture replay and migration in separate jobs. Every class
+        # Keep gates and migration in separate jobs. Every class
         # must appear in exactly one group (ops/ci-selftest.py verifies this).
         classes:
           - "pushfloor unit types contract secret dependency binding artifact freshness"
           - "gates"
-          - "replay"
           - "migration"
+        # Keep fast feedback on draft pushes without starting expensive runners.
+        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"gates"},{"classes":"migration"}]' || '[]') }}
     # Both PR 1121 and PR 1406 exhausted a 20-minute migration job while
     # their separate database acceptance passed. Preserve measured headroom
     # and cover that lane's declared budget without extending other groups.
-    # zsh setup retains its own short deadline below.
-    timeout-minutes: ${{ matrix.classes == 'migration' && 35 || 20 }}
+    # zsh setup retains its own bounded deadline below. 35 -> 45 on 2026-10-17:
+    # the db lane sat at 33-34 min and 10 of 25 runs were cancelled at the cap.
+    timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
       # The migration class needs a database to apply 130 forward migrations to.
@@ -137,14 +138,14 @@ jobs:
       # enforce its loopback-only rule with no override: production is not
       # reachable from here even if someone tried.
       postgres:
-        image: postgres:17
+        image: mirror.gcr.io/library/postgres:17@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
         env:
           POSTGRES_USER: carr_ci
           POSTGRES_PASSWORD: carr_ci
           POSTGRES_DB: carr_ci
         ports: ["5432:5432"]
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U carr_ci -d carr_ci"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -206,26 +207,31 @@ jobs:
           npm --prefix mcp-server ci
           npm --prefix practice-plugin ci
 
+      - name: Identify the runner image for the zsh archive
+        id: zsh-image
+        run: echo "version=$ImageVersion" >> "$GITHUB_OUTPUT"
+      - name: Restore zsh package archives
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/zsh-debs/*.deb
+          key: zsh-ubuntu24-${{ runner.arch }}-${{ steps.zsh-image.outputs.version }}-${{ hashFiles('ops/ci-zsh.sh') }}
       - name: Install zsh
         # bin/review-council-runner.sh has a #!/bin/zsh shebang and its test
         # invokes it by that interpreter. Use the runner's installed shell
         # when available; otherwise try its indexes before refreshing them.
-        # Bound apt processes as well as individual network requests;
-        # an unavailable package still fails the job, never skips its tests.
-        timeout-minutes: 3
-        run: |
-          set -euo pipefail
-          if zsh --version >/dev/null 2>&1; then
-            exit 0
-          fi
-          # zsh is in Ubuntu's archive. Refreshing every vendor index can
-          # exhaust the setup deadline before migration checks ever start.
-          apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
-                       -o Dir::Etc::sourcelist=sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=-)
-          if ! timeout --kill-after=5s 45s sudo apt-get "${apt_options[@]}" install -y -qq zsh; then
-            timeout --kill-after=5s 60s sudo apt-get "${apt_options[@]}" update -qq
-            timeout --kill-after=5s 45s sudo apt-get "${apt_options[@]}" install -y -qq zsh
-          fi
+        # The download is the only step that depends on the Ubuntu mirror, so
+        # it alone is retried (up to three bounded attempts, index refresh
+        # once after the first miss). The unpack runs from the local cache and
+        # has its own 120-second deadline, separate from download deadlines. Every process
+        # is bounded; an unavailable package still fails the job, never skips
+        # its tests. Budget: 3*65 + 65 + 125 + 15 = 400 seconds;
+        # plus 60 seconds of overhead, rounded up, requires exactly 8 minutes.
+        # Cached archives avoid mirror downloads on subsequent runs.
+        timeout-minutes: 12
+        env:
+          ZSH_RETRY_BACKOFF: "5"
+          ZSH_ARCHIVE_DIR: ${{ runner.temp }}/zsh-debs
+        run: ops/ci-zsh.sh
 
       - name: Install PostgreSQL 17
         # Role-migration fixtures own clusters so roles cannot leak into the
@@ -277,6 +283,14 @@ jobs:
                end if;
              end \$\$;"
 
+      - name: Verify edge incident delivery
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-noise-incident-test.py
+
+      - name: Verify audit attempt and cache integrity
+        if: matrix.classes == 'gates'
+        run: python3 test/ci-failure-audit-test.py
+
       - name: Run this group's check classes
         env:
           # ops/ci.sh refuses any DSN that is not loopback. This one is the
@@ -285,6 +299,7 @@ jobs:
           # Excludes the checks whose dependency cannot exist on a runner
           # (installed Claude Code settings, macOS launchd). Each one prints its
           # reason in the output; nothing is dropped silently.
+          GH_TOKEN: ${{ github.token }}
           CARR_CI_PORTABLE_ONLY: "1"
           # The migration shadow drops its regenerated db/schema.sql here; the
           # next step uploads it when the class fails, so a stale snapshot is
@@ -311,25 +326,27 @@ jobs:
     # leave this job skipped, and a required check that never reports blocks
     # the merge silently instead of saying why.
     name: ops/ci.sh --strict
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: classes
+    permissions:
+      contents: read
+      actions: read
     if: ${{ always() }}
     timeout-minutes: 5
     steps:
-      - name: Fail unless every class group succeeded
-        env:
-          CLASSES_RESULT: ${{ needs.classes.result }}
-        run: |
-          echo "class groups: $CLASSES_RESULT"
-          if [ "$CLASSES_RESULT" != "success" ]; then
-            echo "ops/ci.sh --strict: a class group did not succeed (result: $CLASSES_RESULT)"
-            exit 1
-          fi
-          echo "ops/ci.sh --strict: every class group green"
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+      - name: Fail unless every class group succeeded
+        env:
+          CLASSES_RESULT: ${{ needs.classes.result }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 ops/ci-evidence.py verdict
+          if [ "$CLASSES_RESULT" != "success" ]; then
+            echo "aggregate matrix result: $CLASSES_RESULT"
+            exit 1
+          fi
       - name: Record the tested tree and class contract
         run: python3 ops/ci-evidence.py record --output ci-evidence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

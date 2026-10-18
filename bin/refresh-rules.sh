@@ -47,7 +47,6 @@ if run_export >> "$LOG" 2>&1; then
   # derived data, so it is synced by code here, right where the renders move.
   # It re-stamps only the map's own contract hash — never the gate-script
   # hashes, so tampering with a gate is still detected on the next boot.
-  python3 "$REPO/bin/sync-enforcement-map.py" >> "$LOG" 2>&1 || true
   # Assert no tool-call markup reached a rule. Rule c53beeaa has prescribed this
   # exact check since 2026-08-03 and nothing ran it; on 2026-08-13 six active
   # shared rules were found carrying it, five with Joe's verbatim quote absorbed

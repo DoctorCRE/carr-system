@@ -1,11 +1,11 @@
 {
 "counts": {
-"test": 126,
+"test": 127,
 "train": 212
 },
 "rule": "v2 trace cases keep the repo's own split (30% held out per stratum, seed rule-delivery-eval-v2); hard and real-replay cases split by sha256('rule-delivery-hard-v1:'+id)[0] % 2. Tuning reads train only.",
 "schema": "rule-delivery-split/v1",
-"sha256": "10b8aea53e81d3a1c4d57392c2a8861e3e54eafb379420519d24c54dba232565",
+"sha256": "fa34ae31bf0c016cb5f69b6120ba129e45932fb54bab46f0cf7a2580c3560ccd",
 "split": {
 "h-nm-agent-word": "train",
 "h-nm-echo-git-push": "test",
@@ -57,6 +57,7 @@
 "rr-bash-9fcfc2d5b12d": "train",
 "rr-bash-a26c9b7bd1b5": "train",
 "rr-bash-a68e9097bd21": "test",
+"rr-bash-f6b19cbf7e98": "test",
 "rr-bash-f79bbc067e7f": "test",
 "rr-read-02c975a2f703": "test",
 "rr-read-0869e795c36e": "test",

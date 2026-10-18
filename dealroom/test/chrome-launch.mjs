@@ -20,8 +20,14 @@ async function settlesWithin(promise, ms) {
   } finally { clearTimeout(timer); }
 }
 
-function signalChild(child, signal) {
-  // Reap Chrome's helpers too, before a retry can compete with the old tree.
+function signalProcess(child, signal) {
+  if (!child.pid) return;
+  try {
+    child.kill(signal);
+  } catch (error) { if (error.code !== "ESRCH") throw error; }
+}
+
+function signalGroup(child, signal) {
   if (!child.pid) return;
   try {
     if (process.platform === "win32") child.kill(signal);
@@ -29,10 +35,10 @@ function signalChild(child, signal) {
   } catch (error) { if (error.code !== "ESRCH") throw error; }
 }
 
-async function groupStopsWithin(child, ms) {
+export async function processTreeStopsWithin(pid, ms, killProcess = process.kill.bind(process)) {
   const deadline = performance.now() + ms;
   for (;;) {
-    try { process.kill(-child.pid, 0); }
+    try { killProcess(pid, 0); }
     catch (error) {
       if (error.code === "ESRCH") return true;
       // macOS can report EPERM while an owned group is exiting. Keep waiting;
@@ -56,12 +62,54 @@ async function removeProfile(profile) {
   }
 }
 
-async function readyPage(profile, remainingMs) {
+function browserControl(url, timeoutMs) {
+  const socket = new WebSocket(url);
+  const ready = new Promise((resolve) => {
+    socket.addEventListener("open", () => resolve(true), { once: true });
+    socket.addEventListener("error", () => resolve(false), { once: true });
+    socket.addEventListener("close", () => resolve(false), { once: true });
+  });
+  return {
+    async close() {
+      if (!await ready) return false;
+      return new Promise((resolve) => {
+        let timer;
+        const finish = (sent) => {
+          clearTimeout(timer);
+          resolve(sent);
+        };
+        socket.addEventListener("message", (event) => {
+          const message = JSON.parse(String(event.data));
+          if (message.id === 1) finish(!message.error);
+        });
+        socket.addEventListener("close", () => finish(true), { once: true });
+        socket.addEventListener("error", () => finish(false), { once: true });
+        timer = setTimeout(() => finish(false), timeoutMs);
+        socket.send(JSON.stringify({ id: 1, method: "Browser.close", params: {} }));
+      });
+    },
+    dispose() {
+      if (socket.readyState < WebSocket.CLOSING) {
+        try { socket.close(); }
+        catch {}
+      }
+    },
+  };
+}
+
+async function devToolsEndpoint(profile) {
   const [portText, browserPath] = (await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).split(/\r?\n/);
   const port = Number(portText);
   if (!/^\d+$/.test(portText) || port < 1 || port > 65535 || !/^\/devtools\/browser\/[^\s]+$/.test(browserPath ?? "")) {
     throw new Error("DevToolsActivePort is incomplete or invalid");
   }
+  return {
+    port,
+    browserWsUrl: `ws://127.0.0.1:${port}${browserPath}`,
+  };
+}
+
+async function readyPage(port, remainingMs) {
   // File publication can precede HTTP/page readiness; both share the deadline.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.min(500, remainingMs));
@@ -79,29 +127,52 @@ async function readyPage(profile, remainingMs) {
   } finally { clearTimeout(timer); }
 }
 
-export async function launchChrome(chrome, { spawnChrome = spawn, timeoutMs = CHROME_STARTUP_TIMEOUT_MS, pollIntervalMs = 50 } = {}) {
+export async function launchChrome(chrome, {
+  spawnChrome = spawn,
+  timeoutMs = CHROME_STARTUP_TIMEOUT_MS,
+  pollIntervalMs = 50,
+  closeBrowser,
+  stopTimeoutMs = CHROME_STOP_TIMEOUT_MS,
+} = {}) {
   const totalStarted = performance.now();
   const attempts = [];
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const profile = await mkdtemp(path.join(tmpdir(), "v5-j101-chrome-"));
     const started = performance.now();
-    let child, stderr = "", spawnError, exited = false, exitPromise, closePromise, cleanup;
+    let child, control, stderr = "", spawnError, exited = false, exitPromise, closePromise, cleanup;
     const close = () => cleanup ??= (async () => {
       if (child) {
-        signalChild(child, "SIGTERM");
-        // A leader's exit says nothing about helpers that share its group.
-        const stopped = process.platform !== "win32" && child.pid
-          ? () => groupStopsWithin(child, CHROME_STOP_TIMEOUT_MS)
-          : () => settlesWithin(exitPromise, CHROME_STOP_TIMEOUT_MS);
-        if (!await stopped()) {
-          signalChild(child, "SIGKILL");
-          if (!await stopped()) throw new Error("Chrome process tree did not exit after SIGKILL");
+        let gracefulCloseRequested = false;
+        try {
+          if (!exited && control) {
+            const closeRequest = Promise.resolve(control.close()).then((requested) => { gracefulCloseRequested = requested; });
+            await settlesWithin(closeRequest, stopTimeoutMs);
+          }
         }
-        if (!await settlesWithin(exitPromise, CHROME_STOP_TIMEOUT_MS)) throw new Error("Chrome did not exit after cleanup");
+        catch {}
+        if (gracefulCloseRequested) {
+          await settlesWithin(exitPromise, stopTimeoutMs);
+        }
+        if (!exited) {
+          signalProcess(child, "SIGTERM");
+          await settlesWithin(exitPromise, stopTimeoutMs);
+        }
+        const treeStopped = process.platform !== "win32" && child.pid
+          ? await processTreeStopsWithin(-child.pid, stopTimeoutMs)
+          : exited;
+        if (!treeStopped) {
+          signalGroup(child, "SIGKILL");
+          const killed = process.platform !== "win32" && child.pid
+            ? await processTreeStopsWithin(-child.pid, stopTimeoutMs)
+            : await settlesWithin(exitPromise, stopTimeoutMs);
+          if (!killed) throw new Error("Chrome process tree did not exit after SIGKILL");
+        }
+        if (!await settlesWithin(exitPromise, stopTimeoutMs)) throw new Error("Chrome did not exit after cleanup");
         // A detached crash reporter can inherit stderr after Chrome exits.
         // Drain briefly for diagnostics, then release our stream reference.
         await settlesWithin(closePromise, 100);
         child.stderr.destroy();
+        control?.dispose();
       }
       await removeProfile(profile);
     })();
@@ -123,7 +194,11 @@ export async function launchChrome(chrome, { spawnChrome = spawn, timeoutMs = CH
         if (spawnError) throw spawnError;
         if (exited || child.exitCode !== null || child.signalCode !== null) throw new Error("Chrome exited before DevTools started");
         try {
-          const pageWsUrl = await readyPage(profile, Math.max(1, deadline - performance.now()));
+          const { port, browserWsUrl } = await devToolsEndpoint(profile);
+          control ??= closeBrowser
+            ? { close: () => closeBrowser(browserWsUrl), dispose() {} }
+            : browserControl(browserWsUrl, stopTimeoutMs);
+          const pageWsUrl = await readyPage(port, Math.max(1, deadline - performance.now()));
           const elapsedMs = Math.round(performance.now() - started);
           attempts.push({ attempt, elapsedMs });
           return { pageWsUrl, startupMs: Math.round(performance.now() - totalStarted), attempts, close };

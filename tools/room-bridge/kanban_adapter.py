@@ -22,20 +22,15 @@ PROJECT = "carr"
 CATALOG_PATH = Path(__file__).with_name("queue-targets.json")
 QUEUE_MAX_RETRIES = 3
 QUEUE_TRANSIENT_PREFIX = "queue_transient:"
-# ``review`` is a terminal Hermes state (the queue dispatcher treats it as
-# terminal too); it must not be re-opened or re-blocked by reconciliation.
 NONTERMINAL_STATUSES = ("triage", "todo", "ready", "scheduled", "running")
 META_PREFIX = "[CARR_QUEUE_META "
 META_FIELDS = {"v", "target", "cap", "source_seq", "source_msg_id", "finish"}
-# Optional: tasks created before origin stamping (and any without server provenance) carry the six fields above.
 META_OPTIONAL = {"origin"}
 ORIGIN_VALUE = re.compile(r"[a-z][a-z-]{0,31}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
 RECONCILIATION_DIAGNOSTIC_LIMIT = 25
 
 
 
-# A queue claim lasts CLAIM_TTL_S. A Codex job started under that claim must
-# end inside it, or stale-claim recovery can hand the same task out twice.
 CLAIM_TTL_S = 900
 QUEUE_CODEX_TIMEOUT_S = CLAIM_TTL_S - 30
 
@@ -85,7 +80,6 @@ def _subprocess_runner(argv: list[str]) -> dict:
 
 
 def _command_runner(argv: list[str]) -> str:
-    """Run one supported Hermes mutation without interpreting human output."""
     try:
         completed = subprocess.run(argv, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -125,9 +119,6 @@ class KanbanAdapter:
         if isinstance(raw_source_seq, int):
             source_seq = raw_source_seq
         elif isinstance(raw_source_seq, str) and raw_source_seq.isdigit():
-            # Postgres bigint values cross the deployed Worker boundary as
-            # JSON strings. Normalize at queue ingress so the durable task
-            # metadata retains the integer contract its executor validates.
             source_seq = int(raw_source_seq)
         else:
             raise QueueError("source_invalid", "room source sequence is invalid")
@@ -136,9 +127,6 @@ class KanbanAdapter:
             "source_seq": source_seq, "source_msg_id": turn.get("msg_id"),
             "finish": command["finish"],
         }
-        # Server-derived provenance (queue_grammar._origin's fields, never `seat` or body text), stamped into the
-        # adapter-built first line so the desk can require a trusted origin for a Flash code task whatever target
-        # was named. A posted body cannot forge it: the executor reads only this first line as metadata.
         origin = f"{turn.get('origin_channel')}:{turn.get('origin_actor')}"
         if ORIGIN_VALUE.fullmatch(origin):
             meta["origin"] = origin
@@ -157,8 +145,6 @@ class KanbanAdapter:
         if target.get("provider"):
             argv.extend(["--provider", target["provider"]])
         if command.get("manual"):
-            # Hermes creates this manual card blocked atomically.  It can never
-            # appear in a ready list between a create and a later transition.
             argv.extend(["--initial-status", "blocked"])
         argv.extend(["--json", command["title"]])
         raw = self.runner(argv)
@@ -210,7 +196,6 @@ class KanbanAdapter:
 
     @staticmethod
     def _reconciliation_meta(task: dict) -> tuple[dict | None, str | None]:
-        """Parse only the exact queue envelope, without trusting task prose."""
         body = task.get("body")
         if not isinstance(body, str):
             return None, "metadata_missing"
@@ -404,7 +389,6 @@ REPO = Path(__file__).resolve().parents[2]
 
 
 def _model_router():
-    """ops/jev_model_route.py, loaded by path like every ops sibling; paid for only on target=auto."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("jev_model_route", REPO / "ops" / "jev_model_route.py")
     assert spec and spec.loader
@@ -415,7 +399,8 @@ def _model_router():
 
 def _flash_is_up() -> bool:
     import flash_wire
-    # A disabled demand-startable server is an available route, not an outage.
+    if flash_wire.flashlib.is_switched_off():
+        return False
     return flash_wire.is_up() or (Path.home() / "Library/LaunchAgents/local.ds4-flash-next.plist").is_file()
 
 
@@ -447,12 +432,9 @@ class QueueService:
         elif row.get("overflow"):
             reason = "flash_busy_or_down"
         elif (row.get("fallback") or row.get("jev_error")) and alias == "flash":
-            # Jev unreachable, or no score cleared its cutoff: the abstain route never lands on the cheapest desk
             reason = "jev_abstained"
         elif row["route"] == "script" and alias == "flash":
-            # Flash's script protocol needs the data named, in the policy's data folders (flash_wire.script_inputs)
             import flash_wire
-            # data lines count in the body only, exactly as the desk reads them (flash_wire.task_parts)
             paths, _, refusal = flash_wire.script_inputs(command.get("body") or "",
                                                          roots=policy.get("script_data_roots") or [])
             if refusal:
@@ -460,10 +442,6 @@ class QueueService:
             elif paths is None:
                 reason = "script_needs_data"
         elif row["route"] == "code" and alias == "flash":
-            # Defense in depth: a Flash code run executes model-driven code on this host, so it is accepted only from
-            # a server-derived trusted origin (never `seat`), and only when the body names one allowlisted git
-            # project and one bounded test command, read exactly as the desk reads them (flash_wire.code_inputs over
-            # flash_wire.task_parts' body).
             origin = f"{command.get('origin_channel')}:{command.get('origin_actor')}"
             import flash_wire
             spec, _, refusal = flash_wire.code_inputs(command.get("body") or "",
@@ -514,15 +492,6 @@ class QueueService:
                     }}}
                 command = {**command, "target": routed["target"]}
             created = self.adapter.create(command, turn, self.catalog["targets"][command["target"]])
-            # A retried target=auto command re-runs route_auto on every call, so its
-            # idempotency key (from the room message, not the task) can land on an
-            # EXISTING task that was originally routed somewhere else — Flash's
-            # liveness or Jev's decision can differ between the original send and the
-            # retry. On a duplicate FROM AN AUTO ROUTE (routed is not None), the
-            # receipt must report where that existing task actually went, not this
-            # call's freshly recomputed route. An explicit target can never drift this
-            # way — the command names its own target every time — so this stays a
-            # no-op read for every explicit-target create, matching prior behavior.
             report_target = command["target"]
             if routed is not None and not created["created"]:
                 report_target = self._existing_task_target(created["task_id"], default=report_target)
@@ -542,12 +511,6 @@ class QueueService:
         return self.adapter.reconcile_disabled_targets(self.catalog)
 
     def _existing_task_target(self, task_id: str, *, default: str) -> str:
-        """The target actually bound to an already-existing queue task.
-
-        Best-effort: a fresh read that fails or a body that does not parse as the
-        exact queue envelope falls back to the caller's own default rather than
-        failing the whole receipt over a display fact.
-        """
         try:
             payload = self.adapter.show(task_id)
         except QueueError:

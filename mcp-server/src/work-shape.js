@@ -230,25 +230,6 @@ export function workShapeTools({ withEnvelope, writeEvent, ToolError }) {
         const fixedSurface = args.disposition === "not_required" ? args.fixed_surface_ref.trim() : null;
         let updated;
         if (work.capture_idempotency_key) {
-          // Sourced branch only. An INITIAL not_required is preflighted through
-          // the server classifier with empty dependencies and minimal caps: an
-          // intrinsically heavy request needs a Work Shape, so not_required is
-          // refused here before any receipt is written. A zero-row wrapper result
-          // is not "standard"; it only defers to the sourced setter, whose own
-          // ops.heavy_build_classification call is authoritative and fail-closed.
-          // A correction (an existing disposition moving to required) and an
-          // initial required never consult the classifier.
-          if (args.disposition === "not_required" && !work.shape_disposition) {
-            const classified = (await c.query(
-              `select * from ops.classify_sourced_work_request_build($1::text,$2::integer,$3::text,$4::jsonb,$5::jsonb)
-                 /* work-shape:classify-initial-not-required */`,
-              [work.ref, Number(args.base_version), "", "[]", "{}"],
-            )).rows[0];
-            if (classified && classified.tier !== "standard")
-              throw new ToolError({ error: "heavy_build_shape_required", work_request: work.ref, work_request_version: Number(work.version),
-                classification_reasons: Array.isArray(classified.reasons) ? classified.reasons : [],
-                resolution: "an intrinsically heavy sourced Work Request needs a Work Shape; set the disposition to required, then write the evidence-backed Work Shape" });
-          }
           updated = (await c.query(
             `select * from ops.set_sourced_work_request_shape_disposition($1,$2,$3,$4,$5,$6,$7)`,
             [work.ref, Number(args.base_version), args.disposition, fixedSurface, args.rationale.trim(), actor.id, args.idempotency_key],

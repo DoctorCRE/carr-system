@@ -82,8 +82,9 @@ EXPECTED_A3A_FUNCTIONS = sorted([
     "ops.record_assurance_review_extension(uuid,uuid,uuid,jsonb,text,uuid)",
     "ops.refuse_assurance_persistence_rewrite()",
 ])
+# 0790 explicitly searches pg_temp last on definers; invoker paths stay pinned.
 EXPECTED_A3A_FUNCTION_POSTURE = {
-    "ops.assurance_all_tokens_absent(jsonb)": (True, "s", "search_path=pg_catalog, ops"),
+    "ops.assurance_all_tokens_absent(jsonb)": (True, "s", "search_path=pg_catalog, ops, pg_temp"),
     "ops.assurance_digest(jsonb)": (False, "i", "search_path=pg_catalog, ops, public"),
     "ops.assurance_exact_object(jsonb,text[])": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_health_basis(text)": (False, "i", "search_path=pg_catalog"),
@@ -96,15 +97,15 @@ EXPECTED_A3A_FUNCTION_POSTURE = {
     "ops.assurance_health_stage(text[])": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_identifier_valid(text)": (False, "i", "search_path=pg_catalog"),
     "ops.assurance_lease_lineage_current(uuid,timestamp with time zone)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_append_lineage_current(uuid,uuid,timestamp with time zone,uuid,bigint)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_terminal_evidence_lineage_current(uuid,uuid,timestamp with time zone,uuid,bigint)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_terminal_receipt_lineage_current(uuid,uuid,timestamp with time zone)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_manifest_currentness(uuid,text,text,text,text,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.assurance_normalized_set(jsonb)":
         (False, "i", "search_path=pg_catalog, ops, public"),
     "ops.assurance_pinned_pointer(text)": (False, "i", "search_path=pg_catalog"),
@@ -118,15 +119,15 @@ EXPECTED_A3A_FUNCTION_POSTURE = {
         (False, "i", "search_path=pg_catalog, ops"),
     "ops.assurance_unique_array(jsonb)": (False, "i", "search_path=pg_catalog, ops"),
     "ops.assurance_validate_compiler_input(uuid,jsonb,jsonb)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_evidence_extension(uuid,uuid,uuid,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_execution_manifest(uuid,uuid,bigint,text,jsonb,jsonb,jsonb,jsonb,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_owner_acceptance(uuid,uuid,text,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.record_assurance_review_extension(uuid,uuid,uuid,jsonb,text,uuid)":
-        (True, "v", "search_path=pg_catalog, ops, public"),
+        (True, "v", "search_path=pg_catalog, ops, public, pg_temp"),
     "ops.refuse_assurance_persistence_rewrite()":
         (False, "v", "search_path=pg_catalog, ops"),
 }
@@ -1397,6 +1398,10 @@ def main() -> int:
             # The review's default now() must start after terminal evidence completion.
             conn.commit()
             a2.insert_review(cur, fixture, receipt_id)
+            check("review fact timestamp follows terminal evidence in a long transaction",
+                  one(cur, """select date_trunc('second',created_at)>=%s
+                    from ops.engineering_reviewer_fact where receipt_id=%s""",
+                      (terminal_evidence_time, receipt_id))[0])
             released_at = one(cur, "select released_at from ops.canonical_ownership_lease where id=%s",
                               (lease["lease_id"],))[0]
             check("0532a releases the A2 lease before terminal assurance append",

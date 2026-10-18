@@ -14,7 +14,10 @@ SCRIPT = Path(__file__).with_name("pr-description-check.py")
 
 
 class PRDescriptionCheckTest(unittest.TestCase):
-    def test_description_edits_trigger_validation_without_a_push(self):
+    def test_description_is_checked_in_the_gates_class_when_ready(self):
+        # Edits start no run: a skipped suite on a tested head hid the required
+        # context (WR-000249). A fixed description is validated by the next
+        # push, or by reopening the PR.
         repo = SCRIPT.parent.parent
         result = subprocess.run(
             ["node", "-e", "const fs=require('fs'); const yaml=require('js-yaml');"
@@ -24,7 +27,7 @@ class PRDescriptionCheckTest(unittest.TestCase):
         workflow = json.loads(result.stdout)
         trigger = workflow["on"]["pull_request"] or {}
         self.assertEqual(set(trigger.get("types", [])),
-                         {"opened", "synchronize", "reopened", "edited"})
+                         {"opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft"})
         steps = workflow["jobs"]["classes"]["steps"]
         step = next(step for step in steps if step.get("run") == "python3 ops/pr-description-check.py")
         self.assertIn("github.event_name == 'pull_request'", step["if"])

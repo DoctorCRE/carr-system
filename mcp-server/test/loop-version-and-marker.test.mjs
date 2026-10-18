@@ -305,6 +305,7 @@ test("add-loop: a legal marker and a legal domain reach a genuine ok:true (defec
     kind: "open_loop", owner: "joe", body: "verb-fix self-test, close immediately",
     marker: "bell", domain: "system",
     blocker: "capability", blocker_detail: "coverage only, not a real block",
+    residue_kind: "provider_login", residue_host: "github.com",
   });
   assert.equal(result.ok, true);
   assert.equal(result.number, "351");

@@ -111,9 +111,7 @@ ACTIONS_APP_ID = 15368
 ACTIONS_APP_SLUG = "github-actions"
 # ── the Check the head's POSITIVE evidence has to actually be ───────────────
 # A green head is not "no red rows". AGENTS.md states the repository's own
-# requirement -- ruleset "main: CI must be green" requires the `ops/ci.sh
-# --strict` status check -- and ops/config/automerge-pilot-policy.v1.json
-# registers that check's provider identity: the name below, the Actions app
+# requirement. The required check is ops/ci.sh --strict, from the Actions app
 # slug above, and the workflow file that produces it. Those three are restated
 # here as literals rather than read from the policy file at runtime, because
 # this door resolves its own tree (see _paused_policy_tree in the selftest) and

@@ -11,9 +11,14 @@ This test makes that otherwise easy-to-miss relationship executable.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
+
 import json
 import re
-from pathlib import Path
 from typing import Mapping, Never
 
 
@@ -124,8 +129,8 @@ def main() -> int:
     assert "ON CONFLICT DO NOTHING deliberately" in source
     assert "fresh rebuild will not replay their contract updates" in source
 
-    authority = AUTHORITY.read_text(encoding="utf-8")
-    controller = CONTROLLER.read_text(encoding="utf-8")
+    authority = read_migration(AUTHORITY.parent.parent, AUTHORITY.name)
+    controller = read_migration(CONTROLLER.parent.parent, CONTROLLER.name)
     authority_value = inventory.get("authority")
     if not isinstance(authority_value, str):
         fail("reviewed engineering inventory authority must be a string")

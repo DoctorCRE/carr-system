@@ -18,8 +18,8 @@ a control. Verified against the published hooks reference, not assumed.
 
 WHAT ACTUALLY ENFORCES IT is the door the failure came through. The shape is not
 "a directory got registered", it is "engineering work got WRITTEN somewhere that
-is not the repo" — a PreToolUse Write gate, the same door record-home-gate.py and
-gate-edit-gate.py already sit on, which does deny.
+is not the repo" — a PreToolUse Write gate, the same door record-home-gate.py
+already sits on, which does deny.
 
 WHAT IT DENIES, and every test is PATH-STRUCTURAL rather than content-sniffing,
 for the reason lint-gate.py's doctrine gives and the originating loop repeats:

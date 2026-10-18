@@ -2,33 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchChrome, CHROME_STARTUP_TIMEOUT_MS, CHROME_STOP_TIMEOUT_MS } from "./chrome-launch.mjs";
+import { findDisposableChromium } from "./chromium-binary.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEALROOM = path.resolve(HERE, "..");
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/usr/bin/google-chrome",
-  "/usr/bin/google-chrome-stable",
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-].filter(Boolean);
-
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Both bounded launches, their teardown, and the existing journey budget.
 const BROWSER_TEST_TIMEOUT_MS = 2 * CHROME_STARTUP_TIMEOUT_MS + 4 * CHROME_STOP_TIMEOUT_MS + 30_000;
-
-async function chromeBinary() {
-  for (const candidate of CHROME_CANDIDATES) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
 
 class DevTools {
   constructor(url) {
@@ -179,8 +162,8 @@ async function pagesServer(t, { rpc } = {}) {
 }
 
 async function launchBrowser(t) {
-  const chrome = await chromeBinary();
-  if (!chrome) return { unavailableReason: "Chrome/Chromium was not found; real V5-J101 browser evidence was not run" };
+  const chrome = await findDisposableChromium();
+  if (!chrome) return { unavailableReason: "Chrome for Testing/Playwright Chromium was not found; real V5-J101 browser evidence was not run" };
   let browser;
   try { browser = await launchChrome(chrome); }
   catch (error) { return { unavailableReason: error.message }; }

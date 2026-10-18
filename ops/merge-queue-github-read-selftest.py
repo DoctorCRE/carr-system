@@ -155,6 +155,8 @@ class Contract(unittest.TestCase):
                 self.assertFalse(result["ok"])
                 self.assertEqual(result["blocker"]["kind"], "rate_limit")
                 self.assertTrue(result["blocker"]["retryable"])
+                self.assertEqual(result["blocker"]["attempts"], 1)
+                self.assertEqual(len(gh.calls), 1)
                 self.assertEqual(sleeps, [])
                 self.assert_read_only(gh)
 

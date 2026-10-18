@@ -693,6 +693,8 @@ def default_distiller(request: dict[str, Any]) -> dict[str, Any]:
     command = os.environ.get("CARR_POST_CALL_DISTILLER_COMMAND")
     if command:
         return command_distiller(request, command=command)
+    if flashlib.is_switched_off():
+        raise DistillerUnavailable(flashlib.OFF_REASON)
     try:
         return resident_flash_distiller(request)
     except DistillerUnavailable as exc:

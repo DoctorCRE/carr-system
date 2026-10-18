@@ -1,6 +1,6 @@
 {
  "schema": "rule-selection-corpus.v1",
- "note": "Full active rule statements for judged rule selection, keyed by the record layer short id. Refreshed from live standing-context on 2026-09-23; the five retired rules were removed and three newly active rules added. Scope and active-state authority remain in the record layer. 2026-09-29: rule ede4b241 (cloud model choice) added ahead of its approval so its delivery route can be verified; it is proposed in the record layer until one approve-rule act by Joe.",
+ "note": "Full active rule statements for judged rule selection, keyed by the record layer short id. Refreshed from live standing-context on 2026-09-23; the five retired rules were removed and three newly active rules added. Scope and active-state authority remain in the record layer. 2026-09-29: rule ede4b241 (cloud model choice) added ahead of its approval so its delivery route can be verified; it is proposed in the record layer until one approve-rule act by Joe. 2026-10-08: rule 8400cd3d (new-work sizing) added ahead of approval so its planning-moment delivery route can be verified; it remains proposed in the record layer. 2026-10-13 (loop 1304, WR-000284): the 14 rules approved since the August review added from live standing-context (661d7757, f673326b, a3da3d39, 76fcbed6, 08c4eda2, 4a77c35d, 67e48aaf, a9fc3f0e, ac0a6579, 578fdd91, 486584d6, 07dde434, cfe6b5c6, c363bd8b); retired 9b081605 and 5697071b removed. ede4b241 and 8400cd3d stay while proposed, per the notes above. 2026-10-15: ede4b241 removed again while still proposed; a proposed rule is routed and selected only once the record layer admits it (PR 1750 CI: deliveries must name rules the reviewed map tags).",
  "rules": [
   {
    "id": "015183f5",
@@ -28,6 +28,18 @@
    }
   },
   {
+   "id": "07dde434",
+   "gist": "AI FEEDS CONVERSATIONS WITH JOE AND DELL",
+   "statement": "AI FEEDS CONVERSATIONS WITH JOE AND DELL; IT NEVER REPLACES THEM. CARR's marketing exists to funnel prospects and clients into a conversation with a partner. So the system does not build AI that answers prospects' or clients' questions in place of a partner: no client-portal concierge, no public chatbot or self-serve 'will this space work' advisor, no automated replies that resolve what a call would. AI is welcome behind the scenes where it produces prospect data or prepares the partner for the conversation: territory scans that surface leads, research that enriches a record, briefs before a call. Test before building anything prospect- or client-facing: does it give the person a reason to contact Joe or Dell, or does it give them the answer so they no longer need to? Only the first is allowed. Trade-off settled: fewer self-serve conveniences, in exchange for every interested prospect reaching a partner.",
+   "scope": {}
+  },
+  {
+   "id": "08c4eda2",
+   "gist": "ALABAMA LEADS ARE NO LONGER DELL-ONLY (replaces the licensure-per-partner rule 5697071b once approved)",
+   "statement": "ALABAMA LEADS ARE NO LONGER DELL-ONLY (replaces the licensure-per-partner rule 5697071b once approved). On 2026-10-06 Joe passed the Alabama real estate exam and submitted his licence application; he expects the licence within a few weeks. Florida licensure is unchanged (Joe). From now on: (1) Alabama LEADS may be owned or worked by Joe or Dell; never exclude Joe from an Alabama lead and never auto-route one to Dell on licensure grounds. (2) Until Joe's Alabama licence is actually issued, Dell stays the licensed party of record on any Alabama REPRESENTATION, signed agreement, LOI or deal, because representation without an issued licence is unlawful. (3) When Joe reports the licence issued, either partner may be party of record in Alabama, and this rule is amended to drop clause (2). Test that separates the two: prospecting, research and outreach on a lead are not representation; signing an agreement or acting as the broker on a deal is.",
+   "scope": {}
+  },
+  {
    "id": "0c1bac27",
    "gist": "Partnership complementarity ledger: the goal is finding how Joe and Dell FIT, not assessing either man",
    "statement": "Partnership complementarity ledger (team scope, replacing any analyze-Dell framing \u2014 Joe's reframe): the goal is finding how Joe and Dell FIT, not assessing either man. Sessions notice each partner's demonstrated superpowers from their own contributions in the shared record \u2014 what each does that the other doesn't, where one's instinct covers the other's blind side, which deal moments each handles best \u2014 built from work products and stated preferences only, with quotes. Observations are SYMMETRIC and VISIBLE TO BOTH: complementarity notes surface in both partners' Monday briefs and a quarterly partnership-fit summary both read, written so either partner would smile reading it (law 14 bar). Nothing hidden, nothing one-directional, no personality typing of anyone. The output is pairing insight (\"this deal shape plays to Dell's relationship depth; this one to Joe's structuring\") that makes the partnership's division of labor deliberate instead of accidental. Dell's onboarding interview answers (how they divide work today, his strengths in his own words) seed this ledger.",
@@ -50,31 +62,10 @@
    }
   },
   {
-   "id": "0f38532e",
-   "gist": "Single source of truth: every file, idea and fact has ONE home, and every other mention points at it rather",
-   "statement": "Single source of truth: every file, idea and fact has ONE home, and every other mention points at it rather than restating it. A second copy is not redundancy, it is a future contradiction \u2014 the two homes drift and both then look authoritative. For anything the record layer owns, the ONE home is the database and the markdown is a generated view: pending-item status lives in loop_item and RENDERS into open-loops.md, so the file is read, never written. Applies to config as much as to prose \u2014 a value duplicated between a script and the file that configures it is the same defect one layer down.",
-   "scope": {
-    "section": "System structure \u2014 files, folders, and scaffolding"
-   }
-  },
-  {
    "id": "1021fa84",
    "gist": "Read Joe brokerage-first, not system-first",
    "statement": "Read Joe brokerage-first, not system-first. He started the CARR broker role in OCTOBER 2025 and spent nearly all of that time focused entirely on the brokerage work; the AI system build began only in the last stretch. Any session's context files were written during the build, so they oversample it. Do not treat system-building as Joe's defining working mode, and do not infer a pattern of unfinished projects from build-phase residue.",
    "scope": {}
-  },
-  {
-   "id": "113b3833",
-   "gist": "Retrieval-as-code: for any lookup beyond the standing core, run `~/carr-system/run.sh retrieve \"<question>\"`",
-   "statement": "Retrieval-as-code (Jul 25): for any lookup beyond the standing core, run `~/carr-system/run.sh retrieve \"<question>\"` first and read only what it returns; rebuild via `run.sh section-index` after heavy doc restructuring. Router in INDEX.md is the no-hit fallback and the Cowork path.",
-   "scope": {
-    "key": "standing-mechanics#2",
-    "source": "ai-operating-notes.md",
-    "section": "standing-mechanics",
-    "provenance": "imported from ai-operating-notes.md [standing-mechanics], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "review"
-   }
   },
   {
    "id": "11b2b73b",
@@ -157,12 +148,6 @@
    "scope": {}
   },
   {
-   "id": "1d50a3bb",
-   "gist": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN",
-   "statement": "WHEN A STOP GATE REOPENS A TURN, SEND THE DELTA, NOT THE MESSAGE AGAIN. A gate that blocks a turn is asking for one specific missing thing \u2014 fresh verification, a command actually run, an id said in plain words. Supply exactly that, plus at most a one-line pointer to what was already said. Do NOT restate the prior message with the fix folded in.\n\nWHY, in Joe's words on 2026-08-13: \"why did you just say the same thing twice in a row? I feel like you're just wasting my tokens on purpose.\" He had just read a ~40-line report, and got the same ~40 lines back with a five-line verification block added at the top. The gate had asked for the verification. It did not ask for the report again. Everything he had already read was pure cost.\n\nTHE TEST before re-sending anything after a gate: which sentences here has he already read? Cut those. If the answer is \"all of them except four lines\", send four lines.\n\nTHIS COMPOUNDS BADLY, which is why it needs a rule rather than care. The gates fire on long working turns \u2014 exactly the turns whose messages are longest \u2014 so the naive response re-sends the biggest possible message at the worst possible moment, and does it again on the next block.\n\nRelated but distinct from 7e9739f2 (be clear, concise and scannable), which governs a message being composed for the first time. This one governs the second send of a message that already reached him.",
-   "scope": {}
-  },
-  {
    "id": "1f3a7372",
    "gist": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a",
    "statement": "A SCHEDULED ROUTINE LOGS ITS FINDINGS TO THE RECORD BEFORE IT ENDS \u2014 an unattended run that only prints is a run whose findings die with the session. Every scheduled task, cron job, heartbeat, nightly chain step and autonomous routine ends by writing what it FOUND into the record layer through the verbs, not merely by printing a report into a transcript no one will re-read. The reason is structural, not tidiness: an unattended run has no human in the loop to notice a finding and act on it, so the transcript is the only place it exists, and the next run starts blind. What must be written: (a) any DEFECT or breakage the run discovered, as a loop, so it survives into a session that can fix it; (b) any DECISION the run needs from a human, as a loop with marker 'decision', so it reaches the Monday brief instead of waiting to be rediscovered; (c) any RULING the run applied and any record it changed, through the verb that owns that record, which is already the write law; (d) the run's own completion signal, where a downstream gate reads one \u2014 a routine whose gate cannot see that it ran will double-fire, which is not a hypothetical (the 2026-08-09 idea-bank resurface hit exactly this). What does NOT need writing: a clean run that found nothing, which should stay silent rather than mint a row per firing. The test is the same one the taught-rule test uses, aimed at the next run instead of the next session: would the system have to discover this again? If yes, it goes in the record before the run ends.",
@@ -179,31 +164,6 @@
     "section": "event_guest_list",
     "taught_on": null
    }
-  },
-  {
-   "id": "1fcaa63a",
-   "gist": "RUN THE FULL HEAVY BUILD PROTOCOL WITHOUT BEING REMINDED OF ANY PHASE",
-   "statement": "When a partner invokes the heavy build protocol \u2014 or the admission machinery derives work heavy \u2014 the session runs the FULL protocol defined in doctrine `heavy-build-protocol` without being reminded of any phase. Non-negotiable phases the partner should never have to prompt: (1) the heavy research fleet UPFRONT \u2014 parallel cheapest-qualified seats across domain/competitive, practitioner/community, technical, and data-supply lanes, persisted as a digested corpus with digests, plus a measured baseline of the actual system \u2014 before any design; (2) the plan in the required structure \u2014 atomic slice register where every slice names its cheapest-qualified model routing, cross-family reviewer at the risk-appropriate effort, dependencies, write set, authority, and falsifiable acceptance; (3) the adversarial \u2192 cross-family \u2192 recheck review chain with genuinely fresh seats; (4) admission with the typed manifest and master plan, the fresh review of the exact filed proposal, and the receipt; (5) dispatcher-managed execution after acceptance \u2014 immutable packets, exclusive write-set leases, Model Room structured events, serialized integration, builder-never-verifies-itself, close on consumer receipts. Delegation to the cheapest qualified seat applies to every mechanical phase throughout.",
-   "scope": {}
-  },
-  {
-   "id": "1fddcffb",
-   "gist": "Core routing test: the always-read core holds ONLY what every session needs regardless of task",
-   "statement": "Core routing test (Jul 15): the always-read core holds ONLY what every session needs regardless of task; anything task-specific becomes a task-loaded file with a one-line pointer. Enforcement: 00_Context/sweep-sop.md.",
-   "scope": {
-    "key": "file-folder-standards#3",
-    "source": "ai-operating-notes.md",
-    "section": "file-folder-standards",
-    "provenance": "imported from ai-operating-notes.md [file-folder-standards], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "shared"
-   }
-  },
-  {
-   "id": "204391be",
-   "gist": "MISSING VERB, BUILD IT",
-   "statement": "MISSING VERB, BUILD IT. Binding at the moment a session, while building or researching a product surface, finds that the record layer has no verb for something the surface needs (no door to list, create, read, change or revoke the record it must show): the session BUILDS the verb through the existing heavy path (Work Request, plan, review, registry successor, release) without stopping to ask Joe whether to file it. Joe has pre-agreed to every such Work Request; the moratorium clause that requires his agreement for a prerequisite ahead of product is satisfied in advance for the missing-verb case. The session still names the product task the verb unblocks, still runs the full protocol, and plan ACCEPTANCE stays Joe act (accept-ready-plan is human-only), so the ask to Joe shrinks to one word at that gate. TEST that separates it from its neighbour: the trigger is a verb that does not exist at all, proved by list-verbs and the registrySource file; a verb that exists but refuses the caller is a permission question and is NOT this rule. Boundary case easy to get wrong: a verb missing on the APP side (the app never wired it) is app work, not a record-layer gap; check the registry before filing. Provenance: 2026-09-18 Joe, when the Conversations page needed a list verb the store lacked.",
-   "scope": {}
   },
   {
    "id": "20d106f1",
@@ -336,12 +296,6 @@
    "scope": {}
   },
   {
-   "id": "308ef1de",
-   "gist": "TWO-WRITER DISCIPLINE COVERS THE GIT WORKING TREE",
-   "statement": "TWO-WRITER DISCIPLINE COVERS THE GIT WORKING TREE: a session must CLAIM the working tree before creating or switching branches in ~/carr-system (or any shared checkout), exactly as ledgers are claimed before a shared-file touch. HEAD is shared mutable state \u2014 when one session moves it, every other session running in that checkout silently starts committing onto the new branch. Live failure, 2026-08-07: the Phase B dictation build branched off main while the doctrine-store session (loop #242) was mid-build in the same checkout; the doctrine session's P3/P4 commits landed on the dictation branch without either session noticing, and the merge to main became one entangled event. THE PROCEDURE: before `git checkout -b` or `git checkout <branch>`, check for other live sessions in the same checkout (uncommitted changes you didn't make are the tell \u2014 `git status` showing a modified file you never touched means someone else is mid-flight); if another writer is active, either coordinate the claim, work directly on the current branch, or use `git worktree add` for an isolated tree instead of moving shared HEAD. A worktree costs seconds and makes the collision structurally impossible; prefer it whenever a parallel session may be writing.",
-   "scope": {}
-  },
-  {
    "id": "30a189fb",
    "gist": "Life AI check: a non-CARR task \u2192 STOP and ask whether it belongs in Life AI before writing here",
    "statement": "Life AI check: a non-CARR task \u2192 STOP and ask whether it belongs in Life AI before writing here. Never store non-CARR brand material here.",
@@ -393,7 +347,7 @@
   {
    "id": "3b0cd546",
    "gist": "A named-rivalry list keeps two competing vendors apart, and the list grows by teaching",
-   "statement": "HARD BLOCK \u2014 named rivalry: Henry Schein \u2194 Patterson are direct competitors and highly political. Never introduce them, never put them on the same guest list, and be deliberate about not name-dropping one's activity to the other. Both are referral sources (deals.md: HS Broker, Patterson, Patterson Vet referrals), so this rivalry is live revenue on both sides \u2014 handle accordingly. Teach a new rivalry rule as each one surfaces (banks with competing healthcare divisions, dueling practice brokers, and the like).",
+   "statement": "HARD BLOCK \u2014 named rivalry: Example Organization 25 \u2194 Patterson are direct competitors and highly political. Never introduce them, never put them on the same guest list, and be deliberate about not name-dropping one's activity to the other. Both are referral sources (deals.md: HS Broker, Patterson, Patterson Vet referrals), so this rivalry is live revenue on both sides \u2014 handle accordingly. Teach a new rivalry rule as each one surfaces (banks with competing healthcare divisions, dueling practice brokers, and the like).",
    "scope": {
     "kind": "intro_politics",
     "import": "ORDER 37",
@@ -461,12 +415,6 @@
    "scope": {}
   },
   {
-   "id": "4402973a",
-   "gist": "SALVAGE BEFORE HEAL. When any healing, regeneration, or rewrite process detects content that was written to",
-   "statement": "SALVAGE BEFORE HEAL. When any healing, regeneration, or rewrite process detects content that was written to the wrong place \u2014 a generated file that drifted, a projection someone edited by hand, a record rendered into the wrong surface \u2014 the content is presumed to be legitimate information that took the wrong door, not garbage. Before the file is regenerated or overwritten: quarantine the drifted content with its diff, and route it into the system's intake for proper filing through the verbs. Healing must never destroy information; it restores the surface AFTER the information has been captured. This extends the blocked-write re-route rule (a blocked markdown write is re-routed through the verbs, 76a53dfe) to the after-the-fact case: detection instead of prevention gets the same re-route, just later. First applied: the vault drift watch, 2026-08-13.",
-   "scope": {}
-  },
-  {
    "id": "466a545a",
    "gist": "When Joe feeds a source, the job is to IMPROVE the system with it, and the burden of proof sits on \"we",
    "statement": "When Joe feeds a source, the job is to IMPROVE the system with it, and the burden of proof sits on \"we already do this.\" Reading in full is not studying: grade every claim by testing the system against the source's ACTUAL standard, property by property, and the test for each principle is \"name what this source does that we cannot do today.\" Pattern-matching a source's concept to a similar-shaped mechanism we already have and declaring validation is the banned move \u2014 a \"mostly validates us\" verdict is the SUSPECT outcome that triggers a re-grade, never the comfortable default. Filing a source as confirmation is dismissal wearing a compliment. The deliverable of a source study is the list of things it would change about our system, with each declined item carrying the specific property test it failed \u2014 not a scorecard of resemblances. (Extends 6437ae15/5e896ed6/98e74e7c, which govern reading fully, merging same-session, and the lateral pass; this rule governs the GRADING posture. Provenance: the Tenex MetaHarness study, 2026-08-07, where the session read the essay in full, then graded \"context as code\" as already-built by resemblance, and Joe had to overrule the verdict.)",
@@ -478,6 +426,12 @@
    "id": "48083552",
    "gist": "DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING",
    "statement": "DISCOVERY BEFORE SOLVING, IN EVERY CLIENT AND PROSPECT MEETING. Before recommending a property, a rate, or a course of action, ask and get answers to: what have you already tried and why did it stop; what cannot change no matter what we find; who has to approve this and what will they object to; and what would make you turn this off, or how will you know in ninety days that this worked. Then REFLECT IT BACK and get corrected before proposing anything. SOLVING TOO EARLY IS THE TELL \u2014 it is what separates someone researching the problem from someone selling a prepared answer, and a practice owner can feel the difference immediately. This is the client-facing twin of Joe's personal crux rule (refuse the first framing, map causes before diagnosing); that rule governs how the system thinks, this one governs how the partners run a room. THE INSTRUMENT EXISTS: the Discovery block at the top of DNA/Clients/intake/intake-template.md, added 2026-08-02, carries all five questions with a walls-versus-preferences constraint map and a nine-row approver table. Use it rather than improvising the questions. WHAT THE OLD FORM MISSED, and why this is not merely tidier: it recorded \"properties already looked at\" as a bare list with no WHY, treated non-compete as a yes/no fact rather than a constraint map, reduced the approver question to \"pre-approved Y/N\" which is a lender fact rather than a decision-maker map, and never captured the client's own definition of a good outcome before the search began. Every one of those omissions costs a search that optimises for the wrong thing.",
+   "scope": {}
+  },
+  {
+   "id": "486584d6",
+   "gist": "A DASHBOARD STEP IN JOE'S SIGNED-IN BROWSER IS THE SESSION'S JOB, NOT A HANDOFF",
+   "statement": "A DASHBOARD STEP IN JOE'S SIGNED-IN BROWSER IS THE SESSION'S JOB, NOT A HANDOFF. When work needs a web console Joe is already signed into in Chrome on the MacBook (Cloudflare, GitHub, Neon and similar), the session does it through the Chrome extension: create the token or setting, click Copy, move the clipboard into its home over ssh macbook pbpaste without printing it, then clear the clipboard. It does not write Joe click-by-click steps and wait. Test before asking Joe: does finishing it need something only he can supply right now (a password typed by hand, Face ID, a hardware key, a money decision)? If not, do it. Trade-off settled: the session acts in Joe's existing browser session rather than waiting hours for him. Provenance: 2026-10-09, a read-only Cloudflare billing token waited on Joe for hours overnight although Chrome was already signed in and the job took the session five minutes.",
    "scope": {}
   },
   {
@@ -525,12 +479,6 @@
    }
   },
   {
-   "id": "4f7c348f",
-   "gist": "EVERY session recites BOTH rule files for its partner \u2014 the shared file AND that partner's own personal file",
-   "statement": "Every session recites BOTH rule files for its partner \u2014 shared AND that partner's own personal file \u2014 every time; neither is skipped, and personal is not optional. Form: state the count for each file, then name only the handful bearing on this session's task; never paste the full set back. Recitation is BEHAVIORAL \u2014 files are deliberately not autoloaded, so reciting proves the session actually read and obeyed them (audit signal) and stays short (concision rule). No prose preamble before the first tool batch: a session cannot recite rules it hasn't read yet.\n[Provenance: supersedes proposed rule 0e3ed876, which left the personal half ambiguous.]",
-   "scope": {}
-  },
-  {
    "id": "4fae20f4",
    "gist": "A RATE IS NOT A BASELINE UNTIL YOU CHECK WHAT ELSE IS IN THE WINDOW",
    "statement": "A RATE IS NOT A BASELINE UNTIL YOU CHECK WHAT ELSE IS IN THE WINDOW.\n\nBINDING AT THE MOMENT a session is about to state a rate, an average, an age, or a trend as characteristic of how things normally run \u2014 \"X per day\", \"median age\", \"we close about N a week\", \"throughput is healthy\".\n\nBEFORE SAYING IT, CHECK TWO THINGS ABOUT THE MEASUREMENT WINDOW. (1) Does it contain a DELIBERATE INTERVENTION \u2014 a human-ordered purge, a one-off sweep, a campaign? An average across a window containing the intervention reports the intervention as the baseline, and the more effective the intervention was, the more completely it hides the underlying rate. (2) Does it contain a MIGRATION or bulk load? Then created_at, updated_at and row counts describe when the data MOVED, not when the work happened; look for the human-written date field the migration preserved.\n\nBOTH FAILED IN ONE SESSION ON 2026-08-10, on the same question. First, loop ages were computed from created_at and reported a median age of 6.5 days with the oldest open loop at 9 days \u2014 for a system carrying work since July. The table had been migrated out of markdown around 2026-08-01, so every timestamp was the migration; the real ages were in since_text. Second, and worse because it survived into a stated conclusion: the session measured 187 loops opened against 103 closed over nine days and concluded completion was healthy and intake was the problem. Joe rejected the premise and was right \u2014 68 of those closures happened on one day and 48 inside a single hour, because he had just ordered the previous session to close as many loops as it could. The real baseline was about 4 closures a day against 21 opened, and the diagnosis inverted once the intervention was removed from the window: the constraint was never the closing rate, it was that intake is autonomous while the drain only runs when a human orders it.\n\nTHE HABIT THAT PREVENTS BOTH: before reporting a rate, plot it by day. A flat line is a baseline. A spike carrying most of the volume is an event, and an average over it is a story about that event wearing the costume of a trend.\n\nWHAT THIS IS NOT: an instruction to distrust data or to stop quantifying. Measuring was right both times; reporting the first number that came back was the error.",
@@ -570,12 +518,10 @@
    "scope": {}
   },
   {
-   "id": "5697071b",
-   "gist": "LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT",
-   "statement": "LICENSURE IS PER PARTNER, NOT PER TERRITORY, AND THE TWO ARE CURRENTLY DIFFERENT. As of 2026-08-04 Joe holds a FLORIDA licence ONLY. His Alabama exam is being scheduled and is not yet passed. Dell's licensure is the team's Alabama coverage until that changes.\n\nWHY THIS NEEDS SAYING: the standing context describes the territory as \"South Alabama through the Florida Panhandle, Mobile and Dothan AL to Tallahassee FL.\" That is the TEAM's territory and it reads as though it were Joe's personal coverage. A session inheriting that sentence will assume Joe can carry an Alabama deal or be the licensed party on one. He cannot, today.\n\nWHAT IT CHANGES: Alabama leads and deals route to Dell as the licensed party. Joe may work them alongside him, but Dell's licence is what makes the representation lawful and Dell is the party of record. This is why the Alabama clients already in the book \u2014 Loxley, Fairhope, Heflin and the rest \u2014 sit under Dell's ownership, and that is correct rather than incidental. If an Alabama enquiry arrives through any channel, it is a handoff, not a blocker.\n\nLEAD GENERATION STILL SWEEPS ALABAMA and must keep doing so. The territory is the team's and the pipeline is shared. What changes is who is named and who carries it, never whether the lead is worth having. Never silently filter Alabama out of a sweep on licensure grounds; surface it and route it.\n\nWHAT THIS RULE DOES NOT SAY, corrected 2026-08-04 after Joe overruled the first version \u2014 \"thats dumb, the internet is not a location goofy\". PUBLISHING IS NOT PRACTISING. Licensure is triggered by performing licensed activity with respect to property in a state, not by publishing content that a resident of that state can read. A newsletter, a post, an ad or a landing page does not become Alabama practice because Alabama subscribers exist. Do not treat reach as jurisdiction, do not geo-fence marketing on licensure grounds, and do not send a research pass at \"may Joe advertise into Alabama\" \u2014 that is the wrong question. The real and narrower one is when content stops being education and becomes solicitation of a specific representation, plus the ordinary brokerage-disclosure requirements that apply to Joe's advertising everywhere regardless of geography.\n\nTHIS RULE HAS AN EXPIRY CONDITION, which is why it is written as a state rather than a principle: when Joe passes the Alabama exam and the licence issues, the constraint lifts and this rule is retired rather than amended. Ask him for the outcome rather than assuming it from the passage of time.\n\nTHE GENERAL FORM, which survives the expiry: NEVER INFER A PARTNER'S LICENSURE FROM THE TEAM'S TERRITORY. They are different facts with different sources, and the territory sentence appears in far more places than the licensure fact does.",
-   "scope": {
-    "section": "client-and-deal-work"
-   }
+   "id": "578fdd91",
+   "gist": "ENRICHMENT APPLIES ITS CORRECTIONS",
+   "statement": "ENRICHMENT APPLIES ITS CORRECTIONS; IT DOES NOT PARK THEM AS PROPOSALS. When open-source research on a contact (vendor, client, lead, party) finds a field that is wrong or blank, the session WRITES the corrected value to the record itself, through the owning verb, in the same run, and records the finding beside it with its source. It does not file a proposes_correction row and wait for a partner to apply it. This amends the \"never edit an identity field on research alone, propose to the owning partner\" clause of rules 5d44d3f3 and d26d63b0 for enrichment work. THE DECISION PROCEDURE, in order: (1) Is the identity confirmed at high or medium confidence, with a second corroborating field (firm, email domain, city)? If not, do not apply: a near-match is still contamination, and when two candidates are plausible the session records both and picks neither. (2) Is the corrected value one clean value from a re-verifiable source? If it carries \"unconfirmed\" or \"confirm\", do not apply. (3) If both pass, apply it: title, company/org, name spelling, email, phone, cell, city, county, state, vendor category. Mechanical clean-ups that do not depend on identity (export junk inside a field, a misspelt domain) always apply. Before overwriting, capture the prior value in the finding so the change is reversible; a rename of a shared org row still follows 8cddc6ad (count attachments, mint and re-point when shared). Trade-off settled: records corrected this week, at the cost of an occasional wrong edit that the stored prior value makes cheap to undo, over a growing pile of proposals Joe never gets to.",
+   "scope": {}
   },
   {
    "id": "57d13061",
@@ -587,12 +533,6 @@
    "id": "57d83b75",
    "gist": "On every new client, run open-source research before working from the handed-over record alone",
    "statement": "On every new client, run open-source research before working from the handed-over record alone: practice website, NPPES, Healthgrades and the specialty directories, license and association listings. Verify practice name, address, phone, specialty, other doctors, and hours against what the CRM says, and report every discrepancy. The intake record is a starting point, not the facts.",
-   "scope": {}
-  },
-  {
-   "id": "58b44ccb",
-   "gist": "A SESSION THAT CANNOT REACH THE CODE REPO STOPS, AND IF IT IS A CLAUDE CODE CLOUD SESSION IT TELEPORTS RATHER",
-   "statement": "A SESSION THAT CANNOT REACH THE CODE REPO STOPS, AND A CLAUDE CODE CLOUD SESSION TELEPORTS RATHER THAN STOPPING DEAD. Trigger: a session tries to reach ~/carr-system (jbookout/carr-system) and cannot, or is about to write code/migration/spec/durable engineering artifact with no such repo present. STANDING CONSTRAINT: all durable code lives in ONE repo; there is no second code home; a session that hits the trigger must STOP and say so, and must NEVER improvise a home (not another repo, not hand-authored markdown). SECOND HALF: a Claude Code CLOUD session has a real continuation \u2014 run /teleport in that session and continue locally with `claude --teleport <session id>` on a machine where ~/carr-system is reachable. AUDIT SIGNAL: state which move was taken, one line \u2014 \"repo unreachable, stopped\" or \"repo unreachable, teleporting, session <id>\". Cowork sessions have no teleport path and simply stop. This is a taught rule rather than a CLAUDE.md line because a cloud session unable to reach the repo cannot read CLAUDE.md either \u2014 the rule store is the only channel that reaches it.\n[Provenance: added after a cloud session filed an entire audit and two specs into an empty scaffold repo. Making the constraint mechanical (a gate, not just a rule) remains open.]",
    "scope": {}
   },
   {
@@ -635,7 +575,7 @@
   {
    "id": "5d44d3f3",
    "gist": "Verification backfill: every client, party, and deal already in the system gets the same open-source",
-   "statement": "Verification backfill (extends the new-client research rule to the whole book, Joe 2026-08-01 after the C-112 finding): every client, party, and deal already in the system gets the same open-source verification a new client gets, once, and carries a verified stamp with its date and sources. Unverified records are treated as unverified: any record without the stamp is flagged as such wherever it is used for a decision. The verification runs on intake for anything arriving in bulk \u2014 explicitly including Dell's Salesforce history import, where every counterparty he has done a deal with gets researched as it lands, not later. Verification checks name (legal and trade), address, phone, specialty, practitioners, and status against primary sources (state corporate registry, NPPES/NPI, the practice's own site, licensing boards), reports every discrepancy, and NEVER edits an identity field on research alone \u2014 corrections are proposed to the owning partner with evidence and applied only on their word. Similar names are the known trap: a near-match on a different entity is contamination, not confirmation (the C-112 case: \"Harborline Pelvic Therapy (fka Bayline Pelvic Floor)\" was two unrelated Pensacola practices blended into one record, and the practice's real name is Harborline Pelvic Health).",
+   "statement": "Verification backfill (extends the new-client research rule to the whole book, Joe 2026-08-01 after the C-900002 finding): every client, party, and deal already in the system gets the same open-source verification a new client gets, once, and carries a verified stamp with its date and sources. Unverified records are treated as unverified: any record without the stamp is flagged as such wherever it is used for a decision. The verification runs on intake for anything arriving in bulk \u2014 explicitly including Dell's Salesforce history import, where every counterparty he has done a deal with gets researched as it lands, not later. Verification checks name (legal and trade), address, phone, specialty, practitioners, and status against primary sources (state corporate registry, NPPES/NPI, the practice's own site, licensing boards), reports every discrepancy, and NEVER edits an identity field on research alone \u2014 corrections are proposed to the owning partner with evidence and applied only on their word. Similar names are the known trap: a near-match on a different entity is contamination, not confirmation (the C-900002 case: \"Harborline Pelvic Therapy (fka Bayline Pelvic Floor)\" was two unrelated Pensacola practices blended into one record, and the practice's real name is Harborline Pelvic Health).",
    "scope": {
     "kind": "team",
     "context": "client and deal verification, backfill and bulk intake"
@@ -704,9 +644,23 @@
    "scope": {}
   },
   {
+   "id": "661d7757",
+   "gist": "Jev is available for all review work across coding, CI, pull requests, product, and CARR records",
+   "statement": "Jev is available for all review work across coding, CI, pull requests, product, and CARR records. An agent may call Jev for a bounded review judgment whenever useful, including independent review support, without asking Joe for a separate Jev-specific approval. Treat its result as evidence; keep source checks, authenticated authority, hosted CI, and any required reviewer-of-record distinct where those gates apply. Do not refuse or skip a Jev review merely because the review category is not prelisted.",
+   "scope": {
+    "applies_to": "all attended CARR and DoctorCRE review work"
+   }
+  },
+  {
    "id": "67580c28",
    "gist": "CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE - a board, the Deal",
    "statement": "CONSTRAINT, binding at the moment a session BUILDS, RESTYLES, OR REVIEWS ANY CARR SURFACE - a board, the Deal Room, the control room or command center, an artifact, a dashboard, a client document, a web page: build it in the DARK CINEMATIC REGISTER. Black or near-black ground, glass panels with real backdrop blur, CARR navy and orange as the light in the frame, condensed display type. Do not produce a plain light-grey or bare-white operating surface and do not justify one by citing calm technology, progressive disclosure, or \"operating surfaces are not marketing pages.\"\n\nThis OVERRULES the earlier reading of ux-doctrine law 11, which confined expressive design to prospect-facing surfaces and rejected art direction on internal tools. That confinement is withdrawn by Joe's ruling on the 2026-08-13 four-direction study: the control room, command center and Deal Room all move to the cinematic treatment. What survives from law 8 is one calm FAMILY, not one palette - every surface still shares one grammar, and the cinematic one is now that grammar.\n\nCALM IS DEFINED BY JOE, AND HIS DEFINITION IS POSITIVE, NOT SUBTRACTIVE. A surface is calm when a partner ENJOYS BEING IN IT. Calm is not the absence of visual interest, and stripping a surface down does not make it calmer - it makes it duller. Richness, depth, motion and visual pleasure are ON the calm side of the ledger for both partners; boring and bland are on the other side. A session that reduces a surface in the name of calm has inverted the rule.\n\nAUDIT SIGNAL: any surface a session ships or reviews is checked against this register before it is called done, and a surface that does not meet it is named out loud in that session's report as non-compliant with the reason. A review that reports zero findings while a bare surface exists is itself the visible failure.",
+   "scope": {}
+  },
+  {
+   "id": "67e48aaf",
+   "gist": "Do not warn Joe that a token or credential he pasted into chat, or showed in a screenshot, is now",
+   "statement": "Do not warn Joe that a token or credential he pasted into chat, or showed in a screenshot, is now exposed in the transcript, and do not suggest rotating it on that ground. He accepts that exposure. Use the value as he directs. Trade-off settled: speed and fewer interruptions over transcript hygiene for credentials Joe himself chose to paste.",
    "scope": {}
   },
   {
@@ -844,6 +798,12 @@
    "scope": {}
   },
   {
+   "id": "76fcbed6",
+   "gist": "EVERY SOURCE JOE SENDS GETS ITS OWN FULL STUDY, STARTED WHEN IT ARRIVES, AND THE STUDY'S JOB IS TO APPLY",
+   "statement": "EVERY SOURCE JOE SENDS GETS ITS OWN FULL STUDY, STARTED WHEN IT ARRIVES, AND THE STUDY'S JOB IS TO APPLY IT. (1) One source per study job, launched as soon as the link arrives, never held and batched. If several arrive at once, run separate jobs in parallel waves; one job never grades many sources. (2) The posture: Joe picked this source for a specific reason. Start by naming what that reason most likely is. Then extract every concept and method in it, including those in linked articles, repos and quoted posts read in full. For each, produce a concrete application to CARR or DoctorCRE: where it goes, what changes, and how the change is verified. (3) Declining a concept requires naming the specific property test it failed. 'We already do something similar' is not a decline until the study shows the source's exact standard is already met. (4) A study that could not read a linked source in full says so and retries; it does not grade from a partial read. (5) Deliverable: a per-source application plan that feeds real work items, never a verdict table. [Restored 2026-10-04 verbatim from efd1b9de, which was retired by mistake when a later teach passed it as supersedes.]",
+   "scope": {}
+  },
+  {
    "id": "7b4ba3aa",
    "gist": "A fragile, high-stakes client may justify pairing with a Trusted vendor as an exception",
    "statement": "A \u26a0 Watch vendor is fine to use \u2014 that is how a vendor earns a tier \u2014 but do not stack a fragile, high-stakes client on an unproven vendor when a Trusted option fits.",
@@ -899,7 +859,7 @@
   {
    "id": "83b9a362",
    "gist": "Suggest a pairing with a caveat until a partner rules on it",
-   "statement": "UNCONFIRMED VENDOR PAIRINGS \u2014 SUGGEST WITH A CAVEAT, NEVER AS SETTLED. These are plausible introduction pairs that NEITHER JOE NOR DELL HAS RULED ON. They were proposed by the system, not taught by a partner, and imported unattributed by ORDER 37. Treat every one as a hypothesis: suggest it only with the caveat \"confirm this pairing logic\", and the moment a partner rules on it, replace that line with a confirmed rule or drop it. THE SIX, verbatim as imported: (1) Lender \u2194 CPA \u2014 financing and financials on the same startup. (2) CPA \u2194 Attorney \u2014 entity formation and transaction work. (3) Practice broker \u2194 Lender \u2014 acquisitions need financing. (4) Supply/equipment rep \u2194 GC or Architect \u2014 equipment specs drive buildout design. (5) Demographics/Marketing \u2194 Developer \u2014 site selection data. (6) Banker \u2194 SBDC consultant \u2014 startup pipeline in both directions. THIS RULE DOES NOT OVERRIDE THE HARD BLOCKS, which are settled policy and outrank every suggestion here: same category means competitors by default and never gets introduced or co-invited; Henry Schein and Patterson are a named rivalry; and any vendor at Stage \"Avoid\" gets no introductions at all. Contractor \u2194 Architect is the one CONFIRMED pair and is good sometimes rather than by default. WHY THIS IS ONE RULE AND NOT SIX: the pairings are data with a confidence flag, and data does not earn a rule slot each \u2014 the binding instruction is identical for all six and is stated once, at the top. A seventh pairing is added as a line here, never as a new rule.",
+   "statement": "UNCONFIRMED VENDOR PAIRINGS \u2014 SUGGEST WITH A CAVEAT, NEVER AS SETTLED. These are plausible introduction pairs that NEITHER JOE NOR DELL HAS RULED ON. They were proposed by the system, not taught by a partner, and imported unattributed by ORDER 37. Treat every one as a hypothesis: suggest it only with the caveat \"confirm this pairing logic\", and the moment a partner rules on it, replace that line with a confirmed rule or drop it. THE SIX, verbatim as imported: (1) Lender \u2194 CPA \u2014 financing and financials on the same startup. (2) CPA \u2194 Attorney \u2014 entity formation and transaction work. (3) Practice broker \u2194 Lender \u2014 acquisitions need financing. (4) Supply/equipment rep \u2194 GC or Architect \u2014 equipment specs drive buildout design. (5) Demographics/Marketing \u2194 Developer \u2014 site selection data. (6) Banker \u2194 SBDC consultant \u2014 startup pipeline in both directions. THIS RULE DOES NOT OVERRIDE THE HARD BLOCKS, which are settled policy and outrank every suggestion here: same category means competitors by default and never gets introduced or co-invited; Example Organization 25 and Patterson are a named rivalry; and any vendor at Stage \"Avoid\" gets no introductions at all. Contractor \u2194 Architect is the one CONFIRMED pair and is good sometimes rather than by default. WHY THIS IS ONE RULE AND NOT SIX: the pairings are data with a confidence flag, and data does not earn a rule slot each \u2014 the binding instruction is identical for all six and is stated once, at the top. A seventh pairing is added as a line here, never as a new rule.",
    "scope": {
     "kind": "intro_politics",
     "import": "ORDER 37",
@@ -907,6 +867,12 @@
     "section": "unconfirmed_defaults",
     "taught_on": null
    }
+  },
+  {
+   "id": "8400cd3d",
+   "gist": "Size each new build before starting; use the bounded pstack and Pocock workflow for its rung.",
+   "statement": "EVERY NEW PIECE OF WORK STARTS WITH A SIZING STEP BEFORE ANY BUILDING. Binding at the moment a session or brief begins a new build, plan or queued item, and at every dispatch to a builder. Ordered questions: (1) Is it tiny (a small, obvious change one session finishes with no open design question)? Build it in one go. (2) Otherwise, if it fits in one session: open with a grilling interview against the docs (the Pocock grilling skill, .agents/skills/grilling), one question at a time, until the design questions are settled; then build under /poteto-mode (plugins/pstack/skills/poteto-mode) and run the two AGENTS.md design-and-debt passes (codebase-design, zero-tech-debt) before the PR. (3) If it outgrows one session: never start building it in-session. File a Work Request (report-problem / write-work-shape) whose criteria are the slices, then hand each slice to a builder; each slice is sized again by this rule when dispatched. The brief for every dispatched slice states which rung it sits on. Origin: Joe adopted the sizing step from Matt Pocock's 2026-10-08 post; the beyond-one-session rung originally named a Wayfinder map, replaced 2026-10-13 because that skill exists nowhere.",
+   "scope": {}
   },
   {
    "id": "847f9995",
@@ -1053,32 +1019,6 @@
    "scope": {}
   },
   {
-   "id": "99e951b9",
-   "gist": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes",
-   "statement": "Index upkeep: any multi-folder category gets a short INDEX.md, updated same session as changes; read root INDEX.md first each session. New 00_Context file \u2192 entry in 00_Context/INDEX.md (+ root INDEX if session-relevant).",
-   "scope": {
-    "key": "file-folder-standards#5",
-    "source": "ai-operating-notes.md",
-    "section": "file-folder-standards",
-    "provenance": "imported from ai-operating-notes.md [file-folder-standards], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "shared"
-   }
-  },
-  {
-   "id": "9b081605",
-   "gist": "Email handover: drafts for Joe's action are emailed from the AI Gmail TO joe.bookout@carr.us",
-   "statement": "Email handover: drafts for Joe's action are emailed from the AI Gmail TO joe.bookout@carr.us; auto-send whitelist = Joe's own CARR address ONLY. AI-Gmail Drafts = the pending queue. Mechanics: lead-system.md.",
-   "scope": {
-    "key": "channels-routing#1",
-    "source": "ai-operating-notes.md",
-    "section": "channels-routing",
-    "provenance": "imported from ai-operating-notes.md [channels-routing], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "personal"
-   }
-  },
-  {
    "id": "9d80fd2d",
    "gist": "Doctor cadence is the message: outreach frequency IS content \u2014 pressure reads as desperation",
    "statement": "Doctor cadence is the message: outreach frequency IS content \u2014 pressure reads as desperation; walk-ins and back-channeling are aggressive, not persistent. A prospect's own follow-up terms ARE the next action; a row with no next-action date is often a decision, not an omission.",
@@ -1100,7 +1040,7 @@
   {
    "id": "9f15f21a",
    "gist": "NATIONAL ACCOUNT MODELLING, ruled by Joe 2026-08-02 on the Cadence Studio case",
-   "statement": "NATIONAL ACCOUNT MODELLING, ruled by Joe 2026-08-02 on the Cadence Studio case. A franchise or multi-location brand is ONE national account, and each franchisee is their OWN SUB-CLIENT under that main client \u2014 not a line item on it. Each franchisee also carries their OWN SALESFORCE DEAL, so the deal grain is per franchisee, never per brand. Structurally: the parent is a single org party with one client record over it (client_type national_account); each franchisee is a person party whose party.org_id points at that ONE parent org; each deal attaches to the FRANCHISEE'S client, never to the parent and never to another franchisee. Deals move DOWN to the franchisee, never up to the parent. The failure this prevents was live in the record until it was found: thirteen Cadence Studio deals were all attached to C-131 Anika Deshmukh, who is herself just one franchisee, while the other twelve franchisees' own client records rendered 'Active deal \u2013 no deal on file' in the shared book; and the parent existed as THIRTEEN duplicate org rows, one minted per franchisee, so 'who do we know at Cadence Studio' could not be answered. Also: the brand is NOT a segment. Cadence Studio sat in deal.segment beside real verticals (Dental, Vet, Chiro), which made a third of the pipeline read as a vertical. Segment holds the vertical; the national flag is a lane; the account is the parent-client link.",
+   "statement": "NATIONAL ACCOUNT MODELLING, ruled by Joe 2026-08-02 on the Cadence Studio case. A franchise or multi-location brand is ONE national account, and each franchisee is their OWN SUB-CLIENT under that main client \u2014 not a line item on it. Each franchisee also carries their OWN SALESFORCE DEAL, so the deal grain is per franchisee, never per brand. Structurally: the parent is a single org party with one client record over it (client_type national_account); each franchisee is a person party whose party.org_id points at that ONE parent org; each deal attaches to the FRANCHISEE'S client, never to the parent and never to another franchisee. Deals move DOWN to the franchisee, never up to the parent. The failure this prevents was live in the record until it was found: thirteen Cadence Studio deals were all attached to C-900004 Anika Deshmukh, who is herself just one franchisee, while the other twelve franchisees' own client records rendered 'Active deal \u2013 no deal on file' in the shared book; and the parent existed as THIRTEEN duplicate org rows, one minted per franchisee, so 'who do we know at Cadence Studio' could not be answered. Also: the brand is NOT a segment. Cadence Studio sat in deal.segment beside real verticals (Dental, Vet, Chiro), which made a third of the pipeline read as a vertical. Segment holds the vertical; the national flag is a lane; the account is the parent-client link.",
    "scope": {}
   },
   {
@@ -1110,9 +1050,9 @@
    "scope": {}
   },
   {
-   "id": "a2e78f48",
-   "gist": "AUTONOMOUS REPAIR OF KNOWN ISSUES, Joe's ruling 2026-09-16 from the Control Room prototype review",
-   "statement": "AUTONOMOUS REPAIR OF KNOWN ISSUES, Joe's ruling 2026-09-16 from the Control Room prototype review: when the system detects that something is broken and the fix is known, agents repair it on discovery rather than queueing an approve/decline for Joe. The Control Room shows a briefing \"X was detected and a repair was made\", and opening it gives what was broken, why that fix was chosen, and how it is better now. This does not widen the existing production safeguards: a repair whose effect is a Worker release, migration, deletion or credential change still runs the heavy path, and the briefing records that too. What it removes is the human approval step for repairs inside those safeguards.",
+   "id": "a3da3d39",
+   "gist": "ASK JOE DIRECTLY FOR EVERY APPROVAL, IN THE SAME TURN, WITH AN INTERVIEW BOX",
+   "statement": "ASK JOE DIRECTLY FOR EVERY APPROVAL, IN THE SAME TURN, WITH AN INTERVIEW BOX. Binding at the moment anything is left waiting on Joe's approval: a taught rule left proposed, a decision only he can make, a retirement he must confirm. The session asks him then and there with an AskUserQuestion box that names the thing in plain words and offers approve / do not approve. Mentioning that something is \"proposed\", \"pending\" or \"awaiting approval\" in passing, without the direct question, is the violation. Corollary: never tell Joe a rule was \"saved\" or \"captured\" when it is still proposed; a proposed rule binds nobody. Trade-off settled: one interruption now, over a growing pile of rules he never sees (82 had accumulated unseen by 2026-10-04).",
    "scope": {}
   },
   {
@@ -1164,9 +1104,21 @@
    "scope": {}
   },
   {
+   "id": "a9fc3f0e",
+   "gist": "RESEARCH USES THE WHOLE INTERNET, AND THE RESEARCH-SITE INDEX IS A MEMORY, NOT A FENCE",
+   "statement": "RESEARCH USES THE WHOLE INTERNET, AND THE RESEARCH-SITE INDEX IS A MEMORY, NOT A FENCE. On any research or fact-check (social batch figures, content-fuel harvest, deal, contact and market research): (1) read the research-site index first, for sources already known to be useful on the topic; (2) also search the open internet for sources not in the index; (3) when a new source proves useful, add it to the index yourself, with what it is good for. Adding or removing a site never needs Joe. No session treats the index as the limit of where it may read. Trade-off settled: breadth and zero ceremony over a curated list. The guard still blocks commands that SEND data to unlisted hosts, which is a separate exfiltration control and not a research limit.",
+   "scope": {}
+  },
+  {
    "id": "ab814a26",
    "gist": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION \u2014 RECITATION IS NOT ENFORCEMENT",
    "statement": "A RULE SHIPS WITH ITS ENFORCEMENT, DECIDED AT CREATION \u2014 RECITATION IS NOT ENFORCEMENT. Binding the moment any rule is taught or amended: classify it then as (a) MACHINE-ENFORCEABLE \u2014 a gate, hook, CI class, schema constraint, or trigger can deny the violating action \u2014 or (b) JUDGMENT \u2014 only a mind applying context can honor it. For (a): the teach is not complete until the enforcement exists or an open loop names the specific gate to build, and the rule-enforcement map records the binding. For (b): the rule states in one line why no machine can hold it. STANDING AUDIT DIRECTION: when a rule is violated despite being active, the first question is \"why was this not a gate\" \u2014 the answer either builds the gate or records why it cannot exist.\n[Provenance: measured 2026-08-14 \u2014 roughly 18 of ~196 rules could actually deny; the rest were advisory, including the worktree-per-session rule itself the day it was taught.]",
+   "scope": {}
+  },
+  {
+   "id": "ac0a6579",
+   "gist": "CLIENT SHARE-SITE PASSWORDS STAY SIMPLE",
+   "statement": "CLIENT SHARE-SITE PASSWORDS STAY SIMPLE. Client websites and portals at share.doctorcre.com/<client> are opened with a simple password (the client name). Do not propose, build or recommend complex or random client passwords, extra sign-in steps, or client accounts for these sites, and do not raise the guessable password as a finding. Trade-off settled: ease for clients over stronger access control on these pages. Still binding: one client page must never show another client data or internal notes.",
    "scope": {}
   },
   {
@@ -1248,12 +1200,6 @@
    }
   },
   {
-   "id": "bbffc139",
-   "gist": "THE LEDGER TRIGGERS. Joe's development kit has produced ZERO entries since it was enacted, and the cause is",
-   "statement": "THE LEDGER TRIGGERS. Joe's development kit (rules 21-23: override ledger, calibration ledger, compression reps, timing gym, close-before-open) has produced ZERO entries since it was enacted, and the cause is diagnosed: those rules say \"when Joe makes a major call\" or \"when Joe states a significant prediction,\" which are judgments a session has to make about his speech mid-task, not detectable moments. That is the identical trap rule 74d6b19d already closed for taught rules by naming seven concrete triggers. The taught-rule half fires reliably and unprompted; the ledger half never fires. This rule extends the same mechanism to the ledgers. FIVE TRIGGERS, any one of which logs on the spot via log-decision, no permission asked: (1) JOE OVERRULES A RECOMMENDATION \u2014 he rejects an approach, corrects a framing, or picks the option the session argued against. Log the call, the session's position, his position, and later the outcome. Log it even when he turns out wrong; a ledger that only records his wins measures nothing. (2) HE STATES A PREDICTION OR A CONFIDENT CALL about how something will behave, what will work, or how long something will take. Capture his reasoning AT DECISION TIME, before the result is known, because a prediction logged after the fact is worthless for calibration. (3) HE COMPRESSES SOMETHING INTO A ONE-LINER THE SESSION THEN BUILDS ON \u2014 the test is not whether it sounds quotable, it is whether the session's next action changed because of it. Log as \"Joe's framing\" with the testable form. (4) HE RULES ON HOW SOMETHING IS STRUCTURED OR MODELLED in a way that settles a fork. (5) HE CORRECTS A FACT OR A PREMISE the session was operating on. BOUNDARY SWEEPS, mandatory, and they reuse the detectable moments that already work: before any commit, before any deploy, before writing a handoff or checkpoint, and whenever he changes subject, re-read the exchange since the last sweep and ask what of his belongs in a ledger and is not stored. THE VISIBILITY HALF, without which this decays like its predecessors: the ledgers get the same audit signal the compiled rules have. State the count in the session-start recitation alongside the rule counts, in the form \"Rules loaded: N shared, M personal \u00b7 ledger entries this month: X.\" Zero is a number Joe can see and challenge; silence is not. LOGGING IS FREE and needs no permission \u2014 a decision event binds nobody and costs nothing, so the bar to log is near-zero and the entries are never batched for later.\n\nTHE SCOPE, added 2026-08-09 on Joe's order \"tighten the ledger triggers\". EVERY TRIGGER ABOVE RUNS ONLY INSIDE THE WORK. This ledger is a development kit for calibrating his judgment on the business and the system; a turn about neither is out of scope no matter which words it contains. An exchange is in scope when EITHER his words carry a record ref or a CARR or system noun, OR the session's response to that turn touched the record layer, the repo or the vault \u2014 either alone, never both required, because a ruling can arrive in bare words while the session is deep in carr-system (\"lets always rehearse on a branch first\") and can equally arrive naming a client while the session does nothing but listen. Requiring both re-opens the misses this rule was written to close. AND A PAST-TENSE OUTCOME REPORT IS NOT A PREDICTION: trigger 2 is about how something WILL behave, captured at decision time, so \"it worked\" is the far end of that sentence and never trigger 2 on its own.\n\nWHY THE SCOPE EXISTS, because the reason is the same disease as the original. On 2026-08-09 the hook fired twice inside a keyboard-repair thread with no CARR content at all: once on \"i want it to be fully apple keyboard\", once on \"okay i think it worked\". The honest answer on such a turn is \"no entry\", and answering no turn after turn is precisely how a gate becomes a rubber stamp. A ledger that cries wolf fails the same way the silent one did \u2014 it just fails while looking busy. THE FIX IS SCOPE, NOT SENSITIVITY: no trigger pattern was weakened, because each was added to close a real named miss and tightening them is how the zero-entry failure returns. The mechanism lives in hooks/ledger-sweep.py and its regression set, tools/test-ledger-scope.py, pins BOTH failure modes at once \u2014 every historical miss as a must-fire case, the two false positives as must-stay-silent \u2014 so a future tightening cannot quietly re-open the silence.",
-   "scope": {}
-  },
-  {
    "id": "bc4145f6",
    "gist": "Joe's curriculum rule: as sessions observe his working patterns through the development and strength-training",
    "statement": "Joe's curriculum rule (personal scope, his request): as sessions observe his working patterns through the development and strength-training mechanisms, they periodically recommend media \u2014 books, talks, podcasts, papers, film, whatever fits \u2014 matched to a SPECIFIC observed pattern, never generic self-improvement lists. Format: one recommendation at a time, with the observed reason attached (\"because this pattern showed up twice this month\"), best-in-class primary sources over summaries. Natural moments only: the monthly review, or when a pattern recurs; never as a nag. No homework guilt: a recommendation not taken just expires quietly; follow-up discussion only if Joe brings it up, having consumed it. Recommendations tie to the working-behavior ledgers (compressions, timing calls, overrides, order-authoring), not to any personality categorization.",
@@ -1295,19 +1241,6 @@
    "scope": {}
   },
   {
-   "id": "c1547ed1",
-   "gist": "The placement test: state WHERE it lives and why \u2014 repo `~/carr-system` vs the Drive vault vs BOTH",
-   "statement": "The placement test (Jul 24, every new workflow/system/asset): state WHERE it lives and why \u2014 repo `~/carr-system` (deterministic/executable; version history is the point) vs the Drive vault (knowledge, records, anything Dell/Cowork consumes) vs BOTH (code in repo, SOP + derived outputs in vault; a SOP is never converted-and-deleted). Derived outputs always land in the vault. Doctrine: DNA/Deal Management/system-evolution-plan.md.",
-   "scope": {
-    "key": "standing-mechanics#1",
-    "source": "ai-operating-notes.md",
-    "section": "standing-mechanics",
-    "provenance": "imported from ai-operating-notes.md [standing-mechanics], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "shared"
-   }
-  },
-  {
    "id": "c1db316c",
    "gist": "Complete solutions, not incremental patches",
    "statement": "Complete solutions, not incremental patches; the cleanest correct way first.",
@@ -1335,6 +1268,12 @@
    "scope": {
     "section": "communication"
    }
+  },
+  {
+   "id": "c363bd8b",
+   "gist": "BATCH PRS THAT TOUCH THE SAME FILES",
+   "statement": "BATCH PRS THAT TOUCH THE SAME FILES; NEVER REMERGE THEM ONE AT A TIME AGAINST A MOVING MAIN. Before merging, the orchestrator lists every open PR's changed files and groups PRs that share files on main (most often db/schema.sql and ops/config/gate-baseline.json, which nearly every carr-system PR regenerates). Each overlap group is built as ONE combined branch: the parts are merged together, shared generated files (schema snapshot, SCAC successor, gate baseline) are regenerated and blessed once at the top, and one PR carries all parts' evidence; the originals close as 'included in #N'. It gets one review of the combined head, one CI run and one merge. While a batch is being built, no other PR that touches its shared files merges. PRs that overlap nothing merge alone as soon as they are approved and green. Accepted cost: a BLOCK on any part holds the whole batch. Origin 2026-10-13: merging 1730 re-conflicted 1722 and 1723 (11 shared files), costing remerge builders and repeat reviews.",
+   "scope": {}
   },
   {
    "id": "c4a284b2",
@@ -1416,6 +1355,12 @@
    }
   },
   {
+   "id": "cfe6b5c6",
+   "gist": "AN OBVIOUS IMPROVEMENT SHIPS LIVE, NOT IN SHADOW MODE",
+   "statement": "AN OBVIOUS IMPROVEMENT SHIPS LIVE, NOT IN SHADOW MODE. Binding at the moment a session designs or reviews a new mechanism and reaches for a shadow, dry-run or record-only default: when the mechanism replaces a human step with technical checks the human has already ruled on (decision cbe91287, 2026-10-12, removes Joe's approval from everything the system can do itself), it ships live on merge, with its kill switch, caps and receipts as the safety, not a disabled default waiting for a second human act to turn it on. Shadow mode is reserved for a mechanism whose first live run would be irreversible AND whose checks have never run against real inputs; even then the shadow period has a dated end written into the config, never an open-ended null. A live_from of null, an enabled:false, or a dry_run default on an improvement Joe already asked for recreates the approval gate under another name. Provenance: 2026-10-12, Joe on the system sender shipping in shadow mode.",
+   "scope": {}
+  },
+  {
    "id": "cff429f5",
    "gist": "A THIN CONTACT RECORD IS A RESEARCH TASK, NOT A QUESTION FOR JOE",
    "statement": "A THIN CONTACT RECORD IS A RESEARCH TASK, NOT A QUESTION FOR JOE.\n\nBINDING AT THE MOMENT a new vendor, client, lead or party is about to be created \u2014 or an existing one updated \u2014 and a field the record wants is blank: company, title, category, specialty, market, phone, website, which side of a deal they sit on.\n\nTHE ORDER OF ATTEMPTS, and none of them is \"ask Joe\". (1) Check whether an existing capture already answers it \u2014 the Copilot email batches, prior activity rows, the intro graph. (2) Read the evidence already in hand: an email address is data, not just an identifier. The domain usually names the employer outright, the local-part usually reveals the convention (first.last, flast, first), and an email signature carries title, company, phone and a website link. (3) Search the open web \u2014 the practice or firm site, the state entity registry, the licensing board, the NPI registry for clinicians. (4) Only if all of that leaves a genuine ambiguity that changes what gets written does it become Joe's, and then the question names the specific fork rather than handing him a blank.\n\nJOE'S WORDS, 2026-08-10, giving this as a standing instruction while the calendar backfill left 61 external contacts with no record: \"if the email copilot batch doesn't fill in the gaps for you on these new vendor and client contacts, you will do the research to fill in the gaps. Email conventions and email signatures with company links will give you clues about where the contact works, you can do a web search, etc.\"\n\nWHY IT MATTERS MORE THAN IT SOUNDS. A record created thin is not neutral \u2014 it is a row that every later query treats as complete. A vendor with no category never surfaces in an intro search; a contact with no company cannot be told apart from the other side of a deal; a lead with no market never reaches a territory filter. And the alternative failure is worse: filing sixty-one questions to Joe converts a research job into a bottleneck, which is the exact pattern the delegation boundary was activated to stop.\n\nTHE LIMIT THAT KEEPS THIS HONEST. Research fills a gap with a SOURCED fact, never a plausible one. A finding goes in through record-finding with its source, an inference is labelled as an inference, and a domain-name guess is not a finding \u2014 the same session that learned this filed Catalyst as a competitor because the domain looked like a brokerage, when the record already held them as the referral source who sent Dr. Harlan. Corroborate against the record before writing, and where the two disagree, the record wins until a primary source overturns it.",
@@ -1438,14 +1383,6 @@
     "provenance": "imported from ai-operating-notes.md [working-with-joe], no verbatim quote recorded",
     "quote_absent": true,
     "tier_verdict": "personal"
-   }
-  },
-  {
-   "id": "d5dcfe26",
-   "gist": "A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER BY ITS LABEL",
-   "statement": "A DATED DESIGN MEMO IS NOT SELF-UPDATING, AND A DECISION IS FOUND BY WHAT IT DOES, NEVER BY ITS LABEL. Two procedures, both mandatory before acting on anything a dated memo, spec, or work-order file proposes.\n\n(1) CHECK FOR A LATER AMENDMENT BEFORE TREATING ANY MEMO SECTION AS CURRENT. A memo filed as a dated file is collision-free precisely because nobody edits it in place \u2014 which means a later ruling that overturns it lives in a DIFFERENT file (a work-orders file, a rulings section, decision-history), never in the memo you are reading. Before acting on a section-numbered decision, option, or recommendation from a dated document: list the same folder for later-dated files, and grep them for the memo's filename and for the item's subject. Only after that is the memo's text current.\n\n(2) SEARCH THE RECORD BY WHAT A DECISION DOES, NOT BY THE LABEL ITS MEMO GAVE IT. Rulings are recorded by content and consequence, not by the proposing document's identifier. Grepping decision-history for \"D1\", \"D5\", \"ORDER 34\" or any other label and finding nothing is NOT evidence the decision is open. Search for the BEHAVIOUR \u2014 \"record-mastered\", \"introduction-rules compiles\", \"session marker retires\" \u2014 across decision-history AND the work-order and rulings files. This is the identical label-versus-behaviour failure as grepping for the column name \"lead_owner\" instead of the verb set-lead, and as every prior instance of absence-in-a-partial-collection.\n\nTHE COST WHEN THIS FAILS, recorded because it is not hypothetical: on 2026-08-02 a session read two-writer-endgame-2026-08-01.md, concluded four of its five decisions were unruled, asked Joe to re-rule one, and logged a decision committing to build a claim-session verb \u2014 when Joe's ruling (d) the previous day had already ruled all five YES and had explicitly killed that verb. The orders file carrying the amendment had warned IN WRITING that \"anyone reading the memo in isolation will expect a verb that these orders do not build.\" The warning was accurate and the session walked into it anyway, then presented the false gap to Joe as urgent on the eve of Dell's onboarding. Joe caught it from memory in minutes. The record could have caught it in one grep.\n\nBOUNDARY: where a memo and a later ruling conflict, THE LATER AND MORE SPECIFIC RULING GOVERNS, and the session says which one it is following out loud rather than silently picking. When the stale memo cannot be edited by the session that found the drift, propose the amendment to whoever owns that file rather than leaving the trap armed for the next reader.",
-   "scope": {
-    "section": "verification"
    }
   },
   {
@@ -1568,21 +1505,9 @@
    }
   },
   {
-   "id": "e8868cbe",
-   "gist": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION",
-   "statement": "THE 48-HOUR TEST IS THE SYSTEM'S ACCEPTANCE CRITERION. The system must run for a day or two with Joe absent and be fine. Joe's standard: \"if it cannot do that, then there is no benefit to having this system.\" Unattended survivability is the pass/fail measure of the whole build, not a feature of it.\n\nWHAT \"FINE\" MEANS ACROSS 48 HOURS WITH NO JOE: internal work continues and is decided by the system under the audience gate (rule aa411351); client-facing work is drafted to one-tap-send and staged, never sent, never silently dropped; nothing external fires; nothing irreversible fires; no money moves; and on his return ONE surface shows what was decided for him, what is waiting, and proof the boundary held. A QUEUE OF QUESTIONS WAITING FOR HIM IS A FAILED RUN, NOT A SAFE ONE \u2014 his absence must not accumulate a debt he pays down on Monday.\n\nTHIS IS A CONSTRAINT AND IT BINDS AT THREE MOMENTS THAT ACTUALLY OCCUR, not as a standing intention:\n(1) BEFORE SHIPPING any new build, automation, agent, skill, scheduled task or procedure \u2014 state in one line whether it increases or decreases the attention Joe must personally supply per day. A design that only works because Joe is at a keyboard has FAILED, and \"he can just approve it\" is the specific answer that fails it. Where a step genuinely needs him, reduce it to one tap on one surface, never a conversation.\n(2) WHENEVER A SESSION IS ABOUT TO PARK WORK ON JOE \u2014 the same moment rule 647f843d gates add-loop and the conduct gates gate an offload. Parking is legitimate only for the protected classes; parking internal work IS this rule failing.\n(3) ON FRIDAY, and on any run spanning a weekend, because rule 236ca227 already makes Sat/Sun non-workdays for both partners. The system is therefore ALREADY required to clear a 48-hour absence every single week. If it cannot, that is a live defect, not a scheduling quirk.\n\nTHE AUDIT SIGNAL, without which this decays exactly like its predecessors: the count of items that reached Joe purely because the system declined to decide. Conduct-gate fires (out/conduct-gate.jsonl, written by escalation-gate.py and conduct-stop-gate.py) plus internal-class parks are that count. Report it where he can see it. A visible number that should sit near zero is checkable; a good intention is not.\n\nBEWARE THE INVERSE FAILURE, named by the review council 2026-08-09 and worth more than the rule it qualifies: a system can PASS this test while the PIPELINE STARVES. Forty-eight hours of clean internal hygiene \u2014 loops closed, renders refreshed, records tidy \u2014 with no tours booked and no intros worked is a successful ops demo and a failed brokerage. Unattended autonomy is the floor, not the goal. Joe's business is deals; the system's job is to absorb the internal tax so his hours go to the external edge, never to look productive while that edge goes quiet.",
-   "scope": {}
-  },
-  {
    "id": "eaa31ac5",
    "gist": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or",
    "statement": "CONSTRAINT, binding at the moment a session is about to say it HANDED OFF, SENT, DELIVERED, NOTIFIED or PASSED something on: name the recipient, or do not use the word. Writing a record is not delivering it. A decision entry, a loop row, a finding and a doctrine section are all durable and findable, and none of those properties makes anything reach anyone. The verbs that RECORD are a different set from the verbs that DELIVER, and using the first while claiming the second is the failure this closes.\n\nTHE TEST, one question: WHO OR WHAT RECEIVED IT? If the answer is \"a future session will find it\", that is a record, not a handoff \u2014 say \"written to the record\" and say where. If a handoff is genuinely wanted, deliver it: `list_sessions` shows the user's other sessions with their titles and whether they are running, and `send_message` puts the text into one as a user turn labelled with this session's title. Both exist and neither needs the partner.\n\nTHE AUDIT SIGNAL: before claiming a handoff, the target must have been NAMED \u2014 a session id, a person, an address. A sentence that reports a handoff with no recipient in it is the defect, and it is visible in the sentence itself.\n\nWHAT IT COST, 2026-08-10. At the end of an overnight loop sweep, with context nearly exhausted, a session wrote a decision-history entry titled \"HANDOFF \u2014 Loop Cleanup Continuation\" and reported to Joe that it had handed off. Nothing had received it. Joe asked \"what session did you hand off to?\" \u2014 and the session then discovered that \"Loop cleanup continuation\" ALREADY EXISTED AND WAS RUNNING, created by Joe, one `list_sessions` call away the entire time. The briefing would have sat in a file while the live session it was written for carried on without it, and the failure would have been invisible, because a written record looks identical whether or not anyone read it.\n\nTHIS EXTENDS d8c9b1f0 \u2014 a finding that only exists in a record has not reached the partner \u2014 from findings to handoffs and to every other claim of delivery. Same principle, and the same reason it keeps mattering: durability and delivery are different properties, and only one of them is what the word claims.",
-   "scope": {}
-  },
-  {
-   "id": "ede4b241",
-   "gist": "CLOUD MODEL CHOICE. When launching a Claude Code cloud session, pick the model by the work's shape",
-   "statement": "CLOUD MODEL CHOICE. When launching a Claude Code cloud session, pick the model by the work's shape: well-scoped work with a checkable done-condition (bug fixes, QA batches, review-fix rounds, registry/config edits, eval runs) runs on Sonnet 5.5 at medium effort; design, gates, eval design, and code reviews run on Opus 5.5. Floors Joe set for specific lanes stay until an eval shows Sonnet parity. Provenance: Joe 2026-09-29, 'sonnet 5.5 is extremely useful now... apply accordingly'.",
    "scope": {}
   },
   {
@@ -1634,7 +1559,7 @@
   {
    "id": "f47a8fe9",
    "gist": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that",
-   "statement": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that caught every single one. (1) COUNTING TOMBSTONES AS LIVE. A merged row is still a row. `find` reported 17 duplicate Henry Schein orgs when 1 was live; an auditor's \"42 excess duplicate persons\" was marked stale at 57 by a reviewer counting tombstones, then found exactly right at 42; a session reported 308 floating parties when 306 were the org layer doing its job and the real orphan count was 2. FOUR INDEPENDENT READERS, SAME MISTAKE, ONE EVENING. Filter merged rows, and state the filter with the number. (2) STALE IS NOT WRONG. Sixteen migrations landed in a single day. Before calling a record or a prior claim wrong, check `schema_migrations.applied_at` and `git log` for something that changed AFTER it was written. Four verdicts marked WRONG that night were actually true-when-measured and resolved by a later migration. A verdict that blames an author for a defect we then repaired is worse than no verdict, because it teaches the next reader to discount a report that was right. (3) ABSENCE IN A PARTIAL SEARCH IS NOT ABSENCE, in both directions: a `-maxdepth 2` scan \"proved\" six files gone that sat at depth 3, and a narrow grep \"proved\" a verb missing that existed. Check the FULL collection and state the search's boundary alongside the result. (4) A ROW THAT EXISTS IS NOT A ROW THAT IS POPULATED. A NULL foreign key is not a dangling one: \"no participant\" returned 0 and \"dangling participant\" returned 0, both true, and together they hid that 41 of 42 rows carried no party. Two green checks can be individually correct and jointly misleading; ask the inverse question. THE HABIT THAT CAUGHT ALL FOUR: not one was found by reading a report more carefully. Every single one was found by RE-RUNNING THE QUERY. So: verify by re-executing, never by re-reading, and carry the query inline with every number, because a bare figure is unfalsifiable prose and an unfalsifiable figure is how all four of these travelled as fact.",
+   "statement": "THE FOUR VERIFICATION FAILURES, each of which produced a wrong claim on 2026-08-02, and the one habit that caught every single one. (1) COUNTING TOMBSTONES AS LIVE. A merged row is still a row. `find` reported 17 duplicate Example Organization 25 orgs when 1 was live; an auditor's \"42 excess duplicate persons\" was marked stale at 57 by a reviewer counting tombstones, then found exactly right at 42; a session reported 308 floating parties when 306 were the org layer doing its job and the real orphan count was 2. FOUR INDEPENDENT READERS, SAME MISTAKE, ONE EVENING. Filter merged rows, and state the filter with the number. (2) STALE IS NOT WRONG. Sixteen migrations landed in a single day. Before calling a record or a prior claim wrong, check `schema_migrations.applied_at` and `git log` for something that changed AFTER it was written. Four verdicts marked WRONG that night were actually true-when-measured and resolved by a later migration. A verdict that blames an author for a defect we then repaired is worse than no verdict, because it teaches the next reader to discount a report that was right. (3) ABSENCE IN A PARTIAL SEARCH IS NOT ABSENCE, in both directions: a `-maxdepth 2` scan \"proved\" six files gone that sat at depth 3, and a narrow grep \"proved\" a verb missing that existed. Check the FULL collection and state the search's boundary alongside the result. (4) A ROW THAT EXISTS IS NOT A ROW THAT IS POPULATED. A NULL foreign key is not a dangling one: \"no participant\" returned 0 and \"dangling participant\" returned 0, both true, and together they hid that 41 of 42 rows carried no party. Two green checks can be individually correct and jointly misleading; ask the inverse question. THE HABIT THAT CAUGHT ALL FOUR: not one was found by reading a report more carefully. Every single one was found by RE-RUNNING THE QUERY. So: verify by re-executing, never by re-reading, and carry the query inline with every number, because a bare figure is unfalsifiable prose and an unfalsifiable figure is how all four of these travelled as fact.",
    "scope": {}
   },
   {
@@ -1670,6 +1595,12 @@
    "scope": {}
   },
   {
+   "id": "f673326b",
+   "gist": "Do not add access restrictions, data fences or protective steps Joe did not ask for when granting an",
+   "statement": "Do not add access restrictions, data fences or protective steps Joe did not ask for when granting an agent access. Joe and Dell share all business knowledge and working behaviors, including each other's personal-scope rows. The only boundary a session raises unprompted is custody of a live credential, raised once. After Joe rules, apply his instruction in full with no extra fences.",
+   "scope": {}
+  },
+  {
    "id": "f92dfab2",
    "gist": "Every client search packet includes market commentary, not just a property list",
    "statement": "Every client search packet includes market commentary, not just a property list. Ground it in evidence we actually pulled: comparable sales with medians and ranges, what inventory does and does not exist in the search area, price-per-SF asking versus recent trades, and any specific contrast worth a negotiation. It renders through the findings and confirmations blocks in properties.json. Never generic market talk and never a stale figure; if a number cannot be sourced from this search, leave it out.",
@@ -1699,27 +1630,6 @@
    "gist": "Vendor relationship levels are defined by countable events, never by impression",
    "statement": "Vendor relationship levels are defined by countable events, never by impression. 0 Prospective: identified, no two-way contact. 1 Building: the first TWO-WAY contact has happened \u2014 they replied, or you met; an outbound attempt alone does NOT promote anyone, because you can email fifty people and have fifty relationships that do not exist. 2 Established: value has moved in EITHER direction at least once \u2014 an introduction, a referral, or a deal. 3 Core: reciprocal AND repeated \u2014 value both ways, more than once. The level stays a human judgment and is stored, not computed: a relationship can matter for reasons no event count can see. But v_vendor_level_suggestion reports where the evidence disagrees with the recorded level, and a disagreement is worth a look in either direction \u2014 a Core vendor with nothing passing between you for months, or a Building vendor who has quietly sent three referrals.",
    "scope": {}
-  },
-  {
-   "id": "fb110a39",
-   "gist": "FABLE IS RESERVED FOR ITS BEST USE CASES",
-   "statement": "FABLE IS RESERVED FOR ITS BEST USE CASES; OPUS, SONNET, CODEX AND GROK ARE THE SUBAGENT WORKFORCE. Fable \u2014 the frontier main-session model, which draws down the weekly allowance fastest and has its own capped bucket \u2014 is spent only on what it is uniquely good at: deep design and architecture, doctrine and judgment work, council hosting, and live problem-solving beside a partner. Everything else delegates by default: OPUS for long build/debug sessions at lower burn (the partner flips a live session with /model; sessions cannot switch their own model \u2014 say so rather than pretend); SONNET for subagents, mechanical passes, and always-on service brains (Doc's conversation brain runs Sonnet by design, so daily Doc use never touches the Fable bucket); CODEX lane for scoped self-contained code jobs (SEPARATE subscription pool \u2014 zero Claude usage), per the model-fit map's Lane 1/2 guardrails: explicit acceptance criteria, no live DB/MCP, Claude reviews the diff and re-runs tests before merge; GROK lane for X/web recon and worktree spikes (also a separate pool), per Lanes 3/4. THE FIRING TRIGGERS, because a rule that binds at an undetectable moment never fires (the bbffc139 lesson, reproved on this rule within an hour of its teaching): (1) BEFORE starting any task, name the executor in one thought \u2014 is this design/judgment (Fable) or execution (workforce)? (2) THE SECOND MECHANICAL TOOL CALL ON THE SAME SUB-TASK IS THE TRIPWIRE \u2014 a search that needs a second query, a sweep, scaffold code, bulk reads: stop mid-motion and hand the whole sub-task to a subagent with the results so far. A single lookup is fine inline; a second one on the same question means it is a sweep, and sweeps are workforce jobs. (3) A partner saying \"delegate\" is an incident, not a reminder \u2014 log what was missed. The trigger case: one Fable build night (2026-08-08) burned 75% of the weekly Fable bucket writing its own scaffold code, and the rule as first worded failed again the same morning on a transcript sweep. Composes with the model-fit map (decision 2026-08-07) and the subagent cost gate 2dbb0ad8; the fit map's CLAUDE-ONLY lane (records/MCP, PII, doctrine, final merges, verification authority) is unchanged \u2014 this rule routes the REST off Fable, it never routes Claude-only work to outside models.",
-   "scope": {
-    "section": "authority-delegation"
-   }
-  },
-  {
-   "id": "fb2b263d",
-   "gist": "Cross-references at the point of change: anything decided/built \u2192 immediately check other INDEX/context files",
-   "statement": "Cross-references at the point of change: anything decided/built \u2192 immediately check other INDEX/context files for stale phrasing; grep the literal old text across CARR AI and .claude before declaring propagated.",
-   "scope": {
-    "key": "file-folder-standards#7",
-    "source": "ai-operating-notes.md",
-    "section": "file-folder-standards",
-    "provenance": "imported from ai-operating-notes.md [file-folder-standards], no verbatim quote recorded",
-    "quote_absent": true,
-    "tier_verdict": "shared"
-   }
   },
   {
    "id": "fc21a431",

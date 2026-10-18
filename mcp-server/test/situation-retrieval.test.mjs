@@ -1,3 +1,4 @@
+import { readMigration } from "./migration-source.testhelper.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -124,7 +125,7 @@ test("one-word phrases are refused before any database write", async () => {
 
 test("migration preserves revision bytes and installs every governed database contract", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const migration = fs.readFileSync(path.join(here, "../../migrations/0135_situation_retrieval.sql"), "utf8");
+  const migration = readMigration(path.join(here, "../../migrations/0135_situation_retrieval.sql"));
   for (const table of [
     "retrieval_concept", "retrieval_phrase", "doctrine_concept_mapping",
     "retrieval_proposal", "retrieval_ranking_policy", "retrieval_query_log",

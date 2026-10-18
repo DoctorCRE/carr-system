@@ -4,10 +4,15 @@
 
 Joe asked for 100% recall on relevant rules; Jev chose this design (p=1.00).
 Every session and every subagent must fetch every page of the gated rule boot
-(standing-context `detail: "boot"`: the full text of the always-on rules plus
-a one-line index of every active rule, served live from the store) before any
+(standing-context `detail: "boot"`, served live from the store) before any
 other tool call. hooks/gate-integrity.py arms the gate at SessionStart
 (startup, resume, clear, compact) and tells the model which calls to make.
+
+The server's pages_total determines the required set. Compaction re-arms that
+set for the new context. Confirmed pages remain counted within their context,
+including when a later re-read fails. A successful filtered fetch counts when
+its output preserves upstream ok:true and the armed digest. Whole-page JSON
+also retains the length check.
 
 Registered on PreToolUse with matcher ".*" so it sees every tool, which is why
 it is deliberately tiny: no network, no model, one small state read. Also
@@ -23,8 +28,9 @@ the recovery paths that remain available while effects are held.
     absolute `cd ... &&`, and through harmless output filters — the grammar is
     in lib/rule_boot_gate.py)                 -> allow, and record the attempt;
     a page counts as READ only when PostToolUse finds that page's rule_boot
-    (matching page, digest and text) in the result, and the page lengths add
-    up to the boot's total_chars
+    (matching page, digest and text) in the result, with lengths checked against
+    total_chars, or a canonical filtered result retains upstream ok:true and
+    the armed digest
   · other standing-context calls, the read-only rule verbs, ToolSearch -> allow
   · every page of the armed digest confirmed in this context          -> allow
   · incomplete boot, outage, absent deployment, unwritable state or repeated
@@ -72,6 +78,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run
 
 
+def core_cards():
+    """The always-on core cards, or "" when they cannot load (fail open: the boot is unaffected)."""
+    try:
+        from lib.rule_cards import core_text
+        return core_text()
+    except Exception as exc:
+        log(f"CORE-CARDS-UNAVAILABLE {type(exc).__name__}")
+        return ""
+
+
 def _parse_error(exc):
     log(f"DENY(parse-error) {type(exc).__name__}")
     emit("deny", "RULE BOOT UNVERIFIED: invalid hook input; repair the adapter before an ordinary effect.")
@@ -84,6 +100,17 @@ def decide(payload):
         emit("deny", "RULE BOOT UNVERIFIED: hook input must be an object; repair the adapter.")
         return 0
     event = payload.get("hook_event_name") or "PreToolUse"
+    if event == "SessionStart":
+        from lib.rule_boot_gate import arm_session
+        text = arm_session(payload.get("session_id") or payload.get("sessionId"),
+                           payload.get("source"),
+                           agent_id=payload.get("agent_id") or payload.get("agentId"))
+        core = core_cards()
+        print(f"{text}\n\n{core}" if core else text)
+        return 0
+    if event == "SubagentStart":
+        emit("allow", core_cards(), event)
+        return 0
     try:
         if event in ("PostToolUse", "PostToolUseFailure"):
             from lib.rule_boot_gate import observe
@@ -102,6 +129,9 @@ def decide(payload):
 
 
 def main():
+    from hooks.grok_invocation import grok_session
+    if grok_session():
+        return 0
     return run(decide, parse_error=_parse_error)
 
 

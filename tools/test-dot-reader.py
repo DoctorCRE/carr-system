@@ -4,9 +4,14 @@
 No production DSN is accepted. Set CARR_DOT_REPO_SCHEMA=1 to repeat against
 the committed schema rather than the small behavioral fixture.
 """
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from migration_source import read_migration
+
 import importlib.util
 import os
-from pathlib import Path
 import secrets
 import socket
 import subprocess
@@ -19,7 +24,6 @@ import io
 import re
 import ast
 import hashlib
-import sys
 import signal
 import shutil
 import time
@@ -39,7 +43,6 @@ class DotReader(unittest.TestCase):
     def setUpClass(cls):
         spec = importlib.util.spec_from_file_location("local_pg", ROOT / "ops/local-pg-ci.py")
         module = importlib.util.module_from_spec(spec)
-        import sys
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         try:
@@ -145,10 +148,10 @@ class DotReader(unittest.TestCase):
                 revoke execute on function public.dot_fixture_mutation() from public;
             """)
             cls.temp_before = owner.execute("select has_database_privilege('app_reader',current_database(),'TEMP')").fetchone()[0]
-            owner.execute(MIGRATION.read_text())
+            owner.execute(read_migration(MIGRATION.parent.parent, MIGRATION.name))
             if os.environ.get("CARR_DOT_REPO_SCHEMA") == "1":
                 owner.execute("insert into schema_migrations(filename,sha256) values (%s,%s)",
-                              (MIGRATION.name, hashlib.sha256(MIGRATION.read_bytes()).hexdigest()))
+                              (MIGRATION.name, hashlib.sha256(read_migration(MIGRATION.parent.parent, MIGRATION.name).encode()).hexdigest()))
             owner.execute("reset role")
             # Only the fixture sets a password. It stays in memory and never
             # reaches a source file, command argument or test output.
@@ -311,7 +314,7 @@ class DotReader(unittest.TestCase):
                    and isinstance(node.value, str) and "effective" not in node.value
                    and "not has_database_privilege" in node.value]
         self.assertEqual(len(queries), 1)
-        proof = MIGRATION.read_text().split("do $dot_reader_proof$", 1)[1]
+        proof = read_migration(MIGRATION.parent.parent, MIGRATION.name).split("do $dot_reader_proof$", 1)[1]
         proof = "do $dot_reader_proof$" + proof
         with psycopg.connect(**self.owner_args, autocommit=True) as owner:
             for grant, revoke, mutation in (
@@ -361,7 +364,7 @@ class DotReader(unittest.TestCase):
                                     join pg_namespace n on n.oid=c.relnamespace
                                     where p.polname='dot_reader_full_read'""").fetchall():
                                     owner.execute(sql.SQL("drop policy dot_reader_full_read on {}.{}").format(sql.Identifier(schema), sql.Identifier(table)))
-                                owner.execute(MIGRATION.read_text())
+                                owner.execute(read_migration(MIGRATION.parent.parent, MIGRATION.name))
                     finally:
                         owner.execute(revoke)
             finally:
@@ -602,6 +605,18 @@ class ReleaseAbandonFixture(unittest.TestCase):
         self.abandon = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.abandon)
 
+    def test_prepared_database_clone_preserves_schema_but_isolates_rows(self):
+        with self.abandon.isolated_ci_database("host=127.0.0.1") as source:
+            with psycopg.connect(source) as connection:
+                connection.execute("create table public.fixture_probe (value text)")
+                connection.execute("insert into public.fixture_probe values ('pristine')")
+            clone = self.abandon.clone_fixture_database(source, "abandon_legacy")
+            with psycopg.connect(clone) as connection:
+                self.assertEqual(connection.execute("select value from public.fixture_probe").fetchone(), ("pristine",))
+                connection.execute("update public.fixture_probe set value='legacy' where value='pristine'")
+            with psycopg.connect(source) as connection:
+                self.assertEqual(connection.execute("select value from public.fixture_probe").fetchone(), ("pristine",))
+
     def test_tcp_fixture_accepts_spaced_and_long_temporary_roots(self):
         for prefix in ("review space ", "review-" + "x" * 100):
             with self.subTest(prefix=prefix), tempfile.TemporaryDirectory(prefix=prefix, dir="/tmp") as parent:
@@ -684,7 +699,10 @@ class ReleaseAbandonFixture(unittest.TestCase):
             with patch.dict(os.environ, {"CARR_CI_DATABASE_URL": "host=127.0.0.1"}), \
                  patch.object(tempfile, "tempdir", "/tmp"), \
                  patch.object(subprocess, "run", side_effect=fail_stop), \
+                 patch.object(self.abandon, "psql", return_value=subprocess.CompletedProcess([], 0, "", "")), \
+                 patch.object(self.abandon, "clone_fixture_database", return_value="host=127.0.0.1"), \
                  patch.object(self.abandon, "legacy_approval_receipt_refusal"), \
+                 patch.object(self.abandon, "run_cases"), \
                  contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 self.assertEqual(self.abandon.main(), 1)
             self.assertTrue(observed["data"].exists())

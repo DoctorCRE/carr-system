@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Contract tests for the native Codex continuity adapters."""
-import contextlib
-import io
 import json
 import importlib.util
 import os
@@ -9,7 +7,6 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 import uuid
 from unittest import mock
@@ -45,17 +42,6 @@ def native_row(session_id, cwd):
         "payload": {"id": session_id, "session_id": session_id,
                     "cwd": str(pathlib.Path(cwd).resolve()), "originator": "codex_cli_rs",
                     "context_window": {"window_id": window_id("window-initial")}},
-    }
-
-
-def compacted_row(number, previous_window, window):
-    return {
-        "timestamp": f"2026-09-05T12:00:{number:02d}Z", "type": "compacted",
-        "payload": {"message": "", "replacement_history": [],
-                    "window_number": number,
-                    "first_window_id": window_id("window-initial"),
-                    "previous_window_id": window_id(previous_window),
-                    "window_id": window_id(window)},
     }
 
 
@@ -98,9 +84,7 @@ class AdapterCase(unittest.TestCase):
                               input=json.dumps(payload), text=True, capture_output=True,
                               check=False, env=self.env)
 
-    def install_fake_record_call(self, response=None, outage=False, event_response=None,
-                                 recovery_tool_error=False, event_tool_error=False,
-                                 binding_responses=None):
+    def install_fake_record_call(self, response=None, outage=False, recovery_tool_error=False):
         fake = self.base / "fake-call.py"
         log = self.base / "calls.jsonl"
         if log.exists():
@@ -108,26 +92,12 @@ class AdapterCase(unittest.TestCase):
         response_path = self.base / "response.json"
         if response is not None:
             response_path.write_text(json.dumps(response), encoding="utf-8")
-        event_response_path = self.base / "event-response.json"
-        if event_response is not None:
-            event_response_path.write_text(json.dumps(event_response), encoding="utf-8")
         fake.write_text(
             """#!/usr/bin/env python3
-import json, os, pathlib, sys, time
+import json, os, pathlib, sys
 log = pathlib.Path(os.environ["FAKE_CALL_LOG"])
 with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps({"verb": sys.argv[1], "args": json.loads(sys.argv[2])}, separators=(",", ":")) + "\\n")
-bindings = json.loads(os.environ.get("FAKE_BINDING_RESPONSES", "{}"))
-bound = bindings.get(json.loads(sys.argv[2])["project_id"], {}).get(sys.argv[1])
-if bound is not None:
-    time.sleep(bound.get("delay", 0))
-    value = json.dumps(bound["response"])
-    if bound.get("tool_error"):
-        print("TOOL ERROR " + value, file=sys.stderr)
-        raise SystemExit(1)
-    print(value)
-    raise SystemExit(0)
-time.sleep(float(os.environ.get("FAKE_CALL_DELAY", "0")))
 if os.environ.get("FAKE_CALL_OUTAGE") == "1":
     print("simulated store outage", file=sys.stderr)
     raise SystemExit(1)
@@ -139,13 +109,6 @@ if sys.argv[1] == "codex-read-recovery":
         print("TOOL ERROR " + value, file=sys.stderr)
         raise SystemExit(1)
     print(value)
-elif os.environ.get("FAKE_EVENT_RESPONSE"):
-    value = pathlib.Path(os.environ["FAKE_EVENT_RESPONSE"]).read_text(encoding="utf-8")
-    if os.environ.get("FAKE_EVENT_TOOL_ERROR") == "1":
-        print("wrapper diagnostic", file=sys.stderr)
-        print("TOOL ERROR " + value, file=sys.stderr)
-        raise SystemExit(1)
-    print(value)
 else:
     print('{"ok":true}')
 """, encoding="utf-8")
@@ -153,16 +116,10 @@ else:
                "FAKE_CALL_LOG": str(log)}
         if response is not None:
             env["FAKE_RESPONSE"] = str(response_path)
-        if event_response is not None:
-            env["FAKE_EVENT_RESPONSE"] = str(event_response_path)
         if recovery_tool_error:
             env["FAKE_RECOVERY_TOOL_ERROR"] = "1"
-        if event_tool_error:
-            env["FAKE_EVENT_TOOL_ERROR"] = "1"
         if outage:
             env["FAKE_CALL_OUTAGE"] = "1"
-        if binding_responses is not None:
-            env["FAKE_BINDING_RESPONSES"] = json.dumps(binding_responses)
         return env, log
 
     def desktop_assignment(self, roots=None):
@@ -396,789 +353,68 @@ class CodexHookTests(AdapterCase):
             "checkpoint_version": version,
             "state": state or {
                 "objective": "keep one task effective",
-                "latest_corrections": [{"text": "use native payloads",
-                                         "refs": ["rollout:2"]}],
+                "latest_corrections": [{"text": "use native payloads", "refs": ["rollout:2"]}],
                 "decisions": [{"text": "rejected approach", "why": "fabricated schema",
                                "refs": ["rollout:3"]}],
                 "next_action": "verify the actual hook contract"},
-            "cursor": cursor},
-            "source_highwater": cursor,
-            "unincorporated_user_turns": [],
-            "unincorporated_user_turns_omitted": 0,
-            "source_coverage": "known"}
+            "cursor": cursor or {"byte_offset": 1, "source_digest": "0" * 64}}}
 
-    def test_checkpoint_version_requires_a_safe_json_integer(self):
-        hook = load_hook_module()
-        highwater = {"byte_offset": 12, "device": 1, "inode": 2,
-                     "source_digest": "a" * 64}
-        for version in (1, 7, (2 ** 53) - 1):
-            recovery = {"status": "ok", "response": self.checkpoint(version=version)}
-            self.assertEqual(hook.checkpoint_marker(recovery), {
-                "checkpoint_version": version, "checkpoint_status": "available"})
-            self.assertIn(f"checkpoint version: {version}",
-                          hook.checkpoint_freshness(
-                              recovery["response"]["checkpoint"], highwater))
-        for malformed in ("1", "01", True, 0, 2 ** 53):
-            recovery = {"status": "ok", "response": self.checkpoint(version=malformed)}
-            self.assertEqual(hook.checkpoint_marker(recovery), {
-                "checkpoint_version": None, "checkpoint_status": "unavailable"})
-            self.assertIn("checkpoint version: unknown",
-                          hook.checkpoint_freshness(
-                              recovery["response"]["checkpoint"], highwater))
-
-    def test_compact_session_requires_one_exact_window_checkpoint_refresh(self):
-        compacted = compacted_row(1, "window-initial", "window-current")
-        compacted["payload"]["replacement_history"] = ["never-store-opaque-compact-body"]
-        self.native_rollout(compacted)
-        payload = self.hook_payload(source="compact")
-        history = load_history_module()
-        with mock.patch.dict(os.environ, self.env):
-            meta = history.validate_native_rollout(payload)
-            highwater = history.source_highwater(meta)
-        response = self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-initial"), "source_window_number": 0,
-        })
-        env, _ = self.install_fake_record_call(response)
-
-        result = self.run_hook(payload, env)
-
+    def context(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
-        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        material = json.dumps({
-            "operation": "codex-compaction-checkpoint-refresh-v3",
-            "runtime": "codex", "native_task_id": self.session_id,
-            "project_id": meta["project_id"], "cwd": meta["cwd"],
-            "checkpoint_version": 7,
-            "source_window_id": window_id("window-current"), "source_window_number": 1,
-            "cursor": {**highwater, "source_window_id": window_id("window-current"),
-                       "source_window_number": 1, "source": "compact"},
-        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        expected_key = str(uuid.uuid5(uuid.NAMESPACE_URL, material))
-        for expected in (
-            "HIGH PRIORITY CARR COMPACTION CHECKPOINT REPAIR",
-            f'"native_task_id":"{self.session_id}"',
-            f'"project_id":{json.dumps(meta["project_id"])}',
-            f'"cwd":{json.dumps(meta["cwd"])}',
-            '"expected_version":7', f'"idempotency_key":"{expected_key}"',
-            f'"source_window_id":"{window_id("window-current")}"',
-            '"source_window_number":1',
-            f'"byte_offset":{highwater["byte_offset"]}',
-            f'"source_digest":"{highwater["source_digest"]}"',
-            '"source":"compact"',
-            "before normal work", "full replacement state", "one fresh codex-read-recovery",
-            "retry at most once", "read back and verify", "Use direct MCP for codex-checkpoint",
-            "CARR_MCP_CLIENT_PROFILE=codex-continuity ./run.sh call <same verb>",
-            "401", "Auth required", "codex_native_principal_required", "codex_continuity_owner_required",
-            "codex-checkpoint and codex-read-recovery", "identical request", "same JSON",
-            "server principal gate still applies",
-            "never generic or unscoped authentication", "hard cap 24,000",
-            "<=18,000-byte JSON budget", "2,000-byte reserve",
-            "preflight stored JSON UTF-8 size including comma/colon separator spaces",
-            "20,000 preferred", "write any complete valid <=24,000 state once",
-            "not a gate",
-            "Preserve the semantics", "not its wording or item count",
-            "Collapse completed, duplicate, superseded, resolved, finalized work",
-            "receipt identifier",
-            "codex_continuity_payload_too_large", "same fixed binding and idempotency key",
-            "do not issue further oversize retries",
-            "Continuity verified: checkpoint v<version> · window <source_window_number>.",
-            "Do not claim success before readback",
-            "Continuity degraded: checkpoint repair failed (<specific reason>); native history remains available.",
-            "Never hide a degraded repair",
-            "perform one fresh codex-read-recovery",
-            "complete checkpoint.state as the authoritative starting point",
-            "orientation only and may omit whole items",
-            "never treat an omitted item as absent",
-            "If the complete fresh checkpoint.state is unavailable, do not write",
-            "do not issue a knowingly stale write",
-        ):
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(output["hookEventName"], "SessionStart")
+        context = output["additionalContext"]
+        self.assertLessEqual(len(context.encode("utf-8")), 12000)
+        return context
+
+    def binding(self, context):
+        line = next(line for line in context.splitlines() if "arguments=" in line)
+        return json.loads(line.split("arguments=", 1)[1])
+
+    def test_session_start_delivers_saved_state_and_next_binding(self):
+        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
+        env, log = self.install_fake_record_call(self.checkpoint())
+        for source in ("startup", "resume", "compact"):
+            context = self.context(self.run_hook(self.hook_payload(source=source), env))
+            for expected in ("keep one task effective", "use native payloads", "rejected approach",
+                             "fabricated schema", "verify the actual hook contract",
+                             "checkpoint version 7", "never auto-reexecute", "codex-history.py search"):
+                self.assertIn(expected, context)
+            binding = self.binding(context)
+            self.assertEqual(binding["expected_version"], 7)
+            self.assertEqual(binding["native_task_id"], self.session_id)
+            self.assertEqual(binding["cursor"]["byte_offset"], self.rollout.stat().st_size)
+        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual({call["verb"] for call in calls}, {"codex-read-recovery"})
+        self.assertTrue(all("project_id" in call["args"] for call in calls))
+
+    def test_missing_outage_and_rejection_are_distinct(self):
+        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
+        env, _ = self.install_fake_record_call({"ok": True, "found": False, "checkpoint": None})
+        missing = self.context(self.run_hook(self.hook_payload(source="startup"), env))
+        self.assertIn("no checkpoint is saved", missing)
+        self.assertEqual(self.binding(missing)["expected_version"], 0)
+        env, _ = self.install_fake_record_call(outage=True)
+        outage = self.context(self.run_hook(self.hook_payload(source="startup"), env))
+        self.assertIn("checkpoint recovery unavailable", outage)
+        self.assertNotIn("arguments=", outage)
+        env, _ = self.install_fake_record_call({"error": "codex_native_principal_required"},
+                                               recovery_tool_error=True)
+        rejected = self.context(self.run_hook(self.hook_payload(source="resume"), env))
+        self.assertIn("checkpoint recovery codex_native_principal_required", rejected)
+
+    def test_large_recovery_omits_whole_items_with_warning(self):
+        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
+        state = {"objective": "objective",
+                 "latest_corrections": [{"text": "latest correction", "refs": ["rollout:2"]}],
+                 "constraints": [{"text": f"constraint-{i}-" + "z" * 3000, "refs": ["rollout:3"]}
+                                 for i in range(6)],
+                 "next_action": "next action"}
+        env, _ = self.install_fake_record_call(self.checkpoint(state=state))
+        context = self.context(self.run_hook(self.hook_payload(source="compact"), env))
+        for expected in ("latest correction", "next action", "coverage warning", "arguments="):
             self.assertIn(expected, context)
-        self.assertNotIn("never-store-opaque-compact-body", context)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-        same_env, _ = self.install_fake_record_call(self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"), "source_window_number": 1,
-        }))
-        same = json.loads(self.run_hook(payload, same_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", same)
-        self.assertIn("checkpoint covers current context window 1", same)
-        self.assertIn("later native bytes or turns may remain unincorporated", same)
-
-    def test_compact_session_repairs_from_bounded_tail_of_sparse_large_rollout(self):
-        self.native_rollout()
-        mib = 1024 * 1024
-        with self.rollout.open("r+b") as handle:
-            # Sparse one-MiB rows keep the physical fixture small while making
-            # the logical transcript larger than the bounded 64-MiB tail.
-            for offset in range(20 * mib, 71 * mib, mib):
-                handle.seek(offset)
-                handle.write(b"\n")
-            handle.seek(0, os.SEEK_END)
-            opaque = "never-surface-large-rollout-opaque-body"
-            # A complete ordinary row can itself be larger than the former
-            # per-row cap and can quote the candidate word inside its payload.
-            # Only its authenticated depth-one type may classify the row.
-            handle.write((json.dumps({
-                "timestamp": "2026-09-05T12:00:06Z", "ordinal": 6,
-                "type": "event_msg",
-                "payload": {"message": f'payload says "compacted" {"x" * (3 * mib)}'},
-            }, separators=(",", ":")) + "\n").encode())
-            row_seven = compacted_row(7, "window-before-7", "window-seven")
-            handle.write((json.dumps(row_seven, separators=(",", ":")) + "\n").encode())
-            # The authenticated compacted row also exceeds the former cap.
-            # Its opaque replacement body is streamed past while the bounded
-            # outer metadata at the end remains available for verification.
-            row_eight = compacted_row(8, "window-seven", "window-eight")
-            row_eight["payload"]["replacement_history"] = [
-                opaque + ("z" * (3 * mib))]
-            for row in (row_eight,):
-                handle.write((json.dumps(row, separators=(",", ":")) + "\n").encode())
-        self.assertGreater(self.rollout.stat().st_size, 64 * mib)
-        self.assertGreater(20 * mib - (self.rollout.stat().st_size - 64 * mib),
-                           2 * mib)
-        response = self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-seven"),
-            "source_window_number": 7,
-        })
-        env, _ = self.install_fake_record_call(response)
-
-        result = self.run_hook(self.hook_payload(source="compact"), env)
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn(f'"source_window_id":"{window_id("window-eight")}"', context)
-        self.assertIn('"source_window_number":8', context)
-        self.assertNotIn(opaque, context)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_checkpoint_refresh_bootstraps_resume_and_user_prompt_after_compaction(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        response = self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-initial"), "source_window_number": 0,
-        })
-        env, _ = self.install_fake_record_call(response)
-        compact = json.loads(self.run_hook(
-            self.hook_payload(source="compact"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", compact)
-        for source in ("startup", "resume"):
-            context = json.loads(self.run_hook(
-                self.hook_payload(source=source), env).stdout)[
-                    "hookSpecificOutput"]["additionalContext"]
-            self.assertEqual("COMPACTION CHECKPOINT REPAIR" in context,
-                             source == "resume", source)
-            if source == "resume":
-                self.assertIn('"source":"resume"', context)
-        prompt = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-bootstrap"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", prompt)
-        self.assertIn('"source":"user_prompt_submit"', prompt)
-        self.assertIn('"turn_id":"turn-bootstrap"', prompt)
-        self.assertIn("CARR Codex recovery checkpoint", prompt)
-
-    def test_repair_keys_distinguish_newer_user_turns_in_same_window(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        env, _ = self.install_fake_record_call(self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-initial"), "source_window_number": 0,
-        }))
-
-        first = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-first"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        second = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-newer"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-
-        def repair_key(context):
-            directive = context.split("\n\nCARR Codex recovery checkpoint.", 1)[0]
-            marker = '"idempotency_key":"'
-            start = directive.index(marker) + len(marker)
-            return directive[start:directive.index('"', start)]
-
-        self.assertNotEqual(repair_key(first), repair_key(second),
-                            "a newer user turn must never reuse an earlier repair key")
-
-    def test_fresh_window_zero_never_emits_compaction_repair(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "fresh"}})
-        env, _ = self.install_fake_record_call(
-            {"ok": True, "found": False, "checkpoint": None})
-        for payload in (
-            self.hook_payload(source="resume"),
-            self.hook_payload("UserPromptSubmit", turn_id="turn-fresh"),
-        ):
-            context = json.loads(self.run_hook(payload, env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-            self.assertNotIn("COMPACTION CHECKPOINT REPAIR", context)
-
-    def test_user_prompt_repairs_legacy_checkpoint_but_exact_window_is_noop(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        legacy_env, _ = self.install_fake_record_call(
-            self.checkpoint(cursor={"byte_offset": 1, "source_digest": "0" * 64}))
-        legacy = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-legacy"), legacy_env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", legacy)
-        exact_env, _ = self.install_fake_record_call(self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"), "source_window_number": 1,
-        }))
-        exact = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-exact"), exact_env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", exact)
-        self.assertNotIn("Continuity verified:", exact)
-        self.assertNotIn("Continuity degraded:", exact)
-        self.assertIn("covers current context window 1", exact)
-        self.assertIn("later native bytes or turns may remain unincorporated", exact)
-        self.assertIn("no compaction repair is required until the next native compaction", exact)
-
-    def test_exact_checkpoint_with_placeholder_refs_requests_repair(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "keep the active task",
-            "latest_corrections": [{"text": "preserve correction",
-                                     "refs": ["doctrine-section:{REF1}"]}],
-            "decisions": [{"text": "preserve decision", "why": "still binding",
-                           "refs": ["native-user-turn:{REF2}"]}],
-            "next_action": "repair references before accepting the checkpoint",
-        }
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        env, _ = self.install_fake_record_call(response)
-
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn("condensed checkpoint state contains unresolved reference placeholders",
-                      context)
-        self.assertIn("canonical source records remain authoritative and available", context)
-        self.assertNotIn("{REF1}", context)
-        self.assertNotIn("{REF2}", context)
-
-    def test_user_prompt_placeholder_repair_has_no_healthy_noop_message(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "keep the active task through {REF3}",
-            "latest_corrections": [{"text": "preserve correction",
-                                     "refs": ["user:valid"]}],
-            "next_action": "repair the unresolved placeholder",
-        }
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        env, _ = self.install_fake_record_call(response)
-
-        context = json.loads(self.run_hook(self.hook_payload(
-            "UserPromptSubmit", turn_id="turn-placeholder"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn("checkpoint state requires repair now", context)
-        self.assertNotIn("no compaction repair is required", context)
-        self.assertNotIn("{REF3}", context)
-
-    def test_user_prompt_malformed_legacy_state_warns_without_crashing(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        response = self.checkpoint(cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["checkpoint"]["state"] = None
-        env, _ = self.install_fake_record_call(response)
-
-        result = self.run_hook(self.hook_payload(
-            "UserPromptSubmit", turn_id="turn-malformed"), env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        context = json.loads(result.stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("complete replacement state is unavailable", context)
-        self.assertIn("checkpoint state requires repair now", context)
-        self.assertNotIn("no compaction repair is required", context)
-
-    def test_exact_checkpoint_with_valid_path_and_url_refs_stays_healthy(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "keep the active task",
-            "latest_corrections": [{
-                "text": "preserve path citation",
-                "refs": ["/tmp/canonical-evidence.json"],
-            }],
-            "decisions": [{
-                "text": "preserve URL citation",
-                "why": "still binding",
-                "refs": ["https://github.com/jbookout/carr-system/pull/897"],
-            }],
-            "next_action": "continue without repairing valid references",
-        }
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        env, _ = self.install_fake_record_call(response)
-
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn("checkpoint covers current context window 1", context)
-
-    def test_repair_directive_requires_one_pass_size_plan(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        refs = (
-            [f"approval:current:{index}:live-contract" for index in range(32)]
-            + ["decision:uncertain:requires-review"]
-            + [f"receipt:completed:{index}:delivery-evidence" for index in range(68)]
-            + ["receipt:completed:{REF1}:delivery-evidence"])
-        state = {
-            "objective": "keep the active task",
-            "latest_corrections": [
-                {"text": "current correction", "refs": ["approval:current:0:live-contract"]}
-                for _ in range(4)
-            ] + [{"text": "mixed reference manifest with readable words", "refs": refs}],
-            "progress": [{"text": "completed delivery detail"}],
-            "receipts": [{"text": "completed receipt detail"}],
-            "artifacts": [{"text": "filler"} for _ in range(6)],
-            "next_action": "normalize once before writing",
-        }
-        base_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        remaining = 23473 - base_bytes
-        for artifact in state["artifacts"]:
-            addition = min(3900 - len(artifact["text"]), remaining)
-            artifact["text"] += "z" * addition
-            remaining -= addition
-        self.assertEqual(remaining, 0)
-        state_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        self.assertEqual(state_bytes, 23473)
-        self.assertEqual(len(refs), 102)
-        self.assertLessEqual(state_bytes, 24000)
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        env, _ = self.install_fake_record_call(response)
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("one semantic compression pass", context)
-        self.assertIn("<=18,000-byte JSON budget", context)
-        self.assertIn("JSON budget for semantic state", context)
-        self.assertIn("2,000-byte reserve", context)
-        self.assertIn("at most one corrective pass", context)
-        self.assertIn("Reference manifest: copy valid refs byte-for-byte", context)
-        self.assertIn("Keep current/uncertain refs direct", context)
-        self.assertIn("Before compression, classify refs/evidence", context)
-        self.assertLess(context.index("Before compression, classify refs/evidence"),
-                        context.index("After classification/archive, one semantic compression pass"))
-        self.assertIn("not field, age, or size", context)
-        self.assertIn("completed/superseded", context)
-        self.assertIn("archive only completed/superseded progress/receipts/artifacts/refs", context)
-        self.assertIn("Reuse pointer", context)
-        self.assertIn("Keep readable word boundaries; never strip spaces/alter refs", context)
-        self.assertIn("stored JSON UTF-8 size including comma/colon separator spaces", context)
-        self.assertIn("excluding the separate 128,000-byte reference manifest", context)
-        self.assertIn("report semantic bytes, manifest bytes, and ref count", context)
-        self.assertIn("storage bytes/ref count/what cannot archive", context)
-        self.assertIn("historical:true", context)
-        self.assertIn("expected_digest", context)
-        self.assertIn("archive_ref `codex-revision:<checkpoint UUID>:<version>:sha256:<64hex>`", context)
-        self.assertIn("archive only completed/superseded", context)
-        self.assertIn("Failure: retain and report", context)
-        self.assertIn("The full replacement state requires nonempty objective and next_action", context)
-        self.assertIn("CARR_MCP_CLIENT_PROFILE=codex-continuity", context)
-        self.assertIn("codex_native_principal_required", context)
-        self.assertIn("If its version differs from expected_version", context)
-        self.assertIn("codex_checkpoint_version_conflict", context)
-        self.assertIn("same fixed binding and idempotency key", context)
-        directive = context.split("\n\nCARR Codex recovery checkpoint.", 1)[0]
-        self.assertLessEqual(len(directive.encode("utf-8")), 6000)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_repair_directive_keeps_current_approval_refs_within_bound(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "keep the active task",
-            "acceptance": [{"text": "approved rollout " + "z" * 3000,
-                            "refs": ["approval:current"]} for _ in range(7)],
-            "latest_corrections": [{"text": "repair this reference",
-                                    "refs": ["legacy:{REF1}"]}],
-            "next_action": "preserve approval while repairing",
-        }
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        env, _ = self.install_fake_record_call(response)
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        directive = context.split("\n\nCARR Codex recovery checkpoint.", 1)[0]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", directive)
-        self.assertIn("current approval text/refs stay directly in state",
-                      directive)
-        self.assertIn("Current/uncertain correction/decision refs stay direct", directive)
-        self.assertIn("direct in the full logical state", directive)
-        self.assertIn("Keep readable word boundaries", directive)
-        self.assertIn("CARR_MCP_CLIENT_PROFILE=codex-continuity", directive)
-        self.assertIn("same fixed binding and idempotency key", directive)
-        self.assertLessEqual(len(directive.encode("utf-8")), 6000)
-
-    def test_v2_reference_manifest_keeps_large_logical_refs_bounded(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        refs = [f"current:{index:04d}:" + "x" * 90 for index in range(1000)]
-        state = {
-            "objective": "preserve all current references",
-            "latest_corrections": [{"text": "current evidence", "refs": refs}],
-            "progress": [{"text": "x" * 3900}, {"text": "x" * 3900},
-                         {"text": "x" * 2800}],
-            "next_action": "read back exact current references",
-        }
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        response["checkpoint"].update({
-            "storage_contract": {
-                "version": "codex-continuity-storage.v2",
-                "semantic_state_max_bytes": 24000,
-                "reference_manifest_max_bytes": 128000,
-                "recovery_state": "full_logical_state",
-            },
-            "reference_manifest_summary": {
-                "manifest_present": True,
-                "reference_count": 1000,
-                "stored_state_bytes": 11000,
-                "stored_reference_manifest_bytes": 110000,
-                "planned_semantic_state_bytes": 11000,
-                "planned_reference_manifest_bytes": 110000,
-            },
-        })
-        self.assertTrue(load_hook_module()._complete_checkpoint_state(response["checkpoint"]))
-        env, _ = self.install_fake_record_call(response)
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_storage_contract_gates_reference_manifest_repair_budget(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "repair the unresolved reference",
-            "latest_corrections": [{"text": "repair", "refs": ["legacy:{REF1}"]}],
-            "next_action": "write the repaired checkpoint",
-        }
-        cursor = {"byte_offset": 1, "source_digest": "0" * 64,
-                  "source_window_id": window_id("window-current"),
-                  "source_window_number": 1}
-        legacy, _ = self.install_fake_record_call(self.checkpoint(state=state, cursor=cursor))
-        legacy_context = json.loads(self.run_hook(self.hook_payload(source="resume"), legacy).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("excluding the separate 128,000-byte reference manifest", legacy_context)
-
-        capable_response = self.checkpoint(state=state, cursor=cursor)
-        capable_response["storage_contract"] = {
-            "version": "codex-continuity-storage.v2", "semantic_state_max_bytes": 24000,
-            "reference_manifest_max_bytes": 128000, "recovery_state": "full_logical_state",
-        }
-        capable, _ = self.install_fake_record_call(capable_response)
-        capable_context = json.loads(self.run_hook(self.hook_payload(source="resume"), capable).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("excluding the separate 128,000-byte reference manifest", capable_context)
-
-        missing = {"ok": True, "found": False, "checkpoint": None,
-                   "storage_contract": capable_response["storage_contract"]}
-        missing_env, _ = self.install_fake_record_call(missing)
-        missing_context = json.loads(self.run_hook(self.hook_payload(source="resume"), missing_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("excluding the separate 128,000-byte reference manifest", missing_context)
-
-    def test_exact_window_target_excess_is_healthy_until_next_compaction(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        # Every item stays inside the per-item text limit so the fixture is a
-        # genuinely complete state: the no-op must come from the 24,000-byte
-        # server limit, never from an incomplete-state warning.
-        state = {
-            "objective": "keep the active task",
-            "constraints": [{"text": "z" * 3900} for _ in range(5)] + [{"text": ""}],
-            "next_action": "continue without target-only repair",
-        }
-        base_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        state["constraints"][-1]["text"] = "z" * (20143 - base_bytes)
-        state_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        self.assertEqual(state_bytes, 20143)
-        self.assertGreater(state_bytes, 20000)
-        self.assertLessEqual(state_bytes, 24000)
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        self.assertTrue(
-            load_hook_module()._complete_checkpoint_state(response["checkpoint"]),
-            "the healthy-path fixture must itself be a complete checkpoint state")
-        env, _ = self.install_fake_record_call(response)
-
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertNotIn("COMPACTION CHECKPOINT WARNING", context)
-        self.assertIn("checkpoint covers current context window 1", context)
-        self.assertNotIn("bounded repair directive exceeded its output limit", context)
-
-    def test_placeholder_repair_above_target_never_cites_the_soft_target(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        # A complete 21,000-byte state whose only defect is an unresolved
-        # reference.  Being above the 20,000-byte soft target is not itself a
-        # repair reason, so the directive must not order a normalization pass.
-        state = {
-            "objective": "keep the active task",
-            "latest_corrections": [{"text": "repair this reference",
-                                    "refs": ["legacy:{REF1}"]}],
-            "constraints": [{"text": "z" * 3900} for _ in range(5)] + [{"text": ""}],
-            "next_action": "repair the unresolved reference before writing",
-        }
-        base_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        state["constraints"][-1]["text"] = "z" * (21000 - base_bytes)
-        state_bytes = len(json.dumps(
-            state, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-        self.assertEqual(state_bytes, 21000)
-        self.assertGreater(state_bytes, 20000)
-        self.assertLessEqual(state_bytes, 24000)
-        response = self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        })
-        self.assertTrue(
-            load_hook_module()._complete_checkpoint_state(response["checkpoint"]),
-            "the fixture must itself be a complete checkpoint state")
-        env, _ = self.install_fake_record_call(response)
-
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn("unresolved reference placeholders", context)
-        self.assertNotIn("normalization target", context)
-        self.assertNotIn("normalize it now", context)
-        self.assertNotIn("{REF1}", context)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_oversized_legacy_reference_list_still_emits_bounded_repair_directive(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        state = {
-            "objective": "keep the active task",
-            "latest_corrections": [{
-                "text": "preserve correction",
-                "refs": ["legacy:{REF1}"] * 10,
-            }
-                for _ in range(100)],
-            "next_action": "repair unresolved references before writing",
-        }
-        env, _ = self.install_fake_record_call(self.checkpoint(state=state, cursor={
-            "byte_offset": 1, "source_digest": "0" * 64,
-            "source_window_id": window_id("window-current"),
-            "source_window_number": 1,
-        }))
-
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", context)
-        self.assertIn("additional unresolved reference locations omitted", context)
-        self.assertNotIn("bounded repair directive exceeded its output limit", context)
-        directive = context.split("\n\nCARR Codex recovery checkpoint.", 1)[0]
-        self.assertLessEqual(len(directive.encode("utf-8")), 6000)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_user_prompt_reports_rejected_receipt_without_claiming_outage(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "receipt"}})
-        env, _ = self.install_fake_record_call(
-            self.checkpoint(cursor={"byte_offset": 1}),
-            event_response={"error": "codex_event_key_conflict"},
-            event_tool_error=True)
-        context = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-rejected"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("was rejected by the record store (codex_event_key_conflict)", context)
-        self.assertNotIn("receipt could not be stored because the record store is unavailable", context)
-
-    def test_legacy_desktop_roots_require_an_array_of_absolute_strings(self):
-        hook = load_hook_module()
-        meta = {"runtime": "codex", "native_task_id": self.session_id,
-                "project_id": "git:canonical", "cwd": str(self.project)}
-        for roots in ("/unrelated/project", {"/": True}, [],
-                      [str(self.base / "unrelated")], ["relative"],
-                      [str(self.project), 42], [str(self.project), ""]):
-            with self.subTest(roots=roots):
-                self.desktop_assignment(roots)
-                with mock.patch.dict(os.environ, self.env):
-                    self.assertIsNone(hook._legacy_desktop_project(meta))
-        for roots in ([str(self.project)], [str(self.base)],
-                      [str(self.base / "unrelated"), str(self.project)]):
-            with self.subTest(roots=roots):
-                project_id = self.desktop_assignment(roots)
-                with mock.patch.dict(os.environ, self.env):
-                    self.assertEqual(hook._legacy_desktop_project(meta), project_id)
-
-    def test_alternate_recovery_failures_survive_the_real_wrapper(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "recover"}})
-        hook = load_hook_module()
-        project_id = self.desktop_assignment()
-        with mock.patch.dict(os.environ, self.env):
-            meta = hook.HISTORY.validate_native_rollout(self.hook_payload())
-        canonical = meta["project_id"]
-        conflict = {"error": "codex_recovery_binding_conflict"}
-        for alternate, status, error in (
-            ({"response": {"ok": True}, "delay": 1}, "unavailable", None),
-            ({"response": {"error": "codex_continuity_owner_required"},
-              "tool_error": True}, "rejected", "codex_continuity_owner_required"),
-        ):
-            with self.subTest(status=status):
-                env, log = self.install_fake_record_call(binding_responses={
-                    canonical: {"codex-read-recovery": {
-                        "response": conflict, "tool_error": True}},
-                    project_id: {"codex-read-recovery": alternate},
-                })
-                with mock.patch.dict(os.environ, env):
-                    result = hook.read_recovery(meta, deadline=time.monotonic() + 0.5)
-                self.assertEqual(result["status"], status)
-                self.assertEqual(result.get("error"), error)
-                self.assertEqual(result["binding_conflict"],
-                                 {"status": "rejected", "response": conflict,
-                                  "error": conflict["error"]})
-                self.assertEqual(meta["project_id"], canonical)
-                self.assertEqual([json.loads(line)["args"]["project_id"]
-                                  for line in log.read_text().splitlines()],
-                                 [canonical, project_id])
-                output = io.StringIO()
-                with mock.patch.dict(os.environ, env), \
-                     mock.patch.object(hook, "EVENT_DEADLINE_SECONDS", 0.5), \
-                     mock.patch.object(sys, "stdin", io.StringIO(json.dumps(
-                         self.hook_payload("UserPromptSubmit", turn_id="turn-alternate")))), \
-                     contextlib.redirect_stdout(output), \
-                     contextlib.redirect_stderr(io.StringIO()):
-                    hook.main()
-                context = json.loads(output.getvalue())["hookSpecificOutput"]["additionalContext"]
-                self.assertIn("record store is unavailable" if status == "unavailable"
-                              else f"checkpoint recovery ({error})", context)
-                self.assertNotIn("checkpoint recovery (codex_recovery_binding_conflict)", context)
-
-    def test_postcompact_slow_store_keeps_the_canonical_receipt_budget(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        env, log = self.install_fake_record_call()
-        env["FAKE_CALL_DELAY"] = "5"
-        result = self.run_hook(self.hook_payload(
-            "PostCompact", turn_id="turn-slow-store", trigger="auto"), env)
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertNotIn("TimeoutExpired", result.stderr)
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual([call["verb"] for call in calls], ["codex-record-event"])
-        self.assertEqual(calls[0]["args"]["cursor"]["source_window_number"], 1)
-
-    def test_postcompact_large_rollout_is_scanned_once_before_the_receipt(self):
-        self.native_rollout()
-        row = json.dumps({"type": "event_msg", "payload": {"message": "x" * 1000}}) + "\n"
-        with self.rollout.open("a") as handle:
-            for _ in range(45000):
-                handle.write(row)
-        self.append_rollout(compacted_row(1, "window-initial", "window-current"))
-        hook = load_hook_module()
-        self.assertLess(self.rollout.stat().st_size, hook.HISTORY.MAX_COMPACTION_SCAN_BYTES)
-        env, log = self.install_fake_record_call()
-        env["FAKE_CALL_DELAY"] = "1.5"
-        output, errors = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ, env), \
-             mock.patch.object(sys, "stdin", io.StringIO(json.dumps(self.hook_payload(
-                 "PostCompact", turn_id="turn-large-rollout", trigger="auto")))), \
-             mock.patch.object(hook.HISTORY, "compaction_occurrence",
-                               wraps=hook.HISTORY.compaction_occurrence) as scan, \
-             contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
-            hook.main()
-        self.assertEqual(output.getvalue(), "")
-        self.assertNotIn("TimeoutExpired", errors.getvalue())
-        self.assertEqual(scan.call_count, 1)
-        calls = [json.loads(line) for line in log.read_text().splitlines()]
-        self.assertEqual([call["verb"] for call in calls], ["codex-record-event"])
-        self.assertEqual(calls[0]["args"]["cursor"]["source_window_number"], 1)
-
-    def test_postcompact_retries_a_legacy_binding_only_with_checkpoint_proof(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        hook = load_hook_module()
-        project_id = self.desktop_assignment()
-        with mock.patch.dict(os.environ, self.env):
-            canonical = hook.HISTORY.validate_native_rollout(self.hook_payload())["project_id"]
-        for found in (True, False):
-            with self.subTest(found=found):
-                env, log = self.install_fake_record_call(binding_responses={
-                    canonical: {
-                        "codex-record-event": {"tool_error": True, "response": {
-                            "error": "codex_event_binding_conflict"}},
-                        "codex-read-recovery": {"tool_error": True, "response": {
-                            "error": "codex_recovery_binding_conflict"}},
-                    },
-                    project_id: {"codex-read-recovery": {
-                        "response": self.checkpoint() if found else {
-                            "ok": True, "found": False, "checkpoint": None}}},
-                })
-                result = self.run_hook(self.hook_payload(
-                    "PostCompact", turn_id="turn-legacy-post", trigger="auto"), env)
-                self.assertEqual(result.returncode, 0)
-                self.assertEqual(result.stdout, "")
-                calls = [json.loads(line) for line in log.read_text().splitlines()]
-                expected = ["codex-record-event", "codex-read-recovery", "codex-read-recovery"]
-                self.assertEqual([call["verb"] for call in calls],
-                                 expected + (["codex-record-event"] if found else []))
-                if found:
-                    self.assertEqual(calls[-1]["args"]["project_id"], project_id)
-                    self.assertEqual(calls[0]["args"]["cursor"], calls[-1]["args"]["cursor"])
-                    self.assertNotEqual(calls[0]["args"]["idempotency_key"],
-                                        calls[-1]["args"]["idempotency_key"])
+        self.assertNotIn('"text":"constraint-5-', context)
 
     def test_legacy_desktop_project_recovers_only_verified_existing_checkpoint(self):
         hook = load_hook_module()
@@ -1187,454 +423,41 @@ class CodexHookTests(AdapterCase):
                 "project_id": "git:canonical", "cwd": str(self.project)}
         calls = []
 
-        def record_call(_verb, args, **_kwargs):
+        def found(_verb, args):
             calls.append(args["project_id"])
             if args["project_id"] == "git:canonical":
                 return {"status": "rejected", "error": "codex_recovery_binding_conflict"}
             return {"status": "ok", "response": {"ok": True, "found": True,
-                                               "checkpoint": {"checkpoint_version": 2}}}
+                                                 "checkpoint": {"checkpoint_version": 2}}}
 
         with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.codex_home)}), \
-             mock.patch.object(hook, "call_verb", side_effect=record_call):
-            result = hook.read_recovery(meta)
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(meta["project_id"], project_id)
-        self.assertEqual(calls, ["git:canonical", project_id])
+             mock.patch.object(hook, "call_verb", side_effect=found):
+            self.assertEqual(hook.read_recovery(meta)["status"], "ok")
+        self.assertEqual((meta["project_id"], calls), (project_id, ["git:canonical", project_id]))
 
         meta["project_id"] = "git:canonical"
-        def missing_call(_verb, args, **_kwargs):
+
+        def missing(_verb, args):
             if args["project_id"] == "git:canonical":
                 return {"status": "rejected", "error": "codex_recovery_binding_conflict"}
             return {"status": "ok", "response": {"ok": True, "found": False}}
+
         with mock.patch.dict(os.environ, {"CODEX_HOME": str(self.codex_home)}), \
-             mock.patch.object(hook, "call_verb", side_effect=missing_call):
-            result = hook.read_recovery(meta)
-        self.assertEqual(result["status"], "rejected")
+             mock.patch.object(hook, "call_verb", side_effect=missing):
+            self.assertEqual(hook.read_recovery(meta)["status"], "rejected")
         self.assertEqual(meta["project_id"], "git:canonical")
 
-    def test_sanctioned_tool_error_rejection_is_not_reported_as_outage(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        response = {"error": "codex_recovery_binding_conflict"}
-        env, _ = self.install_fake_record_call(
-            response, recovery_tool_error=True)
-
-        startup = json.loads(self.run_hook(
-            self.hook_payload(source="resume"), env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("checkpoint recovery rejected (codex_recovery_binding_conflict)",
-                      startup)
-        self.assertIn("Continuity degraded: checkpoint recovery rejected (codex_recovery_binding_conflict)",
-                      startup)
-        self.assertNotIn("record store is unavailable", startup)
-
-        prompt = json.loads(self.run_hook(
-            self.hook_payload("UserPromptSubmit", turn_id="turn-recovery-rejected"),
-            env).stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("repair could not start because recovery was rejected (codex_recovery_binding_conflict)",
-                      prompt)
-        self.assertIn("checkpoint recovery (codex_recovery_binding_conflict)", prompt)
-        self.assertNotIn("record store is unavailable", prompt)
-
-    def test_compact_refresh_refuses_blind_write_paths(self):
-        self.native_rollout(compacted_row(1, "window-initial", "window-current"))
-        payload = self.hook_payload(source="compact")
-
-        outage_env, _ = self.install_fake_record_call(outage=True)
-        outage = json.loads(self.run_hook(payload, outage_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", outage)
-        self.assertIn("record store is unavailable", outage)
-
-        incomplete_env, _ = self.install_fake_record_call(
-            self.checkpoint(state={"objective": "missing next action"}, cursor={
-                "source_window_id": window_id("window-initial"),
-                "source_window_number": 0}))
-        incomplete = json.loads(self.run_hook(payload, incomplete_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", incomplete)
-        self.assertIn("complete replacement state is unavailable", incomplete)
-
-        for cursor in (
-            {"source_window_id": "window-future", "source_window_number": 2},
-            {"source_window_id": "window-conflict", "source_window_number": 1},
-        ):
-            unknown_env, _ = self.install_fake_record_call(
-                self.checkpoint(cursor=cursor))
-            unknown = json.loads(self.run_hook(payload, unknown_env).stdout)[
-                "hookSpecificOutput"]["additionalContext"]
-            self.assertNotIn("COMPACTION CHECKPOINT REPAIR", unknown)
-            self.assertIn("ahead, malformed, or conflicting", unknown)
-
-        missing_env, _ = self.install_fake_record_call(
-            {"ok": True, "found": False, "checkpoint": None})
-        missing = json.loads(self.run_hook(payload, missing_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertIn("COMPACTION CHECKPOINT REPAIR", missing)
-        self.assertIn('"expected_version":0', missing)
-        self.assertIn("If a complete replacement state cannot be assembled", missing)
-        self.assertIn("warn and continue without writing", missing)
-
-        self.native_rollout({"type": "event_msg", "payload": {"message": "no boundary"}})
-        invalid_env, _ = self.install_fake_record_call(response=self.checkpoint())
-        invalid = json.loads(self.run_hook(payload, invalid_env).stdout)[
-            "hookSpecificOutput"]["additionalContext"]
-        self.assertNotIn("COMPACTION CHECKPOINT REPAIR", invalid)
-        self.assertIn("trusted compact window marker is unavailable", invalid)
-
-    def test_window_freshness_is_semantic_when_current_marker_is_trusted(self):
-        hook = load_hook_module()
-        highwater = {"byte_offset": 900, "device": 1, "inode": 2,
-                     "source_digest": "a" * 64}
-        current = {"source_window_id": "window-current", "source_window_number": 2}
-        exact = self.checkpoint(cursor={"byte_offset": 1,
-                                        "source_window_id": "window-current",
-                                        "source_window_number": 2})["checkpoint"]
-        behind = self.checkpoint(cursor={"byte_offset": 1,
-                                         "source_window_id": "window-old",
-                                         "source_window_number": 1})["checkpoint"]
-        ahead = self.checkpoint(cursor={"byte_offset": 9999,
-                                        "source_window_id": "window-future",
-                                        "source_window_number": 3})["checkpoint"]
-        malformed = self.checkpoint(cursor={"byte_offset": 1,
-                                            "source_window_id": "window-other",
-                                            "source_window_number": 2})["checkpoint"]
-        self.assertIn("covers current context window 2",
-                      hook.checkpoint_freshness(exact, highwater, current))
-        self.assertIn("semantically stale",
-                      hook.checkpoint_freshness(behind, highwater, current))
-        self.assertIn("freshness is unknown",
-                      hook.checkpoint_freshness(ahead, highwater, current))
-        self.assertIn("freshness is unknown",
-                      hook.checkpoint_freshness(malformed, highwater, current))
-        self.assertIn("checkpoint is stale",
-                      hook.checkpoint_freshness(behind, highwater))
-
-    def test_session_start_native_payload_delivers_prioritized_bounded_recovery(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        env, log = self.install_fake_record_call(
-            self.checkpoint(cursor={"byte_offset": 1, "source_digest": "old"}))
-        for source in ("startup", "resume", "compact"):
-            result = self.run_hook(self.hook_payload(source=source), env)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-            for expected in ("keep one task effective", "use native payloads",
-                             "rejected approach", "fabricated schema",
-                             "verify the actual hook contract", "checkpoint version: 7",
-                             "checkpoint is stale"):
-                self.assertIn(expected, context)
-            self.assertLessEqual(len(context.encode("utf-8")), 12000)
-        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        self.assertTrue(all(call["args"]["native_task_id"] == self.session_id
-                            for call in calls))
-        self.assertTrue(all("project_id" in call["args"] for call in calls))
-
-    def test_ten_recovery_cycles_keep_corrections_reason_next_action_and_task_id(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "cycle"}})
-        env, log = self.install_fake_record_call(self.checkpoint())
-        contexts = [json.loads(self.run_hook(
-            self.hook_payload(source="compact"), env).stdout)["hookSpecificOutput"]["additionalContext"]
-                    for _ in range(10)]
-        self.assertEqual(len(contexts), 10)
-        for expected in ("use native payloads", "fabricated schema",
-                         "verify the actual hook contract"):
-            self.assertTrue(all(expected in context for context in contexts))
-        self.assertTrue(all("never auto-reexecute" in context for context in contexts))
-        self.assertTrue(all(len(context.encode("utf-8")) <= 12000 for context in contexts))
-        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual({call["args"]["native_task_id"] for call in calls},
-                         {self.session_id})
-
-    def test_large_recovery_omits_whole_items_with_warning_and_pointer(self):
-        self.native_rollout(
-            compacted_row(1, "window-initial", "window-current"),
-            {"type": "event_msg", "payload": {"message": "latest"}})
-        state = {"objective": "objective",
-                 "latest_corrections": [{"text": "latest correction",
-                                          "refs": ["rollout:2"]}],
-                 "constraints": [{"text": f"constraint-{i}-" + "z" * 3000,
-                                 "refs": ["rollout:3"]}
-                                 for i in range(6)],
-                 "next_action": "next action"}
-        env, _ = self.install_fake_record_call(self.checkpoint(
-            state=state, cursor={"byte_offset": 1, "source_digest": "0" * 64,
-                                 "source_window_id": window_id("window-initial"),
-                                 "source_window_number": 0}))
-        context = json.loads(self.run_hook(
-            self.hook_payload(source="compact"), env).stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-        for expected in ("latest correction", "next action", "coverage warning",
-                         "codex-history.py search", "COMPACTION CHECKPOINT REPAIR",
-                         "complete checkpoint.state as the authoritative starting point",
-                         "orientation only and may omit whole items",
-                         "never treat an omitted item as absent",
-                         "If the complete fresh checkpoint.state is unavailable, do not write"):
-            self.assertIn(expected, context)
-        self.assertNotIn('"text":"constraint-3-', context)
-
-    def test_missing_and_outage_are_distinct(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
-        missing_env, _ = self.install_fake_record_call(
-            {"ok": True, "found": False, "checkpoint": None})
-        missing = json.loads(self.run_hook(
-            self.hook_payload(source="startup"), missing_env).stdout)
-        self.assertIn("no durable checkpoint was found",
-                      missing["hookSpecificOutput"]["additionalContext"].lower())
-        outage_env, _ = self.install_fake_record_call(outage=True)
-        outage = json.loads(self.run_hook(
-            self.hook_payload(source="startup"), outage_env).stdout)
-        self.assertIn("record store is unavailable",
-                      outage["hookSpecificOutput"]["additionalContext"].lower())
-
-    def test_session_start_exposes_bounded_backend_pending_turn_references(self):
-        self.native_rollout({"type": "event_msg", "payload": {
-            "type": "user_message", "message": "latest"}})
-        response = self.checkpoint(cursor=None)
-        response.update({
-            "source_highwater": {"byte_offset": 123, "checkpoint_version": 7,
-                                 "turn_id": "turn-25", "source_digest": "a" * 64,
-                                 "password": "never-render-source-secret"},
-            "source_coverage": "unknown",
-            "unincorporated_user_turns": [
-                {"event_type": "user_prompt_submit",
-                 "cursor": {"byte_offset": index + 10,
-                            "checkpoint_version": 7,
-                            "turn_id": f"turn-{index}",
-                            "source_digest": f"{index:064x}",
-                            **({"access_token": "never-render-event-secret"}
-                               if index == 0 else {})},
-                 "transcript_ref": str(self.rollout.resolve()),
-                 "created_at": "2026-09-05T12:00:00Z"}
-                for index in range(25)],
-            "unincorporated_user_turns_omitted": 4,
-        })
-        env, _ = self.install_fake_record_call(response)
-        result = self.run_hook(self.hook_payload(source="compact"), env)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("recorded source highwater", context)
-        self.assertIn('"turn_id":"turn-0"', context)
-        self.assertIn(str(self.rollout.resolve()), context)
-        self.assertIn("source coverage is unknown", context)
-        self.assertIn("unsupported fields", context)
-        self.assertIn("omitted 4 older unincorporated user turns", context)
-        self.assertIn("all bounded pending user turns above remain unincorporated", context)
-        self.assertNotIn("never-render", context)
-        self.assertLessEqual(len(context.encode("utf-8")), 12000)
-
-    def test_precompact_records_observed_checkpoint_version_before_compaction(self):
-        self.native_rollout({"type": "event_msg", "payload": {
-            "type": "user_message", "message": "compact me"}})
-        cases = [
-            (self.checkpoint(cursor={"byte_offset": 1}), False, 7, "available"),
-            ({"ok": True, "found": False, "checkpoint": None,
-              "source_highwater": None, "unincorporated_user_turns": [],
-              "unincorporated_user_turns_omitted": 0,
-              "source_coverage": "known"}, False, 0, "missing"),
-            (None, True, None, "unavailable"),
-        ]
-        for index, (response, outage, version, status) in enumerate(cases):
-            with self.subTest(status=status):
-                env, log = self.install_fake_record_call(response, outage=outage)
-                result = self.run_hook(self.hook_payload(
-                    "PreCompact", turn_id=f"turn-{index}", trigger="auto"), env)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, "")
-                calls = [json.loads(line) for line in
-                         log.read_text(encoding="utf-8").splitlines()]
-                self.assertEqual([call["verb"] for call in calls],
-                                 ["codex-read-recovery", "codex-record-event"])
-                cursor = calls[1]["args"]["cursor"]
-                self.assertEqual(cursor["checkpoint_version"], version)
-                self.assertEqual(cursor["checkpoint_status"], status)
-                self.assertEqual(cursor["turn_id"], f"turn-{index}")
-                self.assertEqual(cursor["trigger"], "auto")
-
-    def test_slow_store_calls_share_one_deadline_and_still_attempt_event_write(self):
-        self.native_rollout({"type": "event_msg", "payload": {
-            "type": "user_message", "message": "deadline fixture"}})
-        hook = load_hook_module()
-        hook.EVENT_DEADLINE_SECONDS = 0.5
-        self.assertLess(hook.EVENT_DEADLINE_SECONDS, 10)
-        cases = [
-            self.hook_payload("UserPromptSubmit", turn_id="turn-deadline"),
-            self.hook_payload("PreCompact", turn_id="turn-deadline",
-                              trigger="auto"),
-        ]
-        for payload in cases:
-            with self.subTest(event=payload["hook_event_name"]):
-                env, log = self.install_fake_record_call(
-                    self.checkpoint(cursor={"byte_offset": 1}))
-                env["FAKE_CALL_DELAY"] = "1"
-                stdout, stderr = io.StringIO(), io.StringIO()
-                prior_stdin = sys.stdin
-                started = time.monotonic()
-                try:
-                    with mock.patch.dict(os.environ, env, clear=False), \
-                            contextlib.redirect_stdout(stdout), \
-                            contextlib.redirect_stderr(stderr):
-                        sys.stdin = io.StringIO(json.dumps(payload))
-                        self.assertEqual(hook.main(), 0)
-                finally:
-                    sys.stdin = prior_stdin
-                elapsed = time.monotonic() - started
-                self.assertLess(elapsed, 1.0)
-                calls = [json.loads(line) for line in
-                         log.read_text(encoding="utf-8").splitlines()]
-                self.assertEqual([call["verb"] for call in calls],
-                                 ["codex-read-recovery", "codex-record-event"])
-                self.assertIn("record store unavailable", stderr.getvalue())
-                if payload["hook_event_name"] == "UserPromptSubmit":
-                    context = json.loads(stdout.getvalue())[
-                        "hookSpecificOutput"]["additionalContext"]
-                    self.assertIn("checkpoint presence and version are unknown",
-                                  context)
-                    self.assertIn("receipt could not be stored; its status is unknown",
-                                  context)
-                    self.assertNotIn("checkpoint recovery remains available", context)
-                else:
-                    self.assertEqual(stdout.getvalue(), "")
-
-    def test_turn_events_use_actual_turn_id_and_deterministic_source_key(self):
-        self.native_rollout({"type": "event_msg", "payload": {"message": "new prompt"}})
-        env, log = self.install_fake_record_call(
-            self.checkpoint(cursor={"byte_offset": 1}))
-        prompt = self.hook_payload("UserPromptSubmit", turn_id="turn-native-1",
-                                   prompt="do the next thing")
-        first = self.run_hook(prompt, env)
-        self.append_rollout({"type": "event_msg", "payload": {
-            "type": "agent_message", "message": "source advanced"}})
-        pathlib.Path(env["FAKE_RESPONSE"]).write_text(json.dumps(
-            self.checkpoint(cursor={"byte_offset": 1}, version=8)), encoding="utf-8")
-        archived_day = self.codex_home / "sessions" / "2026" / "09" / "06"
-        archived_day.mkdir()
-        prior_rollout = self.rollout
-        self.rollout = archived_day / ROLLOUT_NAME
-        prior_rollout.rename(self.rollout)
-        prompt["transcript_path"] = str(self.rollout)
-        second = self.run_hook(prompt, env)
-        third = self.run_hook(prompt, env)
-        self.assertIn("checkpoint is stale",
-                      json.loads(first.stdout)["hookSpecificOutput"]["additionalContext"])
-        self.assertIn("turn-native-1 is not incorporated",
-                      json.loads(first.stdout)["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual((first.returncode, second.returncode, third.returncode), (0, 0, 0))
-        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        events = [call for call in calls if call["verb"] == "codex-record-event"]
-        self.assertNotEqual(events[0]["args"]["idempotency_key"],
-                            events[1]["args"]["idempotency_key"])
-        self.assertEqual(events[1]["args"]["idempotency_key"],
-                         events[2]["args"]["idempotency_key"])
-        self.assertNotEqual(events[0]["args"]["transcript_ref"],
-                            events[1]["args"]["transcript_ref"])
-        self.assertNotEqual(events[0]["args"]["cursor"]["source_digest"],
-                            events[1]["args"]["cursor"]["source_digest"])
-        self.assertEqual(events[0]["args"]["cursor"]["turn_id"], "turn-native-1")
-        self.assertEqual(events[0]["args"]["cursor"]["checkpoint_version"], 7)
-        self.assertEqual(events[1]["args"]["cursor"]["checkpoint_version"], 8)
-        self.assertEqual(events[0]["args"]["cursor"]["checkpoint_status"],
-                         "available")
-        pre = self.hook_payload("PreCompact", turn_id="turn-native-1", trigger="auto")
-        pre_first = self.run_hook(pre, env)
-        self.append_rollout({"type": "event_msg", "payload": {
-            "type": "token_count", "info": {"total_tokens": 10}}})
-        pre_second = self.run_hook(pre, env)
-        self.assertEqual(pre_first.stdout, "")
-        self.assertEqual(pre_second.stdout, "")
-        pre_other_turn = self.hook_payload(
-            "PreCompact", turn_id="turn-native-2", trigger="auto")
-        self.assertEqual(self.run_hook(pre_other_turn, env).stdout, "")
-        self.append_rollout(compacted_row(1, "window-initial", "window-after-1"))
-        post = self.hook_payload("PostCompact", turn_id="turn-native-1", trigger="auto")
-        self.assertEqual(self.run_hook(post, env).stdout, "")
-        self.assertEqual(self.run_hook(pre, env).stdout, "")
-        self.append_rollout(compacted_row(2, "window-after-1", "window-after-2"))
-        self.assertEqual(self.run_hook(post, env).stdout, "")
-        calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
-        pre_events = [call for call in calls
-                      if call["args"].get("event_type") == "pre_compact"]
-        self.assertEqual(pre_events[0]["args"]["idempotency_key"],
-                         pre_events[1]["args"]["idempotency_key"])
-        self.assertNotEqual(pre_events[0]["args"]["cursor"]["source_digest"],
-                            pre_events[1]["args"]["cursor"]["source_digest"])
-        self.assertEqual(pre_events[0]["args"]["cursor"]["source_window_id"],
-                         window_id("window-initial"))
-        self.assertEqual(pre_events[0]["args"]["cursor"]["source_window_number"], 0)
-        self.assertNotEqual(pre_events[1]["args"]["idempotency_key"],
-                            pre_events[2]["args"]["idempotency_key"])
-        self.assertEqual(pre_events[2]["args"]["cursor"]["turn_id"],
-                         "turn-native-2")
-        self.assertNotEqual(pre_events[1]["args"]["idempotency_key"],
-                            pre_events[3]["args"]["idempotency_key"])
-        self.assertEqual(pre_events[3]["args"]["cursor"]["source_window_id"],
-                         window_id("window-after-1"))
-        post_events = [call for call in calls
-                       if call["args"].get("event_type") == "post_compact"]
-        self.assertNotEqual(post_events[0]["args"]["idempotency_key"],
-                            post_events[1]["args"]["idempotency_key"])
-        self.assertEqual([event["args"]["cursor"]["source_window_number"]
-                          for event in post_events], [1, 2])
-
-    def test_invalid_native_compaction_chain_has_no_record_side_effect(self):
-        self.native_rollout(compacted_row(2, "wrong-window", "window-after-2"))
-        env, log = self.install_fake_record_call(self.checkpoint())
-        result = self.run_hook(self.hook_payload(
-            "PostCompact", turn_id="turn-native-1", trigger="auto"), env)
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("native_compaction_chain_invalid", result.stderr)
-        self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
-
-        history = load_history_module()
-        bad_header = native_row(self.session_id, self.project)
-        bad_header["payload"]["context_window"]["window_id"] = "not-a-uuid"
-        self.write_rollout([bad_header])
-        with mock.patch.dict(os.environ, self.env):
-            meta = history.validate_native_rollout(self.hook_payload())
-            with self.assertRaises(history.HistoryFailure) as bad_first:
-                history.compaction_occurrence(meta, "pre")
-        self.assertEqual(bad_first.exception.payload["error"],
-                         "native_context_window_invalid")
-
-        invalid_window = compacted_row(1, "window-initial", "window-after-1")
-        invalid_window["payload"]["window_id"] = "not-a-uuid"
-        self.native_rollout(invalid_window)
-        with mock.patch.dict(os.environ, self.env):
-            meta = history.validate_native_rollout(self.hook_payload())
-            with self.assertRaises(history.HistoryFailure) as bad_window:
-                history.compaction_occurrence(meta, "post")
-        self.assertEqual(bad_window.exception.payload["error"],
-                         "native_compaction_chain_invalid")
-
-        self.native_rollout(
-            {"type": "event_msg", "payload": {"message": "scan-one"}},
-            {"type": "event_msg", "payload": {"message": "scan-two"}},
-        )
-        with mock.patch.dict(os.environ, self.env):
-            meta = history.validate_native_rollout(self.hook_payload())
-            with mock.patch.object(history, "MAX_COMPACTION_SCAN_LINES", 1):
-                with self.assertRaises(history.HistoryFailure) as scan_limit:
-                    history.compaction_occurrence(meta, "pre")
-        self.assertEqual(scan_limit.exception.payload["error"],
-                         "native_compaction_scan_limit")
-        with self.assertRaises(history.HistoryFailure) as scan_timeout:
-            history.compaction_occurrence(meta, "pre", deadline=0.0)
-        self.assertEqual(scan_timeout.exception.payload["error"],
-                         "native_compaction_scan_timeout")
-
-    def test_invalid_unknown_and_claude_payloads_have_no_record_side_effect(self):
+    def test_other_events_and_untrusted_payloads_have_no_side_effect(self):
         self.native_rollout({"type": "event_msg", "payload": {"message": "latest"}})
         env, log = self.install_fake_record_call(self.checkpoint())
-        bad_payloads = [
-            {**self.hook_payload(source="startup"), "session_id": "different"},
-            {**self.hook_payload(source="startup"), "runtime": "claude"},
-            self.hook_payload(source="clear"),
-            {**self.hook_payload(source="startup"), "hook_event_name": "UnknownEvent"},
-        ]
-        for payload in bad_payloads:
+        for payload in (self.hook_payload("UserPromptSubmit", turn_id="t1"),
+                        self.hook_payload("PreCompact", turn_id="t1", trigger="auto"),
+                        self.hook_payload(source="clear"),
+                        {**self.hook_payload(source="startup"), "session_id": "other-session"},
+                        {**self.hook_payload(source="startup"), "runtime": "claude"}):
             result = self.run_hook(payload, env)
-            self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, "")
-        self.assertFalse(log.exists(), log.read_text() if log.exists() else "")
+            self.assertEqual((result.returncode, result.stdout), (0, ""))
+        self.assertFalse(log.exists())
 
 
 if __name__ == "__main__":

@@ -46,12 +46,6 @@ def hook_strips_git_env():
     return (m is not None and not missing), missing
 
 
-def hook_strips_git_env_for_jev_tolls():
-    """The later Jev verifier can also launch temp-repo selftests."""
-    src = Path(HOOK).read_text(encoding="utf-8")
-    joined = re.sub(r"\\\n\s*", " ", src)
-    match = re.search(r"env(?:\s+-u\s+\w+)+[^\n]*REPO_ROOT=\"\$REPO_ROOT\"[^\n]*TOLLS", joined)
-    return match is not None and all(f"-u {name}" in match.group(0) for name in STRIPPED)
 
 
 def temp_repo_is_hijacked_without_the_fix():
@@ -84,11 +78,6 @@ def main():
     else:
         failures.append(f"pre-push does not strip {missing or 'the git env on the ci.sh call'}")
 
-    if hook_strips_git_env_for_jev_tolls():
-        print("ok   pre-push also isolates the Jev toll verifier")
-    else:
-        failures.append("pre-push does not isolate the Jev toll verifier")
-
     hijacked, isolated = temp_repo_is_hijacked_without_the_fix()
     if hijacked:
         print("ok   demonstrated: with GIT_DIR set, a git call with cwd=<temp> targets the LIVE repo")
@@ -101,7 +90,7 @@ def main():
 
     for f in failures:
         print(f"FAIL {f}")
-    total = 4
+    total = 3
     if failures:
         print(f"hook env isolation: {len(failures)} of {total} FAILED")
         return 1

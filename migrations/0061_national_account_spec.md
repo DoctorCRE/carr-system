@@ -21,12 +21,12 @@ recorded here and the brief is corrected.*
 
 | clause | already true? | what 0061 does |
 |---|---|---|
-| parent is a single org party | **yes**, `0059` collapsed 13 Musicologie org rows to 1 (P-0111, 12 tombstoned into it) | asserts it survived, changes nothing |
-| one client record over it, `client_type = 'national_account'` | **no**, no client existed over P-0111 | creates it |
+| parent is a single org party | **yes**, `0059` collapsed 13 Example Organization 38 org rows to 1 (P-900029, 12 tombstoned into it) | asserts it survived, changes nothing |
+| one client record over it, `client_type = 'national_account'` | **no**, no client existed over P-900029 | creates it |
 | franchisee is a person party whose `org_id` points at that one org | **yes**, all 13 already do (0059) | asserts it, changes nothing |
 | each deal attaches to the franchisee's client | **no**, 12 of 13 were on the wrong client | re-points the 12 |
 | deals never on the parent | n/a | creates the parent with 0 deals and asserts it stays 0 |
-| the brand is not a segment | **no**, `deal.segment = 'Musicologie'` on 13 rows and `client.vertical = 'Musicologie'` on 13 rows | clears both |
+| the brand is not a segment | **no**, `deal.segment = 'Example Organization 38'` on 13 rows and `client.vertical = 'Example Organization 38'` on 13 rows | clears both |
 | the national flag is a lane | **no column existed** | adds `deal.lane` + `deal_lane` vocab, backfilled from source |
 | the account is the parent-client link | **already resolvable** through `party.org_id` | exposes it as `v_client_account`; adds no column |
 
@@ -36,27 +36,27 @@ recorded here and the brief is corrected.*
 
 Every figure here came out of a query run against production on 2026-08-02.
 
-**The mis-attachment.** 40 deals. 13 carry `segment = 'Musicologie'`. All 13 have
-`client_id` = C-131, whose party is P-0301 Anjali Trambadia. That is correct for exactly one
-of them, "Trambadia – Marietta/Smyrna GA". The other 12 belong to 12 different franchisees
+**The mis-attachment.** 40 deals. 13 carry `segment = 'Example Organization 38'`. All 13 have
+`client_id` = C-900004, whose party is P-900034 Example Organization 65. That is correct for exactly one
+of them, "Example Organization 01bf4c3d". The other 12 belong to 12 different franchisees
 who each already had their own person party AND their own client row, all holding **zero**
 deals:
 
 | franchisee | party | client | deal |
 |---|---|---|---|
-| Anjali Trambadia | P-0301 | C-131 | Trambadia – Marietta/Smyrna GA *(already correct)* |
-| Chee Yap | P-0710 | C-132 | Chee Yap – Charlotte NC |
-| Dusty Huggins | P-0219 | C-142 | Dusty Huggins – Peachtree Corners GA |
-| Edmund Reaves | P-1038 | C-135 | Edmund Reaves – McDonough GA |
-| Eric Heisler | P-1065 | C-137 | Eric Heisler – Center City Philly |
-| John Croft | P-0484 | C-138 | John Croft – Holly Springs GA |
-| Justin Saunders | P-0496 | C-139 | Justin Saunders – Scottsdale AZ |
-| Kapil Modi | P-0855 | C-148 | Kapil Modi – Houston TX |
-| Raghu Kakarala | P-0910 | C-136 | Raghu Kakarala – Fort Mill SC |
-| Rick Pomplas | P-0134 | C-144 | Rick Pomplas – Mentor OH |
-| Ryan Lehmann | P-0120 | C-149 | Ryan Lehman – Clifton NJ *(name mismatch, see §3)* |
-| Sham Lal | P-0721 | C-150 | Sham Lal – Harrisburg PA |
-| Shaughn Shields | P-0253 | C-147 | Shaughn Shields – MASS |
+| Example Organization 65 | P-900034 | C-900004 | Example Organization 01bf4c3d *(already correct)* |
+| Example Organization 10 | P-900037 | C-900005 | Example Organization 11 |
+| Example Organization 89 | P-900032 | C-900012 | Example Organization 130 |
+| Example Organization 160 | P-900047 | C-900006 | Example Organization 6 |
+| Example Organization 114 | P-900049 | C-900008 | Example Organization 144 |
+| Example Organization 105 | P-900035 | C-900009 | Example Organization 142 |
+| Example Organization 103 | P-900036 | C-900010 | Example Organization 49 |
+| Example Organization 55 | P-900041 | C-900016 | Example Organization 68 |
+| Example Organization 129 | P-900045 | C-900007 | Example Organization 78 |
+| Example Organization 83 | P-900031 | C-900014 | Example Organization 53 |
+| Example Organization 98 | P-900030 | C-900017 | Example Organization 156 *(name mismatch, see §3)* |
+| Example Organization 13 | P-900038 | C-900018 | Example Organization 145 |
+| Example Organization 126 | P-900033 | C-900015 | Example Organization 126 – MASS |
 
 So the sub-client structure Joe describes was already in the data. The deal grain was the
 part that collapsed.
@@ -75,9 +75,9 @@ on the parent, `franchise` on the 13 franchisees.
 
 ---
 
-## 3. The "Ryan Lehman" problem does not exist, and finding that out mattered
+## 3. The "Example Organization b18f0aa7" problem does not exist, and finding that out mattered
 
-I was warned that `deal.name` says "Ryan Lehman" while the party is "Ryan Lehmann" (double
+I was warned that `deal.name` says "Example Organization b18f0aa7" while the party is "Example Organization 98" (double
 n), that this was the one fuzzy match in the set, and that Joe's standing rule forbids
 asserting an identity link on inference — anything not exactly matchable must be left alone
 and reported.
@@ -85,8 +85,8 @@ and reported.
 The warning is right about `deal.name`. `deal.name` is simply the wrong column.
 
 Every deal carries its Salesforce import verbatim in `deal.source_row`, a jsonb blob with 26
-keys including a dedicated `contact` field. For the deal named "Ryan Lehman – Clifton NJ",
-`source_row->>'contact'` is **`Ryan Lehmann`** — the correct spelling. Checked across all 13:
+keys including a dedicated `contact` field. For the deal named "Example Organization 156",
+`source_row->>'contact'` is **`Example Organization 98`** — the correct spelling. Checked across all 13:
 
 - `source_row->>'contact'` matches a live `kind='person'` party on **exact string equality**
 - exactly **one** party each — never zero, never two
@@ -116,7 +116,7 @@ The Salesforce source already separated two of them. `deal.source_row` carries *
 
 - `lane`: populated and non-empty on all 40 deals — `territory` 25, `national` 15
 - `seg`: equals the stored `deal.segment` on **38 of 40** deals
-- the 2 that differ are **Brett Moorman – St. Louis MO** and **Kumar Tadepalli – Cumming GA**.
+- the 2 that differ are **Example Organization 143** and **Example Organization 77**.
   On both, source `seg` is the **empty string**, source `lane` is `national`, and the stored
   `segment` reads `national`.
 
@@ -130,18 +130,18 @@ row: no inference, and the guard asserts every `deal.lane` equals its own `sourc
 
 ---
 
-## 5. The vertical for Musicologie: there is no correct value, and I did not invent one
+## 5. The vertical for Example Organization 38: there is no correct value, and I did not invent one
 
 I was asked to determine the correct vertical from the data or the vault rather than
 inventing one, and to say so plainly and propose options if there genuinely is none.
 
-**There genuinely is none.** Musicologie is a music-lesson franchise.
+**There genuinely is none.** Example Organization 38 is a music-lesson franchise.
 
 - The vertical values in live use on deals are: Chiro, DPC, Dental, Fitness, Healthcare,
   Legal, Ortho, Other, Vet.
 - The vault's vertical reference guides (`DNA/Reference/`) cover dental, medical, vision and
   veterinary.
-- The Salesforce `seg` field for these 13 rows says `Musicologie` and nothing else.
+- The Salesforce `seg` field for these 13 rows says `Example Organization 38` and nothing else.
 - **There is no segment vocabulary table anywhere in the schema** to consult — I checked
   `information_schema.tables` for anything matching `segment` or `vertical` and got zero rows.
 
@@ -172,10 +172,10 @@ should be chosen by a migration:
    problem rather than this instance, and it is the one I would recommend Joe consider — a
    free-text column with no vocabulary is what let a brand and a lane both move in.
 
-Note that Musicologie is arguably not healthcare at all, which is a separate and more
+Note that Example Organization 38 is arguably not healthcare at all, which is a separate and more
 interesting question than which vertical string to write. CARR's stated verticals are dental,
 medical, veterinary, chiropractic, therapy, vision, fitness and wellness; the pipeline also
-holds a Legal deal (AMA Law Office). Whether music education belongs in this book at all is
+holds a Legal deal (Example Organization 99f6800b). Whether music education belongs in this book at all is
 Joe's call and nothing here presumes an answer.
 
 ---
@@ -226,13 +226,13 @@ All 168 existing clients sit over `kind='person'` parties. Nothing forbids an or
 
 The one thing worth checking was `v_ref_index`, because `0058` turned "these branches cannot
 overlap" into a test that now runs against a shape `0056` never saw. The party branch is
-guarded by `NOT EXISTS (select 1 from client c where c.party_id = p.id)`, so **P-0111 leaves
+guarded by `NOT EXISTS (select 1 from client c where c.party_id = p.id)`, so **P-900029 leaves
 the party branch at the instant it gains a client row and arrives in the client branch**. The
 total is unchanged. The guard in `0061` asserts the branch counts moved by exactly one in each
 direction, and re-runs `0058`'s party-disjointness assertion, rather than trusting the
 reasoning.
 
-One behavioural consequence to know about: `find "Musicologie"` now resolves the brand to a
+One behavioural consequence to know about: `find "Example Organization 38"` now resolves the brand to a
 **client** ref instead of a party ref. It returned 13 rows before (the org party plus the 12
 tombstones from `0059`) and returns 13 now (the client plus the same 12 tombstones), so
 nothing became more ambiguous than it already was.
@@ -246,13 +246,13 @@ brand.
 
 ## 8. The one judgment call, and what was deliberately left for Joe
 
-**Brett Moorman (C-141) and Kumar Tadepalli (C-143) carry `segment = 'national'`.** I was told
+**Example Organization 43 (C-900011) and Example Organization 148 (C-900013) carry `segment = 'national'`.** I was told
 their business-model question is open, Joe has not ruled on it, and they must not be silently
 restructured.
 
 **What 0061 does NOT do to them:** no parent org, no `national_account` client, no
 `client_type`, no change to their party rows, no change to their self-named org parties
-(P-0872 "Brett Moorman", P-0908 "Kumar Tadepalli" — themselves artifacts of the org-minting
+(P-900042 "Example Organization 43", P-900043 "Example Organization 148" — themselves artifacts of the org-minting
 defect `0059` fixed), no change to their clients or deals beyond the one column below.
 
 **What it does do:** sets `segment` to NULL on those two deals, because `source_row` proves
@@ -265,17 +265,17 @@ distinction is what the paragraph above is for. The migration says so out loud i
 
 ```sql
 update deal set segment = 'national'
- where name in ('Brett Moorman – St. Louis MO', 'Kumar Tadepalli – Cumming GA');
+ where name in ('Example Organization 143', 'Example Organization 77');
 ```
 
 **Still open, for Joe:**
 
-1. Whether Moorman and Tadepalli are national accounts in the sense of this ruling — i.e.
+1. Whether Example Organization 1370ea72 and Example Organization efecbbd6 are national accounts in the sense of this ruling — i.e.
    whether each has a brand above them that should become a parent org + national_account
-   client the way Musicologie just did. Their `lane` is `national` in the source, which is
+   client the way Example Organization 38 just did. Their `lane` is `national` in the source, which is
    evidence they are national-lane deals, and that is a different claim from being national
    *accounts*.
-2. The correct vertical for the 13 Musicologie deals (§5).
+2. The correct vertical for the 13 Example Organization 38 deals (§5).
 3. Whether to seed a `deal_segment` vocabulary table so `segment` stops being the only
    uncontrolled classification column on `deal` (§5, option 4).
 4. Whether music education belongs in a healthcare CRE book at all (§5).
@@ -295,30 +295,30 @@ update deal d set client_id = r.from_client
   from deal_reattach_log r where r.deal_id = d.id;
 
 -- 2. every segment goes back to its own source row. This covers all 15 touched deals
---    (13 Musicologie + Moorman + Tadepalli) in one statement and needs no log at all,
+--    (13 Example Organization 38 + Example Organization 1370ea72 + Example Organization efecbbd6) in one statement and needs no log at all,
 --    because deal.source_row is never modified by anything and holds the import verbatim.
 update deal set segment = nullif(source_row->>'seg', '')
  where segment is null and source_row->>'seg' is not null;
 update deal set segment = 'national'
- where name in ('Brett Moorman – St. Louis MO', 'Kumar Tadepalli – Cumming GA');
+ where name in ('Example Organization 143', 'Example Organization 77');
 
 -- 3. the franchisee clients
-update client set vertical = 'Musicologie', client_type = null
+update client set vertical = 'Example Organization 38', client_type = null
  where id in (select c.id from client c join party p on p.id = c.party_id
-               where p.org_id = (select id from party where ref = 'P-0111'));
+               where p.org_id = (select id from party where ref = 'P-900029'));
 
 -- 4. the parent account and the new structure
-delete from client where party_id = (select id from party where ref = 'P-0111');
+delete from client where party_id = (select id from party where ref = 'P-900029');
 drop view v_client_account;
 alter table deal drop column lane;
 drop table deal_lane;
 ```
 
 **Why segment reverts from `source_row` and not from `deal_reattach_log`.** The log holds
-`from_segment`, but it only has rows for the 12 deals that MOVED — the Trambadia deal was
+`from_segment`, but it only has rows for the 12 deals that MOVED — the Example Organization ee5ed70d deal was
 already on the right client, so it has no log row while its segment was still cleared. Rather
 than log a non-move to paper over that, the revert reads `source_row->>'seg'`, which is the
 untouched Salesforce import and is present on all 40 deals. `from_segment` stays in the log
 because it is the cheaper answer for the 12 and because a log row that records only half of
-what changed is a trap for whoever reads it next. The `nullif(..., '')` matters: Moorman and
-Tadepalli have an empty-string `seg`, which is why they need the second statement.
+what changed is a trap for whoever reads it next. The `nullif(..., '')` matters: Example Organization 1370ea72 and
+Example Organization efecbbd6 have an empty-string `seg`, which is why they need the second statement.

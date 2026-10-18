@@ -12,7 +12,7 @@ corrected.*
 | thing | count | note |
 |---|---|---|
 | `deal` | 40 | 6 in phase `negotiation`, 2 closed |
-| deals with any `negotiation_round` at all | **1** | Gulf Coast Pelvic Health |
+| deals with any `negotiation_round` at all | **1** | Example Organization 163 |
 | `negotiation_round` | **2** | landlord round 1, tenant round 1 |
 | observed COUNTERS by our side, anywhere | **0** | see §2 |
 | `deal_participant` rows | 42 | 41 are `role='lead'` carrying an `actor_id` |
