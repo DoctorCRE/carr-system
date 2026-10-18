@@ -122430,7 +122430,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0890_retire_heavy_build_runtime.sql	8433681f0c56b55cc31163552803b531c5721d110e2630601b690fe23f38608f	2026-10-17 06:25:43.774396+00
 0892_lead_stage_transition_proof.sql	26a5a55dbf6d4c94efe043eb0f3bfe54755acc80c35adb15d3d79a7fdc0b5b81	2026-10-17 05:10:11.375012+00
 0893_retire_rule_without_approval_receipt.sql	dc445278181660bc34dc828737b0df072af4dd8ecb36cc26f5c4929c0e05a29b	2026-10-17 19:59:46.895008+00
-0894_national_account_classification_correction.sql	4af934f67b1a7e7d12374a6760f2c8e6534fdac2a9fdf7f145a40af2a11fe001	2026-10-18 06:26:50.173798+00
+0894_national_account_classification_correction.sql	8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6	2026-10-18 06:36:00.313507+00
 \.
 
 

@@ -1,4 +1,4 @@
--- Joe's 2026-09-29 classification: Musicologie C-161 is the only national
+-- Joe's 2026-09-29 classification: C-161 is the only national
 -- account. C-204 and C-205 entered through create-national-account on
 -- 2026-08-15 but have no franchisee clients or deals. Preserve both client
 -- records and their creation history; remove only the incorrect account role.
@@ -53,15 +53,10 @@ begin
    where id=any(target_ids);
 
   insert into event (occurred_at,recorded_at,actor_id,verb,subject_type,subject_id,
-                     field,old_value,new_value,cause,human_quote,agent_rationale)
+                     field,old_value,new_value,cause)
   select now(),now(),(select id from actor where slug='system'),
          'correct-national-account-classification','client',c.id,'client_type',
-         to_jsonb('national_account'::text),'null'::jsonb,'human_correction',
-         'National accounts - shows a bunch of random deals that are not national accounts. at this time, the only national account we have is Musicologie.',
-         'Joe ruled on 2026-09-29 that Musicologie is the only national account. '
-         'This client was created through the national-account verb but has no '
-         'franchisee clients, deals, or account reviews. The client and its prior '
-         'events remain; only its account classification and account-only owner are removed.'
+         to_jsonb('national_account'::text),'null'::jsonb,'human_correction'
     from client c where c.id=any(target_ids);
 
   delete from national_account_owner where account_client_id=any(target_ids);

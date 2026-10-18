@@ -26,7 +26,7 @@ create table event (occurred_at timestamptz, recorded_at timestamptz, actor_id u
   new_value jsonb, cause text not null check (cause in
     ('human_stated','human_correction','ingest_email','ingest_calendar',
      'ingest_webhook','import_migration','import_salesforce','automation_job',
-     'learning_job','system')), human_quote text, agent_rationale text);
+     'learning_job','system')));
 create view v_client_account as select id as client_id,
   parent_account_id as account_client_id,
   parent_account_id is not null as is_sub_client from client;
@@ -34,9 +34,9 @@ insert into actor values
  ('00000000-0000-0000-0000-000000000001','system'),
  ('00000000-0000-0000-0000-000000000002','joe');
 insert into party values
- ('00000000-0000-0000-0000-000000000011','org','Musicologie'),
- ('00000000-0000-0000-0000-000000000012','org','Operation Dental'),
- ('00000000-0000-0000-0000-000000000013','org','Kain Capital'),
+ ('00000000-0000-0000-0000-000000000011','org','Party A'),
+ ('00000000-0000-0000-0000-000000000012','org','Party B'),
+ ('00000000-0000-0000-0000-000000000013','org','Party C'),
  ('00000000-0000-0000-0000-000000000014','org','Unrelated Client');
 insert into client (id,roster_ref,party_id,client_type,acquisition_source,updated_by) values
  ('9c323aa5-b9c0-45e7-b958-ef1ee3738660','C-161','00000000-0000-0000-0000-000000000011','national_account',null,'00000000-0000-0000-0000-000000000002'),
@@ -49,7 +49,7 @@ insert into national_account_owner values
  ('2f7364a7-8167-421d-8492-79815307fba3','00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002');
 `;
 
-test('the reviewed correction leaves Musicologie as the only national account and fails closed on linked work', async (t) => {
+test('the reviewed correction leaves C-161 as the only national account and fails closed on linked work', async (t) => {
   const unavailable = (reason) => {
     assert.notEqual(process.env.CARR_NATIONAL_ACCOUNT_TEST_REQUIRED, '1', reason);
     return t.skip(reason);
@@ -111,7 +111,7 @@ test('the reviewed correction leaves Musicologie as the only national account an
   assert.equal(sql("select string_agg(roster_ref, ',' order by roster_ref) from client where client_type='national_account'"), 'C-161');
   assert.equal(sql('select count(*) from national_account_owner'), '1');
   assert.equal(sql("select count(*) from event where field='client_type' and subject_type='client'"), '2');
-  assert.equal(sql("select count(*) from event where cause='human_correction' and human_quote like '%only national account%'"), '2');
+  assert.equal(sql("select count(*) from event where cause='human_correction' and verb='correct-national-account-classification'"), '2');
   assert.equal(sql("select count(*) from client where roster_ref='C-206' and client_type is null"), '1');
 
   sql('drop schema public cascade; create schema public;');
