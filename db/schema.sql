@@ -78377,8 +78377,7 @@ CREATE TABLE ops.scac_mutation_registry_entry (
     CONSTRAINT scac_mutation_registry_entry_effect_class_check CHECK ((effect_class = ANY (ARRAY['read_only'::text, 'audit_side_effect'::text, 'record_mutation'::text, 'external_mutation'::text, 'administrative_mutation'::text, 'delegating'::text, 'break_glass'::text]))),
     CONSTRAINT scac_mutation_registry_entry_entry_digest_check CHECK ((entry_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_mutation_registry_entry_ingress_key_check CHECK (((ingress_key ~ '^[a-z][a-z0-9_-]+:'::text) AND (ingress_key !~ '[
-
-	]'::text) AND (char_length(ingress_key) <= 1000))),
+	]'::text) AND (char_length(ingress_key) <= 1000))),
     CONSTRAINT scac_mutation_registry_entry_ingress_kind_check CHECK ((ingress_kind = ANY (ARRAY['mcp_tool'::text, 'worker_route'::text, 'worker_sidewrite'::text, 'db_function_acl'::text, 'db_relation_acl'::text, 'db_column_acl'::text, 'job_definition'::text, 'workflow_entrypoint'::text, 'script_entrypoint'::text, 'external_admin'::text, 'break_glass'::text]))),
     CONSTRAINT scac_mutation_registry_entry_source_locator_check CHECK (((btrim(source_locator) <> ''::text) AND (char_length(source_locator) <= 500)))
 );
@@ -78552,8 +78551,7 @@ CREATE TABLE ops.scac_pop_challenge (
     CONSTRAINT scac_pop_challenge_facts_digest_check CHECK ((facts_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_pop_challenge_idempotency_digest_check CHECK ((idempotency_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_pop_challenge_ingress_key_check CHECK (((ingress_key ~ '^[a-z][a-z0-9_-]+:'::text) AND (ingress_key !~ '[
-
-	]'::text) AND (char_length(ingress_key) <= 1000))),
+	]'::text) AND (char_length(ingress_key) <= 1000))),
     CONSTRAINT scac_pop_challenge_mutation_kind_check CHECK ((mutation_kind ~ '^scac\.mutation\.[a-z_]+$'::text)),
     CONSTRAINT scac_pop_challenge_nonce_bytes_check CHECK ((octet_length(nonce_bytes) = 32)),
     CONSTRAINT scac_pop_challenge_nonce_digest_check CHECK ((nonce_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -78678,8 +78676,7 @@ CREATE TABLE ops.scac_reference_monitor_receipt (
     CONSTRAINT scac_reference_monitor_receipt_grant_digest_check CHECK ((grant_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_reference_monitor_receipt_idempotency_digest_check CHECK ((idempotency_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_reference_monitor_receipt_ingress_key_check CHECK (((ingress_key ~ '^[a-z][a-z0-9_-]+:'::text) AND (ingress_key !~ '[
-
-	]'::text) AND (char_length(ingress_key) <= 1000))),
+	]'::text) AND (char_length(ingress_key) <= 1000))),
     CONSTRAINT scac_reference_monitor_receipt_monitor_state_check CHECK ((monitor_state = 'current'::text)),
     CONSTRAINT scac_reference_monitor_receipt_operation_manifest_digest_check CHECK ((operation_manifest_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
     CONSTRAINT scac_reference_monitor_receipt_policy_epoch_digest_check CHECK ((policy_epoch_digest ~ '^sha256:[0-9a-f]{64}$'::text)),
