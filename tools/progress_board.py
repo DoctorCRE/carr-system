@@ -2330,7 +2330,10 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     """The versioned data contract the app page renders, including fresh local
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
     if state.get("work_requests"):
-        return hierarchy_snapshot(state, costs=costs)
+        snapshot = hierarchy_snapshot(state, costs=costs)
+        if state['project'] == 'carr-v5':
+            snapshot['work_queue'] = work_queue_module().board_projection()
+        return fit_snapshot(snapshot)
     tasks = {}
     all_tasks = state.get("tasks") or {}
     active = {task_id: copy.deepcopy(task) for task_id, task in all_tasks.items() if not is_retired(task)}

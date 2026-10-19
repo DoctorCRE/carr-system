@@ -184,21 +184,25 @@ class WorkQueue:
                 item['ready'] = bool(item['ready'])
                 item['active'] = r['claim'] is not None or self._merge_active(r['card_id'])
                 item['stages'] = [dict(s) for s in self.db.execute(
-                    'SELECT stage,enqueued_at,started_at,finished_at,elapsed FROM stage_runs WHERE card_id=? ORDER BY id',
+                    'SELECT stage,enqueued_at,started_at,finished_at,started,elapsed FROM stage_runs WHERE card_id=? ORDER BY id',
                     (r['card_id'],))]
+                for stage in item['stages']:
+                    started = stage.pop('started')
+                    if started is not None and not stage['finished_at']:
+                        stage['elapsed'] = max(0, time.time() - started)
                 item['total_time_s'] = sum(s['elapsed'] for s in item['stages'])
-                running = self.db.execute('SELECT started FROM stage_runs WHERE card_id=? AND started IS NOT NULL AND finished_at IS NULL', (r['card_id'],)).fetchall()
-                item['total_time_s'] += sum(max(0, time.time() - s[0]) for s in running)
                 item['findings_opened'] = len(item['findings'])
                 item['findings_resolved'] = sum(f['resolved'] for f in item['findings'])
                 item['last_event'] = next((e for e in reversed(history) if e['card_id'] == r['card_id']), None)
+                item['priority_changes'] = [e for e in history if e['card_id'] == r['card_id']
+                                            and e['kind'] in ('prioritize', 'requeue')][-10:]
                 item['merge_position'] = None
                 items.append(item)
             merging = [i for i in items if i['stage'] == 'merging' or self._merge_active(i['card_id'])]
             for pos, item in enumerate(merging, 1):
                 item['merge_position'] = pos
             return {'schema': 'room-work-queue/v1', 'revision': history[-1]['id'] if history else 0,
-                    'items': items, 'history': history, 'publication': self.publication()}
+                    'items': items, 'board': board_tree(items), 'history': history, 'publication': self.publication()}
 
     def _end_stage(self, card):
         run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
@@ -521,7 +525,38 @@ def board_projection(path=None):
     finished = [i for i in snapshot['items'] if i['stage'] in TERMINAL]
     retained = {i['card_id'] for i in finished[-20:]}
     snapshot['items'] = [i for i in snapshot['items'] if i['stage'] not in TERMINAL or i['card_id'] in retained]
+    snapshot['board'] = board_tree(snapshot['items'])
     history_count = len(snapshot['history'])
     snapshot['history'] = snapshot['history'][-100:]
     snapshot['omitted'] = {'finished': max(0, len(finished) - 20), 'events': max(0, history_count - 100)}
     return snapshot
+
+
+def board_tree(items):
+    """Ordered parent IDs and rollups belong to the queue, never to a renderer."""
+    roots, nodes = [], {}
+    for item in items:
+        ref = item['wr']
+        match = re.fullmatch(r'WR-?0*(\d+)', ref)
+        wr = 'WR' + str(int(match[1])) if match else (ref or 'unlinked')
+        part = item['slice'] or 'unsliced'
+        sid = f'{wr}.{part}'
+        for key, parent, kind, label in ((wr, None, 'request', ref or 'Unlinked work'),
+                                         (sid, wr, 'slice', part)):
+            if key not in nodes:
+                nodes[key] = {'id': key, 'parent_id': parent, 'kind': kind, 'title': label,
+                              'description': '', 'children': [], 'totals': {
+                                  'jobs': 0, 'prs': 0, 'total_time_s': 0, 'review_rounds': 0,
+                                  'findings_opened': 0, 'findings_resolved': 0, 'stages': {}}}
+                (roots if parent is None else nodes[parent]['children']).append(key)
+            totals = nodes[key]['totals']
+            totals['jobs'] += 1
+            totals['prs'] += len(item['prs'])
+            for field in ('total_time_s', 'findings_opened', 'findings_resolved'):
+                totals[field] += item[field]
+            totals['review_rounds'] += item['review_round']
+            stages = totals['stages']
+            stages[item['stage']] = stages.get(item['stage'], 0) + 1
+        nodes[sid]['children'].append(item['card_id'])
+        nodes[item['card_id']] = {**item, 'id': item['card_id'], 'parent_id': sid, 'kind': 'job'}
+    return {'schema': 'room-work-queue-board/v1', 'order': roots, 'nodes': nodes}
