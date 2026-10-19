@@ -8,6 +8,9 @@ provider identity, production smoke, rollback and live verification.
 Run one tick with ops/release-pipeline.py, inspect commands with --dry-run,
 report shipped releases with report, or clear a failed SHA with clear-failed.
 The configured kill switches and single-run lock apply to both release lanes.
+Use stage-candidate --lane app --sha <full-sha> for a temporary staging taste,
+then restore-candidate --lane app to restore the recorded prior version.
+Candidate operations keep their own durable journal and never advance release state.
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ from lib.github_reader import SOURCE_BYTES as GITHUB_READER_SOURCE_BYTES, GitHub
 from lib.secret_redaction import SOURCE_BYTES as REDACTION_SOURCE_BYTES, redact_text, sensitive_env_values  # noqa: E402
 CONTROLLER_SOURCE_BYTES = Path(__file__).read_bytes()
 CONFIG_PATH = REPO / "ops" / "config" / "release-pipeline.v1.json"
+APP_STAGING_RELEASE_URL = "https://doctorcre-app-staging.joe-bookout-carr-us.workers.dev/app-release"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 ROOM_NAMESPACE = uuid.UUID("3d0e3c55-6a51-4c3e-9b8f-2b6c1f0a7e41")
@@ -169,6 +173,7 @@ class Runner:
                 out += f"\nrelease-pipeline: timed out after {timeout}s\n"
             except OSError as exc:
                 out, rc = f"release-pipeline: could not start: {exc}\n", 127
+            out = redact_text(out, known_secrets=sensitive_env_values(env))
             fh.write(out)
             fh.write(f"\n[exit {rc}]\n")
         return Result(rc, out)
@@ -2221,23 +2226,145 @@ class Pipeline:
                          f"source_commit={last.get('source_commit')} environment={last.get('environment')}"
                          f"{read_error}; log {log}")
 
+    def app_checks_green(self, lane_cfg: dict, sha: str, *, hosted: bool = False) -> None:
+        checks = self.github_factory(lane_cfg["github_repo"]).check_runs(sha)
+        for name in lane_cfg.get("required_checks") or ["test"]:
+            runs = [c for c in checks if c.get("name") == name]
+            if not runs:
+                raise Blocked("checks_missing", f"required check `{name}` has not reported on {sha[:12]}")
+            if hosted and any(c.get("head_sha") != sha or (c.get("app") or {}).get("slug") != "github-actions"
+                              for c in runs):
+                raise Blocked("checks_untrusted", f"`{name}` is not hosted CI for exact SHA {sha[:12]}")
+            if any(c.get("status") != "completed" for c in runs):
+                raise Blocked("checks_pending", f"`{name}` still running on {sha[:12]}")
+            if any(c.get("conclusion") != "success" for c in runs):
+                raise Blocked("checks_red", f"`{name}` is not green on {sha[:12]}")
+
+    @staticmethod
+    def staging_identity(value: Any) -> dict:
+        if (not isinstance(value, dict) or value.get("environment") != "staging"
+                or not isinstance(value.get("source_commit"), str)
+                or not SHA_RE.fullmatch(value["source_commit"])
+                or not isinstance(value.get("provider_version_id"), str)
+                or not UUID_RE.fullmatch(value["provider_version_id"])):
+            raise Blocked("candidate_identity", "staging requires a full source SHA, staging environment and provider version")
+        return {key: value[key] for key in ("source_commit", "environment", "provider_version_id")}
+
+    def candidate(self, command: str, *, lane: str, sha: str | None = None) -> int:
+        """Temporarily publish an app SHA to staging under the release lock."""
+        if lane != "app" or command not in ("stage-candidate", "restore-candidate"):
+            raise Blocked("candidate_scope", "candidate operations support only the app staging lane")
+        if self.dry_run:
+            raise Blocked("candidate_scope", "candidate operations do not support --dry-run")
+        if command == "stage-candidate" and not SHA_RE.fullmatch(sha or ""):
+            raise Blocked("candidate_sha", "stage-candidate requires a full commit SHA")
+        if command == "restore-candidate" and sha is not None:
+            raise Blocked("candidate_sha", "restore-candidate uses its recorded staging identity")
+        with single_run_lock(self.store.root) as got:
+            if not got:
+                raise Blocked("candidate_locked", "another release run holds the lock")
+            why = kill_switch(self.cfg, "app")
+            if why:
+                raise Blocked("candidate_disabled", why)
+            self.controller_current({})
+            if command == "stage-candidate":
+                self.app_checks_green(self.cfg["app"], sha, hosted=True)
+            journal_store = Store(self.store.root / "app-candidate")
+            try:
+                journal = {}
+                if journal_store.state_path.exists():
+                    journal = json.loads(journal_store.state_path.read_text())
+                    if (not isinstance(journal, dict)
+                            or journal.get("status") not in ("publishing", "staged", "restoring", "restored")
+                            or any(not isinstance(journal.get(key), str) or not SHA_RE.fullmatch(journal[key])
+                                   for key in ("sha", "tooling_sha"))):
+                        raise ValueError("invalid candidate journal")
+                    self.staging_identity(journal["prior"])
+                    if journal["status"] in ("staged", "restoring"):
+                        self.staging_identity(journal["observed"])
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise Blocked("candidate_journal", "candidate journal is unreadable; refusing publication") from exc
+            staging = {"live_release_url": APP_STAGING_RELEASE_URL}
+            live = self.staging_identity(self.http(APP_STAGING_RELEASE_URL))
+            if journal and (command == "restore-candidate" or journal["status"] != "restored"):
+                if command == "restore-candidate" and live == journal["prior"]:
+                    journal["status"] = "restored"
+                    journal_store.save(journal)
+                    return 0
+                owns_live = (live["source_commit"] == journal["sha"] and live != journal["prior"]
+                             and (journal["status"] == "publishing" or live == journal.get("observed")))
+                if command == "stage-candidate":
+                    if sha == journal["sha"] and owns_live and journal["status"] in ("publishing", "staged"):
+                        journal.update(status="staged", observed=live)
+                        journal_store.save(journal)
+                        return 0
+                    raise Blocked("candidate_pending", "restore the recorded candidate before staging another; no publication retried")
+                if not owns_live or journal["status"] == "restored":
+                    raise Blocked("candidate_drift", "staging no longer serves the recorded candidate; refusing rollback")
+                sha = journal["sha"]
+            elif command == "restore-candidate":
+                raise Blocked("candidate_missing", "no candidate staging identity was recorded")
+            repo_dir = lane_repo_dir(self.cfg, "app", self.repo)
+            if command == "stage-candidate":
+                self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
+                main = self.git("ls-remote", "--exit-code", "origin", "refs/heads/main", cwd=repo_dir).split()
+                if len(main) != 2 or not SHA_RE.fullmatch(main[0]) or main[1] != "refs/heads/main":
+                    raise Blocked("candidate_tooling", "cannot establish trusted app main")
+                tooling_sha = main[0]
+                self.git("fetch", "--quiet", "origin", tooling_sha, cwd=repo_dir)
+                changed = self.git("diff", "--name-only", tooling_sha, sha, "--", "scripts", "package.json",
+                                   "package-lock.json", "wrangler.jsonc", "wrangler.toml", ".npmrc", cwd=repo_dir)
+                if changed:
+                    raise Blocked("candidate_tooling", "candidate publication scripts, dependencies and staging target must match app main")
+                worktree_sha = sha
+            else:
+                worktree_sha = journal["tooling_sha"]
+                self.git("fetch", "--quiet", "origin", worktree_sha, cwd=repo_dir)
+            wt = self.store.release_worktree("app", worktree_sha, self.run_id)
+            self.add_worktree("app-worktree", repo_dir, wt, worktree_sha)
+            try:
+                self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800)
+                if command == "stage-candidate":
+                    self.step("app-build", ["npm", "run", "build"], wt, timeout=3600,
+                              env={**self.env, "DOCTORCRE_SOURCE_COMMIT": sha})
+                    self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "verify"], wt)
+                    self.app_checks_green(self.cfg["app"], sha, hosted=True)
+                if self.staging_identity(self.http(APP_STAGING_RELEASE_URL)) != live:
+                    raise Blocked("candidate_drift", "staging changed during preparation; refusing publication")
+                if command == "stage-candidate":
+                    journal = {"sha": sha, "tooling_sha": tooling_sha, "prior": live, "status": "publishing"}
+                    journal_store.save(journal)
+                    self.step("app-candidate-publish", ["node", "scripts/release-staging.mjs", "--source-sha", sha],
+                              wt, timeout=900, env=self.deploy_env())
+                    expected = lambda value: (
+                        value.get("source_commit") == sha and value.get("environment") == "staging"
+                        and isinstance(value.get("provider_version_id"), str)
+                        and bool(UUID_RE.fullmatch(value["provider_version_id"]))
+                        and value["provider_version_id"] != live["provider_version_id"])
+                else:
+                    journal["status"] = "restoring"
+                    journal_store.save(journal)
+                    self.step("app-candidate-restore", ["node", "scripts/rollback-staging.mjs",
+                                                       journal["prior"]["provider_version_id"]],
+                              wt, timeout=900, env=self.deploy_env())
+                    expected = lambda value: all(value.get(k) == v for k, v in journal["prior"].items())
+                matched, identity, _, log = self.await_live(staging, command + "-verify", expected)
+                if not matched:
+                    raise StepFailed(command + "-verify", 1, str(log), "staging /app-release identity did not match")
+                journal.update(status="staged" if command == "stage-candidate" else "restored",
+                               observed=self.staging_identity(identity))
+                journal_store.save(journal)
+                return 0
+            finally:
+                self.remove_worktrees()
+
     def release_app(self, lane_cfg: dict, repo_dir: Path, base: str, sha: str) -> dict:
         """The named required checks
         must be PRESENT and green (an empty check list is not a pass)."""
         smoke_on = smoke_enabled(lane_cfg)
         gh = self.github_factory(lane_cfg["github_repo"])
 
-        def checks_green() -> None:
-            checks = gh.check_runs(sha)
-            for name in lane_cfg.get("required_checks") or ["test"]:
-                runs = [c for c in checks if c.get("name") == name]
-                if not runs:
-                    raise Blocked("checks_missing", f"required check `{name}` has not reported on {sha[:12]}")
-                if any(c.get("status") != "completed" for c in runs):
-                    raise Blocked("checks_pending", f"`{name}` still running on {sha[:12]}")
-                if any(c.get("conclusion") != "success" for c in runs):
-                    raise Blocked("checks_red", f"`{name}` is not green on {sha[:12]}")
-        self.dry_tolerant("app checks", checks_green, None)
+        self.dry_tolerant("app checks", lambda: self.app_checks_green(lane_cfg, sha), None)
         prs = self.dry_tolerant("app source", lambda: self.merged_source(gh, lane_cfg, repo_dir, base, sha), [])
         self.wrangler_auth()
         wt = self.store.release_worktree("app", sha, self.run_id)
@@ -2980,9 +3107,9 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", nargs="?", default="tick",
-                    choices=("tick", "report", "clear-failed", "health-preflight"))
+                    choices=("tick", "report", "clear-failed", "health-preflight", "stage-candidate", "restore-candidate"))
     ap.add_argument("--sha", help="clear-failed: the exact failed SHA being cleared; "
-                    "health-preflight: the sha to check out (defaults to origin/main)")
+                    "health-preflight: the sha to check out (defaults to origin/main); stage-candidate: exact app SHA")
     ap.add_argument("--reason", help="clear-failed: why a retry of the same SHA is now right")
     ap.add_argument("--dry-run", action="store_true", help="print the exact commands; execute no deploy")
     ap.add_argument("--lane", choices=("worker", "app"), action="append")
@@ -2997,7 +3124,20 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--rotate-lost-staging-credential needs `tick --lane worker` and no other lane")
     if len(set(args.rotate_lost_staging_credential)) != len(args.rotate_lost_staging_credential):
         ap.error("--rotate-lost-staging-credential names each profile at most once")
+    if args.command in ("stage-candidate", "restore-candidate"):
+        if args.lane != ["app"] or args.dry_run:
+            ap.error("candidate commands require exactly --lane app and do not support --dry-run")
+        if args.command == "stage-candidate" and not SHA_RE.fullmatch(args.sha or ""):
+            ap.error("stage-candidate requires --sha <full-sha>")
+        if args.command == "restore-candidate" and args.sha is not None:
+            ap.error("restore-candidate uses the recorded prior staging version, without --sha")
     cfg = load_config()
+    if args.command in ("stage-candidate", "restore-candidate"):
+        try:
+            return Pipeline(cfg).candidate(args.command, lane="app", sha=args.sha)
+        except (Blocked, StepFailed) as exc:
+            print(f"release-pipeline: {exc}", file=sys.stderr)
+            return 1
     if args.command == "clear-failed":
         if not args.lane or len(args.lane) != 1 or not args.sha or not args.reason:
             ap.error("clear-failed needs exactly one --lane, --sha and --reason")
