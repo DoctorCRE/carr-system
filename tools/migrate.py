@@ -22,6 +22,7 @@ you confirm — read what it prints.
 
 Requires psycopg (pip install 'psycopg[binary]'); listed in requirements.txt.
 """
+from __future__ import annotations
 
 import argparse
 import hashlib

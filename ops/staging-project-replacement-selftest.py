@@ -340,13 +340,17 @@ diagnostic_stdout = f"applying {future_filename} ... "
 diagnostic_stderr = f"psycopg.errors.DuplicateTable: {secret} {owner.value}"
 assert f"migration={future_filename}; error_class=DuplicateTable" in migration_failure(
     diagnostic_stdout, diagnostic_stderr)
-for stdout, stderr in (
+assert "migration=not_started; error_class=TypeError" in migration_failure(
+    "", f"TypeError: {secret} {owner.value}")
+assert "migration=not_started; error_class=OperationalError" in migration_failure(
+    "", f"psycopg.OperationalError: {secret} {owner.value}")
+for migration_stdout, migration_stderr in (
     (diagnostic_stdout, f"psycopg.errors.{secret}: detail"),
     (f"applying {secret}.sql ... ", diagnostic_stderr),
     ("applying 9998_unknown.sql ... ", diagnostic_stderr),
     (diagnostic_stdout, secret),
 ):
-    assert "output suppressed" in migration_failure(stdout, stderr)
+    assert "output suppressed" in migration_failure(migration_stdout, migration_stderr)
 
 prior_scope = ctl.ProviderScope("old", "carr-staging", "br-old", "ep-old", "ep-old.neon.tech")
 future_payload = ctl.prepare_payload(future_source, prior_scope, owner_scope, 1)

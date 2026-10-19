@@ -366,9 +366,21 @@ def apply_candidate_migrations(owner: SecretDsn, source: SourceContract, *, run:
                                environ: Mapping[str, str]) -> None:
     child = safe_environment(environ); child["DATABASE_URL"] = owner.value
     highest = validate_migration_ledger(source.manifest)
-    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "tools/migrate.py"), "--apply", "--yes",
+    result = _run([str(REPO / ".venv/bin/python"), str(REPO / "tools/migrate.py"), "--apply", "--yes",
                    "--through", highest],
-                  run=run, env=child, timeout=3600), "migration reconstruction")
+                  run=run, env=child, timeout=3600)
+    label = "migration reconstruction"
+    if result.returncode and psycopg is not None:
+        names = re.findall(r"^applying ([^\s]+) \.\.\.", str(result.stdout or ""), re.M)
+        classes = re.findall(r"^(psycopg(?:\.errors)?\.)?([A-Za-z]+):", str(result.stderr or ""), re.M)
+        if classes and (not names or names[-1] in source.manifest["migration_ledger"]):
+            module, name = classes[-1]
+            error_class = getattr(psycopg.errors, name, None) if module else None
+            if (isinstance(error_class, type) and issubclass(error_class, psycopg.Error)) \
+                    or (not module and name in ('ImportError', 'ModuleNotFoundError', 'SyntaxError', 'TypeError')):
+                migration = names[-1] if names else 'not_started'
+                label += f"; migration={migration}; error_class={name}"
+    _success(result, label)
 
 
 def install_fixtures(owner: SecretDsn, *, run: Run, environ: Mapping[str, str]) -> None:
