@@ -2,12 +2,17 @@
 """Synthetic STEP-0 decisions and real command wiring, without model or store access."""
 from datetime import datetime
 from pathlib import Path
+import importlib.util
+import io
+import json
+from contextlib import redirect_stderr
 import sys
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -41,22 +46,48 @@ class PredicateTests(unittest.TestCase):
             with self.subTest(current=current, last=last):
                 self.assertFalse(version_unchanged(current, last))
 
+    def test_dst_fallback_orders_receipts_by_instant(self):
+        from lib.scheduled_step0 import stop_reason
+        row = dict(status='success', exit_code=0, canonical_recorded=True,
+                   window='2026-11-01T05:00:00+00:00')
+        for now, end, expected in [
+                ('2026-11-01T06:30:00+00:00', '2026-11-01T07:15:00+00:00', None),
+                ('2026-11-01T07:15:00+00:00', '2026-11-01T06:45:00+00:00', 'weekly_completed')]:
+            with self.subTest(now=now, end=end):
+                self.assertEqual(stop_reason('radar-weekly', datetime.fromisoformat(now),
+                                             [{**row, 'end': end}]), expected)
+
     def test_prompt_calls_share_the_step0_command(self):
         for task in ['health-audit-monthly', 'idea-resurface-monthly',
                      'system-sweep-monthly', 'playbook-review-monthly', 'cc-update-audit']:
             prompt = (REPO/'ops/scheduled-tasks'/f'{task}.SKILL.md').read_text()
             with self.subTest(task=task):
-                self.assertIn(f'python3 bin/scheduled-step0.py {task}', prompt)
+                python = 'python3' if task == 'cc-update-audit' else '.venv/bin/python'
+                self.assertIn(f'{python} bin/scheduled-step0.py {task}', prompt)
         audit = (REPO/'ops/scheduled-tasks/cc-update-audit.SKILL.md').read_text()
         self.assertNotIn('If `current` equals `last_audited`', audit)
 
 class CommandTests(unittest.TestCase):
+    def test_monthly_ledger_timeout_fails_open(self):
+        spec = importlib.util.spec_from_file_location('step0', REPO/'bin/scheduled-step0.py')
+        assert spec is not None and spec.loader is not None
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root/'ops/headless-tasks').mkdir(parents=True)
+            (root/'ops/headless-tasks/tasks.json').write_text(json.dumps({'tasks': {
+                'health-audit-monthly': {'monthly': True, 'cron': '0 9 * * *'}}}))
+            with patch.object(cli, 'REPO', root), patch.object(sys, 'argv', ['step0', 'health-audit-monthly']), \
+                    patch('subprocess.run', side_effect=subprocess.TimeoutExpired('monthly-gate.py', 30)), \
+                    redirect_stderr(io.StringIO()):
+                self.assertEqual(cli.main(), 0)
+
     def test_version_cli_stops_and_reports_changes_without_writing_sentinel(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root/'bin').mkdir()
             (root/'ops/headless-tasks').mkdir(parents=True)
-            shutil.copyfile(REPO/'ops/headless-tasks/tasks.json', root/'ops/headless-tasks/tasks.json')
             (root/'lib').mkdir()
             for name in ['scheduled_step0.py', 'headless_tasks.py']:
                 shutil.copyfile(REPO/'lib'/name, root/'lib'/name)
@@ -79,6 +110,8 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn('current: cli=2.1.1 app=2.1.2', result.stdout)
             self.assertEqual(sentinel.read_text(), 'cli=2.1.1 app=2.1.1\n')
+            (root/'ops/headless-tasks/tasks.json').write_text('broken manifest')
+            self.assertEqual(run().returncode, 0)
             helper.unlink()
             self.assertEqual(run().returncode, 0)
 
