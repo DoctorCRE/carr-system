@@ -24,6 +24,25 @@ spec.loader.exec_module(hook)
 
 
 class ReaperTest(unittest.TestCase):
+    def test_idle_closed_pr_retires_remote_and_preserves_unmerged_work(self):
+        fixture = Fixture()
+        base = fixture.git("rev-parse", "main")
+        tree = fixture.tree("old")
+        head = fixture.commit("closed unmerged work", cwd=tree)
+        fixture.git("push", "origin", "old")
+        (tree / "file").write_text("active unsaved work\n")
+        pr = pull(1, head, base)
+        pr["state"] = "closed"
+        reaper = fixture.reaper(provider=FakeProvider([pr]), clock=lambda: time.time() + 86400,
+                                ownership_probe=lambda path: "owned")
+        report = reaper.run({"fixture/repo": fixture.repo}, execute=True)
+        self.assertFalse(report["errors"], report["errors"])
+        self.assertNotIn("refs/heads/old", fixture.git("ls-remote", "--heads", "origin"))
+        retired = next(a for a in report["actions"] if a["status"] == "retired")
+        self.assertEqual(fixture.git("rev-parse", retired["backup_ref"]), head)
+        self.assertEqual(fixture.git("rev-parse", "old"), head)
+        self.assertEqual((tree / "file").read_text(), "active unsaved work\n")
+
     def successor_fixture(self, body=""):
         fixture = Fixture()
         base = fixture.git("rev-parse", "main")
