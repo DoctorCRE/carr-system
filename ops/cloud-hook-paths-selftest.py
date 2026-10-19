@@ -42,7 +42,7 @@ CONTRACT = REPO / "ops" / "config" / "delegation-gate-hook.json"
 SHELLS = [s for s in ("/bin/sh", "/bin/bash", "/bin/zsh") if os.access(s, os.X_OK)]
 GATE = "delegation-gate.py"
 MACHINE_HOOKS = ("worktree-self-plumb.py", "machine-converge.py")
-KNOWN_HOOKS = (GATE, "builder-agent-gate.py", *MACHINE_HOOKS)
+KNOWN_HOOKS = (GATE, "builder-agent-gate.py", "rule-claim-gate.py", *MACHINE_HOOKS)
 
 FAILURES: list[str] = []
 
@@ -217,7 +217,7 @@ def mac_cases() -> None:
 def contract_cases() -> None:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     commands = {(e, s): c for e, s, c in wired_commands()}
-    check("every wired hook names one of the four known scripts",
+    check("every wired hook names a known script",
           all(s for (_e, s) in commands), str(list(commands)))
     pre, stop = commands.get(("PreToolUse", GATE)), commands.get(("Stop", GATE))
     check("PreToolUse and Stop run the identical delegation-gate command", pre == stop)
