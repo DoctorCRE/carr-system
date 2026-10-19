@@ -1,0 +1,14 @@
+[
+  {
+    "phrase": "try to break it",
+    "suggestion": "confirm the expected invariants hold"
+  },
+  {
+    "phrase": "credential exposed",
+    "suggestion": "confirm sensitive values remain redacted"
+  },
+  {
+    "phrase": "overwrite the binary",
+    "suggestion": "confirm the executable remains unchanged"
+  }
+]
