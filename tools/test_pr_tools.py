@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PrToolsTests(unittest.TestCase):
-    def run_tool(self, tool, views=(), *, update=0, merge=0, args=('12',)):
+    def run_tool(self, tool, views=(), *, update=0, merge=0, behind=0, args=('12',)):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log = root / 'calls.jsonl'
@@ -33,6 +33,8 @@ elif args[:2] == ['pr', 'merge']:
     sys.exit(int(os.environ['PR_TOOL_MERGE']))
 elif 'PUT' in args:
     sys.exit(int(os.environ['PR_TOOL_UPDATE']))
+elif args[0] == 'api' and '/compare/' in args[1]:
+    print(os.environ['PR_TOOL_BEHIND'])
 else:
     print('jbookout/carr-system\\t12\\tMERGEABLE\\tCLEAN')
 ''')
@@ -46,7 +48,7 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
             sleep.chmod(0o755)
             env = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
                    'PR_TOOL_FIXTURE': tmp, 'PR_TOOL_UPDATE': str(update),
-                   'PR_TOOL_MERGE': str(merge), 'R': 'jbookout/carr-system'}
+                   'PR_TOOL_MERGE': str(merge), 'PR_TOOL_BEHIND': str(behind), 'R': 'jbookout/carr-system'}
             result = subprocess.run(['bash', str(ROOT / 'tools' / tool), *args],
                                     env=env, capture_output=True, text=True, timeout=15)
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
@@ -63,13 +65,19 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ['UPDATED 12', 'MERGED 12 abc123'])
         gh = [call for call in calls if call[0] == 'gh']
-        self.assertEqual(len(gh), 5)
+        self.assertEqual(len(gh), 6)
         self.assertIn('repos/jbookout/carr-system/pulls/12/update-branch', gh[1])
+        self.assertIn('repos/jbookout/carr-system/compare/main...abc123', gh[3])
         self.assertIn('--squash', gh[-1])
         self.assertEqual(gh[-1][-2:], ['--match-head-commit', 'abc123'])
         for index, call in enumerate(calls):
             if call[0] == 'gh':
                 self.assertEqual(calls[index - 1], ['sleep', '2'])
+
+    def test_blocked_head_behind_main_is_updated_before_red(self):
+        result, calls = self.run_tool('mq.sh', [self.view('BLOCKED', 'FAILURE'), self.view()], behind=3)
+        self.assertEqual(result.stdout.splitlines(), ['UPDATED 12', 'MERGED 12 abc123'])
+        self.assertTrue(any('update-branch' in ' '.join(call) for call in calls))
 
     def test_terminal_queue_outputs(self):
         for view, merge, expected in (

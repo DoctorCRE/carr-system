@@ -89,6 +89,14 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "on every database; all 0248 adds here is a binding to the autonomy rule, "
         "which this database does not carry",
     ),
+    "0897_national_account_classification_correction.sql": (
+        "select 1 from client where roster_ref in ('C-161','C-204','C-205') "
+        "or id in ('9c323aa5-b9c0-45e7-b958-ef1ee3738660'::uuid, "
+        "'8550b702-e6fb-4bea-8b3e-1fec5b9499bd'::uuid, "
+        "'2f7364a7-8167-421d-8492-79815307fba3'::uuid)",
+        "0897 corrects only the historical C-204/C-205 classifications against C-161; "
+        "none of those clients exists here, so unrelated synthetic accounts need no correction",
+    ),
 }
 
 # ── MIGRATIONS WHOSE INTERMEDIATE CATALOG MUST NEVER COMMIT ────────────────
