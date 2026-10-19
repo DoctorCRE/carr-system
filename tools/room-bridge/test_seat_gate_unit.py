@@ -80,6 +80,10 @@ class SendThroughTheGate(unittest.TestCase):
                                       'CARR_CODEX_SLOT_DIR': str(self.root / 'slots')})
         env.start()
         self.addCleanup(env.stop)
+        inventory = patch.object(dispatch, 'desk_skill_inventory', return_value={
+            'available': ['tdd', 'poteto-mode', 'prove-it-works', 'grill-with-docs']})
+        inventory.start()
+        self.addCleanup(inventory.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
         self.reg.register('cx', 'codex-session', family='sol', effort='high')
         self.reg.register('studio-desk', 'claude-remote', host='studio', model='claude-opus-5-5', effort='high', timeout_s=60)

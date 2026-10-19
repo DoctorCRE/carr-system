@@ -179,6 +179,8 @@ class FamilyDispatchTests(unittest.TestCase):
             return {'status': 'completed'}
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(executor), \
              patch.object(dispatch.seat_gate, 'check', return_value=None), \
+             patch.object(dispatch, 'desk_skill_inventory', return_value={
+                 'available': ['tdd', 'poteto-mode', 'prove-it-works', 'grill-with-docs']}), \
              patch.object(dispatch, '_to_codex', side_effect=execute):
             code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
                                   'send', 'cx', 'work', '--family', 'luna', '--effort', 'low'])
