@@ -2313,7 +2313,7 @@ class Pipeline:
                 tooling_sha = main[0]
                 self.git("fetch", "--quiet", "origin", tooling_sha, cwd=repo_dir)
                 changed = self.git("diff", "--name-only", tooling_sha, sha, "--", "scripts", "package.json",
-                                   "package-lock.json", "wrangler.jsonc", "wrangler.toml", ".npmrc", cwd=repo_dir)
+                                   "package-lock.json", "wrangler.*", ".wrangler", ".npmrc", cwd=repo_dir)
                 if changed:
                     raise Blocked("candidate_tooling", "candidate publication scripts, dependencies and staging target must match app main")
                 worktree_sha = sha

@@ -3151,6 +3151,20 @@ class CandidateStaging(Base):
             pipe.candidate("stage-candidate", lane="app", sha=sha)
         self.assertEqual(self.calls, [])
 
+    def test_candidate_refuses_alternate_wrangler_configuration(self):
+        sha = self.candidate_sha({"wrangler.json": '{"env":{"staging":{"name":"production"}}}'})
+        pipe = self.candidate_pipe()
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_candidate_refuses_wrangler_configuration_redirect(self):
+        sha = self.candidate_sha({".wrangler/deploy/config.json": '{"configPath":"../../production.json"}'})
+        pipe = self.candidate_pipe()
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
     def test_candidate_retries_reconcile_without_republishing_or_losing_prior(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
