@@ -1,8 +1,14 @@
+import contextlib
 import importlib.util
+import io
+import json
+import os
 import pathlib
+import subprocess
 import sys
 import unittest
 import uuid
+from unittest.mock import MagicMock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -25,14 +31,95 @@ class JourneyContractTests(unittest.TestCase):
             with self.subTest(run=run), self.assertRaises(ValueError):
                 journey.identities(run)
 
-    def test_cli_refuses_unverified_target_before_any_connection(self):
-        import os
-        from unittest.mock import patch
-        with patch.dict(os.environ, {}, clear=True), patch.object(sys, 'argv', ['staging-journey-fixtures.py', 'prepare', '--run', str(uuid.uuid4())]), \
-             patch.object(journey.psycopg, 'connect', side_effect=AssertionError('unverified connection')) as connect:
-            with self.assertRaisesRegex(Exception, 'identity is absent or forbidden'):
+
+class JourneyBindingTests(unittest.TestCase):
+    def setUp(self):
+        operation = json.loads((ROOT / 'ops/config/release-pipeline.v1.json').read_text())['worker']['staging_candidate_operation_id']
+        self.projects = [
+            {'id': 'steep-field-48688294', 'name': 'production'},
+            {'id': 'synthetic-old', 'name': 'carr-staging'},
+            {'id': 'synthetic-candidate', 'name': 'carr-staging-replacement-' + uuid.UUID(operation).hex,
+             'pg_version': 18, 'region_id': 'aws-us-east-1'},
+        ]
+        host = 'ep-synthetic-candidate.us-east-1.aws.neon.tech'
+        self.owner = f'postgresql://neondb_owner:password@{host}/neondb?sslmode=require&channel_binding=require'  # ci-secret-scan: allow — synthetic provider fixture
+        self.calls = []
+        self.conn = MagicMock()
+        cur = self.conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = lambda: (True,) if 'session_user' in cur.execute.call_args.args[0] else (0,)
+        self.output = io.StringIO()
+        self.run = str(uuid.uuid4())
+
+    def provider(self, args, **kwargs):
+        self.calls.append(args)
+        self.assertEqual(kwargs['env']['NEON_API_KEY'], 'synthetic-provider-key')
+        if args[1:3] == ['projects', 'list']:
+            value = self.projects
+        elif args[1:3] == ['branches', 'list']:
+            project = args[args.index('--project-id') + 1]
+            value = [{'id': 'br-' + project, 'project_id': project,
+                      'name': 'production' if project == 'steep-field-48688294' else 'main', 'default': True}]
+        elif args[1] == 'api':
+            project = args[2].split('/')[2]
+            value = [{'id': 'ep-' + project, 'branch_id': 'br-' + project, 'type': 'read_write',
+                      'host': 'ep-' + project + '.us-east-1.aws.neon.tech',
+                      'autoscaling_limit_min_cu': 0.25, 'autoscaling_limit_max_cu': 2}]
+        elif args[1] == 'connection-string':
+            self.assertEqual(args[args.index('--project-id') + 1], 'synthetic-candidate')
+            self.assertEqual(args[args.index('--role-name') + 1], 'neondb_owner')
+            return subprocess.CompletedProcess(args, 0, self.owner, '')
+        else:
+            self.fail('unexpected provider action')
+        return subprocess.CompletedProcess(args, 0, json.dumps(value), '')
+
+    def invoke(self, env=None, provider=None):
+        with patch.dict(os.environ, env or {}, clear=True), \
+             patch.object(journey.provisioner.db_tap, '_neon_api_key', return_value='synthetic-provider-key') as credential, \
+             patch.object(subprocess, 'run', side_effect=provider or self.provider), \
+             patch.object(journey.psycopg, 'connect', return_value=self.conn) as connect, \
+             patch.object(sys, 'argv', ['staging-journey-fixtures.py', 'remaining', '--run', self.run]), \
+             contextlib.redirect_stdout(self.output):
+            try:
                 journey.main()
-            connect.assert_not_called()
+            except Exception:
+                connect.assert_not_called()
+                raise
+        credential.assert_called()
+        connect.assert_called_once_with(self.owner, connect_timeout=10)
+
+    def test_remaining_resolves_configured_replacement_without_fixture_exports(self):
+        self.invoke()
+        self.assertEqual(json.loads(self.output.getvalue()), {'schema': journey.SCHEMA, 'run': self.run, 'remaining': 0})
+        self.assertNotIn(self.owner, self.output.getvalue())
+        self.assertTrue(self.calls)
+
+    def test_missing_candidate_refuses_without_old_staging_fallback(self):
+        self.projects.pop()
+        with self.assertRaisesRegex(ValueError, 'candidate does not exist'):
+            self.invoke()
+        self.assertFalse(any(args[1] == 'connection-string' for args in self.calls))
+
+    def test_provider_owner_cannot_address_another_endpoint(self):
+        self.owner = self.owner.replace('ep-synthetic-candidate.', 'ep-synthetic-old.')
+        with self.assertRaisesRegex(Exception, 'differs from the pinned endpoint'):
+            self.invoke()
+
+    def test_provider_owner_cannot_use_another_role(self):
+        self.owner = self.owner.replace('neondb_owner:', 'app_writer:')
+        with self.assertRaisesRegex(Exception, 'differs from the pinned endpoint'):
+            self.invoke()
+
+    def test_ambient_routing_override_refuses_before_connecting(self):
+        for name in ('PGHOST', 'PGHOSTADDR', 'PGDATABASE', 'PGSERVICE'):
+            with self.subTest(name=name), self.assertRaisesRegex(Exception, 'unsupported libpq target override'):
+                self.invoke({name: 'synthetic-override'})
+
+    def test_provider_failure_does_not_expose_output_or_connect(self):
+        def refused(args, **kwargs):
+            return subprocess.CompletedProcess(args, 2, self.owner, self.owner)
+        with self.assertRaises(Exception) as raised:
+            self.invoke(provider=refused)
+        self.assertNotIn(self.owner, str(raised.exception) + self.output.getvalue())
 
 
 class JourneyPostgresTests(unittest.TestCase):

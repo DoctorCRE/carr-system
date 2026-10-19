@@ -64,8 +64,9 @@ def reconcile_monitor(fault, healthy, state_path=None, verb=None):
                     save()
                     if not healthy and not response.get("replayed") and not response.get("deduplicated"):
                         return "open"
-                loop = verb("read-loop", {"loop_id": state["loop_id"]})
-                if loop.get("loop_id") != state["loop_id"] or type(loop.get("version")) is not int:
+                loop = verb("read-loop", {"loop_id": state["loop_id"]}).get("loop")
+                if (not isinstance(loop, dict) or loop.get("loop_id") != state["loop_id"]
+                        or type(loop.get("version")) is not int):
                     return "error"
                 if loop.get("status") in ("done", "dropped"):
                     if fault:
