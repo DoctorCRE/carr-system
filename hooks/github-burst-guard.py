@@ -12,6 +12,9 @@ this hook is the enforcement.
 
 WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
   0. Direct PR merges and branch updates. Use tools/mq.sh to enqueue into the existing daemon.
+     Scan the full text after joining continuation lines, including quoted prose
+     and nested shell bodies. Explicit GET reads remain allowed. A standalone
+     tools/merge_queue/main.py invocation is the merge owner's entry point.
      Naming mq.sh beside a direct mutation does not exempt that mutation.
   1. A shell loop — for / while / until, or xargs / parallel — that runs `gh`
      with no `sleep N` (N >= 2) inside it. Allowed: the same loop with that
@@ -70,7 +73,8 @@ background.
 ALWAYS ALLOWED outside the cooldown, when not inside a loop: a single gh
 command, gh --paginate, and gh api graphql. One paginated call is the cheap
 alternative the refusals name. Text the shell will not run (a heredoc body, a
-commit message, a --body or grep pattern in quotes) is not scanned for gh.
+commit message, a --body or grep pattern in quotes) is not scanned for bursts.
+Merge-action text is conservatively refused even in those inert examples.
 
 STATE: out/github-burst-guard-state.json (out/ is git-ignored), shared by every
 session on the machine because the limit is per account, not per session.
@@ -83,7 +87,8 @@ longer read. CARR_RELEASE_PIPELINE_LOCK overrides the lock path probed.
 
 KNOWN LIMIT. It sees the command a session issues, not what a script does
 inside itself, and a loop hidden behind a variable or a script file is not
-visible. The threat model is the 2026-10-06 shape: a session typing the burst.
+visible. Deliberately computed tool names and string-built commands are out
+of scope for merge enforcement. The threat model is the 2026-10-06 shape: a session typing the burst.
 
 Unsupported native exec_command arguments fail closed. An internal error, malformed input or an unreadable state file
 allows the call and logs the reason to out/hook-guard.log.
@@ -481,88 +486,27 @@ def pending_ticks(state, now):
 
 
 def merge_queue_reason(cmd):
-    source = inert_stripped(cmd).replace('\\\n', '')
-    scan = mask_quoted_data(source)
-    commands = re.compile(_CMD_START + _PREFIX + r"((?:[\w./-]+/)?(?:gh|curl|wget))\s+", re.M)
-    calls = []
-    for substitution in re.finditer(r'\$\((?!\()([^()]*)\)', scan):
-        reason = merge_queue_reason(source[substitution.start(1):substitution.end(1)])
-        if reason:
-            return reason
-    for match in commands.finditer(scan):
-        segment = source[match.end():statement_end(source, match.end())]
-        try:
-            words = shlex.split(segment)
-        except ValueError:
-            words = segment.split()
-        calls.append([os.path.basename(match.group(1)), *words])
-    for _, segment, offset in fanout_segments(scan):
-        for match in GH_RE.finditer(segment):
-            start = offset + match.end()
-            segment = source[start:statement_end(source, start)]
-            try:
-                words = shlex.split(segment)
-            except ValueError:
-                words = segment.split()
-            calls.append(['gh', *words])
-    lexer = shlex.shlex(source, posix=True, punctuation_chars=';&|()<>')
-    lexer.whitespace_split = True
-    groups, words = [], []
-    for word in lexer:
-        if word and all(c in ';&|()<>' for c in word):
-            groups.append(words)
-            words = []
-        else:
-            words.append(word)
-    groups.append(words)
-    for words in groups:
-        while words:
-            first = words.pop(0)
-            if re.match(r'^[A-Za-z_]\w*=', first) or first in ('do', 'then', 'else', 'if', 'elif', 'while', 'until', '!', '{'):
-                continue
-            if os.path.basename(first) in ('env', 'command', 'exec', 'nohup', 'time'):
-                while words and words[0].startswith('-'):
-                    option = words.pop(0)
-                    if option in ('-u', '--unset', '-C', '--chdir') and words:
-                        words.pop(0)
-                    elif option in ('-S', '--split-string') and words:
-                        words = shlex.split(words.pop(0)) + words
-                    elif option.startswith('--split-string='):
-                        words = shlex.split(option.split('=', 1)[1]) + words
-                continue
-            if os.path.basename(first) in ('sh', 'bash', 'zsh') and '-c' in words:
-                index = words.index('-c') + 1
-                reason = merge_queue_reason(words[index]) if index < len(words) else None
-                if reason:
-                    return reason
-            if os.path.basename(first) in ('gh', 'curl', 'wget'):
-                calls.append([os.path.basename(first), *words])
+    source = cmd.replace('\\\n', '')
+    daemon = _PREFIX + _INTERP + r"(?:\S*/)?tools/merge_queue/main\.py(?:\s+[^;&|\n]*)?"
+    if re.fullmatch(r"\s*" + daemon + r"\s*", source) and not re.search(r'[$`<>]', source):
+        return None
+    scan = re.sub(r"['\"`]", '', source)
+    repo_options = r"(?:(?:-R|--repo|--hostname)(?:=|\s*)\S+\s+)*"
+    direct = re.search(r"\bgh\s+" + repo_options + r"pr\s+" + repo_options + r"(?:merge|update-branch)\b", scan)
+    graphql = re.search(r"\bgh\s+" + repo_options + r"api\s+graphql\b", scan) and re.search(
+        r"\b(?:mergePullRequest|updatePullRequestBranch)\b", scan)
+    rest = False
+    for statement in re.split(r"[;|&\n()]", scan):
+        if not re.search(r"\bpulls/[^/\s]+/(?:merge|update-branch)\b", statement):
+            continue
+        methods = re.findall(r"(?:-X\s*|--(?:method|request)(?:=|\s+))(\S+)", statement)
+        if any(method.upper() != 'GET' for method in methods) or (
+                not methods and re.search(r"\bgh\s+" + repo_options + r"api\b", statement)):
+            rest = True
             break
-    endpoint = re.compile(r"(?:^|/)pulls/[^/\s]+/(?:update-branch|merge)(?:[?\s]|$)")
-    for program, *args in calls:
-        words, method, body = [], None, False
-        iterator = iter(args)
-        for word in iterator:
-            if word in ('-R', '--repo', '--hostname'):
-                next(iterator, None)
-            elif word.startswith(('--repo=', '--hostname=')) or word.startswith('-R'):
-                continue
-            elif word in ('-X', '--method', '--request'):
-                method = next(iterator, '').upper()
-            elif word.startswith(('--method=', '--request=')):
-                method = word.split('=', 1)[1].upper()
-            elif word.startswith('-X'):
-                method = word[2:].upper()
-            else:
-                body |= word in ('-f', '-F', '--field', '--raw-field', '--input', '-d', '--data', '--data-raw', '--data-binary', '--json', '--post-data', '--post-file') or word.startswith(('--field=', '--raw-field=', '--input=', '--data=', '--post-data=')) or word.startswith(('-f', '-F', '-d'))
-                words.append(word)
-        direct = program == 'gh' and words[:2] in (['pr', 'merge'], ['pr', 'update-branch'])
-        rest = any(endpoint.search(word.rstrip(')`')) for word in words) and (method or ('POST' if body else 'GET')) not in ('GET', 'HEAD', 'OPTIONS')
-        graphql = (program == 'gh' and words[:2] == ['api', 'graphql']
-                   and any(re.search(r'\bmutation\b', word) and re.search(r'\b(?:mergePullRequest|updatePullRequestBranch)\b', word) for word in words))
-        if direct or rest or graphql:
-            return ('MERGE QUEUE GUARD: only the existing merge-queue daemon may merge or update branches. '
-                    'Use tools/mq.sh PR... or tools/mq.sh --queue owner/repo queue-file log-file to enqueue pinned heads.')
+    if direct or rest or graphql:
+        return ('MERGE QUEUE GUARD: only the existing merge-queue daemon may merge or update branches. '
+                'Use tools/mq.sh PR... or tools/mq.sh --queue owner/repo queue-file log-file to enqueue pinned heads.')
     return None
 
 

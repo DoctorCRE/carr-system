@@ -177,7 +177,7 @@ LOOP_ALLOW = [
     ("heredoc-mentions-loop",
      "cat > notes.txt <<'EOF'\nfor pr in $(gh pr list); do gh pr view $pr; done\nEOF"),
     ("loop-greps-for-gh-text",
-     'for x in $(git ls-files ops); do grep -n "admin\\|update-branch\\|gh pr merge" "$x"; done'),
+     'for x in $(git ls-files ops); do grep -n "admin\\|update-branch\\|gh pr view" "$x"; done'),
     ("ghost-word","for g in ghost ghoul spirit wraith; do echo $g; done"),
 ]
 

@@ -950,7 +950,17 @@ class Queue:
             for repo in bounded_items('snapshot', repos):
                 if self.stopped:
                     return
-                self._tick_repo(repo)
+                self._observing_entries = set()
+                try:
+                    self._tick_repo(repo)
+                finally:
+                    with self.db:
+                        observed = tuple(self._observing_entries) or (-1,)
+                        placeholders = ','.join('?' for _ in observed)
+                        parked = f"SELECT id FROM entries WHERE repo=? AND tested IS NULL AND phase='pending' AND id NOT IN ({placeholders})"
+                        args = (repo, *observed)
+                        self.db.execute(f'UPDATE entries SET ci_since=NULL,ci_head=NULL WHERE id IN ({parked})', args)
+                        self.db.execute(f"DELETE FROM waits WHERE kind IN ('entry','mergeability') AND owner IN (SELECT 'entry:' || id FROM entries WHERE id IN ({parked}))", args)
 
     def _tick_repo(self, queued_repo):
         for e in bounded_items('snapshot', self.db.execute("SELECT * FROM entries WHERE repo=? AND phase IN ('pending','merging','merge_rejected','refreshing') ORDER BY id", (queued_repo,)).fetchall()):
@@ -984,9 +994,6 @@ class Queue:
                 if p['state'] != 'open':
                     self.report(e, 'closed', 'PR closed without merge', 'done')
                     continue
-                if e['tested'] is None and (p['head']['sha'] != e['approved'] or p.get('draft') or self.held(p) or p['base']['ref'] != 'main'):
-                    with self.db:
-                        self.db.execute("DELETE FROM waits WHERE owner=? AND kind='entry'", (f'entry:{e["id"]}',))
                 if p['head']['sha'] != e['approved']:
                     self.report(e, 'head_moved', 'Live head differs from the approved SHA',
                                 'superseded' if e['tested'] is None else None)
@@ -1000,6 +1007,7 @@ class Queue:
                 if p['base']['ref'] != 'main':
                     self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
                     continue
+                self._observing_entries.add(e['id'])
                 if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
                     if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
                         self.report(e, 'ci_timeout', 'Hosted checks did not turn green before the CI deadline', 'exhausted')
@@ -1086,6 +1094,7 @@ class Queue:
                 self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
                 return
             except GitHubReadPaused as exc:
+                self._observing_entries.add(e['id'])
                 self.wait(e, 'entry', 'github_paused', str(exc))
                 continue
             except MergeRejected as exc:

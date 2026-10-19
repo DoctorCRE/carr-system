@@ -113,6 +113,13 @@ class MergeHookTests(unittest.TestCase):
 
     def test_direct_mutations_are_denied_in_every_tool_shape(self):
         commands = [
+            "bash -lc 'gh pr merge 12'", "bash -lc 'env -i gh pr update-branch 12'",
+            'gh api repos/o/r/pulls/12/merge',
+            'gh api repos/o/r/pulls/12/update-branch --input payload.json',
+            'echo "gh pr merge 12"', "cat <<'EOF'\ngh pr merge 12\nEOF",
+            'gh api -X GET repos/o/r/pulls/12/merge; gh api repos/o/r/pulls/13/merge',
+            'gh api -X HEAD repos/o/r/pulls/12/merge',
+            'curl -X GET "$(gh api repos/o/r/pulls/12/merge)"',
             'gh pr merge 12 --squash', 'gh pr update-branch 12',
             'gh -Ro/r pr merge 12', 'gh -Ro/r pr update-branch 12',
             'bash -c \'env -i gh pr merge 12\'', 'echo "$(env -i gh pr merge 12)"',
@@ -133,6 +140,8 @@ class MergeHookTests(unittest.TestCase):
             'gh api "repos/o/r/pulls/$n/update-branch" -X PUT',
             'curl -X PUT https://api.github.com/repos/o/r/pulls/12/merge',
             'tools/mq.sh 12; gh pr merge 13',
+            'python3 tools/merge_queue/main.py --state "$(gh pr merge 12)"',
+            'echo tools/merge_queue/main.py; gh pr merge 12',
         ]
         with tempfile.TemporaryDirectory() as tmp:
             for tool, key in [('Bash', 'command'), ('exec_command', 'cmd'), ('functions.exec', 'cmd')]:
@@ -145,15 +154,16 @@ class MergeHookTests(unittest.TestCase):
                         self.assertEqual(result.returncode, 2, result.stderr)
                         self.assertIn('tools/mq.sh', result.stderr)
 
-    def test_queue_invocations_and_read_only_prose_are_allowed(self):
+    def test_queue_invocations_and_explicit_get_reads_are_allowed(self):
         for cmd in ['bash tools/mq.sh 12', 'R=o/r tools/mq.sh 12 13',
                     'tools/mq.sh --queue o/r queue.txt queue.log',
-                    'gh api repos/o/r/pulls/12/merge',
+                    'python3 tools/merge_queue/main.py --help',
                     'gh api -X GET repos/o/r/pulls/12/merge',
                     'gh api repos/o/r/pulls/12/merge --method=GET',
                     'curl -X GET https://api.github.com/repos/o/r/pulls/12/merge',
-                    'gh pr view 12', 'echo "gh pr merge 12"',
-                    "grep 'pulls/12/merge' file", "cat <<'EOF'\ngh pr merge 12\nEOF"]:
+                    "bash -lc 'gh api -X GET repos/o/r/pulls/12/merge'",
+                    'echo "$(gh api repos/o/r/pulls/12/merge -X GET)"',
+                    'gh pr view 12', "grep 'pulls/12/merge' file"]:
             with self.subTest(cmd=cmd), tempfile.TemporaryDirectory() as tmp:
                 result = subprocess.run([sys.executable, str(ROOT / 'hooks/github-burst-guard.py')],
                     input=json.dumps({'tool_name': 'Bash', 'tool_input': {'command': cmd}}),
