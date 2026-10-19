@@ -90,6 +90,9 @@ unreachable = ("could not reach the deployed Worker at https://api.doctorcre.com
                "The default path fails here rather than silently opening a direct database connection.\n")
 r = call_verb("add-loop", {}, runner=Runner(1, "", unreachable))
 check("an unreachable Worker is transient", r.kind == TRANSIENT and r.reply is None, r)
+check("an unreachable Worker preserves its transport cause instead of CLI guidance",
+      "fetch failed" in r.detail and "default path fails" not in r.detail, r.detail)
+
 
 r = call_verb("add-loop", {}, runner=Runner(1, "", "HTTP 503 from https://api.doctorcre.com/mcp: {}\n"))
 check("an HTTP 5xx from the Worker is transient", r.kind == TRANSIENT, r)
