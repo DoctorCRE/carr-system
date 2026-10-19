@@ -35,7 +35,7 @@ SPEC = importlib.util.spec_from_file_location("progress_board", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 BOARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BOARD)
-from progress_board_test_support import exercise_fields
+from progress_board_test_support import exercise_fields, seed_legacy_task
 
 def fixture_budget(fixture):
     return BOARD.repo_lib("github_rate_limit").GitHubReadBudget(
@@ -167,18 +167,6 @@ def iso(delta: timedelta = timedelta()) -> str:
     return (datetime.now(timezone.utc) - delta).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def seed_legacy_task(root, project, task_id, options):
-    """Import a synthetic old-format record before exercising legacy CLI updates."""
-    path = root / 'boards' / f'{project}.json'
-    state = json.loads(path.read_text())
-    if task_id not in state['tasks']:
-        args = BOARD.parser().parse_args(['task', project, task_id, *options])
-        metadata = BOARD.executor_metadata(args.executor)
-        state['tasks'][task_id] = {'created_at': BOARD.stamp(), 'title':args.title, 'executor':args.executor,
-            **{field:getattr(args,field) or value for field,value in zip(('provider','model','effort'),metadata)}}
-        path.write_text(json.dumps(state))
-
-
 class BoardCase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -219,7 +207,7 @@ class BoardCase(unittest.TestCase):
     def update_legacy_task(self, project, task_id, *args, **kwargs):
         # These v2/v3 regressions operate on imported legacy records. New dispatch
         # through the CLI requires a captured WR and is covered by hierarchy tests.
-        seed_legacy_task(self.root, project, task_id, args)
+        seed_legacy_task(BOARD, self.root, project, task_id, args)
         return self.run_board('task', project, task_id, *args, **kwargs)
 
     def read_state(self, project):
@@ -1581,7 +1569,7 @@ class CardColumns(unittest.TestCase):
 
     def board(self, *args, check=True):
         if args[0] == 'task':
-            seed_legacy_task(self.root, args[1], args[2], args[3:])
+            seed_legacy_task(BOARD, self.root, args[1], args[2], args[3:])
         return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=REPO, env=self.env,
                               text=True, capture_output=True, check=check)
 
@@ -2135,7 +2123,7 @@ class ReviewRound1420(BoardCase):
 
     def test_11_b_mutation_does_not_refresh_or_publish(self):
         self.run_board("init", "demo", "--title", "Demo")
-        seed_legacy_task(self.root, "demo", "a", ["--title", "A", "--executor", "Codex"])
+        seed_legacy_task(BOARD, self.root, "demo", "a", ["--title", "A", "--executor", "Codex"])
         with self.in_process(PROGRESS_BOARD_LOCAL_ONLY="1"), \
              patch.object(BOARD, "render", side_effect=AssertionError("local mutation refreshed the whole board")), \
              patch.object(BOARD, "publish_board", side_effect=AssertionError("local mutation published")):

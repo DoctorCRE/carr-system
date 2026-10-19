@@ -42,6 +42,12 @@ class CleanupTests(unittest.TestCase):
                 incident = watchdog.finding("vendor_release_fetch_error", "vendor:https://vendor.example/docs",
                                             "Vendor unavailable", config, url="https://vendor.example/docs")
                 effects = watchdog.Effects(root, config)
+                # Cleanup evaluates an imported legacy incident, not a new job dispatch.
+                board.main(['init', 'test', '--title', 'Synthetic incidents'])
+                existing = board.read_state('test')
+                existing['tasks'][effects.card(incident)] = {'title':'Vendor unavailable',
+                    'status':'blocked', 'executor':'watchdog'}
+                board.write_json(existing)
                 with patch.object(effects, "_record", return_value={"ok": True, "loop_id": "vendor-loop"}):
                     watchdog.reconcile(root, config, [incident], effects, 100)
                 vendor_card = effects.card(incident)
