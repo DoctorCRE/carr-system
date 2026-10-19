@@ -599,9 +599,9 @@ def resolve_replacement_binding(
         target, production, old, candidate, dict(source_manifest), dict(receipt), owner)
 
 
-def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
-    # Live names describe the candidate after a successful cutover, not the
-    # untouched old project. Its files alone define the rollback snapshot.
+def load_rollback_worker_values(
+    old: Any, prior_names: set[str],
+) -> dict[str, str | None]:
     values: dict[str, str | None] = {}
     for login_profile in PROFILES:
         file_profile = credential.profile(login_profile.label)
@@ -615,6 +615,7 @@ def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
         except credential.CredentialRefusal as exc:
             if (
                 str(exc) == "staging credential is absent"
+                and login_profile.secret_name not in prior_names
                 and (login_profile.created_by_migration or login_profile.label == "authority_joe")
             ):
                 # JSON null restores a binding that was absent before cutover.
@@ -625,6 +626,67 @@ def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
             raise ProvisioningRefusal(
                 "canonical old-staging rollback credential is not final")
         values[login_profile.secret_name] = stored.value
+    return values
+
+
+def prepare_worker_rollback(
+    binding: ReplacementBinding, *, capture: bool = False,
+) -> dict[str, str | None]:
+    """Load rollback values under the cutover lock, retaining pre-cutover names."""
+    root = replacement_credential_root(binding.target.candidate_operation_id)
+    path = root / "prior-worker-secret-names.json"
+    with WRANGLER_CONFIG.open("rb") as handle:
+        worker_name = tomllib.load(handle).get("env", {}).get("staging", {}).get("name")
+    if not isinstance(worker_name, str) or not worker_name:
+        raise ProvisioningRefusal("staging Worker name is not pinned")
+    identity = {
+        "schema": "staging-prior-worker-secret-names/v1",
+        "candidate_operation_id": str(binding.target.candidate_operation_id),
+        "prior_project_id": binding.old.project_id,
+        "prior_branch_id": binding.old.branch_id,
+        "prior_endpoint_id": binding.old.endpoint_id,
+        "prior_endpoint_host": binding.old.endpoint_host,
+        "cloudflare_account_id": CLOUDFLARE_ACCOUNT_ID,
+        "worker_name": worker_name,
+    }
+    exists = credential._safe_lstat(path) is not None
+    if exists:
+        try:
+            proof = json.loads(credential._secure_read(path))
+        except (ValueError, UnicodeError) as exc:
+            raise ProvisioningRefusal("prior Worker inventory proof is malformed") from exc
+        if not isinstance(proof, dict) or set(proof) != {*identity, "secret_names"} \
+                or any(proof.get(key) != value for key, value in identity.items()):
+            raise ProvisioningRefusal("prior Worker inventory proof identity disagrees")
+        names = proof["secret_names"]
+    elif capture:
+        names = sorted(read_worker_database_secret_names())
+    else:
+        raise ProvisioningRefusal("prior Worker inventory proof is absent")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names) \
+            or len(names) != len(set(names)) \
+            or not {"DATABASE_URL_READER", "DATABASE_URL_WRITER"} <= set(names) \
+            or not set(names) <= set(WORKER_DATABASE_SECRET_NAMES):
+        raise ProvisioningRefusal("prior Worker inventory proof secret names are not exact")
+    values = load_rollback_worker_values(binding.old, set(names))
+    if not exists:
+        credential._validate_private_directory(root)
+        temporary = root / f".prior-worker-secret-names-{uuid.uuid4()}.pending"
+        descriptor = os.open(
+            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                os.fchmod(handle.fileno(), 0o600)
+                json.dump({**identity, "secret_names": names}, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            # Link publication cannot replace an existing historical proof.
+            os.link(temporary, path)
+        finally:
+            temporary.unlink()
+        credential._fsync_directory(root)
     return values
 
 
@@ -1818,10 +1880,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.rollback_to_prior_staging:
-            rollback_values = load_rollback_worker_values(binding.old)
-            rollback_names = {name for name, value in rollback_values.items()
-                              if value is not None}
             with credential.exclusive_lock(worker_cutover_lock_path()):
+                rollback_values = prepare_worker_rollback(binding)
+                rollback_names = {name for name, value in rollback_values.items()
+                                  if value is not None}
                 rollback_worker_to_prior(
                     rollback_values, preserve=preserve_provider_scopes,
                     bulk=lambda values: bulk_worker_database_secrets(values),
@@ -1861,7 +1923,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         preserve_provider_scopes()
-        rollback_values = load_rollback_worker_values(binding.old)
+        with credential.exclusive_lock(worker_cutover_lock_path()):
+            rollback_values = prepare_worker_rollback(binding, capture=True)
         rollback_names = {name for name, value in rollback_values.items()
                           if value is not None}
         config_root = replacement_credential_root(target.candidate_operation_id)
