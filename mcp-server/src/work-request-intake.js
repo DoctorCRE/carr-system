@@ -431,7 +431,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
           `select * from ops.current_sourced_work_requests($1::text)
              /* work-request-intake:current */`, [tenant]);
         return { ok: true, items: result.rows.map(row => ({
-          human_ref: row.ref, title: row.title, state: row.state,
+          human_ref: row.ref, display_id: row.ref, title: row.title, state: row.state,
           source: { label: row.source_label, freshness: row.source_freshness },
           next_human_action: row.next_human_action,
         })) };

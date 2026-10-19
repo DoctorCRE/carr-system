@@ -21,6 +21,7 @@
       "**/*.test.mjs",
       "**/*.test.js"
     ],
+    "live_url": "https://api.doctorcre.com",
     "live_release_url": "https://api.doctorcre.com/release",
     "staging_candidate_operation_id": "b8d7f586-8c95-4f56-8547-3b4ca8056014",
     "performance_budget_ref": "ops/performance-budget-gate.py",
@@ -77,6 +78,7 @@
       "test/**",
       "reports/**"
     ],
+    "live_url": "https://app.doctorcre.com",
     "live_release_url": "https://app.doctorcre.com/app-release",
     "review_markers": [
       "independent review: pass",
