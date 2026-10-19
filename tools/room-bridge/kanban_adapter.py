@@ -401,7 +401,7 @@ def _flash_is_up() -> bool:
     import flash_wire
     if flash_wire.flashlib.is_switched_off():
         return False
-    return flash_wire.is_up() or (Path.home() / "Library/LaunchAgents/local.ds4-flash-next.plist").is_file()
+    return flash_wire.is_up()
 
 
 class QueueService:
@@ -431,27 +431,8 @@ class QueueService:
             reason = "capability_target_refused"
         elif row.get("overflow"):
             reason = "flash_busy_or_down"
-        elif (row.get("fallback") or row.get("jev_error")) and alias == "flash":
-            reason = "jev_abstained"
-        elif row["route"] == "script" and alias == "flash":
-            import flash_wire
-            paths, _, refusal = flash_wire.script_inputs(command.get("body") or "",
-                                                         roots=policy.get("script_data_roots") or [])
-            if refusal:
-                reason = "script_data_refused"
-            elif paths is None:
-                reason = "script_needs_data"
-        elif row["route"] == "code" and alias == "flash":
-            origin = f"{command.get('origin_channel')}:{command.get('origin_actor')}"
-            import flash_wire
-            spec, _, refusal = flash_wire.code_inputs(command.get("body") or "",
-                                                      roots=policy.get("code_project_roots") or [])
-            if origin not in (policy.get("code_task_origins") or []):
-                reason = "code_origin_untrusted"
-            elif refusal:
-                reason = "code_project_refused"
-            elif spec is None:
-                reason = "code_needs_project"
+        elif alias in {"flash", "flash-model"}:
+            reason = "flash_explicit_only"
         if reason:
             alias = targets.get("fallback")
         return {"target": alias, "route": row["route"], "model": row.get("model"), "effort": row.get("effort"),
