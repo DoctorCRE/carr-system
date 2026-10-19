@@ -72,6 +72,25 @@ spec.loader.exec_module(fixtures)
 
 
 class RetirementKeepTests(unittest.TestCase):
+    def test_local_keep_guards_do_not_spend_the_remote_pr_budget(self):
+        for condition in ('dirty', 'unpushed'):
+            with self.subTest(condition=condition):
+                fixture = fixtures.Fixture()
+                tree = fixture.tree('guarded')
+                if condition == 'dirty':
+                    (tree / 'file').write_text('keep these bytes')
+                else:
+                    fixture.commit('local only', cwd=tree)
+                fixture.age(tree)
+                provider = fixtures.FakeProvider()
+                with patch.object(provider, 'branch_pulls', wraps=provider.branch_pulls) as queries:
+                    report = fixture.reaper(provider=provider).run({'fixture/repo': fixture.repo},
+                        execute=True, local_only=True)
+                self.assertFalse(report['errors'], report)
+                self.assertTrue(tree.exists())
+                self.assertFalse(report['actions'], report)
+                queries.assert_not_called()
+
     def test_local_reaper_waits_for_competing_maintenance_then_makes_progress(self):
         import fcntl
         import threading
