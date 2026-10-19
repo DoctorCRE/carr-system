@@ -186,6 +186,30 @@ class ConsumerCompletion(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.cli_observations([{**proof, "observed_at": "not a timestamp"}])
 
+    def test_cli_rejects_nonobject_receipt_before_changing_task(self):
+        with tempfile.TemporaryDirectory() as root:
+            env = {**os.environ, "PROGRESS_BOARD_ROOT": root, "PROGRESS_BOARD_LOCAL_ONLY": "1",
+                   "PROGRESS_BOARD_SKIP_GH": "1", "PROGRESS_BOARD_SKIP_PROBE": "1"}
+
+            def run(*args):
+                return subprocess.run([sys.executable, str(Path(board.__file__)), *args],
+                                      env=env, text=True, capture_output=True)
+
+            self.assertEqual(run("init", "synthetic", "--title", "Synthetic rejection").returncode, 0)
+            self.assertEqual(run("task", "synthetic", "feature", "--title", "Before",
+                                 "--status", "running", "--executor", "Codex").returncode, 0)
+            path = Path(root) / "boards/synthetic.json"
+            before = path.read_bytes()
+            for proof in (None, [], ["pass"], "pass", 0, False):
+                with self.subTest(proof=proof):
+                    path.write_bytes(before)
+                    result = run("task", "synthetic", "feature", "--title", "After",
+                                 "--consumer-proof", json.dumps(proof))
+                    self.assertEqual(json.loads(path.read_text())["tasks"]["feature"]["title"], "Before")
+                    self.assertEqual(path.read_bytes(), before)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("JSON object", result.stderr)
+
     def test_refresh_keeps_each_bindings_latest_observation(self):
         task = self.proven_task()
         proof = task["consumer_proof"]
