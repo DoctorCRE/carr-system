@@ -26,7 +26,7 @@ def fixture():
                 queue.finish(job['card_id'], job['claim'], {'status': 'completed', 'model': 'gpt-6.1-sol', 'effort': 'high'}, actor='worker')
             queue.requeue(job['card_id'], stage='review', actor='runner', reason='Independent review requested')
             with patch('work_queue.time.time', return_value=300):
-                review = queue.claim(eligible_desks={'demo-builder'}, actor='reviewer', owner={})
+                review = queue.claim(eligible_desks={'demo-builder'}, card_id=job['card_id'], actor='reviewer', owner={})
             with patch('work_queue.time.time', return_value=360):
                 queue.finish(review['card_id'], review['claim'], {'status': 'completed'}, actor='reviewer')
             queue.update(job['card_id'], actor='reviewer', reason='Review round completed', findings=[
