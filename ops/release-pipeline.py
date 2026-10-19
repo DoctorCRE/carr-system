@@ -2399,8 +2399,10 @@ class Pipeline:
                 if command == "restore-candidate":
                     return 0
             prior = journal["prior"] if journal and (command == "restore-candidate" or journal["status"] != "restored") else live
-            if not isinstance(prior_sha, str) or prior["source_commit"] != prior_sha:
-                raise Blocked("candidate_prior", "restore target must equal the last released app main SHA in pipeline state")
+            recorded_prior = bool(journal and prior == journal["prior"])
+            if (not isinstance(prior_sha, str) or not SHA_RE.fullmatch(prior_sha)
+                    or (prior["source_commit"] != prior_sha and not recorded_prior)):
+                raise Blocked("candidate_prior", "restore target must match recorded main or the last released app main SHA")
             if journal and (command == "restore-candidate" or journal["status"] != "restored"):
                 if command == "restore-candidate" and live == journal["prior"]:
                     journal["status"] = "restored"
