@@ -700,6 +700,28 @@ commit;
             return provision.credential.StoredCredential(
                 "final", pathlib.Path("/fixture/final"), f"dsn-{role_name}",
                 "fixture-password", "legacy.example", 5432, "neondb")
+        provision.read_worker_database_secret_names = lambda: set(
+            provision.WORKER_DATABASE_SECRET_NAMES)
+        for missing_profile in provision.PROFILES:
+            if missing_profile.label in {"reader", "writer"}:
+                continue
+            def missing_live_credential(_paths, *, role_name, **_kwargs):
+                if role_name == missing_profile.login_role:
+                    raise provision.credential.CredentialRefusal("staging credential is absent")
+                return provision.credential.StoredCredential(
+                    "final", pathlib.Path("/fixture/final"), f"dsn-{role_name}",
+                    "fixture-password", "legacy.example", 5432, "neondb")
+            provision.credential.load_existing = missing_live_credential
+            try:
+                provision.load_rollback_worker_values(old)
+            except provision.credential.CredentialRefusal as exc:
+                check(f"lost canonical {missing_profile.label} refuses when its old Worker binding exists",
+                      str(exc) == "staging credential is absent")
+            else:
+                raise AssertionError(
+                    f"rollback accepted deletion of live {missing_profile.secret_name}")
+        provision.read_worker_database_secret_names = lambda: {
+            "DATABASE_URL_READER", "DATABASE_URL_WRITER"}
         provision.credential.load_existing = load_legacy_credential
         rollback_values = provision.load_rollback_worker_values(
             type("OldScope", (), {"endpoint_host": "legacy.example"})())
@@ -1267,6 +1289,9 @@ commit;
         provision.credential.load_existing = load_release_credential
         provision.bulk_worker_database_secrets = publish_release
         for release_number in (1, 2):
+            if release_number == 2:
+                check("second release begins with candidate Joe authority live, not an old canonical file",
+                      "CARR_DB_AUTHORITY_JOE_URL" in live_names)
             seed_reads = preserve_calls = 0
             orchestration_events.clear()
             stdout, stderr = io.StringIO(), io.StringIO()
