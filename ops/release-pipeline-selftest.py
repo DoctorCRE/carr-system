@@ -3581,6 +3581,26 @@ class AppLane(Base):
         cfg["app"]["enabled"] = True
         return cfg
 
+    def test_app_build_toolchain_tampering_refuses_production_publication(self):
+        self.fx.commit({"src/worker.js": "new main"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=self.cfg())
+        pipe.http = lambda _: {"source_commit": self.fx.base, "environment": "production"}
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv == ["npm", "run", "build"]:
+                self.fx.wrangler.write_text("changed after auth")
+            return result
+
+        runner.run = run
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertIn("wrangler-auth", runner.names())
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["step"], "blocked:toolchain_integrity")
+        self.assertNotIn("last_released_sha", self.fx.state().get("app", {}))
+
     def test_empty_app_checks_hold(self):
         self.fx.commit({"src/worker.js": "1"})
         runner = FakeRunner()
@@ -5254,6 +5274,43 @@ class TokenCheckWrangler(Base):
 
     def toolchain(self) -> Path:
         return self.fx.repo / "out/release-pipeline/toolchain"
+
+    def test_reused_toolchain_requires_its_recorded_content_digest(self):
+        for damage in ("binary", "dependency", "receipt", "escaping-link"):
+            with self.subTest(damage=damage):
+                self.tearDown()
+                self.setUp()
+                self.fx.commit({"mcp-server/src/a.js": "new main"})
+                home = self.fx.wrangler.parents[2]
+                if damage == "binary":
+                    self.fx.wrangler.write_text("changed publisher")
+                elif damage == "dependency":
+                    (home / "node_modules/injected.js").write_text("changed dependency")
+                elif damage == "receipt":
+                    home.with_name(home.name + ".sha256").unlink()
+                else:
+                    self.fx.wrangler.unlink()
+                    self.fx.wrangler.symlink_to("/bin/sh")
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "toolchain_integrity")
+
+    def test_reused_toolchain_checks_internal_symlink_target_content(self):
+        self.fx.commit({"mcp-server/src/a.js": "new main"})
+        home = self.fx.wrangler.parents[2]
+        target = home / "node_modules/publisher.js"
+        target.write_text(self.fx.wrangler.read_text())
+        self.fx.wrangler.unlink()
+        self.fx.wrangler.symlink_to("../publisher.js")
+        home.with_name(home.name + ".sha256").write_text(rp.toolchain_digest(home))
+        target.write_text("tampered symlink target")
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.records()[-1]["reason"], "toolchain_integrity")
 
     def test_whoami_uses_the_installed_toolchain_not_the_checkout(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
