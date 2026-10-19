@@ -3176,6 +3176,28 @@ class CandidateStaging(Base):
         self.assertTrue(roots)
         self.assertTrue(all(not root.exists() for root in roots))
 
+    def test_candidate_build_tampering_with_pinned_publisher_refuses_publication(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        tampered = []
+
+        def run(argv, *, cwd, log, env, **kwargs):
+            if argv == ["npm", "run", "build"]:
+                result = rp.Runner().run(
+                    ["node", "-e", "require('node:fs').writeFileSync(process.argv[1], 'tampered publisher')",
+                     str(self.fx.wrangler)], cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+                tampered.append(True)
+            return original(argv, cwd=cwd, log=log, env=env, **kwargs)
+
+        pipe.runner.run = run
+        with self.assertRaisesRegex(rp.Blocked, "toolchain"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertTrue(tampered)
+        self.assertFalse(any("CLOUDFLARE_API_TOKEN" in env for _, _, env in self.calls))
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+
     def test_candidate_build_cannot_replace_credentialed_provider(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
