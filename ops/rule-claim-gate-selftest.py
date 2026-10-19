@@ -94,6 +94,39 @@ class RuleClaimGateTest(unittest.TestCase):
                     call('Edit', file_path=str(self.root / path)),
                     assistant('I created a rule.'))).get('decision'), 'block')
 
+    def test_checkout_root_not_event_subdirectory_controls_paths(self):
+        nested = self.root / 'session'
+        nested.mkdir()
+        self.assertNotEqual(self.run_hook(self.turn(
+            call('Edit', file_path='../hooks/check.py'), assistant('I added a rule.')),
+            cwd=str(nested)).get('decision'), 'block')
+
+    def test_foreign_checkout_and_origin_lookalikes_do_not_count(self):
+        for index, origin in enumerate([
+            'https://github.com/jbookout/other.git',
+            'https://example.com/jbookout/carr-system.git',
+            'https://github.com/jbookout/carr-system-fake.git',
+            'https://github.com/other/carr-system.git',
+        ]):
+            with self.subTest(origin=origin):
+                root = self.checkout(f'foreign-{index}', origin)
+                self.assertEqual(self.run_hook(self.turn(
+                    call('Edit', file_path=str(root / 'hooks/check.py')),
+                    assistant('I saved a rule.'))).get('decision'), 'block')
+
+    def test_external_checkout_preserves_enforcement_path_restrictions(self):
+        root = self.checkout('external', 'ssh://git@github.com/jbookout/carr-system.git')
+        for path in ['hooks/check.py', 'tools/check.py', 'tests/check.py',
+                     '.github/workflows/check.yml', '.claude/settings.json',
+                     'mcp-server/src/check.js', 'hooks/lesson.md', 'tools/memory/check.py',
+                     'AGENTS.md', 'other/hooks/check.py']:
+            with self.subTest(path=path):
+                expected = 'block' if path in ['hooks/lesson.md', 'tools/memory/check.py',
+                                             'AGENTS.md', 'other/hooks/check.py'] else None
+                self.assertEqual(self.run_hook(self.turn(
+                    call('Write', file_path=str(root / path)),
+                    assistant('I saved a rule.'))).get('decision'), expected)
+
     def test_previous_turn_edit_does_not_count(self):
         records = [message('user', 'Old task'), call('Edit', file_path='hooks/old.py'),
                    *self.turn(assistant("I'll remember this."))]

@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import re
 import shlex
+import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -72,6 +73,25 @@ def asserted_claim(sentence):
     return not re.search(
         r"\b(?:if|unless|not|never|haven['’]t|hasn['’]t|hadn['’]t|would|could|should)\b",
         context, re.I)
+
+
+def enforcement_path(path):
+    directory = path.parent
+    while not directory.exists():
+        directory = directory.parent
+    try:
+        root = Path(subprocess.run(
+            ['git', '-C', str(directory), 'rev-parse', '--show-toplevel'],
+            check=True, capture_output=True, text=True, timeout=5).stdout.strip()).resolve()
+        origin = subprocess.run(
+            ['git', '-C', str(root), 'config', '--get', 'remote.origin.url'],
+            check=True, capture_output=True, text=True, timeout=5).stdout.strip()
+        if re.fullmatch(r'(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)'
+                        r'jbookout/carr-system(?:\.git)?/?', origin):
+            return path.relative_to(root).as_posix()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return ''
 
 
 def queued_dispatch(command, cwd):
@@ -203,10 +223,7 @@ def check_turn(event, records):
             ):
                 continue
             path = (Path(event['cwd']) / path).resolve()
-            try:
-                relative = path.relative_to(Path(event['cwd']).resolve()).as_posix()
-            except ValueError:
-                continue
+            relative = enforcement_path(path)
             if path.suffix.lower() != '.md' and (
                 relative == '.claude/settings.json' or relative.startswith(
                     ('hooks/', 'tools/', 'tests/', '.github/workflows/', 'mcp-server/src/'))
