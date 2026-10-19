@@ -39,14 +39,15 @@ def _read_paths(name, args):
         return []
     command = args.get('cmd') or args.get('command')
     if command is None and isinstance(args.get('code'), str):
-        paths = []
-        # Only literal shell commands submitted to the actual execution tool qualify.
-        for match in re.finditer(r'tools\.exec_command\(\{\s*cmd\s*:\s*("(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27)', args['code']):
+        # A wrapper's first unconditional, literal call can be paired with its first result.
+        # Later calls and arbitrary JavaScript need native execution evidence, not source matching.
+        match = re.match(r'\s*(?:// @exec:[^\n]*\n)?\s*text\(await tools\.exec_command\(\{\s*cmd\s*:\s*("(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27)', args['code'])
+        if match:
             try:
-                paths.extend(_read_paths('exec_command', {'cmd': ast.literal_eval(match[1])}))
+                return _read_paths('exec_command', {'cmd': ast.literal_eval(match[1])})
             except (ValueError, SyntaxError):
                 pass
-        return paths
+        return []
     if not isinstance(command, str):
         return []
     try:
@@ -73,8 +74,24 @@ def _success(output):
             return output['exit_code'] == 0
         return _success(output.get('content') or output.get('text'))
     if isinstance(output, list):
-        return _success('\n'.join(item.get('text', '') for item in output
-                                  if isinstance(item, dict) and isinstance(item.get('text'), str)))
+        for item in output:
+            if not isinstance(item, dict) or not isinstance(item.get('text'), str):
+                continue
+            text = item['text']
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                result = None
+            if isinstance(result, dict) and 'exit_code' in result:
+                return result['exit_code'] == 0
+            for match in re.finditer(r'\{"chunk_id"\s*:', text):
+                try:
+                    result, _ = json.JSONDecoder().raw_decode(text[match.start():])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(result.get('exit_code'), int):
+                    return result['exit_code'] == 0
+        return False
     if not isinstance(output, str):
         return False
     while '\\"' in output:
