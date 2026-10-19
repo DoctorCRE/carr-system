@@ -1,6 +1,6 @@
 """Store-backed selection for any hook event. Results are not delivery receipts.
 
-Missing scope is a data defect. Unanswered moment judgments remain unresolved;
+Missing scope is a data defect. Failed configured moment judgments remain unresolved;
 callers must handle incomplete results before claiming delivery coverage.
 """
 from __future__ import annotations
@@ -107,7 +107,7 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
             continue
         if structural_matches(condition, event.get("tool_name", ""), event.get("tool_input", {})):
             selected.append(row)
-        elif condition["moment"]:
+        elif condition["moment"] and judge is not None:
             moments.append(row)
     # Each batch stays within the existing semantic transport's 100k input
     # limit. An individual oversized record remains explicit and unresolved.
@@ -127,9 +127,6 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
         batch_size += row_size
     models = set()
     for batch in batches:
-        if judge is None:
-            unresolved.extend({"rule_id": r["id"], "reason": "moment_judge_not_configured"} for r in batch)
-            continue
         questions = _moment_questions(batch)
         try:
             answer = judge({"event": event, "rules": {r["id"][:8]: r for r in batch}}, questions)
@@ -158,6 +155,7 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
             "corpus_digest": catalog["corpus_digest"],
             "rules": sorted(selected, key=lambda r: r["id"]),
             "data_defects": defects, "unresolved": unresolved,
+            "selection_mode": "deterministic" if judge is None else "judged",
             "models": sorted(models), "complete": not defects and not unresolved}
 
 
@@ -166,7 +164,7 @@ def lookup(event: dict, *, runner: Callable = subprocess.run,
     """Read current sponsor-scoped records once and select for any hook event.
 
     The caller supplies its admitted, bounded cognition adapter for moments.
-    Without that adapter moment conditions remain unresolved. No credentials,
+    Without that adapter deterministic selection is the complete selection. No credentials,
     runtime settings, delivery receipts, or local rule snapshots are written.
     """
     env = {k: v for k, v in os.environ.items()

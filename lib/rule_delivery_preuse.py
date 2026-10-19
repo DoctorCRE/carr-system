@@ -8,6 +8,7 @@ from typing import Any
 from lib.rule_routes import within_cap
 
 LOOKUP_RECEIPT_SCHEMA = "rule-lookup-delivery/v1"
+LOOKUP_COMPLETE_INSTRUCTION = "Read every rule in rules before acting. Fetch the full text of every overflow id with standing-context rule_ids before acting."
 LOOKUP_INSTRUCTION = "Read every rule in rules before acting. Fetch the full text of every overflow id with standing-context rule_ids before acting. Selection gaps are advisory and do not deny this action; incomplete selection is not evidence of full rule coverage."
 IDENTITY_KEYS = frozenset({"agent_principal_id", "runtime_principal", "sponsoring_human_id"})
 SANCTIONED_LOCAL_SPONSORS = {"joe-local": "joe", "dell-local": "dell"}
@@ -209,7 +210,18 @@ def _claude_user_text(record: object) -> str | None:
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     if not isinstance(row, dict):
         return False
-    keys = set(row) - {'cards', 'unresolved_reasons'}
+    original = row
+    mode = row.get('selection_mode')
+    if mode is not None and mode not in ('deterministic', 'judged'):
+        return False
+    if mode == 'deterministic' and row.get('complete') is True:
+        if any(key in row for key in ('unresolved', 'unresolved_count', 'data_defects', 'models')):
+            return False
+        if (row.get('rules') or row.get('overflow')) and 'instruction' not in row:
+            return False
+        row = dict(row, data_defects=[], unresolved=[], models=[],
+                   instruction=row.get('instruction', LOOKUP_COMPLETE_INSTRUCTION))
+    keys = set(row) - {'cards', 'selection_mode'}
     if keys not in (LOOKUP_RECEIPT_KEYS, LOOKUP_RECEIPT_KEYS - {'unresolved'} | {'unresolved_count'}):
         return False
     if 'unresolved' in row:
@@ -220,13 +232,6 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
         unresolved_count = row['unresolved_count']
         if type(unresolved_count) is not int or unresolved_count < 0:
             return False
-    if 'unresolved_reasons' in row:
-        counts = row['unresolved_reasons']
-        if ('unresolved_count' not in row or not isinstance(counts, dict)
-                or any(not _nonempty(reason) or type(count) is not int or count <= 0
-                       for reason, count in counts.items())
-                or sum(counts.values()) != unresolved_count):
-            return False
     if 'cards' in row and (not isinstance(row['cards'], list) or not row['cards'] or len(row['cards']) > 3
                            or any(not isinstance(c, dict) or set(c) != CARD_KEYS
                                   or not all(_nonempty(c[k]) for k in CARD_KEYS) for c in row['cards'])):
@@ -236,7 +241,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
             or not _nonempty(row['session_id']) or not valid_local_identity(row['identity'])
             or type(row['complete']) is not bool or not isinstance(row['models'], list)
             or any(model != 'jev-1.13.0' for model in row['models'])
-            or row['instruction'] != LOOKUP_INSTRUCTION):
+            or row['instruction'] != (LOOKUP_COMPLETE_INSTRUCTION if mode and row['complete'] else LOOKUP_INSTRUCTION)):
         return False
     if ((row['client'] == 'codex' and not _nonempty(row['turn_id']))
             or (row['client'] == 'claude' and row['turn_id'] is not None)):
@@ -262,7 +267,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
         return False
     return (row['complete'] == (not row['data_defects'] and not unresolved_count)
             and row['source_digest'] == source_sha256(repo)
-            and within_cap(canonical(row).decode()) and row['receipt_id'] == receipt_id(row))
+            and within_cap(canonical(original).decode()) and original['receipt_id'] == receipt_id(original))
 
 
 def receipt_from_envelope(record: object) -> dict | None:

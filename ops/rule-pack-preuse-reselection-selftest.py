@@ -31,7 +31,7 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
-    def test_empty_lookup_with_selection_gaps_adds_zero_context_bytes(self):
+    def test_data_defects_remain_incomplete_at_pretooluse(self):
         gaps = [dict(id='22222222', statement='Moment rule.',
                      scope={'moment': 'Before review'}, personal_to=None),
                 dict(id='33333333', statement='Invalid scope.', scope={}, personal_to=None)]
@@ -39,13 +39,16 @@ class DeliveryTests(unittest.TestCase):
             for event in ('PreToolUse', 'UserPromptSubmit', 'Stop'):
                 output = self.invoke(gaps, event=event)
                 context = (output or {}).get('hookSpecificOutput', {}).get('additionalContext', '')
-                self.assertEqual(len(context.encode()), 0)
+                if event == 'PreToolUse':
+                    self.assertFalse(json.loads(context)['complete'])
+                else:
+                    self.assertEqual(len(context.encode()), 0)
             rows = [json.loads(line) for line in hook.GAP_LOG.read_text().splitlines()]
             self.assertEqual(len(rows), 3)
-            self.assertEqual(rows[0]['unresolved'][0]['rule_id'], '22222222')
+            self.assertEqual(rows[0]['unresolved'], [])
             self.assertEqual(rows[0]['data_defects'][0]['rule_id'], '33333333')
 
-    def test_matching_lookup_keeps_rules_without_unresolved_array(self):
+    def test_configured_judge_failure_keeps_rules_and_unresolved_entries(self):
         known = dict(id='11111111', statement='Inspect the current diff.',
                      scope={'tools': ['Bash']}, personal_to=None)
         gap = dict(id='22222222', statement='Moment rule.',
@@ -54,8 +57,7 @@ class DeliveryTests(unittest.TestCase):
             output = self.invoke([known, gap], event=event, judge=lambda *_: None)
             row = json.loads(output['hookSpecificOutput']['additionalContext'])
             self.assertEqual(row['rules'], [known])
-            self.assertNotIn('unresolved', row)
-            self.assertEqual(row['unresolved_count'], 1)
+            self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': 'moment_judgment_unavailable'}])
             self.assertFalse(row['complete'])
             self.assertTrue(validate_lookup_receipt(row, repo=REPO))
 
@@ -73,6 +75,7 @@ class DeliveryTests(unittest.TestCase):
         specific = out['hookSpecificOutput']
         self.assertNotIn('permissionDecision', specific)
         self.assertIn('RULE LOOKUP UNAVAILABLE', specific['additionalContext'])
+        self.assertFalse(json.loads(specific['additionalContext'])['complete'])
         self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False))
 
     def test_stop_never_blocks_on_lookup_failure(self):
@@ -115,6 +118,11 @@ class DeliveryTests(unittest.TestCase):
             self.assertNotIn('000000c8', text)
             self.assertLess(len(text.encode()), 1024)
             self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+            for change in ({'selection_mode': 'unknown'}, {'unresolved': []},
+                           {'data_defects': [{'reason': 'missing_scope'}]}, {'complete': False}):
+                bad = dict(row, **change)
+                bad['receipt_id'] = hook.receipt_id(bad)
+                self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
             self.assertFalse(hook.GAP_LOG.exists())
 
     def test_scope_defects_and_unavailable_judgment_deliver_known_matches_without_denial(self):
@@ -138,8 +146,7 @@ class DeliveryTests(unittest.TestCase):
                 self.assertEqual(row['rules'], [known])
                 self.assertFalse(row['complete'])
                 if issue_key == 'unresolved':
-                    self.assertNotIn('unresolved', row)
-                    self.assertEqual(row['unresolved_count'], 1)
+                    self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': reason}])
                 else:
                     self.assertEqual(row[issue_key], [{'rule_id': '22222222', 'reason': reason}])
                 self.assertNotIn('Must not broadcast', specific['additionalContext'])
@@ -370,7 +377,7 @@ class CardDeliveryTests(unittest.TestCase):
             raise TimeoutError('provider detail')
         moment = self.covered('24e10ee8', scope={'moment': 'Before a retry loop'})
         row = self.receipt(self.invoke([self.UNCOVERED, moment], judge=unavailable))
-        self.assertEqual(row['unresolved_count'], 0)
+        self.assertEqual(row['unresolved'], [])
         self.assertTrue(row['complete'])
 
     def test_cards_are_sent_once_per_context(self):
