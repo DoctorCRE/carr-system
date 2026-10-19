@@ -66,6 +66,54 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def test_consumer_proof_backlog_fits_without_losing_open_cards_or_stage_events(self):
+        tasks = {}
+        expected_histories = {}
+        for n in range(605):
+            stage = "live" if n < 278 else "review" if n < 282 else "build" if n < 305 else "queued" if n < 310 else "merged"
+            status = "done" if n < 278 else "review" if n < 282 else "running" if n < 305 else "queued" if n < 310 else "review"
+            if n >= 492:
+                status = "superseded"
+            event_count = 186 if n == 0 else 3 if n <= 275 else 2
+            if n < 278:
+                event_count -= 1
+            history = [{"stage": "queued" if i % 2 == 0 else "build",
+                        "entered_at": f"2026-10-18T{(i // 60):02d}:{(i % 60):02d}:00+00:00"}
+                       for i in range(event_count)]
+            history[-1]["stage"] = stage
+            task = {"title": f"Synthetic publication task {n:03d} with representative board title",
+                    "status": status, "stage": stage, "executor": "codex",
+                    "provider": "openai", "model": "gpt-6", "effort": "high",
+                    "repo": "jbookout/carr-system", "pr": 2000 + n,
+                    "pr_head": f"{n:040x}", "pr_checks": "1 pass · 0 pending · 0 fail",
+                    "pr_url": f"https://github.com/jbookout/carr-system/pull/{2000 + n}",
+                    "created_at": "2026-10-18T00:00:00+00:00", "updated_at": "2026-10-18T04:00:00+00:00",
+                    "stage_entered_at": history[-1]["entered_at"], "stage_history": history}
+            if n < 30:
+                task["summary"] = "Keep board publication reliable while retaining delivery evidence."
+            tasks[f"task-{n}"] = task
+            expected_histories[f"task-{n}"] = [*history]
+            if n < 278:
+                expected_histories[f"task-{n}"].append({"stage": "review", "entered_at": task["updated_at"]})
+        state = {"project": "carr-v5", "tasks": tasks}
+        before = copy.deepcopy(state)
+
+        snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
+
+        self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_BUDGET)
+        self.assertTrue({f"task-{n}" for n in range(310)} <= snapshot["tasks"].keys())
+        for task_id, card in snapshot["tasks"].items():
+            task = tasks[task_id]
+            with self.subTest(task_id=task_id):
+                for field in ("title", "summary", "executor", "provider", "model", "effort", "repo", "pr", "pr_head", "pr_checks", "pr_url"):
+                    self.assertEqual(card.get(field), task.get(field))
+                self.assertEqual(card["stage"], expected_histories[task_id][-1]["stage"])
+                self.assertEqual([(entry["stage"], datetime.fromisoformat(entry["entered_at"])) for entry in card["stage_history"]],
+                                 [(entry["stage"], datetime.fromisoformat(entry["entered_at"])) for entry in expected_histories[task_id]])
+                self.assertEqual(datetime.fromisoformat(board.stage_entered_at(card)),
+                                 datetime.fromisoformat(expected_histories[task_id][-1]["entered_at"]))
+        self.assertEqual(state, before, "publication must preserve full local source records")
+
     def test_app_evidence_and_inline_question_survive_projection(self):
         task = {"title": "Review", "status": "review", "stage": "review", "pr": 1553,
                 "repo": "jbookout/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
