@@ -72,6 +72,18 @@ spec.loader.exec_module(fixtures)
 
 
 class RetirementKeepTests(unittest.TestCase):
+    def test_identity_readback_does_not_resolve_other_worktree_paths(self):
+        fixture = fixtures.Fixture()
+        tree = fixture.tree('target')
+        reaper = fixture.reaper()
+        entries = [{'path': str(fixture.base / f'unrelated-{index}')} for index in range(400)]
+        entries.append({'path': str(tree), 'head': 'a' * 40, 'branch': 'target'})
+        with patch.object(fixtures.hook, 'worktree_entries', return_value=entries), \
+             patch.object(Path, 'resolve', autospec=True, side_effect=Path.resolve) as resolve:
+            identity = reaper.tree_identity(fixture.repo, tree)
+        self.assertEqual(identity, {'head': 'a' * 40, 'branch': 'target', 'detached': False})
+        self.assertLessEqual(resolve.call_count, 1, 'unrelated paths must not spend the staging budget')
+
     def test_local_keep_guards_do_not_spend_the_remote_pr_budget(self):
         for condition in ('dirty', 'unpushed'):
             with self.subTest(condition=condition):
