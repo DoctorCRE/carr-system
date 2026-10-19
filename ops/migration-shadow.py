@@ -13,7 +13,9 @@ THE RUN, all on a throwaway loopback cluster this script creates and removes:
   3. tools/migrate.py --apply: every migration not in that ledger applies, in
      order, exactly as the release pipeline would apply it to production.
   4. bin/schema-snapshot.sh --from-disposable-local dumps the result.
-  5. Compare with the committed db/schema.sql. Normalize ledger apply times,
+  5. Restore the export into a fresh database, compare reviewed seed rows with
+     their source, and prove business-data isolation.
+  6. Compare with the committed db/schema.sql. Normalize ledger apply times,
      the admitted work-request sequence, control verification/update times and
      SCAC seal/registration times. Structure, seed content, ledger membership
      and checksums must match.
@@ -67,6 +69,7 @@ def _load(name: str, path: pathlib.Path) -> ModuleType:
 
 gate = _load("migration_safety_gate", REPO / "ops" / "migration-safety-gate.py")
 local_pg = _load("local_pg_ci", REPO / "ops" / "local-pg-ci.py")
+seeds = _load("snapshot_seeds", REPO / "ops" / "snapshot-seeds.py")
 # The one operational value ops/schema-snapshot-currentness.py already admits.
 WORK_REQUEST_SEQUENCE_VALUE = re.compile(
     _load("schema_snapshot_currentness", REPO / "ops" / "schema-snapshot-currentness.py")
@@ -293,6 +296,18 @@ def shadow(base: str, bindir: pathlib.Path, work: pathlib.Path) -> tuple[str, st
         candidate = work / "candidate.sql"
         run([REPO / "bin/schema-snapshot.sh", "--from-disposable-local", dsn,
              "--output-candidate", candidate], env, "bin/schema-snapshot.sh", log)
+        run([bindir / "createdb", "-h", "127.0.0.1", "-p", str(port), "-U", "carr_ci", "rebuilt"],
+            env, "createdb snapshot rebuild", log)
+        rebuilt = dsn.rsplit("/", 1)[0] + "/rebuilt"
+        run([bindir / "psql", rebuilt, "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f", candidate],
+            {**env, "PGOPTIONS": "--client-min-messages=warning"}, "restore refreshed db/schema.sql", log)
+        try:
+            seeds.compare(REPO, [str(bindir / "psql"), dsn], [str(bindir / "psql"), rebuilt])
+        except (ValueError, subprocess.CalledProcessError) as exc:
+            message = str(exc) if isinstance(exc, ValueError) else "could not compare rebuilt seed rows"
+            raise StepFailed(message) from exc
+        run([bindir / "psql", rebuilt, "-X", "-v", "ON_ERROR_STOP=1", "-q", "-f",
+             REPO / "pipelines/staging-isolation-proof.sql"], env, "snapshot rebuild isolation", log)
     finally:
         try:
             fixture.close()
