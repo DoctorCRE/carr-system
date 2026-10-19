@@ -89,7 +89,7 @@ def validate_launchd_catalog(
     actual_service_launchd = [tuple(row) for row in cur.execute(
         """select s.key,se.environment,se.deploy_mechanism,s.retired_at is not null
              from ops.service s join ops.service_environment se on se.service_id=s.id
-            where se.deploy_mechanism like 'ops/launchd/%.plist'
+            where s.retired_at is null and se.deploy_mechanism like 'ops/launchd/%.plist'
             order by s.key,se.environment,se.deploy_mechanism"""
     ).fetchall()]
     expected_active_service_launchd = [(*row, False) for row in expected_service_launchd]
@@ -219,8 +219,8 @@ def main() -> int:
             cur.execute("savepoint wrong_service_path_probe")
             cur.execute(
                 """update ops.service_environment se set deploy_mechanism='ops/launchd/wrong.plist'
-                     from ops.service s where s.id=se.service_id and s.key='rules-refresh'
-                       and se.deploy_mechanism='ops/launchd/com.carr.rules-refresh.plist'"""
+                     from ops.service s where s.id=se.service_id and s.key='partner-ping'
+                       and se.deploy_mechanism='ops/launchd/com.carr.partner-ping.plist'"""
             )
             try:
                 validate_launchd_catalog(
@@ -236,7 +236,7 @@ def main() -> int:
             cur.execute("savepoint wrong_service_environment_probe")
             cur.execute(
                 """update ops.service_environment se set environment='local'
-                     from ops.service s where s.id=se.service_id and s.key='rules-refresh'
+                     from ops.service s where s.id=se.service_id and s.key='partner-ping'
                        and se.environment='production'"""
             )
             try:
@@ -251,7 +251,7 @@ def main() -> int:
             cur.execute("release savepoint wrong_service_environment_probe")
 
             cur.execute("savepoint retired_service_probe")
-            cur.execute("update ops.service set retired_at=now() where key='rules-refresh'")
+            cur.execute("update ops.service set retired_at=now() where key='partner-ping'")
             try:
                 validate_launchd_catalog(
                     cur, expected_launchd, expected_service_launchd
@@ -270,7 +270,7 @@ def main() -> int:
             )
             cur.execute(
                 """insert into ops.service_environment(service_id,environment,deploy_mechanism)
-                    select id,'local','ops/launchd/com.carr.rules-refresh.plist'
+                    select id,'local','ops/launchd/com.carr.partner-ping.plist'
                       from ops.service where key='siep11-rogue'"""
             )
             try:
