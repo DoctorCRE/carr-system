@@ -212,7 +212,7 @@ class PostgresCLI(unittest.TestCase):
             ('null-status-party', 'active', None, None),
             ('null-status-dnc-party', 'do_not_contact', None, None),
             ('null-status-merged-party', 'active', '1', None),
-            ('null-status-deleted-party', 'active', None, 'now()'),
+            ('null-status-deleted-party', 'active', None, '2026-01-01T00:00:00Z'),
             ('closed-roster-party', 'active', None, None),
         ]
         clients = [
@@ -224,12 +224,12 @@ class PostgresCLI(unittest.TestCase):
             ('closed-roster-client', 'closed-roster-party', 'closed', 'C-CLOSED', None),
         ]
         with psycopg.connect(self.dsn, autocommit=True) as conn:
-            conn.execute("update client set status='closed' where id between '1' and '45'")
+            conn.execute("update client set status='closed' where id in (select i::text from generate_series(1,45) i)")
             for party_id, state, merged_into, deleted_at in parties:
                 conn.execute(
                     "insert into party(id, name, contact_state, merged_into, deleted_at) "
-                    f"values (%s, 'Synthetic', %s, %s, {deleted_at or 'null'})",
-                    (party_id, state, merged_into))
+                    "values (%s, 'Synthetic', %s, %s, %s)",
+                    (party_id, state, merged_into, deleted_at))
             for client in clients:
                 conn.execute(
                     "insert into client(id, party_id, status, roster_ref, merged_into) "
@@ -248,7 +248,7 @@ class PostgresCLI(unittest.TestCase):
             with psycopg.connect(self.dsn, autocommit=True) as conn:
                 conn.execute("delete from client where id like 'null-status-%' or id='closed-roster-client'")
                 conn.execute("delete from party where id like 'null-status-%' or id='closed-roster-party'")
-                conn.execute("update client set status='engaged' where id between '1' and '45'")
+                conn.execute("update client set status='engaged' where id in (select i::text from generate_series(1,45) i)")
 
     def test_reader_cli_budget_window_tombstones_and_failure(self):
         contact = self.run_cli('contact')
