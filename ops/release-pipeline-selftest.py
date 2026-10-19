@@ -556,6 +556,32 @@ class GitFetchDiagnostics(Base):
         self.assertNotIn(secret, log + failed.exception.detail)
         self.assertIn("[REDACTED]", log)
 
+    def test_fetch_diagnostics_redact_query_tokens_and_preserve_normal_urls(self):
+        opaque = "syntheticOpaqueFetchValue0123456789abcdef0"
+        cases = (
+            ("access_token=fixture-access-value&service=git-upload-pack",
+             "access_token=[REDACTED]&service=git-upload-pack"),
+            (f"{opaque}&service=git-upload-pack", "[REDACTED]&service=git-upload-pack"),
+            ("service=git-upload-pack&depth=1", "service=git-upload-pack&depth=1"),
+        )
+        for query, expected_query in cases:
+            with self.subTest(query=query):
+                pipe = self.fx.pipeline(FakeRunner())
+                url = f"https://example.invalid/app.git?{query}"
+                expected_url = f"https://example.invalid/app.git?{expected_query}"
+                error = f"fatal: unable to access '{url}': Authentication failed"
+                result = subprocess.CompletedProcess([], 128, url.encode(), error.encode())
+                with mock.patch.object(rp.subprocess, "run", return_value=result):
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", url, self.fx.base)
+                log = Path(failed.exception.log)
+                self.assertEqual(log.read_text().count(expected_url), 3)
+                self.assertEqual(failed.exception.detail,
+                                 f"fatal: unable to access '{expected_url}': Authentication failed")
+                if query != expected_query:
+                    self.assertNotIn(url, log.read_text() + failed.exception.detail)
+                log.unlink()
+
     def test_dry_run_fetch_writes_no_state_or_logs(self):
         pipe = self.fx.pipeline(FakeRunner(), dry_run=True)
         before = {path.relative_to(pipe.store.root): path.read_bytes()
