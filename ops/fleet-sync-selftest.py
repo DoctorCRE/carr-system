@@ -276,6 +276,336 @@ def test_dirty_tree_refuses():
     print("PASS  dirty tree refuses, names the file, destroys nothing")
 
 
+def test_landed_residue_refuses_without_restoring():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        path = Path(b, "f.txt")
+        path.write_text("base\nnewer\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "landed upstream: f.txt" in r.stdout, r.stdout
+        assert path.read_text() == "base\nnewer\n", "landed residue was discarded"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  landed residue is reported and refused without restoring files")
+
+
+def test_current_dirty_checkout_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "pull", "-q", "--ff-only", "origin", "main")
+        path = Path(b, "f.txt")
+        path.write_text("uncommitted work on current main\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout
+        assert path.read_text() == "uncommitted work on current main\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  current dirty checkout refuses before installing wiring")
+
+
+def git_edit_env(tmp, clone, command, contents, staged=False):
+    """Inject one editor action at a Git subprocess, then run real Git."""
+    stubs = Path(tmp, "git-stubs")
+    stubs.mkdir()
+    marker = Path(tmp, "editor-ran")
+    real_git = shutil.which("git", path=ENV.get("PATH"))
+    wrapper = stubs / "git"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        f"marker = Path({str(marker)!r})\n"
+        f"if sys.argv[1] == {command!r} and not marker.exists():\n"
+        f"    Path({str(Path(clone, 'f.txt'))!r}).write_text({contents!r})\n"
+        "    marker.touch()\n"
+        + ("    writer_env = os.environ.copy()\n"
+           "    writer_env.pop('GIT_INDEX_FILE', None)\n"
+           f"    staged = subprocess.run([{real_git!r}, 'add', 'f.txt'], env=writer_env, capture_output=True, text=True)\n"
+           f"    Path({str(Path(tmp, 'stage-result'))!r}).write_text(str(staged.returncode))\n"
+           "    if staged.returncode:\n"
+           "        print(staged.stderr, file=sys.stderr)\n"
+           "        sys.exit(staged.returncode)\n"
+           if staged else "")
+        + f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
+    )
+    wrapper.chmod(0o755)
+    return {"PATH": str(stubs) + os.pathsep + ENV.get("PATH", "")}, marker
+
+
+def test_concurrent_staged_landed_bytes_refuse():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        env, marker = git_edit_env(tmp, b, "merge-base", "base\nnewer\n", staged=True)
+        r = run_sync(b, env)
+        assert marker.exists(), "the concurrent editor never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr
+        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+        assert git(b, "show", ":f.txt") == "base\nnewer"
+        assert git(b, "diff", "--cached", "--name-only") == "f.txt"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert "stub installer" not in r.stdout
+    print("PASS  staged landed bytes appearing after preflight refuse and stay staged")
+
+
+def test_conflicting_staging_at_merge_entry_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        env, marker = git_edit_env(tmp, b, "merge", "concurrent staged work\n", staged=True)
+        r = run_sync(b, env)
+        assert marker.exists(), "the late index writer never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert Path(tmp, "stage-result").read_text() == "0"
+        assert "f.txt" in r.stdout + r.stderr
+        assert Path(b, "f.txt").read_text() == "concurrent staged work\n"
+        assert git(b, "show", ":f.txt") == "concurrent staged work"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert not Path(b, ".git", "index.lock").exists()
+        assert "stub installer" not in r.stdout
+    print("PASS  conflicting staging at merge entry refuses and stays staged")
+
+
+def test_post_merge_edit_refuses_wiring_install():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        hook = Path(b, ".git/hooks/post-merge")
+        hook.write_text("#!/bin/sh\nprintf 'concurrent editor work\\n' > f.txt\n")
+        hook.chmod(0o755)
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr
+        assert "refusing wiring install" in r.stderr
+        assert "stub installer" not in r.stdout
+        assert Path(b, "f.txt").read_text() == "concurrent editor work\n"
+        assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
+        assert behind(b) == 0
+    print("PASS  post-merge editor work refuses wiring install and preserves content")
+
+
+def test_interrupted_sync_leaves_git_usable():
+    for sig in ("SIGTERM", "SIGKILL"):
+        for phase in ("before-merge", "post-merge-hook"):
+            with tempfile.TemporaryDirectory() as tmp:
+                b = build(tmp)
+                head = git(b, "rev-parse", "HEAD")
+                stubs = Path(tmp, "git-stubs")
+                stubs.mkdir()
+                real_git = shutil.which("git", path=ENV.get("PATH"))
+                wrapper = stubs / "git"
+                wrapper.write_text(
+                    f"#!{sys.executable}\n"
+                    "import os, signal, sys\n"
+                    "if sys.argv[1] == 'merge':\n"
+                    "    os.environ['FLEET_HELPER_PID'] = str(os.getppid())\n"
+                    + (f"    os.kill(os.getppid(), signal.{sig})\n    sys.exit(128)\n"
+                       if phase == "before-merge" else "")
+                    + f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n")
+                wrapper.chmod(0o755)
+                if phase == "post-merge-hook":
+                    hook = Path(b, ".git/hooks/post-merge")
+                    hook.write_text('#!/bin/sh\nkill -' + sig.removeprefix("SIG")
+                                    + ' "$FLEET_HELPER_PID"\n')
+                    hook.chmod(0o755)
+                r = run_sync(b, {"PATH": str(stubs) + os.pathsep + ENV.get("PATH", "")})
+                assert r.returncode != 0, r.stdout + r.stderr
+                assert not Path(b, ".git/index.lock").exists(), f"{sig} {phase}: stale lock"
+                assert (git(b, "rev-parse", "HEAD") != head) == (phase == "post-merge-hook")
+                assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}"), \
+                    f"{sig} {phase}: HEAD and index diverged"
+                git(b, "add", "f.txt")
+                retry = run_sync(b)
+                assert retry.returncode == 0, retry.stdout + retry.stderr
+                assert behind(b) == 0
+            print(f"PASS  {sig} {phase} leaves no lock, matching HEAD/index, usable add and retry")
+
+
+def test_existing_index_lock_refuses_without_stealing():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        before = tracked_state(b)
+        lock = Path(b, ".git", "index.lock")
+        lock.write_bytes(b"another writer owns this lock\n")
+        r = run_sync(b)
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "index.lock" in r.stdout + r.stderr
+        assert lock.read_bytes() == b"another writer owns this lock\n"
+        assert tracked_state(b) == before
+        assert "stub installer" not in r.stdout
+    print("PASS  an existing index lock refuses without stealing or changing work")
+
+
+def test_native_merge_supports_split_index():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "update-index", "--split-index")
+        r = run_sync(b)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
+        assert git(b, "status", "--porcelain", "--untracked-files=no") == ""
+        assert not Path(b, ".git", "index.lock").exists()
+        Path(b, "f.txt").write_text("next staged change\n")
+        git(b, "add", "f.txt")
+        assert git(b, "show", ":f.txt") == "next staged change"
+    print("PASS  native merge keeps split index consistent and admits the next writer")
+
+
+def test_concurrent_merge_conflict_refuses_and_reports():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        env, marker = git_edit_env(tmp, b, "merge", "concurrent work\n")
+        r = run_sync(b, env)
+        assert marker.exists(), "the late concurrent editor never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr, "Git's refusal must name the conflicting file"
+        assert Path(b, "f.txt").read_text() == "concurrent work\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  late conflicting edit refuses and reports Git's original diagnostic")
+
+
+def test_ignored_incoming_collision_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "scratch.txt").write_text("incoming tracked content\n")
+        git(a, "add", "scratch.txt")
+        git(a, "commit", "-qm", "track scratch")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, ".git", "info", "exclude").write_text("scratch.txt\n")
+        Path(b, "scratch.txt").write_text("local ignored work\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode != 0, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "scratch.txt" in r.stdout + r.stderr
+        assert Path(b, "scratch.txt").read_text() == "local ignored work\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  ignored incoming collision refuses and preserves local content")
+
+
+def tracked_state(clone):
+    return (git(clone, "rev-parse", "HEAD"), git(clone, "ls-files", "--stage"),
+            git(clone, "diff", "--binary"), git(clone, "diff", "--cached", "--binary"))
+
+
+def test_intermediate_landed_residue_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "f.txt").write_text("base\nnewer\nnewest\n")
+        git(a, "commit", "-qam", "newest")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "landed upstream: f.txt" in r.stdout, r.stdout
+        assert tracked_state(b) == before
+        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+    print("PASS  residue matching an intermediate upstream commit stays untouched")
+
+
+def test_landed_residue_beside_real_work_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "pull", "-q", "--ff-only", "origin", "main")
+        a = Path(tmp, "A")
+        Path(a, "new.txt").write_text("incoming\n")
+        git(a, "add", "new.txt")
+        git(a, "commit", "-qm", "new file")
+        git(a, "push", "-q", "origin", "main")
+        git(b, "rm", "f.txt")
+        Path(b, "new.txt").write_text("incoming\n")
+        git(b, "add", "-N", "new.txt")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout and "new.txt" in r.stdout, r.stdout
+        assert tracked_state(b) == before
+        assert not Path(b, "f.txt").exists()
+        assert Path(b, "new.txt").read_text() == "incoming\n"
+    print("PASS  landed bytes beside a staged deletion preserve both files and index")
+
+
+def test_staged_landed_residue_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        git(b, "add", "f.txt")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert tracked_state(b) == before
+    print("PASS  staged landed residue stays staged")
+
+
+def test_staged_and_unstaged_versions_refuse():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("staged work\n")
+        git(b, "add", "f.txt")
+        Path(b, "f.txt").write_text("unstaged work\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert tracked_state(b) == before
+        assert git(b, "show", ":f.txt") == "staged work"
+        assert Path(b, "f.txt").read_text() == "unstaged work\n"
+    print("PASS  distinct staged and unstaged versions both survive refusal")
+
+
+def test_landed_residue_reedited_during_proof_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        env, marker = git_edit_env(tmp, b, "hash-object", "edited during proof\n")
+        r = run_sync(b, env)
+        assert marker.exists(), "the editor never interrupted residue diagnosis"
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert Path(b, "f.txt").read_text() == "edited during proof\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+    print("PASS  landed residue reedited during proof is refused without restoring")
+
+
+def test_untracked_incoming_collision_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "new.txt").write_text("incoming\n")
+        git(a, "add", "new.txt")
+        git(a, "commit", "-qm", "new file")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, "new.txt").write_text("local untracked work\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "new.txt" in r.stdout + r.stderr
+        assert tracked_state(b) == before
+        assert Path(b, "new.txt").read_text() == "local untracked work\n"
+    print("PASS  untracked incoming collision refuses without touching local content")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -733,6 +1063,22 @@ def main():
         print(f"fleet-sync-selftest: {SCRIPT} missing", file=sys.stderr)
         return 1
     test_dirty_tree_refuses()
+    test_landed_residue_refuses_without_restoring()
+    test_current_dirty_checkout_refuses()
+    test_concurrent_staged_landed_bytes_refuse()
+    test_conflicting_staging_at_merge_entry_refuses()
+    test_post_merge_edit_refuses_wiring_install()
+    test_interrupted_sync_leaves_git_usable()
+    test_existing_index_lock_refuses_without_stealing()
+    test_native_merge_supports_split_index()
+    test_concurrent_merge_conflict_refuses_and_reports()
+    test_ignored_incoming_collision_refuses()
+    test_intermediate_landed_residue_refuses()
+    test_landed_residue_beside_real_work_refuses()
+    test_staged_landed_residue_refuses()
+    test_staged_and_unstaged_versions_refuse()
+    test_landed_residue_reedited_during_proof_refuses()
+    test_untracked_incoming_collision_refuses()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
