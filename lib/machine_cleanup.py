@@ -95,7 +95,7 @@ def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
     try:
         import sys
         sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
-        from storage_hygiene import logical_allocated_bytes, Candidate
+        from storage_hygiene import allocated_bytes_evidence
         clone_paths = [p for p in Path(tmp_root).glob('room-codex-*') if p.is_dir() and not p.is_symlink()]
         # Staged clones still occupy the volume until their retention is resolved.
         clone_paths.extend(p for p in (Path(tmp_root) / '_to_delete').glob('room-codex-*') if p.is_dir() and not p.is_symlink())
@@ -103,11 +103,15 @@ def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
         if user_tmp_root is not None:
             measurements.append(('user_temp_bytes', [Path(user_tmp_root)], policy['user_temp_bytes_threshold']))
         for code, paths, threshold in measurements:
-            size = logical_allocated_bytes([Candidate(code, p, 0) for p in paths], 10)
-            if size is None:
-                rows.append({'code': code + '_unavailable', 'detail': code + ' size evidence unavailable'})
-            elif size > threshold:
-                rows.append({'code': code, 'detail': f'{code}: {size} allocated bytes exceed {threshold}'})
+            measurement = allocated_bytes_evidence(paths)
+            size = measurement['allocated_bytes']
+            if size > threshold:
+                qualifier = '' if measurement['complete'] else 'at least '
+                rows.append({'code': code, 'detail': f'{code}: {qualifier}{size} allocated bytes exceed {threshold}',
+                             'measurement': measurement})
+            elif not measurement['complete']:
+                rows.append({'code': code + '_partial', 'measurement': measurement,
+                    'detail': f"{code}: at least {size} allocated bytes; partial evidence after {measurement['entries']} entries ({measurement['reason']}); threshold not resolved"})
     except Exception as exc:
         rows.append({'code': 'cleanup_size_unavailable', 'detail': 'Cleanup size evidence unavailable: ' + type(exc).__name__})
     try:
@@ -189,8 +193,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         now = time.time()
         deadline = time.monotonic() + policy['max_seconds']
         report = {'schema': 'machine-cleanup/v1', 'at': now, 'status': 'running', 'dry_run': dry_run,
-                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': [],
-                  'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0}
+                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': [], 'deferred': [],
+                  'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0, 'budget_exhausted': False}
         pending = previous.get('pending')
         recovered = None
         if pending:
@@ -247,7 +251,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             trees = reaper.run(existing, execute=not dry_run, local_only=True,
                                max_items=policy['max_items'], max_seconds=policy['max_seconds'] / 3)
             report['errors'].extend(trees['errors'])
-            report['errors'].extend(trees['deferred'])
+            report['deferred'].extend(trees['deferred'])
+            report['budget_exhausted'] |= trees['budget_exhausted']
             actions = {a['candidate'].get('path'): a for a in trees['actions']}
             for row in trees['rows']:
                 action = actions.get(row.get('path'))
@@ -273,6 +278,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     max_items=policy['test_temp_max_items'], cursor=cursor.get(slot, ''),
                     process_probe=process_probe, deadline=lambda: time.monotonic() >= root_deadline,
                     dry_run=dry_run, record=temp_record)
+                report['budget_exhausted'] |= temps['budget_exhausted']
                 cursor[slot] = temps['cursor']
                 save(cursor_path, cursor)
                 save(receipt_path, report)
@@ -341,9 +347,9 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     else:
                         cursor['thread_offset'] = stream.tell()
                         save(cursor_path, cursor)
-        report['status'] = 'failed' if report['errors'] else 'completed'
-        report['budget_exhausted'] = time.monotonic() >= deadline
-        if not report['errors'] and not dry_run:
+        report['status'] = 'failed' if report['errors'] else 'deferred' if report['deferred'] else 'completed'
+        report['budget_exhausted'] |= time.monotonic() >= deadline
+        if report['status'] == 'completed' and not dry_run:
             report['last_success_at'] = now
         save(receipt_path, report)
         append(root / 'out/machine-cleanup-runs.jsonl', {k: v for k, v in report.items() if k not in {'removed', 'kept'}})
