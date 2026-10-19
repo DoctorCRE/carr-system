@@ -63,6 +63,7 @@ import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the m
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
+import skill_receipts
 
 TOOLS_ROOT = HERE.parent
 if str(TOOLS_ROOT) not in sys.path:
@@ -130,6 +131,127 @@ def _now() -> str:
 
 def _record(results_path: Path, row: dict) -> None:
     write_ownership.record(results_path, row)
+
+
+def _skill_gh(endpoint, *, method='GET', data=None):
+    time.sleep(2)
+    command = ['gh', 'api', endpoint, '--method', method]
+    if data is None:
+        command += ['--paginate', '--slurp']
+    else:
+        command += ['--input', '-']
+    result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise ValueError('GitHub skill-receipt request failed; retry receipt only, never rerun job')
+    value = json.loads(result.stdout or '{}')
+    if data is None and isinstance(value, list):
+        if value and isinstance(value[0], list):
+            return [item for page in value for item in page]
+        return value[0] if len(value) == 1 else value
+    return value
+
+
+def skill_observation(row, *, since=None):
+    runtime = 'codex' if row.get('kind', '').startswith('codex') else 'claude'
+    sid = row.get('thread_id') or row.get('session_id')
+    path = skill_receipts.session_path(sid, runtime)
+    return skill_receipts.scan(path, since=since) if path else None
+
+
+def desk_skill_inventory(name, entry, results_path):
+    observation = skill_observation(entry)
+    if observation and observation['available']:
+        return observation
+    if entry.get('kind') == 'claude-session':
+        listing = skill_receipts.claude_listing(DESK_STATE / f'{name}.log')
+        if listing and listing['available']:
+            return listing
+    for path in (Path(results_path), _skill_ledger(results_path)):
+        if not path.exists():
+            continue
+        with path.open() as handle:
+            candidates = []
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get('desk') == name and row.get('kind') == entry.get('kind'):
+                    candidates.append(row)
+        for row in reversed(candidates):
+            observation = skill_observation(row)
+            if observation and observation['available']:
+                return observation
+    return None
+
+
+def _skill_ledger(results_path):
+    path = Path(results_path)
+    return path.with_name(path.stem + '-skills.jsonl')
+
+
+def finish_skill_receipt(row):
+    if row.get('status') != 'completed':
+        return None
+    observation = skill_observation(row, since=row.get('dispatched_at'))
+    if observation is None:
+        return None
+    urls = set(re.findall(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)', row.get('result') or ''))
+    if len(urls) != 1:
+        raise ValueError('completed desk must identify exactly one PR for its skill receipt')
+    repo, number = urls.pop()
+    pr = _skill_gh(f'repos/{repo}/pulls/{number}')
+    value = skill_receipts.receipt(row, repo=repo, head=pr['head']['sha'], body=pr.get('body'), observation=observation)
+    body = skill_receipts.comment_body(value)
+    comments = _skill_gh(f'repos/{repo}/issues/{number}/comments')
+    existing = next((item for item in comments if item.get('body') == body
+                     and item.get('user', {}).get('login') == repo.split('/')[0]), None)
+    if existing is None:
+        existing = _skill_gh(f'repos/{repo}/issues/{number}/comments', method='POST', data={'body': body})
+    marker = f"<!-- skill-run-receipt: {existing['html_url']} -->"
+    pr_body = pr.get('body') or ''
+    if marker not in pr_body:
+        pr_body = re.sub(r'\n?<!-- skill-run-receipt: .*? -->', '', pr_body)
+        # Body edits trigger the existing pull_request CI event after the receipt exists.
+        _skill_gh(f'repos/{repo}/pulls/{number}', method='PATCH', data={'body': pr_body + '\n\n' + marker})
+    return value
+
+
+def finish_pending_skill_receipt(pending, result_text, log_path, *, results_path=None):
+    results_path = Path(results_path or DEFAULT_RESULTS)
+    if not results_path.exists():
+        return
+    dispatch_id = pending.get('dispatch_msg_id')
+    row = None
+    with results_path.open() as handle:
+        for line in handle:
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if dispatch_id and candidate.get('msg_id') == dispatch_id:
+                row = candidate
+    if not row or row.get('record_kind') == 'skill-receipt':
+        return
+    sid = pending.get('session_id') or row.get('session_id')
+    if not sid and Path(log_path).exists():
+        with Path(log_path).open('rb') as handle:
+            handle.seek(pending.get('log_offset', 0))
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get('type') == 'result':
+                    sid = event.get('session_id')
+                    break
+    completed = {**row, 'status': 'completed', 'session_id': sid, 'result': result_text}
+    try:
+        completed['skill_receipt'] = finish_skill_receipt(completed)
+    except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+        completed['skill_receipt_error'] = str(exc)
+    _record(_skill_ledger(results_path), {**completed, 'record_kind': 'skill-receipt'})
 
 
 def _to_claude(entry: dict, task: str, msg_id: str) -> dict:
@@ -572,6 +694,11 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    inventory = desk_skill_inventory(name, entry, results_path)
+    try:
+        skill_receipts.require_skills(task, inventory)
+    except ValueError as exc:
+        raise DeskError('skill_unavailable', str(exc)) from exc
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
@@ -612,6 +739,8 @@ def dispatch(
 
     base = {"msg_id": msg_id, "desk": name, "kind": entry["kind"],
             "task": original_task, "dispatched_at": _now(),
+            **({'skill_inventory': inventory['available']} if inventory else {}),
+            **({'session_id': inventory['session_id']} if inventory and inventory.get('session_id') else {}),
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
     declared_writes = write_ownership.declaration(original_task, writes)
@@ -664,6 +793,12 @@ def dispatch(
         **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
     _record(results_path, row)
+    if row['status'] == 'completed' and (row.get('thread_id') or row.get('session_id')):
+        try:
+            row['skill_receipt'] = finish_skill_receipt(row)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            row['skill_receipt_error'] = str(exc)
+        _record(_skill_ledger(results_path), {**row, 'record_kind': 'skill-receipt'})
     return row
 
 
@@ -963,6 +1098,13 @@ def main(argv: list[str]) -> int:
     f.add_argument("name")
 
     sub.add_parser("desks", help="list registered desks and whether they are live")
+    inventory = sub.add_parser('skills', help='report skills listed in a desk session; seed dispatch preflight')
+    inventory.add_argument('name')
+    inventory.add_argument('--session-id', help='observe an existing session, without invoking a model')
+    receipt = sub.add_parser('receipt', help='finalize or retry a receipt without rerunning a job')
+    receipt.add_argument('dispatch_id')
+    receipt.add_argument('--session-id', help='completed Claude session id when delivery was asynchronous')
+    receipt.add_argument('--pr', help='completed job PR URL for asynchronous deliveries')
 
     st = sub.add_parser("start", help="put a Claude desk on the line and register it")
     st.add_argument("name")
@@ -996,6 +1138,31 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        if a.cmd == 'skills':
+            entry = reg.entries()[a.name]
+            if a.session_id:
+                row = {**entry, 'desk': a.name, 'thread_id': a.session_id,
+                       'record_kind': 'skill-inventory'}
+                inventory = skill_observation(row)
+                if not inventory or not inventory['available']:
+                    raise DeskError('skill_inventory_unknown', 'session listing unavailable')
+                _record(_skill_ledger(results), row)
+            else:
+                inventory = desk_skill_inventory(a.name, entry, results)
+            print(json.dumps({'desk': a.name, 'inventory': inventory}))
+            return 0
+        if a.cmd == 'receipt':
+            rows = [json.loads(line) for line in results.read_text().splitlines() if line.strip()]
+            row = next(row for row in reversed(rows) if row.get('msg_id') == a.dispatch_id)
+            if a.session_id:
+                row = {**row, 'session_id': a.session_id, 'status': 'completed',
+                       'result': a.pr or row.get('result', '')}
+            value = finish_skill_receipt(row)
+            if value is None:
+                raise DeskError('skill_receipt_unavailable', 'completed session transcript unavailable')
+            _record(_skill_ledger(results), {**row, 'record_kind': 'skill-receipt', 'skill_receipt': value})
+            print(json.dumps(value))
+            return 0
         if a.cmd == "where":
             return _cmd_where()
 
@@ -1036,6 +1203,8 @@ def main(argv: list[str]) -> int:
                 return 0
             for name, e in sorted(rows.items()):
                 kind = e.get("kind", "?")
+                inventory = desk_skill_inventory(name, e, results)
+                print(f"  skills {', '.join(inventory['available']) if inventory else 'unknown (observe session listing)'}")
                 thread = e.get("thread_id")
                 where = "new thread on first task" if not thread else f"thread {thread}"
                 if kind in codex_models.CODEX_KINDS:

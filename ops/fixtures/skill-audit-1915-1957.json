@@ -1,0 +1,1678 @@
+{
+  "observed": "2026-10-19T12:01:26.388Z",
+  "semantics": "Artifact scores are independent of receipt availability. Missing receipts are unverified, not proof a skill was skipped.",
+  "rows": [
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1915,
+      "url": "https://github.com/jbookout/carr-system/pull/1915",
+      "state": "MERGED",
+      "head": "44c02077b318bf011fd767c5abd9e2dc78f0215e",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs-with-pre-authorized-autonomous-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1916,
+      "url": "https://github.com/jbookout/carr-system/pull/1916",
+      "state": "MERGED",
+      "head": "778145e66ae2b58aa20eb620886a1746a27d0c23",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "unslop",
+        "technical-writing",
+        "codebase-design",
+        "zero-tech-debt"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 3,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1917,
+      "url": "https://github.com/jbookout/carr-system/pull/1917",
+      "state": "MERGED",
+      "head": "086e29a7529d9a1d80be95abbb1e61f48f0a5bf1",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1918,
+      "url": "https://github.com/jbookout/carr-system/pull/1918",
+      "state": "OPEN",
+      "head": "898cbb3fe14206d0fca51e0254aa10a6a7961009",
+      "skills": [
+        "prove-it-works"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 3,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1919,
+      "url": "https://github.com/jbookout/carr-system/pull/1919",
+      "state": "MERGED",
+      "head": "2ce9b48a7c4edc3ca855f809a85ceee3beb87390",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "pocock-pr",
+        "codebase-design",
+        "zero-tech-debt",
+        "laziness-protocol",
+        "model-the-domain",
+        "unslop",
+        "technical-writing",
+        "no-comments"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1920,
+      "url": "https://github.com/jbookout/carr-system/pull/1920",
+      "state": "MERGED",
+      "head": "4806bfad16d7012be316a0caaf645309177fda21",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "pocock-grilling",
+        "pocock-domain-modeling",
+        "codebase-design",
+        "zero-tech-debt",
+        "laziness-protocol",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 2,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1921,
+      "url": "https://github.com/jbookout/carr-system/pull/1921",
+      "state": "MERGED",
+      "head": "a3ba44dbc48e34d1f9984c58a5d7785c5dfa7427",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "laziness-protocol",
+        "sequence-work-into-verifiable-units",
+        "test-behavior",
+        "not-implementation",
+        "make-operations-idempotent",
+        "explain-the-number"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1922,
+      "url": "https://github.com/jbookout/carr-system/pull/1922",
+      "state": "MERGED",
+      "head": "36b08a08dfe270425d067f261ea90c0b5aafeedc",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "model-the-domain",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1923,
+      "url": "https://github.com/jbookout/carr-system/pull/1923",
+      "state": "MERGED",
+      "head": "acac1094b103fba82513747059adac8b52e09edc",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-and-domain-modeling-design-choices-pre-approved",
+        "no-interview-pause",
+        "wayfinder",
+        "codebase-design",
+        "zero-tech-debt",
+        "writing-for-agents",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1924,
+      "url": "https://github.com/jbookout/carr-system/pull/1924",
+      "state": "CLOSED",
+      "head": "eeb23539b74f95ec3e8044a4d316f4612cafca65",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-grilling-and-domain-modeling",
+        "design-decisions-pre-approved",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1925,
+      "url": "https://github.com/jbookout/carr-system/pull/1925",
+      "state": "OPEN",
+      "head": "a1363dbdbed24d9cbb62f45fcc8ffadcc573f3f0",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-and-domain-modeling-design-choices-pre-approved",
+        "interview-omitted",
+        "model-the-domain",
+        "codebase-design",
+        "zero-tech-debt",
+        "writing-for-agents",
+        "pocock-pr",
+        "technical-writing"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1926,
+      "url": "https://github.com/jbookout/carr-system/pull/1926",
+      "state": "OPEN",
+      "head": "091b15199b78d13e57a2f92a7bb6291292b5dd02",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "applied-to-a-behavior-preserving-cleanup-with-existing-test-seams",
+        "grill-with-docs-through-its-grilling-and-domain-modeling-dependencies-with-decisions-pre-approved",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1927,
+      "url": "https://github.com/jbookout/carr-system/pull/1927",
+      "state": "OPEN",
+      "head": "c999c57c5c85d06756389aedb859cef2d1ef68b5",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-with-autonomous-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "subtract-before-you-add",
+        "pr",
+        "technical-writing",
+        "unslop",
+        "attack-the-premise"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1928,
+      "url": "https://github.com/jbookout/carr-system/pull/1928",
+      "state": "OPEN",
+      "head": "cd905d72b48a06938a61fe59401cd7c47f834272",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-with-pre-approved-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "writing-for-agents",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1929,
+      "url": "https://github.com/jbookout/carr-system/pull/1929",
+      "state": "MERGED",
+      "head": "2366f468dd711e2430073806e778ba3bc5a3bbce",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "diagnosing-bugs",
+        "grill-with-docs",
+        "grilling",
+        "domain-modeling",
+        "how",
+        "model-the-domain",
+        "fix-root-causes",
+        "laziness-protocol",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 1,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1930,
+      "url": "https://github.com/jbookout/carr-system/pull/1930",
+      "state": "OPEN",
+      "head": "a2440097dc3a5caef60bfa5d23837d72ea3d5586",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1931,
+      "url": "https://github.com/jbookout/carr-system/pull/1931",
+      "state": "OPEN",
+      "head": "66131f33ff6dfd4d4338c91a563111efb85ab784",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1932,
+      "url": "https://github.com/jbookout/carr-system/pull/1932",
+      "state": "OPEN",
+      "head": "10d041f6cdec3e29bbe55777af98a4d2a9acf863",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "pocock-tdd-through-existing-behavior-preservation-seams",
+        "grill-with-docs-through-grilling-and-domain-modeling-with-design-decisions-pre-approved",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 3,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1933,
+      "url": "https://github.com/jbookout/carr-system/pull/1933",
+      "state": "OPEN",
+      "head": "5451fcae9dd7c0941e39f457d06b1f74d47a0085",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-with-pre-approved-design-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "no-comments-with-independent-review",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1934,
+      "url": "https://github.com/jbookout/carr-system/pull/1934",
+      "state": "MERGED",
+      "head": "fb8355c420d1a2348b2093736f3afe042fc2de02",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-grilling-and-domain-modeling",
+        "design-decisions-pre-approved",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1935,
+      "url": "https://github.com/jbookout/carr-system/pull/1935",
+      "state": "MERGED",
+      "head": "47a1e8b8f40d405309c1648efdc8790d54e9af69",
+      "skills": [
+        "prove-it-works",
+        "tdd"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1936,
+      "url": "https://github.com/jbookout/carr-system/pull/1936",
+      "state": "OPEN",
+      "head": "8fa46e06819996e6a69250922d7b2e5b2a4bfdf5",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "model-the-domain",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1937,
+      "url": "https://github.com/jbookout/carr-system/pull/1937",
+      "state": "MERGED",
+      "head": "e176c56873945b707920e2430e232634118cb5d1",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1938,
+      "url": "https://github.com/jbookout/carr-system/pull/1938",
+      "state": "MERGED",
+      "head": "4f4f4927327e8d106292404d11106637e98e29b8",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1939,
+      "url": "https://github.com/jbookout/carr-system/pull/1939",
+      "state": "MERGED",
+      "head": "e0d55207893e29c48f8503daaaf9da0e414afd68",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "typescript-best-practices",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1940,
+      "url": "https://github.com/jbookout/carr-system/pull/1940",
+      "state": "MERGED",
+      "head": "c7712b905e2cd324c1c8d85d22edb4c39a8e8d09",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "model-the-domain",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1941,
+      "url": "https://github.com/jbookout/carr-system/pull/1941",
+      "state": "OPEN",
+      "head": "e7617f470a649bf78a42d56cd32c45f6c499bf52",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "typescript-best-practices",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1942,
+      "url": "https://github.com/jbookout/carr-system/pull/1942",
+      "state": "MERGED",
+      "head": "fab89ecee33e4b4681a49335c7c676285448a651",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "domain-modeling",
+        "codebase-design",
+        "zero-tech-debt",
+        "no-comments",
+        "technical-writing",
+        "unslop",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 2,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1943,
+      "url": "https://github.com/jbookout/carr-system/pull/1943",
+      "state": "MERGED",
+      "head": "651cc892b4e86ea6dc0f1cddb8e4131b375674f4",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1944,
+      "url": "https://github.com/jbookout/carr-system/pull/1944",
+      "state": "MERGED",
+      "head": "1022c318a71a02076f865ca61aadfa7e23fa2685",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "laziness-protocol",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1945,
+      "url": "https://github.com/jbookout/carr-system/pull/1945",
+      "state": "OPEN",
+      "head": "db258331f19225a59c09cd1c49675bcaabc734a0",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "pocock-grilling-against-source-contract-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "fix-root-causes",
+        "test-behavior-not-implementation",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1946,
+      "url": "https://github.com/jbookout/carr-system/pull/1946",
+      "state": "MERGED",
+      "head": "7582eb367c9873a9c1f36f35ac85c584157fe77a",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-with-pre-approved-autonomous-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1947,
+      "url": "https://github.com/jbookout/carr-system/pull/1947",
+      "state": "MERGED",
+      "head": "2ac6844615f80b413eced9f218f4d4d437af5617",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1948,
+      "url": "https://github.com/jbookout/carr-system/pull/1948",
+      "state": "OPEN",
+      "head": "69039221e88ff1f43461a2fd9ae73428abf23e43",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-with-preapproved-design-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "model-the-domain",
+        "make-operations-idempotent",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1949,
+      "url": "https://github.com/jbookout/carr-system/pull/1949",
+      "state": "MERGED",
+      "head": "54ec6d0c57238cc5239da75a525ecab0e18b9eb7",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "model-the-domain",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false
+      },
+      "passed": 2,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1950,
+      "url": "https://github.com/jbookout/carr-system/pull/1950",
+      "state": "MERGED",
+      "head": "fcfaf9679937663c54400943689cf56d004592fa",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop-grill-with-docs-and-deslop-were-not-found-in-the-installed-skill-locations",
+        "the-scoped-source-and-independent-diff-reviews-were-completed"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 2,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1951,
+      "url": "https://github.com/jbookout/carr-system/pull/1951",
+      "state": "MERGED",
+      "head": "bc64e4f7a40d74a87811b4390da2c769a122b17d",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1952,
+      "url": "https://github.com/jbookout/carr-system/pull/1952",
+      "state": "OPEN",
+      "head": "643994b5e4f3e75546f4456c171361c5ba5fd7d4",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "model-the-domain",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1953,
+      "url": "https://github.com/jbookout/carr-system/pull/1953",
+      "state": "MERGED",
+      "head": "965790a4a9c3dd59af06d3eece409b54b1854dc7",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs-grilling-and-domain-modeling",
+        "with-pre-approved-decisions-recorded-here",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false
+      },
+      "passed": 2,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1954,
+      "url": "https://github.com/jbookout/carr-system/pull/1954",
+      "state": "MERGED",
+      "head": "2d5d203e2af82d6b9c156ea2027c82dbfbd86b75",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "model-the-domain",
+        "codebase-design",
+        "zero-tech-debt",
+        "pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1955,
+      "url": "https://github.com/jbookout/carr-system/pull/1955",
+      "state": "MERGED",
+      "head": "8aebdd7e349999ce6cdab04ccce3602021a46c25",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1956,
+      "url": "https://github.com/jbookout/carr-system/pull/1956",
+      "state": "OPEN",
+      "head": "19d0189065915278cb8fc6a798d6c5a878595a41",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pr",
+        "technical-writing"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative."
+      ]
+    },
+    {
+      "repository": "jbookout/carr-system",
+      "number": 1957,
+      "url": "https://github.com/jbookout/carr-system/pull/1957",
+      "state": "MERGED",
+      "head": "d8764c963762c4701d04b6d37aa677309616bcb2",
+      "skills": [
+        "prove-it-works"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 3,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 302,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/302",
+      "state": "MERGED",
+      "head": "c39a3cba664319a7eb92d0ebb5e224efcc23abce",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "diagnosing-bugs",
+        "grill-with-docs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 2,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 303,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/303",
+      "state": "OPEN",
+      "head": "2ac53e41c9586bef074d88f48d47e2b23d3f761e",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "grill-with-docs",
+        "frontend-design",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "tasteskill-v2-doctrine"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 1,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 304,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/304",
+      "state": "OPEN",
+      "head": "21f82d4d6bdb4af9aae920af7dd5b8098f767a2f",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "grill-with-docs",
+        "frontend-design",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "typescript-best-practices",
+        "tasteskill-v2-doctrine"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 1,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 305,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/305",
+      "state": "OPEN",
+      "head": "1b9c261966b82c5436194ac536d0bc88ecf6c36a",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "diagnosing-bugs",
+        "grill-with-docs-with-preapproved-decisions",
+        "codebase-design",
+        "zero-tech-debt"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 1,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 306,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/306",
+      "state": "MERGED",
+      "head": "ff14d766d2b6e394b3b6919b28ee264b0124fe39",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs-with-preapproved-design-decisions",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": false,
+        "prove-it-works": false
+      },
+      "passed": 1,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "TDD: require a test-only commit that adds or changes a test and is an ancestor of each code-changing commit; mixed test/code commits do not prove test-first work.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 307,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/307",
+      "state": "MERGED",
+      "head": "ad72faf4eaa31c42ecaf06b08e451ffe715512a6",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "typescript-best-practices",
+        "model-the-domain",
+        "type-system-discipline",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 2,
+      "required": 5,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 308,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/308",
+      "state": "MERGED",
+      "head": "8bef89b0acc29816fac4da261bbc33cdbad6c627",
+      "skills": [
+        "poteto-mode",
+        "prove-it-works",
+        "tdd",
+        "codebase-design",
+        "zero-tech-debt",
+        "technical-writing",
+        "unslop"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false
+      },
+      "passed": 2,
+      "required": 4,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 309,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/309",
+      "state": "OPEN",
+      "head": "3790b6d66d5f716c9e82ecd5e2dd2e3386842f03",
+      "skills": [
+        "poteto-mode",
+        "tdd",
+        "prove-it-works",
+        "grill-with-docs",
+        "frontend-design",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "tasteskill-v2-doctrine"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 2,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    },
+    {
+      "repository": "jbookout/doctorcre-app",
+      "number": 310,
+      "url": "https://github.com/jbookout/doctorcre-app/pull/310",
+      "state": "MERGED",
+      "head": "eaf4a2575dbe503635789744ca00038e93f6e5d8",
+      "skills": [
+        "tdd",
+        "poteto-mode",
+        "prove-it-works",
+        "grill-with-docs",
+        "diagnosing-bugs",
+        "codebase-design",
+        "zero-tech-debt",
+        "pocock-pr"
+      ],
+      "checks": {
+        "declaration": true,
+        "receipt": false,
+        "tdd": true,
+        "prove-it-works": false,
+        "grill-with-docs": false,
+        "diagnosing-bugs": false
+      },
+      "passed": 2,
+      "required": 6,
+      "verdict": "FAIL",
+      "errors": [
+        "Missing trusted skill-run receipt for this repository and head SHA; dispatcher must publish it after the job.",
+        "Prove It Works: include real command and test output in a fenced block, or a Reproduction section with command, expected and actual results.",
+        "grill-with-docs: add a Decisions section recording each question, recommended answer, and rejected alternative.",
+        "diagnosing-bugs: add a Root cause section identifying the cause with a file:line reference."
+      ]
+    }
+  ]
+}

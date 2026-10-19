@@ -1,0 +1,194 @@
+"""Session-local skill evidence. Never emit transcript text or tool output."""
+from __future__ import annotations
+
+import ast
+from datetime import datetime
+import json
+from pathlib import Path
+import re
+import shlex
+
+POLICY = json.loads((Path(__file__).resolve().parents[2] / 'ops/skill-evidence-policy.json').read_text())
+MARKER = '<!-- skill-run-receipt/v1 -->'
+
+
+def canonical(value):
+    value = re.sub(r'\([^)]*\)', '', value).strip().strip('`/ ')
+    value = re.split(r'\s+for\s+', value, maxsplit=1)[0].split(':')[-1]
+    value = re.sub(r'[^a-z0-9]+', '-', value.lower()).strip('-')
+    return POLICY['aliases'].get(value, value)
+
+
+def claims(text):
+    match = re.search(r'^Skills(?: used)?:[ \t]*(.+)$', text or '', re.I | re.M)
+    if not match:
+        return []
+    line = re.split(r'\.\s+(?=[A-Z])', match[1], maxsplit=1)[0]
+    return list(dict.fromkeys(canonical(item) for item in re.split(r'[,;]', line) if canonical(item)))
+
+
+def _skill_path(value):
+    return isinstance(value, str) and value.endswith('/SKILL.md') and not any(c in value for c in '*?${}')
+
+
+def _read_paths(name, args):
+    if name.lower() in ('read', 'read_file'):
+        path = args.get('file_path') or args.get('path')
+        return [path] if _skill_path(path) else []
+    if name.split('.')[-1] not in ('exec_command', 'Bash', 'shell', 'shell_command', 'exec'):
+        return []
+    command = args.get('cmd') or args.get('command')
+    if command is None and isinstance(args.get('code'), str):
+        paths = []
+        # Only literal shell commands submitted to the actual execution tool qualify.
+        for match in re.finditer(r'tools\.exec_command\(\{\s*cmd\s*:\s*("(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27)', args['code']):
+            try:
+                paths.extend(_read_paths('exec_command', {'cmd': ast.literal_eval(match[1])}))
+            except (ValueError, SyntaxError):
+                pass
+        return paths
+    if not isinstance(command, str):
+        return []
+    try:
+        tokens = list(shlex.shlex(command, posix=True, punctuation_chars=';&|<>\n'))
+    except ValueError:
+        return []
+    # Refuse redirected reads; copying a skill is not opening it in context.
+    if any('>' in token or '<' in token for token in tokens):
+        return []
+    paths, segment = [], []
+    for token in [*tokens, ';']:
+        if token in (';', '&&', '||', '|', '\n'):
+            if segment and Path(segment[0]).name in ('cat', 'head', 'tail', 'sed'):
+                paths.extend(value for value in segment[1:] if _skill_path(value))
+            segment = []
+        else:
+            segment.append(token)
+    return paths
+
+
+def _success(output):
+    if isinstance(output, dict):
+        if 'exit_code' in output:
+            return output['exit_code'] == 0
+        return _success(output.get('content') or output.get('text'))
+    if isinstance(output, list):
+        return _success('\n'.join(item.get('text', '') for item in output
+                                  if isinstance(item, dict) and isinstance(item.get('text'), str)))
+    if not isinstance(output, str):
+        return False
+    while '\\"' in output:
+        output = output.replace('\\"', '"')
+    if re.search(r'"exit_code"\s*:\s*[1-9]|Process exited with code [1-9]|Script failed', output):
+        return False
+    return bool(re.search(r'"exit_code"\s*:\s*0\b|Process exited with code 0\b|Exit code: 0\b', output))
+
+
+def _stamp(value):
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def scan(path, *, since=None):
+    available, opened, pending = set(), set(), {}
+    cutoff = _stamp(since) if since else None
+    with Path(path).open(encoding='utf-8') as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            payload = row.get('payload') or row
+            if not isinstance(payload, dict):
+                continue
+            content = payload.get('content') or (row.get('message') or {}).get('content') or []
+            if not isinstance(content, list):
+                content = []
+            if payload.get('role') in ('developer', 'system', 'user') or row.get('type') in ('system', 'user'):
+                for block in content:
+                    text = block.get('text', '') if isinstance(block, dict) else ''
+                    if 'Available skills' in text or '<available_skills>' in text:
+                        available.update(canonical(name) for name in re.findall(r'^- ([\w:.-]+):', text, re.M))
+                if row.get('subtype') == 'init':
+                    available.update(canonical(item) for item in row.get('skills', []) if isinstance(item, str))
+            stamp = _stamp(row.get('timestamp'))
+            current = cutoff is None or stamp is not None and stamp >= cutoff
+            if payload.get('type') in ('function_call', 'custom_tool_call') and current:
+                try:
+                    args = ({'code': payload.get('input', '')} if payload['type'] == 'custom_tool_call'
+                            else json.loads(payload.get('arguments', '{}')))
+                    pending[payload.get('call_id')] = _read_paths(payload.get('name', ''), args)
+                except (json.JSONDecodeError, TypeError, AttributeError):
+                    continue
+            elif payload.get('type') in ('function_call_output', 'custom_tool_call_output'):
+                paths = pending.pop(payload.get('call_id'), [])
+                if _success(payload.get('output')):
+                    opened.update(paths)
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get('type') == 'tool_use' and current:
+                    pending[block.get('id')] = (_read_paths(block.get('name', ''), block.get('input') or {}),
+                                                block.get('name') in ('Read', 'read_file', 'Bash'))
+                elif block.get('type') == 'tool_result':
+                    paths, direct = pending.pop(block.get('tool_use_id'), ([], False))
+                    if not block.get('is_error') and (direct or _success(block.get('content'))):
+                        opened.update(paths)
+    return {'available': sorted(available), 'opened': sorted(opened)}
+
+
+def session_path(session_id, runtime, *, home=None):
+    if not re.fullmatch(r'[a-fA-F0-9-]{36}', session_id or ''):
+        return None
+    home = Path(home or Path.home())
+    root = home / ('.codex/sessions' if runtime == 'codex' else '.claude/projects')
+    pattern = f'*/*/*/rollout-*-{session_id}.jsonl' if runtime == 'codex' else f'*/{session_id}.jsonl'
+    matches = list(root.glob(pattern))
+    return matches[0] if len(matches) == 1 else None
+
+
+def require_skills(task, inventory):
+    required = claims(task)
+    if not required:
+        return
+    if not inventory or not inventory.get('available'):
+        raise ValueError('skill inventory unknown; observe the desk session with dispatch.py skills first')
+    missing = sorted(set(required) - set(inventory['available']))
+    if missing:
+        raise ValueError('skills not available in desk session: ' + ', '.join(missing))
+
+
+def claude_listing(path):
+    listing = None
+    if Path(path).exists():
+        with Path(path).open() as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get('type') == 'system' and row.get('subtype') == 'init':
+                    listing = {'session_id': row.get('session_id'), 'opened': [],
+                               'available': sorted({canonical(item) for item in row.get('skills', []) if isinstance(item, str)})}
+    return listing
+
+
+def receipt(row, *, repo, head, body, observation):
+    paths = observation['opened']
+    return {'schema': 'skill-run-receipt/v1', 'repo': repo, 'head': head,
+            'session_id': row.get('thread_id') or row.get('session_id'),
+            'dispatch_id': row['msg_id'], 'available': observation['available'],
+            'skills': [{'skill': skill, 'opened': any(canonical(Path(path).parent.name) == skill for path in paths),
+                        'paths': [path for path in paths if canonical(Path(path).parent.name) == skill]}
+                       for skill in claims(body)]}
+
+
+def comment_body(value):
+    lines = [MARKER, 'Observed successful skill-file reads for this PR revision.', '',
+             '| Claimed skill | Session evidence |', '| --- | --- |']
+    lines.extend(f"| {item['skill']} | {'opened' if item['opened'] else 'not opened'} |" for item in value['skills'])
+    return '\n'.join([*lines, '', '```json', json.dumps(value, sort_keys=True), '```'])

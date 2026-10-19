@@ -321,3 +321,4 @@ line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
 Rigorous engineering work uses `/poteto-mode` from [upstream pstack](https://github.com/cursor/plugins/tree/main/pstack). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd`.
+In desk jobs, run grill-with-docs autonomously: take your recommended answer at each frontier, record every question, answer, and rejected alternative in the PR's Decisions section, and continue until the frontier is empty. Stop for the orchestrator only on Joe-only decisions: money, outbound or client-facing items, credentials, identity edits, or rule retirement.

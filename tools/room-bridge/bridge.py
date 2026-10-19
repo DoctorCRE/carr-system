@@ -352,7 +352,8 @@ def handle_pending(name: str, seat: str, state: dict, *, add_room_turn,
                     queue_executor: queue_dispatch.QueueDeskExecutor | None = None,
                     inspect_background=claude_desktop_wire.inspect_session,
                     read_background_result=claude_desktop_wire.read_final_text,
-                    handoff_background=claude_desktop_wire.handoff_to_desktop) -> dict | None:
+                    handoff_background=claude_desktop_wire.handoff_to_desktop,
+                    results_path: Path | None = None) -> dict | None:
     pending = state_mod.get_pending(state, name)
     if pending is None:
         return None
@@ -416,6 +417,7 @@ def handle_pending(name: str, seat: str, state: dict, *, add_room_turn,
     else:
         result_text = scan(log_path, pending["log_offset"])
     if result_text is not None:
+        dispatch.finish_pending_skill_receipt(pending, result_text, log_path, results_path=results_path)
         if pending.get("origin_kind") == "queue":
             if queue_executor is None:
                 return {"desk": name, "outcome": "queue_executor_unavailable"}
@@ -856,6 +858,7 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
                 pending_timeout_s=pending_timeout_s,
                 now=now_fn(),
                 queue_executor=queue_executor,
+                results_path=results_path,
             )
             if pending_outcome:
                 delivered.append(pending_outcome)

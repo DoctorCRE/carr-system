@@ -3,3 +3,4 @@ Read AGENTS.md and <source files>. Writes: <paths>.
 Acceptance: <observable behavior and regression case>.
 Verify <targeted checks>, open one PR, and report its number, head SHA, and test counts.
 Send this brief through dispatch.py send; it appends brief-footer.md.
+Run grill-with-docs autonomously in desk jobs: take your recommended answer at each frontier, record every question, answer, and rejected alternative in the PR's Decisions section, and continue until the frontier is empty. Stop for the orchestrator only on Joe-only decisions: money, outbound or client-facing items, credentials, identity edits, or rule retirement.

@@ -6,6 +6,8 @@ on:
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 jobs:
   skills-used:
@@ -16,9 +18,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
       - name: Test the parser and validate the PR body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SKILL_RECEIPT_COMMENTS: ${{ runner.temp }}/skill-receipt-comments.json
+          PR_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          gh api --paginate --slurp "repos/$PR_REPOSITORY/issues/$PR_NUMBER/comments" > "$SKILL_RECEIPT_COMMENTS"
           ops/ci.sh --pr-skills

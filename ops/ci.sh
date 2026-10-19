@@ -22,7 +22,7 @@ if [ "${1:-}" = "--doc-drift" ]; then
 fi
 
 if [ "${1:-}" = "--pr-skills" ]; then
-  node --test mcp-server/test/pr-skills.test.mjs || exit 1
+  node --test mcp-server/test/pr-skills.test.mjs mcp-server/test/skill-evidence.test.mjs || exit 1
   exec node ops/check-pr-skills.mjs
 fi
 

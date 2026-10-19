@@ -1,0 +1,8 @@
+{
+  "aliases": {
+    "pocock-tdd": "tdd",
+    "test-driven-development": "tdd",
+    "principle-prove-it-works": "prove-it-works",
+    "proving-it-works": "prove-it-works"
+  }
+}
