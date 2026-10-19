@@ -93,7 +93,7 @@ import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
 import write_ownership  # noqa: E402
 import desks  # noqa: E402
-from desks import DeskError, Registry  # noqa: E402
+from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
 import claude_wire as inject_mod  # noqa: E402  — the Idea 78 wire, see the module
 import claude_desktop_wire  # noqa: E402 — background supervisor + supported /desktop
 import claude_remote_wire
@@ -422,6 +422,8 @@ def _to_codex(
                     "bad_codex_config",
                     "Codex config overrides must be non-empty strings")
             argv += ["-c", override]
+        if entry.get("name") in AUTOMATIC_CODEX_DESKS:
+            argv += ["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"']
         # Bind both starts and resumes, after overrides, so an old thread or
         # caller config cannot restore human approval cards.
         argv += ["-c", 'approval_policy="never"']
@@ -633,6 +635,8 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
+        raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
@@ -856,6 +860,8 @@ def desk_start(
     by delivering its turn into the closing window of a session already on its
     way out. That is the failure this function exists to make impossible.
     """
+    if name == "flash" and flashlib.is_switched_off():
+        raise DeskError("flash_off", flashlib.OFF_REASON)
     registry = registry or Registry()
     state_dir = Path(state_dir or DESK_STATE)
     sock_dir = Path(sock_dir or SOCK_DIR)

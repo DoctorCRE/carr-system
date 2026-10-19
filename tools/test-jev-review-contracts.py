@@ -37,6 +37,7 @@ class ReviewContracts(unittest.TestCase):
         candidate = dict(id='a', patch='synthetic patch', code_or_diff='synthetic',
                          probe_results={'patch_lines': 1}, test_output='failed', test_exit_code=1, elapsed_s=0)
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            stack.enter_context(patch.object(fr.flashlib, "is_switched_off", return_value=False))
             args = NS(cwd=tmp, task='Change synthetic.py', test=test, sandbox='off', no_learn=True,
                       force=force, effort=effort, no_rules=True, attempts=1, all_attempts=False,
                       think='off', escalate='suggest', dry_run=False, keep=False)

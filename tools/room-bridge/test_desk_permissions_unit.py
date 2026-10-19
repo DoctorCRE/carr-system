@@ -236,7 +236,7 @@ print(json.dumps({**result, "entries": reg.entries()}))
             })
             reg = desks.Registry(Path(root) / "registry.json")
             reg.register("fixture-flash", "flash-local")
-            with patch.object(dispatch.flash_wire, "_run_flash_script", return_value=(0, {"answer": "3"})):
+            with patch.object(dispatch.flash_wire.flashlib, "is_switched_off", return_value=False), patch.object(dispatch.flash_wire, "_run_flash_script", return_value=(0, {"answer": "3"})):
                 direct = dispatch.flash_wire.run_task(task, roots=[root])
                 with patch.object(dispatch.flash_wire, "data_roots", return_value=[str(Path(root).resolve())]):
                     row = dispatch.dispatch("fixture-flash", task, registry=reg,

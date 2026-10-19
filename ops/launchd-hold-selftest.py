@@ -360,6 +360,8 @@ class HoldTests(unittest.TestCase):
         patch.object(cac, "tracked_scheduled_task_paths", return_value={}).start()
         self.assertFalse(any(label.startswith("launchd ") for label, _, _ in cac.pairs()))
         patch.object(cac, "pairs", return_value=[]).start()
+        from tools import flash_install
+        patch.object(flash_install, "check", return_value=[]).start()
         for name in ("hook_scripts_untracked", "installed_hook_missing_files",
                      "secondary_scheduled_task_violations",
                      "refused_launchd_templates", "pending_launchd_reloads"):

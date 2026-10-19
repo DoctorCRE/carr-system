@@ -118,7 +118,7 @@ with tempfile.TemporaryDirectory() as config_home, patch.dict(os.environ, {"HOME
         config_rc = config.cmd_check()
     config_output = captured.getvalue()
     check("config check refuses a clean render on an unprovisioned machine",
-          config_rc == 1 and config_output.startswith("config-as-code: PREREQUISITES MISSING"))
+          config_rc == 1 and "config-as-code: PREREQUISITES MISSING" in config_output)
 
 print(f"machine-prerequisites-selftest: {len(failed)} failed")
 raise SystemExit(bool(failed))
