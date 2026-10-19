@@ -14,6 +14,7 @@ import unittest
 
 
 SPEC = importlib.util.spec_from_file_location("board", Path(__file__).with_name("progress_board.py"))
+assert SPEC is not None and SPEC.loader is not None
 board = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(board)
 
@@ -141,8 +142,8 @@ class ConsumerCompletion(unittest.TestCase):
         state = {"tasks": {"feature": task}}
         release = {"sha": "a" * 40, "lane": "app", "ts": "synthetic", "source": "fixture"}
 
-        def record(proof):
-            args = board.parser().parse_args(["task", "synthetic", "feature", "--consumer-proof", json.dumps(proof)])
+        def record(proof, *extra):
+            args = board.parser().parse_args(["task", "synthetic", "feature", "--consumer-proof", json.dumps(proof), *extra])
             board.update_task(state, args)
             with patch.object(board, "latest_release", return_value=release):
                 board.auto_live(state["tasks"]["feature"], task["repo"], "2026-10-04T12:00:00Z", ["js/feature.js"])
@@ -153,6 +154,10 @@ class ConsumerCompletion(unittest.TestCase):
         self.assertEqual(state["tasks"]["feature"]["consumer_proof"], failed)
         self.assertEqual(record(new_pass), "live", "a newer exercised pass restores completion")
         self.assertEqual(record(failed), "live", "an old failure cannot erase the newer pass")
+        self.assertEqual(record({**new_pass, "outcome": "fail"}), "merged")
+        self.assertEqual(record(new_pass), "merged", "a tied pass cannot erase a failure")
+        other_workflow = {**old_pass, "workflow": "another synthetic workflow"}
+        self.assertEqual(record(other_workflow, "--delivery-workflow", other_workflow["workflow"]), "live")
 
     def test_malformed_receipts_and_retired_tasks_cannot_complete(self):
         for proof in (None, [], "pass", {"outcome": "pass"}):

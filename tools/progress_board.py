@@ -2605,6 +2605,15 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     for field in ("delivery_workflow", "delivery_source_sha", "consumer_proof"):
         value = getattr(args, field, None)
         if value is not None:
+            previous = prior.get(field)
+            if field == "consumer_proof" and isinstance(value, dict) and isinstance(previous, dict):
+                observed = parse_time(value.get("observed_at"))
+                last_observed = parse_time(previous.get("observed_at"))
+                same_binding = all(value.get(key) == previous.get(key)
+                                   for key in ("repo", "source_sha", "target", "workflow"))
+                if same_binding and observed and last_observed and (observed < last_observed
+                        or observed == last_observed and previous.get("outcome") == "fail"):
+                    continue
             task[field] = value
     executor = args.executor or prior.get("executor")
     derived = executor_metadata(executor)
