@@ -1165,6 +1165,62 @@ class KeyReuseRoom:
 
 
 class AsyncCheckpointRecoveryTests(unittest.TestCase):
+    def test_terminal_checkpoint_without_final_receipt_publishes_before_clear(self):
+        for finish, outcome, method in (("done", "success", "complete"),
+                                        ("review", "success", "request_review"),
+                                        ("done", "blocked", "block")):
+            for lose_ack in (False, True):
+                with self.subTest(finish=finish, outcome=outcome, lose_ack=lose_ack), \
+                        tempfile.TemporaryDirectory() as root:
+                    root = Path(root)
+                    adapter = FakeAdapter([task(finish=finish)])
+                    provider = mock.Mock(return_value={
+                        "status": "delivered", "msg_id": "acknowledged-dispatch",
+                        "dispatched_at": "2026-08-24T12:00:00+00:00"})
+                    executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+                    pending = executor.start("sol", dispatch_call=provider)["pending"]
+                    state = state_mod.default_state()
+                    state_mod.set_pending(
+                        state, "codex-desk", dispatch_msg_id=pending["dispatch_msg_id"],
+                        log_offset=0, injected_at=pending["injected_at"],
+                        source_msg_id=pending["source_msg_id"], source_seq=pending["source_seq"],
+                        origin_kind="queue", kanban_task_id=pending["kanban_task_id"],
+                        target=pending["target"], finish=pending["finish"], cap=pending["cap"])
+                    checkpoint = root / "bridge.json"
+                    state_mod.save_state(checkpoint, state)
+                    raw = result(outcome=outcome)
+                    executor.finish_pending(pending, raw)
+                    restored = state_mod.load_state(checkpoint)
+                    room = KeyReuseRoom()
+
+                    def post(**kwargs):
+                        self.assertIsNotNone(state_mod.get_pending(restored, "codex-desk"))
+                        room(**kwargs)
+                        if lose_ack:
+                            raise RuntimeError("callback acknowledgement lost")
+
+                    kwargs = dict(log_path=root / "desk.log", pending_timeout_s=60,
+                                  scan=lambda *_: raw,
+                                  queue_executor=queue_dispatch.QueueDeskExecutor(
+                                      catalog=CATALOG, adapter=adapter),
+                                  completion_dir=root / "completions")
+                    if lose_ack:
+                        with self.assertRaisesRegex(RuntimeError, "acknowledgement lost"):
+                            bridge.handle_pending("codex-desk", "sol", restored,
+                                                  add_room_turn=post, **kwargs)
+                        self.assertIsNotNone(state_mod.get_pending(restored, "codex-desk"))
+                        restored = state_mod.load_state(checkpoint)
+                    recovered = bridge.handle_pending("codex-desk", "sol", restored,
+                                                      add_room_turn=room if lose_ack else post, **kwargs)
+                    self.assertEqual(recovered["outcome"], "already_terminal")
+                    self.assertEqual(len(room.completions()), 1)
+                    self.assertEqual(sum(call[0] == method for call in adapter.calls), 1)
+                    self.assertEqual(len(adapter.tasks), 1)
+                    self.assertEqual(provider.call_count, 1)
+                    self.assertIsNone(state_mod.get_pending(restored, "codex-desk"))
+                    self.assertIsNone(bridge.handle_pending("codex-desk", "sol", restored,
+                                                           add_room_turn=room, **kwargs))
+
     def test_final_checkpoint_wins_over_changed_desk_result(self):
         with tempfile.TemporaryDirectory() as root:
             adapter = FakeAdapter([task()])
