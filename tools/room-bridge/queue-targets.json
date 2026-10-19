@@ -1,6 +1,14 @@
 {
   "v": 1,
   "targets": {
+    "luna": {
+      "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:luna-desk",
+      "desk": "luna-desk",
+      "effective_model": "luna (Codex subscription)",
+      "capabilities": ["read", "repo-write", "record-write"]
+    },
     "sol": {
       "enabled": true,
       "adapter": "desk",

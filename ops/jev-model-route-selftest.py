@@ -89,6 +89,7 @@ class PolicyFile(SemanticTestCase):
         targets.update(pin["target"] for key, pin in POLICY["pins"].items() if not key.startswith("_"))
         for target in targets:
             with self.subTest(target=target):
+                self.assertNotIn(target, {"claude-desktop", "claude-session"})
                 self.assertEqual(catalog[target]["adapter"], "desk")
                 self.assertIn(catalog[target]["desk"], codex_desks)
                 self.assertIsNone(POLICY["dispatch_targets"][target]["subagent_model"])
@@ -147,6 +148,13 @@ class Dispatch(SemanticTestCase):
                 self.assertEqual(out["route"], POLICY["abstain_route"])
                 self.assertEqual(out["target"], POLICY["queue_targets"]["fallback"])
                 self.assertTrue(out["review_required"])
+    def test_judge_failure_keeps_automatic_work_on_luna(self):
+        out = route.dispatch("automatic task", judge=FakeJudge(error=TimeoutError("offline")), log_path=None)
+        self.assertEqual(out["target"], "luna")
+        self.assertEqual(out["desk"], "luna-desk")
+        self.assertIsNone(out["subagent_model"])
+        self.assertEqual(out["effort"], "low")
+
     def test_explicit_pin_audit_retains_advisory_route(self):
         judge = FakeJudge({"direct": .99})
         out = route.dispatch("review", pin="merge_review", audit_pin=True, judge=judge, log_path=None)

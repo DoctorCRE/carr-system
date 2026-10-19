@@ -78,6 +78,40 @@ class FamilyDispatchTests(unittest.TestCase):
         self.assertIn('model_reasoning_effort=low', seen[0])
         self.assertEqual(self.reg.entries()['cx']['family'], 'sol')
 
+    def test_automatic_luna_desk_pins_subscription_auth_on_start_and_resume(self):
+        self.reg.register('luna-desk', 'codex-session', family='luna', effort='low')
+        for resume in (False, True):
+            if resume:
+                self.reg.remember_thread('luna-desk', 'subscription-thread')
+            seen = []
+            def run(argv, **options):
+                seen.append(argv)
+                Path(argv[argv.index('-o') + 1]).write_text('done')
+                return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
+            with patch.object(dispatch.subprocess, 'run', side_effect=run):
+                row = dispatch.dispatch('luna-desk', 'automatic task', registry=self.reg,
+                                        results_path=self.results,
+                                        config_overrides=('forced_login_method="api"',))
+            self.assertEqual(row['model'], 'gpt-6-luna')
+            self.assertIn('forced_login_method="chatgpt"', seen[0])
+            self.assertIn('model_provider="openai"', seen[0])
+            self.assertGreater(seen[0].index('forced_login_method="chatgpt"'),
+                               seen[0].index('forced_login_method="api"'))
+
+    def test_automatic_luna_desk_refuses_a_rebound_max_transport(self):
+        for kind in ('claude-session', 'claude-desktop'):
+            self.reg.register('luna-desk', 'codex-session', family='luna', effort='low')
+            data = json.loads(self.reg.path.read_text())
+            data['desks']['luna-desk'].update(kind=kind, model='opus')
+            self.reg.path.write_text(json.dumps(data))
+            with patch.object(dispatch, '_execute', return_value={'status': 'completed', 'detail': 'done'}) as execute, \
+                 patch.object(desks, 'is_live', return_value=True):
+                with self.assertRaises(desks.DeskError) as raised:
+                    dispatch.dispatch('luna-desk', 'automatic task', registry=self.reg,
+                                      results_path=self.results)
+                self.assertEqual(raised.exception.code, 'unsafe_automatic_desk')
+                execute.assert_not_called()
+
     def test_priority_order_is_not_version_order_for_either_family(self):
         self.reg.register('cx', 'codex-session', family='sol', effort='high')
         for family in ('sol', 'luna'):

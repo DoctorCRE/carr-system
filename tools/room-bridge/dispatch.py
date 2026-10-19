@@ -370,6 +370,8 @@ def _to_codex(
                     "bad_codex_config",
                     "Codex config overrides must be non-empty strings")
             argv += ["-c", override]
+        if entry.get("name") == "luna-desk":
+            argv += ["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"']
         # Bind both starts and resumes, after overrides, so an old thread or
         # caller config cannot restore human approval cards.
         argv += ["-c", 'approval_policy="never"']
@@ -572,6 +574,8 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if name == "luna-desk" and entry["kind"] != "codex-session":
+        raise DeskError("unsafe_automatic_desk", "automatic Luna work requires the Codex subscription desk")
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
