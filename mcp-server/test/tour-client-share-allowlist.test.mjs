@@ -278,19 +278,6 @@ test("the client's browser exchange and packet read return no internal material"
   assert.deepEqual(Object.keys(packet.packet).sort(), ["as_of", "stops"]);
 });
 
-test("the client share link is an origin, a fixed path and a random token, with nothing about the client", () => {
-  const app = fs.readFileSync(path.join(root, "dealroom/tours/app.js"), "utf8");
-  const urls = [...app.matchAll(/const url = `([^`]*)`;/g)].map(match => match[1]);
-  assert.equal(urls.length, 1, "exactly one client share URL is built");
-  assert.match(urls[0], /^https:\/\/[a-z0-9.-]+\/share#token=\$\{raw\}$/);
-  // The only interpolation is `raw`, and `raw` is a fresh 32-byte random token.
-  assert.match(app, /const raw = newShareToken\(\);/);
-  assert.match(app, /function newShareToken\(\) \{ const bytes = new Uint8Array\(32\); crypto\.getRandomValues\(bytes\); return base64url\(bytes\); \}/);
-  // The token travels in the fragment, so it never reaches a server log, and
-  // the path carries no tour, projection, grant, client or deal identifier.
-  assert.doesNotMatch(urls[0], /projection|tour_?id|grant|client|deal|name|\?/i);
-});
-
 // ---------------------------------------------------------------------------
 // VALUE safety (review of #1242): an allowed KEY must not carry internal TEXT.
 // One rule -- tour-client-value-safety.js / ops.tour_client_text_violation() --

@@ -259,7 +259,7 @@ binding = "CF_VERSION_METADATA"
 
 # One Worker + one asset binding is the smallest deployable structure. P2
 # materializes the exact digest-pinned DoctorCRE release into this ignored path
-# before Wrangler runs; editable dealroom/ source is no longer deployment input.
+# before Wrangler runs.
 [assets]
 directory = "../out/doctorcre-artifacts/current"
 binding = "ASSETS"

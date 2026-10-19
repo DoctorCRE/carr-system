@@ -8,7 +8,7 @@
 // this is a checked-in module.
 
 export const REVIEW_TIERS_SOURCE = "ops/config/review-tiers.v1.json";
-export const REVIEW_TIERS_DIGEST = "sha256:731c9b99162294ba83c76c03cf9cfc095e6f3d3b45f39595ccfd5a96ad57fb6a";
+export const REVIEW_TIERS_DIGEST = "sha256:88c51afc939528dfc6a0cda08377073cfbb6b6d9dc0ca8ac4f3d852fd6657be2";
 
 export const REVIEW_TIERS = Object.freeze({
   default_tier: 1,
@@ -66,7 +66,6 @@ export const REVIEW_TIERS = Object.freeze({
     Object.freeze({"id": "control-room-contracts", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "control-room/contracts/"}),
     Object.freeze({"id": "workspace-contracts", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "workspace/contracts/"}),
     Object.freeze({"id": "json-schemas", "tier": 2, "class": "adversarial", "match": "suffix", "pattern": ".schema.json"}),
-    Object.freeze({"id": "deal-room", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "dealroom/"}),
     Object.freeze({"id": "fill-engine", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "fill-engine/"}),
   ]),
   noise_exclusions: Object.freeze([

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
-import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
+import { launchChrome } from "./helpers/chrome-launch.mjs";
+import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
 
 const SYSTEM_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 

@@ -11,7 +11,6 @@
     "release_paths": [
       "mcp-server/",
       "migrations/",
-      "dealroom/",
       "ops/config/doctorcre-artifact.v1.json"
     ],
     "non_release_globs": [

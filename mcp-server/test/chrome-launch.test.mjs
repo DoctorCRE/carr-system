@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHROME_STOP_TIMEOUT_MS, launchChrome, processTreeStopsWithin } from "../../dealroom/test/chrome-launch.mjs";
+import { CHROME_STOP_TIMEOUT_MS, launchChrome, processTreeStopsWithin } from "./helpers/chrome-launch.mjs";
 
 const fixture = new URL("./fixtures/chrome-launch-fixture.mjs", import.meta.url);
 const nativeKill = process.kill.bind(process);

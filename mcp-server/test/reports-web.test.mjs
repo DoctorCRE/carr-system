@@ -1,20 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { createReportsWebHandler, isReportsHostRequest, isReportsRequest, REPORTS_ORIGIN } from "../src/reports-web.js";
 
-const REPORTS_ROOT = fileURLToPath(new URL("../../dealroom/", import.meta.url));
-const SHARE_JS = fileURLToPath(new URL("../../dealroom/reports/share.js", import.meta.url));
-const SHARE_BOOTSTRAP_JS = fileURLToPath(new URL("../../dealroom/reports/share-bootstrap.js", import.meta.url));
 
 class ReportAssets {
   constructor() { this.requests = []; }
   async fetch(request) {
     this.requests.push(request);
     const pathname = new URL(request.url).pathname;
-    try { return new Response(await readFile(`${REPORTS_ROOT}${pathname}`), { headers: { "access-control-allow-origin": "*" } }); }
-    catch { return new Response("missing", { status: 404 }); }
+    return new Response(`Asset fixture ${pathname}`, { headers: { "access-control-allow-origin": "*" } });
   }
 }
 
@@ -170,38 +164,4 @@ test("authenticated report read forwards only the opaque session digest", async 
   assert.equal(input.sessionDigest, await sha256Digest(cookie.slice("__Host-tour_share_session=".length)));
   assert.equal(input.session, undefined);
   assert.equal(input.request, undefined);
-});
-
-test("static bootstrap removes the fragment and exposes no ungoverned client mutation or PDF controls", async () => {
-  const [html, bootstrapScript, script, css] = await Promise.all([
-    readFile(`${REPORTS_ROOT}reports/share.html`, "utf8"), readFile(SHARE_BOOTSTRAP_JS, "utf8"),
-    readFile(SHARE_JS, "utf8"), readFile(`${REPORTS_ROOT}reports/share.css`, "utf8"),
-  ]);
-  assert.match(html, /<button id="open-tour" type="button" disabled>Open tour<\/button>/);
-  assert.match(html, /<script src="\/share-bootstrap\.js"><\/script>[\s\S]*<script type="module" src="\/share\.js"><\/script>/);
-  assert.match(bootstrapScript, /window\.location\.hash/);
-  assert.match(bootstrapScript, /history\.replaceState/);
-  assert.match(bootstrapScript, /__CARR_TOUR_TAKE_SHARE_TOKEN__/);
-  assert.doesNotMatch(bootstrapScript, /maplibre|\/api\/share\/exchange|loadReport\(/i);
-  assert.match(script, /\/api\/share\/exchange/);
-  assert.match(script, /route_sequence/);
-  assert.match(script, /property:public/);
-  assert.match(script, /maplibre-gl-6\.4\.1/);
-  assert.match(script, /setWorkerUrl\("\/vendor\/maplibre-gl-6\.4\.1\/maplibre-gl-worker\.mjs"\)/);
-  assert.match(script, /\/api\/share\/map/);
-  assert.match(script, /Promise\.allSettled\(\[fetchReport\(\), fetchMap\(\)\]\)/);
-  assert.match(script, /if \(!shareToken\)[\s\S]*void loadTour\(\)/);
-  assert.match(script, /propertyAddress\(item/);
-  assert.match(script, /properties\.length === 1 \? "property" : "properties"/);
-  assert.doesNotMatch(script, /propertyies/);
-  assert.doesNotMatch(script, /report\?\.(?:tour_name|title|name|summary)/);
-  assert.match(script, /interactive map only/);
-  assert.match(script, /await import\("\/vendor\/maplibre-gl-6\.4\.1\/maplibre-gl\.mjs"\)/);
-  assert.doesNotMatch(script, /LineString|addSource\("tour-route"|addLayer\(\{ id: "tour-route"/);
-  assert.match(html, /id="tour-map"/);
-  assert.doesNotMatch(script + html, /\/api\/share\/(?:pdf|comment|reaction)|allow_(?:comments|reactions|pdf_download)|latest_reaction/);
-  assert.doesNotMatch(script, /authorization|serviceWorker|\/sw\.js|register\s*\(/i);
-  assert.match(css, /[@]media/);
-  assert.match(css, /#002F6C/);
-  assert.match(css, /#F57F29/);
 });

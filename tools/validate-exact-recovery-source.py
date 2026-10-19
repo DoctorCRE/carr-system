@@ -43,8 +43,6 @@ def validate(root_arg: str, expected_sha: str) -> Path:
         raise ValueError("exact source root has uncommitted or ignored inputs")
     required_files = ("mcp-server/wrangler.toml", "mcp-server/src/tools.js")
     missing = [relative for relative in required_files if not (root / relative).is_file()]
-    if not (root / "dealroom").is_dir():
-        missing.append("dealroom")
     if missing:
         raise ValueError("exact source root is missing required inputs: " + ", ".join(missing))
     return root

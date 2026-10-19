@@ -2,7 +2,7 @@
  "schema_version": "review-tier-vectors.v1",
  "generated_by": "ops/sync-review-tiers.py",
  "source": "ops/config/review-tiers.v1.json",
- "map_digest": "sha256:731c9b99162294ba83c76c03cf9cfc095e6f3d3b45f39595ccfd5a96ad57fb6a",
+ "map_digest": "sha256:88c51afc939528dfc6a0cda08377073cfbb6b6d9dc0ca8ac4f3d852fd6657be2",
  "vectors": [
   {
    "path": ".github/CODEOWNERS",
@@ -420,7 +420,7 @@
   },
   {
    "path": "dealroom/index.html",
-   "tier": 2,
+   "tier": 1,
    "noise": false,
    "test": false
   },
@@ -1235,18 +1235,6 @@
    "test": false
   },
   {
-   "path": "dealroom/probe.py",
-   "tier": 2,
-   "noise": false,
-   "test": false
-  },
-  {
-   "path": "x/dealroom/probe.py",
-   "tier": 1,
-   "noise": false,
-   "test": false
-  },
-  {
    "path": "fill-engine/probe.py",
    "tier": 2,
    "noise": false,
@@ -1735,7 +1723,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:beaec50e9926b73641f77a8e28e210e029a965c563682a96e9bed963fc6d3852",
+    "policy_digest": "sha256:1f76d0bfa4a3bcec1d6554e781cb247dd9563af673906a2190dc5a41017a3cde",
     "changed_paths": [
      "lib/example.py",
      "tests/test_example.py"
@@ -1779,7 +1767,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:beaec50e9926b73641f77a8e28e210e029a965c563682a96e9bed963fc6d3852",
+    "policy_digest": "sha256:1f76d0bfa4a3bcec1d6554e781cb247dd9563af673906a2190dc5a41017a3cde",
     "changed_paths": [
      "tests/test_example.py"
     ],
@@ -1820,7 +1808,7 @@
     "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "policy_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "diff_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "policy_digest": "sha256:beaec50e9926b73641f77a8e28e210e029a965c563682a96e9bed963fc6d3852",
+    "policy_digest": "sha256:1f76d0bfa4a3bcec1d6554e781cb247dd9563af673906a2190dc5a41017a3cde",
     "changed_paths": [
      "ops/example-selftest.py"
     ],
@@ -1838,5 +1826,5 @@
    }
   }
  ],
- "policy_digest": "sha256:beaec50e9926b73641f77a8e28e210e029a965c563682a96e9bed963fc6d3852"
+ "policy_digest": "sha256:1f76d0bfa4a3bcec1d6554e781cb247dd9563af673906a2190dc5a41017a3cde"
 }
