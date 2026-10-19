@@ -578,8 +578,37 @@ class GitFetchDiagnostics(Base):
         self.assertIn("[REDACTED]", log)
         self.assertIn("Authentication failed", log)
 
+    def test_fetch_log_preserves_redaction_of_passwords_containing_slashes(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://fixture-user:fixture-password/with/slashes@github.com/example/app.git/"
+        result = subprocess.CompletedProcess([], 128, b"", f"unable to access '{url}'".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertNotIn("fixture-password", Path(failed.exception.log).read_text() + failed.exception.detail)
+
 
 class WorkerIdentityReconciliation(Base):
+    def test_second_unreadable_identity_stops_after_one_retry(self):
+        responses = [http.client.RemoteDisconnected("fixture second dropped connection"),
+                     json.JSONDecodeError("fixture invalid JSON", "{", 1), {}]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[http.client.RemoteDisconnected("fixture first drop"),
+                                                   response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(runner.calls, [])
+
     def test_malformed_or_permanent_identity_read_blocks_without_retry(self):
         responses = [json.JSONDecodeError("fixture invalid JSON", "{", 1),
                      {}, {"git_sha": "malformed"},
