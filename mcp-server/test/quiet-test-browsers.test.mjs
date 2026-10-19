@@ -28,9 +28,14 @@ function launchesExecutable(source, shell) {
     }
     return false;
   };
-  const processLaunch = [...source.matchAll(/\b(?:spawn(?:Sync)?|exec(?:Sync|File|FileSync)?|Popen|subprocess\.(?:run|call|check_call|check_output)|os\.system)\s*\(\s*(\[[\s\S]*?\]|[^,\n)]+)/g)]
-    .some(([, expression]) => isBrowser(expression));
-  return processLaunch || (shell && [...source.matchAll(/^[\t ]*(?:exec\s+)?(?:env\s+)?("[^"]+"|'[^']+'|[^\s;|&#]+)/gm)]
+  const imports = [...source.matchAll(/import\s*\{([^}]+)\}\s*from\s*["'](?:node:)?child_process["']|from\s+subprocess\s+import\s+([^\n]+)/g)];
+  const aliases = imports.flatMap(([, js, python]) =>
+    [...(js ?? python).matchAll(/\b(?:spawn(?:Sync)?|exec(?:Sync|File|FileSync)?|Popen|run|call|check_call|check_output)\s+as\s+([\w$]+)/g)]
+      .map(([, name]) => name.replace(/\$/g, "\\$")));
+  const callables = [String.raw`spawn(?:Sync)?|exec(?:Sync|File|FileSync)?|Popen|subprocess\.(?:run|call|check_call|check_output)|os\.system`, ...aliases];
+  const calls = new RegExp(String.raw`\b(?:${callables.join("|")})\s*\(\s*(\[[\s\S]*?\]|[^,\n)]+)`, "g");
+  const processLaunch = [...source.matchAll(calls)].some(([, expression]) => isBrowser(expression));
+  return processLaunch || (shell && [...source.matchAll(/^[\t ]*(?:exec\s+)?(?:env\s+)?(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|[^\s;|&#]*)[\t ]+)*("[^"]+"|'[^']+'|[^\s;|&#]+)/gm)]
     .some(([, command]) => !/^\w+=/.test(command) && isBrowser(command)));
 }
 
