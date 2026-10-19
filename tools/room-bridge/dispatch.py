@@ -791,6 +791,8 @@ def desk_start(
     by delivering its turn into the closing window of a session already on its
     way out. That is the failure this function exists to make impossible.
     """
+    if name == "flash" and flashlib.is_switched_off():
+        raise DeskError("flash_off", flashlib.OFF_REASON)
     registry = registry or Registry()
     state_dir = Path(state_dir or DESK_STATE)
     sock_dir = Path(sock_dir or SOCK_DIR)

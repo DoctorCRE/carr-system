@@ -208,7 +208,7 @@ def route_turn(state: dict, turn: dict, desk_seats: dict[str, str], *,
     for name, seat in desk_seats.items():
         if is_echo(turn, seat):
             continue
-        if seat == "flash" and not re.search(r"(?<![\w@])@flash(?![\w-])", str(turn.get("body") or ""), re.I):
+        if seat == "flash" or name in {"flash", "flash-model"}:
             continue
         if name in mention_only and is_unaddressed_desk_turn(turn, seat, desk_seats):
             continue

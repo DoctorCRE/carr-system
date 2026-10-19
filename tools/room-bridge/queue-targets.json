@@ -10,7 +10,8 @@
       "capabilities": ["read"]
     },
     "flash": {
-      "enabled": true,
+      "enabled": false,
+      "unavailable_reason": "Flash is explicit-only. Use bin/flash-on on a direct human request, then dispatch directly.",
       "adapter": "desk",
       "assignee": "desk:flash-model",
       "desk": "flash-model",

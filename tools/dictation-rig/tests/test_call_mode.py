@@ -455,6 +455,11 @@ class CallModeHttpTests(SemanticTestCase):
 class PostCallTests(SemanticTestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
+        env = patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(Path(self.tmp.name) / "flash")})
+        env.start()
+        self.addCleanup(env.stop)
+        post_call.flashlib.grant_path().parent.mkdir()
+        post_call.flashlib.grant_path().write_text(json.dumps({"issued_at": 0, "expires_at": 4e9}))
         self.session = Path(self.tmp.name) / "2026.08.10-1234"
         self.session.mkdir()
         self.context = {

@@ -43,7 +43,7 @@ LLAMA_PORT = 8598
 OUTLOOK_URL_LIMIT = 1900
 
 # Flash Next (launchd label local.ds4-flash-next) shares its loopback endpoint
-# with the Model Room flash desk. flashlib loads it on demand and protects
+# with the Model Room flash desk. flashlib requires a human grant and protects
 # requests from idle shutdown. Requests may queue behind other callers.
 # It is a much stronger model than the bundled
 # 1.5B llama.cpp model and, unlike it, reliably produces a usable review pack
@@ -646,7 +646,7 @@ def flash_server_available(opener: Callable[..., Any] = urllib.request.urlopen, 
 
 
 def resident_flash_distiller(request: dict[str, Any], opener: Callable[..., Any] = urllib.request.urlopen) -> dict[str, Any]:
-    """Ensure Flash through the shared lifecycle helper; retain DistillerUnavailable on failure."""
+    """Use an already running, human-granted Flash server or report unavailable."""
     context_json = json.dumps(request["context"], ensure_ascii=False)
     if len(context_json) > 28000:
         raise RuntimeError("call-context index exceeds bounded local distiller context")
