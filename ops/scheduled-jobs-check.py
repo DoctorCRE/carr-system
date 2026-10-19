@@ -20,10 +20,7 @@ def main():
         snapshot = json.loads(Path(args.fixture).read_text()) if args.fixture else None
         rows = jobs.check(snapshot, args.now)
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        rows = [{"label": "checker", "code": "evidence_unavailable",
-                 "key": "scheduled_jobs:checker:evidence_unavailable", "owner": "orchestrator",
-                 "detail": "native definition or evidence could not be interpreted (" + type(exc).__name__ + ")",
-                 "fix": "restore the native definition or named evidence source and rerun"}]
+        rows = jobs.unavailable(exc)
     if args.json:
         print(json.dumps(rows))
     else:

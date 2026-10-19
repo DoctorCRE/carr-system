@@ -17,6 +17,7 @@ from lib import rule_cards, rule_routes
 from lib.hook_runtime import decision, run
 
 CARD_TOOL = 'rule-cards'
+GAP_LOG = REPO / 'out/rule-lookup/selection-gaps.jsonl'
 
 FAILURE = "RULE LOOKUP INCOMPLETE. Rules were not fully delivered. Ordinary actions must wait. Recover through standing-context or the read-only rule verbs; report unusable scope as a data defect."
 UNAVAILABLE = "RULE LOOKUP UNAVAILABLE. The rule store could not be reached for this action; it was not blocked. Recover rules through standing-context if the work depends on them."
@@ -137,8 +138,17 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     if dedupe:
         ids = rule_routes.fresh_ids(session, tool or event, ids, agent_id=agent, corpus_digest=selection["corpus_digest"])
     rules = [r for r in selection['rules'] if r['id'] in ids]
-    if not rules and not cards and (selection['complete'] or event == 'Stop'):
-        # Nothing to deliver. On Stop, an advisory gap notice re-opens the turn and loops.
+    if selection['data_defects'] or selection['unresolved']:
+        try:
+            GAP_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with GAP_LOG.open('a') as handle:
+                handle.write(json.dumps({'session_id': session, 'event_name': event,
+                    'tool_use_id': payload.get('tool_use_id'), 'corpus_digest': selection['corpus_digest'],
+                    'data_defects': selection['data_defects'], 'unresolved': selection['unresolved']},
+                    sort_keys=True) + '\n')
+        except OSError:
+            pass  # Advisory diagnostics must not deny an otherwise valid action.
+    if not rules and not cards:
         return None
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,
             'client': 'codex' if payload.get('turn_id') else 'claude',
@@ -148,7 +158,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
             'task_sha256': digest(task), 'corpus_digest': selection['corpus_digest'],
             'source_digest': source_sha256(REPO), 'identity': selection['identity'],
             'rule_ids': sorted(ids), 'data_defects': selection['data_defects'],
-            'unresolved': selection['unresolved'], 'models': selection['models'],
+            'unresolved_count': len(selection['unresolved']), 'models': selection['models'],
             'complete': selection['complete'], 'instruction': LOOKUP_INSTRUCTION}
     if cards:
         base['cards'] = [rule_cards.card_view(c) for c in cards]
@@ -159,12 +169,11 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
     full, overflow = rule_routes.fit_rules(rules, render, always_on=set())
     text = render(full, overflow)
     if not rule_routes.within_cap(text) and not selection['complete']:
-        for field in ('data_defects', 'unresolved'):
-            grouped = {}
-            for issue in selection[field]:
-                grouped.setdefault(issue['reason'], []).append(issue['rule_id'][:8])
-            base[field] = [{'reason': reason, 'rule_ids': rule_ids}
-                           for reason, rule_ids in sorted(grouped.items())]
+        grouped = {}
+        for issue in selection['data_defects']:
+            grouped.setdefault(issue['reason'], []).append(issue['rule_id'][:8])
+        base['data_defects'] = [{'reason': reason, 'rule_ids': rule_ids}
+                                for reason, rule_ids in sorted(grouped.items())]
         full, overflow = rule_routes.fit_rules(rules, render, always_on=set())
         text = render(full, overflow)
     if not rule_routes.within_cap(text):

@@ -207,8 +207,19 @@ def _claude_user_text(record: object) -> str | None:
 
 
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
-    if not isinstance(row, dict) or set(row) - {'cards'} != LOOKUP_RECEIPT_KEYS:
+    if not isinstance(row, dict):
         return False
+    keys = set(row) - {'cards'}
+    if keys not in (LOOKUP_RECEIPT_KEYS, LOOKUP_RECEIPT_KEYS - {'unresolved'} | {'unresolved_count'}):
+        return False
+    if 'unresolved' in row:
+        if not isinstance(row['unresolved'], list):
+            return False
+        unresolved_count = len(row['unresolved'])
+    else:
+        unresolved_count = row['unresolved_count']
+        if type(unresolved_count) is not int or unresolved_count < 0:
+            return False
     if 'cards' in row and (not isinstance(row['cards'], list) or not row['cards'] or len(row['cards']) > 3
                            or any(not isinstance(c, dict) or set(c) != CARD_KEYS
                                   or not all(_nonempty(c[k]) for k in CARD_KEYS) for c in row['cards'])):
@@ -231,7 +242,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     ids, rules, overflow = row['rule_ids'], row['rules'], row['overflow']
     if (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)
             or ids != sorted(set(ids)) or not isinstance(rules, list) or not isinstance(overflow, list)
-            or not isinstance(row['data_defects'], list) or not isinstance(row['unresolved'], list)):
+            or not isinstance(row['data_defects'], list)):
         return False
     if any(not isinstance(r, dict) or not _nonempty(r.get('id')) or not _nonempty(r.get('statement'))
            or r.get('personal_to') not in (None, row['identity']['sponsoring_human_id']) for r in rules):
@@ -242,7 +253,7 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     parts = [r['id'] for r in rules] + [r['id'] for r in overflow]
     if sorted(parts) != ids or len(parts) != len(set(parts)):
         return False
-    return (row['complete'] == (not row['data_defects'] and not row['unresolved'])
+    return (row['complete'] == (not row['data_defects'] and not unresolved_count)
             and row['source_digest'] == source_sha256(repo)
             and within_cap(canonical(row).decode()) and row['receipt_id'] == receipt_id(row))
 

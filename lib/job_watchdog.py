@@ -1229,13 +1229,34 @@ class Effects:
         return self.enqueue(f) if action == "enqueue" else self.fix(f)
 
 
-def digest(root, config):
+def digest(root, config, *, session_id=None):
     rows = read_latest(path_at(root, config["paths"]["findings"]))
     active = [f for f in rows.values() if not f.get("cleared_at")]
+    import scheduled_jobs
+    status = scheduled_jobs.status_path(root)
+    if status.exists():
+        current = json.loads(status.read_text())
+        active = [f for f in active if f['kind'] != 'scheduled_job_drift']
+        active.extend(detect({'scheduled_jobs': current}, config, time.time()))
+    active.sort(key=lambda f: f['key'])
+    if session_id:
+        view = [{k: f.get(k) for k in ('key', 'kind', 'reason', 'next_action', 'needs_joe')}
+                for f in active]
+        signature = hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
+        session = hashlib.sha256(session_id.encode()).hexdigest()
+        path = root / 'out/watchdog/banner-sessions' / (session + '.digest')
+        with locked(path.with_suffix('.lock')):
+            if path.exists() and path.read_text() == signature:
+                return ""
+            path.write_text(signature)
     if not active:
         return ""
     lines = [f"Orchestrator watchdog: {len(active)} open finding(s)."]
-    for f in active[:config["thresholds"]["digest_items"]]:
+    idle = sum(f['kind'] == 'branch_idle' for f in active)
+    if idle:
+        lines.append(f"- branch_idle: {idle} idle branches.")
+    actionable = [f for f in active if f['kind'] != 'branch_idle']
+    for f in actionable[:config["thresholds"]["digest_items"]]:
         reason = " ".join(f["reason"].split())[:config["thresholds"]["digest_reason_chars"]]
         lines.append(f"- {f['kind']}: {reason} · next: {f['next_action']}" +
                      (" · needs Joe: " + f["needs_joe"] if f.get("needs_joe") else ""))

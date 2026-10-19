@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import fcntl
+import tempfile
 import re
 import hashlib
 import json
@@ -413,8 +415,33 @@ def collect(manifest):
 
 def check(snapshot=None, now=None):
     manifest = native_manifest()
-    return report(manifest, collect(manifest) if snapshot is None else snapshot,
-                  time.time() if now is None else now)
+    now = time.time() if now is None else now
+    if snapshot is not None:
+        return report(manifest, snapshot, now)
+    path = status_path(Path(expand(manifest['canonical_checkout'])))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            rows = report(manifest, collect(manifest), now)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            rows = unavailable(exc)
+        with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, delete=False) as handle:
+            json.dump(rows, handle)
+        os.replace(handle.name, path)
+    return rows
+
+
+def unavailable(exc):
+    return [{"label": "checker", "code": "evidence_unavailable",
+             "key": "scheduled_jobs:checker:evidence_unavailable", "owner": "orchestrator",
+             "detail": "native definition or evidence could not be interpreted (" + type(exc).__name__ + ")",
+             "fix": "restore the native definition or named evidence source and rerun"}]
+
+
+def status_path(root):
+    """One machine observation for the checker, scanner, and prompt banner."""
+    return root / 'out/watchdog/scheduled-jobs.json'
 
 
 def native_manifest(source=SOURCE):
