@@ -72,6 +72,32 @@ class SkillReceiptTests(unittest.TestCase):
                 ]
                 self.assertEqual(self.scan(rows)['opened'], [])
 
+    def test_reader_options_cannot_bypass_the_file(self):
+        for command in (
+            'cat /missing/tdd/SKILL.md --help',
+            'head --version /missing/tdd/SKILL.md',
+            'sed --version /missing/tdd/SKILL.md',
+            "sed -n 'e true' /missing/tdd/SKILL.md",
+            'cat /missing/tdd/SKILL.md#suffix',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.scan(self.codex(command))['opened'], [])
+        for command in ('cat -- /skills/tdd/SKILL.md', 'head /skills/tdd/SKILL.md',
+                        'tail /skills/tdd/SKILL.md', "sed -n '1,20p' /skills/tdd/SKILL.md"):
+            self.assertEqual(self.scan(self.codex(command))['opened'], ['/skills/tdd/SKILL.md'])
+
+    def test_wrapper_cannot_override_the_literal_command(self):
+        rows = self.codex('unused')
+        rows[0]['payload'].update(type='custom_tool_call', name='exec')
+        rows[1]['payload'].update(type='custom_tool_call_output', output='{"exit_code":0}')
+        for code in (
+            'text(await tools.exec_command({cmd:"cat /missing/tdd/SKILL.md", cmd:"true"}));',
+            'text(await tools.exec_command({cmd:"cat /missing/tdd/SKILL.md", ...options}));',
+        ):
+            with self.subTest(code=code):
+                rows[0]['payload']['input'] = code
+                self.assertEqual(self.scan(rows)['opened'], [])
+
     def test_exec_wrapper_and_claude_read(self):
         rows = self.codex('unused')
         rows[0]['payload'].update(name='functions.exec', arguments=json.dumps({
