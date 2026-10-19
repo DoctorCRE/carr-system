@@ -20,7 +20,7 @@ rotation is reported in the run output with its profile, role, time and reason.
 STAGING ONLY, AND THAT IS THE DESIGN RATHER THAN A GAP. Every scope this tool
 resolves is refused if it lands on the Production project id. Migration 0502
 creates the Gate Zero producer seat WITHOUT a password, and this tool ADOPTS
-that state for STAGING as its third login profile. The production credential
+that state for STAGING. The production credential
 for ``carr_gate_zero_producer`` and the production Worker secret
 DATABASE_URL_GATE_ZERO_WRITER are Joe's own act at a console he controls,
 through the equivalent production path already written down: Neon Database SOP
@@ -93,8 +93,10 @@ FORBIDDEN_ENV = (
     "CARR_DB_READER_URL",
     "CARR_DB_JOBS_URL",
     "CARR_DB_AUTHORITY_URL",
+    "CARR_DB_AUTHORITY_JOE_URL",
     "CARR_DB_STAGING_WRITER_URL",
     "CARR_DB_STAGING_READER_URL",
+    "CARR_DB_STAGING_AUTHORITY_JOE_URL",
     "CARR_DB_STAGING_GATE_ZERO_WRITER_URL",
     "CARR_DB_STAGING_FOUNDATION_ASSURANCE_WRITER_URL",
     "PGHOST",
@@ -160,10 +162,6 @@ replacement = load_module(
 
 REPLACEMENT_VERIFIER_KEY = "CARR_DB_PROGRAM5_FORWARD_FIX_VERIFIER_URL"
 REPLACEMENT_VERIFIER_ROLE = "carr_program5_forward_fix_verifier"
-WORKER_DATABASE_SECRET_NAMES = (
-    "DATABASE_URL_READER", "DATABASE_URL_WRITER", "DATABASE_URL_GATE_ZERO_WRITER",
-    "DATABASE_URL_FOUNDATION_ASSURANCE_WRITER",
-)
 WORKER_ENV_ALLOWLIST = (
     "PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "USER", "LOGNAME", "SHELL",
     "SSL_CERT_FILE", "SSL_CERT_DIR", "CLOUDFLARE_API_TOKEN",
@@ -305,19 +303,18 @@ class ProfileClosure:
     creator_edges: tuple[tuple[str, bool, bool, bool, int], ...]
 
 
-# Reader first, then writer, then the seat: run_profile_sequence relies on this
-# order so each completed profile stays recoverable if the next boundary refuses.
-# The Gate Zero seat is LAST because it is the narrowest and the newest; nothing
-# else in the Worker reads its secret.
 PROFILES = (
     LoginProfile("reader", READER_ROLE, READER_BUNDLE_ROLE, "DATABASE_URL_READER"),
     LoginProfile("writer", APP_ROLE, BUNDLE_ROLE, "DATABASE_URL_WRITER"),
+    LoginProfile("authority_joe", "carr_authority_joe", "carr_authority",
+                 "CARR_DB_AUTHORITY_JOE_URL"),
     LoginProfile("gate_zero_producer", GATE_ZERO_PRODUCER_ROLE,
                  None, "DATABASE_URL_GATE_ZERO_WRITER", created_by_migration=True),
     LoginProfile("foundation_assurance_oracle", FOUNDATION_ASSURANCE_ORACLE_ROLE,
                  None, "DATABASE_URL_FOUNDATION_ASSURANCE_WRITER",
                  created_by_migration=True),
 )
+WORKER_DATABASE_SECRET_NAMES = tuple(profile.secret_name for profile in PROFILES)
 
 # THE ONE APPROVED REASON A CREDENTIALED STAGING ROLE MAY BE ROTATED BY THIS
 # TOOL. Joe approved it in chat on 2026-10-12: the Mac Studio holding the local
@@ -617,13 +614,10 @@ def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
         except credential.CredentialRefusal as exc:
             if (
                 str(exc) == "staging credential is absent"
-                and login_profile.created_by_migration
+                and (login_profile.created_by_migration or login_profile.label == "authority_joe")
                 and login_profile.secret_name not in live_names
             ):
-                # The prior Worker predates this migration-created seat.  JSON
-                # null is Wrangler's atomic bulk-delete representation, so a
-                # rollback restores the observed absence instead of inventing
-                # a credential that never existed.
+                # JSON null restores a binding that was absent before cutover.
                 values[login_profile.secret_name] = None
                 continue
             raise
@@ -1508,7 +1502,8 @@ def read_worker_database_secret_names(
     if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
         raise ProvisioningRefusal("Worker secret name readback has the wrong shape")
     names = [str(row.get("name") or "") for row in payload]
-    database_names = sorted(name for name in names if name.startswith("DATABASE_URL"))
+    database_names = sorted(name for name in names
+                            if name.startswith(("DATABASE_URL", "CARR_DB_AUTHORITY")))
     if len(names) != len(set(names)):
         raise ProvisioningRefusal("Worker secret name readback contains duplicates")
     return set(database_names)
