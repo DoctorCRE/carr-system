@@ -218,6 +218,21 @@ class DeliveryTests(unittest.TestCase):
                 f.write(json.dumps({'type':'event_msg','payload':{'type':'user_message','message':'Changed task'}})+'\n')
             self.assertEqual(hook.task_text({'transcript_path':str(path)}),'Changed task')
 
+    def test_codex_native_child_uses_its_explicit_rollout(self):
+        agent = '01a1520b-a310-7cc1-86c0-4d3c49f8cec3'
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f'rollout-2026-10-18T21-44-16-{agent}.jsonl'
+            path.write_text(json.dumps({'type': 'response_item', 'payload': {
+                'type': 'message', 'role': 'user',
+                'content': [{'type': 'input_text', 'text': 'Read-only child PR review'}]}}) + '\n')
+            output = self.invoke([], payload={'prompt': None, 'transcript_path': str(path),
+                'agent_id': agent, 'turn_id': 'native-turn'})
+            specific = output['hookSpecificOutput']
+            self.assertNotIn('permissionDecision', specific)
+            row = json.loads(specific['additionalContext'])
+            self.assertTrue(row['complete'])
+            self.assertEqual(row['task_sha256'], digest('Read-only child PR review'))
+
     def test_native_child_call_uses_child_task_instead_of_parent(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp) / 'fixture.jsonl'
