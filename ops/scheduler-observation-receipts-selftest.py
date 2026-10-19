@@ -252,7 +252,7 @@ class ObservationTests(unittest.TestCase):
         self.task = 'unknown-task'
         with self.assertRaises(CutoverRefusal):
             self.collect()
-        self.assertEqual(self.calls, [])
+        self.assertTrue(all(command[0] == 'git' for command in self.calls))
 
     def test_cli_prints_the_measured_receipt_and_sanitizes_failure(self):
         import lib.scheduler_observation_receipts as receipts

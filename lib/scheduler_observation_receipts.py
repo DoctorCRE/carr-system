@@ -71,6 +71,10 @@ def collect_receipt(task_id: str, *, repo: Path, home: Path, runner: Runner = _r
     """Measure a reviewed headless task and its retained native registration."""
     if re.fullmatch(r'[a-z][a-z0-9-]*', task_id) is None:
         raise CutoverRefusal('task identity is invalid')
+    runtime_repo = home / 'carr-system'
+    revision = _revision(repo, runner)
+    if runtime_repo != repo and _revision(runtime_repo, runner) != revision:
+        raise CutoverRefusal('installed runtime revision differs from the observed source')
     settings = read_json(repo / 'ops/headless-tasks/tasks.json')
     registered = workflows(repo)
     workflow = registered.get(task_id)
@@ -82,10 +86,6 @@ def collect_receipt(task_id: str, *, repo: Path, home: Path, runner: Runner = _r
     cron, zone = settings['tasks'][task_id]['cron'], settings['timezone']
     if workflow.get('recurrence') is None or (workflow['recurrence'].get('cron'), workflow['recurrence'].get('timezone')) != (cron, zone):
         raise CutoverRefusal('headless recurrence differs from the workflow version')
-    runtime_repo = home / 'carr-system'
-    revision = _revision(repo, runner)
-    if runtime_repo != repo and _revision(runtime_repo, runner) != revision:
-        raise CutoverRefusal('installed runtime revision differs from the observed source')
     instant = observed_at or datetime.now(timezone.utc)
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise CutoverRefusal('observation clock must have a timezone')
