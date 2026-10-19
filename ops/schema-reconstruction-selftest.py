@@ -55,6 +55,26 @@ class ReconstructionTests(unittest.TestCase):
                 actual = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
             self.assertEqual(actual, expected)
 
+            with psycopg.connect(dsn) as conn:
+                conn.execute("""insert into party (id,kind,name,created_by,updated_by)
+                    select '00000000-0000-0000-0000-000000000011','org',
+                        'Synthetic reconstruction account',id,id from actor where slug='system'""")
+                conn.execute("""insert into client (id,roster_ref,party_id,client_type,created_by,updated_by)
+                    select '00000000-0000-0000-0000-000000000012','SYNTHETIC-ACCOUNT',
+                        '00000000-0000-0000-0000-000000000011','national_account',id,id
+                    from actor where slug='system'""")
+                conn.execute("delete from schema_migrations where filename >= %s",
+                    ('0897_national_account_classification_correction.sql',))
+            resumed = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
+                '--apply', '--yes', '--through', highest], cwd=ROOT,
+                env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=600)
+            self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+            with psycopg.connect(dsn) as conn:
+                self.assertEqual(dict(conn.execute(
+                    'select filename, sha256 from schema_migrations').fetchall()), expected)
+                self.assertEqual(conn.execute("select roster_ref,client_type from client").fetchall(),
+                    [('SYNTHETIC-ACCOUNT', 'national_account')])
+
 
 if __name__ == '__main__':
     unittest.main()
