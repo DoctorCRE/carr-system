@@ -21,6 +21,9 @@ An old staging binding whose canonical credential was lost is recovered before
 cutover. Its guarded rotation reuses one durable pending value across retries,
 rebinds the staging Worker, and publishes an authenticated canonical final file.
 A private operation receipt records the recovery without credential values.
+A prior authority binding with no local credential and no database login is
+retired through the Worker bulk adapter. Candidate authority provisioning stays
+in the profile registry; prior staging is never upgraded as part of recovery.
 
 STAGING ONLY, AND THAT IS THE DESIGN RATHER THAN A GAP. Every scope this tool
 resolves is refused if it lands on the Production project id. Migration 0502
@@ -711,14 +714,15 @@ def recover_live_rollback_credentials(
                         "reason": "live staging rollback credential missing; recover canonical binding"}
             record = records.get(profile.label)
             record_keys = {*metadata, "outcome"}
-            if isinstance(record, dict) and record.get("outcome") == "rotated":
-                record_keys.add("rotated_at")
+            if isinstance(record, dict) and record.get("outcome") in {"rotated", "retired"}:
+                record_keys.add(record["outcome"] + "_at")
             if record is not None and (
                     not isinstance(record, dict)
                     or any(record.get(k) != v for k, v in metadata.items())
-                    or record.get("outcome") not in {"rotating", "rotated"}
+                    or record.get("outcome") not in {"rotating", "rotated", "retiring", "retired"}
                     or set(record) != record_keys
-                    or (record.get("outcome") == "rotated" and not isinstance(record.get("rotated_at"), str))):
+                    or (record.get("outcome") in {"rotated", "retired"}
+                        and not isinstance(record.get(record["outcome"] + "_at"), str))):
                 raise ProvisioningRefusal("staging rollback rotation receipt is malformed")
             try:
                 stored = credential.load_existing(
@@ -746,9 +750,31 @@ def recover_live_rollback_credentials(
                 cur = owner.cursor()
                 expected_creator = require_direct_owner_identity(cur)
                 owner.commit()
+                cur.execute("select pg_advisory_xact_lock(%s)", (LOCK_KEY,))
+                exists_now = role_exists(cur, profile.login_role)
+                retiring = record is not None and record["outcome"] in {"retiring", "retired"}
+                if retiring and (stored is not None or exists_now):
+                    raise ProvisioningRefusal("prior authority retirement no longer has an absent role and credential")
+                if stored is None and not exists_now:
+                    if profile.label != "authority_joe" or (record is not None and not retiring):
+                        raise ProvisioningRefusal("missing prior staging login cannot recover its binding")
+                    if record is None:
+                        records[profile.label] = {**metadata, "outcome": "retiring"}
+                        save_private_json(path, receipt)
+                    live_names = read_worker_database_secret_names()
+                    if profile.secret_name in live_names:
+                        bulk_worker_database_secrets({profile.secret_name: None})
+                    verify_worker_database_secret_bindings(expected_names=live_names - {profile.secret_name})
+                    owner.commit()
+                    records[profile.label] = {
+                        **metadata, "outcome": "retired",
+                        "retired_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+                    save_private_json(path, receipt)
+                    protected_names.discard(profile.secret_name)
+                    continue
                 if stored is None:
                     action = decide_profile_action(
-                        role_exists_now=role_exists(cur, profile.login_role), credential_state="absent",
+                        role_exists_now=exists_now, credential_state="absent",
                         role_passwordless=role_is_passwordless(cur, profile.login_role), rotate_lost=True)
                     if action != "rotate":
                         raise ProvisioningRefusal("live staging rollback profile cannot rotate")
@@ -1271,7 +1297,10 @@ def collect_creator_edges(
 
 def role_exists(cur: Any, role: str) -> bool:
     cur.execute("select exists(select 1 from pg_roles where rolname=%s)", (role,))
-    return cur.fetchone() == (True,)
+    row = cur.fetchone()
+    if row not in ((True,), (False,)):
+        raise ProvisioningRefusal("database role existence could not be proved")
+    return row == (True,)
 
 
 def repair_snapshot_creator_edge(

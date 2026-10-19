@@ -115,7 +115,6 @@ def main() -> int:
         raise RuntimeError("the Gate Zero seat is no longer a migration-created profile")
     passwords = {"reader": "reader-fixture-" + "r" * 48,
                  "writer": "writer-fixture-" + "w" * 48,
-                 "authority_joe": "authority-fixture-" + "a" * 48,
                  "seat": "seat-fixture-" + "g" * 48,
                  "seat_rotation": "rotation-fixture-" + "x" * 44,
                  "owner": "owner-fixture-" + "o" * 48}  # ci-secret-scan: allow — disposable loopback fixture
@@ -171,7 +170,7 @@ def main() -> int:
                     raise RuntimeError("neondb_owner fixture reaches the bootstrap role")
                 cur.execute(
                     "select rolname from pg_roles where "
-                    "rolname in ('app_reader','app_writer','carr_authority_joe') order by rolname"
+                    "rolname in ('app_reader','app_writer') order by rolname"
                 )
                 if cur.fetchall():
                     raise RuntimeError("disposable login roles already exist before gate")
@@ -224,7 +223,7 @@ def main() -> int:
                     creator = provision.require_direct_owner_identity(cur)
                     cur.execute(
                         "select rolname from pg_roles where "
-                        "rolname in ('app_reader','app_writer','carr_authority_joe') order by rolname"
+                        "rolname in ('app_reader','app_writer') order by rolname"
                     )
                     if cur.fetchall():
                         raise RuntimeError("disposable login roles already exist before gate")
@@ -238,7 +237,7 @@ def main() -> int:
                             )
                 owner.rollback()
 
-                for label in ("reader", "writer", "authority_joe"):
+                for label in ("reader", "writer"):
                     provision.apply_login_profile(
                         owner, profiles[label], plans[label], passwords[label],
                         expected_creator=creator,
@@ -412,7 +411,6 @@ def main() -> int:
             else:
                 admin.rollback()
                 with admin.cursor() as cur:
-                    cur.execute("drop role if exists carr_authority_joe")
                     cur.execute("drop role if exists app_writer")
                     cur.execute("drop role if exists app_reader")
                     for profile in profiles.values():
@@ -442,7 +440,7 @@ def main() -> int:
                 with admin.cursor() as cur:
                     cur.execute(
                         "select count(*) from pg_roles where "
-                        "rolname in ('app_reader','app_writer','carr_authority_joe')"
+                        "rolname in ('app_reader','app_writer')"
                     )
                     if cur.fetchone() != (0,):
                         raise RuntimeError("disposable login roles were not removed")
@@ -492,7 +490,7 @@ def main() -> int:
                 with admin.cursor() as cur:
                     cur.execute(
                         "select count(*) from pg_roles where "
-                        "rolname in ('app_reader','app_writer','carr_authority_joe')"
+                        "rolname in ('app_reader','app_writer')"
                     )
                     if cur.fetchone() != (0,):
                         raise RuntimeError("rolled-back fixture unexpectedly created login roles")
@@ -521,7 +519,7 @@ def main() -> int:
                 raise
         if failure is not None:
             raise failure
-    print("PASS (DISPOSABLE LOOPBACK ONLY): SQL-created app_reader/app_writer/carr_authority_joe authenticate with exact closed profiles; "
+    print("PASS (DISPOSABLE LOOPBACK ONLY): SQL-created app_reader/app_writer authenticate with exact closed profiles; "
           "reader DML/DDL/sequence/role escalation is denied; "
           f"{seat.login_role} refuses adoption when pg_authid is unreadable, adopts its first "
           "password from the passwordless state 0502 leaves, authenticates with the exact "

@@ -118,15 +118,11 @@ class Recovery(unittest.TestCase):
             self.rollback()
 
     def apply(self, owner, profile, _grants, password, *, rotate=False, commit=True, **_kwargs):
+        self.assertTrue(rotate)
         self.assertFalse(commit)
-        if not rotate and profile.login_role in self.passwords:
-            self.assertEqual(password, self.passwords[profile.login_role])
-            return False
-        if rotate:
-            self.assertIn(profile.login_role, self.passwords)
+        self.assertIn(profile.login_role, self.passwords)
         owner.pending[profile.login_role] = password
         self.changes.append((profile.login_role, password))
-        return not rotate
 
     def validate(self, dsn, profile, _grants, **_kwargs):
         if urlsplit(dsn).password != self.passwords[profile.login_role]:
@@ -284,6 +280,19 @@ class Recovery(unittest.TestCase):
             self.prepare()
         self.assertEqual(self.bulk_calls, [])
         self.assertIn(profile.secret_name, self.live)
+
+    def test_unproven_database_role_absence_refuses_deletion(self):
+        del self.passwords["carr_authority_joe"]
+        original = self.Owner.execute
+        def no_row(owner, statement, params=None):
+            original(owner, statement, params)
+            if "exists(select 1 from pg_roles" in str(statement):
+                owner.row = None
+        with mock.patch.object(self.Owner, "execute", no_row):
+            with self.assertRaises(provision.ProvisioningRefusal):
+                self.prepare()
+        self.assertIn("CARR_DB_AUTHORITY_JOE_URL", self.live)
+        self.assertEqual(self.bulk_calls, [])
 
     def test_retirement_resumes_after_worker_deletion_before_readback(self):
         del self.passwords["carr_authority_joe"]
