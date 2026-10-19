@@ -329,22 +329,35 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
-    failures = set()
+    def job_scope(job):
+        return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
     successes = {}
     for job in jobs:
-        if job.get("exit_code") == 0 and "start" in job:
-            card = job.get("card", job["id"])
-            successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
+        if job.get("card") and "start" in job and job.get("ended_at") and job.get("exit_code") == 0:
+            if job["card"] == "branch-janitor":
+                try:
+                    report = json.loads(job.get("log_tail", ""))
+                except ValueError:
+                    continue
+                if (not isinstance(report, dict) or report.get("schema") != "branch-retirement/v1"
+                        or report.get("execute") is not True or report.get("deferred") != []
+                        or report.get("errors") != [] or not isinstance(report.get("counts"), dict)
+                        or set(report["counts"]) != set(config["repositories"])):
+                    continue
+            scope = job_scope(job)
+            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["ended_at"]))
+    failures = set()
     for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
             card = job.get("card", subject)
-            if job["exit_code"] != 0 and not job.get("superseded"):
-                if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
-                    continue
+            scope = job_scope(job)
+            completed = job.get("card") and "start" in job and job.get("ended_at")
+            recovered = completed and successes.get(scope, -math.inf) > epoch(job["ended_at"])
+            if job["exit_code"] != 0 and not job.get("superseded") and not recovered:
                 reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
-                incident = json.dumps([reason, successes.get(card) if "start" in job else None])
+                incident = json.dumps([scope, reason, successes.get(scope) if completed else None])
                 key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
                 if key not in failures:
                     failures.add(key)
@@ -938,11 +951,14 @@ def collect(root, config, now=None):
         dates = {}
     t = config["thresholds"]
     for repo in config["repositories"]:
+        open_branches = None
         if limited:
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
+            open_branches = {pr["head"]["ref"] for page in pages for pr in page
+                             if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
             listed = {f"{repo}#{pr['number']}" for page in pages for pr in page}
             cache = {k: v for k, v in cache.items() if k in listed or not k.startswith(repo + "#")}
@@ -966,7 +982,11 @@ def collect(root, config, now=None):
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
             error(repo + " PRs", exc, "prs")
+            if open_branches is None:
+                error(repo + " branches", exc, "branches")
         if limited:
+            continue
+        if open_branches is None:
             continue
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
@@ -995,8 +1015,7 @@ def collect(root, config, now=None):
                             dates[key] = date
                         facts["branches"].append({"repo": repo, "name": branch["name"],
                                                   "updated": date,
-                            "open_pr": any(p["repo"] == repo and p.get("headRefName") == branch["name"]
-                                           for p in facts["prs"])})
+                            "open_pr": branch["name"] in open_branches})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
