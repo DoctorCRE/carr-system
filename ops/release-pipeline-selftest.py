@@ -3114,6 +3114,7 @@ class CandidateStaging(Base):
         pipe = self.fx.pipeline(Provider(), cfg=cfg, github=FakeGitHub(checks=[
             {"name": "test", "status": "completed", "conclusion": "success",
              "app": {"slug": "github-actions"}, "head_sha": git(self.fx.repo, "rev-parse", "HEAD")}]))
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
         pipe.http = lambda url: dict(self.live)
         pipe.out = self.output.append
         pipe.deploy_env = lambda: {**pipe.env, "CLOUDFLARE_API_TOKEN": CF_TOKEN}
@@ -3145,6 +3146,53 @@ class CandidateStaging(Base):
         with self.assertRaisesRegex(rp.Blocked, "last released app main SHA"):
             pipe.candidate("stage-candidate", lane="app", sha=sha)
         self.assertEqual(self.calls, [])
+
+    def test_candidate_build_cannot_replace_credentialed_provider(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        marker = self.fx.tmp / "untrusted-provider-ran"
+        build_observations = []
+        credentialed = []
+        real = rp.Runner()
+        node = shutil.which("node", path=rp.BREW_PATH)
+        self.assertIsNotNone(node)
+        payload = """const fs = require('node:fs');
+fs.mkdirSync('node_modules/wrangler/bin', {recursive:true});
+fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
+  'require("node:fs").writeFileSync(' + JSON.stringify(process.argv[1]) +
+  ', process.env.CLOUDFLARE_API_TOKEN || "none"); console.log("Worker Version ID: VERSION")');
+""".replace("VERSION", VERSION)
+
+        def run(argv, *, cwd, log, env, timeout=3600):
+            if argv == ["npm", "run", "build"]:
+                build_observations.append((dict(env), list(cwd.glob("wrangler.*"))))
+                result = real.run([node, "-e", payload, str(marker)], cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+            if "CLOUDFLARE_API_TOKEN" in env:
+                credentialed.append((list(argv), cwd))
+                if "scripts/release-staging.mjs" in argv:
+                    real.run([node, "node_modules/wrangler/bin/wrangler.js"],
+                             cwd=cwd, log=log, env=env)
+            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+
+        pipe.env.update({"NODE_OPTIONS": "candidate-option", "NPM_CONFIG_USERCONFIG": "deploy-config",
+                         "ARBITRARY_DEPLOY_SECRET": "synthetic"})
+        pipe.runner.run = run
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertFalse(marker.exists(), "candidate executable received the deploy environment")
+        self.assertTrue(credentialed)
+        for argv, cwd in credentialed:
+            executable = Path(argv[0]).resolve()
+            self.assertTrue(executable.is_relative_to(pipe.store.root / "toolchain"), argv)
+            self.assertIn("--config", argv)
+            self.assertNotIn("node_modules", str(cwd))
+        for env, configs in build_observations:
+            self.assertEqual(configs, [])
+            self.assertNotIn("NODE_OPTIONS", env)
+            self.assertNotIn("NPM_CONFIG_USERCONFIG", env)
+            self.assertNotIn("ARBITRARY_DEPLOY_SECRET", env)
+            self.assertNotEqual(env["HOME"], pipe.env.get("HOME"))
 
     def test_candidate_requires_green_hosted_ci_for_exact_sha_before_any_step(self):
         sha = self.candidate_sha()
