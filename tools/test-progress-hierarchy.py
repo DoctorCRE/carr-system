@@ -18,6 +18,99 @@ class HierarchyTests(unittest.TestCase):
             'two': {'title': 'Review checks', 'work_request': 'WR-000014', 'slice_id': 'review',
                     'status': 'review', 'repo': 'jbookout/doctorcre-app', 'pr': 316}}}
 
+    def test_archived_slices_do_not_hold_completed_requests_open(self):
+        b = self.board()
+        b['tasks']['one'].update(merged_at='2026-10-19T12:00:00Z', merge_sha='a' * 40)
+        b['legacy_history'] = {'two': b['tasks'].pop('two')}
+        view = h.project(b)
+        self.assertEqual(view['slices']['WR14.S2']['status'], 'archived')
+        self.assertEqual(view['work_requests']['WR14']['status'], 'done')
+        b['legacy_history']['one'] = b['tasks'].pop('one')
+        self.assertEqual(h.project(b)['work_requests']['WR14']['status'], 'archived')
+
+    def test_backfill_reuses_existing_implicit_slice_and_completed_request(self):
+        b = self.board()
+        b['work_requests']['WR-000014']['slices'][1]['slice_id'] = 'implicit'
+        b['tasks']['two']['slice_id'] = 'implicit'
+        for task in b['tasks'].values():
+            task.update(merged_at='2026-10-19T12:00:00Z', merge_sha='a' * 40)
+        h.project(b)
+        proposal = h.backfill(b)
+        self.assertEqual([s['slice_id'] for s in proposal['requests']['WR-000014']['slices']], ['queue', 'implicit'])
+        applied = h.apply_backfill(b, proposal, lambda *args: self.fail('Existing request must not be captured'))
+        view = h.project(applied)
+        self.assertEqual(view['work_requests']['WR14']['status'], 'done')
+        self.assertEqual(view['aliases']['two'], 'WR14.S2.J1.app#316')
+
+    def test_reviewed_summary_replaces_generated_job_and_new_request_copy(self):
+        for generated in [False, True]:
+            with self.subTest(generated=generated):
+                task = {'title': 'Rebuild Observatory around current navigation', 'pr': 12, 'repo': 'jbookout/carr-system'}
+                if generated:
+                    h.propose_copy(task)
+                b = {'project': 'test', 'tasks': {'one': task}}
+                summary = {'title': 'Observatory navigation', 'description': 'Keep Observatory navigation clear so partners can find their work.'}
+                proposal = h.backfill(b, facts={'jbookout/carr-system#12': {'title': task['title']}}, summaries={'one': summary})
+                request = proposal['requests']['pr:jbookout/carr-system#12']
+                self.assertEqual(request['card_title'], summary['title'])
+                self.assertEqual(request['card_description'], summary['description'])
+                applied = h.apply_backfill(b, proposal, lambda *args: {'ok': True, 'human_ref': 'WR-000014'})
+                card = next(iter(h.project(applied)['cards'].values()))
+                self.assertEqual(card['card_title'], summary['title'])
+                self.assertEqual(card['card_description'], summary['description'])
+
+    def test_older_work_placeholders_project_without_changing_summary_proposals(self):
+        tasks = {str(n): {'title': 'Dot research: ?', 'pr': n + 1, 'repo': 'jbookout/carr-system',
+            'github_state': 'CLOSED' if n % 2 else 'MERGED'} for n in range(81)}
+        tasks['open'] = {'title': 'Dot research: ?', 'pr': 82, 'repo': 'jbookout/carr-system', 'github_state': 'OPEN'}
+        b = {'project': 'test', 'tasks': tasks}
+        plan = h.backfill(b)
+        self.assertEqual(len(plan['summary_required']), 82)
+        applied = h.apply_backfill(b, plan, lambda *args: {'ok': True, 'human_ref': 'WR-000014'})
+        view = h.project(applied)
+        self.assertEqual(len(view['cards']), 82)
+        for card in view['cards'].values():
+            self.assertEqual(card['card_title'], 'Older work')
+            self.assertEqual(card['card_description'], 'Older work from before cards had summaries; open details for the PR link.')
+            self.assertEqual(card['archived'], card['github_state'] != 'OPEN')
+            self.assertFalse(card['done'])
+        self.assertEqual(view['slices']['WR14.S1']['status'], 'active')
+        for task in applied['tasks'].values():
+            self.assertTrue(task['summary_required'])
+            self.assertNotIn('card_title', task)
+
+    def test_apply_validates_entire_projection_before_any_capture(self):
+        for invalid in ['copy', 'slice', 'assignment']:
+            with self.subTest(invalid=invalid):
+                b = {'project': 'test', 'tasks': {'one': {'title': 'Board cleanup'}}}
+                plan = h.backfill(b)
+                if invalid == 'copy':
+                    plan['requests']['legacy']['card_title'] = 'Invalid'
+                elif invalid == 'slice':
+                    plan['requests']['legacy']['slices'] = [
+                        {'slice_id': 'implicit', 'ordinal': 1, 'title': 'Board cleanup'},
+                        {'slice_id': 'duplicate', 'ordinal': 1, 'title': 'Board cleanup'}]
+                else:
+                    plan['assignments']['one']['slice_id'] = 'unregistered'
+                calls = []
+                def capture(*args):
+                    calls.append(args)
+                    return {'ok': True, 'human_ref': 'WR-000014'}
+                with self.assertRaises(ValueError):
+                    h.apply_backfill(b, plan, capture)
+                self.assertEqual(calls, [])
+                self.assertNotIn('work_requests', b)
+
+    def test_reviewed_summary_updates_new_parent_after_an_unreviewed_related_job(self):
+        b = {'project': 'test', 'tasks': {
+            'first': {'title': 'Rebuild Observatory around current navigation', 'repo': 'jbookout/carr-system', 'pr': 12},
+            'second': {'title': 'Rebuild Observatory around navigation', 'repo': 'jbookout/carr-system', 'pr': 13}}}
+        facts = {f'jbookout/carr-system#{t["pr"]}': {'title': t['title'], 'headRefName': 'observatory-navigation'} for t in b['tasks'].values()}
+        summary = {'title': 'Observatory navigation', 'description': 'Keep Observatory navigation clear so partners can find their work.'}
+        plan = h.backfill(b, facts=facts, summaries={'second': summary})
+        self.assertEqual(len(plan['requests']), 1)
+        self.assertEqual(next(iter(plan['requests'].values()))['card_title'], summary['title'])
+
     def test_registered_slice_order_and_parent_address(self):
         b = self.board()
         view = h.project(b)

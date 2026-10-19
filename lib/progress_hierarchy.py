@@ -58,9 +58,11 @@ def project(state):
             if key not in triage:
                 triage.append(key)
         propose_copy(task)
-        if not task.get('card_title') or not task.get('card_description'):
-            raise ValueError(f'Model Room summary required: {key}')
-        validate_copy(task['card_title'], task['card_description'])
+        placeholder = task.get('summary_required') and not (task.get('card_title') and task.get('card_description'))
+        display_copy = {'card_title': 'Older work',
+            'card_description': 'Older work from before cards had summaries; open details for the PR link.'} if placeholder else {
+            'card_title': task.get('card_title'), 'card_description': task.get('card_description')}
+        validate_copy(display_copy['card_title'], display_copy['card_description'])
         ref = task.get('work_request')
         parent = requests[wr_address(ref)]
         candidates = [slices[sid] for sid in parent['slices']]
@@ -91,12 +93,14 @@ def project(state):
             if row.get('pr'):
                 address += f".{REPOSITORIES[row['repo']]}#{row['pr']}"
             addresses.append(address)
-            card = {**task, **row, 'id': address, 'task_id': key, 'parent_id': sid,
+            card = {**task, **display_copy, **row, 'id': address, 'task_id': key, 'parent_id': sid,
                     'archived': key in state.get('legacy_history', {}) and key not in state.get('tasks', {})}
             if len(links) > 1:
                 for field in ('merge_sha', 'merged_at', 'github_state'):
                     if field not in row:
                         card.pop(field, None)
+            if placeholder and (merged(card) or str(card.get('github_state', '')).upper() in ('MERGED', 'CLOSED')):
+                card['archived'] = True
             previous = cards.get(address)
             if previous and not previous['archived'] and card['archived']:
                 card = previous
@@ -138,6 +142,7 @@ def merged(card):
 def aggregate(values):
     if values and all(v.get('status') == 'archived' for v in values):
         return 'archived'
+    values = [v for v in values if v.get('status') != 'archived']
     if values and all(v.get('done') or (v.get('status') == 'done' and 'pr_counts' in v) for v in values):
         return 'done'
     if any(v.get('status') in ('blocked', 'question-for-orchestrator') or v.get('health') == 'blocked' for v in values):
@@ -271,6 +276,15 @@ def propose_copy(record):
     record.pop('summary_required', None)
 
 
+def apply_copy_proposal(record, proposal):
+    previous = record.get('proposed_copy', {})
+    for field, name in [('card_title', 'title'), ('card_description', 'description')]:
+        if not record.get(field) or (previous.get('generator', '').startswith('plain-summary.')
+                and record[field] == previous.get('values', {}).get(name)):
+            record[field] = proposal['values'][name]
+    record['proposed_copy'] = copy.deepcopy(proposal)
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
@@ -332,9 +346,8 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         propose_copy(task)
         if key in summaries:
             validate_copy(**summaries[key])
-            task['proposed_copy'] = {'generator': 'model-room-import.v1', 'source_digest': digest(original), 'values': summaries[key]}
-            task.setdefault('card_title', summaries[key]['title'])
-            task.setdefault('card_description', summaries[key]['description'])
+            apply_copy_proposal(task, {'generator': 'model-room-import.v1',
+                'source_digest': digest(original), 'values': summaries[key]})
             task.pop('summary_required', None)
         proposed[key] = {k: task[k] for k in ('proposed_copy', 'summary_required') if k in task}
         ref = original.get('work_request') or original.get('work_request_ref')
@@ -356,8 +369,12 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         if (task.get('card_title') and task.get('card_description') and group != 'legacy'
                 and not group.startswith('series:') and ref not in catalog
                 and ref not in state.get('work_requests', {})):
-            request.setdefault('card_title', task['card_title'])
-            request.setdefault('card_description', task['card_description'])
+            if task.get('proposed_copy', {}).get('generator') == 'model-room-import.v1':
+                request['card_title'] = task['card_title']
+                request['card_description'] = task['card_description']
+            else:
+                request.setdefault('card_title', task['card_title'])
+                request.setdefault('card_description', task['card_description'])
         request.setdefault('slices', [])
         slice_ref = original.get('slice_id') or original.get('slice_ref') or original.get('slice')
         if not slice_ref and series:
@@ -369,7 +386,8 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         assignments[key] = {'request_key': group, 'slice_id': slice_ref or 'implicit',
                             'collection': 'tasks' if key in state.get('tasks', {}) else 'legacy_history'}
     for key, row in requests.items():
-        if row['slices'] and any(a['request_key'] == key and a['slice_id'] == 'implicit' for a in assignments.values()):
+        if (row['slices'] and not any(s['slice_id'] == 'implicit' for s in row['slices'])
+                and any(a['request_key'] == key and a['slice_id'] == 'implicit' for a in assignments.values())):
             row['slices'].append({'slice_id': 'implicit', 'title': 'Other work', 'description': 'Keep unsliced work visible within its Work Request.'})
     creates = []
     for key, row in requests.items():
@@ -402,24 +420,34 @@ def apply_backfill(state, proposal, call):
     if proposal['source_digest'] != digest(state):
         raise ValueError('Board changed since dry run')
     bindings = {key: key for key in proposal['requests'] if key.startswith('WR-')}
+    preview_bindings = dict(bindings)
+    next_ref = max((int(wr_address(ref)[2:]) for ref in bindings), default=0)
+    for index, row in enumerate(proposal['create_requests'], start=1):
+        preview_bindings[row['request_key']] = f'WR-{next_ref + index:06d}'
+    project(bind_backfill(state, proposal, preview_bindings))
     for row in proposal['create_requests']:
         receipt = call(row['verb'], row['args'])
         if not receipt.get('ok'):
             raise ValueError('Work Request capture failed')
         wr_address(receipt.get('human_ref'))
         bindings[row['request_key']] = receipt['human_ref']
+    return bind_backfill(state, proposal, bindings)
+
+
+def bind_backfill(state, proposal, bindings):
     result = copy.deepcopy(state)
-    result['work_requests'] = {bindings[key]: row for key, row in proposal['requests'].items()}
+    result['work_requests'] = {bindings[key]: copy.deepcopy(row) for key, row in proposal['requests'].items()}
     result['legacy_work_request'] = bindings.get('legacy')
     result['later_triage'] = list(proposal['later_triage'])
     for key, assignment in proposal['assignments'].items():
         task = result[assignment.get('collection', 'tasks')][key]
         task['work_request'] = bindings[assignment['request_key']]
         task['slice_id'] = assignment['slice_id']
-        task.update(proposal['proposed_copy'][key])
-        if task.get('proposed_copy'):
-            task.setdefault('card_title', task['proposed_copy']['values']['title'])
-            task.setdefault('card_description', task['proposed_copy']['values']['description'])
+        proposed = proposal['proposed_copy'][key]
+        if proposed.get('proposed_copy'):
+            apply_copy_proposal(task, proposed['proposed_copy'])
+        if proposed.get('summary_required'):
+            task['summary_required'] = True
         for field in ('plan_id', 'plan_ref'):
             task.pop(field, None)
     return result
