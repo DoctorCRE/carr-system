@@ -41,7 +41,7 @@ async def query(*, prompt, options):
     assert options.permission_mode == 'dontAsk'
     assert all(t in options.allowed_tools for t in ['Read', 'Write', 'Edit', 'Bash'])
     assert options.setting_sources == [] and options.strict_mcp_config
-    assert options.env['ANTHROPIC_API_KEY'] == 'fake-api-key'
+    assert options.env['ANTHROPIC_API_KEY'] == 'model-room-transport'
     assert not any(k in options.env for k in ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'])
     yield SimpleNamespace(model=options.model)
     msg = ResultMessage()
@@ -59,12 +59,123 @@ async def query(*, prompt, options):
         self.keychain = lambda *a, **k: subprocess.CompletedProcess(a, 0, 'fake-api-key\n', '')
 
     def seed_spend(self, cost):
-        reservation = self.ledger.reserve(self.entry['model'])
-        self.ledger.settle(reservation, cost)
+        with self.ledger.locked() as data:
+            data['months'][wire.month_now()] = {'spent_usd': str(cost), 'reservations': {}}
 
     def run_task(self, **kwargs):
         return wire.run_task(self.entry, 'finish the job', env=self.env,
                              ledger=self.ledger, keychain_run=self.keychain, **kwargs)
+
+    def test_request_bounds_and_month_admission_leave_reservation_margin(self):
+        self.entry['model'] = 'claude-sonnet-5-5'
+        code = (self.sdk / '__init__.py').read_text().replace(
+            '    yield SimpleNamespace(model=options.model)', """
+    assert options.max_turns == 16
+    assert options.max_budget_usd == 7.0
+    assert options.env['CLAUDE_CODE_MAX_OUTPUT_TOKENS'] == '8192'
+    yield SimpleNamespace(model=options.model)""")
+        (self.sdk / '__init__.py').write_text(code)
+        self.seed_spend('190.00')
+        row = self.run_task()
+        self.assertEqual(row['status'], 'completed', row)
+        self.assertEqual(self.ledger.read()['spent_usd'], '191.25')
+        self.assertEqual(self.run_task()['detail'], 'monthly_budget_exceeded')
+
+    def test_detached_tool_is_dead_after_timeout_and_receipt_is_truthful(self):
+        code = (self.sdk / '__init__.py').read_text().replace(
+            '    yield SimpleNamespace(model=options.model)', """
+    import subprocess, sys, pathlib, asyncio
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                             start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    pathlib.Path(options.cwd, 'detached.pid').write_text(str(child.pid))
+    await asyncio.sleep(60)
+    yield SimpleNamespace(model=options.model)""")
+        (self.sdk / '__init__.py').write_text(code)
+        self.entry['timeout_s'] = 0.5
+        result = self.run_task()
+        self.assertEqual(result['status'], 'timed_out', result)
+        pid = int((self.root / 'detached.pid').read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            alive = False
+        else:
+            alive = True
+            os.kill(pid, 9)
+        self.assertFalse(alive, 'detached Bash/tool process survived the job')
+        self.assertTrue(result['termination_confirmed'], result)
+
+    def test_tool_subprocess_cannot_read_transport_key(self):
+        code = (self.sdk / '__init__.py').read_text().replace(
+            '    yield SimpleNamespace(model=options.model)', """
+    import subprocess, sys
+    subprocess.run([sys.executable, '-c',
+        "import os,pathlib;pathlib.Path('tool-env.txt').write_text(str(dict(os.environ)))"],
+        cwd=options.cwd, check=True)
+    yield SimpleNamespace(model=options.model)""")
+        (self.sdk / '__init__.py').write_text(code)
+        result = self.run_task()
+        self.assertEqual(result['status'], 'completed', result)
+        self.assertNotIn('fake-api-key', (self.root / 'tool-env.txt').read_text())
+
+    def test_completed_job_cleans_reparented_tool_and_leaves_unrelated_process(self):
+        sentinel = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (sentinel.kill(), sentinel.wait()) if sentinel.poll() is None else None)
+        code = (self.sdk / '__init__.py').read_text().replace(
+            '    yield SimpleNamespace(model=options.model)', """
+    import subprocess, sys, asyncio
+    subprocess.run([sys.executable, '-c',
+        "import os,time,pathlib;pid=os.fork(); "
+        "pathlib.Path('orphan.pid').write_text(str(pid)) if pid else os.setsid(); "
+        "os._exit(0) if pid else time.sleep(60)"], cwd=options.cwd,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    await asyncio.sleep(0.1)
+    yield SimpleNamespace(model=options.model)""")
+        (self.sdk / '__init__.py').write_text(code)
+        row = self.run_task()
+        pid = int((self.root / 'orphan.pid').read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            alive = False
+        else:
+            alive = True
+            os.kill(pid, 9)
+        self.assertFalse(alive, 'reparented detached tool survived completion')
+        self.assertEqual(row['status'], 'completed', row)
+        self.assertTrue(row['termination_confirmed'], row)
+        self.assertIsNone(sentinel.poll())
+
+    def test_unconfirmed_cleanup_retains_reservation_and_executor_claim(self):
+        events = []
+        original = wire.JobTree.terminate
+        def unconfirmed(tree):
+            original(tree)
+            return False
+        with patch.object(wire.JobTree, 'terminate', unconfirmed):
+            row = self.run_task(on_executor=events.append)
+        self.assertEqual(row['status'], 'failed')
+        self.assertFalse(row['termination_confirmed'])
+        self.assertEqual(events[-1]['kind'], 'unconfirmed_tree')
+        self.assertEqual(self.ledger.read()['reserved_usd'], '10.00')
+        self.assertEqual(self.ledger.read()['stop'], 'termination_unconfirmed')
+
+    def test_unpriced_model_and_unsafe_reservation_refuse_before_key_lookup(self):
+        with patch.object(wire.config, 'RUN_ESTIMATE_USD', wire.Decimal('9.00')):
+            self.assertEqual(self.run_task()['detail'], 'claude_api_unpriced_model')
+        self.entry['model'] = 'claude-future-unpriced'
+        with patch.object(wire.subprocess, 'Popen', side_effect=AssertionError('must not launch')):
+            self.assertEqual(self.run_task()['detail'], 'claude_api_unpriced_model')
+
+    def test_unexpected_cost_bound_breach_stops_admission_without_hiding_charge(self):
+        code = (self.sdk / '__init__.py').read_text().replace('total_cost_usd=1.25', 'total_cost_usd=10.50')
+        (self.sdk / '__init__.py').write_text(code)
+        row = self.run_task()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['detail'], 'claude_api_cost_bound_breached')
+        self.assertEqual(self.ledger.read()['spent_usd'], '10.5')
+        self.assertEqual(self.ledger.read()['stop'], 'cost_bound_breached')
 
     def test_sonnet_default_keeps_opus_selectable_per_desk(self):
         registry = desks.Registry(self.root / 'desks.json')
@@ -319,7 +430,7 @@ async def query(*, prompt, options):
         self.assertEqual(self.ledger.read()['reserved_usd'], '10.00')
         self.assertEqual(self.ledger.read()['spent_usd'], '0')
 
-    def test_budget_refuses_before_keychain_or_worker_and_reports_month(self):
+    def test_budget_refuses_before_worker_and_reports_month(self):
         self.seed_spend('195.00')
         with patch.object(wire.subprocess, 'Popen') as launch:
             result = self.run_task()

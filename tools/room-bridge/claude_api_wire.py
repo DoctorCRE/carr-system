@@ -14,10 +14,18 @@ interrupted job. It preserves spent dollars and pending reservations. Never
 replay a timed-out write job without checking its checkout and remote receipts.
 Policy lives in claude_api_config.py, including the model and USD 200 monthly
 budget. Months use America/Chicago. A run reserves USD 10 atomically before
-launch and passes that amount as the SDK maximum budget. The SDK may overshoot
-by one request. Provider credit exhaustion remains the final account limit.
+launch. A parent-owned transport caps Sonnet at 16 requests (Opus at 8),
+100k counted input tokens per request and 8192 output tokens. At reviewed
+standard pricing, 25% input-count margin and 2x cache-write pricing bound either
+run at USD 9.31072. The SDK also has a USD 7 soft limit and a turn cap.
+Only the two priced models and standard custom-tool requests are admitted;
+provider beta headers are stripped; server tools, fast mode and geographic
+premiums are refused. Re-review prices and token-count assumptions before
+changing policy.
 Reported terminal cost replaces the reservation. Unknown cost retains it and
-stops spending. Outstanding reservations carry across months. A run crossing
+stops spending. Unconfirmed cleanup retains the reservation and writer claim.
+Unexpected cost above the reservation is recorded honestly and stops admission.
+Outstanding reservations carry across months. A run crossing
 a month boundary counts its full reported cost in both months conservatively.
 The ledger and its independent two-slot pool live under Library/Application
 Support/CARR, outside provider config. Results use dispatch's existing NDJSON.
@@ -34,9 +42,16 @@ when the bundle is missing. Our worker pins the SDK version and bundle path,
 refuses a missing bundle, disables filesystem settings and ambient MCP, uses
 an empty temporary Claude config, strips alternate auth and proxies, and
 requires auth status to report the environment API key on firstParty. It never
-uses the Max token loader. The keychain secret travels only in process memory
-and the child environment. Worker stderr is discarded and receipts redact the
-key. The parent kills the whole process group on completion and timeout.
+uses the Max token loader. The real key stays in the parent-owned model
+transport; the worker and tool environments contain a dummy credential and a
+random localhost route. The transport forwards only Messages/count_tokens to
+api.anthropic.com over TLS and redacts reflected credentials. Worker stderr is
+discarded. A per-job inherited marker and PID/start identities track tools
+across detached sessions and reparenting. Completion and timeout freeze, kill
+and rescan that tree. Failed inventory or surviving processes yield an
+unconfirmed receipt and retain claims. This is lifecycle tracking, not a
+hostile-process sandbox: deliberately erasing ancestry and the inherited
+marker is outside its containment guarantee.
 
 Runtime reference: https://code.claude.com/docs/en/agent-sdk/python
 """
@@ -50,7 +65,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
@@ -58,6 +72,8 @@ import time
 import uuid
 
 import claude_api_config as config
+from claude_api_transport import Transport
+from claude_api_process import JobTree
 from desks import DeskError
 import write_ownership
 from claude_api_worker import billing_error
@@ -134,12 +150,17 @@ class Ledger:
                 'model': model, 'actual_model': None, 'cost_usd': None, 'status': 'reserved'}
             return month, run_id
 
-    def settle(self, reservation, cost, *, actual_model=None, status='settled', billing_error=False):
+    def settle(self, reservation, cost, *, actual_model=None, status='settled', billing_error=False,
+               termination_confirmed=True):
         with self.locked() as data:
             if billing_error:
                 data['stop'] = 'billing_error'
+            if not termination_confirmed:
+                data['stop'] = 'termination_unconfirmed'
             account = data['months'][reservation[0]]
             cost = usd(cost)
+            if cost is not None and cost > Decimal(account['reservations'][reservation[1]]):
+                data['stop'] = 'cost_bound_breached'
             run = account['runs'][reservation[1]]
             run.update(actual_model=actual_model, cost_usd=str(cost) if cost is not None else None,
                        status=status if cost is not None else 'accounting_unknown')
@@ -150,7 +171,8 @@ class Ledger:
                 charged = data['months'].setdefault(month, {'spent_usd': '0', 'reservations': {}})
                 charged['spent_usd'] = str(Decimal(charged['spent_usd']) + cost)
                 charged.setdefault('runs', {})[reservation[1]] = dict(run)
-            del account['reservations'][reservation[1]]
+            if termination_confirmed:
+                del account['reservations'][reservation[1]]
 
     def clear_stop(self):
         with self.locked() as data:
@@ -158,12 +180,12 @@ class Ledger:
 
 
 
-def api_env(env, key, config_dir):
+def api_env(env, url, config_dir):
     child = {k: v for k, v in scrubbed_env(env).items()
              if not k.startswith(('ANTHROPIC_', 'CLAUDE', 'AWS_', 'GOOGLE_', 'OTEL_', 'API_'))}
     for proxy in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'):
         child.pop(proxy, None)
-    child.update(ANTHROPIC_API_KEY=key, CLAUDE_CONFIG_DIR=config_dir,
+    child.update(ANTHROPIC_API_KEY='model-room-transport', ANTHROPIC_BASE_URL=url, CLAUDE_CONFIG_DIR=config_dir,
                  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC='1', CLAUDE_CODE_MAX_RETRIES='0')
     return child
 
@@ -204,6 +226,9 @@ def run_task(entry, task, *, env=None, ledger=None, keychain_run=None, on_execut
 
 
 def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
+    if (entry['model'] not in config.MODEL_PRICES
+            or config.run_bound_usd(entry['model']) >= config.RUN_ESTIMATE_USD):
+        raise DeskError('claude_api_unpriced_model', 'Claude API model has no safe reservation bound')
     keychain_run = keychain_run or subprocess.run
     try:
         key_result = keychain_run(['/usr/bin/security', 'find-generic-password',
@@ -217,9 +242,11 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
                 'setup_command': config.KEY_SETUP}
     reservation = ledger.reserve(entry['model'])
     request = {'task': task, 'cwd': entry['checkout_path'], 'model': entry['model'],
-               'effort': entry['effort'], 'estimate_usd': float(config.RUN_ESTIMATE_USD)}
-    with tempfile.TemporaryDirectory(prefix='room-claude-api-') as isolated:
-        child = api_env(env, key, isolated)
+               'effort': entry['effort']}
+    with tempfile.TemporaryDirectory(prefix='room-claude-api-') as isolated, \
+            Transport(key, entry['model'], deadline) as transport:
+        child = api_env(env, transport.url, isolated)
+        child['CARR_CLAUDE_API_JOB'] = uuid.uuid4().hex
         try:
             proc = subprocess.Popen([sys.executable, str(Path(__file__).with_name('claude_api_worker.py'))],
                                     env=child, cwd=request['cwd'], stdin=subprocess.PIPE,
@@ -233,6 +260,7 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
 
         identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
                     'start_time': write_ownership.process_start(proc.pid), 'kind': 'process_group'}
+        tree = JobTree(proc, child['CARR_CLAUDE_API_JOB'])
         try:
             if on_executor:
                 on_executor(identity)
@@ -251,24 +279,26 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
         except subprocess.TimeoutExpired:
             result = {'status': 'timed_out', 'detail': 'claude_api_deadline; do not replay'}
         finally:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait(timeout=2)
+            confirmed = tree.terminate()
+            if on_executor and not confirmed:
+                on_executor({**identity, 'kind': 'unconfirmed_tree'})
             proc.stdin.close()
             proc.stdout.close()
             proc.stderr.close()
-        for _ in range(20):
-            if write_ownership.process_terminated(identity, group=True):
-                break
-            time.sleep(0.01)
-        result['termination_confirmed'] = write_ownership.process_terminated(identity, group=True)
+        result['termination_confirmed'] = confirmed
+        if not confirmed and result['status'] == 'completed':
+            result.update(status='failed', detail='job_tree_termination_unconfirmed')
+        result['billing_error'] = result.get('billing_error', False) or transport.billing_error
+        if result['billing_error']:
+            result.update(status='failed', detail='claude_api_billing_error')
     if usd(result.get('cost_usd')) is None:
         result['cost_usd'] = None
         if result.get('status') == 'completed':
             result.update(status='failed', detail='sdk_cost_missing')
+    elif usd(result['cost_usd']) > config.RUN_ESTIMATE_USD:
+        result.update(status='failed', detail='claude_api_cost_bound_breached')
     result['spend_reservation'] = {'month': reservation[0], 'run_id': reservation[1]}
     ledger.settle(reservation, result.get('cost_usd'), actual_model=result.get('actual_model'),
-                  status=result['status'], billing_error=result.get('billing_error', False))
+                  status=result['status'], billing_error=result.get('billing_error', False),
+                  termination_confirmed=result['termination_confirmed'])
     return result

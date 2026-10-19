@@ -1,4 +1,4 @@
-"""One API-only SDK job. The parent owns its deadline and process group."""
+"""One API-only SDK job. The parent owns transport, deadline and tool cleanup."""
 from __future__ import annotations
 
 import asyncio
@@ -18,7 +18,7 @@ def billing_error(value):
     return bool(BILLING_ERROR.search(str(value)))
 
 
-TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch']
+TOOLS = ['Read', 'Write', 'Edit', 'MultiEdit', 'Bash', 'Glob', 'Grep']
 
 
 async def execute(request):
@@ -43,7 +43,8 @@ async def execute(request):
         cli_path=str(cli), system_prompt={'type': 'preset', 'preset': 'claude_code'},
         tools=TOOLS, allowed_tools=TOOLS, permission_mode='dontAsk',
         setting_sources=[], strict_mcp_config=True,
-        max_budget_usd=request['estimate_usd'], env=dict(os.environ),
+        max_budget_usd=float(config.SOFT_BUDGET_USD), max_turns=config.MODEL_REQUESTS[request['model']],
+        env={**os.environ, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS': str(config.MAX_OUTPUT_TOKENS)},
     )
     actual_model = None
     billing = False
