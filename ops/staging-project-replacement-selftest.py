@@ -324,6 +324,30 @@ ctl.apply_candidate_migrations(
     run=capture_migration,
     environ={"PATH": "/bin"})
 assert migration_calls and migration_calls[0][-2:] == ["--through", future_filename]
+
+def migration_failure(stdout, stderr):
+    try:
+        ctl.apply_candidate_migrations(owner, future_source,
+            run=lambda args, **unused: subprocess.CompletedProcess(args, 1, stdout, stderr),
+            environ={"PATH": "/bin"})
+    except ctl.ReplacementRefusal as exc:
+        message = str(exc)
+        assert secret not in message and owner.value not in message
+        return message
+    raise AssertionError("failed migration was accepted")
+
+diagnostic_stdout = f"applying {future_filename} ... "
+diagnostic_stderr = f"psycopg.errors.DuplicateTable: {secret} {owner.value}"
+assert f"migration={future_filename}; error_class=DuplicateTable" in migration_failure(
+    diagnostic_stdout, diagnostic_stderr)
+for stdout, stderr in (
+    (diagnostic_stdout, f"psycopg.errors.{secret}: detail"),
+    (f"applying {secret}.sql ... ", diagnostic_stderr),
+    ("applying 9998_unknown.sql ... ", diagnostic_stderr),
+    (diagnostic_stdout, secret),
+):
+    assert "output suppressed" in migration_failure(stdout, stderr)
+
 prior_scope = ctl.ProviderScope("old", "carr-staging", "br-old", "ep-old", "ep-old.neon.tech")
 future_payload = ctl.prepare_payload(future_source, prior_scope, owner_scope, 1)
 assert future_payload["migration_highest"] == future_filename
