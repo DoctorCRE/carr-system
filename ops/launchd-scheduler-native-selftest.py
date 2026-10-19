@@ -78,7 +78,7 @@ def main() -> int:
         def disabled_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
             if command[1] == "print-disabled":
                 return subprocess.CompletedProcess(command, 0, f'{{ "{locator}" => true }}', "")
-            return subprocess.CompletedProcess(command, 113, "", "not found")
+            return subprocess.CompletedProcess(command, 113, "", "Could not find service")
 
         disabled = read_native_launchd(
             home=home, repo=REPO, locator=locator, repo_plist_relpath=relpath,
@@ -93,7 +93,7 @@ def main() -> int:
         def absent_runner(command: list[str]) -> subprocess.CompletedProcess[str]:
             if command[1] == "print-disabled":
                 return subprocess.CompletedProcess(command, 0, "{ }", "")
-            return subprocess.CompletedProcess(command, 113, "", "not found")
+            return subprocess.CompletedProcess(command, 113, "", "Could not find service")
 
         kwargs = dict(home=home, repo=REPO, locator=locator, repo_plist_relpath=relpath,
                       installed_plist_name=installed_name, expected_program_arguments=json.loads(args_json),

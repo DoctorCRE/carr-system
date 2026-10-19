@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from lib.claude_scheduler_native import system_timezone
 from lib.control_plane_scheduler_cutover import CutoverRefusal
+from lib.launchd_observation import LaunchdObservationError, label_state
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
@@ -25,13 +26,15 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def _normalize(value: Any, *, repo: Path) -> Any:
+def _paths(value: Any, replacements: tuple[tuple[str, str], ...]) -> Any:
     if isinstance(value, str):
-        return value.replace(str(repo), "{{REPO}}")
+        for source, target in replacements:
+            value = value.replace(source, target)
+        return value
     if isinstance(value, list):
-        return [_normalize(item, repo=repo) for item in value]
+        return [_paths(item, replacements) for item in value]
     if isinstance(value, dict):
-        return {key: _normalize(item, repo=repo) for key, item in value.items()}
+        return {key: _paths(item, replacements) for key, item in value.items()}
     return value
 
 
@@ -91,9 +94,10 @@ def read_native_launchd(
         raise CutoverRefusal("installed launchd plist path must not traverse a symlink")
     repo_plist = _read_plist(repo_path)
     runtime_repo = installed_repo or (home / "carr-system")
-    installed_plist = _normalize(_read_plist(installed_path), repo=runtime_repo)
-    expected = _normalize(repo_plist, repo=repo)
-    if installed_plist != expected:
+    installed_plist = _read_plist(installed_path)
+    expected = _paths(repo_plist, ((str(repo), "{{REPO}}"), (str(home), "{{HOME}}")))
+    rendered = _paths(expected, (("{{REPO}}", str(runtime_repo)), ("{{HOME}}", str(home))))
+    if installed_plist != rendered:
         raise CutoverRefusal("installed launchd plist differs from the tracked definition")
     if (expected.get("Label") != locator
             or expected.get("ProgramArguments") != expected_program_arguments
@@ -113,9 +117,13 @@ def read_native_launchd(
     if disabled.returncode != 0:
         raise CutoverRefusal("launchd disabled-state registry is unreadable")
     override = _disabled_override(disabled.stdout, locator)
-    if job.returncode == 0 and override is not True:
+    try:
+        state = label_state(locator, runner=lambda _: job, uid=resolved_uid)
+    except LaunchdObservationError as exc:
+        raise CutoverRefusal("launchd job state is unreadable") from exc
+    if state == "loaded" and override is not True:
         enabled = True
-    elif job.returncode != 0 and override is True:
+    elif state == "not_found" and override is True:
         enabled = False
     else:
         raise CutoverRefusal("launchd native state is absent, ambiguous, or contradictory")

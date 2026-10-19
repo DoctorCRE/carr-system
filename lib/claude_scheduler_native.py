@@ -58,6 +58,16 @@ def system_timezone(localtime_path: Path = Path("/etc/localtime")) -> str:
     return zone
 
 
+def render_task_definition(portable: bytes, *, repo: Path, home: Path, cwd: str | None = None) -> str:
+    """Render the tracked task using observed installation paths."""
+    text = portable.decode('utf-8')
+    if '{{VAULT}}' in text and not cwd:
+        raise CutoverRefusal('vault definition requires a retained disabled native row for path provenance')
+    for token, value in (('{{REPO}}', str(repo)), ('{{HOME}}', str(home)), ('{{VAULT}}', cwd or '')):
+        text = text.replace(token, value)
+    return text
+
+
 def read_native_task(*, home: Path, repo: Path, locator: str, expected_cron: str,
                      expected_timezone: str, portable_definition_sha256: str,
                      snapshot_path: Path | None = None, observed_at: datetime | None = None,
@@ -95,11 +105,7 @@ def read_native_task(*, home: Path, repo: Path, locator: str, expected_cron: str
     cwd = row.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         raise CutoverRefusal("Claude native scheduler task has no working-directory provenance")
-    canonical_live = live_text
-    replacements = ((str(repo), "{{REPO}}"), (cwd, "{{VAULT}}"), (str(home), "{{HOME}}"))
-    for real, token in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
-        canonical_live = canonical_live.replace(real, token)
-    if canonical_live.encode("utf-8") != portable_bytes:
+    if live_text != render_task_definition(portable_bytes, repo=repo, home=home, cwd=cwd):
         raise CutoverRefusal("Claude live scheduled-task definition does not match the tracked portable source")
     projection = {
         "id": locator, "cronExpression": row["cronExpression"], "enabled": row["enabled"],

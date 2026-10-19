@@ -265,6 +265,12 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this read-only registration report before scheduler cutover and one-shot cleanup. It never installs, activates, or deletes a task.",
       "evidence": "WR-000014 slice 4; ops/scheduler-hygiene-selftest.py exercises its CLI with isolated provider state."
+    },
+    {
+      "path": "ops/scheduler-observation-receipts.py",
+      "class": "hand_tool",
+      "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
+      "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
     }
   ]
 }
