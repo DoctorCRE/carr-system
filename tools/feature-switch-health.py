@@ -9,7 +9,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from lib.record_call import call_verb
+from lib.record_call import REFUSED, call_verb
 
 BOUND='on breach: create/update deduplicated owner loop; retire and remove gates after review or record a reviewed future date; verify list-feature-switches and consumer tests; auto-clear when retired or no longer overdue'
 
@@ -34,6 +34,11 @@ def main():
             payload=fixture.get('feature_switches')
         else:
             result=call_verb('check-feature-switches', {'idempotency_key':str(uuid.uuid4())}, timeout=30)
+            if (result.kind == REFUSED and result.error == 'unknown_tool'
+                    and isinstance(result.reply, dict)
+                    and result.reply.get('name') == 'check-feature-switches'):
+                print(f'WARN feature switches: check-feature-switches pending deploy · {BOUND}; verify the verb after Worker promotion.')
+                return 3
             if not result.ok:
                 raise ValueError(result.describe())
             payload=result.reply
