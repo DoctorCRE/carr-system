@@ -1,0 +1,2344 @@
+{
+  "schema": "branch-retirement-triage-run/v1",
+  "verified_at": "2026-10-18T23:10:17.503592-05:00",
+  "source_table": "/private/tmp/claude-501/-Users-booko-carr-system/bdf267e8-2d87-451a-9c57-0da2d9ac506b/scratchpad/branch-triage-2026-10-18.md",
+  "source_shas": "/private/tmp/room-codex-rkm6wjuj/triage/classified.json",
+  "counts": {
+    "carr-system": {
+      "tagged": 50,
+      "deleted": 50,
+      "skipped": 0,
+      "protected_unchanged": 48
+    },
+    "doctorcre-app": {
+      "tagged": 30,
+      "deleted": 30,
+      "skipped": 0,
+      "protected_unchanged": 4
+    },
+    "software-factory": {
+      "tagged": 11,
+      "deleted": 11,
+      "skipped": 0,
+      "protected_unchanged": 3
+    }
+  },
+  "checks": {
+    "new_tests": 0,
+    "leak_guard_tests": 44,
+    "leak_guard_failures": 0,
+    "leak_guard_errors": 0,
+    "leak_guard_log": "/private/tmp/room-codex-y26av28j/retirement/leak-guard-tests.log",
+    "local_classes": [
+      "pushfloor",
+      "secret",
+      "freshness"
+    ],
+    "local_classes_status": "passed",
+    "initial_synthetic_hook_run": {
+      "tests": 44,
+      "failures": 1,
+      "errors": 3
+    },
+    "source_behavior_changed": false
+  },
+  "skipped": [],
+  "other_remote_changes": [
+    {
+      "repo": "carr-system",
+      "ref": "refs/heads/wr001-export-home",
+      "before": null,
+      "after": "8d57c202ff265747e183472470cb472cdfb00944"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1914/head",
+      "before": null,
+      "after": "8d57c202ff265747e183472470cb472cdfb00944"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1915/head",
+      "before": null,
+      "after": "7de856ff77e7b60933665934ae8ade7e077260a0"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1914/merge",
+      "before": null,
+      "after": "8fbb89108fe738403d225e8f98637078bd335393"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1913/head",
+      "before": "93095f9b0544b4cf08c898b57207182fcf6aad10",
+      "after": "2ceb03779ee7fa6342e2a0923f282119b539e803"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1913/merge",
+      "before": "886af4a39da188dd3d5765ede11de046e25c9d61",
+      "after": "1fa55c74596eb436dbc12e0a6af3e76f52cab058"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/pull/1915/merge",
+      "before": null,
+      "after": "7a2005996cbe5f56606e820a4d9d332818880699"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/heads/staging-reconstruction",
+      "before": "93095f9b0544b4cf08c898b57207182fcf6aad10",
+      "after": "2ceb03779ee7fa6342e2a0923f282119b539e803"
+    },
+    {
+      "repo": "carr-system",
+      "ref": "refs/heads/fix/fleet-sync-preserve-canonical-work",
+      "before": null,
+      "after": "7de856ff77e7b60933665934ae8ade7e077260a0"
+    }
+  ],
+  "rows": [
+    {
+      "repo": "carr-system",
+      "branch": "census-server-attested-store",
+      "classification": "ABANDONED",
+      "evidence": "#1244 adds extensive attestation machinery around the older census design.",
+      "next_action": "Retire the duplicate design; retain current census implementation.",
+      "expected_tip": "5c29acc9834edca594dad01431d79c1716971e1d",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "5c29acc9834edca594dad01431d79c1716971e1d",
+      "tag": "archive/census-server-attested-store-2026-10-18",
+      "tag_object": "8d59d12d03fb1048a7fdd4f12e110bdc0c00cf1c",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/batch-doc-drift-leak-guard",
+      "classification": "SUPERSEDED",
+      "evidence": "Resolved branch delta is empty; splits landed in #1746 and #1748.",
+      "next_action": "Retire the batch carrier.",
+      "expected_tip": "62bc29c70608de39c451d25154bc857a1cd4e756",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1746,
+          "commit": "14fae6d19bd15cbe8ae0ee0bcd7b317770452253",
+          "on_main": true
+        },
+        {
+          "pr": 1748,
+          "commit": "1b897ddf0395fba67f1e86d36ee055c3d5da455c",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "62bc29c70608de39c451d25154bc857a1cd4e756",
+      "tag": "archive/claude/batch-doc-drift-leak-guard-2026-10-18",
+      "tag_object": "d08cc1e0d3da3308d173c1117bd5bde0598b59fc",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/board-snapshot-size",
+      "classification": "SUPERSEDED",
+      "evidence": "#1553 landed; subsequent corrupt-repository guard landed in #1562.",
+      "next_action": "Retire after janitor verifies the later guard.",
+      "expected_tip": "78749df6125fa2ee22992d89291ad45af924ed54",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1553,
+          "commit": "8eb73150e33f045f42f402791fc1645fd16905ea",
+          "on_main": true
+        },
+        {
+          "pr": 1562,
+          "commit": "8336d631a3a3ca1d990971482fe31924aa472625",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "78749df6125fa2ee22992d89291ad45af924ed54",
+      "tag": "archive/claude/board-snapshot-size-2026-10-18",
+      "tag_object": "c646ed880464f78d57f3c5039a1d197fbdf1118f",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/continuity-spool",
+      "classification": "SUPERSEDED",
+      "evidence": "Drain/watch landed in #1712; lifecycle machinery subsequently simplified.",
+      "next_action": "Retire the old spool implementation.",
+      "expected_tip": "f7b372fac767595e318dd5782018eac9bfa1099b",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1712,
+          "commit": "8e037e147bf4f6cecc0aa4c460f4af5f4a3c91bc",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "f7b372fac767595e318dd5782018eac9bfa1099b",
+      "tag": "archive/claude/continuity-spool-2026-10-18",
+      "tag_object": "a9f7747f7e64559b91de953b72a8125ccb6ae1c2",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/dedupe-github-budget-test",
+      "classification": "SUPERSEDED",
+      "evidence": "Duplicate class deletion landed as #1787, `3568559d`.",
+      "next_action": "Retire the duplicate fix branch.",
+      "expected_tip": "12485d1f148bf0e231dc0353156dff39135a8d3a",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1787,
+          "commit": "3568559de39a24e5af048454ca345f8a303fcbf4",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "12485d1f148bf0e231dc0353156dff39135a8d3a",
+      "tag": "archive/claude/dedupe-github-budget-test-2026-10-18",
+      "tag_object": "a60a8fdbb9d86ae93a01f00409009a3f71813583",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/fix-forward-1646-carrier",
+      "classification": "SUPERSEDED",
+      "evidence": "Replacement regression carrier landed as #1732, `dbc6e04d`.",
+      "next_action": "Retire the older carrier.",
+      "expected_tip": "1ad4399abb971bce85f339cc9a43d6ae6677fcba",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1732,
+          "commit": "dbc6e04d30e57b135a440964be309e13d5a03bde",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "1ad4399abb971bce85f339cc9a43d6ae6677fcba",
+      "tag": "archive/claude/fix-forward-1646-carrier-2026-10-18",
+      "tag_object": "528f016b48a18b5c1aec7111f49d060dd5f34ec0",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/gate-precision",
+      "classification": "ABANDONED",
+      "evidence": "Central ledger/metering targets were removed by #1801.",
+      "next_action": "Do not restore retired gate paperwork.",
+      "expected_tip": "dcd2404ed2f1ec5b6e33d71777d85a52adcdd5ea",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "dcd2404ed2f1ec5b6e33d71777d85a52adcdd5ea",
+      "tag": "archive/claude/gate-precision-2026-10-18",
+      "tag_object": "6ea0910855fed64cd6117e484fb9d6881cb04c1c",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/hotfix-referrer-on-live",
+      "classification": "SUPERSEDED",
+      "evidence": "OAuth source blob matches main; #1625 fixed consent Origin handling.",
+      "next_action": "Retire the live hotfix branch.",
+      "expected_tip": "c08b706e7db6850e1aaafbe0544139af4a225cc7",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1625,
+          "commit": "fd55a4417ec9f0aae3a3767a3ce9b370814264ec",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "c08b706e7db6850e1aaafbe0544139af4a225cc7",
+      "tag": "archive/claude/hotfix-referrer-on-live-2026-10-18",
+      "tag_object": "a9ea220a3cc3b913be5411e8ad2a6dcc57f4d4da",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/jev-worker-daily-cap",
+      "classification": "SUPERSEDED",
+      "evidence": "#1784 includes #1783 and its safe-integer correction.",
+      "next_action": "Retire the standalone cap branch.",
+      "expected_tip": "8ad35fa5ef900f4cdb8d9489b01d9f1f39875a3c",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1784,
+          "commit": "84f0cdcb8bdae0d2ee7d3c973a658316256eff57",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "8ad35fa5ef900f4cdb8d9489b01d9f1f39875a3c",
+      "tag": "archive/claude/jev-worker-daily-cap-2026-10-18",
+      "tag_object": "e53a1698583f9ae88168578074eb7dd4270599cf",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/migration-safety",
+      "classification": "SUPERSEDED",
+      "evidence": "Shadow-run and rollback checks landed in #1605, `dca5d2c0`.",
+      "next_action": "Retire the standalone migration branch.",
+      "expected_tip": "e061ee4b83bed2e425ab981b5daefe8e64ee12a4",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "e061ee4b83bed2e425ab981b5daefe8e64ee12a4",
+      "tag": "archive/claude/migration-safety-2026-10-18",
+      "tag_object": "63e7225e903ffed2f0a778dc8d5b7ede034118f6",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:06:34.265440+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/one-step-rule-approval",
+      "classification": "SUPERSEDED",
+      "evidence": "#1877 explicitly supersedes #1536; commit `35c3d5d`.",
+      "next_action": "Retire the older approval implementation.",
+      "expected_tip": "9a1bd8e8d66ceba63fa89c23c3bf74d69548b83b",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1877,
+          "commit": "35c3d5d3317bd5f7c93de286efc24f4d07cf0988",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "9a1bd8e8d66ceba63fa89c23c3bf74d69548b83b",
+      "tag": "archive/claude/one-step-rule-approval-2026-10-18",
+      "tag_object": "81be1f577039d7916ebfd2e9f18793248961cb4d",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/orch2-lane",
+      "classification": "SUPERSEDED",
+      "evidence": "Inventory and UTC fixture changes landed in #1784.",
+      "next_action": "Retire the batch input branch.",
+      "expected_tip": "c6d2a2a202addcfa3c39bcdcecb2799eebe0b620",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1784,
+          "commit": "84f0cdcb8bdae0d2ee7d3c973a658316256eff57",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "c6d2a2a202addcfa3c39bcdcecb2799eebe0b620",
+      "tag": "archive/claude/orch2-lane-2026-10-18",
+      "tag_object": "6e9a47b7598cd8acc3af11b9859fe31b4116e14a",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/register-github-burst-guard-control",
+      "classification": "SUPERSEDED",
+      "evidence": "#1738 includes #1634 and migrations 0872\u20130878.",
+      "next_action": "Retire the standalone control registration.",
+      "expected_tip": "22d94edbbb8b645c39d2ebc035d80bf94af9ce33",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1738,
+          "commit": "8ae418ffed4fe875314c631653c35ad7f42ed730",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "22d94edbbb8b645c39d2ebc035d80bf94af9ce33",
+      "tag": "archive/claude/register-github-burst-guard-control-2026-10-18",
+      "tag_object": "2964683d8c8fdb26333a918680784a55ec54965d",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/retro-boot",
+      "classification": "SUPERSEDED",
+      "evidence": "#1846 replaced the old boot-class formatting with digest boot.",
+      "next_action": "Retire the obsolete formatter repair.",
+      "expected_tip": "7d8193f9c380c05f84047bf6febdbbc31b4c0a8c",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1846,
+          "commit": "5b7eba94e0e54acdabcfc04a0b0c7c353017dcbe",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "7d8193f9c380c05f84047bf6febdbbc31b4c0a8c",
+      "tag": "archive/claude/retro-boot-2026-10-18",
+      "tag_object": "eee3b3baaa11376fda05e4b7a492c161863c599d",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:11.331878+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/retro-ci-failures",
+      "classification": "SUPERSEDED",
+      "evidence": "#1605 includes its migration, registry and collection preflight checks.",
+      "next_action": "Retire the retro branch.",
+      "expected_tip": "430d6a451850b2b059589d74c954e325090d2b35",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "430d6a451850b2b059589d74c954e325090d2b35",
+      "tag": "archive/claude/retro-ci-failures-2026-10-18",
+      "tag_object": "3a614e6fddaf975e79f45a65740bde503a91816f",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/retro-correction-routes",
+      "classification": "SUPERSEDED",
+      "evidence": "#1605 includes collector validation, private audits, redaction and type routing.",
+      "next_action": "Retire the standalone correction-audit branch.",
+      "expected_tip": "da9844dc00fab0726e158dccbc23a90f3eabc0df",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "da9844dc00fab0726e158dccbc23a90f3eabc0df",
+      "tag": "archive/claude/retro-correction-routes-2026-10-18",
+      "tag_object": "39dffb1ade7efde4f97fc43cb284f7252846f473",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/review-retro-standards",
+      "classification": "ABANDONED",
+      "evidence": "Large historical audit and guard for registry machinery later retired.",
+      "next_action": "Avoid reviving the historical standards framework.",
+      "expected_tip": "e86fa27253e479bd4729ab12a95211ad55e30101",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "e86fa27253e479bd4729ab12a95211ad55e30101",
+      "tag": "archive/claude/review-retro-standards-2026-10-18",
+      "tag_object": "8d44a2b8a458b26d4d0d98318b0d22bb20204799",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/rule-approval-worklist",
+      "classification": "SUPERSEDED",
+      "evidence": "Worklist changes landed in #1738.",
+      "next_action": "Retire the batch input branch.",
+      "expected_tip": "dc998685f6f1731dfbf8c8c48f3162b943974fb2",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1738,
+          "commit": "8ae418ffed4fe875314c631653c35ad7f42ed730",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "dc998685f6f1731dfbf8c8c48f3162b943974fb2",
+      "tag": "archive/claude/rule-approval-worklist-2026-10-18",
+      "tag_object": "6493b5d9558794f04d81905192d628561389239a",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/rule-boot-compaction-carry",
+      "classification": "SUPERSEDED",
+      "evidence": "Compaction carry landed in #1708, `efc9b90b`.",
+      "next_action": "Retire the standalone compaction branch.",
+      "expected_tip": "7b392219c8bd4d0ff6631401ca5f405fbd81b2da",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1708,
+          "commit": "efc9b90b6f1f4ac488fd95a02dab4ce93240e623",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "7b392219c8bd4d0ff6631401ca5f405fbd81b2da",
+      "tag": "archive/claude/rule-boot-compaction-carry-2026-10-18",
+      "tag_object": "421eef7af625565e97ff81884527c043b281367b",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/rule-dedupe-claim",
+      "classification": "SUPERSEDED",
+      "evidence": "#1840 replaced the compiled-selector route this patch targeted.",
+      "next_action": "Retire the old route-claim implementation.",
+      "expected_tip": "1a26be24b95f02d2a3cc4b0044d9f784322f09a8",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1840,
+          "commit": "f7f59b0a2fee4f28d0a9c4d3c58f5a4e2021fb9a",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "1a26be24b95f02d2a3cc4b0044d9f784322f09a8",
+      "tag": "archive/claude/rule-dedupe-claim-2026-10-18",
+      "tag_object": "e67f78b7d3ac33b751d2414c0ea2f6ed9ec927f3",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:14.693225+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/self-closing-records",
+      "classification": "SUPERSEDED",
+      "evidence": "#1738 includes #1722\u2019s record-closing changes.",
+      "next_action": "Retire the batch input branch.",
+      "expected_tip": "c606facd77018057ac10569491d9991379872de5",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1738,
+          "commit": "8ae418ffed4fe875314c631653c35ad7f42ed730",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "c606facd77018057ac10569491d9991379872de5",
+      "tag": "archive/claude/self-closing-records-2026-10-18",
+      "tag_object": "a5e4216991bd0db0eecd22bdc94a0e5049502f74",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/w3c-lead-undo-clean",
+      "classification": "SUPERSEDED",
+      "evidence": "#1481 explicitly incorporated #1550\u2019s undo/archive work.",
+      "next_action": "Retire the integration input.",
+      "expected_tip": "ef9a83c961126d30dcbdb847d3b210576a0fb7b2",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1481,
+          "commit": "8d5f00b6a81b0cc0a3756989a1f7226efff1b7f7",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "ef9a83c961126d30dcbdb847d3b210576a0fb7b2",
+      "tag": "archive/claude/w3c-lead-undo-clean-2026-10-18",
+      "tag_object": "8b7ef5e66391f4c6a85d9169cb694bfdb569e47d",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "claude/wave1-release-rejection",
+      "classification": "SUPERSEDED",
+      "evidence": "Empty branch delta; rejection/retirement changes landed in #1605.",
+      "next_action": "Retire the old release carrier.",
+      "expected_tip": "d6b6540ec9e5d33d7b843be580d87a1468643f3d",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "d6b6540ec9e5d33d7b843be580d87a1468643f3d",
+      "tag": "archive/claude/wave1-release-rejection-2026-10-18",
+      "tag_object": "c795e27a2016138cb6ca7d6c34064357c7722faf",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex-merge-queue-read-20261007",
+      "classification": "SUPERSEDED",
+      "evidence": "#1760 explicitly carries #1640\u2019s exact-head reader fixes.",
+      "next_action": "Retire the standalone reader branch.",
+      "expected_tip": "5231be2a6bb97ed3ab01bae3492c360b7c00ca8b",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "5231be2a6bb97ed3ab01bae3492c360b7c00ca8b",
+      "tag": "archive/codex-merge-queue-read-20261007-2026-10-18",
+      "tag_object": "42b1de25b5950f55fb40d1984b121bd7027a468e",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/batch-A",
+      "classification": "ABANDONED",
+      "evidence": "Mixed 95-file batch includes subsequently retired gates and tracking machinery.",
+      "next_action": "Recover useful slices individually; abandon the combined batch.",
+      "expected_tip": "47d4a0bc2f8f2fd178332b8c74b204a9584045e0",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "47d4a0bc2f8f2fd178332b8c74b204a9584045e0",
+      "tag": "archive/codex/batch-A-2026-10-18",
+      "tag_object": "b8ef784d347657361f34eca11cd8d2328f48fb0c",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/benchmark-f47-column-repair",
+      "classification": "SUPERSEDED",
+      "evidence": "#1375 includes full-column adjudication and edge-case corrections.",
+      "next_action": "Retire the benchmark repair carrier.",
+      "expected_tip": "a484d727b1bc6dc0f77a428d89ea82510f4197ac",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1375,
+          "commit": "a8c210db24fb9c5936690f89aa2074bc61ef5c4a",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "a484d727b1bc6dc0f77a428d89ea82510f4197ac",
+      "tag": "archive/codex/benchmark-f47-column-repair-2026-10-18",
+      "tag_object": "71522451b9fe2ff881628aa7603d2b912f251a81",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/benchmark-v2-fallback",
+      "classification": "SUPERSEDED",
+      "evidence": "Same repaired benchmark work landed in #1375, `a8c210db`.",
+      "next_action": "Retire the fallback carrier.",
+      "expected_tip": "3cf26187b0e85af79c236e5beef07e9eb380d409",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1375,
+          "commit": "a8c210db24fb9c5936690f89aa2074bc61ef5c4a",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "3cf26187b0e85af79c236e5beef07e9eb380d409",
+      "tag": "archive/codex/benchmark-v2-fallback-2026-10-18",
+      "tag_object": "86fda88b99cc19c8ba2660589144d64cae418342",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/fix-national-accounts-20260929",
+      "classification": "SUPERSEDED",
+      "evidence": "Correction landed in #1875, `0e1f8c18`.",
+      "next_action": "Retire the earlier correction branch.",
+      "expected_tip": "5a1abd09ac6dae6763eb44cbb251d9fe0758bb4f",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1875,
+          "commit": "0e1f8c18e1d97e6a96e3b13753e9c5a5a888fb3f",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "5a1abd09ac6dae6763eb44cbb251d9fe0758bb4f",
+      "tag": "archive/codex/fix-national-accounts-20260929-2026-10-18",
+      "tag_object": "f3ed5ad3b481f5272713236313dbac6b4d9f1b25",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/incident-v92-0737",
+      "classification": "SUPERSEDED",
+      "evidence": "Incident triage replacement landed in #1376, `f5a5fab2`.",
+      "next_action": "Retire the old registry-bound implementation.",
+      "expected_tip": "99190145d31e9fd1f758b1a3a1aef5b4614a4aed",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1376,
+          "commit": "f5a5fab2a88e1389d44621b79053516f59b833e8",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "99190145d31e9fd1f758b1a3a1aef5b4614a4aed",
+      "tag": "archive/codex/incident-v92-0737-2026-10-18",
+      "tag_object": "81fe95bdb8027fc880947cc0df453d4311556017",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/release-verifier-provenance",
+      "classification": "SUPERSEDED",
+      "evidence": "#1760 incorporated it; #1799 subsequently removed approval machinery.",
+      "next_action": "Retire the historical verifier branch.",
+      "expected_tip": "a2c74f1087c5664f7dd5416f2d68e951bfdf89d3",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        },
+        {
+          "pr": 1799,
+          "commit": "d23a7eeca9a8d8248c5b7bf5fdc79ab8dc9b50a5",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "a2c74f1087c5664f7dd5416f2d68e951bfdf89d3",
+      "tag": "archive/codex/release-verifier-provenance-2026-10-18",
+      "tag_object": "6afc1e0f23c1c7bbba43da5806e3858e5690f45d",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:07:55.222009+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/routines-to-code",
+      "classification": "SUPERSEDED",
+      "evidence": "#1833 explicitly carried the NPI-only slice with safer proposal routing.",
+      "next_action": "Retire the old automatic-write version.",
+      "expected_tip": "fdbb7749ebc51f5f46853c60705806f50389bd6c",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1833,
+          "commit": "64f1659de01072670ad944997ef90e74ad83d4a4",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "fdbb7749ebc51f5f46853c60705806f50389bd6c",
+      "tag": "archive/codex/routines-to-code-2026-10-18",
+      "tag_object": "1508a1eb95ce2e7bc614599b9b554533c3405ae4",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/rule-delivery-precision",
+      "classification": "ABANDONED",
+      "evidence": "Targets compiled selectors removed by #1840 and #1846.",
+      "next_action": "Do not restore the retired selector/calibration stack.",
+      "expected_tip": "ed0ad60ce6b2a598c019063832466c8335a27e41",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "ed0ad60ce6b2a598c019063832466c8335a27e41",
+      "tag": "archive/codex/rule-delivery-precision-2026-10-18",
+      "tag_object": "6f53852ca4ff095471b910086d59f222e6bea601",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/rule-eval-protected-gold",
+      "classification": "ABANDONED",
+      "evidence": "Protected expectations and boot-class contracts were retired by #1846.",
+      "next_action": "Preserve canonical current evals; abandon old admission plumbing.",
+      "expected_tip": "eb83aec8a30407db045c75f56d144070405de154",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "eb83aec8a30407db045c75f56d144070405de154",
+      "tag": "archive/codex/rule-eval-protected-gold-2026-10-18",
+      "tag_object": "942dd8ee2af1dc4afdf644f06acfb397dedac142",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/rule-fix-every-finding",
+      "classification": "ABANDONED",
+      "evidence": "Adds receipt/coverage-gate machinery removed from the delivery model.",
+      "next_action": "Do not revive the obsolete gate framework.",
+      "expected_tip": "1c2eab10434e7261c2fcbb6bdaab5f6295fba684",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "1c2eab10434e7261c2fcbb6bdaab5f6295fba684",
+      "tag": "archive/codex/rule-fix-every-finding-2026-10-18",
+      "tag_object": "5f16b09ec062524771db7444634199de5a039808",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "codex/wr221-correction-0881",
+      "classification": "SUPERSEDED",
+      "evidence": "Triaged Work Request supersession landed in #1774, `3e7c4c91`.",
+      "next_action": "Retire the older migration allocation.",
+      "expected_tip": "b304b6e020fdcbdb9b3f4032b631d216b699d7e7",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1774,
+          "commit": "3e7c4c91f27de6eecad12b449f6d63f0905b5e85",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "b304b6e020fdcbdb9b3f4032b631d216b699d7e7",
+      "tag": "archive/codex/wr221-correction-0881-2026-10-18",
+      "tag_object": "ce377cfc87a1a65249c71fa675164eeeaaef1dcd",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "fix/0884-retain-pack-delivery-catalog",
+      "classification": "ABANDONED",
+      "evidence": "Adds transition-recovery machinery while current cleanup removes that transition.",
+      "next_action": "Abandon the old helper design; follow current migration cleanup.",
+      "expected_tip": "398ef34c010854266baae0f9bca171b2dbe433ae",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "398ef34c010854266baae0f9bca171b2dbe433ae",
+      "tag": "archive/fix/0884-retain-pack-delivery-catalog-2026-10-18",
+      "tag_object": "e88b9e2f6c1fcb86695abd56883b557f7ac480e3",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "fix/app-release-prepare-step",
+      "classification": "SUPERSEDED",
+      "evidence": "#1760 explicitly incorporates #1548\u2019s controller freshness work.",
+      "next_action": "Retire the standalone release fix.",
+      "expected_tip": "dcb5c0a9e0a26e2d845fa48da4a9d0b7de4523d3",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "dcb5c0a9e0a26e2d845fa48da4a9d0b7de4523d3",
+      "tag": "archive/fix/app-release-prepare-step-2026-10-18",
+      "tag_object": "304a319482dda03f8e11eb0ac0fc4da5afa150d8",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "fix/ci-ready-event-skip",
+      "classification": "SUPERSEDED",
+      "evidence": "#1760 explicitly preserves #1693\u2019s required-check metadata-event fix.",
+      "next_action": "Retire the standalone workflow repair.",
+      "expected_tip": "4324de8ccd8db2f3a9bd5757247cf3b7c29fdcb9",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "4324de8ccd8db2f3a9bd5757247cf3b7c29fdcb9",
+      "tag": "archive/fix/ci-ready-event-skip-2026-10-18",
+      "tag_object": "c260f27a01c0924b63a36e4ea0d26ede93877af6",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "fix/dot-database-design-job5b",
+      "classification": "SUPERSEDED",
+      "evidence": "#1882 explicitly relands #1448\u2019s final net change.",
+      "next_action": "Retire the long repair-history branch.",
+      "expected_tip": "4564b8bcb266403ea1e6991e6a7bea41513f4c0d",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1882,
+          "commit": "33a2ff583c6e605342e6616da028f33275a5aa8d",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "4564b8bcb266403ea1e6991e6a7bea41513f4c0d",
+      "tag": "archive/fix/dot-database-design-job5b-2026-10-18",
+      "tag_object": "e025325c734866ab1af28d398e6fce24617923ca",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "fix/room-bridge-dispatch-idempotency",
+      "classification": "SUPERSEDED",
+      "evidence": "Current dispatch-link/acknowledgement fix landed in #1874, `8185677d`.",
+      "next_action": "Retire old registry-bound carrier.",
+      "expected_tip": "2dd65854ff6d2846c60304121869c394e632b55d",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1874,
+          "commit": "8185677da2f22c8ffe8746cbda3b0fd9ff89b0c9",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "2dd65854ff6d2846c60304121869c394e632b55d",
+      "tag": "archive/fix/room-bridge-dispatch-idempotency-2026-10-18",
+      "tag_object": "d73424e66e04ff85149d1fa866168b285dc827ba",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:08:35.721512+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "migration-0884-approved-control",
+      "classification": "ABANDONED",
+      "evidence": "Historical retained-catalog recovery adds helpers absent from the current path.",
+      "next_action": "Do not revive transition-specific recovery machinery.",
+      "expected_tip": "23c26c7d7bcaca4051043c562de38b01b40fd6cb",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "23c26c7d7bcaca4051043c562de38b01b40fd6cb",
+      "tag": "archive/migration-0884-approved-control-2026-10-18",
+      "tag_object": "fb15bd21dcaf8a50a0deadc40db59a37b9b89eea",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "release-fix-acb709fe",
+      "classification": "SUPERSEDED",
+      "evidence": "App preparation/controller repair is included in #1605.",
+      "next_action": "Retire the one-off release branch.",
+      "expected_tip": "26ee68efc90372e5447e42ebb78918df09ed6c9b",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "26ee68efc90372e5447e42ebb78918df09ed6c9b",
+      "tag": "archive/release-fix-acb709fe-2026-10-18",
+      "tag_object": "e8c61ae04ebf39ded12780ce93ce2c927df1c3fd",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "rule-boot-transcript-freshness-20261008",
+      "classification": "SUPERSEDED",
+      "evidence": "Digest boot and compact-child freshness changed through #1846/#1853.",
+      "next_action": "Retire old epoch/measurement implementation.",
+      "expected_tip": "a68a3b14788668d82e3360b45e30968ff1dd9102",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1846,
+          "commit": "5b7eba94e0e54acdabcfc04a0b0c7c353017dcbe",
+          "on_main": true
+        },
+        {
+          "pr": 1853,
+          "commit": "3d2855da0185b2f140d3e6b7683ef60d59abe0b8",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "a68a3b14788668d82e3360b45e30968ff1dd9102",
+      "tag": "archive/rule-boot-transcript-freshness-20261008-2026-10-18",
+      "tag_object": "c3992222f24ad0f2dc606c7079650eb705334208",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "slim-recall-repair-20261007",
+      "classification": "SUPERSEDED",
+      "evidence": "#1846 removed the boot-class/recall machinery being repaired.",
+      "next_action": "Retire the obsolete repair branch.",
+      "expected_tip": "71b7d549349f36b932718f535c338037e85660b6",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1846,
+          "commit": "5b7eba94e0e54acdabcfc04a0b0c7c353017dcbe",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "71b7d549349f36b932718f535c338037e85660b6",
+      "tag": "archive/slim-recall-repair-20261007-2026-10-18",
+      "tag_object": "744c9fbf7f48e1ed6e3a5a948de1cd46c0b381ac",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "v5-gatezero-canary-job-8dcd",
+      "classification": "ABANDONED",
+      "evidence": "Canary script/plist were deliberately removed in #1812.",
+      "next_action": "Do not reinstate the retired scheduler canary.",
+      "expected_tip": "53161c0b54f5598fc68a134f71ebe0d1b991b5ed",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "53161c0b54f5598fc68a134f71ebe0d1b991b5ed",
+      "tag": "archive/v5-gatezero-canary-job-8dcd-2026-10-18",
+      "tag_object": "248c5c55ac46af27d34f11fd3578b9c79d21561e",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "worktree-agent-a65f78e3ec957af26",
+      "classification": "ABANDONED",
+      "evidence": "Conduct reply gate targeted by #1633 was removed in #1801.",
+      "next_action": "Abandon the obsolete parser/eval repair.",
+      "expected_tip": "9e0705140913d4bb993b3b533105dd1ff365271a",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "9e0705140913d4bb993b3b533105dd1ff365271a",
+      "tag": "archive/worktree-agent-a65f78e3ec957af26-2026-10-18",
+      "tag_object": "69a0b0e86de6acc9f003705e4954a30b6cd0711a",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "worktree-fix-0783-ledger-prefix",
+      "classification": "SUPERSEDED",
+      "evidence": "Ledger prefix/order repair landed in #1508, `337e0d98`.",
+      "next_action": "Retire historical migration-renumbering branch.",
+      "expected_tip": "2dcc0fd51c5139dca1d2e648a7e7392e5e1c1a6e",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1508,
+          "commit": "337e0d9847b725a9594cb5ec7d27e0efee035762",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "2dcc0fd51c5139dca1d2e648a7e7392e5e1c1a6e",
+      "tag": "archive/worktree-fix-0783-ledger-prefix-2026-10-18",
+      "tag_object": "c755b2fea54bbca18523b0bb09e035246654d48a",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "worktree-fix-release-wrangler-auth-tool",
+      "classification": "SUPERSEDED",
+      "evidence": "Toolchain integration landed in #1760; TMPDIR repair in #1605.",
+      "next_action": "Retire the older release-tool carrier.",
+      "expected_tip": "56cae146a6a86d74eedb737e77387df9fa369bb0",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1605,
+          "commit": "dca5d2c0a742ee27b84e6fe16fdd898aec44e9de",
+          "on_main": true
+        },
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "56cae146a6a86d74eedb737e77387df9fa369bb0",
+      "tag": "archive/worktree-fix-release-wrangler-auth-tool-2026-10-18",
+      "tag_object": "3544c143f3e4424ec7e4a65416eec33310313f72",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "worktree-release-wrangler-toolchain",
+      "classification": "SUPERSEDED",
+      "evidence": "#1760 explicitly incorporates #1613.",
+      "next_action": "Retire the standalone toolchain branch.",
+      "expected_tip": "db9623f34fc116f7d4fc6d9c907eeed14950b5ae",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1760,
+          "commit": "5ddaa8f39507de3f3343c5cc5177d3d07168e9eb",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "db9623f34fc116f7d4fc6d9c907eeed14950b5ae",
+      "tag": "archive/worktree-release-wrangler-toolchain-2026-10-18",
+      "tag_object": "3cd44376e4f1a122c9127ef41c3420bc961d00bd",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "carr-system",
+      "branch": "worktree-wr75-refusal-fixes",
+      "classification": "SUPERSEDED",
+      "evidence": "Third refusal repaired in #1018; Gate Zero lifecycle later retired in #1806.",
+      "next_action": "Retire the historical refusal-repair branch.",
+      "expected_tip": "42bf6db49f4f4d52144345ba6d349a47812f7211",
+      "main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "landing_proofs": [
+        {
+          "pr": 1018,
+          "commit": "df85aea68279c3cc455f6d2437f1e33f8e6b1439",
+          "on_main": true
+        },
+        {
+          "pr": 1806,
+          "commit": "6015711f51b0501c3782e80c1287601ebac7fdc9",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "42bf6db49f4f4d52144345ba6d349a47812f7211",
+      "tag": "archive/worktree-wr75-refusal-fixes-2026-10-18",
+      "tag_object": "80cace409f52e7cdba8060e9a37fa033dc8bb131",
+      "final_main": "090201bf306a3d6460edb6883968917694a4da8e",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:05:52.135056+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:15.107001+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "claude/journey-selector-flake",
+      "classification": "SUPERSEDED",
+      "evidence": "#238 explicitly includes #237; custom harness later removed by #241.",
+      "next_action": "Retire the old drag-selector repair.",
+      "expected_tip": "54bf03539823e5851e01d898921f431c58468af0",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 238,
+          "commit": "4927b15de8e71584b98c2e2d72b5c137ebe905e4",
+          "on_main": true
+        },
+        {
+          "pr": 241,
+          "commit": "4888425bcae9464411fcd4da5ef4b413534290d3",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "54bf03539823e5851e01d898921f431c58468af0",
+      "tag": "archive/claude/journey-selector-flake-2026-10-18",
+      "tag_object": "dde542ac3a4d2d1d4cf5a9257cfde976a288a9f2",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "claude/review-retro-standards",
+      "classification": "ABANDONED",
+      "evidence": "Targets ownership/pin machinery removed by #245.",
+      "next_action": "Do not restore retired contract-registration checks.",
+      "expected_tip": "d74ea1b7752f957c55b44f1aacfba8a66511a294",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "d74ea1b7752f957c55b44f1aacfba8a66511a294",
+      "tag": "archive/claude/review-retro-standards-2026-10-18",
+      "tag_object": "54a8aaaa4aa281941d01691b660c0031d43e91fb",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "claude/wr-000293-carr-floor",
+      "classification": "SUPERSEDED",
+      "evidence": "#236 batches #235; #241 subsequently replaced its harness.",
+      "next_action": "Retire old staging-floor implementation.",
+      "expected_tip": "bf0836ffc0682aa0dcb9b4e38f0767440009e7a0",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 236,
+          "commit": "3d7d8422afd82c51024d6dbc86b367968b683a44",
+          "on_main": true
+        },
+        {
+          "pr": 241,
+          "commit": "4888425bcae9464411fcd4da5ef4b413534290d3",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "bf0836ffc0682aa0dcb9b4e38f0767440009e7a0",
+      "tag": "archive/claude/wr-000293-carr-floor-2026-10-18",
+      "tag_object": "375e696016984f8ca5eae6b9c213b7bc2e595dcf",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/app-comment-wave2-20261014",
+      "classification": "ABANDONED",
+      "evidence": "Stacked comment cleanup; useful lifecycle slice survives in open #249.",
+      "next_action": "Abandon combined cleanup; finish #249 independently.",
+      "expected_tip": "f51014543a63412e4aa0613bd1551cdfd4e28a9a",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "f51014543a63412e4aa0613bd1551cdfd4e28a9a",
+      "tag": "archive/codex/app-comment-wave2-20261014-2026-10-18",
+      "tag_object": "f891ec9c33e906524ddad0f7665181fe72669cad",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/clean-comment-wave1-20261016",
+      "classification": "ABANDONED",
+      "evidence": "Closed #247 changes only redundant CSS labels; V2 replaced styling.",
+      "next_action": "Drop the behavior-free cleanup branch.",
+      "expected_tip": "39aa5f7fc1e2251527e19ff57840ac479f5370fa",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "39aa5f7fc1e2251527e19ff57840ac479f5370fa",
+      "tag": "archive/codex/clean-comment-wave1-20261016-2026-10-18",
+      "tag_object": "40567cddec06e6ff95dc213ae0215aa98e4b6efd",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/clean-comment-wave2-20261016",
+      "classification": "ABANDONED",
+      "evidence": "Closed #248 is comment-only cleanup over subsequently revised files.",
+      "next_action": "Drop the behavior-free cleanup branch.",
+      "expected_tip": "37ef80ffddf8b85e4b8a317679e66d934c8290e1",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "37ef80ffddf8b85e4b8a317679e66d934c8290e1",
+      "tag": "archive/codex/clean-comment-wave2-20261016-2026-10-18",
+      "tag_object": "eada9df411ddbaa2bcd8ec9e6c5d059b965cfcf8",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/dead-control-sweep-workflows",
+      "classification": "ABANDONED",
+      "evidence": "Adds nightly custom sweep workflow removed by #241.",
+      "next_action": "Use current native staging workflows.",
+      "expected_tip": "48832b391ea44973a1eed490550b7d0c40528346",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "48832b391ea44973a1eed490550b7d0c40528346",
+      "tag": "archive/codex/dead-control-sweep-workflows-2026-10-18",
+      "tag_object": "1a021d6f319234b410f346e627a68b4037794443",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/e2e-app-fixes",
+      "classification": "SUPERSEDED",
+      "evidence": "V1 fixes carried through #200/#204 and subsequent application revisions.",
+      "next_action": "Retire the older QA carrier.",
+      "expected_tip": "df9439f61cfac4b281959e05c4ac5845c7d61e1f",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 200,
+          "commit": "0031cd4cf250621df0b50f9277b3349d4a2e27b1",
+          "on_main": true
+        },
+        {
+          "pr": 204,
+          "commit": "b649b24baa26621cd56b7a63a3c20d2c1e89e7e0",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "df9439f61cfac4b281959e05c4ac5845c7d61e1f",
+      "tag": "archive/codex/e2e-app-fixes-2026-10-18",
+      "tag_object": "562e9613909c3634d22c801af5653a563a3ba538",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/leak-guard",
+      "classification": "ABANDONED",
+      "evidence": "Unshipped parallel scanner/hash-corpus publication design.",
+      "next_action": "Avoid publishing the historical corpus or reviving duplicate scanner plumbing.",
+      "expected_tip": "c55ec2fda3e90bc361b8474a8db9e2f9d92056f1",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "c55ec2fda3e90bc361b8474a8db9e2f9d92056f1",
+      "tag": "archive/codex/leak-guard-2026-10-18",
+      "tag_object": "77c9eb7c0a25ae6fbadb1485b1a6f6cf3b708f81",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/main-ci-proof-env-20261008",
+      "classification": "ABANDONED",
+      "evidence": "Its sole target, `test/full-main.test.mjs`, was deleted by #241.",
+      "next_action": "Drop the obsolete reporter-fixture fix.",
+      "expected_tip": "e99c9c005c7beac60f7d406831c385d6e936cc87",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "e99c9c005c7beac60f7d406831c385d6e936cc87",
+      "tag": "archive/codex/main-ci-proof-env-20261008-2026-10-18",
+      "tag_object": "5b86aaa3fb2fa8f84cca942ce48a3ec99e0c6c2e",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:25.973034+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/pr-previews",
+      "classification": "SUPERSEDED",
+      "evidence": "#282 explicitly replaces #164 with fixture-only previews.",
+      "next_action": "Retire the old preview architecture.",
+      "expected_tip": "d6bbf481bbc36d18037df77743009c9d7500d6a7",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 282,
+          "commit": "5aa0a1b89f22edefc632f3de440235dc349ee2ab",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "d6bbf481bbc36d18037df77743009c9d7500d6a7",
+      "tag": "archive/codex/pr-previews-2026-10-18",
+      "tag_object": "2146fd7a0ef8cd5fdc6efe26581028764b453fb0",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/usage-signals",
+      "classification": "ABANDONED",
+      "evidence": "Producer capture removed by CARR #1890 for having no consumer.",
+      "next_action": "Do not revive disconnected analytics capture.",
+      "expected_tip": "9e9b4ccf8da6f5f07a04d75c3127123b0039b2f8",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "9e9b4ccf8da6f5f07a04d75c3127123b0039b2f8",
+      "tag": "archive/codex/usage-signals-2026-10-18",
+      "tag_object": "a7d641aed12057212a5891dbda38e9163f8741ec",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-e2e-recovery-20261007",
+      "classification": "SUPERSEDED",
+      "evidence": "#200 flattened the 185\u2013195 stack; #241 replaced its harness.",
+      "next_action": "Retire the historical staging stack branch.",
+      "expected_tip": "f5507f5b0178ea001f188f5903f4998849be70d5",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 200,
+          "commit": "0031cd4cf250621df0b50f9277b3349d4a2e27b1",
+          "on_main": true
+        },
+        {
+          "pr": 241,
+          "commit": "4888425bcae9464411fcd4da5ef4b413534290d3",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "f5507f5b0178ea001f188f5903f4998849be70d5",
+      "tag": "archive/codex/v1-e2e-recovery-20261007-2026-10-18",
+      "tag_object": "301f8251f4877a31f1c88f226ca63f94ce5d536f",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-e2e-source-packet-1015",
+      "classification": "ABANDONED",
+      "evidence": "All 30 changed paths belong to the removed custom staging harness.",
+      "next_action": "Preserve native staging implementation instead.",
+      "expected_tip": "7147e7fc43bf2dd7755f6d48ac411537f1e8e8b1",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "7147e7fc43bf2dd7755f6d48ac411537f1e8e8b1",
+      "tag": "archive/codex/v1-e2e-source-packet-1015-2026-10-18",
+      "tag_object": "5062efb3e385a9bfdf7dd6036c7bd0a87b6393ba",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-fixture-write-boundary-20261008",
+      "classification": "SUPERSEDED",
+      "evidence": "#195 incorporated into flattened #200, later replaced by #241.",
+      "next_action": "Retire the historical fixture-boundary branch.",
+      "expected_tip": "941ce4f256a0467dbb224228f16b541f8a4ae12f",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 200,
+          "commit": "0031cd4cf250621df0b50f9277b3349d4a2e27b1",
+          "on_main": true
+        },
+        {
+          "pr": 241,
+          "commit": "4888425bcae9464411fcd4da5ef4b413534290d3",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "941ce4f256a0467dbb224228f16b541f8a4ae12f",
+      "tag": "archive/codex/v1-fixture-write-boundary-20261008-2026-10-18",
+      "tag_object": "ca5f2da95d4fd4c318c574473d6481e37323f0b5",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-pr233-test-context-1015",
+      "classification": "ABANDONED",
+      "evidence": "Primarily continuation/context machinery removed by #241.",
+      "next_action": "Abandon the superseded harness integration attempt.",
+      "expected_tip": "e0d3ff2b03f0f4facfce6398f7b661af90e22b40",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "e0d3ff2b03f0f4facfce6398f7b661af90e22b40",
+      "tag": "archive/codex/v1-pr233-test-context-1015-2026-10-18",
+      "tag_object": "6c55fa04d828703932e24a0c8f366fff5451f572",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-staging-home-qa008-20261008",
+      "classification": "SUPERSEDED",
+      "evidence": "Home recovery integrated through #200 and subsequent QA carryovers.",
+      "next_action": "Retire the held V1 integration branch.",
+      "expected_tip": "3d377d756e8409476660723cee7426b550dc46af",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 200,
+          "commit": "0031cd4cf250621df0b50f9277b3349d4a2e27b1",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "3d377d756e8409476660723cee7426b550dc46af",
+      "tag": "archive/codex/v1-staging-home-qa008-20261008-2026-10-18",
+      "tag_object": "ede2678f9475141c074b5430833ed0bd57b78efa",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/v1-staging-pr182-qa008-20261008",
+      "classification": "SUPERSEDED",
+      "evidence": "Source stack incorporated through #200.",
+      "next_action": "Retire the earlier integration carrier.",
+      "expected_tip": "5812bdaeebf23dac46133608fc852d22a725c85a",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 200,
+          "commit": "0031cd4cf250621df0b50f9277b3349d4a2e27b1",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "5812bdaeebf23dac46133608fc852d22a725c85a",
+      "tag": "archive/codex/v1-staging-pr182-qa008-20261008-2026-10-18",
+      "tag_object": "3ddb9605b1fb095a3570e01091de002e636e0e3e",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/w1b-five-region",
+      "classification": "SUPERSEDED",
+      "evidence": "#129, W8 integration in #143, and command-bar #145 landed.",
+      "next_action": "Retire the old stacked shell branch.",
+      "expected_tip": "c0b1ce9b5d9e5a2b952e516d0f7d351b12f0a286",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 129,
+          "commit": "1a990621c48366f7591703745805cea8655e8587",
+          "on_main": true
+        },
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        },
+        {
+          "pr": 145,
+          "commit": "0d1538e1a3d94ac55ff1b3325fe41220d2026a16",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "c0b1ce9b5d9e5a2b952e516d0f7d351b12f0a286",
+      "tag": "archive/codex/w1b-five-region-2026-10-18",
+      "tag_object": "7f0781813560c07221915bf05fa5c5c20dfa4fc1",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "codex/w8-doc-presence",
+      "classification": "SUPERSEDED",
+      "evidence": "W8 integrated in #143; current Doc shell supersedes old strip implementation.",
+      "next_action": "Retire the historical Doc-presence stack.",
+      "expected_tip": "cc6ed90805046627b8381f7e253f05add15bf35a",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "cc6ed90805046627b8381f7e253f05add15bf35a",
+      "tag": "archive/codex/w8-doc-presence-2026-10-18",
+      "tag_object": "1fcb804cd4e1e4e5d703b757d3f978e4cd903859",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:29.615116+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "cut-overbuilt",
+      "classification": "SUPERSEDED",
+      "evidence": "#245 landed removal; #246 landed final React-foundation restoration.",
+      "next_action": "Retire after accounting for both merged PRs.",
+      "expected_tip": "a70595697d57eeb51dcd1dcda30284690ea92f3b",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 245,
+          "commit": "c76a932f85e7d118e1f5d8ff067a58691262c108",
+          "on_main": true
+        },
+        {
+          "pr": 246,
+          "commit": "35935adfd2f2b5bab1aa30772eb8d5f5eabf6835",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "a70595697d57eeb51dcd1dcda30284690ea92f3b",
+      "tag": "archive/cut-overbuilt-2026-10-18",
+      "tag_object": "b4cf04732301f1b96fa048e9083f2a9d1f8ce66d",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "e2e-run-budget-20261008",
+      "classification": "ABANDONED",
+      "evidence": "Mock-only custom run-budget architecture; owning harness removed by #241.",
+      "next_action": "Do not reintroduce the deleted run-budget framework.",
+      "expected_tip": "baf4b9c3309b2a7fc60ba448eb3b582c8b3d2cc5",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "baf4b9c3309b2a7fc60ba448eb3b582c8b3d2cc5",
+      "tag": "archive/e2e-run-budget-20261008-2026-10-18",
+      "tag_object": "2b53a846c95a5820c7baa0e4f00db1ceb143bc51",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix-readback-party-reuse",
+      "classification": "ABANDONED",
+      "evidence": "All five changed harness/readback paths were removed by #241.",
+      "next_action": "Use current native fixture ownership tests.",
+      "expected_tip": "d03260b40ba216e68beecf39b8fc08de8783d48e",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "d03260b40ba216e68beecf39b8fc08de8783d48e",
+      "tag": "archive/fix-readback-party-reuse-2026-10-18",
+      "tag_object": "83914e619ab3ec7f9d68739af6ec0535d7e55ec3",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix/release-flaky-touch-and-w14-drag",
+      "classification": "SUPERSEDED",
+      "evidence": "Browser/touch fixes landed through #143; settled W14 dragging in #147.",
+      "next_action": "Retire the one-off release-test fix.",
+      "expected_tip": "0da9c5354d0625b0ddac9692080b3f0928ab0cc0",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        },
+        {
+          "pr": 147,
+          "commit": "6ee447bc35abfebf79200e9920ce8ba4be8e1b84",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "0da9c5354d0625b0ddac9692080b3f0928ab0cc0",
+      "tag": "archive/fix/release-flaky-touch-and-w14-drag-2026-10-18",
+      "tag_object": "03d59b7340c997252aaac5e349cc87ea9874ec1b",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix/release-skip-repeat-suite",
+      "classification": "ABANDONED",
+      "evidence": "Proposes skipping suite work against a subsequently changed release contract.",
+      "next_action": "Preserve current release qualification; discard old shortcut.",
+      "expected_tip": "7547c36dd6ef02f0be0736d39eb61563c6889724",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "7547c36dd6ef02f0be0736d39eb61563c6889724",
+      "tag": "archive/fix/release-skip-repeat-suite-2026-10-18",
+      "tag_object": "8025eb4f5175dd298f4a4173c188172b14379f09",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix/release-test-concurrency-c4bd1be",
+      "classification": "SUPERSEDED",
+      "evidence": "Main already caps Node test concurrency at two; bounded timing landed in #143.",
+      "next_action": "Retire the alternate three-worker cap.",
+      "expected_tip": "998d62acf465c0b22db64e91195311edc52a87bf",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "998d62acf465c0b22db64e91195311edc52a87bf",
+      "tag": "archive/fix/release-test-concurrency-c4bd1be-2026-10-18",
+      "tag_object": "d24b6001ae9cffab07c854c20d4f1250823be1c0",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix/release-test-concurrency-guard",
+      "classification": "SUPERSEDED",
+      "evidence": "Current two-worker cap and integrated browser timing replace this patch.",
+      "next_action": "Retire the duplicate cap/guard branch.",
+      "expected_tip": "cbfb4cc74efc740c0c786920793360425877c502",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "cbfb4cc74efc740c0c786920793360425877c502",
+      "additional_evidence": "Current integrated timing replacement cited by adjacent concurrency rows, PR #143.",
+      "tag": "archive/fix/release-test-concurrency-guard-2026-10-18",
+      "tag_object": "8db6fa10903d6960da05229848588b5e3c69d8eb",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "fix/tour-day-mic-independent-release",
+      "classification": "SUPERSEDED",
+      "evidence": "#143 explicitly includes microphone-independent capture validation.",
+      "next_action": "Retire the standalone audio-test fix.",
+      "expected_tip": "79fed9a36749b225778d33e11b4c4adb1a6de9a7",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 143,
+          "commit": "a17896d2253d0ec0efe4d066d2658fd861cc8551",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "79fed9a36749b225778d33e11b4c4adb1a6de9a7",
+      "tag": "archive/fix/tour-day-mic-independent-release-2026-10-18",
+      "tag_object": "1365f28874a23ba42cd39961df9bc9cba89256ff",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "qa/e2e-round2-01a10ddb",
+      "classification": "SUPERSEDED",
+      "evidence": "#182 landed round-two fixes; #241 later replaced old suite plumbing.",
+      "next_action": "Retire the historical QA branch.",
+      "expected_tip": "7ca6c5076f3bb44eb1280dcd4d1b4635dad37827",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 182,
+          "commit": "bc52f29fb38d1a88c9b8c951b6d8fbc57a94ccf6",
+          "on_main": true
+        },
+        {
+          "pr": 241,
+          "commit": "4888425bcae9464411fcd4da5ef4b413534290d3",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "7ca6c5076f3bb44eb1280dcd4d1b4635dad37827",
+      "tag": "archive/qa/e2e-round2-01a10ddb-2026-10-18",
+      "tag_object": "038a2041e02422769a31d5333c9231071ab24996",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "doctorcre-app",
+      "branch": "v2-fix-staging-verification",
+      "classification": "SUPERSEDED",
+      "evidence": "Split fixes landed in #258\u2013#268, including Search, health, fonts and leases.",
+      "next_action": "Retire the combined V2 verification carrier.",
+      "expected_tip": "a5bbd5fbe85d2441b242514f4b0780dd37a04c19",
+      "main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "landing_proofs": [
+        {
+          "pr": 258,
+          "commit": "d7deb1c0e52f2d9b383606440314e09123fffe14",
+          "on_main": true
+        },
+        {
+          "pr": 259,
+          "commit": "c6ab6a2d5c07be33d4b97fe7afc94578bc807c3e",
+          "on_main": true
+        },
+        {
+          "pr": 260,
+          "commit": "869db00dce50348f6d9b30fab47fb307d3e200b4",
+          "on_main": true
+        },
+        {
+          "pr": 261,
+          "commit": "7025eb820445f7c6da151faf786b129444fdc1ff",
+          "on_main": true
+        },
+        {
+          "pr": 262,
+          "commit": "86a2442efe074b2cc97a33c0698224378a713ad0",
+          "on_main": true
+        },
+        {
+          "pr": 263,
+          "commit": "aa385f63020301ee5e50f2efe888cac48c621018",
+          "on_main": true
+        },
+        {
+          "pr": 264,
+          "commit": "d29c5fbcb1ec17f2ce8f7354d20d9d1ca81babdc",
+          "on_main": true
+        },
+        {
+          "pr": 265,
+          "commit": "d497a0d48e39e3a840de0eaebc88e7f2e963acd0",
+          "on_main": true
+        },
+        {
+          "pr": 266,
+          "commit": "a1580a9d127dfc44fabaf5ab0cc3cdfddca1325b",
+          "on_main": true
+        },
+        {
+          "pr": 267,
+          "commit": "bacd1ba790886fe8a6170e3c4528eed9d3449bbd",
+          "on_main": true
+        },
+        {
+          "pr": 268,
+          "commit": "c6ae19d420f1df9b1781a3234f7c15de430f11c9",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "a5bbd5fbe85d2441b242514f4b0780dd37a04c19",
+      "tag": "archive/v2-fix-staging-verification-2026-10-18",
+      "tag_object": "ad6a1103f8e470559281500c1d5b6f40aa5c1d51",
+      "final_main": "eff46702569d68a125f22bf9664f92cea4113752",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:20.023429+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:33.428816+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "ci-limits-src10",
+      "classification": "SUPERSEDED",
+      "evidence": "PR cancellation landed in #37; current CI has a maintained 25-minute ceiling.",
+      "next_action": "Retire obsolete one-minute timeout proposal.",
+      "expected_tip": "49d73bae02583bdaf3498e5249b4a74b69771da0",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [
+        {
+          "pr": 37,
+          "commit": "25e63962c6838f815d31707460dfdeb36d025562",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "49d73bae02583bdaf3498e5249b4a74b69771da0",
+      "tag": "archive/ci-limits-src10-2026-10-18",
+      "tag_object": "a1ee0c97205c2e0174511f75bb363fc4ddea458f",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/fix14-proof",
+      "classification": "ABANDONED",
+      "evidence": "Browser proof intake/archive machinery removed by #72.",
+      "next_action": "Do not restore the retired proof pipeline.",
+      "expected_tip": "dbf8db735247089905a0d744939f9ad8c2e2d96c",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "dbf8db735247089905a0d744939f9ad8c2e2d96c",
+      "tag": "archive/claude/fix14-proof-2026-10-18",
+      "tag_object": "8953016eabdf5672f9a878f49deb65b81a4f2713",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/fix30-backstops",
+      "classification": "ABANDONED",
+      "evidence": "Nightly/recovery backstop machinery removed by #72.",
+      "next_action": "Keep current checks; abandon old shadow services.",
+      "expected_tip": "3f369345e9590646d6d869e53b21a11708590045",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "3f369345e9590646d6d869e53b21a11708590045",
+      "tag": "archive/claude/fix30-backstops-2026-10-18",
+      "tag_object": "f6d337954ad2491d74f4517b112aca14bd566e99",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/retro-ci-failures",
+      "classification": "ABANDONED",
+      "evidence": "Fast lane invokes policy tests deleted by #72.",
+      "next_action": "Do not restore deleted tests solely to revive the lane.",
+      "expected_tip": "0f74a19ea214f3c709e07b2962e49d31d1c7ce61",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "0f74a19ea214f3c709e07b2962e49d31d1c7ce61",
+      "tag": "archive/claude/retro-ci-failures-2026-10-18",
+      "tag_object": "0d17ac745c453013e92215705ed39eb970308d75",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/retro-review-dispatch",
+      "classification": "SUPERSEDED",
+      "evidence": "Tiered repository review decisions landed via #59, `f3675d5`.",
+      "next_action": "Retire alternate review-dispatch integration.",
+      "expected_tip": "9713dcb1769902634134ae7e20fb4e8870690062",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [
+        {
+          "pr": 59,
+          "commit": "f3675d5d210e2720ec7808de75e421a8166f22c6",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "9713dcb1769902634134ae7e20fb4e8870690062",
+      "tag": "archive/claude/retro-review-dispatch-2026-10-18",
+      "tag_object": "027c9761048e6152fa7dc91460520e19a6cdf2e3",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/review-retro-standards",
+      "classification": "ABANDONED",
+      "evidence": "Adds artifact-authority framework around machinery removed by #72.",
+      "next_action": "Avoid restoring obsolete provenance enforcement.",
+      "expected_tip": "7b668454ab2c48a9e96e68fca99824c12c463b06",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "7b668454ab2c48a9e96e68fca99824c12c463b06",
+      "tag": "archive/claude/review-retro-standards-2026-10-18",
+      "tag_object": "a1e6f8c8d02c1709991b3682177040d9c741d9b4",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "claude/wave1-fix-receipts-selfreview",
+      "classification": "ABANDONED",
+      "evidence": "Adds extensive receipt/replay machinery outside the simplified delivery path.",
+      "next_action": "Abandon the historical paperwork framework.",
+      "expected_tip": "0e626168c4a59c0d3c072536849495bde3de80a5",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "0e626168c4a59c0d3c072536849495bde3de80a5",
+      "tag": "archive/claude/wave1-fix-receipts-selfreview-2026-10-18",
+      "tag_object": "c6ebd3161f489a537aa698bdf0c566276cb00779",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "codex/doc-drift",
+      "classification": "ABANDONED",
+      "evidence": "Unadopted weekly instruction-audit/issue lifecycle adds a separate service.",
+      "next_action": "Use focused documentation checks without reviving the service.",
+      "expected_tip": "a1c2a203ebd883f30522e02dcafa7b1c0faea5b0",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "a1c2a203ebd883f30522e02dcafa7b1c0faea5b0",
+      "tag": "archive/codex/doc-drift-2026-10-18",
+      "tag_object": "0cfa0698579089ac8f14ca8486e5ac97bf400def",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "codex/leak-guard",
+      "classification": "ABANDONED",
+      "evidence": "Historical scanner proposal includes roughly 96,000 lines of corpus output.",
+      "next_action": "Drop the corpus-based implementation; avoid public historical hash publication.",
+      "expected_tip": "9da64ae5422649eff068f1d8b6ca8b756a14ac9c",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [],
+      "skipped": [],
+      "observed_tip": "9da64ae5422649eff068f1d8b6ca8b756a14ac9c",
+      "tag": "archive/codex/leak-guard-2026-10-18",
+      "tag_object": "8c29afc7fd9c2298c727a04ab54b6ec09a5013de",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "codex/pr63-focused-repairs-20261007",
+      "classification": "SUPERSEDED",
+      "evidence": "Pagination correction landed in #63; #72 removed remaining cutover targets.",
+      "next_action": "Retire the old cutover repair carrier.",
+      "expected_tip": "03f84a843086c7dc646be8e589a5cb196d8be4d8",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [
+        {
+          "pr": 63,
+          "commit": "bd6778be9f4b6da04cf833d6b1e4e85d1d0e7f72",
+          "on_main": true
+        },
+        {
+          "pr": 72,
+          "commit": "bada75bf4cb1f7f0c03fad5a8e83da0a527da516",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "03f84a843086c7dc646be8e589a5cb196d8be4d8",
+      "tag": "archive/codex/pr63-focused-repairs-20261007-2026-10-18",
+      "tag_object": "88acad542a1e15c4a9226f8a181200e0dfabfcda",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:43.448820+00:00"
+    },
+    {
+      "repo": "software-factory",
+      "branch": "task-af-engineering-skills",
+      "classification": "SUPERSEDED",
+      "evidence": "#17 and #71 adopted the design/debt and installed skill workflow another way.",
+      "next_action": "Retire duplicate vendored skill copies.",
+      "expected_tip": "00e44822aa3c255bde0daad7de287483c97c7821",
+      "main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "landing_proofs": [
+        {
+          "pr": 17,
+          "commit": "264892ee5f2885f9dc51257dfc125b48071a4dfc",
+          "on_main": true
+        },
+        {
+          "pr": 71,
+          "commit": "e0d8f58ff7274ba5a6bd19c7777dc931f92db900",
+          "on_main": true
+        }
+      ],
+      "skipped": [],
+      "observed_tip": "00e44822aa3c255bde0daad7de287483c97c7821",
+      "tag": "archive/task-af-engineering-skills-2026-10-18",
+      "tag_object": "7e9ce65582edfa50f7c4402291462fae88cc9b80",
+      "final_main": "0e2231b4fe2db68017e5531314696d867bb9ced3",
+      "tag_verified": true,
+      "deletion_verified": true,
+      "archive_confirmed_at": "2026-10-19T04:09:37.601672+00:00",
+      "delete_confirmed_at": "2026-10-19T04:09:47.097721+00:00"
+    }
+  ],
+  "decisions": [
+    "No maintained behavior change. Pocock TDD reviewed; no new tests or test seams.",
+    "Grill-with-docs reviewed. Explicit autonomy resolves design choices without an interview.",
+    "Existing branch_retirement.py supports local backups only. It cannot push archive tags and was not used for mutation.",
+    "Archive tags are new annotated refs with noreply tagger metadata, peeled to the exact triage tips. Pushes are atomic, spaced at least two seconds, and deletion batches contain at most ten branches.",
+    "Temporary push-time validator checks advertised tips and new-tag absence. The CARR repository hook is chained and its command-specific Git config is isolated from synthetic tests.",
+    "The first CARR tag push failed four synthetic hook checks because config leaked into tests. Live refs confirmed no effect before retry. No repository source changed.",
+    "A second atomic CARR push passed local checks but GitHub rejected seven lightweight tags with GH007. No tags were created. An annotated-tag probe with noreply tagger succeeded at the original commit; all archives use that form without history rewrites or privacy-setting changes.",
+    "The concurrency-guard row cites no PR number. Its landing proof uses merged DoctorCRE PR 143, the integrated timing replacement cited by the adjacent concurrency row."
+  ]
+}
