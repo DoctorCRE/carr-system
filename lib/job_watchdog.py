@@ -329,11 +329,20 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
+    def job_scope(job):
+        return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
+    successes = {}
+    for job in jobs:
+        if job.get("card") and "start" in job and job.get("exit_code") == 0:
+            scope = job_scope(job)
+            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["start"]))
     for job in jobs:
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
-            if job["exit_code"] != 0 and not job.get("superseded"):
+            recovered = (job.get("card") and "start" in job and
+                         successes.get(job_scope(job), -math.inf) > epoch(job["start"]))
+            if job["exit_code"] != 0 and not job.get("superseded") and not recovered:
                 emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
             continue
         if not job.get("alive"):

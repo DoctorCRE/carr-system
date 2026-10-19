@@ -220,6 +220,28 @@ class ReplayTests(unittest.TestCase):
         facts["jobs"][1]["log_mtime"] = 1400.1
         self.assertNotIn("job_silent", {f["kind"] for f in w.detect(facts, c, 2000)})
 
+    def test_job_recovery_requires_same_scope_and_strictly_later_start(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        failed = {"id": "failed", "card": "scheduled", "executor": "worker",
+                  "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
+                  "start": 100, "exit_code": 1}
+        success = {**failed, "id": "success", "start": 200, "exit_code": 0}
+        for change in ({"card": "other"}, {"executor": "other"}, {"repo": "fixture/other"},
+                       {"pr": 2}, {"head": "b" * 40}, {"start": 99}, {"start": 100}):
+            with self.subTest(change=change):
+                found = w.detect({"jobs": [failed, {**success, **change}]}, c, 300)
+                self.assertEqual([f["subject"] for f in found], ["failed"])
+        for missing in ("card", "start"):
+            with self.subTest(missing=missing):
+                incomplete = {k: v for k, v in failed.items() if k != missing}
+                self.assertEqual(len(w.detect({"jobs": [incomplete, success]}, c, 300)), 1)
+        newer_failure = {**failed, "id": "newer-failure", "start": 250}
+        for jobs in ([failed, success, newer_failure], [newer_failure, success, failed]):
+            with self.subTest(order=[j["id"] for j in jobs]):
+                self.assertEqual([f["subject"] for f in w.detect({"jobs": jobs}, c, 300)],
+                                 ["newer-failure"])
+
     def test_release_block_counts_only_while_it_is_the_lane_outcome(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
