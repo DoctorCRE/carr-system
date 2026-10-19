@@ -207,6 +207,49 @@ class PostgresCLI(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def test_null_status_identity_anomaly_and_tombstone_exclusions(self):
+        parties = [
+            ('null-status-party', 'active', None, None),
+            ('null-status-dnc-party', 'do_not_contact', None, None),
+            ('null-status-merged-party', 'active', '1', None),
+            ('null-status-deleted-party', 'active', None, 'now()'),
+            ('closed-roster-party', 'active', None, None),
+        ]
+        clients = [
+            ('null-status-client', 'null-status-party', None, 'C-SYN', None),
+            ('null-status-dnc-client', 'null-status-dnc-party', None, 'C-DNC', None),
+            ('null-status-merged-client', '1', None, 'C-MERGED', '1'),
+            ('null-status-merged-party-client', 'null-status-merged-party', None, 'C-MERGED-PARTY', None),
+            ('null-status-deleted-party-client', 'null-status-deleted-party', None, 'C-DELETED-PARTY', None),
+            ('closed-roster-client', 'closed-roster-party', 'closed', 'C-CLOSED', None),
+        ]
+        with psycopg.connect(self.dsn, autocommit=True) as conn:
+            conn.execute("update client set status='closed' where id between '1' and '45'")
+            for party_id, state, merged_into, deleted_at in parties:
+                conn.execute(
+                    "insert into party(id, name, contact_state, merged_into, deleted_at) "
+                    f"values (%s, 'Synthetic', %s, %s, {deleted_at or 'null'})",
+                    (party_id, state, merged_into))
+            for client in clients:
+                conn.execute(
+                    "insert into client(id, party_id, status, roster_ref, merged_into) "
+                    "values (%s, %s, %s, %s, %s)", client)
+        try:
+            selected = self.run_cli('deal-history')['selected']
+            by_id = {row['subject_id']: row for row in selected}
+            self.assertEqual(by_id.get('null-status-client'), {
+                'subject_type': 'client', 'subject_id': 'null-status-client',
+                'reason': 'identity_anomaly'})
+            for excluded_id in ('null-status-dnc-client', 'null-status-merged-client',
+                                'null-status-merged-party-client', 'null-status-deleted-party-client',
+                                'closed-roster-client'):
+                self.assertNotIn(excluded_id, by_id)
+        finally:
+            with psycopg.connect(self.dsn, autocommit=True) as conn:
+                conn.execute("delete from client where id like 'null-status-%' or id='closed-roster-client'")
+                conn.execute("delete from party where id like 'null-status-%' or id='closed-roster-party'")
+                conn.execute("update client set status='engaged' where id between '1' and '45'")
+
     def test_reader_cli_budget_window_tombstones_and_failure(self):
         contact = self.run_cli('contact')
         self.assertEqual(contact['selected'][0]['subject_type'], 'client')
