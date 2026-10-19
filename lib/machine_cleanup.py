@@ -29,7 +29,10 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
             return keep('dispatch checkout identity mismatch')
         identity = workspace.stat().st_ino, clone.stat().st_ino
         repo = 'jbookout/carr-system'
-        provider.verify_repository(repo, clone)
+        try:
+            provider.verify_repository(repo, clone)
+        except RuntimeError:
+            return keep('repository identity unavailable or outside authorized cleanup scope')
         git(clone, 'fetch', '--prune', 'origin')
         head = git(clone, 'rev-parse', 'HEAD')
         branch = git(clone, 'symbolic-ref', '--quiet', '--short', 'HEAD', allowed=(0, 1))
