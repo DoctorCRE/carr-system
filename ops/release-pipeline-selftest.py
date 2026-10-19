@@ -422,6 +422,41 @@ class Base(unittest.TestCase):
         self._tmp.cleanup()
 
 
+class GitFetchDiagnostics(Base):
+    def test_failed_fetch_keeps_stderr_in_the_run_log(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        with self.assertRaises(rp.StepFailed) as failed:
+            pipe.git("fetch", "--quiet", "origin", "refs/heads/deleted-branch")
+        self.assertEqual(failed.exception.rc, 128)
+        self.assertTrue(failed.exception.log, "fetch failure must link its diagnostic log")
+        log = Path(failed.exception.log)
+        self.assertTrue(log.is_relative_to(pipe.run_dir))
+        self.assertIn("couldn't find remote ref refs/heads/deleted-branch", log.read_text())
+
+    def test_transient_fetch_retries_once_and_keeps_both_attempts(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        run = subprocess.run
+        attempts = []
+        error = b"fatal: unable to access 'https://github.com/example/app.git/': Recv failure: Operation timed out\n"
+
+        def flaky(argv, **kwargs):
+            attempts.append(argv)
+            if len(attempts) == 1:
+                return subprocess.CompletedProcess(argv, 128, b"", error)
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky), \
+                mock.patch.object(pipe, "sleep") as sleep:
+            pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        sleep.assert_called_once_with(2)
+        logs = "\n".join(p.read_text() for p in pipe.run_dir.glob("*fetch*.log"))
+        self.assertIn(error.decode().strip(), logs)
+        self.assertIn("[exit 128]", logs)
+        self.assertIn("[exit 0]", logs)
+
+
 class WorkerIdentityReconciliation(Base):
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
