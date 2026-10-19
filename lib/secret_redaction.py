@@ -29,6 +29,12 @@ MASK = "[REDACTED]"
 _URI_WITH_CREDENTIALS = re.compile(
     r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"@]*@[^\s'\"]+")
 
+_URL_WITH_QUERY = re.compile(r"\bhttps?://[^\s'\"?#]+\?[^\s'\"#]+", re.IGNORECASE)
+_QUERY_SECRET = re.compile(
+    r"([?&](?:access[_-]?token|token|auth(?:orization)?|api[_-]?key)=)[^&#]*"
+    r"|(?<=[?=&])[A-Za-z0-9+/_%\-]{32,}={0,2}(?=[&#]|$)", re.IGNORECASE)
+
+
 # Recognisable API-key / access-token prefixes (OpenAI-shaped, GitHub, AWS,
 # Slack...).
 _PREFIXED_TOKEN = re.compile(
@@ -102,6 +108,8 @@ def redact_text(text: str, *, known_secrets: Iterable[str] = ()) -> str:
         if secret:
             out = out.replace(secret, MASK)
     out = _URI_WITH_CREDENTIALS.sub(MASK, out)
+    out = _URL_WITH_QUERY.sub(
+        lambda url: _QUERY_SECRET.sub(lambda value: (value.group(1) or "") + MASK, url.group()), out)
     out = _PREFIXED_TOKEN.sub(MASK, out)
     # Known secrets and credential shapes take precedence over public labels.
     out = _ASSIGNED_SECRET.sub(_redact_assigned_value, out)
