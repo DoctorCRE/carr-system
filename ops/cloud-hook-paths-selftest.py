@@ -109,6 +109,7 @@ def cloud_project(tmp: Path) -> Path:
     shutil.copy2(REPO / "lib/hook_runtime.py", project / "lib/hook_runtime.py")
     (project / "ops").mkdir(parents=True)
     shutil.copy2(REPO / "ops" / "command_precheck.py", project / "ops" / "command_precheck.py")
+    shutil.copy2(REPO / "ops" / "git_env.py", project / "ops" / "git_env.py")
     (project / ".claude").mkdir()
     shutil.copy2(SETTINGS, project / ".claude" / "settings.json")
     shutil.copy2(REPO / "AGENTS.md", project / "AGENTS.md")
