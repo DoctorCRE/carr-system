@@ -1850,21 +1850,8 @@ TARGETS = {
     "clients-active.md": (ACTIVE_REL, build_clients_active),
     "compiled-rules-shared": (RULES_SHARED_REL, build_rules_shared),
     "compiled-rules-joe": (RULES_JOE_REL, build_rules_joe),
-    # ORDER 37. Named `compiled-rules-intro` ON PURPOSE: `--only compiled-rules`
-    # already prefix-matches, so this file rides the hourly bin/refresh-rules.sh
-    # and the nightly chain with no edit to either. A rule taught at 9am reaches
-    # the engine at the top of the next hour, same as every other taught rule.
     "compiled-rules-intro": (RULES_INTRO_REL, build_rules_intro),
-    # Dell onboarding prep (2026-08-01): Dell's personal compiled rules, in the
-    # DNA share. Prefix-matches --only compiled-rules → rides hourly + nightly.
     "compiled-rules-dell": (RULES_DELL_REL, build_rules_dell),
-    # PASS 1 (2026-08-03). The one-line gist index inside CARR AI/CLAUDE.md — a
-    # PARTIAL render (see build_rule_gist_index and exporters/partial.py); the rest
-    # of that file stays hand-authored and byte-identical. Named with the
-    # `compiled-rules` prefix on purpose, same reasoning as the intro target: the
-    # gist list is a view of the same store, so it must refresh on the same hourly
-    # bin/refresh-rules.sh beat. A gist index that lags the rules it indexes is the
-    # drift this target exists to prevent.
     "compiled-rules-gist-index": (CLAUDE_MD_REL, build_rule_gist_index),
     # record-layer-dictionary.md RETIRED to staging 2026-08-13 (decision dcd4912c,
     # Joe-approved) — restore by re-adding this line + exporters/dictionary.py's

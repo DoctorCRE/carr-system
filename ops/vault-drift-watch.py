@@ -94,8 +94,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # has always called the test override) runs normally, because naming a root is
 # not ambient. Omitting it means the caller wants the REAL vault, and that is
 # the case which must say so: it requires --recovery --reason WHY, and refuses
-# with the seam named otherwise. bin/refresh-rules.sh, the one sanctioned
-# caller, passes those controls with a fixed reason.
+# with the seam named otherwise.
 sys.path.insert(0, str(_PATHLIB.Path(__file__).resolve().parents[1]))
 from lib.drive_recovery import (  # noqa: E402
     SEAM_MISSING_EXIT, add_recovery_arguments, require_recovery)
@@ -128,29 +127,8 @@ SKIP_DIRS = {"Source Material", "Output", ".obsidian", ".claude", ".git",
 # make every exporter refresh look like a wall of UNEXPECTED adds.
 GENERATIONS_SUFFIX = ".generations"
 
-# Belt-and-suspenders per the build brief: these three ride the hourly rules
-# refresh and the nightly chain. compiled-rules-shared.md and
-# compiled-rules-joe.md are TARGETS entries too (so the live-registry parse
-# below already carries them); listed again here so a broken import of
-# exporters/targets.py still does not misclassify any of the three as
-# UNEXPECTED — it degrades to "everything else is UNEXPECTED", never the
-# reverse.
 def load_target_paths_by_key_prefix(prefix):
-    """The vault paths written by every TARGETS entry whose KEY starts with
-    `prefix` — i.e. exactly the files `run.sh export --only <prefix>` writes.
-
-    WHY BY KEY AND NOT BY PATH. bin/refresh-rules.sh first shipped this with a
-    hardcoded list of the three compiled-rules render paths, and it was wrong
-    within minutes: `--only compiled-rules` also prefix-matches
-    compiled-rules-gist-index (CLAUDE.md) and compiled-rules-intro
-    (DNA/Network/introduction-rules.md), so the hourly job rewrote five files
-    and the rebaseline only re-snapshotted three. The next check reported the
-    other two as TAMPER. A hand-kept list beside a registry is the drift this
-    whole change exists to remove (rule a8c55a47 — a manual path and an
-    automated path that do the same job must be the same code), so the caller
-    now names the EXPORT SELECTOR and the registry resolves it. Adding a sixth
-    compiled-rules target needs no edit here.
-    """
+    """Resolve the same paths as `run.sh export --only <prefix>`."""
     try:
         sys.path.insert(0, str(REPO_ROOT))
         from exporters import targets as _targets  # noqa: PLC0415 (deliberate late import)
@@ -805,28 +783,7 @@ def run_rebaseline(args):
         print(f"⚠︎ could not load the TARGETS registry ({expected_err}) — proceeding "
               f"because --only merges and its paths are hardcoded.", file=sys.stderr)
 
-    # --only: a PARTIAL rebaseline, merged into whatever is already on file.
-    #
-    # WHY THIS EXISTS. --rebaseline is documented to run LAST, after the nightly
-    # export chain, and it re-snapshots everything at once. That is correct for
-    # every writer that runs on the nightly beat — but bin/refresh-rules.sh
-    # re-renders the three compiled-rules files HOURLY, 7:00-20:00, so a rule
-    # taught at noon reaches the binding surface the same day. Those two beats
-    # do not agree, and the tamper pass believed the slower one: on run
-    # 20260813T201608Z all three compiled-rules files reported TAMPER
-    # ("rewritten outside the nightly export") against an 18:04Z baseline they
-    # had legitimately moved past at 20:00Z. It is not an occasional race. The
-    # render carries an `Exported: <timestamp>` line, so the bytes change on
-    # EVERY hourly pass even when no rule changed — DNA/compiled-rules-dell.md's
-    # diff in that run was that one line and nothing else. Three guaranteed
-    # false TAMPER findings a day, on the three files whose integrity matters
-    # most, is worse than no check at all: it teaches the reader to skip them.
-    #
-    # WHY MERGE RATHER THAN A FULL RE-SNAPSHOT ON THE HOURLY BEAT. Running the
-    # whole --rebaseline hourly would silently bless any OTHER registered file
-    # that had been rewritten outside its export — which is the exact tampering
-    # this tool exists to catch. --only keeps the blast radius to the paths the
-    # caller names and leaves every other baseline entry exactly as it was.
+    # A partial baseline preserves tamper evidence for every unselected path.
     only_prefixes = None
     if args.only_target:
         resolved, resolve_err = load_target_paths_by_key_prefix(args.only_target)
@@ -1287,9 +1244,7 @@ def main(argv=None):
                      help="With --rebaseline: re-snapshot ONLY registered paths starting "
                           "with one of these comma-separated prefixes, MERGING them into "
                           "the existing baseline and leaving every other path's baseline "
-                          "untouched. For a writer that runs on its own beat between "
-                          "nightly chains (bin/refresh-rules.sh). Without it, --rebaseline "
-                          "re-snapshots the whole registry as before.")
+                          "untouched. Without it, --rebaseline re-snapshots the whole registry.")
     ap.add_argument("--dry-run-ingest", action="store_true",
                      help="With --check and CARR_DRIFT_INGEST=1: build and print payloads, "
                           "never actually POST. No effect when CARR_DRIFT_INGEST is unset.")
