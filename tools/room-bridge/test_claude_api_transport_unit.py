@@ -6,6 +6,8 @@ from pathlib import Path
 import sys
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -16,8 +18,12 @@ import claude_api_config as config
 class Response(io.BytesIO):
     status = 200
 
+    def __init__(self, body, content_type='application/json'):
+        super().__init__(body)
+        self.content_type = content_type
+
     def getheader(self, _name, default=None):
-        return 'application/json'
+        return self.content_type
 
 
 class TransportTests(unittest.TestCase):
@@ -51,7 +57,7 @@ class TransportTests(unittest.TestCase):
             if path.endswith('count_tokens'):
                 return Response(b'{"input_tokens":100000}')
             calls.append(json.loads(body))
-            return Response(b'{"content":[]}')
+            return Response(b'{"content":[],"usage":{"input_tokens":0,"output_tokens":0}}')
         with Transport('transport-fixture-secret', 'claude-sonnet-5-5', time.monotonic() + 10,
                        upstream=upstream) as transport:
             statuses = [self.post(transport, {'model': 'claude-sonnet-5-5', 'max_tokens': 128000,
@@ -88,6 +94,72 @@ class TransportTests(unittest.TestCase):
     def test_each_priced_model_has_a_bound_below_its_reservation(self):
         self.assertLess(config.run_bound_usd(config.MODEL), config.RUN_ESTIMATE_USD)
         self.assertLess(config.run_bound_usd('claude-opus-5-5'), config.RUN_ESTIMATE_USD)
+
+    def test_stream_usage_is_cumulative_and_includes_both_cache_ttls(self):
+        events = [
+            {'type': 'message_start', 'message': {'usage': {
+                'input_tokens': 1000, 'output_tokens': 1, 'cache_read_input_tokens': 1000,
+                'cache_creation_input_tokens': 5000, 'cache_creation': {
+                    'ephemeral_5m_input_tokens': 2000, 'ephemeral_1h_input_tokens': 3000}}}},
+            {'type': 'message_delta', 'usage': {'output_tokens': 50}},
+            {'type': 'message_delta', 'usage': {'output_tokens': 100}},
+            {'type': 'message_stop'}]
+        body = b''.join(b'data: ' + json.dumps(e).encode() + b'\n\n' for e in events)
+        class Fragmented(Response):
+            def read1(self, size):
+                return super().read1(7)
+        def upstream(path, *_args):
+            if path.endswith('count_tokens'):
+                return Response(b'{"input_tokens":10000}')
+            return Fragmented(body, 'text/event-stream')
+        with Transport('fixture', config.MODEL, time.monotonic() + 10, upstream) as transport:
+            status, received = self.post(transport, {'model': config.MODEL, 'messages': [], 'stream': True})
+            self.assertEqual(status, 200)
+            self.assertEqual(received, body)
+            self.assertEqual(transport.cost_usd, config.Decimal('0.0201'))
+            self.assertFalse(transport.uncertain)
+
+    def test_concurrent_requests_charge_before_next_reservation_check(self):
+        calls = []
+        def upstream(path, *_args):
+            if path.endswith('count_tokens'):
+                return Response(b'{"input_tokens":100000}')
+            calls.append(path)
+            time.sleep(0.03)
+            return Response(b'{"usage":{"cache_creation_input_tokens":100000,"output_tokens":8192}}')
+        with patch.object(config, 'RUN_ESTIMATE_USD', config.Decimal('0.60')), \
+                Transport('fixture', config.MODEL, time.monotonic() + 10, upstream) as transport, \
+                ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(lambda _: self.post(transport, {'model': config.MODEL, 'messages': []})[0], range(2)))
+            self.assertEqual(sorted(statuses), [200, 429])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(transport.cost_usd, config.Decimal('0.48192'))
+
+    def test_json_cache_prices_for_each_model(self):
+        body = json.dumps({'usage': {
+            'input_tokens': 1000, 'output_tokens': 100, 'cache_read_input_tokens': 1000,
+            'cache_creation_input_tokens': 5000, 'cache_creation': {
+                'ephemeral_5m_input_tokens': 2000, 'ephemeral_1h_input_tokens': 3000}}}).encode()
+        def upstream(path, *_args):
+            return Response(b'{"input_tokens":10000}' if path.endswith('count_tokens') else body)
+        for model, expected in ((config.MODEL, '0.0201'), ('claude-opus-5-5', '0.0402')):
+            with self.subTest(model=model), Transport('fixture', model, time.monotonic() + 10, upstream) as transport:
+                self.post(transport, {'model': model, 'messages': []})
+                self.assertEqual(transport.cost_usd, config.Decimal(expected))
+
+    def test_unknown_usage_consumes_full_reservation_and_refuses_later_requests(self):
+        cases = [b'{"content":[]}', b'{"usage":{"input_tokens":1,"output_tokens":-1}}',
+                 b'data: {"type":"message_start","message":{"usage":{"input_tokens":1,"output_tokens":1}}}\n\n']
+        for body in cases:
+            def upstream(path, *_args):
+                if path.endswith('count_tokens'):
+                    return Response(b'{"input_tokens":1}')
+                return Response(body, 'text/event-stream' if body.startswith(b'data:') else 'application/json')
+            with self.subTest(body=body), Transport('fixture', config.MODEL, time.monotonic() + 10, upstream) as transport:
+                self.post(transport, {'model': config.MODEL, 'messages': []})
+                self.assertTrue(transport.uncertain)
+                self.assertEqual(transport.cost_usd, config.RUN_ESTIMATE_USD)
+                self.assertEqual(self.post(transport, {'model': config.MODEL, 'messages': []})[0], 429)
 
 
 if __name__ == '__main__':

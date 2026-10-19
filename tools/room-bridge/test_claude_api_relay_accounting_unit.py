@@ -55,7 +55,8 @@ for _ in range(15):
     with urllib.request.urlopen(req,timeout=2) as response: response.read()
 """
         target = fixture.sdk / '__init__.py'
-        target.write_text(target.read_text().replace('    yield SimpleNamespace(model=options.model)',
+        target.write_text(target.read_text().replace('    await transport_fixture(options)\n', '')
+            .replace('    yield SimpleNamespace(model=options.model)',
             sdk_call + '    import subprocess, sys\n    subprocess.run([sys.executable, "-c", '
             + repr(tool) + '], cwd=options.cwd, check=True)\n    yield SimpleNamespace(model=options.model)')
             .replace('total_cost_usd=1.25', 'total_cost_usd=0.01'))

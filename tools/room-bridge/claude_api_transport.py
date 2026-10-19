@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import time
@@ -19,7 +20,10 @@ class Transport:
         self.upstream = upstream or self._upstream
         self.calls = 0
         self.billing_error = False
-        self.lock = threading.Lock()
+        self.spent_usd = Decimal(0)
+        self.uncertain = False
+        self.closed = False
+        self.lock = threading.RLock()
         self.prefix = '/' + uuid.uuid4().hex
         owner = self
 
@@ -28,6 +32,12 @@ class Transport:
                 pass
 
             def do_POST(self):
+                # Include response metering in the lock: tool/SDK requests share
+                # one reservation, with no uncharged concurrent generation.
+                with owner.lock:
+                    self.relay()
+
+            def relay(self):
                 path = self.path.partition('?')[0]
                 if path not in (owner.prefix + '/v1/messages', owner.prefix + '/v1/messages/count_tokens'):
                     self.send_error(403)
@@ -52,8 +62,12 @@ class Transport:
                     self.end_headers()
                     try:
                         carry = b''
+                        received = bytearray()
                         secret = owner.key.encode()
                         while chunk := response.read1(65536):
+                            received.extend(chunk)
+                            if len(received) > 8 * 1024 * 1024:
+                                raise ValueError('response size')
                             carry += chunk
                             # Keep a possible partial secret across network chunks.
                             end = max(0, len(carry) - len(secret) + 1)
@@ -66,10 +80,38 @@ class Transport:
                             self.wfile.write(carry[:end])
                             carry = carry[end:]
                             self.wfile.flush()
+                        if not path.endswith('count_tokens'):
+                            if response.getheader('Content-Type', '').startswith('text/event-stream'):
+                                usage = {}
+                                started = delta = stopped = False
+                                for line in received.splitlines():
+                                    if not line.startswith(b'data:'):
+                                        continue
+                                    event = json.loads(line[5:])
+                                    kind = event.get('type')
+                                    if kind == 'message_start':
+                                        if started:
+                                            raise ValueError('multiple messages')
+                                        started = True
+                                        usage.update(event['message']['usage'])
+                                    elif kind == 'message_delta':
+                                        update = event.get('usage', {})
+                                        delta |= 'output_tokens' in update
+                                        usage.update(update)  # Provider counts are cumulative.
+                                    elif kind == 'message_stop':
+                                        stopped = True
+                                    elif kind == 'error':
+                                        owner.billing_error |= billing_error(event.get('error', ''))
+                                        raise ValueError('stream error')
+                                if not (started and delta and stopped):
+                                    raise ValueError('incomplete stream')
+                                owner.meter(usage)
+                            else:
+                                owner.meter(json.loads(received)['usage'])
                         self.wfile.write(carry)
                     finally:
                         response.close()
-                except (OSError, ValueError, TypeError, AttributeError, http.client.HTTPException):
+                except (OSError, ValueError, KeyError, TypeError, AttributeError, http.client.HTTPException):
                     self.close_connection = True
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -90,7 +132,7 @@ class Transport:
         if path.endswith('count_tokens'):
             return self.send(path, body, headers)
         with self.lock:
-            if (self.billing_error or self.calls >= config.MODEL_REQUESTS[self.model]
+            if (self.closed or self.uncertain or self.billing_error or self.calls >= config.MODEL_REQUESTS[self.model]
                     or time.monotonic() >= self.deadline):
                 return 429, None
             count_request = {k: v for k, v in request.items()
@@ -104,9 +146,42 @@ class Transport:
                     return 400, None
             finally:
                 counted.close()
+            request['max_tokens'] = min(request.get('max_tokens', config.MAX_OUTPUT_TOKENS), config.MAX_OUTPUT_TOKENS)
+            input_price, output_price = config.MODEL_PRICES[self.model]
+            bound = (tokens * Decimal('1.25') * 2 * input_price
+                     + request['max_tokens'] * output_price) / 1000000
+            if self.spent_usd + bound > config.RUN_ESTIMATE_USD:
+                return 429, None
             self.calls += 1
-        request['max_tokens'] = min(request.get('max_tokens', config.MAX_OUTPUT_TOKENS), config.MAX_OUTPUT_TOKENS)
+            self.uncertain = True
         return self.send(path, json.dumps(request).encode(), headers)
+
+    def meter(self, usage):
+        def tokens(name, source=usage):
+            value = source.get(name, 0)
+            if type(value) is not int or value < 0:
+                raise ValueError('invalid usage')
+            return value
+        if 'output_tokens' not in usage or not any(
+                k in usage for k in ('input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')):
+            raise ValueError('missing usage')
+        input_price, output_price = config.MODEL_PRICES[self.model]
+        # Aggregate cache writes without a TTL breakdown use the highest rate.
+        cache_write = tokens('cache_creation_input_tokens') * 2
+        if usage.get('cache_creation') is not None:
+            detail = usage['cache_creation']
+            five, hour = tokens('ephemeral_5m_input_tokens', detail), tokens('ephemeral_1h_input_tokens', detail)
+            if five + hour != tokens('cache_creation_input_tokens'):
+                raise ValueError('cache usage mismatch')
+            cache_write = five * Decimal('1.25') + hour * 2
+        self.spent_usd += (input_price * (tokens('input_tokens') + cache_write
+                           + tokens('cache_read_input_tokens') * Decimal('0.05'))
+                           + output_price * tokens('output_tokens')) / 1000000
+        self.uncertain = False
+
+    @property
+    def cost_usd(self):
+        return max(self.spent_usd, config.RUN_ESTIMATE_USD) if self.uncertain else self.spent_usd
 
     def send(self, path, body, headers):
         response = self.upstream(path, body, headers)
@@ -135,6 +210,7 @@ class Transport:
         return self
 
     def __exit__(self, *_args):
+        self.closed = True
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=1)

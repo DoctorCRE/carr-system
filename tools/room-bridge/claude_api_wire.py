@@ -22,8 +22,12 @@ Only the two priced models and standard custom-tool requests are admitted;
 provider beta headers are stripped; server tools, fast mode and geographic
 premiums are refused. Re-review prices and token-count assumptions before
 changing policy.
-Reported terminal cost replaces the reservation. Unknown cost retains it and
-stops spending. Unconfirmed cleanup retains the reservation and writer claim.
+The parent meters every forwarded Messages response, including tool-originated
+calls, from input, output and cache usage at the configured model prices.
+Billable requests serialize through response metering; each needs room for its
+worst-case token bound before forwarding. Relay cost replaces the reservation;
+the SDK total is diagnostic only. Missing or incomplete usage charges the full
+reservation and stops spending. Unconfirmed cleanup retains the reservation and writer claim.
 Unexpected cost above the reservation is recorded honestly and stops admission.
 Outstanding reservations carry across months. A run crossing
 a month boundary counts its full reported cost in both months conservatively.
@@ -151,12 +155,14 @@ class Ledger:
             return month, run_id
 
     def settle(self, reservation, cost, *, actual_model=None, status='settled', billing_error=False,
-               termination_confirmed=True):
+               termination_confirmed=True, metering_uncertain=False):
         with self.locked() as data:
             if billing_error:
                 data['stop'] = 'billing_error'
             if not termination_confirmed:
                 data['stop'] = 'termination_unconfirmed'
+            if metering_uncertain:
+                data.setdefault('stop', 'accounting_unknown')
             account = data['months'][reservation[0]]
             cost = usd(cost)
             if cost is not None and cost > Decimal(account['reservations'][reservation[1]]):
@@ -291,14 +297,15 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
         result['billing_error'] = result.get('billing_error', False) or transport.billing_error
         if result['billing_error']:
             result.update(status='failed', detail='claude_api_billing_error')
-    if usd(result.get('cost_usd')) is None:
-        result['cost_usd'] = None
-        if result.get('status') == 'completed':
-            result.update(status='failed', detail='sdk_cost_missing')
-    elif usd(result['cost_usd']) > config.RUN_ESTIMATE_USD:
+    result['sdk_cost_usd'] = result.get('cost_usd') if usd(result.get('cost_usd')) is not None else None
+    cost = transport.cost_usd
+    result['cost_usd'] = float(cost)
+    if transport.uncertain and result['status'] == 'completed':
+        result.update(status='failed', detail='claude_api_metering_uncertain')
+    elif cost > config.RUN_ESTIMATE_USD:
         result.update(status='failed', detail='claude_api_cost_bound_breached')
     result['spend_reservation'] = {'month': reservation[0], 'run_id': reservation[1]}
-    ledger.settle(reservation, result.get('cost_usd'), actual_model=result.get('actual_model'),
+    ledger.settle(reservation, cost, actual_model=result.get('actual_model'),
                   status=result['status'], billing_error=result.get('billing_error', False),
-                  termination_confirmed=result['termination_confirmed'])
+                  termination_confirmed=result['termination_confirmed'], metering_uncertain=transport.uncertain)
     return result
