@@ -2293,6 +2293,8 @@ if not RECOVERY_MODE:
 print(f"HEALTH RECOVERY MODE — NONCANONICAL Drive projections — reason: {RECOVERY_REASON}", file=sys.stderr)
 print(f"HEALTH RECOVERY MODE — vault: {VAULT}", file=sys.stderr)
 
+from exporters.common import EXPORT_HOME
+
 # name, output (glob ok — newest match wins), max_age_days (None = no cadence),
 # input globs (any newer than output => BEHIND), note shown on failure
 WATCH = [
@@ -2346,10 +2348,10 @@ WATCH = [
     # chain did not run or its export step failed. Rule 28 in its purest form —
     # these files existing proves nothing; their FRESHNESS proves the chain ran.
     # No BEHIND inputs: their input is the database, which has no mtime.
-    ("GEN lead-registry",   "DNA/Leads/lead-registry.xlsx",              26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN client-roster",   "DNA/Clients/client-roster.xlsx",            26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN vendors",         "DNA/Network/vendors.xlsx",                  26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN deals json",      "DNA/Deal Management/panhandle-team-deals.json", 26/24, [], "nightly chain (bin/nightly.sh)"),
+    ("GEN lead-registry",   str(EXPORT_HOME / "DNA/Leads/lead-registry.xlsx"), 26/24, [], "nightly chain (bin/nightly.sh)"),
+    ("GEN client-roster",   str(EXPORT_HOME / "DNA/Clients/client-roster.xlsx"), 26/24, [], "nightly chain (bin/nightly.sh)"),
+    ("GEN vendors",         str(EXPORT_HOME / "DNA/Network/vendors.xlsx"), 26/24, [], "nightly chain (bin/nightly.sh)"),
+    ("GEN deals json",      str(EXPORT_HOME / "DNA/Deal Management/panhandle-team-deals.json"), 26/24, [], "nightly chain (bin/nightly.sh)"),
     # --- the remaining repo-local job reports ----------------------------------
     # The review queue is still refreshed by the weekday local schedule. Legacy
     # brief-pack and Monday-agenda files are intentionally absent from this
