@@ -413,6 +413,8 @@ def handle_pending(name: str, seat: str, state: dict, *, add_room_turn,
                 return {"desk": name, "outcome": "queue_executor_unavailable"}
             terminal = queue_executor.finish_pending_posted(
                 pending, result_text, post_completion=post_completion, completion_dir=completion_dir)
+            if terminal.get("outcome") == "already_terminal":
+                post_completion(terminal["completion"])
             state_mod.clear_pending(state, name)
             return {"desk": name, **{key: value for key, value in terminal.items()
                                      if key != "completion"}}
