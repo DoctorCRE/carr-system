@@ -6,3 +6,4 @@ node_modules
 .dev.vars
 .dev.vars.*
 .last-deployed-verb-count*
+.generated/
