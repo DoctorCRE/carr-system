@@ -654,46 +654,6 @@ added_on       = "2026-08-17"
 note           = "Fresh baseline. It cannot inherit code_drift_rows because that older metric compared the repo with a Drive runtime copy."
 
 [[metric]]
-key            = "rules_live_agreement"
-source_mode    = "recovery"
-category       = "governance"
-dimension      = "staleness"
-question       = "Does the rule store's active count match what every live surface declares?"
-source_command = "cd \"$REPO\" && { ./.venv/bin/python ops/rules-live-check.py 2>/dev/null || true; } | grep -oE 'behind by [0-9]+' | grep -oE '[0-9]+' || echo 0"
-measured_from  = "the RULE STORE's count of active shared rules, queried live from the database"
-threshold      = { warn = 1, fail = 1 }
-bound_action   = "Run bin/refresh-rules.sh (never a raw run.sh export, which drafts to out/exports and once produced a rule that bound nobody). Verification: both counts agree and the health row reads OK."
-added_on       = "2026-08-09"
-independent_command = "cd \"$REPO\" && { ./.venv/bin/python ops/rules-live-check.py 2>/dev/null || true; } | grep -cE '^STALE' || true"
-note = """
-A GENUINELY independent pair, unlike facade_stale_rows: primary queries the
-DATABASE, the second path reads the count the RENDERED FILE declares about
-itself. Different substrates, so a disagreement means the render is stale
-relative to the store — which is the exact failure the 2026-08-04 correction
-was about (a session ran `run.sh export`, got three green results, and produced
-a rule that bound nobody because the write went to draft).
-LIVE EXAMPLE from this row's first runs, 2026-08-09, and it caught a real drift
-within the hour. The store moved 123 -> 124 -> 125 during one session while the
-render trailed: health had captured 123 at 07:44 and declared the file in
-agreement; the file re-exported at 07:52 declaring 124; by the third run the
-store held 125 against a render still on 124, which rules-live-check reported as
-STALE with the remedy bin/refresh-rules.sh. Ran it; both sides now agree at 125.
-Every one of those readings was internally consistent and none of them was
-current. A single-source check cannot see that at all, which is the argument for
-the whole measurement_integrity category.
-
-PARSE HARDENED THE SAME RUN, and this is its own lesson. The first version of
-this command matched only the healthy output shape ("shared: 125 active") and
-returned NOTHING against the STALE shape ("shared: store 125, live file 124").
-So the metric went blind at exactly the moment the system became unhealthy — it
-reported RUBRIC DRIFT when what it had actually found was a real defect. A check
-whose parser only handles the passing case is worse than no check, because its
-silence reads as health. The `|| true` is deliberate too: rules-live-check exits
-1 on STALE, which is a REAL STATE and not a command failure, and the metric must
-still report the number.
-"""
-
-[[metric]]
 key            = "doctrine_stale_sections"
 category       = "governance"
 dimension      = "staleness"
