@@ -525,9 +525,13 @@ class FleetReaper:
                 raise RuntimeError("orphan file type unreadable; preserve tree")
         return digest.hexdigest()
 
+    def tree_entry(self, root, path):
+        entries = self.hook.worktree_entries(str(root))
+        return next((e for e in entries if e["path"] == str(path)), None) or next(
+            (e for e in entries if str(Path(e["path"]).resolve()) == str(path)), None)
+
     def tree_identity(self, root, path):
-        entry = next((e for e in self.hook.worktree_entries(str(root)) if
-                      str(Path(e["path"]).resolve()) == str(path)), None)
+        entry = self.tree_entry(root, path)
         if not entry or entry.get("locked") or entry.get("bare"):
             return None
         return {"head": entry.get("head"), "branch": entry.get("branch"),
@@ -634,8 +638,7 @@ class FleetReaper:
                 raise MainAdvanced
             return {"status": "preserved", "reason": "evidence changed before action"}
         if row["action"] == "stage_worktree":
-            entry = next((e for e in self.hook.worktree_entries(str(root)) if
-                          str(Path(e["path"]).resolve()) == row["path"]), None)
+            entry = self.tree_entry(root, Path(row["path"]))
             if not entry or self.tree_identity(root, Path(row["path"])) != {k: row[k] for k in ("head", "branch", "detached")}:
                 return {"status": "preserved", "reason": "worktree moved or HEAD changed"}
             active = self.provider.open_pulls(repo, entry["branch"]) if entry.get("branch") else []
