@@ -329,22 +329,35 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
-    failures = set()
+    def job_scope(job):
+        return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
     successes = {}
     for job in jobs:
-        if job.get("exit_code") == 0 and "start" in job:
-            card = job.get("card", job["id"])
-            successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
+        if job.get("card") and "start" in job and job.get("ended_at") and job.get("exit_code") == 0:
+            if job["card"] == "branch-janitor":
+                try:
+                    report = json.loads(job.get("log_tail", ""))
+                except ValueError:
+                    continue
+                if (not isinstance(report, dict) or report.get("schema") != "branch-retirement/v1"
+                        or report.get("execute") is not True or report.get("deferred") != []
+                        or report.get("errors") != [] or not isinstance(report.get("counts"), dict)
+                        or set(report["counts"]) != set(config["repositories"])):
+                    continue
+            scope = job_scope(job)
+            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["ended_at"]))
+    failures = set()
     for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
             card = job.get("card", subject)
-            if job["exit_code"] != 0 and not job.get("superseded"):
-                if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
-                    continue
+            scope = job_scope(job)
+            completed = job.get("card") and "start" in job and job.get("ended_at")
+            recovered = completed and successes.get(scope, -math.inf) > epoch(job["ended_at"])
+            if job["exit_code"] != 0 and not job.get("superseded") and not recovered:
                 reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
-                incident = json.dumps([reason, successes.get(card) if "start" in job else None])
+                incident = json.dumps([scope, reason, successes.get(scope) if completed else None])
                 key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
                 if key not in failures:
                     failures.add(key)
