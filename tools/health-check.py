@@ -2352,13 +2352,6 @@ WATCH = [
     ("GEN client-roster",   str(EXPORT_HOME / "DNA/Clients/client-roster.xlsx"), 26/24, [], "nightly chain (bin/nightly.sh)"),
     ("GEN vendors",         str(EXPORT_HOME / "DNA/Network/vendors.xlsx"), 26/24, [], "nightly chain (bin/nightly.sh)"),
     ("GEN deals json",      str(EXPORT_HOME / "DNA/Deal Management/panhandle-team-deals.json"), 26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN clients-active",  "DNA/Clients/clients-active.md",             26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN rules shared",    "DNA/compiled-rules-shared.md",              26/24, [], "nightly chain (bin/nightly.sh)"),
-    ("GEN rules joe",       "00_Context/compiled-rules-joe.md",          26/24, [], "nightly chain (bin/nightly.sh)"),
-    # ORDER 37: the vendor-politics compile target. Its key prefix-matches
-    # `--only compiled-rules`, so the hourly refresh reaches it as well.
-    ("GEN rules intro",     "DNA/Network/introduction-rules.md",         26/24, [],
-     "nightly chain (bin/nightly.sh) + hourly bin/refresh-rules.sh"),
     # --- the remaining repo-local job reports ----------------------------------
     # The review queue is still refreshed by the weekday local schedule. Legacy
     # brief-pack and Monday-agenda files are intentionally absent from this
@@ -2377,52 +2370,6 @@ WATCH = [
     ("Dell calendar feed","DNA/Team/calendar-latest-dell.ics", 4, [],
      "KNOWN BLOCKED on Dell's OS update (memory: dell-calendar-fetch-blocked) — expected stale until he updates"),
 ]
-
-def _retired_watch_entries(watch, retired_paths):
-    """Drop only dead-man rows whose exact output is a retired export target."""
-    retired = [entry for entry in watch if entry[1] in retired_paths]
-    active = [entry for entry in watch if entry[1] not in retired_paths]
-    return active, retired
-
-
-# THE CUTOFF REACHES THIS LIST TOO, and until 2026-08-23 it did not.
-#
-# The markdown-render cutoff fired 2026-08-19: exporters/run_exports.py skips
-# every .md target and prints RETIRED instead of writing it. Both export-freshness
-# checks in this file already ask the same flag function and drop the retired
-# targets. This dead-man list did not, so four rows watched files the exporter now
-# refuses to write and reported a CHOSEN state as four failures every single day —
-# the compiled shared rules, Joe's personal rules, the introduction rules, and the
-# active-client roster.
-#
-# Worse than noise: the remedy those rows printed was bin/refresh-rules.sh, which
-# exits 0 and writes nothing after the cutoff. A red row whose fix silently does
-# nothing costs more than no row, because somebody runs it and believes it.
-#
-# MATCHED AGAINST THE EXPORT REGISTRY, NOT AGAINST ".md". The first version of
-# this block dropped any row whose path ended in .md, which took the radar digest
-# and the two repo-local job reports with it — three files still written nightly
-# by tools the cutoff never touched. The cutoff is about EXPORT TARGETS, so this
-# asks the registry which paths it has stopped writing and drops exactly those.
-#
-# Gated on the same flag rather than deleted, so flipping doctrine.md_renders_retired
-# back to false restores the rows with no code change — one contract, no second
-# place to decide what "retired" means.
-try:
-    from exporters.run_exports import md_renders_retired as _md_retired
-    from exporters.targets import TARGETS as _EXPORT_TARGETS
-    if _md_retired():
-        _retired_paths = {rel for rel, _fn in _EXPORT_TARGETS.values()
-                          if rel.lower().endswith(".md")}
-        WATCH, _retired_watch = _retired_watch_entries(WATCH, _retired_paths)
-        for _w in _retired_watch:
-            print(f"  -- {_w[0]:<18} RETIRED at the markdown-render cutoff; the store "
-                  f"serves this (standing-context / read-doctrine / catch-me-up)")
-except Exception as _exc:
-    # Fails OPEN, the same direction run_exports.py chose: a dead config lookup
-    # keeps every row rather than silently hiding a watch that still matters.
-    print(f"  -- {'md cutoff':<18} could not read the cutoff registry "
-          f"({type(_exc).__name__}); watching every row")
 
 # --- credential gates (added 2026-08-02) -------------------------------------
 # A JOB THAT CANNOT RUN IS NOT A JOB THAT FAILED, and reporting both as MISSING
@@ -2539,7 +2486,7 @@ _db_env_line = db_env_parse_failure()
 if _db_env_line is not None:
     print(f"  ⚠︎ {'db.env':<18} UNSOURCEABLE — {DB_ENV} does not parse as shell at line "
           f"{_db_env_line}. Every job that does `set -a; . db.env` (bin/migrate-prod.sh, "
-          f"bin/nightly.sh, bin/refresh-rules.sh, bin/control-plane-tick.sh and the rest) "
+          f"bin/nightly.sh, bin/control-plane-tick.sh and the rest) "
           f"loses ALL of its keys, not just the bad one, and reports its credential missing. "
           f"Fix: single-quote that value  · one bad line disables every credential here")
     rc = 1
@@ -3358,7 +3305,7 @@ except Exception as e:
 # back. This row reads that result (out/codex-hook-smoke.json) rather than
 # re-running the smoke — a live Codex call on every `run.sh health` would be a
 # heavier side effect than a freshness check should carry, same reasoning as
-# the cutover-readiness row below. PASS within 30 days reads OK; anything
+# the other stored readiness receipts. PASS within 30 days reads OK; anything
 # else — FAIL, or no recent record at all — reads as a fault, never silently
 # green, because an unverified hook runtime is exactly the gap this row used
 # to paper over with a permanent gray "unverified" line.
@@ -3411,116 +3358,12 @@ except Exception as e:
     print(f"  ⚠︎ {'fetch allowlist':<18} check failed ({type(e).__name__}: {e})")
     rc = 1
 
-# ── taught rules: store vs the file that actually binds (added 2026-08-04) ────
-# Every row above this one asks "is the output FRESH". This one asks "is the
-# output TRUE", because freshness could not have caught the defect it exists for.
-#
-# 2026-08-04: teach returned ok, activate-rule returned ok, and
-# `run.sh export --only compiled-rules` returned ok reporting 56 rows. The rule
-# was still absent from the file sessions read. `run.sh export` writes to
-# out/exports/ DRAFT by default; only CARR_EXPORT_LIVE=1 reaches the vault
-# (exporters/common.py:32), and CLAUDE.md documented the command without the
-# flag. The vault file was fresh the whole time — the hourly refresh keeps it
-# that way — so an mtime check would have shown green while a rule taught after
-# 20:00 bound nobody until morning.
-#
-# The count is the signal because both halves already carry it: the store knows
-# how many rules are active, and each file declares its own total in its header.
-# Nothing compared them. The session-start recitation reads that header and
-# states it to the partner as fact, so a stale file makes the session misreport
-# what is binding it — which is the audit signal rule 4f7c348f exists to provide.
-try:
-    _rlc = os.path.join(REPO_ROOT, "ops", "rules-live-check.py")
-    if not os.path.exists(_rlc):
-        print(f"  -- {'rules live':<18} ops/rules-live-check.py not present; skipped")
-    else:
-        # NOT sys.executable. `run.sh health` invokes this file with bare
-        # `python3` (run.sh:80) while every other entry point uses "$PY", the
-        # repo venv — health-check.py is deliberately stdlib-only so it runs
-        # anywhere. The child is not: it needs psycopg. Handing it sys.executable
-        # gave it system python3, which failed the import, exited non-zero and
-        # printed nothing, so the row read "(no output)" and looked like a broken
-        # check rather than a missing dependency. Resolve the venv explicitly and
-        # leave health-check's own stdlib-only property intact.
-        _venv = os.path.join(REPO_ROOT, ".venv", "bin", "python")
-        _py = _venv if os.path.exists(_venv) else sys.executable
-        _p = subprocess.run([_py, _rlc], capture_output=True, text=True, timeout=60)
-        _lines = (_p.stdout or "").strip().splitlines()
-        # Carry stderr into the message on a silent failure. The first version of
-        # this block swallowed it, which is the defect this whole row exists for.
-        _first = _lines[0] if _lines else (
-            f"(no output; stderr: {(_p.stderr or '').strip().splitlines()[-1]})"
-            if (_p.stderr or "").strip() else "(no output, no stderr)")
-        if _first.startswith("SKIP"):
-            print(f"  -- {'rules live':<18} {_first.split(': ', 1)[-1]}")
-        elif _p.returncode == 0:
-            print(f"  OK {'rules live':<18} {_first.split('— ', 1)[-1]}")
-        else:
-            print(f"  ⚠︎ {'rules live':<18} {_first.split('— ', 1)[-1]}  · "
-                  f"run ~/carr-system/bin/refresh-rules.sh")
-            rc = 1
-except Exception as e:
-    print(f"  ⚠︎ {'rules live':<18} check failed ({type(e).__name__}: {e})")
-    rc = 1
-
-# ── cutover readiness: LAST result per partner (Phase 1, 2026-08-13) ─────────
-# Unlike the "rules live" row above, this does NOT re-run the check — it reads
-# the artifact ops/cutover-readiness.py wrote the last time the nightly chain
-# ran it (out/cutover-readiness.json), same read-the-artifact pattern as the
-# vault-drift-watch row below. Re-running here would mean this row silently
-# fires a LIVE standing-context/doctrine-index call and a full store scan every
-# time someone runs `run.sh health` by hand, which is a heavier side effect
-# than a freshness check should carry. What matters for the cutover is whether
-# last night's proof was clean and recent, not whether it is clean RIGHT NOW.
-print("\ncutover readiness (store-first boot, per partner)")
-try:
-    _crc_path = os.path.join(REPO_ROOT, "out", "cutover-readiness.json")
-    if not os.path.exists(_crc_path):
-        print(f"  -- cutover-readiness    no run yet — ops/cutover-readiness.py has not been "
-              f"run (rides the nightly chain now; expected before the first night, a fault after)")
-    else:
-        with open(_crc_path) as _f:
-            _crj = json.load(_f)
-        if _crj.get("skip"):
-            print(f"  -- cutover-readiness    last run SKIPPED — {_crj['skip']}")
-        else:
-            _crc_age_h = (time.time() -
-                          datetime.strptime(_crj["generated_at"][:19], "%Y-%m-%dT%H:%M:%S").timestamp())
-            # generated_at is UTC (isoformat of a timezone.utc datetime); the strptime
-            # above parses it naive, so localtime-vs-UTC offsets this by up to a few
-            # hours depending on the machine's zone. Good enough for a freshness gate
-            # whose tolerance is measured in hours, same slack the vault-drift row below
-            # accepts from the same isoformat-vs-epoch approach.
-            _crc_age_h = abs(_crc_age_h) / 3600
-            _this = (_crj.get("this_machine") or {}).get("resolved_identity") or "(unresolved)"
-            _parts = _crj.get("partners") or {}
-            _bits = []
-            for _partner in ("joe", "dell"):
-                _cr_st = (_parts.get(_partner) or {}).get("status", "MISSING")
-                _short = "READY" if _cr_st == "READY" else ("PARTIAL" if _cr_st.startswith("PARTIAL") else "NOT READY")
-                _bits.append(f"{_partner}={_short}")
-            _summary = f"this machine={_this}; {', '.join(_bits)}"
-            if not _crj.get("overall_ready", False):
-                print(f"  ⚠︎ cutover-readiness    {_summary} ({_crc_age_h:.1f}h old) · on breach: "
-                      f"./.venv/bin/python ops/cutover-readiness.py and read the DISAGREES/FAILED lines")
-                rc = 1
-            elif _crc_age_h > 30:
-                print(f"  ⚠︎ cutover-readiness    STALE {_crc_age_h:.0f}h — last result was clean "
-                      f"({_summary}) · on breach: check the nightly chain log for the "
-                      f"'cutover readiness' step")
-                rc = 1
-            else:
-                print(f"  OK cutover-readiness    {_summary} ({_crc_age_h:.1f}h old)")
-except Exception as e:
-    print(f"  ⚠︎ cutover-readiness check failed ({type(e).__name__}: {e})")
-    rc = 1
-
 # ── forgetting (loop #212, migration 0071) ──────────────────────────────────
 # The store's forgetting policy, surfaced daily: re-verify queue depth (expired
 # + unstamped-volatile verifications), ingest_inbox backlog, and growth SLOPE
 # per accumulating table. The child also writes today's growth snapshot — the
 # health check is the one daily process guaranteed to run, so the snapshot
-# rides it. Same delegate pattern as rules-live: stdlib parent, venv child.
+# rides it. The parent delegates to the repository venv child.
 try:
     _fgc = os.path.join(REPO_ROOT, "ops", "forgetting-check.py")
     if not os.path.exists(_fgc):
@@ -3670,97 +3513,6 @@ try:
                       f"batch through bin/import-doctrine.sh")
 except Exception as e:
     print(f"  ⚠︎ doctrine store check failed ({type(e).__name__}: {e})")
-    rc = 1
-
-# --- the portability mirror (Joe's ruling 2026-08-08) ------------------------
-# Freshness only: a mirror is insurance, and stale insurance that looks valid
-# is worse than none. Bound action inline per rule 590b11e1.
-try:
-    _mp = os.path.join(DEFAULT_RECOVERY_VAULT, "Backups", "portability-mirror", "MANIFEST.md")
-    if not os.path.exists(_mp):
-        print("  ⚠︎ portability-mirror  MISSING · on breach: run tools/db-tap.py run "
-              "pipelines/doctrine_mirror.py (see nightly.sh for args)")
-        rc = 1
-    else:
-        _age_h = (time.time() - os.path.getmtime(_mp)) / 3600
-        if _age_h > 30:
-            print(f"  ⚠︎ portability-mirror  STALE {int(_age_h)}h · on breach: the nightly "
-                  f"mirror step failed — check out/nightly logs, rerun the db-tap command")
-            rc = 1
-        else:
-            print(f"  OK portability-mirror  fresh ({int(_age_h)}h old, Drive + local)")
-except Exception as e:
-    print(f"  ⚠︎ portability-mirror check failed ({type(e).__name__}: {e})")
-    rc = 1
-
-# --- vault drift watch (Phase 1 v2, 2026-08-13) --------------------------------
-# Detection control for the proven-open Codex vault-write door
-# (ops/vault-drift-watch.py). v2 added a second, independent baseline
-# (--rebaseline, run LAST in the nightly chain after all exports) that survives
-# the nightly rewrite, so a generated file tampered with and then re-exported
-# the same night is still caught the NEXT time --check runs (--check runs
-# FIRST in the chain, before exports) — the exact gap a plain manifest-to-
-# manifest diff could not close. This row reads --check's own summary
-# (out/vault-drift-check-summary.json) plus the --rebaseline baseline's age;
-# neither existing yet before the first-ever run of its mode is not a fault, a
-# stale or non-clean one is. Bound action inline per rule 590b11e1.
-print("\nvault drift watch")
-try:
-    _vdw_summary_path = os.path.join(REPO_ROOT, "out", "vault-drift-check-summary.json")
-    _vdw_baseline_path = os.path.join(REPO_ROOT, "out", "vault-drift-baseline", "manifest.json")
-
-    _vdw_baseline_age_h = None
-    if os.path.exists(_vdw_baseline_path):
-        with open(_vdw_baseline_path) as _f:
-            _vdw_bl = json.load(_f)
-        _vdw_baseline_age_h = (time.time() -
-                                datetime.fromisoformat(_vdw_bl["generated_at"]).timestamp()) / 3600
-
-    if not os.path.exists(_vdw_summary_path):
-        _bl_note = (f"; baseline is {_vdw_baseline_age_h:.1f}h old" if _vdw_baseline_age_h is not None
-                    else ", and no --rebaseline baseline exists yet either")
-        print(f"  -- vault-drift-watch     no --check run yet — run ops/vault-drift-watch.py "
-              f"--check once (nightly step 1){_bl_note} (expected before the first run, a "
-              f"fault after)")
-    else:
-        with open(_vdw_summary_path) as _f:
-            _vdw = json.load(_f)
-        _vdw_age_h = (time.time() -
-                      datetime.fromisoformat(_vdw["generated_at"]).timestamp()) / 3600
-        _vdw_tamper = _vdw.get("tamper_count", 0)
-        _vdw_unexpected = _vdw.get("unexpected_count", 0)
-        _vdw_mirror_verified = _vdw.get("mirror_verified_count", 0)
-        _bl_str = f"{_vdw_baseline_age_h:.1f}h" if _vdw_baseline_age_h is not None else "NO BASELINE"
-        if _vdw_tamper or _vdw_unexpected:
-            print(f"  ⚠︎ vault-drift-watch     {_vdw_tamper} TAMPER + {_vdw_unexpected} "
-                  f"UNEXPECTED last check ({_vdw_age_h:.1f}h old, baseline {_bl_str} old) · "
-                  f"on breach: read out/vault-drift-salvage-manifest.jsonl and the newest "
-                  f"folder under out/vault-drift-quarantine/ for the quarantined files + "
-                  f"diffs, then confirm with Joe whether each edit is legitimate")
-            rc = 1
-        elif _vdw_age_h > 30:
-            print(f"  ⚠︎ vault-drift-watch     STALE {_vdw_age_h:.0f}h — last check reported "
-                  f"clean (baseline {_bl_str} old) · on breach: check the nightly chain log "
-                  f"for the 'vault drift watch (check)' step")
-            rc = 1
-        elif _vdw_baseline_age_h is None:
-            print(f"  ⚠︎ vault-drift-watch     check clean ({_vdw_age_h:.1f}h old) but NO "
-                  f"--rebaseline BASELINE exists yet · on breach: run "
-                  f"ops/vault-drift-watch.py --rebaseline once (nightly's last step, after "
-                  f"exports) — until then the tamper check has nothing to compare against")
-            rc = 1
-        elif _vdw_baseline_age_h > 30:
-            print(f"  ⚠︎ vault-drift-watch     check clean ({_vdw_age_h:.1f}h old) but "
-                  f"baseline STALE {_vdw_baseline_age_h:.0f}h · on breach: check the nightly "
-                  f"chain log for the 'vault drift watch (rebaseline)' step")
-            rc = 1
-        else:
-            _mirror_note = (f", {_vdw_mirror_verified} mirror-verified" if _vdw_mirror_verified
-                             else "")
-            print(f"  OK vault-drift-watch     0 tamper, 0 unexpected{_mirror_note} "
-                  f"({_vdw_age_h:.1f}h old check, baseline {_vdw_baseline_age_h:.1f}h old)")
-except Exception as e:
-    print(f"  ⚠︎ vault-drift-watch check failed ({type(e).__name__}: {e})")
     rc = 1
 
 # --- deploy provenance: does production run code this repo has a record of? (Phase 1, 2026-08-13) ---
