@@ -11,6 +11,9 @@ import tempfile
 import threading
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[2] / "lib"))
+from selftest_harness import temporary_directory
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -28,7 +31,7 @@ class FakeRouter:
 
     def __init__(self, *, owner: bool = True, start_error: str | None = None,
                  steer_ok: bool = True, chatter: bool = True):
-        self.dir = tempfile.mkdtemp(prefix="ipc-")
+        self.dir = temporary_directory(prefix="ipc-")
         self.path = os.path.join(self.dir, "ipc.sock")
         self.owner = owner
         self.start_error = start_error

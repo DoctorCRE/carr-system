@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
@@ -22,7 +22,10 @@ const realChromeSkipReason = process.platform !== "darwin"
     : process.env.CODEX_SANDBOX === "seatbelt"
       ? "Codex seatbelt aborts Chrome before DevTools"
       : false;
-const codeSignCloneDirectory = path.resolve(tmpdir(), "..", "X", "com.google.Chrome.code_sign_clone");
+const systemTemp = process.platform === "darwin"
+  ? execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim()
+  : tmpdir();
+const codeSignCloneDirectory = path.resolve(systemTemp, "..", "X", "com.google.Chrome.code_sign_clone");
 function fakeChrome(t, scenarios, beforeSpawn = () => {}) {
   const calls = [];
   t.after(async () => {
@@ -59,6 +62,11 @@ async function directoryEntryCount(directory) {
   catch (error) { if (error.code === "ENOENT") return 0; throw error; }
 }
 
+test("code-sign clone root ignores the suite TMPDIR", { skip: process.platform !== "darwin" }, () => {
+  const userTemp = execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim();
+  assert.equal(codeSignCloneDirectory, path.resolve(userTemp, "..", "X", "com.google.Chrome.code_sign_clone"));
+});
+
 test("code-sign clone counting treats an absent directory as empty", async (t) => {
   const parent = await mkdtemp(path.join(tmpdir(), "chrome-clone-count-"));
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -91,6 +99,24 @@ test("graceful Chrome shutdown does not grow the macOS code-sign clone directory
   }
   assert.ok(after <= before, `Chrome code-sign clones grew ${before} -> ${after}`);
 });
+
+for (const scenario of ["temp-artifact", "temp-artifact-exit"]) {
+  test(`Chrome owns temporary downloads across close and startup failure (${scenario})`, async (t) => {
+    const parent = await mkdtemp(path.join(tmpdir(), "chrome-download-test-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const previousTmp = process.env.TMPDIR;
+    process.env.TMPDIR = parent;
+    t.after(() => {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+    });
+    const fake = fakeChrome(t, [scenario]);
+    const launched = launchChrome("fake-chrome", { spawnChrome: fake.spawnChrome, timeoutMs: 1500 });
+    if (scenario.endsWith("-exit")) await assert.rejects(launched, /Chrome failed to start/);
+    else await (await launched).close();
+    assert.deepEqual(await readdir(parent), []);
+  });
+}
 
 test("Chrome requests a real CDP shutdown before sending process signals", async (t) => {
   const fake = fakeChrome(t, ["ready"]);

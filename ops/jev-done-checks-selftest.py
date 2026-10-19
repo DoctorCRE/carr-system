@@ -15,6 +15,9 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 OPS = Path(__file__).resolve().parent
 sys.path.insert(0, str(OPS))
 from git_env import fixture_env  # noqa: E402
@@ -89,7 +92,7 @@ index 333..444 100644
 # --------------------------------------------------------- #10 handoff pack
 
 def make_repo():
-    tmp = tempfile.mkdtemp()
+    tmp = temporary_directory()
     env = {**fixture_env(), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
     subprocess.run(["git", "init", "-q"], cwd=tmp, env=env, check=True)
