@@ -334,6 +334,16 @@ def detect(facts, config, now):
     successes = {}
     for job in jobs:
         if job.get("card") and "start" in job and job.get("exit_code") == 0:
+            if job["card"] == "branch-janitor":
+                try:
+                    report = json.loads(job.get("log_tail", ""))
+                except ValueError:
+                    continue
+                if (not isinstance(report, dict) or report.get("schema") != "branch-retirement/v1"
+                        or report.get("execute") is not True or report.get("deferred") != []
+                        or report.get("errors") != [] or not isinstance(report.get("counts"), dict)
+                        or set(report["counts"]) != set(config["repositories"])):
+                    continue
             scope = job_scope(job)
             successes[scope] = max(successes.get(scope, -math.inf), epoch(job["start"]))
     for job in jobs:
