@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serial merge ownership through the shell command interface."""
+"""Enqueue-only CLI, mutation guard and required-check workflow contracts."""
 import json
 import os
 from pathlib import Path
@@ -13,134 +13,86 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class SerialQueueTests(unittest.TestCase):
+class EnqueueTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        self.env = {**os.environ, 'PATH': f'{self.root}:{os.environ["PATH"]}',
-                    'CARR_MQ_LOCK_ROOT': str(self.root / 'locks'),
-                    'MQ_FIXTURE': str(self.root), 'R': 'test/repo'}
-        self.script('sleep', '#!/bin/sh\nexit 0\n')
-        self.script('gh', f'#!{sys.executable}\n' + '''
-import json, os, sys, time
-from pathlib import Path
-root = Path(os.environ['MQ_FIXTURE'])
-with (root / 'calls').open('a') as log: log.write(json.dumps(sys.argv[1:]) + '\\n')
-if sys.argv[1:3] == ['pr', 'view']:
-    marker = root / 'entered'
-    if not marker.exists():
-        marker.touch()
-        while not (root / 'release').exists(): time.sleep(.01)
-    print(json.dumps(dict(state='MERGED', mergeStateStatus='CLEAN', headRefOid='abc', statusCheckRollup=[])))
-''')
-
-    def script(self, name, content):
-        path = self.root / name
-        path.write_text(content)
-        path.chmod(0o755)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('enqueue_daemon', ROOT / 'tools/merge_queue/main.py')
+        daemon = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(daemon)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.q = daemon.Queue(self.root / 'out/merge-queue', ROOT, gap=0)
+        self.addCleanup(self.q.db.close)
+        gh = self.root / 'gh'
+        gh.write_text(f'#!{sys.executable}\n' + "import sys,json,time\nfrom pathlib import Path\n"
+            + f"with Path({str(self.root / 'calls')!r}).open('a') as f: f.write(str(time.monotonic())+' '+' '.join(sys.argv[1:])+'\\n')\n"
+            + "print(json.dumps(dict(number=int(sys.argv[2].split('/')[-1]),state='open',head=dict(sha='a'*40,ref='topic'),base=dict(sha='b'*40,ref='main'),mergeable_state='clean')))\n")
+        gh.chmod(0o755)
+        self.env = {**os.environ, 'PATH': f'{self.root}:{os.environ["PATH"]}', 'CARR_ROOT': tmp.name,
+                    'CARR_GITHUB_READ_BUDGET': str(self.root / 'budget'), 'GH_LIMITER_DIR': str(self.root / 'limiter')}
 
     def command(self, *args):
         return ['bash', str(ROOT / 'tools/mq.sh'), *args]
 
-    def start(self, *args):
-        proc = subprocess.Popen(self.command(*args), env=self.env, text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.addCleanup(lambda: proc.poll() is None and proc.kill())
-        deadline = time.monotonic() + 5
-        while not (self.root / 'entered').exists() and time.monotonic() < deadline:
-            time.sleep(.01)
-        self.assertTrue((self.root / 'entered').exists())
-        return proc
+    def test_frontend_enqueues_pinned_heads_while_daemon_owns_lock(self):
+        with self.q.runner_lock():
+            for _ in range(2):
+                result = subprocess.run(self.command('12'), env=self.env,
+                                        text=True, capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([(r['pr'], r['approved'], r['phase']) for r in self.q.db.execute('SELECT * FROM entries')],
+                         [(12, 'a'*40, 'pending')])
+        self.assertIn('ENQUEUED 12', result.stdout)
+        calls = (self.root / 'calls').read_text().splitlines()
+        self.assertTrue(all(' api repos/' in line for line in calls))
+        self.assertGreaterEqual(float(calls[1].split()[0]) - float(calls[0].split()[0]), 1.9)
 
-    def test_second_runner_for_repo_is_refused_before_github(self):
-        first = self.start('12')
-        try:
-            second = subprocess.run(self.command('13'), env=self.env, text=True,
-                                    capture_output=True, timeout=5)
-            self.assertNotEqual(second.returncode, 0)
-            self.assertIn('already running', second.stderr)
-            self.assertIn('test/repo', second.stderr)
-            calls = (self.root / 'calls').read_text().splitlines()
-            self.assertEqual(len(calls), 1)
-        finally:
-            (self.root / 'release').touch()
-            first.communicate(timeout=5)
+    def test_file_snapshot_waits_for_writer_and_never_consumes_input(self):
+        import fcntl
+        queue, log = self.root / 'queue', self.root / 'log'
+        with queue.open('w') as writer:
+            fcntl.flock(writer, fcntl.LOCK_EX)
+            writer.write('12')
+            writer.flush()
+            proc = subprocess.Popen(self.command('--queue', 'jbookout/carr-system', str(queue), str(log)),
+                                    env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.addCleanup(lambda: proc.poll() is None and proc.kill())
+            time.sleep(.3)
+            self.assertIsNone(proc.poll())
+            self.assertFalse((self.root / 'calls').exists())
+            writer.write('3\n124\n')
+            writer.flush()
+        stdout, stderr = proc.communicate(timeout=10)
+        self.assertEqual(proc.returncode, 0, stderr)
+        self.assertEqual([r['pr'] for r in self.q.db.execute('SELECT * FROM entries ORDER BY id')], [123, 124])
+        self.assertEqual(queue.read_text(), '123\n124\n')
+        self.assertEqual(len(log.read_text().splitlines()), 2)
+        self.assertIn('ENQUEUED 123', stdout)
 
-    def test_dead_runner_is_recovered(self):
-        first = self.start('12')
-        lock, = (self.root / 'locks').rglob('*.lock')
-        self.assertEqual(int((lock / 'pid').read_text()), first.pid)
-        self.assertGreater(float((lock / 'start').read_text()), 0)
-        first.kill()
-        first.wait(timeout=5)
-        (self.root / 'release').touch()
-        first.communicate(timeout=5)
-        result = subprocess.run(self.command('13'), env=self.env, text=True,
-                                capture_output=True, timeout=5)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('MERGED 13', result.stdout)
-        self.assertFalse(lock.exists())
-
-    def test_other_repository_can_run_while_first_is_live(self):
-        first = self.start('12')
-        try:
-            env = {**self.env, 'R': 'test/other'}
-            second = subprocess.run(self.command('13'), env=env, text=True,
-                                    capture_output=True, timeout=5)
-            self.assertEqual(second.returncode, 0, second.stderr)
-        finally:
-            (self.root / 'release').touch()
-            first.communicate(timeout=5)
-
-    def test_queue_merges_top_down_logs_and_consumes_terminal_entries(self):
+    def test_partial_or_invalid_file_is_refused_before_github(self):
         queue = self.root / 'queue'
-        log = self.root / 'queue.log'
-        queue.write_text('12\n13\n')
-        self.script('sleep', f'#!{sys.executable}\n' + '''
-import os, signal, sys
-if sys.argv[1] == '60': os.kill(os.getppid(), signal.SIGTERM)
-''')
-        self.script('gh', f'#!{sys.executable}\n' + '''
-import json, os, sys
-from pathlib import Path
-root = Path(os.environ['MQ_FIXTURE'])
-args = sys.argv[1:]
-with (root / 'calls').open('a') as log: log.write(json.dumps(args) + '\\n')
-if args[:2] == ['pr', 'view']:
-    print(json.dumps(dict(state='OPEN', mergeStateStatus='CLEAN', headRefOid='abc', statusCheckRollup=[])))
-''')
-        result = subprocess.run(self.command('--queue', 'test/repo', str(queue), str(log)),
-                                env=self.env, text=True, capture_output=True, timeout=5)
-        self.assertEqual(result.returncode, 143, result.stderr)
-        self.assertEqual(queue.read_text(), '')
-        self.assertEqual([line.split(' test/repo ')[1] for line in log.read_text().splitlines()],
-                         ['MERGED 12 abc', 'MERGED 13 abc'])
-        calls = [json.loads(line) for line in (self.root / 'calls').read_text().splitlines()]
-        self.assertEqual([call[:3] for call in calls],
-                         [['pr', 'view', '12'], ['pr', 'merge', '12'],
-                          ['pr', 'view', '13'], ['pr', 'merge', '13']])
-        self.assertFalse(list((self.root / 'locks').rglob('*.lock')))
-
-    def test_queue_and_direct_modes_share_one_lock(self):
-        queue = self.root / 'queue'
-        queue.write_text('12\n')
-        first = self.start('--queue', 'test/repo', str(queue), str(self.root / 'queue.log'))
-        try:
-            result = subprocess.run(self.command('13'), env=self.env, text=True,
-                                    capture_output=True, timeout=5)
+        for text in ('12', '12\ninvalid\n', '12\n0\n'):
+            queue.write_text(text)
+            result = subprocess.run(self.command('--queue', 'jbookout/carr-system', str(queue), str(self.root / 'log')),
+                                    env=self.env, text=True, capture_output=True, timeout=5)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('already running', result.stderr)
-        finally:
-            first.terminate()
-            (self.root / 'release').touch()
-            first.communicate(timeout=5)
+            self.assertFalse((self.root / 'calls').exists())
 
 
 class MergeHookTests(unittest.TestCase):
     def test_native_codex_javascript_commands_are_inspected(self):
-        code = 'await tools.exec_command({cmd: "gh pr merge 12 --squash"});'
-        for tool_input in (code, {'code': code}):
+        codes = [
+            'await tools.exec_command({cmd: "gh pr merge 12 --squash"});',
+            'await tools.exec_command({cmd: `gh pr merge 12 --squash`});',
+            'await tools.exec_command({"cmd": "gh pr merge 12 --squash"});',
+            "await tools.exec_command({'cmd': 'gh pr update-branch 12'});",
+            'await tools.exec_command({cmd: `gh pr merge ${pr}`});',
+            r'await tools.exec_command({cmd: `gh pr \x6derge 12`});',
+            'const other={cmd: "echo read only"}; await tools.exec_command({cmd: dynamicCommand});',
+            'await tools.exec_command({cmd: "echo read only", ...dynamicArguments});',
+        ]
+        for tool_input in [item for code in codes for item in (code, {'code': code})]:
             with self.subTest(tool_input=tool_input), tempfile.TemporaryDirectory() as tmp:
                 result = subprocess.run([sys.executable, str(ROOT / 'hooks/github-burst-guard.py')],
                     input=json.dumps({'tool_name': 'functions.exec', 'tool_input': tool_input}),
@@ -159,6 +111,12 @@ class MergeHookTests(unittest.TestCase):
     def test_direct_mutations_are_denied_in_every_tool_shape(self):
         commands = [
             'gh pr merge 12 --squash', 'gh pr update-branch 12',
+            'gh -Ro/r pr merge 12', 'gh -Ro/r pr update-branch 12',
+            'bash -c \'env -i gh pr merge 12\'', 'echo "$(env -i gh pr merge 12)"',
+            "gh api graphql -f 'query=mutation {mergePullRequest(input:{pullRequestId:\"id\"}){clientMutationId}}'",
+            'env -S "gh pr merge 12"', 'env --split-string="gh pr update-branch 12"',
+            'env -i gh pr merge 12', 'env -u HOME gh pr update-branch 12',
+            'X=1 command gh pr merge 12', '"gh" pr merge 12',
             'gh pr ' + chr(92) + '\nmerge 12',
             '/usr/local/bin/gh pr merge 12', 'gh --repo=o/r pr merge 12',
             'gh -R o/r pr merge 12', 'gh pr --repo o/r merge 12',
@@ -186,6 +144,10 @@ class MergeHookTests(unittest.TestCase):
     def test_queue_invocations_and_read_only_prose_are_allowed(self):
         for cmd in ['bash tools/mq.sh 12', 'R=o/r tools/mq.sh 12 13',
                     'tools/mq.sh --queue o/r queue.txt queue.log',
+                    'gh api repos/o/r/pulls/12/merge',
+                    'gh api -X GET repos/o/r/pulls/12/merge',
+                    'gh api repos/o/r/pulls/12/merge --method=GET',
+                    'curl -X GET https://api.github.com/repos/o/r/pulls/12/merge',
                     'gh pr view 12', 'echo "gh pr merge 12"',
                     "grep 'pulls/12/merge' file", "cat <<'EOF'\ngh pr merge 12\nEOF"]:
             with self.subTest(cmd=cmd), tempfile.TemporaryDirectory() as tmp:
