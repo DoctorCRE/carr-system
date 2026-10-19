@@ -21,6 +21,8 @@ import launchd_scope
 import machine_role
 import launchd_hold
 
+CANONICAL_CHECKOUT = "~/carr-system"
+
 SCHEDULE_KEYS = ("StartInterval", "StartCalendarInterval", "KeepAlive", "RunAtLoad",
                  "WatchPaths", "QueueDirectories", "ThrottleInterval")
 # Environment fields whose value IS the checkout a job runs against.
@@ -414,15 +416,15 @@ def collect(manifest):
 
 
 def check(snapshot=None, now=None):
-    manifest = native_manifest()
     now = time.time() if now is None else now
     if snapshot is not None:
-        return report(manifest, snapshot, now)
-    path = status_path(Path(expand(manifest['canonical_checkout'])))
+        return report(native_manifest(), snapshot, now)
+    path = status_path(Path(expand(CANONICAL_CHECKOUT)))
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix('.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
+            manifest = native_manifest()
             rows = report(manifest, collect(manifest), now)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             rows = unavailable(exc)
@@ -447,7 +449,7 @@ def status_path(root):
 def native_manifest(source=SOURCE):
     """Derive expectations from the same native definitions the installer uses."""
     source = Path(source)
-    manifest = {"schema_version": 1, "canonical_checkout": "~/carr-system", "jobs": []}
+    manifest = {"schema_version": 1, "canonical_checkout": CANONICAL_CHECKOUT, "jobs": []}
     holds = launchd_hold.read_holds()
     for path in sorted((source / "ops/launchd").glob("*.plist")):
         if path.name == "com.carr.call-mode.plist":
