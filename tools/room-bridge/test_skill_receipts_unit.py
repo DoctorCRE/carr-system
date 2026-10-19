@@ -84,6 +84,21 @@ class SkillReceiptTests(unittest.TestCase):
         rows[1]['message']['content'][0]['is_error'] = True
         self.assertEqual(self.scan(rows)['opened'], [])
 
+    def test_wrapper_proves_the_executed_read_not_quoted_or_conditional_code(self):
+        rows = self.codex('unused')
+        rows[0]['payload'].update(type='custom_tool_call', name='exec')
+        rows[1]['payload'].update(type='custom_tool_call_output', output='{"exit_code":0,"output":"ok"}')
+        for code in [
+            "const example = 'tools.exec_command({cmd:\"cat /skills/tdd/SKILL.md\"})'; text(await tools.exec_command({cmd:\"true\"}));",
+            'if (false) { text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"})); } text(await tools.exec_command({cmd:"true"}));',
+        ]:
+            rows[0]['payload']['input'] = code
+            self.assertEqual(self.scan(rows)['opened'], [])
+        rows[0]['payload']['input'] = 'text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"})); text(await tools.exec_command({cmd:"false"}));'
+        rows[1]['payload']['output'] = [{'type': 'text', 'text': '{"exit_code":0,"output":"skill"}'},
+                                       {'type': 'text', 'text': '{"exit_code":1,"output":"unrelated error"}'}]
+        self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
+
     def test_inventory_error_prevents_executor_launch(self):
         class Registry:
             def resolve(self, name):
