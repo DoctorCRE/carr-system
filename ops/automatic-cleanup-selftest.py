@@ -72,6 +72,25 @@ spec.loader.exec_module(fixtures)
 
 
 class RetirementKeepTests(unittest.TestCase):
+    def test_local_reaper_waits_for_competing_maintenance_then_makes_progress(self):
+        import fcntl
+        import threading
+        fixture = fixtures.Fixture()
+        fixture.tree('finished')
+        lock = fixture.repo / 'out/worktree-reap.lock'
+        lock.parent.mkdir(exist_ok=True)
+        with lock.open('a+') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            timer = threading.Timer(.15, lambda: fcntl.flock(stream, fcntl.LOCK_UN))
+            timer.start()
+            try:
+                report = fixture.reaper().run({'fixture/repo': fixture.repo},
+                    local_only=True, max_seconds=2)
+            finally:
+                timer.join()
+        self.assertFalse(report['deferred'], report)
+        self.assertTrue(report['rows'], report)
+
     def test_dirty_old_worktree_is_kept_and_reported(self):
         fixture = fixtures.Fixture()
         tree = fixture.tree('dirty')
@@ -300,6 +319,86 @@ class ThreadArchiveTests(unittest.TestCase):
 
 
 class CleanupHealthTests(unittest.TestCase):
+    def test_receipt_reports_partial_temp_batch_and_resumes_backlog(self):
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['test_temp_max_items'] = 1
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch = root / 'scratch'
+            scratch.mkdir()
+            for name in ('carr-ci-test-a', 'carr-ci-test-b'):
+                (scratch / name).mkdir()
+                os.utime(scratch / name, (0, 0))
+            options = dict(hook=None, tmp_root=root, user_tmp_root=scratch, roots={},
+                dispatch_path=root / 'absent', provider=object(),
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+            first = cleanup.run(root, config, **options)
+            self.assertTrue(first['budget_exhausted'], first)
+            second = cleanup.run(root, config, **options)
+            self.assertEqual(len(first['removed']), 1)
+            self.assertEqual(len(second['removed']), 1)
+            self.assertNotEqual(first['removed'][0]['path'], second['removed'][0]['path'])
+
+    def test_oversized_fixture_does_not_starve_later_small_fixture(self):
+        import storage_hygiene
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            huge = root / 'carr-ci-test-a-large'
+            huge.mkdir()
+            for index in range(10001):
+                (huge / str(index)).touch()
+            small = root / 'carr-ci-test-b-small'
+            small.mkdir()
+            os.utime(small, (0, 0))
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=lambda paths: set(),
+                deadline=lambda: False, dry_run=False)
+            self.assertTrue(huge.exists())
+            self.assertFalse(small.exists())
+            self.assertFalse(report['errors'], report)
+            self.assertIn('budget', report['kept'][0]['reason'])
+
+    def test_health_retains_partial_size_evidence_instead_of_discarding_it(self):
+        import itertools
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / 'room-codex-fixture').mkdir()
+            with patch('time.monotonic', side_effect=itertools.count()):
+                rows = cleanup.health_findings(root, config, tmp_root=root,
+                    user_tmp_root=root, roots={}, now=90000)
+            sizes = [r for r in rows if r['code'].endswith('_bytes_partial')]
+            self.assertEqual(len(sizes), 2, rows)
+            for row in sizes:
+                self.assertFalse(row['measurement']['complete'])
+                self.assertEqual(row['measurement']['allocated_bytes'], 0)
+                self.assertIn('at least 0', row['detail'])
+
+    def test_large_tree_measurement_returns_bounded_honest_lower_bound(self):
+        import storage_hygiene
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'payload').write_bytes(b'x' * 8192)
+            outside = root.parent / ('measurement-outside-' + uuid.uuid4().hex)
+            try:
+                outside.write_bytes(b'x' * 16384)
+                (root / 'link').symlink_to(outside)
+                for index in range(30):
+                    (root / str(index)).mkdir()
+                measured = storage_hygiene.allocated_bytes_evidence([root], max_entries=5)
+                self.assertFalse(measured['complete'])
+                self.assertEqual(measured['entries'], 5)
+                self.assertGreaterEqual(measured['allocated_bytes'], 0)
+                self.assertIn('entry budget', measured['reason'])
+                full = storage_hygiene.allocated_bytes_evidence([root])
+                self.assertTrue(full['complete'])
+                self.assertGreaterEqual(full['allocated_bytes'], 8192)
+                self.assertLess(full['allocated_bytes'], 24576)
+            finally:
+                outside.unlink(missing_ok=True)
+
     def test_scheduled_cleanup_records_temp_effects_bytes_and_durable_receipt(self):
         import machine_cleanup as cleanup
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
@@ -360,6 +459,27 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_persistent_lock_defers_only_worktrees_without_claiming_success(self):
+        import fcntl
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['max_seconds'] = .3
+        lock = fixture.repo / 'out/worktree-reap.lock'
+        lock.parent.mkdir(exist_ok=True)
+        with lock.open('a+') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            start = time.monotonic()
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook,
+                tmp_root=fixture.base, dispatch_path=fixture.base / 'absent',
+                roots={'fixture/repo': fixture.repo}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+        self.assertLess(time.monotonic() - start, 1)
+        self.assertFalse(report['errors'], report)
+        self.assertEqual(report['status'], 'deferred')
+        self.assertTrue(report['deferred'])
+        self.assertIsNone(report['last_success_at'])
+
     def test_fixture_run_receipts_and_dry_run_do_not_remove_work(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
