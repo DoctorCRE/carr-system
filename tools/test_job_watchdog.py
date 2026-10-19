@@ -31,6 +31,33 @@ def tearDownModule():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_job_success_clears_earlier_failures_and_recurrence_reopens(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        effects = Mock()
+        effects.report.return_value = {}
+        failed = {"id": "failed-1", "card": "recurring", "start": 10,
+                  "exit_code": 1, "log_tail": "synthetic failure"}
+        success = {"id": "success", "card": "recurring", "start": 20, "exit_code": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            found = w.detect({"jobs": [failed]}, config, 15)
+            key = found[0]["key"]
+            w.reconcile(root, config, found, effects, 15)
+            for jobs in ([success, failed], [failed, success]):
+                found = w.detect({"jobs": jobs}, config, 25)
+                self.assertEqual(found, [])
+                w.reconcile(root, config, found, effects, 25)
+            self.assertIsNotNone(w.read_latest(root / config["paths"]["findings"])[key]["cleared_at"])
+            later = {**failed, "id": "failed-2", "start": 30}
+            found = w.detect({"jobs": [later, success, failed]}, config, 35)
+            self.assertEqual(len(found), 1)
+            self.assertEqual(found[0]["key"], key)
+            w.reconcile(root, config, found, effects, 35)
+            self.assertIsNone(w.read_latest(root / config["paths"]["findings"])[key]["cleared_at"])
+            self.assertEqual(effects.report.call_count, 2)
+
     def test_identical_job_failures_collapse_by_card_and_cause(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
