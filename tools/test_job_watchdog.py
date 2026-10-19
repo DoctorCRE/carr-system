@@ -655,6 +655,21 @@ class GithubBudgetTests(unittest.TestCase):
         self.branches = []
         self.assertEqual(self.collect(1240)["branches"], [])
 
+    def test_open_pr_protects_branch_when_detail_collection_fails(self):
+        self.listing[0]["head"].update(ref="claude/x", repo={"full_name": self.REPO})
+        self.branches = [{"name": name, "commit": {"sha": "b" * 40}}
+                         for name in ("claude/x", "codex/orphan")]
+        original = self.gh
+        def unavailable(argv, config, cwd=None):
+            if argv[:3] == ["gh", "pr", "view"]:
+                raise RuntimeError("synthetic PR detail unavailable")
+            return original(argv, config, cwd)
+        self.gh = unavailable
+        facts = self.collect(2000000000)
+        idle = [f["subject"] for f in self.w.detect(facts, self.c, 2000000000)
+                if f["kind"] == "branch_idle"]
+        self.assertEqual(idle, [self.REPO + ":codex/orphan"])
+
     def test_unchanged_pr_is_not_recollected_until_the_cache_expires(self):
         first = self.collect(1000)
         self.assertEqual(len(self.graphql_calls()), 2, "snapshot and check identities per collected PR")
