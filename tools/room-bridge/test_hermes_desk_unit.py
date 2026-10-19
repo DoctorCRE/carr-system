@@ -27,6 +27,10 @@ class HermesTests(unittest.TestCase):
         hermes.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys, subprocess, time
 mode = os.environ.get('FAKE_MODE', '')
+if sys.argv[1:2] == ['--print-runtime-command']:
+    code = 'import runpy; runpy.run_path(' + repr(str(pathlib.Path(__file__).resolve())) + ", run_name='__main__'); raise SystemExit(0)"
+    print(json.dumps([sys.executable, '-I', '-c', code]))
+    sys.exit(0)
 if sys.argv[1:] == ['fallback', 'list']:
     print('Fallback chain: other paid provider' if os.environ.get('FAKE_FALLBACK')
           else '  No fallback providers configured.')
@@ -43,6 +47,8 @@ if sys.argv[1:] == ['portal', 'status']:
     print('Auth:    ✓ logged in')
     sys.exit(0)
 pathlib.Path('invocation.json').write_text(json.dumps(sys.argv[1:]))
+pathlib.Path('native_env.json').write_text(json.dumps({key: os.environ.get(key) for key in
+    ('HERMES_YOLO_MODE', 'HERMES_IGNORE_USER_CONFIG')}))
 if mode == 'timeout':
     child = subprocess.Popen([sys.executable, '-c', "import time; time.sleep(0.5); open('escaped', 'w').write('bad')"])
     pathlib.Path('child.pid').write_text(str(child.pid))
@@ -55,6 +61,7 @@ pathlib.Path(sys.argv[sys.argv.index('--usage-file') + 1]).write_text(json.dumps
     'model': 'other/model' if mode == 'mismatch' else model,
     'provider': 'nous', 'completed': mode not in ('fail', 'partial'), 'input_tokens': 123,
     'output_tokens': 45, 'api_calls': 2,
+    **({'spend_limit_reached': True, 'spend_upper_bound_usd': '0.12'} if mode == 'spend-stop' else {}),
     'estimated_cost_usd': None if mode == 'token-cost' else float(os.environ.get('FAKE_COST', '0.02')),
     'failure': 'fixture-private-diagnostic'}))
 if mode == 'fail':
@@ -78,7 +85,8 @@ import json
 print(json.dumps({'paidRecommendedModels': [
     {'modelName': 'z-ai/glm-8.9'}, {'modelName': 'z-ai/glm-8.10:US',
      'tokenPrice': 'in $2.00 / out $6.00 per 1M'},
-    {'modelName': 'z-ai/glm-8.10-flash:US'}, {'modelName': 'deepseek/deepseek-v7-pro'}]}))
+    {'modelName': 'z-ai/glm-8.10-flash:US'}, {'modelName': 'deepseek/deepseek-v7-pro',
+     'tokenPrice': 'in $2.00 / out $6.00 per 1M'}]}))
 ''')
         catalog.chmod(0o755)
         self.env = {**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
@@ -107,12 +115,12 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['usage']['input_tokens'], 123)
         self.assertEqual(json.loads(self.results.read_text()), row)
         argv = json.loads((self.root / 'invocation.json').read_text())
-        self.assertIn('--yolo', argv)
+        self.assertIn('--allowance-usd', argv)
+        self.assertEqual(argv[argv.index('--allowance-usd') + 1], '1.00')
+        self.assertIn('--price-json', argv)
         self.assertIn('-z', argv)
-        self.assertEqual(argv[argv.index('--in') + 1], str(self.root))
-        self.assertEqual(argv[argv.index('--provider') + 1], 'nous')
-        self.assertIn('--ignore-user-config', argv)
-        self.assertNotIn('--ignore-rules', argv)
+        self.assertEqual(json.loads((self.root / 'native_env.json').read_text()),
+                         {'HERMES_YOLO_MODE': '1', 'HERMES_IGNORE_USER_CONFIG': '1'})
 
     def test_failure_records_usage_without_private_diagnostics(self):
         self.register()
@@ -122,6 +130,15 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['exit_code'], 3)
         self.assertEqual(row['usage']['api_calls'], 2)
         self.assertNotIn('fixture-private-diagnostic', self.results.read_text())
+
+    def test_native_spend_stop_is_terminal_and_books_the_request_ceiling(self):
+        self.register()
+        self.env['FAKE_MODE'] = 'spend-stop'
+        row = self.send()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['code'], 'nous_spend_stop')
+        self.assertEqual(row['detail'], 'Nous run spending limit reached')
+        self.assertEqual(row['budget']['spent_usd'], '0.12')
 
     def test_cost_ledger_persists_spend_and_refuses_the_next_estimate(self):
         self.register()
@@ -191,12 +208,15 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(receipt['cost_usd'], '0.01')
         self.assertEqual(receipt['price']['source'], 'nous_recommended_models')
 
-    def test_unpriced_tokens_fail_closed_and_stop_later_spending(self):
+    def test_unpriced_model_is_refused_before_any_inference(self):
         self.reg.register('nous-builder', 'hermes-nous', cwd=str(self.root), family='deepseek')
-        self.env['FAKE_MODE'] = 'token-cost'
-        self.assertEqual(self.send()['status'], 'failed')
-        self.env['FAKE_MODE'] = ''
-        self.assertEqual(self.send()['detail'], 'Nous run cost unavailable; reconcile ledger')
+        catalog = self.bin / 'curl'
+        catalog.write_text(catalog.read_text().replace('in $2.00 / out $6.00 per 1M', 'unknown'))
+        row = self.send()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['code'], 'nous_spend_stop')
+        self.assertEqual(row['detail'], 'Nous model price unavailable; cannot bound run spending')
+        self.assertFalse((self.root / 'invocation.json').exists())
 
     def test_budget_read_command_prints_spend_without_changing_the_ledger(self):
         self.register()
@@ -297,7 +317,7 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertTrue((repo / 'pr-call').read_text().startswith('pr create'))
         self.assertFalse((canonical / 'fixed.py').exists())
         argv = json.loads((repo / 'invocation.json').read_text())
-        self.assertEqual(argv[argv.index('--in') + 1], str(repo))
+        self.assertIn('--allowance-usd', argv)
 
     def test_cli_registers_and_documents_the_desk(self):
         output = io.StringIO()

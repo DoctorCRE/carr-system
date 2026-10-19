@@ -28,18 +28,25 @@ Each job selects the latest version from Portal's live recommended model list,
 preferring the full model over flash at the same version. No cached fallback.
 Auth is checked without opening a login prompt; signed-out jobs fail immediately
 with "Nous Portal not signed in". --timeout bounds preflight and the whole job
-process group. Final response and numeric usage are recorded in the results row.
-User configuration is ignored for the invocation to prevent provider fallback;
-AGENTS.md and project rules still load. Authentication stays with Hermes.
+process group. Execution uses Hermes' in-process one-shot runner through its
+installation-bound runtime command; no persistent gateway receives the job.
+Final response and numeric usage are recorded in the results row. User config
+is ignored; AGENTS.md and project rules still load. Hermes owns authentication.
 
 Nous spending uses ops/config/nous-spend.v1.json and a durable .nous-spend.json
 ledger beside the canonical dispatch results. Redirecting --results does not
 reset the shared budget. Each admission reserves the configured run estimate.
-Reported usage dollars take priority; otherwise tokens use the selected Portal
-price. Booked costs round upward to cents. Unknown costs block later spending.
+Each agent is limited to 8 tool iterations and 4096 output tokens per request.
+A shared dollar allowance reserves a worst-case token charge before each main,
+auxiliary or retry HTTP request. It counts serialized input bytes as tokens and
+the full output limit, without refunds. Other provider/model routes, redirects,
+multimodal input and unsupported caps are refused. Missing Portal prices refuse
+the job before inference. The ledger books the greater of this request ceiling
+and observed usage cost (reported dollars, otherwise Portal token prices).
+Booked costs round upward to cents. Unknown costs block later spending.
 Payment/credit/quota failures set a sticky stop; only a human may reconcile or
 clear it in the ledger. There is no automatic reset or paid-provider fallback.
-This admission budget does not impose a provider-side dollar ceiling on a run.
+This is a local request ceiling using Portal prices, not a provider billing limit.
 
     dispatch.py register nous-builder --kind hermes-nous --provider nous --family glm --timeout 900
     dispatch.py nous-budget

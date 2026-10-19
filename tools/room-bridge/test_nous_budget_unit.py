@@ -47,6 +47,18 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(self.ledger.read()['spent_usd'], '0.12')
         self.assertEqual(self.ledger.read()['reserved_usd'], '0.00')
 
+    def test_native_request_bound_covers_failed_and_auxiliary_requests(self):
+        self.ledger.reserve('job')
+        self.ledger.settle('job', {'estimated_cost_usd': '0.01',
+                                 'spend_upper_bound_usd': '0.12'}, True)
+        self.assertEqual(self.ledger.read()['spent_usd'], '0.12')
+        saved = json.loads(self.ledger.path.read_text())
+        self.assertEqual(saved['runs']['job']['cost_source'], 'native_request_bound')
+        self.ledger.reserve('no-response')
+        self.ledger.settle('no-response', {'spend_upper_bound_usd': '0.12'}, True)
+        self.assertIsNone(self.ledger.read()['stop'])
+        self.assertEqual(self.ledger.read()['spent_usd'], '0.24')
+
     def test_a_crashed_run_requires_reconciliation_before_more_spending(self):
         subprocess.run([sys.executable, '-c',
             'from nous_budget import Ledger; import sys; Ledger(sys.argv[1]).reserve("crashed")',

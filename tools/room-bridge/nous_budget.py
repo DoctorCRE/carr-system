@@ -49,6 +49,13 @@ def portal_price(payload, model):
 
 
 def run_cost(usage, price):
+    if usage.get('spend_upper_bound_usd') is not None:
+        try:
+            observed, _ = run_cost({key: value for key, value in usage.items()
+                                   if key != 'spend_upper_bound_usd'}, price)
+        except (ValueError, KeyError, AttributeError, TypeError):
+            observed = Decimal(0)
+        return max(dollars(usage['spend_upper_bound_usd']), observed), 'native_request_bound'
     total = usage.get('total_including_auxiliary') or {}
     if total.get('estimated_cost_usd') is not None:
         return dollars(total['estimated_cost_usd']), 'hermes_usage_usd'
