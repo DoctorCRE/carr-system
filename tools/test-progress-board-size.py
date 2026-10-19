@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location("board_size", ROOT / "tools/progre
 assert spec is not None and spec.loader is not None
 board = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(board)
+from progress_board_test_support import exercise_fields
 
 
 class CostSnapshotTests(unittest.TestCase):
@@ -65,6 +66,19 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def test_exact_work_lineage_survives_projection_and_title_changes(self):
+        refs = {"work_request_ref": "WR-900", "plan_ref": "plan:synthetic-v2",
+                "slice_ref": "slice:seven", "task_ref": "task:linked-card", "job_ref": "job:synthetic-build"}
+        task = {"title": "Synthetic card", "status": "review", "pr": 73, **refs}
+        state = {"project": "fixture", "tasks": {"app-pr-73": task}}
+        for title in ("Synthetic card", "Renamed card"):
+            task["title"] = title
+            projected = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})["tasks"]["app-pr-73"]
+            self.assertEqual({key: projected.get(key) for key in refs}, refs)
+        del task["plan_ref"]
+        projected = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})["tasks"]["app-pr-73"]
+        self.assertNotIn("plan_ref", projected)
+
     def test_app_evidence_and_inline_question_survive_projection(self):
         task = {"title": "Review", "status": "review", "stage": "review", "pr": 1553,
                 "repo": "jbookout/carr-system", "pr_head": "a" * 40, "pr_checks": "failure",
@@ -93,6 +107,8 @@ class SnapshotSizeTests(unittest.TestCase):
                 "next_action": "Read the job log, restore the source, then retry.",
                 "pr_head": "f" * 40, "pr_checks": "1 pass · 0 pending · 1 fail",
             }
+        for n in range(337, 867):
+            tasks[f"task-{n}"].update(exercise_fields())
         state = {"project": "carr-v5", "tasks": tasks}
         before = copy.deepcopy(state)
         snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
