@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -65,6 +65,41 @@ const wrongBinding: number = bindings.OAUTH_KV;
     writeFileSync(source, valid);
     const restored = check();
     assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CI rejects invalid Worker declarations outside the legacy Durable Object exception", () => {
+  const dir = mkdtempSync(path.join(root, "type-tests/declarations-"));
+  try {
+    writeFileSync(path.join(dir, "broken.d.ts"),
+      "interface ReviewBrokenEnv extends Env { OAUTH_KV: number; }\n");
+    const result = spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
+      encoding: "utf8", cwd: path.dirname(root),
+    });
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stdout + result.stderr, /TS2430.*ReviewBrokenEnv/s);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CI regenerates Worker declarations without a stale cached Env augmentation", () => {
+  const dir = mkdtempSync(path.join(root, "type-tests/stale-"));
+  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
+    encoding: "utf8", cwd: path.dirname(root),
+  });
+  try {
+    const valid = check();
+    assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+    appendFileSync(path.join(root, ".generated/worker-configuration.d.ts"),
+      "\ninterface Env { STALE_REVIEW_ONLY: string; }\n");
+    writeFileSync(path.join(dir, "stale.ts"),
+      "declare const env: Env;\nconst stale: string = env.STALE_REVIEW_ONLY;\n");
+    const stale = check();
+    assert.equal(stale.status, 1, stale.stdout + stale.stderr);
+    assert.match(stale.stdout + stale.stderr, /TS2339.*STALE_REVIEW_ONLY/s);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
