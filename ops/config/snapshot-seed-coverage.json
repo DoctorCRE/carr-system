@@ -22,7 +22,15 @@
     "",
     "CARRIED_AFTER_APPLY is for a reviewed bounded seed whose source migration is",
     "not yet in the snapshot ledger. It must be absent while pending and becomes",
-    "row-required automatically when the migration enters the ledger."
+    "row-required automatically when the migration enters the ledger.",
+    "",
+    "RENDERS declares reviewed selectors for the shared renderer. A new carried seed",
+    "uses a declaration rather than another shell INSERT block. The migration field",
+    "keeps its rows pending until that migration is applied. Scope and row counts",
+    "are reviewed here; detection never automatically adds a table. Column lists",
+    "also prevent a later schema column from entering the export without review.",
+    "The renderer refuses source columns outside columns plus omit_columns, so",
+    "a new seeded column cannot silently disappear from rebuild verification."
   ],
   "carried_after_apply": {
     "ops.canonical_ownership_issuer_generation": "0532a's exact two-principal issuer selector: repository-owned g1 is active and g2 is draining. These are bounded control configuration and the foreign-key target for canonical ownership runtime sessions, not session records or credentials. Once the migration enters the snapshot ledger, bin/schema-snapshot.sh verifies and carries only these two rows.",
@@ -56,7 +64,7 @@
     "ops.execution_environment_provider": "governed execution seeds appended as deterministic SQL (0309)",
     "ops.execution_environment_provider_event": "governed execution seeds appended as deterministic SQL (0309)",
     "ops.guidance_registry": "the registry's own singleton header row; guidance-registry-db-gate fails without it",
-    "ops.job_definition": "the two fixed internal job contracts (renewal-radar-source-daily, governed execution); never widened to arbitrary job rows",
+    "ops.job_definition": "Only renewal-radar-source-daily:v1 and engineering-slice:v1. Reviewed selectors render their current contract fields after their seeding migration enters the ledger; operational timestamps and legacy-disable observations are omitted. No runs, leases, or arbitrary jobs are carried.",
     "ops.rule_delivery_activation_target": "the exact ledger-appropriate reviewed cutover targets; without them a rebuild has no cutover target set",
     "ops.rule_delivery_policy": "bounded singleton delivery policy; without it a rebuild comes up mode:null",
     "ops.siep_component_alias": "the 25 SCAC/MPE component aliases. The same db-gate asserts the exact alias mapping against its reviewed manifest; carried by the sealed-restore block, digest-verified at load",
@@ -139,5 +147,106 @@
     "ops.work_request": {
       "sourced captures": "\"ref\":\\s*\"WR-\\d{6,}\""
     }
-  }
+  },
+  "renders": [
+    {
+      "table": "ops.job_definition",
+      "migration": "0230_renewal_decision_delivery.sql",
+      "where": "key='renewal-radar-source-daily' and version=1",
+      "order_by": "key,version",
+      "exact_rows": 1,
+      "columns": [
+        "key",
+        "version",
+        "enabled",
+        "risk",
+        "owner_actor",
+        "execution_kind",
+        "execution_contract",
+        "inventory_contract",
+        "recurrence",
+        "state_contract",
+        "routing_contract",
+        "filtering_contract",
+        "validation_contract",
+        "retry_policy",
+        "deduplication",
+        "completion_contract",
+        "legacy_schedule"
+      ],
+      "omit_columns": [
+        "registered_at",
+        "updated_at",
+        "legacy_disabled_at",
+        "legacy_disable_reason"
+      ]
+    },
+    {
+      "table": "ops.job_definition",
+      "migration": "0310_engineering_execution_fabric.sql",
+      "where": "key='engineering-slice' and version=1",
+      "order_by": "key,version",
+      "exact_rows": 1,
+      "columns": [
+        "key",
+        "version",
+        "enabled",
+        "risk",
+        "owner_actor",
+        "execution_kind",
+        "execution_contract",
+        "inventory_contract",
+        "recurrence",
+        "state_contract",
+        "routing_contract",
+        "filtering_contract",
+        "validation_contract",
+        "retry_policy",
+        "deduplication",
+        "completion_contract",
+        "legacy_schedule"
+      ],
+      "omit_columns": [
+        "registered_at",
+        "updated_at",
+        "legacy_disabled_at",
+        "legacy_disable_reason"
+      ]
+    },
+    {
+      "table": "public.doctrine_gate_check",
+      "migration": "0075_doctrine_store.sql",
+      "where": "true",
+      "order_by": "check_key",
+      "columns": [
+        "check_key",
+        "description",
+        "severity",
+        "applies_to",
+        "impl_key",
+        "config",
+        "enabled",
+        "created_at"
+      ]
+    },
+    {
+      "table": "public.agent_profile",
+      "migration": "0284_named_agent_profiles.sql",
+      "where": "true",
+      "order_by": "profile_key",
+      "columns": [
+        "id",
+        "profile_key",
+        "display_name",
+        "charter",
+        "current_model",
+        "current_desk",
+        "sponsor_scope",
+        "status",
+        "version",
+        "created_at",
+        "updated_at"
+      ]
+    }
+  ]
 }
