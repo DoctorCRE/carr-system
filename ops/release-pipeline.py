@@ -2292,7 +2292,7 @@ class Pipeline:
                     journal_store.save(journal)
                     return 0
                 owns_live = (live["source_commit"] == journal["sha"] and live != journal["prior"]
-                             and (journal["status"] == "publishing" or live == journal.get("observed")))
+                             and live["provider_version_id"] == journal.get("published_version_id"))
                 if command == "stage-candidate":
                     if sha == journal["sha"] and owns_live and journal["status"] in ("publishing", "staged"):
                         journal.update(status="staged", observed=live)
@@ -2334,13 +2334,18 @@ class Pipeline:
                 if command == "stage-candidate":
                     journal = {"sha": sha, "tooling_sha": tooling_sha, "prior": live, "status": "publishing"}
                     journal_store.save(journal)
-                    self.step("app-candidate-publish", ["node", "scripts/release-staging.mjs", "--source-sha", sha],
+                    publication = self.step("app-candidate-publish", ["node", "scripts/release-staging.mjs", "--source-sha", sha],
                               wt, timeout=900, env=self.deploy_env())
+                    versions = set(re.findall(r"Worker Version ID:\s*(" + UUID_RE.pattern + r")", publication.out))
+                    if len(versions) != 1:
+                        raise StepFailed("app-candidate-publish", 1, publication.log, "provider returned no unique version ID")
+                    journal["published_version_id"] = versions.pop()
+                    journal_store.save(journal)
                     expected = lambda value: (
                         value.get("source_commit") == sha and value.get("environment") == "staging"
                         and isinstance(value.get("provider_version_id"), str)
                         and bool(UUID_RE.fullmatch(value["provider_version_id"]))
-                        and value["provider_version_id"] != live["provider_version_id"])
+                        and value["provider_version_id"] == journal["published_version_id"])
                 else:
                     journal["status"] = "restoring"
                     journal_store.save(journal)
