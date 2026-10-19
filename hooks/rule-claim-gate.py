@@ -98,22 +98,18 @@ def queued_dispatch(command, cwd):
     lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|\n')
     lexer.whitespace = ' \t\r'
     lexer.whitespace_split = True
-    segments, segment, operators = [], [], []
+    segments, segment = [], []
     for token in lexer:
         if token and all(c in ';&|\n' for c in token):
             segments.append(segment)
-            operators.append(token)
             segment = []
         else:
             segment.append(token)
     segments.append(segment)
-    if (len(segments) == 2 and operators == ['&&'] and len(segments[0]) == 2
-            and segments[0][0] == 'cd'
-            and (Path(cwd) / segments[0][1]).resolve() == Path(cwd).resolve()):
-        segments = segments[1:]
-    if len(segments) != 1:
-        return False
     for args in segments:
+        if len(args) == 2 and args[0] == 'cd':
+            cwd = (Path(cwd) / Path(args[1]).expanduser()).resolve()
+            continue
         if args and re.fullmatch(r'python(?:3(?:\.\d+)?)?', Path(args[0]).name):
             args = args[1:]
         if len(args) < 4:
