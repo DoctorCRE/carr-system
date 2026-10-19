@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 STAGES = {"pending": "pending", "research": "research", "site selection": "site_selection",
           "negotiation": "negotiation", "legal": "legal", "due diligence": "due_diligence",
-          "closing": "closing", "closed": "closed", "closed won": "closed", "closed lost": "closed"}
+          "closing": "closing", "closed": "closed", "closed won": "closed", "fully closed out": "closed"}
 OWNERS = {"joe": "joe", "joe bookout": "joe", "dell": "dell", "dell mccraney": "dell",
           "wayne mccraney": "dell"}
 
@@ -89,8 +89,11 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
         if not owner and not ({"joe", "dell"} & team):
             item.update(kind="out_of_scope", reason="other_owner")
             continue
-        if stage.startswith("closed") and row["close_date"] and dt.date.fromisoformat(row["close_date"]) < as_of - dt.timedelta(days=90):
+        if (stage.startswith("closed") or stage == "fully closed out") and row["close_date"] and dt.date.fromisoformat(row["close_date"]) < as_of - dt.timedelta(days=90):
             item.update(kind="out_of_scope", reason="closed_before_window")
+            continue
+        if stage == "closed lost":
+            item.update(kind="held", reason="lost_status_contract_required")
             continue
         if stage not in STAGES or owner is None or (stage.startswith("closed") and (stage == "closed" or not row["close_date"])):
             item.update(kind="held", reason="unmapped_stage_owner_or_close_date")
@@ -111,8 +114,8 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
         fields = {"phase": STAGES[stage], "salesforce_id": sid}
         if row["close_date"]:
             fields["sf_close_date_placeholder"] = row["close_date"]
-        if stage in ("closed won", "closed lost"):
-            fields["outcome"] = "won" if stage == "closed won" else "lost"
+        if stage in ("closed won", "fully closed out"):
+            fields["outcome"] = "won"
         if match and (match.get("phase") == "closed" or match.get("outcome") in ("won", "lost")):
             if fields["phase"] != "closed" or (match.get("outcome") in ("won", "lost") and fields.get("outcome") != match["outcome"]):
                 item.update(kind="held", reason="closed_state_conflict")
@@ -229,7 +232,9 @@ def apply_plan(plan, call_verb, journal_path):
 
 
 def deployed_verb(verb, args):
-    if verb not in {"read-deal-reconciliation", "find", "new-deal", "update-deal", "set-lead"}:
+    if verb not in {"read-deal-reconciliation", "find", "new-deal", "update-deal", "set-lead",
+                    "deal-room-board", "get-deal-room", "patch-deal-field", "set-market-agent",
+                    "add-party", "new-client", "create-national-market-deal"}:
         raise ValueError("verb_not_allowed")
     result = subprocess.run([sys.executable, str(REPO / "tools/call-verb.py"), verb, json.dumps(args)],
                             cwd=REPO, capture_output=True, text=True, timeout=90)
@@ -244,6 +249,7 @@ def deployed_verb(verb, args):
 def main(argv=None, call_verb=deployed_verb):
     parser = argparse.ArgumentParser(description="Dry-run a complete Salesforce report, then apply the saved plan through CARR verbs.")
     parser.add_argument("report", nargs="?", help="Salesforce details CSV or browser-captured TSV")
+    parser.add_argument("--bindings", type=Path, help="Private reviewed identity/account bindings for a PSV snapshot")
     parser.add_argument("--expected-count", type=int, help="Salesforce report Total Records, required for a dry run")
     parser.add_argument("--as-of", type=dt.date.fromisoformat,
                         default=dt.datetime.now(ZoneInfo("America/Chicago")).date())
@@ -252,24 +258,36 @@ def main(argv=None, call_verb=deployed_verb):
     args = parser.parse_args(argv)
     try:
         if args.apply:
-            if args.report or args.out or args.expected_count is not None:
+            if args.report or args.out or args.bindings or args.expected_count is not None:
                 parser.error("--apply takes only a saved plan")
-            result = apply_plan(json.loads(args.apply.read_text()), call_verb,
-                                args.apply.with_suffix(".receipts.jsonl"))
+            from lib import salesforce_active_snapshot as active
+            saved = json.loads(args.apply.read_text())
+            apply = active.apply_plan if saved.get("schema") == "salesforce-active-snapshot.v1" else apply_plan
+            result = apply(saved, call_verb, args.apply.with_suffix(".receipts.jsonl"))
             print(json.dumps(result, sort_keys=True))
             return 2 if result["held"] else 0
         if not args.report or args.expected_count is None or not args.out:
             parser.error("a dry run requires report, --expected-count, and --out")
         report = Path(args.report).read_text(encoding="utf-8-sig")
-        rows = read_report(report, args.expected_count)
-        deals = read_snapshot(call_verb)
-        clients = [{"ref": d["client_ref"], "name": d["client_name"]} for d in deals if d.get("client_ref")]
-        for name in sorted({r["client"] for r in rows if r["client"]}):
-            if not any(norm(c["name"]) == norm(name) for c in clients):
-                found = call_verb("find", {"query": name})
-                clients.extend({"ref": c["ref"], "name": c["name"]} for c in found.get("parties", [])
-                               if c.get("kind") == "client" and c.get("merged") is False and norm(c["name"]) == norm(name))
-        plan = build_plan(report, deals=deals, clients=clients, as_of=args.as_of, expected_count=args.expected_count)
+        if not report.strip():
+            raise ValueError("report_empty")
+        if report.splitlines()[0].startswith("sf_id_tail|"):
+            from lib import salesforce_active_snapshot as active
+            bindings = json.loads(args.bindings.read_text()) if args.bindings else {}
+            plan = active.build_plan(report, active.read_snapshot(call_verb),
+                                     expected_count=args.expected_count, bindings=bindings)
+        else:
+            if args.bindings:
+                parser.error("--bindings requires a PSV snapshot")
+            rows = read_report(report, args.expected_count)
+            deals = read_snapshot(call_verb)
+            clients = [{"ref": d["client_ref"], "name": d["client_name"]} for d in deals if d.get("client_ref")]
+            for name in sorted({r["client"] for r in rows if r["client"]}):
+                if not any(norm(c["name"]) == norm(name) for c in clients):
+                    found = call_verb("find", {"query": name})
+                    clients.extend({"ref": c["ref"], "name": c["name"]} for c in found.get("parties", [])
+                                   if c.get("kind") == "client" and c.get("merged") is False and norm(c["name"]) == norm(name))
+            plan = build_plan(report, deals=deals, clients=clients, as_of=args.as_of, expected_count=args.expected_count)
         fd = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w") as output:
             json.dump(plan, output, indent=2, sort_keys=True)

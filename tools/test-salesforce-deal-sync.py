@@ -114,6 +114,25 @@ class SalesforceSyncTests(unittest.TestCase):
             self.assertEqual(p["counts"]["held"], 2)
             self.assertEqual(p["counts"]["update"], 0)
 
+    def test_empty_cli_input_stops_cleanly_before_any_record_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            report = Path(folder) / 'empty.csv'
+            report.write_text('')
+            with contextlib.redirect_stderr(io.StringIO()):
+                code = sync.main([str(report), '--expected-count', '0', '--out', str(Path(folder) / 'plan')],
+                    call_verb=lambda verb, args: self.fail('empty input must not read records'))
+            self.assertEqual(code, 1)
+
+    def test_closed_lost_never_plans_closed_phase_and_fully_closed_out_means_won(self):
+        lost = self.plan("006000000000001,Example office,Example Practice,Closed Lost,Joe,2026-10-01\n",
+                         clients=[{"ref": "C-001", "name": "Example Practice"}])['items'][0]
+        self.assertEqual(lost['kind'], 'held')
+        self.assertEqual(lost['reason'], 'lost_status_contract_required')
+        won = self.plan("006000000000001,Example office,Example Practice,Fully Closed Out,Joe,2026-10-01\n",
+                        clients=[{"ref": "C-001", "name": "Example Practice"}])['items'][0]
+        self.assertEqual(won['fields']['phase'], 'closed')
+        self.assertEqual(won['fields']['outcome'], 'won')
+
     def test_closed_deal_is_never_reopened_or_reclassified(self):
         p = self.plan("006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n",
                       deals=[{"id": "d1", "name": "Example expansion", "salesforce_id": "006000000000001",
