@@ -28,6 +28,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -2252,40 +2253,43 @@ class Pipeline:
 
     def build_candidate(self, repo_dir: Path, sha: str, toolchain: Path) -> Path:
         """Build without deploy configuration; hand off only regular artifact files."""
-        wt = self.store.release_worktree("app", sha, self.run_id)
-        self.add_worktree("app-worktree", repo_dir, wt, sha)
-        for path in [*wt.glob("wrangler.*"), wt / ".wrangler", wt / ".npmrc",
-                     *wt.glob(".env*"), *wt.glob(".dev.vars*")]:
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            else:
-                path.unlink(missing_ok=True)
-        home = wt / ".build-home"
-        home.mkdir()
-        env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home),
-               "LANG": "en_US.UTF-8", "CI": "1", "DOCTORCRE_SOURCE_COMMIT": sha,
-               "NPM_CONFIG_USERCONFIG": "/dev/null", "NPM_CONFIG_GLOBALCONFIG": str(home / "npm-global")}
-        self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800, env=env)
-        self.step("app-build", ["npm", "run", "build"], wt, timeout=3600, env=env)
-        self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "prepare-deployment"], wt, env=env)
-        self.step("app-worker-build", [str(toolchain / "node_modules/.bin/esbuild"), "src/worker.js",
-                                      "--bundle", "--format=esm", "--platform=browser",
-                                      "--external:cloudflare:*", "--outfile=dist/worker.mjs"], wt, env=env)
-        source = wt / "dist"
-        artifact = self.run_dir / "app-artifact"
-        if source.is_symlink() or not source.is_dir():
-            raise Blocked("candidate_artifact", "build output must be a regular directory")
-        paths = [source / "worker.mjs", source / "site"]
-        if not paths[0].is_file() or not paths[1].is_dir():
-            raise Blocked("candidate_artifact", "build output requires Worker bundle and site directory")
-        for path in [*paths, *paths[1].rglob("*")]:
-            if path.is_symlink() or not (path.is_file() or path.is_dir()):
-                raise Blocked("candidate_artifact", "artifact handoff cannot contain links or special files")
-        artifact.mkdir(parents=True)
-        shutil.copy2(paths[0], artifact / "worker.mjs")
-        shutil.copytree(paths[1], artifact / "site")
-        self.remove_worktrees()
-        return artifact
+        with tempfile.TemporaryDirectory(prefix="carr-app-candidate-", dir="/tmp") as root:
+            try:
+                wt = Path(root) / "build"
+                self.add_worktree("app-worktree", repo_dir, wt, sha)
+                for path in [*wt.glob("wrangler.*"), wt / ".wrangler", wt / ".npmrc",
+                             *wt.glob(".env*"), *wt.glob(".dev.vars*")]:
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink(missing_ok=True)
+                home = wt / ".build-home"
+                home.mkdir()
+                env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home),
+                       "LANG": "en_US.UTF-8", "CI": "1", "DOCTORCRE_SOURCE_COMMIT": sha,
+                       "NPM_CONFIG_USERCONFIG": "/dev/null", "NPM_CONFIG_GLOBALCONFIG": str(home / "npm-global")}
+                self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800, env=env)
+                self.step("app-build", ["npm", "run", "build"], wt, timeout=3600, env=env)
+                self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "prepare-deployment"], wt, env=env)
+                self.step("app-worker-build", [str(toolchain / "node_modules/.bin/esbuild"), "src/worker.js",
+                                              "--bundle", "--format=esm", "--platform=browser",
+                                              "--external:cloudflare:*", "--outfile=dist/worker.mjs"], wt, env=env)
+                source = wt / "dist"
+                artifact = self.run_dir / "app-artifact"
+                if source.is_symlink() or not source.is_dir():
+                    raise Blocked("candidate_artifact", "build output must be a regular directory")
+                paths = [source / "worker.mjs", source / "site"]
+                if not paths[0].is_file() or not paths[1].is_dir():
+                    raise Blocked("candidate_artifact", "build output requires Worker bundle and site directory")
+                for path in [*paths, *paths[1].rglob("*")]:
+                    if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                        raise Blocked("candidate_artifact", "artifact handoff cannot contain links or special files")
+                artifact.mkdir(parents=True)
+                shutil.copy2(paths[0], artifact / "worker.mjs")
+                shutil.copytree(paths[1], artifact / "site")
+                return artifact
+            finally:
+                self.remove_worktrees()
 
     def candidate_publisher(self, repo_dir: Path, tooling_sha: str) -> tuple[Path, dict[str, str]]:
         """Materialize trusted configuration outside the discarded build checkout."""
