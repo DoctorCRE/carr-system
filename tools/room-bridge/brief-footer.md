@@ -1,0 +1,3 @@
+Skills: Pocock TDD (write the failing test first for behavior changes), poteto-mode, Prove It Works; grill-with-docs for medium+ work. Size first: tiny -> build now; one session -> grill-with-docs; bigger -> wayfinder. PR body must include a "Skills used:" line.
+
+Rules: never merge (open a PR; report PR number, head SHA, and test counts to the orchestrator); commits jbookout@users.noreply.github.com; never force-push; never open .env, credentials, tokens, keys, keychains, or DB dumps; never decrypt; no production writes; never install config into ~/.claude or ~/.codex; no client PII; GitHub calls never burst (sleep 2 between per-item gh calls). Less code: prefer deleting output over adding flags.
