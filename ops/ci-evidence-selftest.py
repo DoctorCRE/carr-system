@@ -8,12 +8,56 @@ import os
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('ci_evidence', ROOT / 'ops/ci-evidence.py')
 assert spec is not None and spec.loader is not None
 evidence = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(evidence)
+
+
+class HostedVerdict(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='ci-verdict-selftest-')
+        self.addCleanup(self.tmp.cleanup)
+        self.summary = pathlib.Path(self.tmp.name) / 'summary'
+        self.env = patch.dict(os.environ, GITHUB_REPOSITORY='jbookout/carr-system',
+                              GITHUB_RUN_ID='39284055792', GITHUB_RUN_ATTEMPT='1',
+                              GITHUB_STEP_SUMMARY=str(self.summary))
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.jobs = [
+            {'id': 118164883351, 'run_attempt': 1, 'status': 'completed',
+             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only migration'},
+            {'id': 118164883636, 'run_attempt': 1, 'status': 'completed',
+             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only gates'},
+            {'id': 118164883742, 'run_attempt': 1, 'status': 'completed',
+             'conclusion': 'success', 'name': 'ops/ci.sh --strict --only '
+                 'pushfloor unit types contract secret dependency binding artifact freshness'},
+            {'id': 118174315239, 'run_attempt': 1, 'status': 'in_progress',
+             'conclusion': None, 'name': 'ops/ci.sh --strict'},
+        ]
+
+    def response(self, jobs):
+        return subprocess.CompletedProcess([], 0, stdout=json.dumps([
+            {'total_count': len(jobs), 'jobs': jobs[:2]},
+            {'total_count': len(jobs), 'jobs': jobs[2:]},
+        ]))
+
+    def test_waits_for_class_conclusions_after_needs_succeeded(self):
+        stale = copy.deepcopy(self.jobs)
+        for job in (stale[0], stale[2]):
+            job.update(status='in_progress', conclusion=None)
+        with patch('subprocess.run', side_effect=[self.response(stale),
+                                                 self.response(self.jobs)]), \
+                patch('time.sleep'):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+        summary = self.summary.read_text()
+        self.assertIn('migration: PASSED', summary)
+        self.assertIn('unit: PASSED', summary)
+        self.assertNotIn('INCOMPLETE', summary)
+
 
 class Reuse(unittest.TestCase):
     def setUp(self):
