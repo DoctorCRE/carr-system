@@ -128,6 +128,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
           const prior = structuredClone(result);
+          if (name === 'deal-room-board') delete prior.closed_deals;
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
@@ -153,7 +154,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         invoiced_on: '2026-10-02', closed_on: '2026-10-01', lane: 'national', outcome: 'won',
       });
       assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals, []);
-      assert.deepEqual((await TOOLS['deal-room-board'].handler(c, actor, {})).deals, []);
+      const archived = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.deepEqual(archived.deals, []);
+      assert.equal(archived.closed_deals.length, 1);
+      assert.deepEqual(Object.fromEntries(['id','name','type','closed_on','invoiced_on'].map(key => [key, archived.closed_deals[0][key]])), {
+        id:id(4), name:'Synthetic Assignment', type:'renewal', closed_on:'2026-10-01', invoiced_on:'2026-10-02',
+      });
     }));
 
     await t.test('all invoice reads preserve national lane and separate client benefit from commission', async () => transaction(async () => {

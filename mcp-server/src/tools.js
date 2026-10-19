@@ -3408,6 +3408,21 @@ export const TOOLS = {
           order by b.attention desc, b.next_date nulls last, b.name
           /* dealroom:board-field-base */`,
         [workspace, args.account_client_id || null, [...DEAL_ROOM_FIELDS]]);
+      const closedDeals = await c.query(
+        `select b.id, b.name, b.client_ref, b.client_name, b.deal_type as type,
+                b.phase, b.outcome, b.lead_owner as owner,
+                to_jsonb(b.closed_on)#>>'{}' as closed_on,
+                to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
+                a.account_client_id,
+                case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
+           from v_deal_board b
+           left join v_client_account a on a.client_ref=b.client_ref and a.is_sub_client
+          where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
+            and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
+            and ($2::uuid is null or a.account_client_id = $2::uuid)
+          order by b.closed_on desc nulls last, b.name, b.id
+          /* dealroom:closed-deals */`,
+        [workspace, args.account_client_id || null]);
       const accounts = await c.query(
         `select account_client_id, account_client_ref, account_name, account_owner,
                 open_deals, attention_deals, overdue_deals, stale_deals,
@@ -3422,7 +3437,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, closed_deals: closedDeals.rows, accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
