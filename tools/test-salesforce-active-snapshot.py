@@ -37,6 +37,15 @@ class ActiveSnapshotTests(unittest.TestCase):
         self.assertEqual(item['desired']['owner'], 'dell')
         self.assertEqual(item['desired']['salesforce_id'], '006000000000001AAA')
 
+    def test_outside_owner_on_a_team_deal_does_not_call_the_national_agent_contract(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Outside Agent|Example Practice\n'
+        board = {'deals': [{'id': 'd1', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
+                           'operating_state': 'active', 'account_client_id': None}], 'accounts': []}
+        item = active.build_plan(source, board, expected_count=1, bindings={})['items'][0]
+        self.assertEqual(item['kind'], 'unchanged')
+        self.assertNotIn('market_agent', item['desired'])
+        self.assertEqual(item['source_owner'], 'Outside Agent')
+
     def test_missing_id_mapping_and_duplicate_targets_are_held(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Joe|Example Practice\n'
         self.assertEqual(active.build_plan(source, {'deals': [], 'accounts': []}, expected_count=1, bindings={})['counts']['held'], 1)

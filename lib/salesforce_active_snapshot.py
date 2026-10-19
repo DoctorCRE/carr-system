@@ -75,7 +75,9 @@ def build_plan(source, board, *, expected_count, bindings):
         desired['owner'] = owner
         agent = row['owner'].strip() if not OWNERS.get(norm(row['owner'])) else None
         if agent:
-            desired['market_agent'] = agent
+            item['source_owner'] = agent
+            if binding.get('account_client_id') or (prior or {}).get('account_client_id'):
+                desired['market_agent'] = agent
         if prior:
             item.update(kind='update', changes=[k for k, v in desired.items()
                         if (sfid(prior.get(k)) != sfid(v) if k == 'salesforce_id' else prior.get(k) != v)])
