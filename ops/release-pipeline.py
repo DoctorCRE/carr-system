@@ -2256,7 +2256,10 @@ class Pipeline:
         with tempfile.TemporaryDirectory(prefix="carr-app-candidate-", dir="/tmp") as root:
             try:
                 wt = Path(root) / "build"
-                self.add_worktree("app-worktree", repo_dir, wt, sha)
+                self.step("app-worktree", ["git", "init", "--quiet", str(wt)], Path(root))
+                self.step("app-source-fetch", ["git", "fetch", "--quiet", "--no-write-fetch-head",
+                                              "--no-tags", str(repo_dir), sha], wt)
+                self.step("app-source-checkout", ["git", "checkout", "--quiet", "--detach", sha], wt)
                 for path in [*wt.glob("wrangler.*"), wt / ".wrangler", wt / ".npmrc",
                              *wt.glob(".env*"), *wt.glob(".dev.vars*")]:
                     if path.is_dir() and not path.is_symlink():
