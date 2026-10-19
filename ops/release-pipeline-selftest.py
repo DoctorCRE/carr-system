@@ -3119,6 +3119,24 @@ class CandidateStaging(Base):
         pipe.deploy_env = lambda: {**pipe.env, "CLOUDFLARE_API_TOKEN": CF_TOKEN}
         return pipe
 
+    def test_unowned_same_sha_version_must_not_be_rolled_back(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def interrupted_before_publish(argv, **kwargs):
+            if "scripts/release-staging.mjs" in argv or "upload" in argv:
+                raise OSError("interrupted before provider publication")
+            return original(argv, **kwargs)
+
+        pipe.runner.run = interrupted_before_publish
+        with self.assertRaises(OSError):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.live.update(source_commit=sha, provider_version_id=PRIOR)
+        pipe.runner.run = original
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("restore-candidate", lane="app")
+
     def test_candidate_requires_green_hosted_ci_for_exact_sha_before_any_step(self):
         sha = self.candidate_sha()
         for override in ([], [{"status": "in_progress"}], [{"conclusion": "failure"}],
