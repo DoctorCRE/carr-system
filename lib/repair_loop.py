@@ -60,8 +60,9 @@ def reconcile(row, desired, verb, save, *, outcome=None, refresh=False):
         return "none"
     if desired is not None and row.get("body") == desired["body"] and (opened or not refresh):
         return "opened" if opened else "open"
-    observed = verb("read-loop", {"loop_id": row["loop_id"]})["loop"]
-    if not observed.get("version") or observed.get("status") not in {"open", "done", "dropped", "closed"}:
+    observed = verb("read-loop", {"loop_id": row["loop_id"]}).get("loop")
+    if (not isinstance(observed, dict) or not observed.get("version")
+            or observed.get("status") not in {"open", "done", "dropped", "closed"}):
         raise RuntimeError("repair loop read failed")
     if observed["status"] != "open":
         for key in ("loop_id", "body", "open_key", "close_payload", "update_payload"):
