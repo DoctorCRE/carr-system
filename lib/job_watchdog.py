@@ -333,7 +333,7 @@ def detect(facts, config, now):
         return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
     successes = {}
     for job in jobs:
-        if job.get("card") and "start" in job and job.get("exit_code") == 0:
+        if job.get("card") and "start" in job and job.get("ended_at") and job.get("exit_code") == 0:
             if job["card"] == "branch-janitor":
                 try:
                     report = json.loads(job.get("log_tail", ""))
@@ -345,13 +345,13 @@ def detect(facts, config, now):
                         or set(report["counts"]) != set(config["repositories"])):
                     continue
             scope = job_scope(job)
-            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["start"]))
+            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["ended_at"]))
     for job in jobs:
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
-            recovered = (job.get("card") and "start" in job and
-                         successes.get(job_scope(job), -math.inf) > epoch(job["start"]))
+            recovered = (job.get("card") and "start" in job and job.get("ended_at") and
+                         successes.get(job_scope(job), -math.inf) > epoch(job["ended_at"]))
             if job["exit_code"] != 0 and not job.get("superseded") and not recovered:
                 emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
             continue
