@@ -3095,13 +3095,14 @@ class CandidateStaging(Base):
         git(self.fx.repo, "push", "origin", "HEAD:refs/heads/ui-candidate")
         return git(self.fx.repo, "rev-parse", "HEAD")
 
-    def candidate_pipe(self):
+    def candidate_pipe(self, *, resume=False):
         cfg = self.fx.config()
         cfg["app"]["enabled"] = True
-        self.live = {"source_commit": self.fx.base, "environment": "staging",
-                     "provider_version_id": PRIOR_APP}
-        self.calls = []
-        self.output = []
+        if not resume:
+            self.live = {"source_commit": self.fx.base, "environment": "staging",
+                         "provider_version_id": PRIOR_APP}
+            self.calls = []
+            self.output = []
         owner = self
 
         class Provider:
@@ -3126,11 +3127,54 @@ class CandidateStaging(Base):
         pipe = self.fx.pipeline(Provider(), cfg=cfg, github=FakeGitHub(checks=[
             {"name": "test", "status": "completed", "conclusion": "success",
              "app": {"slug": "github-actions"}, "head_sha": git(self.fx.repo, "rev-parse", "HEAD")}]))
-        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        if not resume:
+            pipe.store.save({"app": {"last_released_sha": self.fx.base}})
         pipe.http = lambda url: dict(self.live)
         pipe.out = self.output.append
         pipe.deploy_env = lambda: {**pipe.env, "CLOUDFLARE_API_TOKEN": CF_TOKEN}
         return pipe
+
+    def release_new_main(self, *, replace_staging):
+        git(self.fx.repo, "checkout", "main")
+        sha = self.fx.commit({"src/worker.js": "new main"})
+        runner = FakeRunner()
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        release = self.fx.pipeline(runner, cfg=cfg)
+        production = {"source_commit": self.fx.base, "environment": "production"}
+        release.http = lambda _: dict(production)
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv == ["node", "scripts/release-production.mjs"]:
+                production["source_commit"] = sha
+                if replace_staging:
+                    self.live.update(source_commit=sha, provider_version_id=PRIOR)
+            return result
+
+        runner.run = run
+        self.assertEqual(release.tick(["app"]), 0, self.fx.records())
+        self.assertIn("app-release", runner.names())
+        self.assertEqual(self.fx.state()["app"]["last_released_sha"], sha)
+        return sha
+
+    def test_new_main_on_staging_retires_candidate_and_allows_restore_and_restage(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        main = self.release_new_main(replace_staging=True)
+        checkpoint = pipe.store.state_path.read_bytes()
+        before = len(self.calls)
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before, "main already serves staging; no rollback needed")
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+        pipe = self.candidate_pipe(resume=True)
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=main), 0)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"]["source_commit"], main)
+        self.assertEqual(journal["prior"]["provider_version_id"], PRIOR)
+        self.assertEqual(pipe.store.state_path.read_bytes(), checkpoint)
 
     def test_unowned_same_sha_version_must_not_be_rolled_back(self):
         sha = self.candidate_sha()
