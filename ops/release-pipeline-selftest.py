@@ -528,6 +528,40 @@ class GitFetchDiagnostics(Base):
         pipe = self.fx.pipeline(FakeRunner())
         pipe.git("fetch", "--quiet", "origin", self.fx.base)
 
+    def test_process_timeout_keeps_partial_output_and_stops_after_one_retry(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        timeout = subprocess.TimeoutExpired("git fetch", 300, output=b"partial stdout\n",
+                                            stderr=b"partial stderr\n")
+        with mock.patch.object(rp.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(failed.exception.rc, 124)
+        log = Path(failed.exception.log).read_text()
+        for expected in ("partial stdout", "partial stderr", "[exit 124]"):
+            self.assertEqual(log.count(expected), 2)
+
+    def test_fetch_log_redacts_credentials_in_command_and_both_streams(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        secret = "fixture-sensitive-output"
+        pipe.env["FIXTURE_SECRET"] = secret
+        result = subprocess.CompletedProcess([], 128, secret.encode(), f"fatal: {secret}".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", secret, self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn(secret, log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+
+    def test_dry_run_fetch_writes_no_state_or_logs(self):
+        pipe = self.fx.pipeline(FakeRunner(), dry_run=True)
+        before = {path.relative_to(pipe.store.root): path.read_bytes()
+                  for path in pipe.store.root.rglob("*") if path.is_file()}
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        after = {path.relative_to(pipe.store.root): path.read_bytes()
+                 for path in pipe.store.root.rglob("*") if path.is_file()}
+        self.assertEqual(after, before)
+
 
 class WorkerIdentityReconciliation(Base):
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
