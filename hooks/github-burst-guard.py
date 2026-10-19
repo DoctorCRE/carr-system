@@ -11,7 +11,7 @@ lockout. Joe ordered a rule (74ddb23c, "never burst GitHub") and enforcement;
 this hook is the enforcement.
 
 WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
-  0. Direct PR merges and branch updates. Use tools/mq.sh and its repo lock.
+  0. Direct PR merges and branch updates. Use tools/mq.sh to enqueue into the existing daemon.
      Naming mq.sh beside a direct mutation does not exempt that mutation.
   1. A shell loop — for / while / until, or xargs / parallel — that runs `gh`
      with no `sleep N` (N >= 2) inside it. Allowed: the same loop with that
@@ -85,7 +85,7 @@ KNOWN LIMIT. It sees the command a session issues, not what a script does
 inside itself, and a loop hidden behind a variable or a script file is not
 visible. The threat model is the 2026-10-06 shape: a session typing the burst.
 
-FAILS OPEN. An internal error, malformed input or an unreadable state file
+Unsupported native exec_command arguments fail closed. An internal error, malformed input or an unreadable state file
 allows the call and logs the reason to out/hook-guard.log.
 
 Fixtures: ops/github-burst-guard-selftest.py
@@ -484,30 +484,85 @@ def merge_queue_reason(cmd):
     source = inert_stripped(cmd).replace('\\\n', '')
     scan = mask_quoted_data(source)
     commands = re.compile(_CMD_START + _PREFIX + r"((?:[\w./-]+/)?(?:gh|curl|wget))\s+", re.M)
-    endpoint = re.compile(r"(?:^|/)pulls/[^/\s]+/(?:update-branch|merge)(?:[?\s]|$)")
-    calls = {(match.end(), os.path.basename(match.group(1))) for match in commands.finditer(scan)}
-    for _, segment, offset in fanout_segments(scan):
-        calls.update((offset + match.end(), 'gh') for match in GH_RE.finditer(segment))
-    for offset, program in sorted(calls):
-        segment = source[offset:statement_end(source, offset)]
+    calls = []
+    for substitution in re.finditer(r'\$\((?!\()([^()]*)\)', scan):
+        reason = merge_queue_reason(source[substitution.start(1):substitution.end(1)])
+        if reason:
+            return reason
+    for match in commands.finditer(scan):
+        segment = source[match.end():statement_end(source, match.end())]
         try:
             words = shlex.split(segment)
         except ValueError:
             words = segment.split()
-        args = iter(words)
-        words = []
-        for word in args:
+        calls.append([os.path.basename(match.group(1)), *words])
+    for _, segment, offset in fanout_segments(scan):
+        for match in GH_RE.finditer(segment):
+            start = offset + match.end()
+            segment = source[start:statement_end(source, start)]
+            try:
+                words = shlex.split(segment)
+            except ValueError:
+                words = segment.split()
+            calls.append(['gh', *words])
+    lexer = shlex.shlex(source, posix=True, punctuation_chars=';&|()<>')
+    lexer.whitespace_split = True
+    groups, words = [], []
+    for word in lexer:
+        if word and all(c in ';&|()<>' for c in word):
+            groups.append(words)
+            words = []
+        else:
+            words.append(word)
+    groups.append(words)
+    for words in groups:
+        while words:
+            first = words.pop(0)
+            if re.match(r'^[A-Za-z_]\w*=', first) or first in ('do', 'then', 'else', 'if', 'elif', 'while', 'until', '!', '{'):
+                continue
+            if os.path.basename(first) in ('env', 'command', 'exec', 'nohup', 'time'):
+                while words and words[0].startswith('-'):
+                    option = words.pop(0)
+                    if option in ('-u', '--unset', '-C', '--chdir') and words:
+                        words.pop(0)
+                    elif option in ('-S', '--split-string') and words:
+                        words = shlex.split(words.pop(0)) + words
+                    elif option.startswith('--split-string='):
+                        words = shlex.split(option.split('=', 1)[1]) + words
+                continue
+            if os.path.basename(first) in ('sh', 'bash', 'zsh') and '-c' in words:
+                index = words.index('-c') + 1
+                reason = merge_queue_reason(words[index]) if index < len(words) else None
+                if reason:
+                    return reason
+            if os.path.basename(first) in ('gh', 'curl', 'wget'):
+                calls.append([os.path.basename(first), *words])
+            break
+    endpoint = re.compile(r"(?:^|/)pulls/[^/\s]+/(?:update-branch|merge)(?:[?\s]|$)")
+    for program, *args in calls:
+        words, method, body = [], None, False
+        iterator = iter(args)
+        for word in iterator:
             if word in ('-R', '--repo', '--hostname'):
-                next(args, None)
-            elif not word.startswith(('--repo=', '--hostname=')):
+                next(iterator, None)
+            elif word.startswith(('--repo=', '--hostname=')) or word.startswith('-R'):
+                continue
+            elif word in ('-X', '--method', '--request'):
+                method = next(iterator, '').upper()
+            elif word.startswith(('--method=', '--request=')):
+                method = word.split('=', 1)[1].upper()
+            elif word.startswith('-X'):
+                method = word[2:].upper()
+            else:
+                body |= word in ('-f', '-F', '--field', '--raw-field', '--input', '-d', '--data', '--data-raw', '--data-binary', '--json', '--post-data', '--post-file') or word.startswith(('--field=', '--raw-field=', '--input=', '--data=', '--post-data=')) or word.startswith(('-f', '-F', '-d'))
                 words.append(word)
         direct = program == 'gh' and words[:2] in (['pr', 'merge'], ['pr', 'update-branch'])
-        rest = any(endpoint.search(word.rstrip(')`')) for word in words)
-        if direct or rest:
-            return ('MERGE QUEUE GUARD: direct PR merges and branch updates race other '
-                    'runners and waste CI. Use tools/mq.sh PR... or '
-                    'tools/mq.sh --queue owner/repo queue-file log-file. '
-                    'tools/mq.sh holds the per-repository lock for every update and merge.')
+        rest = any(endpoint.search(word.rstrip(')`')) for word in words) and (method or ('POST' if body else 'GET')) not in ('GET', 'HEAD', 'OPTIONS')
+        graphql = (program == 'gh' and words[:2] == ['api', 'graphql']
+                   and any(re.search(r'\bmutation\b', word) and re.search(r'\b(?:mergePullRequest|updatePullRequestBranch)\b', word) for word in words))
+        if direct or rest or graphql:
+            return ('MERGE QUEUE GUARD: only the existing merge-queue daemon may merge or update branches. '
+                    'Use tools/mq.sh PR... or tools/mq.sh --queue owner/repo queue-file log-file to enqueue pinned heads.')
     return None
 
 
@@ -708,6 +763,59 @@ def observe(payload, cmd, now, event):
         log(f"RECORDED rate-limit answer :: {cmd[:200]}")
 
 
+class UninspectableCommand(ValueError):
+    pass
+
+
+def native_commands(code):
+    tokens = re.findall(r'''//[^\n]*|/\*[\s\S]*?\*/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`|[A-Za-z_$][\w$]*|[^\s]''', code)
+    tokens = [token for token in tokens if not token.startswith(('//', '/*'))]
+    commands = []
+    for i, token in enumerate(tokens):
+        if token == 'exec_command':
+            argument = i + 1
+        elif token in ('"exec_command"', "'exec_command'", '`exec_command`') and i and tokens[i - 1] == '[':
+            if tokens[i + 1:i + 2] != [']']:
+                raise UninspectableCommand('Dynamic native tool names cannot be inspected.')
+            argument = i + 2
+        else:
+            continue
+        if tokens[argument:argument + 2] == ['?', '.']:
+            argument += 2
+        if tokens[argument:argument + 2] != ['(', '{']:
+            raise UninspectableCommand('Native exec_command requires an inspectable object argument.')
+        depth, values = 1, []
+        for j in range(argument + 2, len(tokens)):
+            current = tokens[j]
+            if depth == 1 and current in ('.', '['):
+                raise UninspectableCommand('Spread or computed native command arguments cannot be inspected.')
+            if depth == 1 and current in ('cmd', '"cmd"', "'cmd'") and tokens[j + 1:j + 2] == [':']:
+                literal = tokens[j + 2] if j + 2 < len(tokens) else ''
+                if not literal.startswith(('"', "'", '`')) or tokens[j + 3:j + 4] not in ([','], ['}']):
+                    raise UninspectableCommand('Dynamic native commands cannot be inspected; use a literal cmd.')
+                if literal.startswith('`'):
+                    if '${' in literal or '\\' in literal:
+                        raise UninspectableCommand('Interpolated or escaped native templates cannot be inspected; use a plain literal cmd.')
+                    values.append(literal[1:-1])
+                else:
+                    if re.search(r'''\\(?![\\'"abfnrtv0-7xuU\n])''', literal):
+                        raise UninspectableCommand('Unsupported JavaScript string escape in native command.')
+                    try:
+                        values.append(ast.literal_eval(literal))
+                    except (ValueError, SyntaxError):
+                        raise UninspectableCommand('Unsupported native command literal.') from None
+            if current in ('{', '[', '('):
+                depth += 1
+            elif current in ('}', ']', ')'):
+                depth -= 1
+            if depth == 0:
+                break
+        if depth != 0 or len(values) != 1:
+            raise UninspectableCommand('Native exec_command requires exactly one literal cmd.')
+        commands.extend(values)
+    return '\n'.join(commands)
+
+
 def command_of(payload):
     tool = payload.get("tool_name") or payload.get("toolName") or ""
     if tool not in ("Bash", "exec_command", "functions.exec"):
@@ -715,8 +823,7 @@ def command_of(payload):
     ti = payload.get("tool_input") or payload.get("toolInput") or {}
     cmd = (ti.get("command") or ti.get("cmd") or ti.get("code") or "") if isinstance(ti, dict) else ti
     if tool == 'functions.exec' and isinstance(cmd, str) and 'exec_command' in cmd:
-        literals = re.findall(r'''\bcmd\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''', cmd)
-        cmd = '\n'.join(ast.literal_eval(literal) for literal in literals)
+        cmd = native_commands(cmd)
     return cmd if isinstance(cmd, str) and cmd else None
 
 
@@ -744,6 +851,9 @@ def main():
             print(reason, file=sys.stderr)
             return 2
         return 0
+    except UninspectableCommand as exc:
+        print(f'MERGE QUEUE GUARD: {exc} Enqueue with tools/mq.sh.', file=sys.stderr)
+        return 2
     except Exception as exc:                       # fail OPEN
         log(f"ALLOW(internal-error) {type(exc).__name__}: {exc}")
         return 0

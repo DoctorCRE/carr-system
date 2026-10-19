@@ -85,6 +85,9 @@ class MergeHookTests(unittest.TestCase):
         codes = [
             'await tools.exec_command({cmd: "gh pr merge 12 --squash"});',
             'await tools.exec_command({cmd: `gh pr merge 12 --squash`});',
+            'await tools["exec_command"]({cmd: "gh pr merge 12 --squash"});',
+            'await tools.exec_command?.({cmd: "gh pr merge 12 --squash"});',
+            'await tools.exec_command({cmd: "echo safe", ["cmd"]: "gh pr merge 12 --squash"});',
             'await tools.exec_command({"cmd": "gh pr merge 12 --squash"});',
             "await tools.exec_command({'cmd': 'gh pr update-branch 12'});",
             'await tools.exec_command({cmd: `gh pr merge ${pr}`});',
@@ -115,6 +118,7 @@ class MergeHookTests(unittest.TestCase):
             'bash -c \'env -i gh pr merge 12\'', 'echo "$(env -i gh pr merge 12)"',
             "gh api graphql -f 'query=mutation {mergePullRequest(input:{pullRequestId:\"id\"}){clientMutationId}}'",
             'env -S "gh pr merge 12"', 'env --split-string="gh pr update-branch 12"',
+            '/usr/bin/env -i gh pr merge 12',
             'env -i gh pr merge 12', 'env -u HOME gh pr update-branch 12',
             'X=1 command gh pr merge 12', '"gh" pr merge 12',
             'gh pr ' + chr(92) + '\nmerge 12',

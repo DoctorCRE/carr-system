@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ops'))
 sys.path.insert(0, str(ROOT))
 from git_env import scrubbed_env
+from lib.carr_paths import canonical_checkout
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
 REPOS = ('jbookout/carr-system', 'jbookout/doctorcre-app', 'jbookout/software-factory')
@@ -120,7 +121,8 @@ def command(argv, *, cwd=None, data=None, timeout=None, observe=None, diagnostic
         raise WaitExpired(detail) from None
     if observe is not None:
         observe(p)
-    if p.returncode:
+    checks_result = argv[:3] == ['gh', 'pr', 'checks'] and p.returncode in (1, 8) and bool(p.stdout.strip())
+    if p.returncode and not checks_result:
         stderr = '; stderr tail: ' + (redacted_tail(p.stderr, known_secrets=sensitive_env_values(os.environ)).strip() or '(empty)') if diagnostics else ''
         if argv[:3] == ['gh', 'pr', 'merge'] and 'GraphQL:' in p.stderr and any(
                 phrase in p.stderr.lower() for phrase in bounded_items('snapshot', ('pull request is not mergeable',
@@ -181,7 +183,8 @@ class Queue:
                             'retry_at': 'REAL NOT NULL DEFAULT 0'},
                 'actions': {'attempts': 'INTEGER NOT NULL DEFAULT 0', 'expected_base': 'TEXT',
                             'dispatcher_pid': 'INTEGER', 'dispatcher_identity': 'TEXT', 'receipt': 'TEXT'},
-                'github_failures': {'stopped': 'INTEGER NOT NULL DEFAULT 0'}}
+                'github_failures': {'stopped': 'INTEGER NOT NULL DEFAULT 0',
+                                    'failed_at': 'REAL NOT NULL DEFAULT 0'}}
             for table, columns in bounded_items('snapshot', additions.items()):
                 existing = {r['name'] for r in bounded_items('snapshot', self.db.execute(f'PRAGMA table_info({table})'))}
                 for name, definition in bounded_items('snapshot', columns.items()):
@@ -284,13 +287,20 @@ class Queue:
         self.check_cancelled()
         scope = self._github_scope if scope is None else scope
         entry = self._github_entry if entry_budget else None
+        if entry is not None:
+            scope = f'{scope}:entry:{entry}'
         key = hashlib.sha256(json.dumps(operation, separators=(',', ':')).encode()).hexdigest()
         stopped = self.db.execute('SELECT detail FROM github_failures WHERE scope=? AND key=? AND stopped=1',
-                                  (f'{scope}:entry:{entry}', key)).fetchone() if entry is not None else None
+                                  (scope, key)).fetchone() if entry is not None else None
         if stopped:
             raise WaitExpired(f'{stopped["detail"]}; stopped; reconcile before retry')
         failure = self.db.execute('SELECT * FROM github_failures WHERE scope=? AND key=?',
                                   (scope, key)).fetchone()
+        if (failure and read and entry is None and not failure['stopped']
+                and time.time() >= failure['failed_at'] + BOUNDS['github_retry']['seconds']):
+            with self.db:
+                self.db.execute('DELETE FROM github_failures WHERE scope=? AND key=?', (scope, key))
+            failure = None
         if failure and (failure['stopped'] or failure['attempts'] >= MAX_ATTEMPTS):
             if failure['stopped']:
                 raise WaitExpired(f'{failure["detail"]}; stopped; reconcile before retry')
@@ -314,6 +324,7 @@ class Queue:
                 self.db.execute('INSERT INTO github_failures(scope,key,is_read,attempts,detail,entry_id) VALUES(?,?,?,1,?,?) '
                                 'ON CONFLICT(scope,key) DO UPDATE SET attempts=attempts+1,detail=excluded.detail,entry_id=COALESCE(github_failures.entry_id,excluded.entry_id)',
                                 (scope, key, int(read), detail, entry))
+                self.db.execute('UPDATE github_failures SET failed_at=? WHERE scope=? AND key=?', (time.time(), scope, key))
                 if entry is not None:
                     self.db.execute('UPDATE entries SET github_attempts=github_attempts+1 WHERE id=?', (entry,))
                 if isinstance(exc, WaitExpired):
@@ -322,7 +333,7 @@ class Queue:
                     else:
                         self.db.execute('INSERT INTO github_failures(scope,key,is_read,attempts,detail,entry_id,stopped) VALUES(?,?,?,0,?,?,1) '
                                         'ON CONFLICT(scope,key) DO UPDATE SET stopped=1,detail=excluded.detail',
-                                        (f'{scope}:entry:{entry}', key, int(read), detail, entry))
+                                        (scope, key, int(read), detail, entry))
                 attempts = self.db.execute('SELECT attempts FROM github_failures WHERE scope=? AND key=?',
                                            (scope, key)).fetchone()[0]
                 if entry is not None:
@@ -467,6 +478,18 @@ class Queue:
                 self.db.execute("UPDATE entries SET phase='pending',outcome='requeued',note=? WHERE id=?", (note, e['id']))
                 self.event(repo, n, 'requeued', f'Rearmed exhausted head {head}; merge and CI caps retained', e['id'])
         return e['id']
+
+    def submit(self, repo, numbers, log=None):
+        if repo not in REPOS or not numbers or any(n <= 0 for n in numbers):
+            raise ValueError('expected authorized repo and positive PR numbers')
+        for n in bounded_items('snapshot', numbers):
+            p = self.pr(repo, n)
+            entry = self.enqueue(repo, n, p['head']['sha'], 'submitted through mq.sh', rearm=False)
+            result = f'ENQUEUED {n} {p["head"]["sha"]} entry={entry}'
+            print(result, flush=True)
+            if log is not None:
+                with log.open('a') as stream:
+                    stream.write(f'{repo} {result}\n')
 
     def event(self, repo, n, outcome, detail, entry_id=None):
         prev = self.db.execute('SELECT outcome,detail FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
@@ -641,8 +664,10 @@ class Queue:
         d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
         merge = subprocess.run(['git', '-C', str(d), 'merge-tree', '--write-tree', '--name-only',
                                 '-z', base, head], text=True, capture_output=True, timeout=BOUNDS['command']['seconds'], env=scrubbed_env())
+        if merge.returncode == 0:
+            return False
         if merge.returncode != 1:
-            raise RuntimeError('conflicting-files readback not ready')
+            raise RuntimeError('conflicting-files readback failed: ' + redacted_tail(merge.stderr))
         files = merge.stdout.split('\0')[1:]
         files = files[:files.index('')] if '' in files else files
         if not files:
@@ -663,6 +688,7 @@ class Queue:
             self.db.execute('INSERT OR IGNORE INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',
                             (key, 'dispatch', repo, n, head, str(brief)))
             self.event(repo, n, 'conflict', f'Fix brief {brief}; files: {", ".join(files)}')
+        return True
 
     def dispatch_conflicts(self):
         with self.runner_lock():
@@ -809,15 +835,15 @@ class Queue:
     def behind(self, repo, p):
         if p['mergeable_state'] == 'behind':
             return True
-        # Drafts mask BEHIND with BLOCKED/DRAFT. Check main ancestry only after clean mergeability is proven.
-        if p.get('draft') and p.get('mergeable') is True and p['mergeable_state'] in ('blocked', 'draft'):
+        # Required checks and drafts can mask BEHIND. Prove ancestry before updating.
+        if p.get('mergeable') is True and p['mergeable_state'] in ('blocked', 'draft'):
             self.fetch(repo, p['head']['sha'])
             d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
             result = subprocess.run(['git', '-C', str(d), 'merge-base', '--is-ancestor',
                                      'origin/main', p['head']['sha']], capture_output=True, env=scrubbed_env(),
                                     timeout=BOUNDS['command']['seconds'])
             if result.returncode not in (0, 1):
-                raise RuntimeError('draft ancestry readback failed')
+                raise RuntimeError('main ancestry readback failed')
             return result.returncode == 1
         return False
 
@@ -846,11 +872,14 @@ class Queue:
                         self.event(repo, n, 'stacked', f'Waiting for base {p["base"]["ref"]}')
                     continue
                 if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
-                    self.conflict(repo, p)
+                    if not self.conflict(repo, p):
+                        complete = False
                 elif self.behind(repo, p) and p.get('mergeable') is True:
                     self.action('update', repo, n, p['head']['sha'], 'main')
                 elif p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
-                    raise RuntimeError('GitHub is still computing mergeability')
+                    complete = False
+                    with self.db:
+                        self.event(repo, n, 'refresh_waiting', 'GitHub is still computing mergeability')
                 else:
                     with self.db:
                         self.event(repo, n, 'unchanged', f'Post-merge refresh: {p["mergeable_state"]} at {p["head"]["sha"]}')
@@ -858,12 +887,17 @@ class Queue:
                 with self.db:
                     self.event(repo, n, 'github_paused', str(exc))
                 raise
+            except ActionUncertain as exc:
+                complete = False
+                with self.db:
+                    self.event(repo, n, 'refresh_waiting', str(exc))
             except (WaitExpired, subprocess.TimeoutExpired):
                 raise WaitExpired('Post-merge refresh transport deadline expired; reconcile before retry') from None
             except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
                 complete = False
                 with self.db:
                     self.event(repo, n, 'refresh_waiting', str(exc))
+                raise
         return complete
 
     def discover(self):
@@ -923,12 +957,6 @@ class Queue:
             repo, n = e['repo'], e['pr']
             self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
             try:
-                if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
-                    if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
-                        self.report(e, 'ci_timeout', 'Hosted checks did not turn green before the CI deadline', 'exhausted')
-                    else:
-                        self.report(e, 'entry_timeout', 'Entry deadline expired; intent retained; reconcile before retry', 'blocked')
-                    continue
                 retry_deadline = self.db.execute('SELECT deadline FROM waits WHERE owner=? AND kind=?',
                                                  (f'entry:{e["id"]}', 'github_retry')).fetchone()
                 if retry_deadline and time.time() >= retry_deadline[0]:
@@ -948,22 +976,35 @@ class Queue:
                         continue
                     self.report(e, 'merged', f'Merge commit {mc} confirmed on origin/main', 'refreshing')
                     if not self.refresh(repo, p['head']['ref']):
-                        if self.retry(e, 'Post-merge refresh remains incomplete'):
-                            continue
-                        return
+                        if self.wait(e, 'refresh', 'refresh_waiting', 'Post-merge provider computation remains incomplete'):
+                            return
+                        continue
                     self.report(e, 'merged', f'Merge commit {mc} confirmed; post-merge refresh complete', 'done')
                     return
                 if p['state'] != 'open':
                     self.report(e, 'closed', 'PR closed without merge', 'done')
                     continue
+                if e['tested'] is None and (p['head']['sha'] != e['approved'] or p.get('draft') or self.held(p) or p['base']['ref'] != 'main'):
+                    with self.db:
+                        self.db.execute("DELETE FROM waits WHERE owner=? AND kind='entry'", (f'entry:{e["id"]}',))
                 if p['head']['sha'] != e['approved']:
-                    self.report(e, 'head_moved', 'Live head differs from the approved SHA')
+                    self.report(e, 'head_moved', 'Live head differs from the approved SHA',
+                                'superseded' if e['tested'] is None else None)
                     continue
                 if p.get('draft'):
                     self.report(e, 'draft', 'Waiting for PR to be marked ready')
                     continue
                 if self.held(p):
                     self.report(e, 'held', 'do_not_merge label present')
+                    continue
+                if p['base']['ref'] != 'main':
+                    self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
+                    continue
+                if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
+                    if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
+                        self.report(e, 'ci_timeout', 'Hosted checks did not turn green before the CI deadline', 'exhausted')
+                    else:
+                        self.report(e, 'entry_timeout', 'Entry deadline expired; intent retained; reconcile before retry', 'blocked')
                     continue
                 if e['phase'] == 'merge_rejected' or (e['phase'] == 'pending' and e['tested'] is not None):
                     if self.merge_pending(repo, n, e['tested']):
@@ -976,9 +1017,6 @@ class Queue:
                         self.report(e, 'reconciled', 'GitHub rejected the request and now proves no pending merge', 'pending')
                     if e['phase'] == 'merge_rejected' or e['merge_attempts'] >= MAX_ATTEMPTS:
                         return
-                if p['base']['ref'] != 'main':
-                    self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
-                    continue
                 if e['phase'] == 'merging':
                     if self.failure(e, 'Merge was issued; reconcile GitHub state before any retry',
                                     'transient_attempts', 'merge_uncertain', 'merge_uncertain_exhausted', 'blocked'):
@@ -986,7 +1024,10 @@ class Queue:
                     return
                 head = p['head']['sha']
                 if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
-                    self.conflict(repo, p)
+                    if not self.conflict(repo, p):
+                        if self.wait(e, 'mergeability', 'waiting_mergeability', 'Provider reports conflicts but Git merges cleanly; waiting for fresh mergeability'):
+                            return
+                        continue
                     self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
                     continue
                 if self.behind(repo, p) and p.get('mergeable') is True:
@@ -1045,7 +1086,7 @@ class Queue:
                 self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
                 return
             except GitHubReadPaused as exc:
-                self.report(e, 'github_paused', str(exc))
+                self.wait(e, 'entry', 'github_paused', str(exc))
                 continue
             except MergeRejected as exc:
                 self.report(e, 'merge_rejected', str(exc), 'merge_rejected')
@@ -1373,13 +1414,16 @@ class Queue:
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--state', type=Path, default=ROOT / 'out/merge-queue')
+    p.add_argument('--state', type=Path, default=Path(canonical_checkout()) / 'out/merge-queue')
     p.add_argument('--root', type=Path, default=ROOT)
     sub = p.add_subparsers(dest='cmd', required=True)
     run = sub.add_parser('run')
     run.add_argument('--poll', type=float, default=BOUNDS['poll']['seconds'])
     run.add_argument('--no-discover', action='store_true')
     run.add_argument('--legacy', type=Path)
+    submit = sub.add_parser('submit')
+    submit.add_argument('prs', nargs='*', type=int)
+    submit.add_argument('--queue', nargs=3, metavar=('REPO', 'FILE', 'LOG'))
     enq = sub.add_parser('enqueue')
     enq.add_argument('repo', choices=REPOS)
     enq.add_argument('pr', type=int)
@@ -1404,6 +1448,20 @@ def main():
     q = Queue(a.state, a.root)
     if a.cmd == 'run':
         q.run(a.poll, not a.no_discover, a.legacy)
+    elif a.cmd == 'submit':
+        if a.queue:
+            if a.prs:
+                p.error('use PR numbers or --queue')
+            repo, filename, log = a.queue
+            with Path(filename).open() as stream:
+                fcntl.flock(stream, fcntl.LOCK_SH)
+                lines = stream.readlines()
+            if any(not line.endswith('\n') or not line.strip().isdigit() for line in lines):
+                p.error('queue file must contain complete PR-number lines')
+            if lines:
+                q.submit(repo, [int(line) for line in lines], Path(log))
+        else:
+            q.submit(os.environ.get('R', REPOS[0]), a.prs)
     elif a.cmd == 'enqueue':
         print(q.enqueue(a.repo, a.pr, a.head, a.note))
     elif a.cmd == 'import-legacy':
