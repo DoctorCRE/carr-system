@@ -161,6 +161,30 @@ class SkillReceiptTests(unittest.TestCase):
             since='2026-10-19T16:00:00Z')['opened'], [])
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md')[:1])['opened'], [])
 
+    def test_reads_and_results_must_both_be_inside_the_job_window(self):
+        start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02.500000Z'
+        inside = self.codex('cat /skills/tdd/SKILL.md')
+        self.assertEqual(self.scan(inside, since=start, until=end)['opened'], ['/skills/tdd/SKILL.md'])
+        late = self.codex('cat /skills/tdd/SKILL.md', stamp='2026-10-19T15:00:02.500001Z')
+        self.assertEqual(self.scan(late, since=start, until=end)['opened'], [])
+        inside[1]['timestamp'] = late[1]['timestamp']
+        self.assertEqual(self.scan(inside, since=start, until=end)['opened'], [])
+        inside[1].pop('timestamp')
+        self.assertEqual(self.scan(inside, since=start, until=end)['opened'], [])
+        claude = [
+            {'timestamp': start, 'type': 'assistant', 'message': {'content': [{'type': 'tool_use',
+             'id': 'r', 'name': 'Read', 'input': {'file_path': '/skills/tdd/SKILL.md'}}]}},
+            {'timestamp': late[1]['timestamp'], 'type': 'user', 'message': {'content': [{'type': 'tool_result',
+             'tool_use_id': 'r', 'content': 'skill', 'is_error': False}]}},
+        ]
+        self.assertEqual(self.scan(claude, since=start, until=end)['opened'], [])
+        claude[1]['timestamp'] = end
+        self.assertEqual(self.scan(claude, since=start, until=end)['opened'], ['/skills/tdd/SKILL.md'])
+        for kwargs in ({'since': 'invalid', 'until': end}, {'since': start, 'until': 'invalid'},
+                       {'since': end, 'until': start}):
+            with self.assertRaises(ValueError):
+                self.scan(inside, **kwargs)
+
     def test_aliases_and_missing_inventory_fail_before_launch(self):
         self.assertEqual(skill_receipts.claims('Skills: Pocock TDD, Prove It Works; poteto-mode'),
                          ['tdd', 'prove-it-works', 'poteto-mode'])
