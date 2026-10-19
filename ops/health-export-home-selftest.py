@@ -2,8 +2,8 @@
 """Exercise recovery freshness watches without running health's external checks."""
 import ast
 import glob
+import importlib
 import os
-import runpy
 import sys
 import tempfile
 import time
@@ -14,6 +14,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from exporters import common
+
 SOURCE = ROOT / "tools/health-check.py"
 TREE = ast.parse(SOURCE.read_text(encoding="utf-8"))
 WATCH_CODE = compile(ast.Module(body=[
@@ -21,6 +23,7 @@ WATCH_CODE = compile(ast.Module(body=[
     if (isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "WATCH"
                 for target in node.targets))
+    or (isinstance(node, ast.ImportFrom) and node.module == "exporters.common")
     or (isinstance(node, ast.FunctionDef) and node.name in {"newest", "age_days"})
 ], type_ignores=[]), str(SOURCE), "exec")
 EXPORTS = {
@@ -37,11 +40,10 @@ class ExportFreshness(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name) / "exports"
         self.vault = Path(self.temp.name) / "vault"
+        self.health = dict(os=os, glob=glob, time=time, VAULT=str(self.vault))
         with patch.dict(os.environ, {"CARR_EXPORT_HOME": str(self.home)}):
-            common = runpy.run_path(str(ROOT / "exporters/common.py"))
-        self.health = dict(os=os, glob=glob, time=time, VAULT=str(self.vault),
-                           EXPORT_HOME=common["EXPORT_HOME"])
-        exec(WATCH_CODE, self.health)
+            importlib.reload(common)
+            exec(WATCH_CODE, self.health)
         self.rows = {row[0]: row for row in self.health["WATCH"]}
 
     def write(self, root, relative, age=0):
