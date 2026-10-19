@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 
 const JOE = { id: "10000000-0000-0000-0000-000000000002", slug: "joe", human: true, via: "test" };
-const BOT = { ...JOE, human: false, slug: "claude" };
+const BOT = { ...JOE, human: false, slug: "claude", sponsoring_human_slug: "joe" };
+const LOCAL = { ...BOT, slug: "joe-local", via: "local-token", native_agent_verified: true };
 const KEY = "10000000-0000-0000-0000-000000000099";
 const DECLINE = { idempotency_key: KEY, human_ref: "WR-000032", base_version: 1,
   exit_reason: "captured by mistake from a schema probe; nothing to build" };
@@ -92,6 +93,28 @@ test("decline records the reason, the closing time and one audit event", async (
   assert.equal(JSON.parse(event.params[7]).state, "declined");
   assert.equal(JSON.parse(event.params[6]).state, "captured");
 });
+
+for (const from of ["captured", "triaged"]) {
+  test(`an unsponsored agent cannot decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const actor = { ...BOT, slug: "codex", sponsoring_human_slug: null };
+    const out = await rejected(() => executeRegisteredTool(db, actor, "decline-work-request",
+      { ...DECLINE, base_version: db.version }));
+    assert.equal(out.error, "sponsored_actor_required");
+    assert.equal(out.authorization_class, "unsponsored_agent");
+    assert.equal(db.calls.length, 0);
+    assert.equal(db.state, from);
+  });
+
+  test(`Joe's sponsored local actor can decline a ${from} request`, async () => {
+    const db = new WithdrawFake({ from });
+    const out = await executeRegisteredTool(db, LOCAL, "decline-work-request",
+      { ...DECLINE, base_version: db.version });
+    assert.equal(out.state, "declined");
+    const call = db.calls.find(x => x.sql.includes("decline_sourced_work_request"));
+    assert.equal(call.params[3], "joe-local");
+  });
+}
 
 test("decline preserves the triaged origin in its audit event", async () => {
   const db = new WithdrawFake({ from: "triaged" });

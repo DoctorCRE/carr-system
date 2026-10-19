@@ -327,6 +327,38 @@ def main() -> int:
         with rollback_only_connection(dsn) as conn:
             cur = conn.cursor()
             actor = fixture(cur)
+            for state, version in (("captured", 1), ("triaged", 2)):
+                request = capture(cur, f"Sponsored {state} decline")
+                if state == "triaged":
+                    triage(cur, request)
+                cur.execute("select set_config('carr.acting_actor_slug','codex',true),"
+                            " set_config('carr.sponsoring_human_slug','',true)")
+                cur.execute("set local role carr_writer")
+                try:
+                    refuses_named(cur,
+                        "select ops.decline_sourced_work_request(%s,%s,'r','codex',%s)",
+                        (request, version, uuid.uuid4()), "sponsored_actor_required:",
+                        f"an unsponsored agent declining a {state} request")
+                finally:
+                    cur.execute("reset role")
+                card = cur.execute("select state,version from ops.work_request_card(%s,'carr-internal')",
+                                   (request,)).fetchone()
+                if card != (state, version):
+                    raise RuntimeError(f"refused {state} decline changed the request: {card}")
+                cur.execute("select set_config('carr.acting_actor_slug','joe-local',true),"
+                            " set_config('carr.sponsoring_human_slug','joe',true)")
+                cur.execute("set local role carr_writer")
+                try:
+                    row = cur.execute(
+                        "select state,version from ops.decline_sourced_work_request(%s,%s,'r','joe-local',%s)",
+                        (request, version, uuid.uuid4())).fetchone()
+                finally:
+                    cur.execute("reset role")
+                if row != ("declined", version + 1):
+                    raise RuntimeError(f"Joe's sponsored local {state} decline did not land: {row}")
+                print(f"PASS: {state} decline refuses an unsponsored writer and accepts Joe's sponsored local actor")
+            cur.execute("select set_config('carr.acting_actor_slug','joe',true),"
+                        " set_config('carr.sponsoring_human_slug','',true)")
             junk, real, third = capture(cur, "Junk"), capture(cur, "Real"), capture(cur, "Third")
 
             # --- supersede, and the record must survive it -------------------
