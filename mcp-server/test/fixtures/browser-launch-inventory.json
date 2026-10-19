@@ -1,0 +1,8 @@
+[
+  {
+    "name": "direct spawn with a Chrome executable variable",
+    "path": "mcp-server/test/independent.mjs",
+    "source": "spawn(chrome, [\"--headless=new\"]);",
+    "allowed": false
+  }
+]
