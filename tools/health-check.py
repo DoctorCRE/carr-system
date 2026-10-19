@@ -1653,7 +1653,8 @@ def _canonical_health():
                     rc = _red("scheduled_jobs_" + _job_row["code"], _line,
                               subject=_job_row["label"],
                               hard_error=_job_row["code"] == "evidence_unavailable",
-                              time_rolling=_job_row["code"] == "stale_log")
+                              time_rolling=_job_row["code"] in {
+                                  "stale_log", "behind_main", "remote_ref_stale"})
                 if not _scheduled_rows:
                     print("  OK scheduled jobs match manifest; canonical main is current")
             except Exception as exc:
