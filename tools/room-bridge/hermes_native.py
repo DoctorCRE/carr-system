@@ -9,14 +9,35 @@ import threading
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from nous_budget import dollars
+from nous_budget import CONFIG, dollars
+from hermes_wire import CREDIT_ERROR
 
-MAX_TURNS = 8
-MAX_OUTPUT_TOKENS = 4096
+MAX_TURNS = 32
 
 
 class SpendStop(ValueError):
     pass
+
+
+def quote_model(model):
+    try:
+        from hermes_cli.models_pricing import get_pricing_for_provider
+        prices = get_pricing_for_provider('nous', force_refresh=True)
+    except Exception:
+        prices = {}
+    pinned = json.loads(CONFIG.read_text()).get('pinned_prices', {})
+    for source, row in (('hermes_picker_v1_models', prices.get(model)),
+                        ('pinned_conservative', pinned.get(model))):
+        try:
+            original = row.get('original') or {}
+            incoming = max(dollars(row['prompt']), dollars(row.get('input_cache_read', 0)),
+                           dollars(row.get('input_cache_write', 0)), dollars(original.get('prompt', 0)))
+            outgoing = max(dollars(row['completion']), dollars(original.get('completion', 0)))
+            return {'model': model, 'input_usd_per_token': str(incoming),
+                    'output_usd_per_token': str(outgoing), 'source': source}
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return None
 
 
 class CallBudget:
@@ -28,10 +49,18 @@ class CallBudget:
         self.reserved = Decimal(0)
         self.lock = threading.Lock()
         self.stopped = False
+        self.credits_exhausted = False
+        self.credits_path = None
 
     def stop(self):
         self.stopped = True
         raise SpendStop('Nous run spending limit reached')
+
+    def output_limit(self, *, slots=1):
+        with self.lock:
+            if not self.output_price:
+                return None
+            return max(0, int((self.allowance - self.reserved) / self.output_price / slots))
 
     def bind(self, base_url, provider, model):
         origin = urlsplit(str(base_url))
@@ -58,10 +87,10 @@ class CallBudget:
                 or (url.scheme, url.netloc) != self.origin or body.get('model') != self.model):
             self.stop()
         caps = [body[key] for key in ('max_tokens', 'max_completion_tokens', 'max_output_tokens') if key in body]
-        if (not caps or any(type(cap) is not int or not 0 < cap <= MAX_OUTPUT_TOKENS for cap in caps)
+        if ((not caps and self.output_price) or any(type(cap) is not int or cap <= 0 for cap in caps)
                 or body.get('n', 1) != 1 or body.get('best_of', 1) != 1 or 'prediction' in body):
             self.stop()
-        outputs = max(caps)
+        outputs = max(caps, default=0)
         messages = body.get('messages')
         if not isinstance(messages, list):
             self.stop()
@@ -89,16 +118,28 @@ class CallBudget:
         def send(client, request, *args, **kwargs):
             if self.admit(request):
                 kwargs['follow_redirects'] = False
-            return sync(client, request, *args, **kwargs)
+            response = sync(client, request, *args, **kwargs)
+            status = getattr(response, 'status_code', 0)
+            self.billing_response(status, response.read() if status >= 400 and status != 402 else b'')
+            return response
         async def send_async(client, request, *args, **kwargs):
             if self.admit(request):
                 kwargs['follow_redirects'] = False
-            return await asynchronous(client, request, *args, **kwargs)
+            response = await asynchronous(client, request, *args, **kwargs)
+            status = getattr(response, 'status_code', 0)
+            self.billing_response(status, await response.aread() if status >= 400 and status != 402 else b'')
+            return response
         httpx.Client.send, httpx.AsyncClient.send = send, send_async
         try:
             yield
         finally:
             httpx.Client.send, httpx.AsyncClient.send = sync, asynchronous
+
+    def billing_response(self, status, body):
+        if status == 402 or (status >= 400 and CREDIT_ERROR.search(body.decode('utf-8', errors='replace'))):
+            self.credits_exhausted = self.stopped = True
+            if self.credits_path is not None:
+                self.credits_path.write_text('nous credits exhausted')
 
 
 def run_native(prompt, model, reasoning, usage_file, budget):
@@ -108,9 +149,13 @@ def run_native(prompt, model, reasoning, usage_file, budget):
     class BoundedAgent(original):
         def __init__(self, *args, **kwargs):
             budget.bind(kwargs.get('base_url'), kwargs.get('provider'), kwargs.get('model'))
-            kwargs.update(max_iterations=MAX_TURNS, max_tokens=MAX_OUTPUT_TOKENS,
+            kwargs.update(max_iterations=MAX_TURNS, max_tokens=budget.output_limit(slots=MAX_TURNS),
                           fallback_model=None, skip_background_review=True)
             super().__init__(*args, **kwargs)
+
+        def _max_tokens_param(self, value):
+            limit = budget.output_limit()
+            return super()._max_tokens_param(min(value, limit) if limit is not None else value)
     run_agent.AIAgent = BoundedAgent
     try:
         with budget.enforce():
@@ -122,6 +167,9 @@ def run_native(prompt, model, reasoning, usage_file, budget):
 
 def main():
     import argparse
+    if sys.argv[1:2] == ['--quote-model'] and len(sys.argv) == 3:
+        print(json.dumps(quote_model(sys.argv[2])))
+        return 0
     parser = argparse.ArgumentParser()
     parser.add_argument('-z', required=True)
     parser.add_argument('-m', required=True)
@@ -134,6 +182,7 @@ def main():
     os.environ['HERMES_SINGLE_QUERY_SESSION'] = '1'
     os.environ['HERMES_YOLO_MODE'] = '1'
     budget = CallBudget(args.allowance_usd, json.loads(args.price_json), args.m)
+    budget.credits_path = Path(args.usage_file).with_suffix('.credits-exhausted')
     try:
         code = run_native(args.z, args.m, args.reasoning, args.usage_file, budget)
     except Exception:
@@ -143,7 +192,8 @@ def main():
         usage = json.loads(path.read_text())
     except (OSError, ValueError):
         usage = {}
-    usage.update(spend_upper_bound_usd=str(budget.reserved), spend_limit_reached=budget.stopped)
+    usage.update(spend_upper_bound_usd=str(budget.reserved), spend_limit_reached=budget.stopped,
+                 nous_credits_exhausted=budget.credits_exhausted)
     path.write_text(json.dumps(usage))
     return 3 if budget.stopped else code
 

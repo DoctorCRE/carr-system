@@ -31,6 +31,12 @@ if sys.argv[1:2] == ['--print-runtime-command']:
     code = 'import runpy; runpy.run_path(' + repr(str(pathlib.Path(__file__).resolve())) + ", run_name='__main__'); raise SystemExit(0)"
     print(json.dumps([sys.executable, '-I', '-c', code]))
     sys.exit(0)
+if sys.argv[1:2] == ['--quote-model']:
+    pathlib.Path('quoted-model').write_text(sys.argv[2])
+    print(json.dumps(None if os.environ.get('FAKE_UNPRICED') else {
+        'model': sys.argv[2], 'input_usd_per_token': '0.000002',
+        'output_usd_per_token': '0.000006', 'source': 'hermes_picker_v1_models'}))
+    sys.exit(0)
 if sys.argv[1:] == ['fallback', 'list']:
     print('Fallback chain: other paid provider' if os.environ.get('FAKE_FALLBACK')
           else '  No fallback providers configured.')
@@ -71,6 +77,12 @@ if mode == 'fail':
 if mode == 'credits':
     print(os.environ['FAKE_CREDIT_ERROR'], file=sys.stderr)
     sys.exit(3)
+if mode == 'silent-credits':
+    usage_path = pathlib.Path(sys.argv[sys.argv.index('--usage-file') + 1])
+    usage_path.write_text(json.dumps({'spend_upper_bound_usd': '0.00'}))
+    usage_path.with_suffix('.credits-exhausted').write_text('nous credits exhausted')
+    print('Partial work before the provider failed.')
+    sys.exit(1)
 if mode == 'write':
     pathlib.Path('fixed.py').write_text('fixed = True\\n')
     for command in (['git', 'add', 'fixed.py'], ['git', 'commit', '-m', 'Hermes fix'],
@@ -140,6 +152,18 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['detail'], 'Nous run spending limit reached')
         self.assertEqual(row['budget']['spent_usd'], '0.12')
 
+    def test_missing_failed_turn_usage_cannot_lose_the_billing_stop(self):
+        self.register()
+        self.env['FAKE_MODE'] = 'silent-credits'
+        row = self.send()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['detail'], 'nous credits exhausted')
+        self.assertEqual(row['code'], 'nous_spend_stop')
+        self.assertEqual(row['budget']['stop'], 'nous credits exhausted')
+        (self.root / 'invocation.json').unlink()
+        self.assertEqual(self.send()['detail'], 'nous credits exhausted')
+        self.assertFalse((self.root / 'invocation.json').exists())
+
     def test_cost_ledger_persists_spend_and_refuses_the_next_estimate(self):
         self.register()
         self.env['FAKE_COST'] = '21.50'
@@ -206,17 +230,26 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(receipt['cost_source'], 'portal_tokens')
         self.assertEqual(receipt['calculated_cost_usd'], '0.000516')
         self.assertEqual(receipt['cost_usd'], '0.01')
-        self.assertEqual(receipt['price']['source'], 'nous_recommended_models')
+        self.assertEqual(receipt['price']['source'], 'hermes_picker_v1_models')
 
     def test_unpriced_model_is_refused_before_any_inference(self):
         self.reg.register('nous-builder', 'hermes-nous', cwd=str(self.root), family='deepseek')
         catalog = self.bin / 'curl'
         catalog.write_text(catalog.read_text().replace('in $2.00 / out $6.00 per 1M', 'unknown'))
+        self.env['FAKE_UNPRICED'] = '1'
         row = self.send()
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(row['code'], 'nous_spend_stop')
         self.assertEqual(row['detail'], 'Nous model price unavailable; cannot bound run spending')
         self.assertFalse((self.root / 'invocation.json').exists())
+
+    def test_picker_price_supports_models_with_null_recommendation_prices(self):
+        self.register()
+        catalog = self.bin / 'curl'
+        catalog.write_text(catalog.read_text().replace("'in $2.00 / out $6.00 per 1M'", 'None'))
+        row = self.send()
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual((self.root / 'quoted-model').read_text(), 'z-ai/glm-8.10:US')
 
     def test_budget_read_command_prints_spend_without_changing_the_ledger(self):
         self.register()

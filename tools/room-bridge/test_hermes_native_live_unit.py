@@ -44,6 +44,33 @@ class InstalledNativeTest(unittest.TestCase):
                 self.assertEqual(prepared.returncode, 0, prepared.stderr)
                 env['HERMES_DISABLE_LAZY_INSTALLS'] = '1'
                 command = hermes_wire.native_command(discovered.stdout)
+                quote = dispatch._run_headless_process(
+                    [*command, '--quote-model', 'z-ai/glm-5.3:US'], env, 20, None, False, cwd=root)
+                self.assertEqual(quote.returncode, 0, quote.stderr)
+                self.assertEqual(json.loads(quote.stdout)['source'], 'hermes_picker_v1_models')
+                marker = '; import runpy; runpy.run_path('
+                before, after = command[3].rsplit(marker, 1)
+                # Real installed HTTPX, but a local transport: no network or inference.
+                billing_probe = """
+import httpx, runpy
+from pathlib import Path
+native = runpy.run_path(sys.argv[1])
+guard = native['CallBudget']('1.00', {'input_usd_per_token': '0.000002',
+    'output_usd_per_token': '0.000006'}, 'probe')
+guard.bind('https://inference.example/v1', 'nous', 'probe')
+guard.credits_path = Path('billing-stop')
+with guard.enforce(), httpx.Client(transport=httpx.MockTransport(
+        lambda req: httpx.Response(402, text='HTTP 402 out of credits'))) as client:
+    response = client.post('https://inference.example/v1/chat/completions',
+        json={'model': 'probe', 'max_tokens': 1, 'messages': []})
+    assert response.status_code == 402
+assert guard.credits_exhausted
+assert guard.credits_path.read_text() == 'nous credits exhausted'
+"""
+                billing = dispatch._run_headless_process(
+                    [*command[:3], before + '; exec(' + repr(billing_probe) + ')',
+                     str(repo / 'tools/room-bridge/hermes_native.py')], env, 10, None, False, cwd=root)
+                self.assertEqual(billing.returncode, 0, billing.stderr)
                 # Insert the hold before the EXACT native runner used by dispatch. The installed
                 # run_oneshot executes, but its _run_agent cannot construct or call a model.
                 setup = """
@@ -56,8 +83,6 @@ def hold(*args, **kwargs):
     time.sleep(60)
 oneshot._run_agent = hold
 """
-                marker = '; import runpy; runpy.run_path('
-                before, after = command[3].rsplit(marker, 1)
                 command[3] = before + '; exec(' + repr(setup) + ')' + marker + after
                 with self.assertRaises(subprocess.TimeoutExpired) as caught:
                     dispatch._run_headless_process([*command, '-z', 'hold before model', '-m', 'probe',

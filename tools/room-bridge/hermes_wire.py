@@ -108,13 +108,14 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
             payload = json.loads(catalog.stdout)
             model = select_model(payload, entry['family'])
             base['model'] = model
-            accounting['price'] = nous_budget.portal_price(payload, model)
-            if not accounting['price']:
-                raise nous_budget.BudgetStop('Nous model price unavailable; cannot bound run spending')
             runtime = invoke(['hermes', '--print-runtime-command', '--module', 'hermes_cli.gateway_client'], 15)
             if runtime.returncode:
                 raise ValueError('Hermes native runtime unavailable')
             command = native_command(runtime.stdout)
+            quote = invoke([*command, '--quote-model', model], 15)
+            accounting['price'] = json.loads(quote.stdout) if quote.returncode == 0 else None
+            if not accounting['price']:
+                raise nous_budget.BudgetStop('Nous model price unavailable; cannot bound run spending')
             accounting['before_launch']()
             accounting['launched'] = True
             env = {**env, 'HERMES_IGNORE_USER_CONFIG': '1', 'HERMES_YOLO_MODE': '1',
@@ -146,7 +147,8 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
         accounting['usage'] = raw_usage
         if raw_usage.get('spend_limit_reached'):
             outcome.update(status='failed', code='nous_spend_stop', detail='Nous run spending limit reached')
-        if CREDIT_ERROR.search(str(raw_usage.get('failure', '')) + str(raw_usage.get('error', ''))):
+        if (usage_path.with_suffix('.credits-exhausted').exists() or raw_usage.get('nous_credits_exhausted')
+                or CREDIT_ERROR.search(str(raw_usage.get('failure', '')) + str(raw_usage.get('error', '')))):
             accounting['exhausted'] = True
             outcome.update(status='failed', detail='nous credits exhausted')
         if outcome['status'] == 'completed':

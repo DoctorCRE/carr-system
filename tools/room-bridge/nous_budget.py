@@ -5,7 +5,6 @@ import fcntl
 import json
 import os
 from pathlib import Path
-import re
 from write_ownership import process_owner, process_start
 
 CONFIG = Path(__file__).resolve().parents[2] / 'ops/config/nous-spend.v1.json'
@@ -29,23 +28,6 @@ def dollars(value):
 
 def money(amount):
     return str(amount.quantize(Decimal('0.01'), rounding=ROUND_UP))
-
-
-def portal_price(payload, model):
-    for item in payload.get('paidRecommendedModels', []):
-        if item.get('modelName') != model:
-            continue
-        pricing = item.get('pricing') or {}
-        if pricing.get('prompt') is not None and pricing.get('completion') is not None:
-            prompt, completion = dollars(pricing['prompt']), dollars(pricing['completion'])
-        else:
-            match = re.fullmatch(r'in \$([\d.]+) / out \$([\d.]+) per 1M', item.get('tokenPrice') or '')
-            if not match:
-                return None
-            prompt, completion = (dollars(value) / 1000000 for value in match.groups())
-        return {'model': model, 'input_usd_per_token': str(prompt),
-                'output_usd_per_token': str(completion), 'source': 'nous_recommended_models'}
-    return None
 
 
 def run_cost(usage, price):

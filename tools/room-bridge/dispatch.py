@@ -36,15 +36,18 @@ is ignored; AGENTS.md and project rules still load. Hermes owns authentication.
 Nous spending uses ops/config/nous-spend.v1.json and a durable .nous-spend.json
 ledger beside the canonical dispatch results. Redirecting --results does not
 reset the shared budget. Each admission reserves the configured run estimate.
-Each agent is limited to 8 tool iterations and 4096 output tokens per request.
+Each agent allows 32 tool iterations; output limits follow the selected model's
+price and remaining run allowance rather than a fixed token count.
 A shared dollar allowance reserves a worst-case token charge before each main,
 auxiliary or retry HTTP request. It counts serialized input bytes as tokens and
 the full output limit, without refunds. Other provider/model routes, redirects,
-multimodal input and unsupported caps are refused. Missing Portal prices refuse
-the job before inference. The ledger books the greater of this request ceiling
+multimodal input and unsupported caps are refused. Prices come from Hermes'
+Nous picker (/v1/models), with conservative exact-model config pins as fallback.
+Missing prices refuse the job before inference. The ledger books the greater of this request ceiling
 and observed usage cost (reported dollars, otherwise Portal token prices).
 Booked costs round upward to cents. Unknown costs block later spending.
-Payment/credit/quota failures set a sticky stop; only a human may reconcile or
+HTTP payment/credit/quota failures set a sticky stop even without failed-turn
+usage; only a human may reconcile or
 clear it in the ledger. There is no automatic reset or paid-provider fallback.
 This is a local request ceiling using Portal prices, not a provider billing limit.
 

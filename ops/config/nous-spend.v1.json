@@ -1,4 +1,9 @@
 {
   "budget_usd": "22.00",
-  "per_run_estimate_usd": "1.00"
+  "per_run_estimate_usd": "1.00",
+  "pinned_prices": {
+    "z-ai/glm-5.3:US": {"prompt": "0.000003", "completion": "0.000010"},
+    "z-ai/glm-5.3-flash:US": {"prompt": "0.0000004", "completion": "0.0000012"},
+    "deepseek/deepseek-v4.1-flash:US": {"prompt": "0.0000005", "completion": "0.0000015"}
+  }
 }

@@ -2,6 +2,8 @@
 from contextlib import contextmanager
 from decimal import Decimal
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -25,6 +27,22 @@ class NativeTests(unittest.TestCase):
         guard.bind('https://inference.example/v1', 'nous', 'glm-current')
         return guard
 
+    def test_price_comes_from_the_nous_picker_or_an_exact_conservative_pin(self):
+        calls = []
+        def picker(provider, **kwargs):
+            calls.append(provider)
+            return {'glm-current': {'prompt': '0.0000001', 'completion': '0.0000004'}}
+        module = SimpleNamespace(get_pricing_for_provider=picker)
+        with patch.dict('sys.modules', {'hermes_cli.models_pricing': module}):
+            quote = hermes_native.quote_model('glm-current')
+            self.assertEqual(quote['input_usd_per_token'], '1E-7')
+            self.assertEqual(quote['source'], 'hermes_picker_v1_models')
+            pin = hermes_native.quote_model('z-ai/glm-5.3:US')
+            self.assertEqual(pin['source'], 'pinned_conservative')
+            self.assertGreaterEqual(Decimal(pin['output_usd_per_token']), Decimal('0.00000726'))
+            self.assertIsNone(hermes_native.quote_model('future-unpriced'))
+        self.assertEqual(calls, ['nous', 'nous', 'nous'])
+
     def test_worst_case_tokens_are_reserved_before_every_send_including_retries(self):
         guard = self.guard('0.05')
         sent = []
@@ -38,8 +56,8 @@ class NativeTests(unittest.TestCase):
         self.assertLessEqual(guard.reserved, Decimal('0.05'))
 
     def test_no_other_paid_provider_or_model_can_receive_inference(self):
-        for req in (request(model='other'), request(max_tokens=0), request(max_tokens=100000),
-                    request(max_completion_tokens=100000), request(n=2)):
+        for req in (request(model='other'), request(max_tokens=0), request(max_tokens=1000000),
+                    request(max_completion_tokens=1000000), request(n=2)):
             with self.subTest(req=req):
                 guard = self.guard()
                 with self.assertRaises(hermes_native.SpendStop):
@@ -97,11 +115,53 @@ class NativeTests(unittest.TestCase):
             code = hermes_native.run_native('fix it', 'glm-current', 'high', 'usage.json', guard)
         self.assertEqual(code, 0)
         self.assertEqual(calls, [])
-        self.assertEqual(built[0]['max_iterations'], hermes_native.MAX_TURNS)
-        self.assertEqual(built[0]['max_tokens'], hermes_native.MAX_OUTPUT_TOKENS)
+        self.assertGreaterEqual(built[0]['max_iterations'], 32)
+        self.assertEqual(built[0]['max_tokens'], 5208)
         self.assertIsNone(built[0]['fallback_model'])
         self.assertTrue(built[0]['skip_background_review'])
         self.assertIs(run_agent.AIAgent, Agent)
+
+    def test_token_allowance_tracks_selected_price_and_remaining_dollars(self):
+        expensive = hermes_native.CallBudget('1.00', {
+            'input_usd_per_token': '0.000001', 'output_usd_per_token': '0.000001'}, 'glm-current')
+        cheap = hermes_native.CallBudget('1.00', {
+            'input_usd_per_token': '0.000001', 'output_usd_per_token': '0.0000005'}, 'glm-current')
+        self.assertEqual(expensive.output_limit(), 1000000)
+        self.assertEqual(cheap.output_limit(), 2000000)
+        expensive.bind('https://inference.example/v1', 'nous', 'glm-current')
+        expensive.admit(request(max_tokens=10000))
+        self.assertLess(expensive.output_limit(), 990000)
+
+    def test_billing_response_stops_sync_and_async_calls_even_without_a_usage_receipt(self):
+        import asyncio
+        for asynchronous in (False, True):
+            for status, body in ((402, b''), (429, b'quota exhausted'), (403, b'payment required')):
+                with self.subTest(asynchronous=asynchronous, status=status), tempfile.TemporaryDirectory() as tmp:
+                    guard = self.guard()
+                    guard.credits_path = Path(tmp) / 'credits-exhausted'
+                    class Response:
+                        status_code = status
+                        def read(self):
+                            return body
+                        async def aread(self):
+                            return body
+                    response = Response()
+                    class Client:
+                        def send(self, req, **kwargs):
+                            return response
+                    class AsyncClient:
+                        async def send(self, req, **kwargs):
+                            return response
+                    httpx = SimpleNamespace(Client=Client, AsyncClient=AsyncClient)
+                    with patch.dict('sys.modules', {'httpx': httpx}), guard.enforce():
+                        if asynchronous:
+                            asyncio.run(AsyncClient().send(request()))
+                        else:
+                            Client().send(request())
+                        self.assertTrue(guard.credits_exhausted)
+                        self.assertEqual(guard.credits_path.read_text(), 'nous credits exhausted')
+                        with self.assertRaises(hermes_native.SpendStop):
+                            guard.admit(request())
 
 
 if __name__ == '__main__':
