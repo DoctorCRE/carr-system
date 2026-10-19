@@ -35,7 +35,8 @@ class FamilyDispatchTests(unittest.TestCase):
             {'slug': slug, 'display_name': slug.upper()} for slug in
             ['gpt-5.6-sol', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.6-luna', 'gpt-6-luna']]}))
         self.env = patch.dict(os.environ, {'CODEX_HOME': str(self.root),
-                                         'CARR_CODEX_SLOT_DIR': str(self.root / 'slots')})
+                                         'CARR_CODEX_SLOT_DIR': str(self.root / 'slots'),
+                                         'CARR_WORK_QUEUE_DB': str(self.root / 'work-queue.sqlite3')})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
@@ -169,21 +170,21 @@ class FamilyDispatchTests(unittest.TestCase):
         self.assertIn('luna', out.getvalue())
         self.assertIn('gpt-6-luna', out.getvalue())
 
-    def test_send_cli_names_resolved_executor_before_launch(self):
+    def test_send_cli_defers_model_resolution_to_worker(self):
+        import work_runner
+        from work_queue import WorkQueue, default_path
         self.reg.register('cx', 'codex-session')
         out = io.StringIO()
-        executor = io.StringIO()
-        def execute(entry, *args, **kwargs):
-            self.assertIn('gpt-6-luna', executor.getvalue())
-            self.assertIn('low', executor.getvalue())
-            return {'status': 'completed'}
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(executor), \
+        with contextlib.redirect_stdout(out), \
              patch.object(dispatch.seat_gate, 'check', return_value=None), \
-             patch.object(dispatch, '_to_codex', side_effect=execute):
+             patch.object(work_runner, 'kick'), patch.object(dispatch, '_to_codex') as execute:
             code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
                                   'send', 'cx', 'work', '--family', 'luna', '--effort', 'low'])
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(out.getvalue())['model'], 'gpt-6-luna')
+        execute.assert_not_called()
+        with WorkQueue(default_path()) as queue:
+            card = queue.get(json.loads(out.getvalue())['card_id'])
+        self.assertEqual((card['family'], card['effort'], card['model']), ('luna', 'low', ''))
 
     def test_desks_without_default_names_job_requirement(self):
         self.reg.register('cx', 'codex-session')

@@ -47,6 +47,9 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.reg = desks.Registry(self.root / 'desks.json')
         self.reg.register('cx', 'codex-session', cwd=str(self.source), family='sol', effort='high')
         self.results = self.root / 'results.jsonl'
+        queue_env = patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(self.root / 'work-queue.sqlite3')})
+        queue_env.start()
+        self.addCleanup(queue_env.stop)
         self.codex_calls = []
         canonical = patch('codex_checkout.CANONICAL_REPO', self.source)
         canonical.start()
@@ -54,9 +57,6 @@ class CheckoutDispatchTests(unittest.TestCase):
         checkout_root = patch('codex_checkout.CHECKOUT_ROOT', self.root)
         checkout_root.start()
         self.addCleanup(checkout_root.stop)
-        slot_dir = patch.object(dispatch, 'CODEX_SLOT_DIR', self.root / 'slots')
-        slot_dir.start()
-        self.addCleanup(slot_dir.stop)
 
     def git(self, *args, cwd=None):
         return REAL_RUN(['git', '-C', str(cwd or self.source), *args], check=True,
@@ -190,47 +190,22 @@ class CheckoutDispatchTests(unittest.TestCase):
                 self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
                 self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
 
-    def test_codex_jobs_queue_for_a_free_slot(self):
-        # WR-000356: five concurrent Sol-high jobs drew 429s; a `send` past
-        # CARR_CODEX_MAX_CONCURRENT waits for a free slot instead of starting.
-        slots = {'CARR_CODEX_MAX_CONCURRENT': '1', 'CARR_CODEX_SLOT_DIR': str(self.root / 'slots'),
-                 'CODEX_HOME': str(self.root)}
-        argv = ['--registry', str(self.reg.path), '--results', str(self.results),
-                'send', 'cx', 'repair it', '--fresh']
-        held = dispatch._codex_slot(slots)
-        held.__enter__()
-        released = False
-        try:
-            with patch.dict(os.environ, slots), \
-                 patch.object(dispatch, 'CODEX_SLOT_POLL_S', 0.01), \
-                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
-                 patch.object(dispatch.subprocess, 'run', side_effect=self.execute), \
-                 contextlib.redirect_stdout(io.StringIO()):
-                job = threading.Thread(target=dispatch.main, args=(argv,))
-                job.start()
-                time.sleep(0.3)
-                self.assertEqual(self.codex_calls, [])
-                held.__exit__(None, None, None)
-                released = True
-                job.join(10)
-            self.assertFalse(job.is_alive())
-            self.assertEqual(len(self.codex_calls), 1)
-        finally:
-            if not released:
-                held.__exit__(None, None, None)
-
-    def test_cli_documents_and_forwards_checkout(self):
+    def test_cli_documents_and_enqueues_checkout(self):
+        import work_runner
+        from work_queue import WorkQueue, default_path
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             dispatch.main(['send', '--help'])
         self.assertIn('--checkout', out.getvalue())
         self.assertIn('new:', out.getvalue())
-        with patch.object(dispatch, 'dispatch', return_value={'status': 'completed'}) as send, \
+        with patch.object(work_runner, 'kick'), \
              patch.object(dispatch.seat_gate, 'check', return_value=None), \
              contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(dispatch.main(['--registry', str(self.reg.path), 'send', 'cx',
-                                           'repair', '--checkout', 'repair']), 0)
-        self.assertEqual(send.call_args.kwargs['checkout'], 'repair')
+            self.assertEqual(dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
+                                           'send', 'cx', 'repair', '--checkout', 'repair']), 0)
+        with WorkQueue(default_path()) as queue:
+            self.assertEqual(json.loads(queue.candidates()[0]['options'])['checkout'], 'repair')
+        self.assertEqual(self.codex_calls, [])
 
 
 if __name__ == '__main__':
