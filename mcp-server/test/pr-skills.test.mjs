@@ -20,10 +20,11 @@ function check(body, overrides = {}) {
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
 
-test("a declaration alone fails without a receipt", () => {
+test("a declaration without receipt or artifacts passes with unverified annotations", () => {
   const result = check("## Change\nFix behavior.\n\nSkills used: poteto-mode, tdd\n");
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /receipt/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /::warning::unverified.*receipt/);
+  assert.match(result.stderr, /::warning::unverified.*TDD/);
 });
 
 for (const [name, body] of [
@@ -62,7 +63,7 @@ test("a dependency-looking branch by a person is not exempt", () => {
   assert.equal(check(null, { head: { ref: "dependabot/npm/example" } }).status, 1);
 });
 test("the validator never evaluates PR text", () => {
-  assert.equal(check("Skills used: $(exit 91); `exit 92`\r\n").status, 1);
+  assert.equal(check("Skills used: $(exit 91); `exit 92`\r\n").status, 0);
 });
 
 test("the PR workflow checks body edits and the template prompts for skills", () => {
