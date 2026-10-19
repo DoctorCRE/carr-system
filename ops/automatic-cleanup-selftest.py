@@ -247,6 +247,36 @@ class JobCloneTests(unittest.TestCase):
 
 
 class ThreadArchiveTests(unittest.TestCase):
+    def test_unloaded_historical_thread_is_kept_without_an_archive_attempt(self):
+        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
+        import codex_wire
+        for code, message, failed in ((-32600, 'thread not loaded: historical', False),
+                (-32600, 'permission denied', True), (-32000, 'thread not loaded: historical', True)):
+            with self.subTest(code=code, message=message):
+                calls = []
+                class Wire:
+                    def __init__(self, timeout):
+                        pass
+                    def upgrade(self):
+                        pass
+                    def send_json(self, request):
+                        calls.append(request)
+                        self.request = request
+                    def receive_json(self):
+                        result = {'id': self.request['id'], 'result': {}}
+                        if self.request['method'] == 'thread/read':
+                            result = {'id': self.request['id'], 'error': {'code': code, 'message': message}}
+                        return result
+                    def close(self):
+                        pass
+                result = codex_wire.archive_finished_thread('historical', before=100,
+                    process_probe=lambda paths: set(), wire_factory=Wire)
+                self.assertEqual(result['status'], 'kept')
+                self.assertEqual('error' in result, failed, result)
+                self.assertNotIn('thread/archive', [c['method'] for c in calls])
+                if not failed:
+                    self.assertIn('not loaded', result['reason'])
+
     def test_native_archive_preserves_active_recent_pinned_and_live_descendants(self):
         sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
         import codex_wire
