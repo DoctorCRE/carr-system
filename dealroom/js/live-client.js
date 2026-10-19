@@ -6,6 +6,7 @@
  * staging; one may be passed directly for isolated client tests.
  */
 import { uuidv4 } from './uuid.js';
+import { createMcpTransport } from './web-transport.js';
 
 /**
  * @param {Object} [opts]
@@ -17,48 +18,7 @@ export function createLiveClient(opts = {}) {
   const baseUrl = (opts.baseUrl || '').replace(/\/$/, '');
   let selfActor = opts.selfActor || null;
   const fetchImpl = opts.fetchImpl || ((path, init) => fetch(`${baseUrl}${path}`, init));
-  let rpcId = 0;
-
-  async function rpc(verb, args = {}) {
-    const res = await fetchImpl('/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: ++rpcId,
-        method: 'tools/call',
-        params: { name: verb, arguments: args },
-      }),
-    });
-    if (!res.ok) {
-      // The status is the only thing that says whether this request was DECIDED
-      // or merely unanswered, and throwing it away made every failure look the
-      // same to a caller. A 401 or 403 is a decision taken before the verb ever
-      // ran: the change was not saved, and inviting a retry would be wrong. A
-      // 5xx, a proxy's 502, a gateway timeout is the path failing around a
-      // request that may well have been applied. Callers need to tell those apart.
-      //
-      // The BODY does not go into the message. A 500's body is a server stack
-      // written for whoever maintains the verb — it is not a statement about this
-      // deal, and this page prints `error.message` at partners. It travels on the
-      // error for the console and for a bug report, and no surface renders it.
-      const body = await res.text().catch(() => '');
-      const error = new Error(`live ${verb} -> HTTP ${res.status}`);
-      error.status = res.status;
-      error.body = body.slice(0, 500);
-      throw error;
-    }
-    const envelope = await res.json();
-    if (envelope.error) throw new Error(`live ${verb} rpc error: ${envelope.error.message}`);
-    const payload = JSON.parse(envelope.result?.content?.[0]?.text ?? 'null');
-    if (envelope.result?.isError) {
-      const err = new Error(`live ${verb} refused: ${payload?.error || 'tool_error'}`);
-      err.payload = payload;
-      throw err;
-    }
-    return payload;
-  }
+  const rpc = createMcpTransport({ fetchImpl });
 
   async function write(verb, args) {
     return rpc(verb, { ...args, idempotency_key: args.idempotency_key || uuidv4() });
