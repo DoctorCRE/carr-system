@@ -24,6 +24,7 @@ What is pinned, one test class each:
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 import os
@@ -2036,6 +2037,22 @@ RULE_GAPS_97 = _finding("rule_enforcement", "97 active rule gaps", count=97)
 RULE_GAPS_99 = _finding("rule_enforcement", "99 active rule gaps", count=99)
 
 
+def scheduled_job_findings(snapshot):
+    """Run the report and its shipped health adapter without live machine readers."""
+    sys.path.insert(0, str(HERE.parent / "lib"))
+    from lib import scheduled_jobs
+    tree = ast.parse((HERE.parent / "tools/health-check.py").read_text())
+    call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "_red"
+                and node.args and isinstance(node.args[0], ast.BinOp)
+                and isinstance(node.args[0].left, ast.Constant)
+                and node.args[0].left.value == "scheduled_jobs_")
+    adapter = compile(ast.Expression(call), "health scheduled-job adapter", "eval")
+    rows = scheduled_jobs.report({"jobs": []}, snapshot, now=0)
+    return [eval(adapter, {"_red": _finding, "_job_row": row, "_line": line})
+            for row, line in zip(rows, scheduled_jobs.render(rows))]
+
+
 class HealthCompleteMarkerDoesNotDrift(unittest.TestCase):
     """Point 3 of the third round of an independent review of PR #1237: a
     REAL run of health-preflight showed `complete=False` on every single
@@ -2077,6 +2094,57 @@ class HealthGate(Base):
     fails on a new pair, a risen count, or any hard_error — never on a
     standing finding unchanged since the baseline. Findings A-G below track
     the points of an independent review of PR #1237 by letter."""
+
+    def main_advances_during_release(self, *, fetch):
+        target = self.fx.commit({"mcp-server/src/a.js": "1"})
+        writer = self.fx.tmp / "unrelated-writer"
+        git(self.fx.tmp, "clone", "-q", "--branch", "main", str(self.fx.origin), str(writer))
+        live = {"sha": self.fx.base}
+        fx = self.fx
+
+        class AdvancingMainRunner(FakeRunner):
+            def _health_output(self, name, argv):
+                if name == "health":
+                    (writer / "README.md").write_text("unrelated main advance\n")
+                    git(writer, "add", "README.md")
+                    git(writer, "commit", "-q", "-m", "unrelated main advance")
+                    git(writer, "push", "-q", "origin", "HEAD:main")
+                    if fetch:
+                        git(fx.repo, "fetch", "-q", "origin")
+                ahead, behind = map(int, git(fx.repo, "rev-list", "--left-right", "--count",
+                                             "HEAD...origin/main").split())
+                snapshot = {"plists": {}, "launchctl_list": "", "launchctl_disabled": "",
+                            "cron": "", "machine_role": "primary",
+                            "git": {"ahead": ahead, "behind": behind, "branch": "main",
+                                    "remote_matches": git(fx.repo, "rev-parse", "origin/main") ==
+                                    git(writer, "rev-parse", "HEAD")}}
+                findings = scheduled_job_findings(snapshot)
+                if name == "health-baseline":
+                    self.health_baseline_findings = findings
+                else:
+                    self.health_findings = findings
+                return super()._health_output(name, argv)
+
+        runner = AdvancingMainRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        rc = pipe.tick(["worker"])
+        key = "scheduled_jobs_behind_main" if fetch else "scheduled_jobs_remote_ref_stale"
+        self.assertIn("health", runner.names(), self.fx.records()[-1])
+        self.assertEqual(runner.health_baseline_findings, [])
+        self.assertEqual([row["key"] for row in runner.health_findings], [key])
+        self.assertEqual(live["sha"], target)
+        self.assertNotEqual(git(writer, "rev-parse", "HEAD"), target)
+        self.assertEqual(rc, 0, self.fx.records()[-1])
+        record = self.fx.records()[-1]
+        self.assertEqual(record["status"], "shipped")
+        self.assertIn(key + "[canonical]", record["health_time_rolling_not_attributed"][0])
+        self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+
+    def test_mid_release_main_advance_does_not_fail_on_canonical_behind_main(self):
+        self.main_advances_during_release(fetch=True)
+
+    def test_mid_release_main_advance_does_not_fail_on_stale_remote_ref(self):
+        self.main_advances_during_release(fetch=False)
 
     def test_missing_feature_verb_after_promote_fails_even_when_baseline_was_pending(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
