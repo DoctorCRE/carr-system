@@ -3,7 +3,11 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 test("the published board and durable answer poller pass their CLI contract", () => {
-  const run = spawnSync("python3", ["-m", "unittest", "tools/test-progress-board.py"], {
+  const run = spawnSync("python3", ["-m", "unittest",
+    "tools/test-progress-board.py", "tools/test-progress-board-consumer-proof.py",
+    "tools/test-progress-board-1380.py", "tools/test-progress-board-clean.py",
+    "tools/test-progress-board-size.py", "tools/test-progress-board-rest.py",
+  ], {
     cwd: new URL("../../", import.meta.url), encoding: "utf8",
   });
   assert.equal(run.status, 0, run.stderr);

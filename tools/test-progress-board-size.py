@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location("board_size", ROOT / "tools/progre
 assert spec is not None and spec.loader is not None
 board = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(board)
+from progress_board_test_support import exercise_fields
 
 
 class CostSnapshotTests(unittest.TestCase):
@@ -106,6 +107,8 @@ class SnapshotSizeTests(unittest.TestCase):
                 "next_action": "Read the job log, restore the source, then retry.",
                 "pr_head": "f" * 40, "pr_checks": "1 pass · 0 pending · 1 fail",
             }
+        for n in range(337, 867):
+            tasks[f"task-{n}"].update(exercise_fields())
         state = {"project": "carr-v5", "tasks": tasks}
         before = copy.deepcopy(state)
         snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})

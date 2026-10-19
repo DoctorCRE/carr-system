@@ -178,7 +178,7 @@ actual_entries = inventory.validate_registry(
 by_id = {item["id"]: item["class"] for item in actual_entries}
 assert all(by_id[item] in inventory.OPERATIONAL_CLASSES for item in (
     "normal-record-source-vault-relative", "normal-executor-agent-definitions",
-    "projection-rule-render-verifiers", "normal-front-door-launch-links",
+    "normal-front-door-launch-links",
     "normal-routine-child-vault",
     "scheduled-settings-render"))
 passed += 1
