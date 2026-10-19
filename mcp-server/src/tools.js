@@ -3437,7 +3437,7 @@ export const TOOLS = {
             and ($3::uuid is null or account_client_id=$3::uuid)
           order by started_at desc limit 1`,
         [actor.slug, workspace, args.account_client_id || null]);
-      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, closed_deals: closedDeals.rows, accounts: accounts.rows,
+      return { schema_version: 'local-deals-board.v1', actor: actor.slug, deals: deals.rows, closed_deals: closedDeals.rows.filter(d => d.outcome === 'won' || !d.outcome && (d.closed_on || d.invoiced_on)), lost_deals: closedDeals.rows.filter(d => d.outcome === 'lost'), accounts: accounts.rows,
         open_session: session.rows[0] || null };
     },
   },
@@ -8910,14 +8910,14 @@ registerTools(invoiceTrackerTools({ ToolError, withEnvelope, writeEvent }), "inv
 // the rest of this registry; the one explicit exception is the ephemeral lease.
 registerTools({
   "get-deal-room": {
-    description: "Read one complete open Deal Room work record: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
+    description: "Read one complete Deal Room work record, including closed and invoiced deals: board/workspace and active/parked fields, next actions, notes, critical dates, activity, parties, premises, current economics, documents, and attributed history. Includes salesforce_id and base_version only so a reconciler can make one guarded follow-on write. Placeholder Salesforce fields are structurally excluded.",
     inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
     handler: async (c, _actor, args) => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
-      const deal = await c.query(
+      let deal = await c.query(
         `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
-                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.client_ref, b.client_name,
+                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
                 b.market_agent, to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -8930,6 +8930,17 @@ registerTools({
            from v_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
           where b.id=$1`, [s.id]);
+      if (!deal.rows.length) deal = await c.query(
+        `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
+                b.client_ref, b.client_name, b.client_id, a.account_client_id,
+                case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
+                to_jsonb(b.closed_on)#>>'{}' as closed_on,
+                to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                r.salesforce_id, r.base_version
+           from v_deal_board b
+           join v_deal_reconciliation_read r on r.id=b.id
+           left join v_client_account a on a.client_id=b.client_id
+          where b.id=$1 /* dealroom:archived-detail */`, [s.id]);
       if (!deal.rows.length) throw new ToolError({ error: "not_found", table: "deal", id: s.id });
       const thread = await c.query(
         "select id, kind, text, actor, to_jsonb(created_at)#>>'{}' as created_at from v_deal_room_note where deal_id=$1 order by created_at desc, id desc",

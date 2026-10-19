@@ -128,10 +128,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
           const prior = structuredClone(result);
-          if (name === 'deal-room-board') delete prior.closed_deals;
+          if (name === 'deal-room-board') { delete prior.closed_deals; delete prior.lost_deals; }
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
+            assert.equal(prior.client_id,id(3));
+            delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
           }
@@ -157,6 +159,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const archived = await TOOLS['deal-room-board'].handler(c, actor, {});
       assert.deepEqual(archived.deals, []);
       assert.equal(archived.closed_deals.length, 1);
+      const detail=await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(detail.deal_id,id(4));
+      assert.equal(detail.client_id,id(3));
       assert.deepEqual(Object.fromEntries(['id','name','type','closed_on','invoiced_on'].map(key => [key, archived.closed_deals[0][key]])), {
         id:id(4), name:'Synthetic Assignment', type:'renewal', closed_on:'2026-10-01', invoiced_on:'2026-10-02',
       });
