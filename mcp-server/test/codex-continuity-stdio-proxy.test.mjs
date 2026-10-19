@@ -67,10 +67,14 @@ test("Codex continuity stdio proxy keeps the bearer out of config and exposes tw
     { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "codex-checkpoint", arguments: { state: storageLimitState } } },
     { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "codex-checkpoint", arguments: { state: referenceCapacityState } } },
   ].map(value => JSON.stringify(value)).join("\n") + "\n" + "not-json\n" + "x".repeat(2_000_001) + "\n");
+  const probe = fetch(`http://127.0.0.1:${server.address().port}/unrelated`, {
+    signal: AbortSignal.timeout(1000),
+  }).catch(() => null);
   const code = await new Promise(resolve => child.on("close", resolve));
   server.close();
   fs.rmSync(temp, { recursive: true, force: true });
   assert.equal(code, 0, stderr);
+  assert.equal((await probe)?.status, 404);
   const responses = stdout.trim().split("\n").map(JSON.parse);
   assert.equal(responses[0].result.serverInfo.name, "carr-codex-continuity");
   assert.match(responses[0].result.instructions, /semantic checkpoints/);

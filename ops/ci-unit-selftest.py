@@ -94,6 +94,27 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('workspace: command exited 1', result.stderr)
 
+    def test_early_failure_survives_later_passing_receipts(self):
+        self.all_packages()
+        failed = {'version': 1, 'test': 'mcp-server/test/early.test.mjs',
+                  'first_exit': 1, 'rerun_exit': 1, 'status': 'failed', 'candidate': False,
+                  'test_counts': {'tests': 1, 'pass': 0, 'fail': 1,
+                                  'cancelled': 0, 'skipped': 0, 'todo': 0}}
+        passed = dict(failed, test='mcp-server/test/later.test.mjs', first_exit=0,
+                      rerun_exit=None, status='passed',
+                      test_counts=dict(failed['test_counts'], **{'pass': 1, 'fail': 0}))
+        (self.root / 'mcp-server/run.mjs').write_text(
+            'console.log(' + json.dumps('CARR_FLAKE_RESULT ' + json.dumps(failed)) + ');\n'
+            'console.log("original assertion diagnostic");\n'
+            'for (let i=0; i<300; i++) console.log('
+            + json.dumps('CARR_FLAKE_RESULT ' + json.dumps(passed)) + ');\nprocess.exit(1);\n')
+        (self.root / 'mcp-server/package.json').write_text(
+            json.dumps({'scripts': {'test': 'node run.mjs'}}))
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('mcp-server/test/early.test.mjs', result.stderr)
+        self.assertIn('original assertion diagnostic', result.stderr)
+
     def test_exit_zero_without_test_output_fails(self):
         self.all_packages()
         (self.root / 'workspace/package.json').write_text(
