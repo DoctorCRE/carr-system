@@ -2066,6 +2066,37 @@ class HealthGate(Base):
     standing finding unchanged since the baseline. Findings A-G below track
     the points of an independent review of PR #1237 by letter."""
 
+    def test_missing_feature_verb_after_promote_fails_even_when_baseline_was_pending(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        pending = _finding("feature_switch_pending_deploy", "check-feature-switches pending deploy")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live, health_baseline_findings=[pending], health_findings=[pending])
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 1)
+        self.assertIn("promote", runner.names())
+        rec = self.fx.records()[-1]
+        self.assertEqual(rec["step"], "health")
+        self.assertIn("feature_switch_pending_deploy", rec["detail"])
+
+    def test_pending_feature_verb_allows_baseline_and_passes_when_deployed(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        pending = _finding("feature_switch_pending_deploy", "check-feature-switches pending deploy")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live, health_baseline_findings=[pending], health_findings=[])
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertIn("promote", runner.names())
+        self.assertIn("health", runner.names())
+
+    def test_unreadable_feature_switch_baseline_still_blocks_before_promote(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        failure = _finding("feature_switch_unreadable", "HTTP 401", hard_error=True)
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live, health_baseline_findings=[failure])
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 3)
+        self.assertNotIn("promote", runner.names())
+        self.assertEqual(self.fx.records()[-1]["reason"], "health_baseline_hard_error")
+
+
+
     def test_standing_finding_present_before_and_after_does_not_fail(self):
         # D: "98 becoming 97 rule gaps" must not fail — and neither may an
         # UNCHANGED 98 -> 98, even though health-check.py's own rc stays 1

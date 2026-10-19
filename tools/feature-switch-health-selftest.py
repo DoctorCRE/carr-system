@@ -14,17 +14,37 @@ spec=importlib.util.spec_from_file_location('feature_health',p)
 assert spec is not None and spec.loader is not None
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class Health(unittest.TestCase):
-    def test_worker_refusal_names_the_failed_verb_and_error(self):
+    def test_missing_check_verb_warns_that_deployment_is_pending(self):
         response = subprocess.CompletedProcess([], 1, '',
             'TOOL ERROR {"error":"unknown_tool","name":"check-feature-switches"}\n')
         with patch.object(sys, 'argv', [str(p)]), \
              patch.object(subprocess, 'run', return_value=response), \
              redirect_stdout(io.StringIO()) as output:
             code = m.main()
-        self.assertEqual(code, 2)
-        self.assertIn('check-feature-switches refused:', output.getvalue())
-        self.assertIn('unknown_tool', output.getvalue())
-        self.assertIn('UNKNOWN feature switches:', output.getvalue())
+        self.assertEqual(code, 3)
+        self.assertIn('WARN feature switches:', output.getvalue())
+        self.assertIn('check-feature-switches pending deploy', output.getvalue())
+        self.assertNotIn('UNKNOWN', output.getvalue())
+
+    def test_every_other_worker_failure_remains_unknown(self):
+        failures = [
+            (1, '', 'could not reach the deployed Worker: fetch failed'),
+            (1, '', 'HTTP 401 from https://fixture.invalid/mcp: {}'),
+            (1, '', 'HTTP 503 from https://fixture.invalid/mcp: {}'),
+            (1, '', 'TOOL ERROR {"error":"forbidden","name":"check-feature-switches"}'),
+            (1, '', 'TOOL ERROR {"error":"unknown_tool","name":"another-verb"}'),
+            (1, '', 'TOOL ERROR {"error":"unknown_tool"}'),
+            (0, 'not JSON', ''),
+            (0, '{"ok":true}', ''),
+        ]
+        for rc, stdout, stderr in failures:
+            with self.subTest(stderr=stderr, stdout=stdout), \
+                 patch.object(sys, 'argv', [str(p)]), \
+                 patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], rc, stdout, stderr)), \
+                 redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(m.main(), 2)
+                self.assertIn('UNKNOWN feature switches:', output.getvalue())
+                self.assertNotIn('pending deploy', output.getvalue())
 
     def test_malformed_rows_are_rejected_at_render_interface(self):
         for row in ('x', None, [], 1):
