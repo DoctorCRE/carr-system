@@ -19,6 +19,7 @@ from typing import Callable
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(REPO / "lib"))
 AGE_SECONDS = 24 * 60 * 60
 DATA_THRESHOLD_BYTES = 1_000_000_000_000
 TMP_PREFIXES = (
@@ -462,15 +463,63 @@ def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
     return RunResult(removed, findings, status)
 
 
+def _temp_activity(path, deadline):
+    import hashlib
+    digest = hashlib.sha256()
+    latest = 0.0
+    def inspect(entry):
+        nonlocal latest
+        if deadline():
+            raise TimeoutError('fixture inspection budget')
+        info = entry.lstat()
+        latest = max(latest, info.st_mtime)
+        digest.update(repr((str(entry.relative_to(path)), info.st_dev, info.st_ino,
+                            info.st_mode, info.st_size, info.st_mtime_ns)).encode())
+    inspect(path)
+    def fail(error):
+        raise error
+    for parent, dirs, files in os.walk(path, followlinks=False, onerror=fail):
+        dirs.sort()
+        for name in sorted(dirs + files):
+            inspect(Path(parent) / name)
+    return digest.hexdigest(), latest
+
+
+def recover_test_temp(pending, *, deadline):
+    from branch_retirement import save
+    source = Path(pending['path'])
+    manifest = Path(pending['manifest_path'])
+    if (source.resolve() != source or manifest.resolve() != manifest or
+            manifest.parent.parent != source.parent / '_to_delete'):
+        raise RuntimeError('interrupted fixture staging identity mismatch')
+    row = json.loads(manifest.read_text())
+    staged = Path(row['staged_path'])
+    if (row['path'] != str(source) or staged != manifest.parent / 'fixture' or
+            staged.resolve() != staged or row['status'] not in {'intent', 'staged', 'verified_no_effect'}):
+        raise RuntimeError('interrupted fixture manifest mismatch')
+    if source.exists() == staged.exists():
+        raise RuntimeError('interrupted fixture move is ambiguous')
+    actual = staged if staged.exists() else source
+    info = actual.lstat()
+    if (info.st_dev, info.st_ino) != tuple(row['identity']):
+        raise RuntimeError('interrupted fixture directory changed')
+    if actual == staged and _temp_activity(staged, deadline)[0] != row['activity']:
+        raise RuntimeError('interrupted staged fixture changed')
+    row.update(status='staged' if actual == staged else 'verified_no_effect',
+               reason='interrupted fixture move read back before retry')
+    save(manifest, row)
+    return row
+
+
 def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                        deadline, dry_run, record=lambda row: None):
     import heapq
+    from branch_retirement import save
     root = Path(root)
-    report = {'removed': [], 'kept': [], 'cursor': cursor, 'removed_allocated_bytes': 0,
-              'free_space_delta_bytes': 0, 'budget_exhausted': False, 'errors': []}
+    report = {'removed': [], 'kept': [], 'cursor': cursor, 'staged_allocated_bytes': 0,
+              'freed_bytes': 0, 'budget_exhausted': False, 'errors': []}
     descriptor = _open_root(root)
     identity = os.fstat(descriptor)
-    before_free = shutil.disk_usage(root).free
     try:
         with os.scandir(descriptor) as entries:
             names = heapq.nsmallest(max_items, (e.name for e in entries
@@ -494,46 +543,60 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                     elif busy is None or str(path) in busy:
                         row['reason'] = 'live process or process evidence unavailable'
                     else:
-                        latest = info.st_mtime
-                        for parent, dirs, files in os.walk(path, followlinks=False):
-                            if deadline():
-                                raise TimeoutError('fixture inspection budget')
-                            for entry in (*dirs, *files):
-                                latest = max(latest, (Path(parent) / entry).lstat().st_mtime)
+                        activity, latest = _temp_activity(path, deadline)
                         if now - latest >= min_age:
                             size = logical_allocated_bytes([Candidate('test_temp', path, now - latest)], 3)
                             if size is None:
                                 raise OSError('fixture size evidence unavailable')
+                            target = None
+                            if not dry_run:
+                                staging = root / '_to_delete'
+                                staging.mkdir(exist_ok=True)
+                                if staging.resolve() != staging:
+                                    raise OSError('staging root is a symlink')
+                                target = staging / (name + '-' + uuid.uuid4().hex)
+                                target.mkdir()
+                                row.update(staged_path=str(target / 'fixture'), manifest_path=str(target / 'manifest.json'),
+                                    identity=[info.st_dev, info.st_ino], activity=activity, allocated_bytes=size, at=now)
+                                save(target / 'manifest.json', {**row, 'status': 'intent'})
+                                record({**row, 'status': 'intent'})
                             final_busy = process_probe([str(path)])
-                            if final_busy is None or str(path) in final_busy:
-                                row['reason'] = 'fixture became live or process evidence unavailable'
+                            # A nested write can leave the candidate directory's mtime unchanged.
+                            final_activity, newest = _temp_activity(path, deadline)
+                            rechecked = _open_root(root, (identity.st_dev, identity.st_ino))
+                            os.close(rechecked)
+                            if final_busy is None or str(path) in final_busy or activity != final_activity or now - newest < min_age:
+                                row['reason'] = 'fixture became live or changed before staging'
+                            elif dry_run:
+                                row.update(status='would_stage', reason='old inactive disposable test fixture', allocated_bytes=size)
                             else:
-                                if deadline():
-                                    raise TimeoutError('fixture removal budget')
-                                check = path.lstat()
-                                if (check.st_dev, check.st_ino, check.st_mtime) != (info.st_dev, info.st_ino, info.st_mtime):
-                                    raise OSError('fixture changed during inspection')
-                                rechecked = _open_root(root, (identity.st_dev, identity.st_ino))
-                                os.close(rechecked)
-                                row.update(reason='old inactive disposable test fixture', allocated_bytes=size)
-                                if dry_run:
-                                    row['status'] = 'would_remove'
+                                assert target is not None
+                                os.rename(name, target / 'fixture', src_dir_fd=descriptor)
+                                staged_busy = process_probe([str(path), str(target / 'fixture')])
+                                if (staged_busy is None or any(p in staged_busy for p in (str(path), str(target / 'fixture'))) or
+                                        _temp_activity(target / 'fixture', deadline)[0] != activity):
+                                    if path.exists() or path.is_symlink():
+                                        raise RuntimeError('fixture restore destination occupied')
+                                    os.rename(target / 'fixture', name, dst_dir_fd=descriptor)
+                                    row['reason'] = 'fixture became live or changed during staging; restored'
                                 else:
-                                    record({**row, 'status': 'removing'})
-                                    shutil.rmtree(name, dir_fd=descriptor)
-                                    row['status'] = 'removed'
-                                    report['removed_allocated_bytes'] += size
+                                    row.update(status='staged', reason='old inactive disposable test fixture')
+                                    report['staged_allocated_bytes'] += size
+                            if target is not None:
+                                save(target / 'manifest.json', {**row,
+                                    'status': 'staged' if row['status'] == 'staged' else 'verified_no_effect'})
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-                    row.update(reason='fixture evidence or removal failed', error=type(exc).__name__)
+                    row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
                     report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
-                report['removed' if row['status'] == 'removed' else 'kept'].append(row)
+                report['removed' if row['status'] == 'staged' else 'kept'].append(row)
                 report['cursor'] = name
                 record(row)
+                if row.get('error'):
+                    return report
             if report['budget_exhausted']:
                 break
         if not report['budget_exhausted'] and len(names) < max_items:
             report['cursor'] = ''
-        report['free_space_delta_bytes'] = shutil.disk_usage(root).free - before_free
         return report
     finally:
         os.close(descriptor)
@@ -578,10 +641,8 @@ def main(argv: list[str] | None = None) -> int:
         return int(used > DATA_THRESHOLD_BYTES)
 
     started = time.monotonic()
-    machine = None
     if args.machine:
         import importlib.util
-        sys.path.insert(0, str(REPO / "lib"))
         from job_watchdog import load_config, repository_roots
         from machine_cleanup import run as clean_machine
         config = load_config(REPO / "ops/config/job-watchdog.json")
@@ -595,6 +656,8 @@ def main(argv: list[str] | None = None) -> int:
             dispatch_path=Path.home() / ".config/carr/hermes-dispatch-results.jsonl",
             roots=repository_roots(config), user_tmp_root=tmp_root, dry_run=args.dry_run)
         print(json.dumps({k: v for k, v in machine.items() if k not in {"removed", "kept"}}))
+        print(row)
+        return int(bool(machine["errors"]))
     plan = plan_cleanup(
         clone_root=clone_root, tmp_root=tmp_root, replay_root=replay_root,
         include_scratch=args.include_scratch, include_replay=args.include_gate_replay,
@@ -627,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {candidate.kind}: {candidate.path}")
     for path in sorted(plan.unrecognized):
         print(f"  unrecognized sample, report only: {path}")
-    return int(result.record_status == "record-failed" or bool(machine and machine["errors"]))
+    return int(result.record_status == "record-failed")
 
 
 if __name__ == "__main__":

@@ -468,7 +468,8 @@ class TestFixtureCleanup(unittest.TestCase):
             report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
                 max_items=100, cursor='', process_probe=lambda paths: set(), deadline=lambda: False, dry_run=False)
             self.assertEqual(len(report['removed']), len(storage_hygiene.TEST_TMP_PREFIXES))
-            self.assertFalse(list(root.iterdir()))
+            self.assertEqual([p.name for p in root.iterdir()], ['_to_delete'])
+            self.assertEqual(len(list((root / '_to_delete').glob('*/manifest.json'))), len(storage_hygiene.TEST_TMP_PREFIXES))
 
 
     def test_process_starting_during_fixture_inspection_keeps_directory(self):
@@ -487,7 +488,7 @@ class TestFixtureCleanup(unittest.TestCase):
             self.assertFalse(report['removed'])
 
 
-    def test_old_allowlisted_fixtures_remove_but_recent_live_unknown_and_symlinks_stay(self):
+    def test_old_allowlisted_fixtures_stage_but_recent_live_unknown_and_symlinks_stay(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             now = time.time()
@@ -506,7 +507,7 @@ class TestFixtureCleanup(unittest.TestCase):
             for name in ('presence-live', 'flash-inputs-new', 'unrelated-old', 'doc-drift-fixture-active-file', 'jev-ring-link'):
                 self.assertTrue((root / name).exists(), name)
             self.assertEqual(len(report['removed']), 1)
-            self.assertGreaterEqual(report['removed_allocated_bytes'], 8192)
+            self.assertGreaterEqual(report['staged_allocated_bytes'], 8192)
             self.assertTrue(report['kept'])
 
     def test_unknown_process_evidence_dry_run_budget_and_cursor_keep_safe(self):
@@ -522,7 +523,7 @@ class TestFixtureCleanup(unittest.TestCase):
             self.assertEqual(report['cursor'], 'hookenv-b-b')
             kwargs['cursor'] = report['cursor']
             report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=True)
-            self.assertEqual(report['kept'][0]['status'], 'would_remove')
+            self.assertEqual(report['kept'][0]['status'], 'would_stage')
             self.assertEqual(len(list(root.iterdir())), 3)
             kwargs['deadline'] = lambda: True
             report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=False)

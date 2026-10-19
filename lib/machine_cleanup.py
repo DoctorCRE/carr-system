@@ -40,9 +40,15 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         busy = process_probe([str(workspace)])
         if busy is None or busy:
             return keep('live process or process evidence unavailable')
-        pulls = provider.branch_pulls(repo, branch) if branch else []
+        evidence_branch = branch or dispatch.get('checkout_branch')
+        pulls = provider.branch_pulls(repo, evidence_branch) if evidence_branch else []
+        if not branch:
+            pulls.extend(provider.commit_pulls(repo, head))
         if any(p['state'] == 'open' for p in pulls):
             return keep('open PR')
+        if not branch and (not evidence_branch or command(['git', '-C', str(clone), 'merge-base', '--is-ancestor',
+                head, 'refs/remotes/origin/' + evidence_branch], allowed=(0, 1, 128)).returncode != 0):
+            return keep('detached HEAD has uncertain PR or dispatch branch evidence')
         merged = command(['git', '-C', str(clone), 'merge-base', '--is-ancestor', head, 'origin/main'],
                          allowed=(0, 1, 128)).returncode == 0
         closed = any(p['state'] == 'closed' and p['head']['sha'] == head for p in pulls)
@@ -50,7 +56,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                             clone.stat().st_mtime, (clone / '.git/index').stat().st_mtime)
         if not (merged or closed or now - last_activity >= older_than):
             return keep('clean abandoned checkout younger than age limit')
-        if branch and provider.open_pulls(repo, branch):
+        if (evidence_branch and provider.open_pulls(repo, evidence_branch) or
+                not branch and any(p['state'] == 'open' for p in provider.commit_pulls(repo, head))):
             return keep('open PR appeared before staging')
         busy = process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
@@ -182,10 +189,47 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         now = time.time()
         deadline = time.monotonic() + policy['max_seconds']
         report = {'schema': 'machine-cleanup/v1', 'at': now, 'status': 'running', 'dry_run': dry_run,
-                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': []}
+                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': [],
+                  'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0}
+        pending = previous.get('pending')
+        recovered = None
+        if pending:
+            try:
+                kind = pending['kind']
+                if kind == 'job_clone':
+                    recovered = recover_clone(pending['path'])
+                    cursor['clone'] = Path(pending['path']).name
+                elif kind == 'test_temp':
+                    sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
+                    from storage_hygiene import recover_test_temp
+                    recovered = recover_test_temp(pending, deadline=lambda: time.monotonic() >= deadline)
+                    slot = 'test_temp:' + str(Path(pending['path']).parent)
+                    cursor[slot] = Path(pending['path']).name
+                elif kind == 'thread':
+                    before = pending.get('before', previous['at'] - policy['thread_age_seconds'])
+                    recovered = archive_thread(pending['thread_id'], before=before,
+                        process_probe=process_probe, timeout=min(30, policy['max_seconds']), dry_run=True)
+                    if recovered.get('status') == 'would_archive':
+                        # The interrupted effect did not happen. Revisit dispatch evidence normally.
+                        recovered = {**recovered, 'status': 'verified_no_effect',
+                                     'reason': 'interrupted thread archive had no effect'}
+                    if recovered.get('error'):
+                        raise RuntimeError('interrupted thread archive readback failed')
+                else:
+                    raise RuntimeError('unknown pending cleanup kind')
+                append(root / 'out/machine-cleanup-recovery.jsonl',
+                       {'previous': previous, 'resolution': recovered, 'at': now})
+            except Exception as exc:
+                error = {'kind': pending.get('kind'), 'error': type(exc).__name__, 'reason': str(exc)}
+                errors = previous.get('errors', [])
+                failed = {**previous, 'status': 'failed', 'errors': errors if error in errors else errors + [error]}
+                save(receipt_path, failed)
+                return failed
         save(receipt_path, report)
 
         def record(row):
+            if row.get('kind') == 'test_temp' and row.get('status') == 'staged':
+                report['temp_staged_allocated_bytes'] += row['allocated_bytes']
             report['removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept'].append(row)
             if row.get('error'):
                 report['errors'].append({'kind': row['kind'], 'error': row['error']})
@@ -194,18 +238,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             save(receipt_path, report)
             save(cursor_path, cursor)
 
-        pending = previous.get('pending')
-        if pending and pending.get('kind') == 'job_clone':
-            try:
-                recovered = recover_clone(pending['path'])
-                if recovered:
-                    cursor['clone'] = Path(pending['path']).name
-                    record(recovered)
-            except Exception as exc:
-                report.update(status='failed', pending=pending)
-                report['errors'].append({'kind': 'job_clone', 'error': type(exc).__name__})
-                save(receipt_path, report)
-                return report
+        if recovered:
+            record(recovered)
 
         existing = {repo: path for repo, path in roots.items() if Path(path).expanduser().is_dir()}
         if existing:
@@ -224,29 +258,28 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
             from storage_hygiene import cleanup_test_temps
             temp_deadline = time.monotonic() + max(0, deadline - time.monotonic()) / 3
-            report['temp_removed_allocated_bytes'] = 0
-            report['temp_free_space_delta_bytes'] = 0
             temp_roots = list(dict.fromkeys((Path(user_tmp_root).resolve(), tmp_root)))
             for index, temp_root in enumerate(temp_roots):
                 root_deadline = time.monotonic() + max(0, temp_deadline - time.monotonic()) / (len(temp_roots) - index)
                 slot = 'test_temp:' + str(temp_root)
                 def temp_record(row):
-                    if row['status'] == 'removing':
+                    if row['status'] == 'intent':
                         report['pending'] = row
                         save(receipt_path, report)
                     else:
                         cursor[slot] = Path(row['path']).name
-                        if row['status'] == 'removed':
-                            report['temp_removed_allocated_bytes'] += row['allocated_bytes']
                         record(row)
                 temps = cleanup_test_temps(temp_root, now=now, min_age=policy['test_temp_age_seconds'],
                     max_items=policy['test_temp_max_items'], cursor=cursor.get(slot, ''),
                     process_probe=process_probe, deadline=lambda: time.monotonic() >= root_deadline,
                     dry_run=dry_run, record=temp_record)
                 cursor[slot] = temps['cursor']
-                report['temp_free_space_delta_bytes'] += temps['free_space_delta_bytes']
                 save(cursor_path, cursor)
                 save(receipt_path, report)
+                if report.get('pending'):
+                    report['status'] = 'failed'
+                    save(receipt_path, report)
+                    return report
         remaining = max(0, deadline - time.monotonic())
         clone_deadline = time.monotonic() + remaining / 2
         candidates = heapq.nsmallest(policy['max_items'],
@@ -294,7 +327,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                         elif now - epoch(latest['dispatched_at']) < policy['thread_age_seconds']:
                             result = {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'reason': 'recent dispatch'}
                         else:
-                            report['pending'] = {'kind': 'thread', 'thread_id': tid}
+                            report['pending'] = {'kind': 'thread', 'thread_id': tid,
+                                                 'before': now - policy['thread_age_seconds']}
                             save(receipt_path, report)
                             result = archive_thread(tid, before=now - policy['thread_age_seconds'],
                                 process_probe=process_probe, timeout=min(30, max(.1, deadline - time.monotonic())),

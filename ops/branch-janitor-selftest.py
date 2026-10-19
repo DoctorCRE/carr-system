@@ -929,6 +929,9 @@ class FakeProvider:
     def branch_pulls(self, repo, branch):
         return [r for r in self.rows if r["head"]["ref"] == branch]
 
+    def commit_pulls(self, repo, head):
+        return [r for r in self.rows if r['head']['sha'] == head]
+
     def pull(self, repo, number):
         return next(r for r in self.rows if r["number"] == number)
 

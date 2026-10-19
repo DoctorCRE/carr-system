@@ -176,6 +176,16 @@ class GitHub:
                 return [r for r in rows if (r["head"]["repo"] or {}).get("full_name") == repo]
             cursor = connection["pageInfo"]["endCursor"]
 
+    def commit_pulls(self, repo, head):
+        query = """query($owner:String!,$name:String!,$head:GitObjectID!) {
+            repository(owner:$owner,name:$name) { object(oid:$head) { ... on Commit {
+            associatedPullRequests(first:100) { nodes { """ + self.fields + """ }
+            pageInfo { hasNextPage } } } } } }"""
+        connection = self.query(repo, query, head=head)['object']['associatedPullRequests']
+        if connection['pageInfo']['hasNextPage']:
+            raise RuntimeError('commit PR evidence exceeds inspection budget')
+        return [self.normalize(row) for row in connection['nodes']]
+
     def open_pulls(self, repo, branch):
         return [row for row in self.branch_pulls(repo, branch) if row["state"] == "open"]
 

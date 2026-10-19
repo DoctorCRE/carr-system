@@ -322,10 +322,10 @@ class CleanupHealthTests(unittest.TestCase):
             self.assertFalse(old.exists())
             self.assertFalse(system_temp.exists())
             self.assertEqual(report['status'], 'completed')
-            self.assertGreaterEqual(report['temp_removed_allocated_bytes'], 8192)
+            self.assertGreaterEqual(report['temp_staged_allocated_bytes'], 8192)
             saved = json.loads((root / 'out/machine-cleanup.json').read_text())
-            self.assertEqual(saved['removed'][0]['status'], 'removed')
-            self.assertEqual(saved['temp_removed_allocated_bytes'], report['temp_removed_allocated_bytes'])
+            self.assertEqual(saved['removed'][0]['status'], 'staged')
+            self.assertEqual(saved['temp_staged_allocated_bytes'], report['temp_staged_allocated_bytes'])
 
 
     def test_temp_and_clone_byte_thresholds_feed_red_watchdog_findings(self):
