@@ -33,6 +33,16 @@ class SkillReceiptTests(unittest.TestCase):
         self.assertEqual(result['available'], ['tdd'])
         self.assertEqual(result['opened'], [])
 
+    def test_claude_init_listing_seeds_only_its_own_desk_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'builder.log').write_text(json.dumps({'type': 'system', 'subtype': 'init',
+                'session_id': 'a' * 36, 'skills': ['tdd', 'pstack:poteto-mode']}) + '\n')
+            with patch.object(dispatch, 'DESK_STATE', root):
+                value = dispatch.desk_skill_inventory('builder', {'kind': 'claude-session'}, root / 'results.jsonl')
+                self.assertEqual(value['available'], ['poteto-mode', 'tdd'])
+                self.assertIsNone(dispatch.desk_skill_inventory('other', {'kind': 'claude-session'}, root / 'results.jsonl'))
+
     def test_only_successful_real_reads_count(self):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md'))['opened'],
                          ['/skills/tdd/SKILL.md'])
