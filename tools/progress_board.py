@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import copy
 import contextlib
-import copy
 import fcntl
 import functools
 import hashlib
@@ -40,7 +39,8 @@ STATUSES = ("queued", "running", "review", "blocked", "question-for-orchestrator
 # Failed and superseded cards leave the pipeline: they show only in History,
 # each with its reason.
 RETIRED_STATUSES = ("failed", "superseded")
-DONE_WITHOUT_PR_EVIDENCE = "Complete; no PR (marked done by the orchestrator)"
+CONSUMER_PROOF_PENDING = "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+CONSUMER_PROOF_FIELDS = frozenset({"schema", "outcome", "repo", "source_sha", "target", "workflow", "evidence_ref", "observed_at"})
 PIPELINE_STAGES = ("queued", "build", "review", "ci", "merged", "live")
 PR_STAGES = PIPELINE_STAGES[1:] + ("measured",)
 STAGE_LABELS = {
@@ -75,10 +75,11 @@ SNAPSHOT_BUDGET = SNAPSHOT_LIMIT * 9 // 10
 # note duplicates watchdog stderr already carried in blocked_reason.
 SNAPSHOT_TASK_FIELDS = frozenset("""
     title status stage executor provider model effort health repo pr pr_url
-    pr_phase pr_head pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
+    pr_phase pr_head merge_sha pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
     release_wait created_at updated_at completed_at merged_at manual_stage
     stage_entered_at stage_history question_ids human_ref kind related
     work_request work_request_ref milestone milestone_source slice
+    delivery_target delivery_workflow delivery_source_sha consumer_proof
 """.split())
 BLOCKER_EXCERPT_LIMIT = 192
 
@@ -403,14 +404,14 @@ def retired_reason(task: dict[str, Any]) -> str:
 
 
 def task_stage(task: dict[str, Any]) -> str:
-    # Live means complete (Joe). A done card with no PR has nothing left to
-    # merge or release. A note that names a PR is never read as one.
-    if task.get("status") == "done" and task.get("pr") is None:
+    if task.get("status") == "done" and task.get("pr") is None and consumer_proven(task):
         return "live"
     requested = task.get("stage")
     if requested == "measured":
         requested = "live"
     evidence = task.get("evidence")
+    if requested == "live" and not consumer_proven(task):
+        requested = None
     if requested == "live" and not (isinstance(evidence, str) and evidence.strip()):
         requested = None
     if requested in PIPELINE_STAGES:
@@ -420,8 +421,84 @@ def task_stage(task: dict[str, Any]) -> str:
         # merged is still in review. Never back in Building.
         return "merged" if task.get("pr_phase") == "Merged" else "review"
     if task.get("status") == "measured":
-        return "live" if isinstance(evidence, str) and evidence.strip() else "build"
+        return "live" if consumer_proven(task) and isinstance(evidence, str) and evidence.strip() else "build"
     return STATUS_TO_STAGE.get(task.get("status", "queued"), "queued")
+
+
+def valid_consumer_proof(proof: Any) -> bool:
+    return (isinstance(proof, dict) and set(proof) == CONSUMER_PROOF_FIELDS
+            and all(isinstance(value, str) and value.strip() and len(value) <= 1000 for value in proof.values())
+            and proof.get("schema") == "carr-consumer-proof.v1"
+            and proof.get("outcome") in {"pass", "fail"}
+            and parse_time(proof.get("observed_at")) is not None)
+
+
+def consumer_binding(proof: dict[str, Any]) -> str:
+    return json.dumps([proof.get(key) for key in ("repo", "source_sha", "target", "workflow")],
+                      separators=(",", ":"))
+
+
+def selected_consumer_proof(task: dict[str, Any]) -> Any:
+    proofs = task.get("consumer_proofs")
+    if not isinstance(proofs, dict):
+        return task.get("consumer_proof")
+    repo = task_repo(task)
+    target = task.get("delivery_target")
+    if isinstance(target, str) and target in {"worker", "app"}:
+        target = (release_config().get(target) or {}).get("live_url")
+    source = task.get("merge_sha") if task.get("pr") is not None else task.get("delivery_source_sha")
+    return proofs.get(consumer_binding({"repo": repo, "source_sha": source,
+                                       "target": target, "workflow": task.get("delivery_workflow")}))
+
+
+def record_consumer_proof(task: dict[str, Any], proof: Any) -> None:
+    if not valid_consumer_proof(proof):
+        raise SystemExit("--consumer-proof requires a valid pass/fail receipt with an observation timestamp")
+    stored = task.get("consumer_proofs")
+    proofs = dict(stored) if isinstance(stored, dict) else {}
+    legacy = task.get("consumer_proof")
+    observations = [proof] if isinstance(stored, dict) or not valid_consumer_proof(legacy) else [legacy, proof]
+    for observation in observations:
+        key = consumer_binding(observation)
+        previous = proofs.get(key)
+        observed = parse_time(observation["observed_at"])
+        last_observed = parse_time(previous.get("observed_at")) if isinstance(previous, dict) else None
+        if isinstance(previous, dict) and last_observed and observed and (observed < last_observed
+                or observed == last_observed and previous.get("outcome") == "fail"):
+            continue
+        proofs[key] = observation
+    task["consumer_proofs"] = proofs
+
+
+def consumer_proven(task: dict[str, Any]) -> bool:
+    """A source/release assertion alone is never an exercise receipt."""
+    proof = selected_consumer_proof(task)
+    if is_retired(task) or not valid_consumer_proof(proof):
+        return False
+    if task.get("pr") is not None and task.get("pr_phase") != "Merged":
+        return False
+    repo = task_repo(task)
+    target = task.get("delivery_target")
+    if not isinstance(target, str):
+        return False
+    if target in {"worker", "app"}:
+        if AUTOMATIC_DELIVERY_TARGETS.get(repo) != target:
+            return False
+        target = (release_config().get(target) or {}).get("live_url")
+    source = task.get("merge_sha") if task.get("pr") is not None else task.get("delivery_source_sha")
+    workflow = task.get("delivery_workflow")
+    return (proof.get("outcome") == "pass" and proof.get("repo") == repo
+            and isinstance(source, str) and SHA_RE.fullmatch(source) is not None
+            and proof.get("source_sha") == source
+            and isinstance(target, str) and "://" in target and proof.get("target") == target
+            and isinstance(workflow, str) and bool(workflow.strip()) and proof.get("workflow") == workflow
+            and parse_time(proof.get("observed_at")) is not None)
+
+
+def consumer_evidence(task: dict[str, Any], release_evidence: str) -> str:
+    proof = selected_consumer_proof(task)
+    return (f"{proof['workflow']} passed on {proof['target']} for source {proof['source_sha']}; "
+            f"receipt {proof['evidence_ref']}. {release_evidence}")
 
 
 def completed_at(task: dict[str, Any]) -> datetime | None:
@@ -508,6 +585,16 @@ def record_stage(task: dict[str, Any], entered_at: str, prior_stage: str | None)
 def normalize_task(task: dict[str, Any]) -> bool:
     """Idempotent repair of stored state; never moves updated_at."""
     before = json.dumps(task, sort_keys=True)
+    if isinstance(task.get("consumer_proofs"), dict):
+        task["consumer_proof"] = selected_consumer_proof(task)
+    if not is_retired(task) and (task.get("status") in {"done", "measured"} or task.get("stage") in {"live", "measured"}) and not consumer_proven(task):
+        task["stage"] = "merged" if task.get("pr_phase") == "Merged" else "review"
+        task["status"] = "review"
+        task["release_wait"] = CONSUMER_PROOF_PENDING
+        task.pop("completed_at", None)
+        task.pop("manual_stage", None)
+        for field in ("health", "blocked_reason", "next_action", "blocked_source", "blocked_head"):
+            task.pop(field, None)
     if task.get("status") == "done" or task_stage(task) == "live":
         for field in ("health", "blocked_reason", "next_action", "blocked_source", "blocked_head"):
             task.pop(field, None)
@@ -1369,27 +1456,29 @@ def release_scope_gap(repo: str, paths: list[str] | None) -> str | None:
 
 
 def auto_live(task: dict[str, Any], repo: str, at: str, paths: list[str] | None) -> bool:
-    """Move a merged card to Live once its merge commit is in a verified
-    release of a lane that deploys everything the PR changed. Anything else
-    (a local tool, a LaunchAgent) waits for an operational receipt."""
+    """Require both release coverage and the matching consumer exercise."""
     merge = str(task.get("merge_sha") or "")
     if task_stage(task) != "merged" or not SHA_RE.fullmatch(merge):
         return False
     gap = release_scope_gap(repo, paths)
     if gap:
         wait = (f"{gap}; a release cannot make it Live, it needs an operational receipt "
-                "(task --stage live --evidence)")
+                "(task --stage live --evidence --consumer-proof)")
         if task.get("release_wait") != wait:
             task["release_wait"] = wait
             return True
         return False
     release = latest_release(repo)
     if release and (release["sha"] == merge or compare_status(repo, release["sha"], merge) in {"behind", "identical"}):
+        if not consumer_proven(task):
+            changed = task.get("release_wait") != CONSUMER_PROOF_PENDING
+            task["release_wait"] = CONSUMER_PROOF_PENDING
+            return changed
         prior = task_stage(task)
         where = (f"the verified {release['lane']} release {release['sha'][:12]}"
                  + (f" shipped {release['ts']}" if release.get("ts") else f" ({release['source']})"))
         task.update({"status": "done", "stage": "live", "completed_at": at, "updated_at": at,
-                     "evidence": f"Merged commit {merge[:12]} is in {where}"})
+                     "evidence": consumer_evidence(task, f"Merged commit {merge[:12]} is in {where}")})
         task.pop("release_wait", None)
         record_stage(task, at, prior)
         normalize_task(task)
@@ -1402,30 +1491,29 @@ def auto_live(task: dict[str, Any], repo: str, at: str, paths: list[str] | None)
 
 
 def delivered_live(task: dict[str, Any], repo: str, at: str, evidence: str | None) -> bool:
-    """Move a project card from Merged to Live only when its declared delivery
-    target is the one this repository's release deploys (worker or app) and
-    the production source readback shows the change. Any other target, or
-    none, waits for measured evidence (task --stage live --evidence)."""
+    """Require production source readback and the matching consumer exercise."""
     if task_stage(task) != "merged":
         return False
     target = task.get("delivery_target")
     automatic = AUTOMATIC_DELIVERY_TARGETS.get(repo)
-    if automatic and target == automatic and evidence:
+    if automatic and target == automatic and evidence and consumer_proven(task):
         prior = task_stage(task)
         task.update({"status": "done", "stage": "live", "completed_at": at, "updated_at": at,
-                     "evidence": evidence})
+                     "evidence": consumer_evidence(task, evidence)})
         task.pop("release_wait", None)
         record_stage(task, at, prior)
         normalize_task(task)
         return True
-    if automatic and target == automatic:
+    if automatic and target == automatic and evidence:
+        wait = CONSUMER_PROOF_PENDING
+    elif automatic and target == automatic:
         wait = f"production does not show this change yet; {release_wait_reason(repo)}"
     elif target:
         wait = (f"a release does not complete the {target} delivery target; "
-                "it needs measured evidence (task --stage live --evidence)")
+                "it needs measured evidence and consumer proof (task --stage live --evidence --consumer-proof)")
     else:
-        wait = ("no delivery target recorded; set --delivery-target (worker or app complete from the "
-                "release readback) or record measured evidence (task --stage live --evidence)")
+        wait = ("no delivery target recorded; set --delivery-target and --delivery-workflow, "
+                "then record matching --consumer-proof with measured evidence")
     if task.get("release_wait") != wait:
         task["release_wait"] = wait
         return True
@@ -1636,6 +1724,9 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
+                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs"):
+                    if field in previous:
+                        card[field] = previous[field]
                 if merged and pr.get("_legacy_terminal") and previous:
                     card = dict(previous)
                 if task_stage(previous) == "live" and merged:
@@ -1677,6 +1768,8 @@ DERIVED_STATE = ("status", "stage", "pr_phase", "blocked_reason", "next_action")
 def sync_pr_task(task: dict[str, Any], info: dict[str, Any], at: str) -> bool:
     """Bring one PR card to GitHub's state. Returns True if anything changed."""
     status, stage, phase = derived_pr_state(info, task_repo(task))
+    if stage == "merged":
+        status = "review"
     current = task_stage(task)
     if current == "live" and info["state"] == "MERGED":
         status, stage = "done", "live"
@@ -1711,12 +1804,14 @@ def sync_pr_task(task: dict[str, Any], info: dict[str, Any], at: str) -> bool:
 
 
 def settle_done_without_pr(task: dict[str, Any]) -> bool:
-    """Store a finished no-PR card as Live, keeping its own times."""
+    """A no-PR completion still needs an exercised consumer."""
     if task.get("status") != "done" or task.get("pr") is not None:
         return False
+    if not consumer_proven(task):
+        return normalize_task(task)
     evidence = task.get("evidence")
     settled = {"stage": "live",
-               "evidence": evidence if isinstance(evidence, str) and evidence.strip() else DONE_WITHOUT_PR_EVIDENCE,
+               "evidence": evidence if isinstance(evidence, str) and evidence.strip() else consumer_evidence(task, ""),
                "completed_at": task.get("completed_at") or task.get("updated_at") or stamp()}
     if all(task.get(field) == value for field, value in settled.items()):
         return False
@@ -2055,9 +2150,10 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
     tasks = {}
     all_tasks = state.get("tasks") or {}
-    active = {task_id: task for task_id, task in all_tasks.items() if not is_retired(task)}
+    active = {task_id: copy.deepcopy(task) for task_id, task in all_tasks.items() if not is_retired(task)}
     at = now_utc()
     for task_id, task in active.items():
+        normalize_task(task)
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
@@ -2551,6 +2647,12 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     task = dict(prior)
     if args.delivery_target is not None:
         task["delivery_target"] = args.delivery_target
+    for field in ("delivery_workflow", "delivery_source_sha"):
+        value = getattr(args, field, None)
+        if value is not None:
+            task[field] = value
+    if args.consumer_proof is not None:
+        record_consumer_proof(task, args.consumer_proof)
     executor = args.executor or prior.get("executor")
     derived = executor_metadata(executor)
     new_executor = args.executor is not None
@@ -2572,7 +2674,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
         task["summary"] = args.summary.strip()
     if prior.get("pr") is not None and pr_key(prior) != pr_key(task):
         for field in ("pr_phase", "pr_checks", "pr_head", "evidence", "completed_at", "merge_sha",
-                      "review_verdict", "release_wait"):
+                      "review_verdict", "release_wait", "consumer_proof", "consumer_proofs"):
             task.pop(field, None)
         task["status"] = args.status or "running"
         task["stage"] = stage or "build"
@@ -2580,8 +2682,10 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
         task["stage"] = stage
         task["manual_stage"] = stage
     if stage == "live":
+        if not consumer_proven(task):
+            raise SystemExit("Live requires passing --consumer-proof matching the delivered source, target and workflow")
         task["status"] = "done"
-        task["evidence"] = args.evidence.strip()
+        task["evidence"] = consumer_evidence(task, args.evidence.strip())
         task["completed_at"] = prior.get("completed_at") if task_stage(prior) == "live" else task_time
     elif task_stage(prior) == "live" and (stage or (args.status and args.status != "done")):
         if not stage:
@@ -2688,6 +2792,13 @@ def command_note(args: argparse.Namespace) -> None:
     mutate(args.project, add)
 
 
+def consumer_proof_argument(value: str) -> dict[str, Any]:
+    proof = json.loads(value)
+    if not isinstance(proof, dict):
+        raise argparse.ArgumentTypeError("consumer proof must be a JSON object")
+    return proof
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
@@ -2719,8 +2830,10 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--receipt", action="store_true", help="print the locked before/after task mutation receipt")
     task.add_argument("--note")
     task.add_argument("--evidence")
-    task.add_argument("--delivery-target", choices=("worker", "app", "workstation", "database", "manual"),
-                      help="Matching worker/app targets may complete from release readback; other targets require measured --evidence")
+    task.add_argument("--delivery-target", help="worker/app for the configured production URL, or an exact target URI")
+    task.add_argument("--delivery-workflow", help="the workflow the consumer must exercise")
+    task.add_argument("--delivery-source-sha", help="exact delivered source revision for a task without a PR")
+    task.add_argument("--consumer-proof", type=consumer_proof_argument, help="carr-consumer-proof.v1 JSON exercise receipt, including pass/fail")
     task.set_defaults(func=command_task)
     ask = commands.add_parser("ask")
     ask.add_argument("project")
