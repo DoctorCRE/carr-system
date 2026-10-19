@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import copy
+import contextlib
+import io
 import json
 import sys
 import importlib.util
@@ -57,6 +59,89 @@ class HostedVerdict(unittest.TestCase):
         self.assertIn('migration: PASSED', summary)
         self.assertIn('unit: PASSED', summary)
         self.assertNotIn('INCOMPLETE', summary)
+
+    def test_current_attempt_cannot_inherit_previous_success(self):
+        os.environ['GITHUB_RUN_ATTEMPT'] = '2'
+        current = copy.deepcopy(self.jobs)
+        for job in current:
+            job['run_attempt'] = 2
+        current[0]['conclusion'] = 'failure'
+
+        def api(command, **kwargs):
+            jobs = current if '/attempts/2/jobs?' in command[-1] else self.jobs
+            return self.response(jobs)
+
+        with patch('subprocess.run', side_effect=api), patch('time.sleep'):
+            self.assertEqual(evidence.hosted_verdict(), 1)
+        self.assertIn('migration: FAILED', self.summary.read_text())
+
+    def test_waits_through_minutes_of_stale_api_state(self):
+        stale = copy.deepcopy(self.jobs)
+        stale[0].update(status='in_progress', conclusion=None)
+        clock = [0]
+
+        def api(*args, **kwargs):
+            return self.response(stale if clock[0] < 180 else self.jobs)
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        with patch('subprocess.run', side_effect=api), \
+                patch('time.monotonic', side_effect=lambda: clock[0]), \
+                patch('time.sleep', side_effect=sleep):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+
+    def test_terminal_class_results_cannot_be_retried_into_success(self):
+        for conclusion in ('failure', 'cancelled', 'skipped', 'timed_out', 'neutral', None):
+            with self.subTest(conclusion=conclusion):
+                jobs = copy.deepcopy(self.jobs)
+                jobs[0]['conclusion'] = conclusion
+                with patch('subprocess.run', side_effect=[self.response(jobs),
+                                                         self.response(self.jobs)]), \
+                        patch('time.sleep'):
+                    self.assertEqual(evidence.hosted_verdict(), 1)
+
+    def test_unsettled_jobs_exhaust_budget_and_stay_red(self):
+        for state in ('missing', 'incomplete'):
+            with self.subTest(state=state):
+                jobs = copy.deepcopy(self.jobs)
+                if state == 'missing':
+                    jobs.pop(0)
+                else:
+                    jobs[0].update(status='in_progress', conclusion=None)
+                clock = [0]
+
+                def api_response(*args, **kwargs):
+                    clock[0] += kwargs['timeout']
+                    return self.response(jobs)
+
+                def advance(seconds):
+                    clock[0] += seconds
+
+                with patch('subprocess.run', side_effect=api_response) as api, \
+                        patch('time.monotonic', side_effect=lambda: clock[0]), \
+                        patch('time.sleep', side_effect=advance) as sleep:
+                    self.assertEqual(evidence.hosted_verdict(), 1)
+                budget = sum(call.kwargs['timeout'] for call in api.call_args_list)
+                budget += sum(call.args[0] for call in sleep.call_args_list)
+                self.assertLess(budget, 300)
+
+    def test_ambiguous_class_is_red(self):
+        jobs = self.jobs + [copy.deepcopy(self.jobs[0])]
+        with patch('subprocess.run', return_value=self.response(jobs)), patch('time.sleep'):
+            self.assertEqual(evidence.hosted_verdict(), 1)
+        self.assertIn('migration: AMBIGUOUS', self.summary.read_text())
+
+    def test_unavailable_or_malformed_api_fails_closed(self):
+        for error in (subprocess.CalledProcessError(1, ['gh']),
+                      subprocess.TimeoutExpired(['gh'], 15),
+                      subprocess.CompletedProcess([], 0, stdout='not JSON')):
+            with self.subTest(error=type(error).__name__):
+                with patch('subprocess.run', side_effect=[error]), \
+                        patch.object(sys, 'argv', ['ci-evidence.py', 'verdict']), \
+                        contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(evidence.main(), 1)
+                self.assertIn('job conclusions unavailable; refusing success', output.getvalue())
 
 
 class Reuse(unittest.TestCase):
