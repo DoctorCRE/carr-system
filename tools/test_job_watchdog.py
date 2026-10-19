@@ -66,8 +66,11 @@ class ReplayTests(unittest.TestCase):
                 found = w.detect({"jobs": [failed, recovery]}, config, 35)
                 self.assertEqual([f["kind"] for f in found], ["job_failed"])
         undated = {k: v for k, v in failed.items() if k != "start"}
-        self.assertEqual(len(w.detect({"jobs": [undated, {**failed, "start": 30, "exit_code": 0}]},
-                                     config, 35)), 1)
+        initial = w.detect({"jobs": [undated]}, config, 25)
+        for start in (30, 40):
+            retained = w.detect({"jobs": [undated, {**failed, "start": start, "exit_code": 0}]}, config, 45)
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0]["key"], initial[0]["key"])
 
     def test_scan_collapses_legacy_run_findings_and_clears_after_success(self):
         from unittest.mock import Mock, patch
