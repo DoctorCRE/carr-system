@@ -55,10 +55,14 @@ def main():
                          'npm', '--prefix', package, 'test'], cwd=ROOT,
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
+                counts = package_counts(output)
+                if result.returncode:
+                    output = '\n'.join(line for line in output.splitlines()
+                                       if not line.startswith(PREFIX)
+                                       or json.loads(line[len(PREFIX):]).get('status') != 'passed')
                 for line in output.splitlines():
                     if line.startswith((PREFIX, 'QUARANTINED ')):
                         print(line)
-                counts = package_counts(output)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'
                 elif counts is None:
