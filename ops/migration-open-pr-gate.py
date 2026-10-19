@@ -36,7 +36,7 @@ def main() -> int:
         head = event['pull_request']['head']['sha']
         fork = subprocess.run(['git', 'merge-base', base, head], cwd=ROOT,
                               env=scrubbed_env(), capture_output=True, text=True, check=True, timeout=60).stdout.strip()
-        base_names = migration_names(ROOT, base)
+        base_names = migration_names(ROOT, base) | migration_names(ROOT, 'origin/main')
         added = migration_names(ROOT, head) - migration_names(ROOT, fork) - base_names
         if not added:
             print('migration-open-pr-gate: no added migrations')
