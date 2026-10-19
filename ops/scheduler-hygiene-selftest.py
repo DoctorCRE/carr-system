@@ -48,10 +48,14 @@ class SchedulerHygieneTests(unittest.TestCase):
                          'with pathlib.Path(os.environ["LAUNCH_CALLS"]).open("a") as f: f.write(" ".join(sys.argv[1:])+"\\n")\n'
                          'sys.exit(113 if sys.argv[1] == "print" else 0)\n')
         launch.chmod(0o755)
+        (fakebin / 'sitecustomize.py').write_text(
+            f'import sys; sys.path.insert(0, {str(REPO)!r})\n'
+            'import lib.claude_scheduler_native as native\n'
+            'native.system_timezone = lambda: \"America/Chicago\"\n')
         self.calls = self.home / 'launch-calls'
         self.env = {**os.environ, 'HOME': str(self.home),
                     'PATH': str(fakebin) + os.pathsep + os.environ['PATH'],
-                    'LAUNCH_CALLS': str(self.calls)}
+                    'LAUNCH_CALLS': str(self.calls), 'PYTHONPATH': str(fakebin)}
 
     def write_workflow(self):
         (self.repo / 'ops/config/control-plane-workflows.v1.json').write_text(
@@ -141,6 +145,74 @@ class SchedulerHygieneTests(unittest.TestCase):
         self.assertEqual([r['task_id'] for r in rows if r['action'] == 'delete_completed_one_shot'], ['one-shot'])
         self.assertTrue(ephemeral.exists())
         self.assertFalse(self.calls.exists())
+
+    def test_report_flags_missing_native_registration_for_retained_tasks(self):
+        settings = self.repo / 'ops/headless-tasks/tasks.json'
+        settings.write_text(json.dumps({'timezone': 'America/Chicago', 'tasks': {}}))
+        self.write_snapshot([])
+        result = self.report()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tasks'][0]['action'], 'missing_native_registration')
+
+    def test_report_preserves_paused_native_tasks(self):
+        self.workflow['enabled'] = False
+        self.write_workflow()
+        result = self.report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tasks'][0]['action'], 'keep_paused')
+        self.assertFalse(self.calls.exists())
+
+    def test_report_keeps_failed_running_and_recurring_ephemeral_tasks(self):
+        rows = [self.row]
+        for task_id, values in {
+                'failed': {'enabled': False, 'cronExpression': None, 'lastRunAt': 123, 'lastRunStatus': 'failed'},
+                'running': {'enabled': True, 'cronExpression': None, 'lastRunAt': 123, 'lastRunStatus': 'succeeded'},
+                'recurring': {'enabled': False, 'cronExpression': '0 9 * * *', 'lastRunAt': 123, 'lastRunStatus': 'succeeded'},
+                'unverified': {'enabled': False, 'cronExpression': None, 'lastRunAt': 123}}.items():
+            prompt = self.home / '.claude/scheduled-tasks' / task_id / 'SKILL.md'
+            prompt.parent.mkdir()
+            prompt.write_text('---\nephemeral: true\n---\nSynthetic task.\n')
+            rows.append({'id': task_id, **values})
+        self.write_snapshot(rows)
+        result = self.report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(r['action'] == 'delete_completed_one_shot' for r in json.loads(result.stdout)['tasks']))
+
+    def test_one_shot_cleanup_requires_closed_top_level_marker(self):
+        cases = ['---\ndescription: |\n  ephemeral: true\n---\n',
+                 '---\nephemeral: true\n',
+                 '---\nephemeral: true\nephemeral: false\n---\n']
+        for text in cases:
+            with self.subTest(frontmatter=text):
+                prompt = self.home / '.claude/scheduled-tasks/temporary/SKILL.md'
+                prompt.parent.mkdir(exist_ok=True)
+                prompt.write_text(text)
+                self.write_snapshot([self.row, {'id': 'temporary', 'enabled': False,
+                    'cronExpression': None, 'lastRunAt': 123, 'lastRunStatus': 'succeeded'}])
+                result = self.report()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(r['action'] == 'delete_completed_one_shot' for r in json.loads(result.stdout)['tasks']))
+
+    def test_report_detects_leftover_headless_registration_after_manifest_removal(self):
+        settings = self.repo / 'ops/headless-tasks/tasks.json'
+        settings.write_text(json.dumps({'timezone': 'America/Chicago', 'tasks': {}}))
+        self.row['enabled'] = True
+        self.write_snapshot()
+        agents = self.home / 'Library/LaunchAgents'
+        agents.mkdir(parents=True)
+        (agents / 'com.carr.headless.test-task.plist').touch()
+        result = self.report()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['tasks'][0]['action'], 'duplicate_registration')
+
+    def test_report_includes_orphan_headless_registration(self):
+        agents = self.home / 'Library/LaunchAgents'
+        agents.mkdir(parents=True)
+        (agents / 'com.carr.headless.orphan.plist').touch()
+        result = self.report()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        orphan = next(r for r in json.loads(result.stdout)['tasks'] if r['task_id'] == 'orphan')
+        self.assertEqual(orphan['action'], 'orphan_headless_registration')
 
     def test_remaining_registration_set_uses_reviewed_crons(self):
         tasks = json.loads((REPO / 'ops/headless-tasks/tasks.json').read_text())['tasks']
