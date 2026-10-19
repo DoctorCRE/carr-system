@@ -265,8 +265,9 @@ runpy.run_path(sys.argv[0], run_name='__main__')
         import io
         with patch.object(sys, "argv", [str(ROOT / "hooks/worktree-self-plumb.py")]), \
                 patch.object(sys, "stdin", io.StringIO("{}")), \
-                patch.object(hook, "resolve_cwd", side_effect=ValueError("fixture boot error")):
+                patch.object(hook, "resolve_cwd", side_effect=ValueError("fixture boot error")) as resolve:
             self.assertEqual(hook.main(), 0)
+        resolve.assert_called_once()
 
     def test_contended_cli_defers_without_failure_or_replacing_receipts(self):
         import contextlib

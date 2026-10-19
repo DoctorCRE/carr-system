@@ -404,10 +404,7 @@ def main():
         except ImportError:
             pass  # an unavailable optional probe retains ordinary processing
     if "--reap" in sys.argv[1:]:
-        try:
-            return reap_main(sys.argv[1:])
-        except Exception:
-            return 0
+        return reap_main(sys.argv[1:])
     return run(decide, invalid_event={})
 
 
