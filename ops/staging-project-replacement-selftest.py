@@ -332,14 +332,27 @@ def migration_failure(stdout, stderr):
             environ={"PATH": "/bin"})
     except ctl.ReplacementRefusal as exc:
         message = str(exc)
-        assert secret not in message and owner.value not in message
+        for value in (secret, owner.value, ctl.urlsplit(owner.value).password,
+                      owner.scope.endpoint_host, "invented-row-1913"):
+            assert value and value not in message
         return message
     raise AssertionError("failed migration was accepted")
 
 diagnostic_stdout = f"applying {future_filename} ... "
-diagnostic_stderr = f"psycopg.errors.DuplicateTable: {secret} {owner.value}"
+diagnostic_stderr = f"psycopg.errors.DuplicateTable: {secret} {owner.value} invented-row-1913"
 assert f"migration={future_filename}; error_class=DuplicateTable" in migration_failure(
     diagnostic_stdout, diagnostic_stderr)
+for detail in ("CONTEXT", "DETAIL", "HINT"):
+    assert f"migration={future_filename}; error_class=RaiseException" in migration_failure(
+        diagnostic_stdout,
+        f"psycopg.errors.RaiseException: {secret} {owner.value}\n{detail}: invented-row-1913")
+assert f"migration={future_filename}; error_class=MigrationError" in migration_failure(
+    diagnostic_stdout, f"ERROR: {secret} {owner.value}")
+assert f"migration={future_filename}; error_class=MigrationError" in migration_failure(
+    diagnostic_stdout, "")
+assert f"migration={future_filename}; error_class=QueryCanceled" in migration_failure(
+    diagnostic_stdout,
+    f"psycopg.errors.QueryCanceled:\nERROR: {future_filename} exceeded statement_timeout\n{secret}")
 assert "migration=not_started; error_class=TypeError" in migration_failure(
     "", f"TypeError: {secret} {owner.value}")
 assert "migration=not_started; error_class=OperationalError" in migration_failure(

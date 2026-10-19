@@ -453,6 +453,9 @@ create table if not exists schema_migrations (
 
 
 def fail(msg: str) -> NoReturn:
+    error_type = sys.exc_info()[0]
+    if error_type is not None:
+        print(f"{error_type.__module__}.{error_type.__name__}:", file=sys.stderr)
     print(f"ERROR: {msg}", file=sys.stderr)
     sys.exit(1)
 

@@ -370,16 +370,19 @@ def apply_candidate_migrations(owner: SecretDsn, source: SourceContract, *, run:
                    "--through", highest],
                   run=run, env=child, timeout=3600)
     label = "migration reconstruction"
-    if result.returncode and psycopg is not None:
+    if result.returncode:
         names = re.findall(r"^applying ([^\s]+) \.\.\.", str(result.stdout or ""), re.M)
+        migration = 'not_started' if not names else (
+            names[-1] if names[-1] in source.manifest["migration_ledger"] else 'unknown')
+        error_name = 'MigrationError'
         classes = re.findall(r"^(psycopg(?:\.errors)?\.)?([A-Za-z]+):", str(result.stderr or ""), re.M)
-        if classes and (not names or names[-1] in source.manifest["migration_ledger"]):
-            module, name = classes[-1]
-            error_class = getattr(psycopg.errors, name, None) if module else None
+        for module, name in reversed(classes):
+            error_class = getattr(psycopg.errors, name, None) if module and psycopg is not None else None
             if (isinstance(error_class, type) and issubclass(error_class, psycopg.Error)) \
                     or (not module and name in ('ImportError', 'ModuleNotFoundError', 'SyntaxError', 'TypeError')):
-                migration = names[-1] if names else 'not_started'
-                label += f"; migration={migration}; error_class={name}"
+                error_name = name
+                break
+        label += f"; migration={migration}; error_class={error_name}"
     _success(result, label)
 
 
