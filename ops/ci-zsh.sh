@@ -27,18 +27,28 @@ from urllib.parse import unquote
 signal.alarm(60)
 root = Path(sys.argv[1])
 private, cache, phase = Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
+metadata_unavailable = False
 for archive in root.glob("*.deb"):
     match = re.fullmatch(r"([a-z0-9][a-z0-9+.-]*)_([^_]+)_([a-z0-9][a-z0-9-]*)\.deb", archive.name)
     verified = False
-    if match and archive.is_file() and not archive.is_symlink():
+    if match and archive.is_file() and not archive.is_symlink() and not metadata_unavailable:
         package, version, architecture = match.groups()
-        metadata = subprocess.run(["apt-cache", "show", "--no-all-versions", package + ":" + architecture],
-                                  capture_output=True, text=True, timeout=30)
-        if metadata.returncode not in (0, 100):
-            metadata.check_returncode()
+        try:
+            metadata = subprocess.run(["apt-cache", "show", "--no-all-versions", package + ":" + architecture],
+                                      capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            if phase == "install":
+                sys.exit("Refusing to install zsh: archive metadata verification timed out")
+            metadata_unavailable = True
+            metadata_text = ""
+            print("Ignoring cached zsh archives: metadata verification timed out", file=sys.stderr)
+        else:
+            if metadata.returncode not in (0, 100):
+                metadata.check_returncode()
+            metadata_text = metadata.stdout
         content = archive.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
-        for paragraph in metadata.stdout.split("\n\n"):
+        for paragraph in metadata_text.split("\n\n"):
             fields = dict(line.split(": ", 1) for line in paragraph.splitlines() if ": " in line)
             if (fields.get("Package") == package and fields.get("Version") == unquote(version)
                     and fields.get("Architecture") == architecture and fields.get("SHA256") == digest):
