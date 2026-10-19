@@ -276,6 +276,23 @@ def test_dirty_tree_refuses():
     print("PASS  dirty tree refuses, names the file, destroys nothing")
 
 
+def test_landed_residue_refuses_without_restoring():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        path = Path(b, "f.txt")
+        path.write_text("base\nnewer\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "landed upstream: f.txt" in r.stdout, r.stdout
+        assert path.read_text() == "base\nnewer\n", "landed residue was discarded"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  landed residue is reported and refused without restoring files")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -733,6 +750,7 @@ def main():
         print(f"fleet-sync-selftest: {SCRIPT} missing", file=sys.stderr)
         return 1
     test_dirty_tree_refuses()
+    test_landed_residue_refuses_without_restoring()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
