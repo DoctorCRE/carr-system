@@ -96,7 +96,7 @@ class Recovery(unittest.TestCase):
             elif "exists" in str(statement):
                 self.row = (params[0] in self.fixture.passwords,)
             elif "pg_authid" in str(statement):
-                self.row = (False,)
+                self.row = (False,) if params[0] in self.fixture.passwords else None
 
         def fetchone(self):
             return self.row
@@ -118,9 +118,8 @@ class Recovery(unittest.TestCase):
             self.rollback()
 
     def apply(self, owner, profile, _grants, password, *, rotate=False, commit=True, **_kwargs):
-        self.assertTrue(rotate)
+        self.assertEqual(rotate, profile.login_role in self.passwords)
         self.assertFalse(commit)
-        self.assertIn(profile.login_role, self.passwords)
         owner.pending[profile.login_role] = password
         self.changes.append((profile.login_role, password))
 
@@ -255,11 +254,16 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.changes, [])
         self.assertEqual(self.bulk_calls, [])
 
-    def test_missing_database_role_still_refuses_instead_of_deleting_binding(self):
+    def test_live_authority_binding_with_missing_role_creates_registered_login(self):
         del self.passwords["carr_authority_joe"]
-        with self.assertRaises(provision.ProvisioningRefusal):
-            self.prepare()
-        self.assertEqual(self.bulk_calls, [])
+        values, outcomes = self.prepare()
+        authority = values["CARR_DB_AUTHORITY_JOE_URL"]
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], authority)
+        self.assertEqual(urlsplit(authority).password, self.passwords["carr_authority_joe"])
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertTrue(self.file_profile("authority_joe").paths.final.is_file())
+        self.assertEqual(self.prepare()[0], values)
+        self.assertEqual(len(self.changes), 1)
 
 
 class InventoryCrash(unittest.TestCase):
