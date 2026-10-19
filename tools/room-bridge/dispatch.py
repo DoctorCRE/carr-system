@@ -222,21 +222,26 @@ def finish_skill_receipt(row):
     return value
 
 
+def _receipt_job(results_path, dispatch_id):
+    row = None
+    for path in (Path(results_path), _skill_ledger(results_path)):
+        if not path.exists():
+            continue
+        with path.open() as handle:
+            for line in handle:
+                try:
+                    candidate = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if dispatch_id and candidate.get('msg_id') == dispatch_id:
+                    row = candidate
+    return row
+
+
 def finish_pending_skill_receipt(pending, result_text, log_path, *, results_path=None):
     results_path = Path(results_path or DEFAULT_RESULTS)
-    if not results_path.exists():
-        return
-    dispatch_id = pending.get('dispatch_msg_id')
-    row = None
-    with results_path.open() as handle:
-        for line in handle:
-            try:
-                candidate = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if dispatch_id and candidate.get('msg_id') == dispatch_id:
-                row = candidate
-    if not row or row.get('record_kind') == 'skill-receipt':
+    row = _receipt_job(results_path, pending.get('dispatch_msg_id'))
+    if not row:
         return
     sid = pending.get('session_id') or row.get('session_id')
     if not sid and Path(log_path).exists():
@@ -251,6 +256,12 @@ def finish_pending_skill_receipt(pending, result_text, log_path, *, results_path
                     sid = event.get('session_id')
                     break
     completed = {**row, 'status': 'completed', 'session_id': sid, 'result': result_text}
+    if not completed.get('completed_at'):
+        runtime = 'codex' if completed.get('kind', '').startswith('codex') else 'claude'
+        path = skill_receipts.session_path(sid, runtime)
+        completed['completed_at'] = (skill_receipts.completion_time(
+            path, since=row.get('dispatched_at'), result=result_text) if path else None)
+    _record(_skill_ledger(results_path), {**completed, 'record_kind': 'skill-receipt'})
     try:
         completed['skill_receipt'] = finish_skill_receipt(completed)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
@@ -1158,8 +1169,9 @@ def main(argv: list[str]) -> int:
             print(json.dumps({'desk': a.name, 'inventory': inventory}))
             return 0
         if a.cmd == 'receipt':
-            receipt_rows = [json.loads(line) for line in results.read_text().splitlines() if line.strip()]
-            row = next(row for row in reversed(receipt_rows) if row.get('msg_id') == a.dispatch_id)
+            row = _receipt_job(results, a.dispatch_id)
+            if row is None:
+                raise DeskError('skill_receipt_unavailable', 'dispatch result unavailable')
             if a.session_id:
                 row = {**row, 'session_id': a.session_id, 'status': 'completed',
                        'result': a.pr or row.get('result', '')}

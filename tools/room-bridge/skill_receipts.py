@@ -172,6 +172,36 @@ def scan(path, *, since=None, until=None):
     return {'available': sorted(available), 'opened': sorted(opened)}
 
 
+def completion_time(path, *, since, result):
+    cutoff = _stamp(since)
+    if cutoff is None or not isinstance(result, str) or not result.strip():
+        return None
+    with Path(path).open(encoding='utf-8') as handle:
+        for line in handle:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            stamp = _stamp(row.get('timestamp'))
+            if stamp is None or stamp < cutoff:
+                continue
+            message = row.get('message') if row.get('type') == 'assistant' else row.get('payload')
+            if not isinstance(message, dict):
+                continue
+            terminal = (row.get('type') == 'assistant' and message.get('stop_reason') == 'end_turn'
+                        or message.get('role') == 'assistant' and message.get('channel') == 'final')
+            content = message.get('content')
+            if not terminal or not isinstance(content, list):
+                continue
+            text = '\n'.join(block['text'] for block in content if isinstance(block, dict)
+                             and block.get('type') in ('text', 'output_text') and isinstance(block.get('text'), str))
+            if text.strip() == result.strip():
+                return row['timestamp']
+    return None
+
+
 def session_path(session_id, runtime, *, home=None):
     if not re.fullmatch(r'[a-fA-F0-9-]{36}', session_id or ''):
         return None
