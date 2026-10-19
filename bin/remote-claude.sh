@@ -1,5 +1,5 @@
 #!/bin/bash
-# Dispatch stdin to a registered Model Room desk, with the ordinary receipt.
+# Enqueue stdin for a registered Model Room desk and return its durable queued receipt.
 set -euo pipefail
 
 if [ $# -ne 1 ] || [[ "$1" == -* ]]; then
