@@ -562,6 +562,19 @@ class GitFetchDiagnostics(Base):
                  for path in pipe.store.root.rglob("*") if path.is_file()}
         self.assertEqual(after, before)
 
+    def test_fetch_log_redacts_username_only_url_userinfo(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://opaque-fixture-access-token@github.com/example/app.git/"
+        error = f"fatal: unable to access '{url}': Authentication failed\n"
+        result = subprocess.CompletedProcess([], 128, b"", error.encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn("opaque-fixture-access-token", log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+        self.assertIn("Authentication failed", log)
+
 
 class WorkerIdentityReconciliation(Base):
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
