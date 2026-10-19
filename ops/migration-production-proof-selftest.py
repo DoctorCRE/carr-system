@@ -429,7 +429,7 @@ create table public.schema_migrations (filename text primary key, sha256 text);
             root = Path(directory)
             (root / 'tools').mkdir()
             (root / 'migrations').mkdir()
-            for name in ['migrate.py', 'migration_baseline.py', 'migration_number_contract.py', 'migration_0882.py']:
+            for name in ['migrate.py', 'migration_baseline.py', 'migration_number_contract.py']:
                 shutil.copyfile(ROOT / 'tools' / name, root / 'tools' / name)
             scripts = {name: 'select 1;' for names in FROZEN_COLLISIONS.values() for name in names}
             scripts.update({'0900_base.sql': 'create table public.example (id integer);',
