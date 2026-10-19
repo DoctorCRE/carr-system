@@ -2099,6 +2099,7 @@ class HealthGate(Base):
         target = self.fx.commit({"mcp-server/src/a.js": "1"})
         writer = self.fx.tmp / "unrelated-writer"
         git(self.fx.tmp, "clone", "-q", "--branch", "main", str(self.fx.origin), str(writer))
+        git(writer, "config", "user.useConfigOnly", "true")
         live = {"sha": self.fx.base}
         fx = self.fx
 
