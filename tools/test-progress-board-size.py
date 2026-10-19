@@ -66,6 +66,39 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def test_projection_preserves_custom_waits_and_stage_time_precision_and_fallbacks(self):
+        utc = "2026-10-18T12:34:56.123456+00:00"
+        offset = "2026-10-18T18:04:56.123456+05:30"
+        tasks = {
+            "missing-history": {"title": "Missing history", "status": "running", "stage": "build",
+                                "updated_at": utc, "stage_entered_at": utc,
+                                "release_wait": "Wait for the operator's custom delivery check."},
+            "offset-history": {"title": "Non-UTC history", "status": "running", "stage": "build",
+                               "updated_at": offset, "stage_entered_at": offset,
+                               "stage_history": [{"stage": "build", "entered_at": offset}]},
+            "updated-fallback": {"title": "Updated fallback", "status": "queued", "stage": "queued", "updated_at": utc},
+            "explicit-only": {"title": "Explicit stage time", "status": "queued", "stage": "queued", "stage_entered_at": utc},
+        }
+        state = {"project": "fixture", "tasks": tasks}
+        before = copy.deepcopy(state)
+
+        snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
+
+        self.assertEqual(snapshot["schema"], "carr-progress-board.v2")
+        self.assertNotIn("task_defaults", snapshot)
+        cards = snapshot["tasks"]
+        self.assertEqual(cards["missing-history"]["release_wait"], tasks["missing-history"]["release_wait"])
+        for task_id in ("missing-history", "offset-history", "updated-fallback"):
+            with self.subTest(task_id=task_id):
+                card = cards[task_id]
+                self.assertEqual(len(card["stage_history"]), 1)
+                self.assertEqual(datetime.fromisoformat(board.stage_entered_at(card)), datetime.fromisoformat(utc))
+                self.assertNotIn("stage_entered_at", card)
+        self.assertEqual(cards["offset-history"]["updated_at"], offset)
+        self.assertEqual(cards["offset-history"]["stage_history"][0]["entered_at"], offset)
+        self.assertEqual(datetime.fromisoformat(cards["explicit-only"]["stage_entered_at"]), datetime.fromisoformat(utc))
+        self.assertEqual(state, before)
+
     def test_consumer_proof_backlog_fits_without_losing_open_cards_or_stage_events(self):
         tasks = {}
         expected_histories = {}
@@ -97,12 +130,23 @@ class SnapshotSizeTests(unittest.TestCase):
                 expected_histories[f"task-{n}"].append({"stage": "review", "entered_at": task["updated_at"]})
         state = {"project": "carr-v5", "tasks": tasks}
         before = copy.deepcopy(state)
+        costs = {"state": "ready", "providers": [
+            {"provider": f"synthetic-{provider}", "daily": [
+                {"day": f"2026-10-{day:02d}", "usd": 1.25,
+                 "drivers": {f"synthetic-driver-{driver:02d}": 0.05 for driver in range(16)}}
+                for day in range(1, 32)]}
+            for provider in range(3)]}
 
-        snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
+        snapshot = board.board_snapshot(state, costs=costs)
 
         self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_BUDGET)
+        self.assertEqual(snapshot["schema"], "carr-progress-board.v3")
+        self.assertTrue(snapshot["task_defaults"])
+        self.assertNotIn("summary", snapshot["task_defaults"])
+        self.assertEqual(snapshot["costs"], costs)
         self.assertTrue({f"task-{n}" for n in range(310)} <= snapshot["tasks"].keys())
         for task_id, card in snapshot["tasks"].items():
+            card = {**snapshot.get("task_defaults", {}), **card}
             task = tasks[task_id]
             with self.subTest(task_id=task_id):
                 for field in ("title", "summary", "executor", "provider", "model", "effort", "repo", "pr", "pr_head", "pr_checks", "pr_url"):
@@ -150,14 +194,15 @@ class SnapshotSizeTests(unittest.TestCase):
         self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_LIMIT * 9 // 10)
         self.assertTrue(set(f"task-{n}" for n in range(337)) <= snapshot["tasks"].keys())
         for n in range(337):
-            card = snapshot["tasks"][f"task-{n}"]
+            card = {**snapshot.get("task_defaults", {}), **snapshot["tasks"][f"task-{n}"]}
             self.assertEqual(card["title"], tasks[f"task-{n}"]["title"])
             self.assertEqual(card["next_action"], tasks[f"task-{n}"]["next_action"])
             self.assertEqual(card["stage_history"], tasks[f"task-{n}"]["stage_history"])
             self.assertEqual(card["pr_head"], tasks[f"task-{n}"]["pr_head"])
             self.assertEqual(card["pr_checks"], tasks[f"task-{n}"]["pr_checks"])
-        self.assertTrue(snapshot["tasks"]["task-0"]["blocked_reason"].startswith("GitHub read failed:"))
-        self.assertTrue(snapshot["tasks"]["task-0"]["blocked_reason"].endswith("diagnostic line\n"))
+        diagnostic = {**snapshot.get("task_defaults", {}), **snapshot["tasks"]["task-0"]}
+        self.assertTrue(diagnostic["blocked_reason"].startswith("GitHub read failed:"))
+        self.assertTrue(diagnostic["blocked_reason"].endswith("diagnostic line\n"))
         self.assertNotIn("note", snapshot["tasks"]["task-0"])
         self.assertEqual(state, before, "publishing must preserve full local diagnostics")
 
