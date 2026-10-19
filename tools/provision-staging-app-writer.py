@@ -682,15 +682,24 @@ def recover_live_rollback_credentials(
 ) -> list[dict[str, str]]:
     old = binding.old
     path = replacement_credential_root(binding.target.candidate_operation_id) / "prior-worker-credential-recovery.json"
-    receipt = (json.loads(credential._secure_read(path))
-               if credential._safe_lstat(path) is not None else {"identity": identity, "profiles": {}})
-    if (not isinstance(receipt, dict) or set(receipt) != {"identity", "profiles"}
+    exists = credential._safe_lstat(path) is not None
+    receipt = (json.loads(credential._secure_read(path)) if exists
+               else {"identity": identity, "profiles": {}, "protected_names": sorted(protected_names)})
+    if (not isinstance(receipt, dict) or set(receipt) != {"identity", "profiles", "protected_names"}
             or receipt["identity"] != identity or not isinstance(receipt["profiles"], dict)
-            or not set(receipt["profiles"]) <= {p.label for p in PROFILES}):
+            or not set(receipt["profiles"]) <= {p.label for p in PROFILES}
+            or not isinstance(receipt["protected_names"], list)
+            or not all(isinstance(name, str) for name in receipt["protected_names"])
+            or len(receipt["protected_names"]) != len(set(receipt["protected_names"]))
+            or not set(receipt["protected_names"]) <= set(WORKER_DATABASE_SECRET_NAMES)):
         raise ProvisioningRefusal("staging rollback recovery receipt identity disagrees")
     records = receipt["profiles"]
     root = credential.profile("reader").paths.final.parent
     with credential.exclusive_lock(root / ".staging-prior-rollback-role.lock"):
+        protected_names |= set(receipt["protected_names"])
+        if not exists or receipt["protected_names"] != sorted(protected_names):
+            receipt["protected_names"] = sorted(protected_names)
+            save_private_json(path, receipt)
         for profile in PROFILES:
             file_profile = credential.profile(profile.label)
             if (profile.login_role != file_profile.role_name
