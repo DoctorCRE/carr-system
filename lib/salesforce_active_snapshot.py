@@ -72,6 +72,9 @@ def build_plan(source, board, *, expected_count, bindings):
                 continue
         if not matches:
             matches = [d for d in board['deals'] if norm(d['name']) == norm(row['name'])]
+            if matches and not binding.get('client_ref'):
+                item['reason'] = 'reviewed_client_binding_required'
+                continue
         if len(matches) > 1 or (matches and matches[0].get('salesforce_id') and
                                (sfid(matches[0]['salesforce_id']) != sfid(sid) if sid else not matches[0]['salesforce_id'].endswith(key))):
             item['reason'] = 'ambiguous_or_conflicting_identity'
@@ -133,7 +136,7 @@ def build_plan(source, board, *, expected_count, bindings):
             item.update(kind='held', reason='market_agent_requires_guarded_contract')
         if keys[item['source_key']] > 1 or targets[(item.get('prior') or {}).get('id')] > 1 or (item['kind'] == 'create' and names[norm(item['name'])] > 1):
             item.update(kind='held', reason='duplicate_source_or_target')
-    result = {'schema': 'salesforce-active-snapshot.v2', 'source_digest': fingerprint(source),
+    result = {'schema': 'salesforce-active-snapshot.v3', 'source_digest': fingerprint(source),
               'board_digest': fingerprint(board), 'items': items,
               'counts': {'source': len(rows), **{kind: sum(i['kind'] == kind for i in items)
                          for kind in ('create', 'update', 'unchanged', 'held')},
@@ -159,7 +162,7 @@ def apply_plan(plan, call_verb, journal_path):
     import os
     import uuid
 
-    if plan.get('schema') != 'salesforce-active-snapshot.v2' or plan.get('plan_digest') != fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'}):
+    if plan.get('schema') != 'salesforce-active-snapshot.v3' or plan.get('plan_digest') != fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'}):
         raise ValueError('plan_changed_run_dry_run_again')
     if journal_path.exists():
         raise ValueError('attempt_already_recorded_reconcile_receipts')

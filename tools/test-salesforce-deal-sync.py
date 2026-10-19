@@ -102,6 +102,25 @@ class SalesforceSyncTests(unittest.TestCase):
         p = self.plan("006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n",
                       deals=[{"id": "d1", "name": "Example expansion", "client_name": "Other Practice", "base_version": 1}])
         self.assertEqual(p["items"][0]["kind"], "held")
+        records = RecordLayer([{"id": "d1", "name": "Example expansion", "client_name": "Other Practice", "base_version": 1}])
+        with tempfile.TemporaryDirectory() as folder:
+            self.assertEqual(sync.apply_plan(p, records, Path(folder) / 'receipts'), {'verified': 0, 'held': 1})
+        self.assertFalse(any(v != 'read-deal-reconciliation' for v, _ in records.calls))
+
+    def test_full_id_csv_cannot_claim_a_same_name_deal_with_unresolved_client(self):
+        for client_name in (None, '', '   '):
+            with self.subTest(client_name=client_name):
+                deal = {'id': 'd1', 'name': 'Example office', 'client_name': client_name,
+                        'salesforce_id': None, 'phase': 'research', 'owner': 'dell', 'base_version': 1}
+                plan = self.plan('006000000000001AAA,Example office,Example Practice,Legal,Dell,2026-12-01\n',
+                                 deals=[deal])
+                records = RecordLayer([deal])
+                with tempfile.TemporaryDirectory() as folder:
+                    result = sync.apply_plan(plan, records, Path(folder) / 'receipts')
+                self.assertEqual(result, {'verified': 0, 'held': 1})
+                self.assertFalse(any(v != 'read-deal-reconciliation' for v, _ in records.calls))
+                self.assertIsNone(records.deals[0]['salesforce_id'])
+                self.assertEqual(records.deals[0]['phase'], 'research')
 
     def test_ambiguous_or_conflicting_identity_is_held(self):
         row = "006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n"
@@ -188,11 +207,12 @@ class SalesforceSyncTests(unittest.TestCase):
     def test_old_company_matching_plans_require_a_new_dry_run(self):
         plan = self.plan("006000000000001,Example office,Example Practice,Legal,Dell,2026-12-01\n",
                          clients=[{"ref": "C-001", "name": "Example Practice"}])
-        plan['schema'] = 'salesforce-deal-sync.v1'
-        plan['plan_digest'] = sync.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
-        with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
-            sync.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
-                            Path(folder) / 'receipts')
+        for version in ('salesforce-deal-sync.v1', 'salesforce-deal-sync.v2'):
+            plan['schema'] = version
+            plan['plan_digest'] = sync.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
+            with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
+                sync.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
+                                Path(folder) / 'receipts')
 
     def test_stale_or_edited_plan_performs_no_writes(self):
         p = self.plan("006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n",

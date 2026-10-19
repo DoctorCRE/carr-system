@@ -18,7 +18,7 @@ class ActiveSnapshotTests(unittest.TestCase):
         board = {'deals': [{'id': 'd1', 'name': 'Example office', 'phase': 'research',
                            'owner': 'dell', 'operating_state': 'parked', 'client_ref': 'C-001',
                            'field_base': {'operating_state': {'id': 'event-1'}}}], 'accounts': []}
-        plan = active.build_plan(source, board, expected_count=1, bindings={})
+        plan = active.build_plan(source, board, expected_count=1, bindings={'00001AAA': {'client_ref': 'C-001'}})
         self.assertEqual(plan['counts'], {'source': 1, 'create': 0, 'update': 1, 'unpark': 1, 'unchanged': 0, 'held': 0})
         item = plan['items'][0]
         self.assertEqual(item['desired']['phase'], 'legal')
@@ -39,9 +39,9 @@ class ActiveSnapshotTests(unittest.TestCase):
 
     def test_outside_owner_on_a_team_deal_does_not_call_the_national_agent_contract(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Outside Agent|Example Practice\n'
-        board = {'deals': [{'id': 'd1', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
+        board = {'deals': [{'id': 'd1', 'client_ref': 'C-001', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
                            'operating_state': 'active', 'account_client_id': None}], 'accounts': []}
-        item = active.build_plan(source, board, expected_count=1, bindings={})['items'][0]
+        item = active.build_plan(source, board, expected_count=1, bindings={'00001AAA': {'client_ref': 'C-001'}})['items'][0]
         self.assertEqual(item['kind'], 'unchanged')
         self.assertNotIn('market_agent', item['desired'])
         self.assertEqual(item['source_owner'], 'Outside Agent')
@@ -55,13 +55,52 @@ class ActiveSnapshotTests(unittest.TestCase):
         self.assertEqual(item['kind'], 'held')
         self.assertEqual(item['reason'], 'client_conflict')
 
+    def test_full_id_only_binding_cannot_claim_a_same_name_deal_for_another_client(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
+        row = {'id': 'd1', 'name': 'Example office', 'client_ref': 'C-OTHER', 'client_name': 'Other Practice',
+               'phase': 'research', 'owner': 'dell', 'operating_state': 'active',
+               'salesforce_id': None, 'base_version': 1}
+        board = {'deals': [row], 'accounts': []}
+        writes = []
+        def record(verb, args):
+            if verb == 'deal-room-board':
+                return copy.deepcopy(board)
+            if verb in ('read-deal-reconciliation', 'get-deal-room'):
+                return copy.deepcopy(row)
+            writes.append(verb)
+            row.update(args['fields'])
+            return {'ok': True}
+        plan = active.build_plan(source, board, expected_count=1, bindings={
+            '00001AAA': {'salesforce_id': '006000000000001AAA'}})
+        with tempfile.TemporaryDirectory() as folder:
+            result = active.apply_plan(plan, record, Path(folder) / 'receipts')
+        self.assertEqual(result, {'verified': 0, 'held': 1})
+        self.assertEqual(writes, [])
+        self.assertIsNone(row['salesforce_id'])
+        self.assertEqual(row['phase'], 'research')
+
+    def test_name_fallback_requires_reviewed_client_resolution_in_every_binding_shape(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
+        for extra in ({}, {'salesforce_id': '006000000000001AAA'}, {'client_name': 'Example Practice'}):
+            for reviewed_ref in (None, 'C-001', 'C-OTHER'):
+                for actual_ref in (None, 'C-001'):
+                    with self.subTest(extra=extra, reviewed_ref=reviewed_ref, actual_ref=actual_ref):
+                        row = {'id': 'd1', 'name': 'Example office', 'client_ref': actual_ref,
+                               'client_name': 'Example Practice', 'phase': 'research', 'owner': 'dell',
+                               'operating_state': 'active'}
+                        binding = {**extra, 'client_ref': reviewed_ref}
+                        item = active.build_plan(source, {'deals': [row]}, expected_count=1,
+                                                 bindings={'00001AAA': binding})['items'][0]
+                        self.assertEqual(item['kind'], 'update' if reviewed_ref == actual_ref == 'C-001' else 'held')
+
     def test_missing_id_mapping_and_duplicate_targets_are_held(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Joe|Example Practice\n'
         self.assertEqual(active.build_plan(source, {'deals': [], 'accounts': []}, expected_count=1, bindings={})['counts']['held'], 1)
         board = {'deals': [{'id': 'd1', 'name': 'Example office', 'phase': 'legal', 'owner': 'joe',
-                            'operating_state': 'active', 'field_base': {}}], 'accounts': []}
+                            'operating_state': 'active', 'field_base': {}, 'client_ref': 'C-001'}], 'accounts': []}
         duplicated = source + source.splitlines()[1].replace('00001AAA', '00002AAA') + '\n'
-        self.assertEqual(active.build_plan(duplicated, board, expected_count=2, bindings={})['counts']['held'], 2)
+        bindings = {k: {'client_ref': 'C-001'} for k in ('00001AAA', '00002AAA')}
+        self.assertEqual(active.build_plan(duplicated, board, expected_count=2, bindings=bindings)['counts']['held'], 2)
 
     def test_ambiguous_intake_is_held_while_independent_records_continue(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n' + \
@@ -69,7 +108,8 @@ class ActiveSnapshotTests(unittest.TestCase):
         binding = {'00001AAA': {'salesforce_id': '006000000000001AAA',
             'intake': {'party': {'name': 'Example Practice', 'kind': 'org'}, 'client': {}}}}
         row = {'id': 'd2', 'name': 'Existing office', 'phase': 'research', 'owner': 'dell',
-               'operating_state': 'active', 'salesforce_id': None, 'base_version': 1}
+               'operating_state': 'active', 'salesforce_id': None, 'base_version': 1, 'client_ref': 'C-002'}
+        binding['00002AAA'] = {'client_ref': 'C-002'}
         board = {'deals': [row], 'accounts': []}
         writes = []
         def record(verb, args):
@@ -92,16 +132,16 @@ class ActiveSnapshotTests(unittest.TestCase):
 
     def test_market_agent_changes_are_held_without_an_atomic_guarded_contract(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Source Agent|Example Brand\n'
-        row = {'id': 'd1', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
+        row = {'id': 'd1', 'client_ref': 'C-001', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
                'operating_state': 'active', 'account_client_id': 'account-1', 'market_agent': 'Partner correction'}
-        plan = active.build_plan(source, {'deals': [row], 'accounts': []}, expected_count=1, bindings={})
+        plan = active.build_plan(source, {'deals': [row], 'accounts': []}, expected_count=1, bindings={'00001AAA': {'client_ref': 'C-001'}})
         self.assertEqual(plan['items'][0]['kind'], 'held')
         self.assertEqual(plan['items'][0]['reason'], 'market_agent_requires_guarded_contract')
         self.assertEqual(plan['counts']['update'], 0)
 
     def test_concurrent_market_agent_correction_is_preserved_and_not_reported_verified(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Source Agent|Example Brand\n'
-        row = {'id': 'd1', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
+        row = {'id': 'd1', 'client_ref': 'C-001', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
                'operating_state': 'active', 'account_client_id': 'account-1', 'market_agent': 'Source Agent',
                'salesforce_id': None, 'base_version': 1}
         board = {'deals': [row], 'accounts': []}
@@ -123,7 +163,7 @@ class ActiveSnapshotTests(unittest.TestCase):
                 row['market_agent'] = args['agent_name']
                 return {'ok': True}
             self.fail(verb)
-        plan = active.build_plan(source, board, expected_count=1, bindings={})
+        plan = active.build_plan(source, board, expected_count=1, bindings={'00001AAA': {'client_ref': 'C-001'}})
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'receipts'
             with self.assertRaises(ValueError):
@@ -135,11 +175,12 @@ class ActiveSnapshotTests(unittest.TestCase):
     def test_plans_from_before_the_safety_fix_require_a_new_dry_run(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
         plan = active.build_plan(source, {'deals': [], 'accounts': []}, expected_count=1, bindings={})
-        plan['schema'] = 'salesforce-active-snapshot.v1'
-        plan['plan_digest'] = active.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
-        with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
-            active.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
-                              Path(folder) / 'receipts')
+        for version in ('salesforce-active-snapshot.v1', 'salesforce-active-snapshot.v2'):
+            plan['schema'] = version
+            plan['plan_digest'] = active.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
+            with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
+                active.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
+                                  Path(folder) / 'receipts')
 
     def test_identity_and_terminal_races_refuse_before_changing_the_phase(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
@@ -172,7 +213,7 @@ class ActiveSnapshotTests(unittest.TestCase):
 
     def test_uncertain_write_leaves_pending_receipt_and_is_never_retried(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
-        row = {'id': 'd1', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
+        row = {'id': 'd1', 'client_ref': 'C-001', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
                'operating_state': 'active', 'salesforce_id': None, 'base_version': 1}
         board = {'deals': [row], 'accounts': []}
         attempts = []
@@ -183,7 +224,7 @@ class ActiveSnapshotTests(unittest.TestCase):
                 return copy.deepcopy(row)
             attempts.append(verb)
             raise TimeoutError('response lost')
-        plan = active.build_plan(source, board, expected_count=1, bindings={})
+        plan = active.build_plan(source, board, expected_count=1, bindings={'00001AAA': {'client_ref': 'C-001'}})
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'receipts'
             with self.assertRaises(TimeoutError):
@@ -273,10 +314,17 @@ class ActiveSnapshotTests(unittest.TestCase):
                 self.fail(verb)
             return {'ok': True}
         plan = active.build_plan(source, board, expected_count=1, bindings={})
+        from lib import salesforce_deal_sync as sync
+        import contextlib
+        import io
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / 'receipts.jsonl'
-            result = active.apply_plan(plan, record, path)
-            self.assertEqual(result['verified'], 1)
+            saved = Path(folder) / 'plan.json'
+            saved.write_text(json.dumps(plan))
+            path = saved.with_suffix('.receipts.jsonl')
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(sync.main(['--apply', str(saved)], record), 0)
+            self.assertEqual(json.loads(output.getvalue()), {'verified': 1, 'held': 0})
             self.assertEqual((row['phase'], row['owner'], row['operating_state']), ('legal', 'dell', 'active'))
             self.assertEqual(json.loads(path.read_text().splitlines()[-1])['status'], 'complete')
             with self.assertRaisesRegex(ValueError, 'attempt_already_recorded'):

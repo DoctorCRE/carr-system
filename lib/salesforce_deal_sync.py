@@ -115,9 +115,14 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
             item.update(kind="held", reason="ambiguous_or_conflicting_identity")
             continue
         match = matches[0] if matches else None
-        if match and not matched_by_id and match.get("client_name") and norm(match["client_name"]) != norm(row["client"]):
-            item.update(kind="held", reason="client_conflict")
-            continue
+        if match and not matched_by_id:
+            client_name = norm(match.get("client_name") or "")
+            if not client_name or not norm(row["client"]):
+                item.update(kind="held", reason="client_resolution_required")
+                continue
+            if client_name != norm(row["client"]):
+                item.update(kind="held", reason="client_conflict")
+                continue
         fields = {"phase": STAGES[stage], "salesforce_id": sid}
         if row["close_date"]:
             fields["sf_close_date_placeholder"] = row["close_date"]
@@ -148,7 +153,7 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
     for item in items:
         if source_ids[sfid(item["opportunity_id"])] > 1 or targets.get(item.get("deal"), 0) > 1 or (item["kind"] == "create" and new_names[norm(item["name"])] > 1):
             item.update(kind="held", reason="duplicate_source_or_target")
-    result = {"schema": "salesforce-deal-sync.v2", "as_of": as_of.isoformat(),
+    result = {"schema": "salesforce-deal-sync.v3", "as_of": as_of.isoformat(),
               "report_digest": fingerprint(report), "record_digest": fingerprint(sorted(deals, key=lambda d: d["id"])),
               "items": items, "counts": {"source": len(rows), **{kind: sum(i["kind"] == kind for i in items)
               for kind in ("create", "update", "unchanged", "held", "out_of_scope")}}}
@@ -164,7 +169,7 @@ def read_snapshot(call_verb):
 
 
 def apply_plan(plan, call_verb, journal_path):
-    if plan.get("schema") != "salesforce-deal-sync.v2" or plan.get("plan_digest") != fingerprint({k: v for k, v in plan.items() if k != "plan_digest"}):
+    if plan.get("schema") != "salesforce-deal-sync.v3" or plan.get("plan_digest") != fingerprint({k: v for k, v in plan.items() if k != "plan_digest"}):
         raise ValueError("plan_changed_run_dry_run_again")
     current = read_snapshot(call_verb)
     if plan["record_digest"] != fingerprint(sorted(current, key=lambda d: d["id"])):
@@ -268,7 +273,7 @@ def main(argv=None, call_verb=deployed_verb):
                 parser.error("--apply takes only a saved plan")
             from lib import salesforce_active_snapshot as active
             saved = json.loads(args.apply.read_text())
-            apply = active.apply_plan if saved.get("schema") == "salesforce-active-snapshot.v2" else apply_plan
+            apply = active.apply_plan if saved.get("schema") == "salesforce-active-snapshot.v3" else apply_plan
             result = apply(saved, call_verb, args.apply.with_suffix(".receipts.jsonl"))
             print(json.dumps(result, sort_keys=True))
             return 2 if result["held"] else 0
