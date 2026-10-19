@@ -126,7 +126,7 @@ def _codex_slot(env):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def _record(results_path: Path, row: dict) -> None:
@@ -152,11 +152,11 @@ def _skill_gh(endpoint, *, method='GET', data=None):
     return value
 
 
-def skill_observation(row, *, since=None):
+def skill_observation(row, *, since=None, until=None):
     runtime = 'codex' if row.get('kind', '').startswith('codex') else 'claude'
     sid = row.get('thread_id') or row.get('session_id')
     path = skill_receipts.session_path(sid, runtime)
-    return skill_receipts.scan(path, since=since) if path else None
+    return skill_receipts.scan(path, since=since, until=until) if path else None
 
 
 def desk_skill_inventory(name, entry, results_path):
@@ -194,7 +194,11 @@ def _skill_ledger(results_path):
 def finish_skill_receipt(row):
     if row.get('status') != 'completed':
         return None
-    observation = skill_observation(row, since=row.get('dispatched_at'))
+    since, until = row.get('dispatched_at'), row.get('completed_at')
+    if not since or not until:
+        raise ValueError('completed job has no persisted skill receipt window')
+    skill_receipts.validate_window(since, until)
+    observation = skill_observation(row, since=since, until=until)
     if observation is None:
         return None
     urls = set(re.findall(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)', row.get('result') or ''))
@@ -772,6 +776,8 @@ def dispatch(
     with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
+            if outcome['status'] == 'completed':
+                outcome = {**outcome, 'completed_at': _now()}
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
                     or 'selected model is at capacity' not in outcome.get('detail', '').lower()):

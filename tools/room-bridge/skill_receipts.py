@@ -113,12 +113,17 @@ def _stamp(value):
         return None
 
 
-def scan(path, *, since=None, until=None):
-    available, opened, pending = set(), set(), {}
+def validate_window(since, until):
     cutoff, end = _stamp(since), _stamp(until)
     if (since is not None and cutoff is None or until is not None and end is None
             or cutoff is not None and end is not None and cutoff > end):
         raise ValueError('invalid skill receipt window')
+    return cutoff, end
+
+
+def scan(path, *, since=None, until=None):
+    available, opened, pending = set(), set(), {}
+    cutoff, end = validate_window(since, until)
     with Path(path).open(encoding='utf-8') as handle:
         for line in handle:
             try:
