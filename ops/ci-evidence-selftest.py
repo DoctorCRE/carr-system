@@ -60,7 +60,7 @@ class HostedVerdict(unittest.TestCase):
         self.assertIn('unit: PASSED', summary)
         self.assertNotIn('INCOMPLETE', summary)
 
-    def test_current_attempt_cannot_inherit_previous_success(self):
+    def test_earlier_success_cannot_mask_failed_current_class(self):
         os.environ['GITHUB_RUN_ATTEMPT'] = '2'
         current = copy.deepcopy(self.jobs)
         for job in current:
@@ -72,6 +72,49 @@ class HostedVerdict(unittest.TestCase):
             return self.response(jobs)
 
         with patch('subprocess.run', side_effect=api), patch('time.sleep'):
+            self.assertEqual(evidence.hosted_verdict(), 1)
+        self.assertIn('migration: FAILED', self.summary.read_text())
+
+    def rerun_fixture(self):
+        fixture = json.loads((ROOT / 'test/fixtures/ci-single-job-rerun.json').read_text())
+        os.environ['GITHUB_RUN_ID'] = str(fixture['run_id'])
+        os.environ['GITHUB_RUN_ATTEMPT'] = str(fixture['run_attempt'])
+        return fixture
+
+    def test_observed_single_job_rerun_preserves_successful_classes(self):
+        fixture = self.rerun_fixture()
+        initial = {job['name']: job for job in fixture['attempt_1']['jobs']}
+        rerun = {job['name']: job for job in fixture['attempt_2']['jobs']}
+        for name in ('ops/ci.sh --strict --only migration',
+                     'ops/ci.sh --strict --only pushfloor unit types contract secret '
+                     'dependency binding artifact freshness'):
+            self.assertEqual(initial[name]['completed_at'], rerun[name]['completed_at'])
+        self.assertNotEqual(initial['ops/ci.sh --strict --only gates']['started_at'],
+                            rerun['ops/ci.sh --strict --only gates']['started_at'])
+        self.assertEqual(fixture['attempt_2'], fixture['latest'])
+        with patch('subprocess.run', return_value=self.response(fixture['attempt_2']['jobs'])):
+            self.assertEqual(evidence.hosted_verdict(), 0)
+        self.assertEqual(self.summary.read_text().count(': PASSED'), 11)
+
+    def test_rerun_failure_overrides_previously_successful_class(self):
+        fixture = self.rerun_fixture()
+        jobs = fixture['attempt_2']['jobs']
+        migration = next(job for job in jobs if job['name'].endswith('--only migration'))
+        migration['conclusion'] = 'failure'
+        with patch('subprocess.run', return_value=self.response(jobs)):
+            self.assertEqual(evidence.hosted_verdict(), 1)
+        self.assertIn('migration: FAILED', self.summary.read_text())
+
+    def test_pending_rerun_waits_instead_of_reusing_old_success(self):
+        fixture = self.rerun_fixture()
+        jobs = fixture['attempt_2']['jobs']
+        migration = next(job for job in jobs if job['name'].endswith('--only migration'))
+        migration.update(status='in_progress', conclusion=None)
+        failed = copy.deepcopy(jobs)
+        next(job for job in failed if job['name'].endswith('--only migration')).update(
+            status='completed', conclusion='failure')
+        with patch('subprocess.run', side_effect=[self.response(jobs), self.response(failed)]), \
+                patch('time.sleep'):
             self.assertEqual(evidence.hosted_verdict(), 1)
         self.assertIn('migration: FAILED', self.summary.read_text())
 
