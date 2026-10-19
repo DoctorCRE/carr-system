@@ -69,6 +69,7 @@
     {"id": "control-room-contracts", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "control-room/contracts/", "why": "Schemas and contracts."},
     {"id": "workspace-contracts", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "workspace/contracts/", "why": "Schemas and contracts."},
     {"id": "json-schemas", "tier": 2, "class": "adversarial", "match": "suffix", "pattern": ".schema.json", "why": "Schemas anywhere."},
+    {"id": "deal-room", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "dealroom/", "why": "Job Passport wire reader used by the evidence-activation proof."},
     {"id": "fill-engine", "tier": 2, "class": "adversarial", "match": "prefix", "pattern": "fill-engine/", "why": "Client-facing document fill."}
   ],
   "test_files": [

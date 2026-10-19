@@ -2934,10 +2934,10 @@ class ReleaseTarget(Base):
         self.assert_shipped(*self.ship(gh), f)
 
     def test_only_ignored_commits_since_the_release_ship_head_as_before(self):
-        # mcp-server/*.md is a release path AND canary-ignored: no canary runs,
+        # migrations/*.md is a release path AND canary-ignored: no canary runs,
         # and the verdict is the last released commit's own green run.
-        self.fx.commit({"mcp-server/a.md": "1"})
-        head = self.fx.commit({"mcp-server/b.md": "2"})
+        self.fx.commit({"migrations/a.md": "1"})
+        head = self.fx.commit({"migrations/b.md": "2"})
         gh = FakeGitHub(canary={self.fx.base: self.GREEN})
         self.assert_shipped(*self.ship(gh), head)
 

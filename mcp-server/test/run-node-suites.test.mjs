@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { suiteBatches } from "../run-tests.mjs";
 
 test("every Node suite runs exactly once without the retired browser shim", () => {
-  const files = ["z.test.js", "chrome-launch.test.mjs", "a.test.mjs", "future.test.js", "helper.mjs", "tour-feedback-browser.test.mjs", "future-browser.test.mjs"];
+  const files = ["z.test.js", "chrome-launch.test.mjs", "a.test.mjs", "future.test.js", "helper.mjs", "sample-browser.test.mjs", "future-browser.test.mjs"];
   const batches = suiteBatches(files);
   assert.deepEqual(batches[0], ["chrome-launch.test.mjs"]);
   assert.deepEqual(batches[1], ["future-browser.test.mjs"]);
-  assert.deepEqual(batches[2], ["tour-feedback-browser.test.mjs"]);
+  assert.deepEqual(batches[2], ["sample-browser.test.mjs"]);
   assert.deepEqual(batches[3], ["a.test.mjs", "future.test.js", "z.test.js"]);
   const all = batches.flat();
   assert.equal(new Set(all).size, all.length);
