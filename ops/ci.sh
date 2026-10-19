@@ -589,6 +589,13 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
   fi
 
   _mstep load
+  if ! run_quiet "$LOGDIR/migration-reconstruction.log" \
+       "$PY" ops/schema-reconstruction-selftest.py --postgres; then
+    tail -30 "$LOGDIR/migration-reconstruction.log" >&2
+    bad migration "snapshot reconstruction did not reach the exact source migration ledger"
+    return
+  fi
+  _mstep reconstruction
   if ! run_quiet "$LOGDIR/migration-production-proof-fixture.log" \
        "$PY" ops/migration-production-proof-selftest.py --postgres; then
     tail -30 "$LOGDIR/migration-production-proof-fixture.log" >&2

@@ -366,9 +366,24 @@ def apply_candidate_migrations(owner: SecretDsn, source: SourceContract, *, run:
                                environ: Mapping[str, str]) -> None:
     child = safe_environment(environ); child["DATABASE_URL"] = owner.value
     highest = validate_migration_ledger(source.manifest)
-    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "tools/migrate.py"), "--apply", "--yes",
+    result = _run([str(REPO / ".venv/bin/python"), str(REPO / "tools/migrate.py"), "--apply", "--yes",
                    "--through", highest],
-                  run=run, env=child, timeout=3600), "migration reconstruction")
+                  run=run, env=child, timeout=3600)
+    label = "migration reconstruction"
+    if result.returncode:
+        names = re.findall(r"^applying ([^\s]+) \.\.\.", str(result.stdout or ""), re.M)
+        migration = 'not_started' if not names else (
+            names[-1] if names[-1] in source.manifest["migration_ledger"] else 'unknown')
+        error_name = 'MigrationError'
+        classes = re.findall(r"^(psycopg(?:\.errors)?\.)?([A-Za-z]+):", str(result.stderr or ""), re.M)
+        for module, name in reversed(classes):
+            error_class = getattr(psycopg.errors, name, None) if module and psycopg is not None else None
+            if (isinstance(error_class, type) and issubclass(error_class, psycopg.Error)) \
+                    or (not module and name in ('ImportError', 'ModuleNotFoundError', 'SyntaxError', 'TypeError')):
+                error_name = name
+                break
+        label += f"; migration={migration}; error_class={error_name}"
+    _success(result, label)
 
 
 def install_fixtures(owner: SecretDsn, *, run: Run, environ: Mapping[str, str]) -> None:
@@ -388,8 +403,17 @@ def sync_control_plane(owner: SecretDsn, *, run: Run,
                   run=run, env=bootstrap_env, timeout=900), "control-plane sync")
     readback_env = safe_environment(environ)
     readback_env["DATABASE_URL"] = owner.value
-    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "ops/control-plane-registry-gate.py")],
-                  run=run, env=readback_env, timeout=900), "control-plane readback")
+    result = _run([str(REPO / ".venv/bin/python"), str(REPO / "ops/control-plane-registry-gate.py")],
+                  run=run, env=readback_env, timeout=900)
+    label = "control-plane readback"
+    if result.returncode:
+        # The gate names only manifest workflow keys and field names; keep that line, nothing else.
+        gate = re.findall(r"^control-plane-registry-gate FAILED: (.*)$", str(result.stderr or ""), re.M)
+        detail = re.sub(r"[^A-Za-z0-9_.:;=,'()\[\] -]", "", gate[-1])[:600] if gate else ""
+        secrets = (owner.value, unquote(urlsplit(owner.value).password or ""), owner.scope.endpoint_host)
+        label += f"; detail={detail}" if detail and not any(v and v in detail for v in secrets) \
+            else "; detail=unavailable"
+    _success(result, label)
 
 
 def candidate_reconstruction_state(owner: SecretDsn, source: SourceContract, *, connect: Any) -> str:

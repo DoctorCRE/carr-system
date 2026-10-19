@@ -195,36 +195,28 @@ def _cases(dsn: str) -> None:
     record(dsn, "sync-registry")
     # Candidate intake verifies every environment before opening the database,
     # so every abandonment fixture uses a real staging manifest rather than a
-    # synthetic shape that the release door must refuse. Each fixture uses a
-    # distinct repository revision so their immutable source evidence differs.
-    staging_manifests: dict[str, Path] = {}
-    staging_error = ""
+    # synthetic shape that the release door must refuse. Distinct ledger rows
+    # can share verified source; abandonment does not require valid ancestors.
     fixture_keys = ("rel-abandon-a", "rel-abandon-b", "rel-malformed", "rel-successor")
-    for offset, key in enumerate(fixture_keys, start=1):
-        staging_built = subprocess.run(
-            [sys.executable, str(REPO / "tools" / "release-manifest.py"),
-             "build", "--sha", f"HEAD~{offset}", "--environment", "staging",
-             "--performance-budget-ref", "runbook:worker-performance-v1",
-             "--performance-budget-ms", "1500",
-             "--recovery-strategy", "rollback",
-             "--rollback-plan-ref", "runbook:rollback-worker-v1"],
-            cwd=REPO, capture_output=True, text=True, timeout=300)
-        if staging_built.returncode != 0:
-            staging_error = (staging_built.stderr or staging_built.stdout).strip()[:160]
-            break
-        manifest_path = (Path(os.environ.get("TMPDIR", "/tmp")) /
-                         f"abandon-manifest-{offset}.json")
-        manifest_path.write_text(staging_built.stdout)
-        staging_manifests[key] = manifest_path
-    check("0. canonical staging source manifests build on distinct revisions",
-          not staging_error and len(staging_manifests) == len(fixture_keys),
-          staging_error)
-    if staging_error or len(staging_manifests) != len(fixture_keys):
+    staging_built = subprocess.run(
+        [sys.executable, str(REPO / "tools" / "release-manifest.py"),
+         "build", "--sha", "HEAD", "--environment", "staging",
+         "--performance-budget-ref", "runbook:worker-performance-v1",
+         "--performance-budget-ms", "1500",
+         "--recovery-strategy", "rollback",
+         "--rollback-plan-ref", "runbook:rollback-worker-v1"],
+        cwd=REPO, capture_output=True, text=True, timeout=300)
+    check("0. canonical staging source manifest builds",
+          staging_built.returncode == 0,
+          (staging_built.stderr or staging_built.stdout).strip()[:160])
+    if staging_built.returncode != 0:
         return
+    staging_mpath = Path(os.environ.get("TMPDIR", "/tmp")) / "abandon-staging-manifest.json"
+    staging_mpath.write_text(staging_built.stdout)
 
     for k in fixture_keys:
         record(dsn, "release", "candidate", "--key", k,
-               "--manifest", str(staging_manifests[k]),
+               "--manifest", str(staging_mpath),
                "--service", "carr-mcp", "--environment", "staging",
                "--test-evidence", "ref", "--security-evidence", "ref")
     # Production candidate intake now rebuilds the manifest before it opens a
