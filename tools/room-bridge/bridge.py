@@ -300,15 +300,9 @@ def probe_live(entry: dict) -> bool:
 
 
 class QueueCompletionPostFailed(Exception):
-    """A synchronous desk's FINAL completion post to the room failed.
+    """Contain start() callback failures to one desk.
 
-    Raised only by run_once's post_sync_completion hook, wrapping the bare
-    RuntimeError add_room_turn raises (verb_io.py's contract). It is a distinct
-    type, not a RuntimeError, so run_once's per-desk handler can contain exactly
-    this failure to its own desk while every OTHER RuntimeError — a
-    conversational delivery or handle_pending post failure — still aborts the
-    cycle before state is saved, so that turn is retried rather than recorded as
-    consumed (PR #1254 round 2 review, finding 2).
+    Pending-reply failures still abort before the bridge saves its checkpoint.
     """
 
 
@@ -332,30 +326,28 @@ def _post_completion_payload(completion: dict, *, add_room_turn, seat: str) -> N
     )
 
 
-def _post_queue_completion(terminal: dict, *, add_room_turn, seat: str) -> None:
-    """Post one queue task's bounded typed completion callback into the room.
-
-    Used by the async pending path (handle_pending), which already has a full
-    "terminal" dict ({"task_id": ..., "completion": ...}) in hand once
-    finish_pending returns. Synchronous desks without MCP tools post through
-    _post_completion_payload directly instead — see finish_pending_posted.
-    """
-    completion = terminal.get("completion")
-    if not isinstance(completion, dict):
-        raise queue_dispatch.QueueDispatchError("queue completion callback is absent")
-    _post_completion_payload(completion, add_room_turn=add_room_turn, seat=seat)
-
-
 def handle_pending(name: str, seat: str, state: dict, *, add_room_turn,
                     log_path: Path, pending_timeout_s: float,
                     scan=scan_for_result, now: str | None = None,
                     queue_executor: queue_dispatch.QueueDeskExecutor | None = None,
+                    completion_dir: Path | None = None,
                     inspect_background=claude_desktop_wire.inspect_session,
                     read_background_result=claude_desktop_wire.read_final_text,
                     handoff_background=claude_desktop_wire.handoff_to_desktop) -> dict | None:
     pending = state_mod.get_pending(state, name)
     if pending is None:
         return None
+
+    def post_completion(completion: dict) -> None:
+        _post_completion_payload(completion, add_room_turn=add_room_turn, seat=seat)
+
+    if pending.get("origin_kind") == "queue" and queue_executor is not None and completion_dir is not None:
+        recovered = queue_executor.resume_pending(
+            pending, post_completion=post_completion, completion_dir=completion_dir)
+        if recovered is not None:
+            state_mod.clear_pending(state, name)
+            return {"desk": name, **{key: value for key, value in recovered.items()
+                                     if key != "completion"}}
     result_text = None
     if pending.get("transport") == "claude-desktop":
         session_id = pending.get("session_id")
@@ -419,8 +411,8 @@ def handle_pending(name: str, seat: str, state: dict, *, add_room_turn,
         if pending.get("origin_kind") == "queue":
             if queue_executor is None:
                 return {"desk": name, "outcome": "queue_executor_unavailable"}
-            terminal = queue_executor.finish_pending(pending, result_text)
-            _post_queue_completion(terminal, add_room_turn=add_room_turn, seat=seat)
+            terminal = queue_executor.finish_pending_posted(
+                pending, result_text, post_completion=post_completion, completion_dir=completion_dir)
             state_mod.clear_pending(state, name)
             return {"desk": name, **{key: value for key, value in terminal.items()
                                      if key != "completion"}}
@@ -856,6 +848,7 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
                 pending_timeout_s=pending_timeout_s,
                 now=now_fn(),
                 queue_executor=queue_executor,
+                completion_dir=state_path.parent / (state_path.name + ".queue-completions"),
             )
             if pending_outcome:
                 delivered.append(pending_outcome)
@@ -895,7 +888,7 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
                     is_flash_local = entry.get("kind") == "flash-local"
                     publishes_sync_reply = entry.get("kind") in {"flash-local", "grok-cli"}
 
-                    def post_sync_completion(completion: dict) -> None:
+                    def post_queue_completion(completion: dict) -> None:
                         # Posted from INSIDE finish_pending_posted, only for a FINAL
                         # outcome and before Hermes is marked terminal — see that
                         # method's docstring for why a failed post must not lose the
@@ -917,7 +910,7 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
                         unavailable_since=state.get("queue_unavailable_since", {}),
                         include_reply=publishes_sync_reply,
                         retry_protocol_errors=is_flash_local,
-                        post_completion=post_sync_completion if publishes_sync_reply else None,
+                        post_completion=post_queue_completion,
                         completion_dir=state_path.parent / (state_path.name + ".queue-completions"),
                     )
                     queue_scan_complete = queue_scan_complete and bool(
@@ -1017,14 +1010,8 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
             # A queue outage says nothing about whether the named desk is live.
             registry_ext.stamp_heartbeat(name, live=live_by_desk.get(name, True), path=registry.path)
         except QueueCompletionPostFailed as e:
-            # ONLY a synchronous final completion post (post_sync_completion,
-            # above). Hermes was never marked terminal for it (finish_pending_posted
-            # posts BEFORE that mutation), so the claim just ages out and Hermes'
-            # own recovery returns the task to its retry phase. This must cost only
-            # this desk's cycle, not the whole bridge run. Any other RuntimeError
-            # (a conversational delivery, a handle_pending post) is deliberately
-            # NOT caught here: it aborts the cycle before save_state, so the turn
-            # it was carrying is retried rather than saved as consumed.
+            # The final receipt survives a lost post response or an expired
+            # claim. Pending and conversational failures still abort before save.
             if name in required_queue_desks:
                 queue_scan_complete = False
             errors.append({"desk": name, "error": "queue_completion_post_failed", "detail": str(e)[:500]})
