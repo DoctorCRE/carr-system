@@ -17,8 +17,8 @@ REPO = Path(__file__).resolve().parent.parent
 REQUIRED = {
     'claude': {'guard-unattended.py', 'record-home-gate.py', 'bash-write-gate.py',
                'write-effect-check.py', 'draft-export-gate.py',
-               'weekend-quiet-gate.py', 'costar-lane-gate.py'},
-    'codex': {'guard-unattended.py', 'record-home-gate.py'},
+               'weekend-quiet-gate.py', 'costar-lane-gate.py', 'github-burst-guard.py'},
+    'codex': {'guard-unattended.py', 'record-home-gate.py', 'github-burst-guard.py'},
 }
 
 HOOKS = REPO / "hooks"

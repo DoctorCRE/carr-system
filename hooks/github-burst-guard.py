@@ -11,6 +11,8 @@ lockout. Joe ordered a rule (74ddb23c, "never burst GitHub") and enforcement;
 this hook is the enforcement.
 
 WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
+  0. Direct PR merges and branch updates. Use tools/mq.sh and its repo lock.
+     Naming mq.sh beside a direct mutation does not exempt that mutation.
   1. A shell loop — for / while / until, or xargs / parallel — that runs `gh`
      with no `sleep N` (N >= 2) inside it. Allowed: the same loop with that
      sleep, which covers the `until gh ...; do sleep 30; done` poll; and a
@@ -88,6 +90,7 @@ allows the call and logs the reason to out/hook-guard.log.
 
 Fixtures: ops/github-burst-guard-selftest.py
 """
+import ast
 import fcntl
 import json
 import os
@@ -477,9 +480,43 @@ def pending_ticks(state, now):
             if isinstance(v, (int, float)) and now - v < TICK_PENDING_TTL}
 
 
+def merge_queue_reason(cmd):
+    source = inert_stripped(cmd).replace('\\\n', '')
+    scan = mask_quoted_data(source)
+    commands = re.compile(_CMD_START + _PREFIX + r"((?:[\w./-]+/)?(?:gh|curl|wget))\s+", re.M)
+    endpoint = re.compile(r"(?:^|/)pulls/[^/\s]+/(?:update-branch|merge)(?:[?\s]|$)")
+    calls = {(match.end(), os.path.basename(match.group(1))) for match in commands.finditer(scan)}
+    for _, segment, offset in fanout_segments(scan):
+        calls.update((offset + match.end(), 'gh') for match in GH_RE.finditer(segment))
+    for offset, program in sorted(calls):
+        segment = source[offset:statement_end(source, offset)]
+        try:
+            words = shlex.split(segment)
+        except ValueError:
+            words = segment.split()
+        args = iter(words)
+        words = []
+        for word in args:
+            if word in ('-R', '--repo', '--hostname'):
+                next(args, None)
+            elif not word.startswith(('--repo=', '--hostname=')):
+                words.append(word)
+        direct = program == 'gh' and words[:2] in (['pr', 'merge'], ['pr', 'update-branch'])
+        rest = any(endpoint.search(word.rstrip(')`')) for word in words)
+        if direct or rest:
+            return ('MERGE QUEUE GUARD: direct PR merges and branch updates race other '
+                    'runners and waste CI. Use tools/mq.sh PR... or '
+                    'tools/mq.sh --queue owner/repo queue-file log-file. '
+                    'tools/mq.sh holds the per-repository lock for every update and merge.')
+    return None
+
+
 def pre_verdict(cmd, now, key="-"):
     """Return a refusal reason, or None to allow. Notes when an allowed tick
     starts; only PostToolUse (observe_tick) stamps the window."""
+    reason = merge_queue_reason(cmd)
+    if reason:
+        return reason
     scan = mask_quoted_data(inert_stripped(cmd))
     has_gh = bool(gh_calls(scan))
     tick = runs_release_tick(scan)
@@ -676,7 +713,10 @@ def command_of(payload):
     if tool not in ("Bash", "exec_command", "functions.exec"):
         return None
     ti = payload.get("tool_input") or payload.get("toolInput") or {}
-    cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
+    cmd = (ti.get("command") or ti.get("cmd") or ti.get("code") or "") if isinstance(ti, dict) else ti
+    if tool == 'functions.exec' and isinstance(cmd, str) and 'exec_command' in cmd:
+        literals = re.findall(r'''\bcmd\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''', cmd)
+        cmd = '\n'.join(ast.literal_eval(literal) for literal in literals)
     return cmd if isinstance(cmd, str) and cmd else None
 
 

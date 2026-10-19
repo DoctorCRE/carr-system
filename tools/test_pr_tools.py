@@ -47,6 +47,7 @@ with (pathlib.Path(os.environ['PR_TOOL_FIXTURE']) / 'calls.jsonl').open('a') as 
 ''')
             sleep.chmod(0o755)
             env = {**os.environ, 'PATH': f'{root}:{os.environ["PATH"]}',
+                   'CARR_MQ_LOCK_ROOT': str(root / 'locks'),
                    'PR_TOOL_FIXTURE': tmp, 'PR_TOOL_UPDATE': str(update),
                    'PR_TOOL_MERGE': str(merge), 'PR_TOOL_BEHIND': str(behind), 'R': 'jbookout/carr-system'}
             result = subprocess.run(['bash', str(ROOT / 'tools' / tool), *args],
