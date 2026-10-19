@@ -96,7 +96,7 @@ class Recovery(unittest.TestCase):
             elif "exists" in str(statement):
                 self.row = (params[0] in self.fixture.passwords,)
             elif "pg_authid" in str(statement):
-                self.row = (False,)
+                self.row = (False,) if params[0] in self.fixture.passwords else None
 
         def fetchone(self):
             return self.row
@@ -118,9 +118,11 @@ class Recovery(unittest.TestCase):
             self.rollback()
 
     def apply(self, owner, profile, _grants, password, *, rotate=False, commit=True, **_kwargs):
-        self.assertTrue(rotate)
         self.assertFalse(commit)
-        self.assertIn(profile.login_role, self.passwords)
+        if rotate:
+            self.assertIn(profile.login_role, self.passwords)
+        else:
+            self.assertEqual(profile.label, "authority_joe")
         owner.pending[profile.login_role] = password
         self.changes.append((profile.login_role, password))
 
@@ -255,8 +257,20 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.changes, [])
         self.assertEqual(self.bulk_calls, [])
 
-    def test_missing_database_role_still_refuses_instead_of_deleting_binding(self):
+    def test_missing_old_authority_is_provisioned_before_candidate_cutover(self):
         del self.passwords["carr_authority_joe"]
+        values, outcomes = self.prepare()
+        authority = values["CARR_DB_AUTHORITY_JOE_URL"]
+        self.assertIsNotNone(authority)
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], authority)
+        self.assertEqual(urlsplit(authority).password, self.passwords["carr_authority_joe"])
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual(self.prepare()[0], values)
+        self.assertEqual(len(self.changes), 1)
+
+    def test_missing_reader_role_still_refuses_instead_of_deleting_binding(self):
+        del self.passwords["app_reader"]
+        self.file_profile("reader").paths.final.unlink()
         with self.assertRaises(provision.ProvisioningRefusal):
             self.prepare()
         self.assertEqual(self.bulk_calls, [])
