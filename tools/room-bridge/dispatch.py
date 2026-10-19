@@ -153,6 +153,8 @@ def _skill_gh(endpoint, *, method='GET', data=None):
 
 
 def skill_observation(row, *, since=None, until=None):
+    if row.get('kind') == 'claude-remote':
+        return None
     runtime = 'codex' if row.get('kind', '').startswith('codex') else 'claude'
     sid = row.get('thread_id') or row.get('session_id')
     path = skill_receipts.session_path(sid, runtime)
@@ -726,7 +728,8 @@ def dispatch(
     entry = registry.resolve(name)
     inventory = desk_skill_inventory(name, entry, results_path)
     try:
-        skill_receipts.require_skills(task, inventory)
+        if entry['kind'] != 'claude-remote':
+            skill_receipts.require_skills(task, inventory)
     except ValueError as exc:
         raise DeskError('skill_unavailable', str(exc)) from exc
     network_access = entry.get('network_access', False)
@@ -773,6 +776,9 @@ def dispatch(
             **({'session_id': inventory['session_id']} if inventory and inventory.get('session_id') else {}),
             **({key: entry[key] for key in ("family", "model", "effort")}
                if entry["kind"] in codex_models.CODEX_KINDS else {})}
+    if entry['kind'] == 'claude-remote':
+        base.update(skill_receipt_status='unverified',
+                    skill_receipt_error='remote skill inventory and transcript unavailable to local observer')
     declared_writes = write_ownership.declaration(original_task, writes)
     if declared_writes and provider_run is not None:
         raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')

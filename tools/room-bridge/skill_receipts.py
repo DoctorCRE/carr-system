@@ -1,4 +1,9 @@
-"""Session-local skill evidence. Never emit transcript text or tool output."""
+"""Session-local skill evidence. Never emit transcript text or tool output.
+
+Catch an honest-but-careless agent claiming a skill it never opened.
+Deliberate forgery, including replaced system tools, symlinks, or wrapper code
+that rewrites tool results, is outside this check's scope.
+"""
 from __future__ import annotations
 
 import ast
