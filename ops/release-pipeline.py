@@ -18,15 +18,18 @@ import dataclasses
 import datetime as dt
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
 import runpy
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -1364,7 +1367,20 @@ class Pipeline:
     def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
         url = lane_cfg["live_release_url"]
         try:
-            live = self.http(url)
+            for attempt in range(1, 3):
+                try:
+                    live = self.http(url)
+                    break
+                except (ConnectionError, TimeoutError, http.client.IncompleteRead,
+                        urllib.error.URLError, socket.gaierror) as exc:
+                    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                    transient = not isinstance(exc, urllib.error.HTTPError) and (
+                        isinstance(cause, (ConnectionError, TimeoutError, http.client.IncompleteRead))
+                        or isinstance(cause, socket.gaierror) and cause.errno == socket.EAI_AGAIN)
+                    if attempt == 1 and transient:
+                        self.sleep(2)
+                        continue
+                    raise
             sha = live["git_sha"]["value"]
             version = live["worker_version"]["id"]
             if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)

@@ -27,7 +27,7 @@ MASK = "[REDACTED]"
 # scheme://userinfo@host... -- mask the WHOLE authority-bearing URI, not
 # just the password, since host/database name can be sensitive too.
 _URI_WITH_CREDENTIALS = re.compile(
-    r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"/@]*@[^\s'\"]+")
+    r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s'\"@]*@[^\s'\"]+")
 
 # Recognisable API-key / access-token prefixes (OpenAI-shaped, GitHub, AWS,
 # Slack...).
