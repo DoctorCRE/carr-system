@@ -49,6 +49,9 @@ class SkillReceiptTests(unittest.TestCase):
             'code': 'text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"}));'}))
         rows[1]['payload']['output'] = '{"exit_code":0,"output":"skill"}'
         self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
+        rows[1]['payload']['output'] = [{'type': 'text', 'text': 'hook receipt'},
+            {'type': 'text', 'text': '{"exit_code":0,"output":"skill"}'}]
+        self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
         rows[0]['payload'].update(type='custom_tool_call', name='exec',
             input='text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"}));')
         rows[1]['payload']['type'] = 'custom_tool_call_output'
@@ -59,6 +62,29 @@ class SkillReceiptTests(unittest.TestCase):
             {'type': 'user', 'message': {'content': [{'type': 'tool_result',
              'tool_use_id': 'r', 'content': 'skill', 'is_error': False}]}},
         ])['opened'], ['/skills/poteto-mode/SKILL.md'])
+
+    def test_claude_bash_success_and_failure(self):
+        rows = [
+            {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'r',
+             'name': 'Bash', 'input': {'command': 'cat /skills/tdd/SKILL.md'}}]}},
+            {'type': 'user', 'message': {'content': [{'type': 'tool_result',
+             'tool_use_id': 'r', 'content': 'skill contents', 'is_error': False}]}},
+        ]
+        self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
+        rows[1]['message']['content'][0]['is_error'] = True
+        self.assertEqual(self.scan(rows)['opened'], [])
+
+    def test_inventory_error_prevents_executor_launch(self):
+        class Registry:
+            def resolve(self, name):
+                return {'kind': 'codex-session', 'thread_id': None}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(dispatch, 'desk_skill_inventory', return_value={'available': ['tdd']}), \
+             patch.object(dispatch, '_execute') as execute:
+            with self.assertRaisesRegex(dispatch.DeskError, 'not available.*grill-with-docs'):
+                dispatch.dispatch('builder', 'Skills: grill-with-docs', registry=Registry(),
+                                  results_path=Path(directory) / 'results.jsonl')
+        execute.assert_not_called()
 
     def test_prior_job_reads_and_unfinished_calls_do_not_count(self):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md'),
