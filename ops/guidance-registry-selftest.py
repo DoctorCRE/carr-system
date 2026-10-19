@@ -437,8 +437,8 @@ def main():
     # pending-retirement rules left the active map, each one whole compiled
     # item; none was a split and nothing was reclassified.
     reviewed_counts = {
-        "constraint": 34, "procedure": 83, "doctrine": 11, "rubric": 50,
-        "preference": 23, "precedent": 3, "example": 0,
+        "constraint": 33, "procedure": 83, "doctrine": 11, "rubric": 50,
+        "preference": 24, "precedent": 3, "example": 0,
     }
     split_compile_pass = (
         not reviewed_errors and not reviewed_compile_errors
@@ -475,7 +475,7 @@ def main():
         "source_manifest_provenance": {
             "path": "audits/guidance-migration-manifest.v1.tsv", "sha256": "a" * 64,
             "manifest": "carr-guidance-migration", "schema_version": "1.0.0",
-            "source_classification": "judgment_ambient", "entry_count": 137,
+            "source_classification": "judgment_ambient", "entry_count": 138,
         },
         "base_inventory": {
             "path": "ops/config/rule-enforcement-map.json", "sha256": "b" * 64,

@@ -1,9 +1,9 @@
 {
   "counts": {
     "core": 16,
-    "gate": 30,
+    "gate": 29,
     "gone": 0,
-    "jit": 158
+    "jit": 159
   },
   "fallback_narrowing": {
     "delegation-council": {
@@ -124,10 +124,10 @@
       "title_gist": "FOLLOW-UPS IDENTIFIED DURING A BUILD GET BUILT IN THE SAME SESSION, NOT PARKED \u2014 parking is only for work"
     },
     {
-      "carrying_control": "glanceable_lead",
-      "home": "gate",
+      "home": "jit",
       "id": "17ffd587",
-      "reason": "Already machine-enforced via control 'glanceable_lead' (ops/glanceable-lead-check.py); binds over the rendered glanceable surfaces. Failure mode on violation: CI class failure",
+      "jit_trigger_hint": "When composing glanceable reminders involving a lead or a dated follow-up on a real deal",
+      "reason": "The generated-file checker was removed under WR-000003 because source CI has none of its live inputs. Apply the reminder rule and its real-deal carve-out as guidance.",
       "title_gist": "No lead-outreach reminders on ANY glanceable surface"
     },
     {

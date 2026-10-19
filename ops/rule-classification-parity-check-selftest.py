@@ -213,8 +213,25 @@ def main() -> int:
         "why_unenforceable": "Framing judgment for a specific kind of proposal."}
     machine_export = with_rule(EXPORT_BASE, "dddddddd",
                                {"enforcement_class": "machine_enforceable", "state": "admitted"})
+    retrofit_map = copy.deepcopy(removed_map)
+    retrofit_controls = retrofit_map["rule_controls"]
+    assert isinstance(retrofit_controls, dict)
+    retrofit_controls["dddddddd"]["why_unenforceable"] = (
+        "Automated gate glanceable_lead removed under WR-000003: source CI has no inputs.")
+    retrofit_controls["17ffd587"] = retrofit_controls.pop("dddddddd")
+    retrofit_export = with_rule(EXPORT_BASE, "17ffd587",
+                                {"enforcement_class": "machine_enforceable", "state": "admitted"})
+    unrelated_retirement = copy.deepcopy(retrofit_map)
+    unrelated_controls = unrelated_retirement["rule_controls"]
+    assert isinstance(unrelated_controls, dict)
+    unrelated_controls["dddddddd"] = unrelated_controls.pop("17ffd587")
     cases = [
         case_unit_buckets(),
+        case("the WR-000003 retirement may lead the frozen admission export",
+             retrofit_map, retrofit_export, expect_ok=True, expect_compared=3),
+        case("the WR-000003 exception cannot reclassify an unrelated rule",
+             unrelated_retirement, machine_export, expect_ok=False,
+             expect_mismatch_ids=["dddddddd"]),
         case("a removed-gate rule may lead the export until production re-syncs",
              removed_map, machine_export, expect_ok=True, expect_compared=3),
         case("a judgment rule without the removed-gate record still fails",
