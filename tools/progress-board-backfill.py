@@ -37,16 +37,11 @@ def main():
         Path(args.output).write_text(json.dumps(migrated, indent=2) + '\n')
         print('Captured through record-layer intake; wrote a separate board. Nothing published.')
         return
-    proposal = hierarchy.backfill(state, catalog=read(args.catalog), facts=read(args.facts))
     summaries = read(args.summaries)
-    for key, values in summaries.items():
-        if key not in proposal['proposed_copy']:
-            parser.error(f'unknown summary card: {key}')
-        hierarchy.validate_copy(**values)
-        proposal['proposed_copy'][key] = {'proposed_copy': {
-            'generator': 'model-room-import.v1',
-            'source_digest': hierarchy.digest({**state.get('legacy_history', {}), **state['tasks']}[key]), 'values': values}}
-    proposal['summary_required'] = [key for key in proposal['summary_required'] if key not in summaries]
+    known = {**state.get('legacy_history', {}), **state['tasks']}
+    if set(summaries) - set(known):
+        parser.error('summary file contains an unknown card')
+    proposal = hierarchy.backfill(state, catalog=read(args.catalog), facts=read(args.facts), summaries=summaries)
     identities = {}
     for key, task in state['tasks'].items():
         if task.get('pr'):

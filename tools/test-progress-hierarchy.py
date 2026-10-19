@@ -229,6 +229,23 @@ class HierarchyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             h.validate_copy('A answer that', 'Show changes since the last visit.')
 
+    def test_model_copy_is_applied_before_parent_proposals_and_preserves_human_wording(self):
+        b = {'project':'test','tasks':{'one':{'title':'Refresh obsolete deployment knowledge and remove dead instructions',
+             'repo':'jbookout/carr-system','pr':12, 'card_title':'My wording', 'card_description':'A person wrote this.'}}}
+        facts = {'jbookout/carr-system#12':{'title':b['tasks']['one']['title'], 'body':'Refresh the instructions used to deliver changes.'}}
+        self.assertEqual(h.backfill(b, facts=facts)['summary_required'], [])
+        proposal = h.backfill(b, facts=facts, summaries={'one':{'title':'Delivery instructions', 'description':'Refresh delivery instructions so operators use the current process.'}})
+        self.assertEqual(proposal['summary_required'], [])
+        self.assertEqual(proposal['assignments']['one']['request_key'], 'pr:jbookout/carr-system#12')
+        applied = h.apply_backfill(b, proposal, lambda v,a:{'ok':True,'human_ref':'WR-000014'})
+        self.assertEqual(applied['tasks']['one']['card_title'], 'My wording')
+        self.assertEqual(applied['tasks']['one']['card_description'], 'A person wrote this.')
+
+    def test_description_sentence_limit_handles_titles_of_address(self):
+        h.validate_copy('Suggestion actions', 'Dr. CRE offers suggestions. Partners choose what to accept.')
+        with self.assertRaises(ValueError):
+            h.validate_copy('Suggestion actions', 'One sentence. Another sentence. A third sentence.')
+
 
 if __name__ == '__main__':
     unittest.main()

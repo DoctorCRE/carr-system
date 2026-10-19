@@ -142,7 +142,8 @@ def validate_copy(title, description):
         raise ValueError('Identifiers belong in card details')
     if not isinstance(description, str) or not description.strip() or re.match(r'(?i)\s*(?:(?:WR|PR|J|S)[- .#]?\d|(?:carr|app|factory)#\d|#\d|\d{4,}|[0-9a-f]{8,}\b)', description):
         raise ValueError('Card descriptions must open with human language')
-    if len(re.findall(r'[.!?](?:\s|$)', description)) > 2:
+    sentences = re.sub(r'\b(?:Dr|Mr|Mrs|Ms)\.', '', description)
+    if len(re.findall(r'[.!?](?:\s|$)', sentences)) > 2:
         raise ValueError('Card descriptions require one or two sentences')
 
 
@@ -152,7 +153,8 @@ def plain_text(text):
     text = re.sub(r'`([^`]*)`', lambda match: match[1].replace('-', ' ') if re.fullmatch(r'[A-Za-z][A-Za-z -]*', match[1]) else '', text)
     text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'(?i)\b(?:WR[- ]?\d+|PR\s*#?\d+|[a-f0-9]{12,})\b', '', text)
-    text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor)(?:\([^)]*\))?:\s*', '', text)
+    text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor)\(([^)]*)\):\s*', r'\1: ', text)
+    text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor):\s*', '', text)
     text = re.sub(r'^\s*(?:V\d+[- ]+[A-Z]\d*[a-z]?:?\s*|[A-Z]\d+[a-z]?:\s*)', '', text)
     return re.sub(r'\s+', ' ', text.strip(' #*\n')).strip()
 
@@ -184,8 +186,9 @@ def propose_copy(record):
     title = next((label for pattern, label in TOPICS if re.search(pattern, source, re.I)), None)
     stop = {'a', 'an', 'the', 'this', 'that', 'to', 'for', 'of', 'in', 'on', 'with', 'and', 'or', 'by', 'from', 'it', 'is', 'are', 'as', 'its', 'each'}
     words = [w for w in source.split() if re.fullmatch(r"[A-Za-z][A-Za-z']*", w) and w.lower() not in stop]
-    if title is None and len(words) >= 2:
-        title = ' '.join(words[:3]).capitalize()
+    if title is None and 1 <= len(words) <= 3:
+        title = ' '.join(words)
+        title = title[:1].upper() + title[1:]
     description = plain_text(record.get('description') or record.get('body') or record.get('summary'))
     if len(description.split()) < 7 or re.match(r'(?i)^(?:absent|natural run|summary)\b', description):
         description = source
@@ -202,6 +205,10 @@ def propose_copy(record):
     elif source and len(words) >= 2:
         description = source.rstrip(' .') + '. Follow this work to see what changes and what still needs attention.'
     if not title or not description:
+        if record.get('card_title') and record.get('card_description'):
+            validate_copy(record['card_title'], record['card_description'])
+            record.pop('summary_required', None)
+            return
         record['summary_required'] = True
         return
     try:
@@ -221,10 +228,11 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
-def backfill(state, catalog=None, facts=None):
+def backfill(state, catalog=None, facts=None, summaries=None):
     import uuid
     catalog = catalog or {}
     facts = facts or {}
+    summaries = summaries or {}
     assignments, requests, proposed = {}, {}, {}
     for key, original in {**state.get('legacy_history', {}), **state.get('tasks', {})}.items():
         task = copy.deepcopy(original)
@@ -238,6 +246,12 @@ def backfill(state, catalog=None, facts=None):
             task['title'] = fact.get('title') or task.get('title')
             task['body'] = fact.get('body')
         propose_copy(task)
+        if key in summaries:
+            validate_copy(**summaries[key])
+            task['proposed_copy'] = {'generator': 'model-room-import.v1', 'source_digest': digest(original), 'values': summaries[key]}
+            task.setdefault('card_title', summaries[key]['title'])
+            task.setdefault('card_description', summaries[key]['description'])
+            task.pop('summary_required', None)
         proposed[key] = {k: task[k] for k in ('proposed_copy', 'summary_required') if k in task}
         ref = original.get('work_request') or original.get('work_request_ref')
         text = str(task.get('title') or '')
@@ -248,12 +262,17 @@ def backfill(state, catalog=None, facts=None):
         if not series:
             match = re.search(r'\b(V\d+)\s+([A-Z]\d+[A-Za-z]?|\d+[A-Z]|[A-Z])\b', text)
             series = match[1] if match else None
-        standalone = f"pr:{original.get('repo', 'jbookout/carr-system')}#{original['pr']}" if original.get('pr') and fact and task.get('proposed_copy') else None
+        standalone = f"pr:{original.get('repo', 'jbookout/carr-system')}#{original['pr']}" if original.get('pr') and fact and task.get('card_title') and task.get('card_description') else None
         group = ref or ('series:' + str(series) if series else standalone or 'legacy')
         request = requests.setdefault(group, copy.deepcopy(catalog.get(ref) or state.get('work_requests', {}).get(ref) or {
             'title': 'Legacy backlog' if group == 'legacy' else (str(series) + ' delivery' if series and not ref else text),
-            'description': task['proposed_copy']['values']['description'] if standalone and group == standalone else
+            'description': task['card_description'] if standalone and group == standalone else
                            'Recover the work history and keep related changes together for later triage.'}))
+        if (task.get('card_title') and task.get('card_description') and group != 'legacy'
+                and not group.startswith('series:') and ref not in catalog
+                and ref not in state.get('work_requests', {})):
+            request.setdefault('card_title', task['card_title'])
+            request.setdefault('card_description', task['card_description'])
         request.setdefault('slices', [])
         slice_ref = original.get('slice_id') or original.get('slice_ref') or original.get('slice')
         if not slice_ref and series:
