@@ -41,7 +41,7 @@ export async function reconcileRuntimeErrors(call = callRecord) {
   if (rows.length !== expected || new Set(rows.map(row => row.id)).size !== expected)
     throw new Error('runtime_incident_census_short');
 
-  const pending = [];
+  let linked = 0;
   for (const row of rows) {
     if (row.kind !== 'incident' || !INCIDENT_REF.test(row.id)) throw new Error('runtime_incident_ref_invalid');
     const card = await call('get-incident', { ref: row.id, fact_limit: 1 });
@@ -53,11 +53,7 @@ export async function reconcileRuntimeErrors(call = callRecord) {
         !incident.fingerprint.startsWith(`carr-mcp|${incident.environment}|`) ||
         ['resolved', 'reviewed'].includes(incident.state) || card.links.some(link => link.kind === 'work_request')) continue;
     if (incident.ref !== row.id) throw new Error('runtime_incident_identity_mismatch');
-    pending.push({ ref: incident.ref, environment: incident.environment, failure_class: failureClass });
-  }
-
-  let linked = 0;
-  for (const signal of pending.slice(0, 10)) {
+    const signal = { ref: incident.ref, environment: incident.environment, failure_class: failureClass };
     const finding = await call('record-finding', { idempotency_key: key(signal.ref, 'finding'),
       subject: 'repo:jbookout/carr-system', kind: 'runtime_error', internal: true,
       epistemic_status: 'observed', source: `incident:${signal.ref}`,
@@ -78,8 +74,9 @@ export async function reconcileRuntimeErrors(call = callRecord) {
     if (link.ok !== true || link.incident_ref !== signal.ref || link.work_request !== request.human_ref)
       throw new Error('runtime_link_receipt_invalid');
     linked += 1;
+    if (linked === 10) break;
   }
-  return { linked, deferred: Math.max(0, pending.length - linked) };
+  return { linked };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
