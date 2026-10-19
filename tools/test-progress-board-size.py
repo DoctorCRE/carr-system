@@ -66,6 +66,31 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def test_trimming_removes_defaults_no_remaining_card_inherits(self):
+        for field, value in (("title", "X" * 240000),
+                             ("stage_history", [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}] * 5000)):
+            with self.subTest(field=field):
+                merged = {"title": "Merged task", "stage": "merged", "status": "review", "pr_phase": "Merged", field: value}
+                task = {"title": "Open task", "stage": "build", "status": "running"}
+                if field == "stage_history":
+                    task[field] = [{"stage": "build", "entered_at": "2026-10-18T12:00:00Z"}]
+                state = {"project": "fixture", "tasks": {"merged-a": copy.deepcopy(merged),
+                                                         "merged-b": copy.deepcopy(merged), "open": task}}
+                before = copy.deepcopy(state)
+
+                snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
+
+                self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_BUDGET)
+                self.assertEqual(set(snapshot["tasks"]), {"open"})
+                defaults = snapshot.get("task_defaults", {})
+                self.assertNotIn(field, defaults)
+                for default in defaults:
+                    self.assertTrue(any(default not in card for card in snapshot["tasks"].values()))
+                restored = {**defaults, **snapshot["tasks"]["open"]}
+                for key, expected in task.items():
+                    self.assertEqual(restored[key], expected)
+                self.assertEqual(state, before)
+
     def test_projection_preserves_custom_waits_and_stage_time_precision_and_fallbacks(self):
         utc = "2026-10-18T12:34:56.123456+00:00"
         offset = "2026-10-18T18:04:56.123456+05:30"
