@@ -178,6 +178,28 @@ class RuleClaimGateTest(unittest.TestCase):
                     assistant('I added a rule. It is queued and not yet enforced.'))
                     ).get('decision'), 'block')
 
+    def test_wrapped_dispatch_segments_count(self):
+        dispatch = ('python3 tools/room-bridge/dispatch.py send builder '
+                    '"Build a hook that checks this rule." --family sol --timeout 14400')
+        prefix = 'cd ~/carr-system && export CARR_HERMES_CODEX_TIMEOUT=14400 && '
+        wait = ('F=/tmp/desk-ready; for i in ' + '\n'.join(map(str, range(1, 481)))
+                + '; do grep -q ready "$F" && break; sleep 60; done; sleep 30; ')
+        for command in [prefix + dispatch, wait + prefix + dispatch,
+                        'export CARR_HERMES_CODEX_TIMEOUT=14400;\n' + dispatch]:
+            with self.subTest(command=command[:100]):
+                self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
+                    assistant('I added a rule. It is queued and not yet enforced.')))
+                    .get('decision'), 'block')
+
+    def test_wrapped_dispatch_still_requires_build_brief(self):
+        for brief in ['Review the hook.', 'Build a report.', 'Explain the CI check.']:
+            command = ('cd ~/carr-system && export CARR_HERMES_CODEX_TIMEOUT=14400 && '
+                       'python3 tools/room-bridge/dispatch.py send builder ' + shlex.quote(brief))
+            with self.subTest(brief=brief):
+                self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
+                    assistant('I added a rule. It is queued and not yet enforced.')))
+                    .get('decision'), 'block')
+
     def test_honest_uncheckable_rule_passes(self):
         self.assertNotEqual(self.run_hook(self.turn(assistant(
             "I'll remember this preference. The rule is not enforced because tone "
@@ -235,9 +257,9 @@ class RuleClaimGateTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.run_hook(self.turn(assistant(text))).get('decision'), 'block')
 
-    def test_conditional_dispatch_is_not_evidence(self):
+    def test_conditional_dispatch_segment_counts(self):
         command = 'false && python3 tools/room-bridge/dispatch.py send builder "Build a gate"'
-        self.assertEqual(self.run_hook(self.turn(call('Bash', command=command),
+        self.assertNotEqual(self.run_hook(self.turn(call('Bash', command=command),
             assistant('I saved a rule. It is queued and not yet enforced.')))
             .get('decision'), 'block')
 
