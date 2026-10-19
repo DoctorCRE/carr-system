@@ -1,16 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { chromium } from 'playwright-core';
+import { testBrowser } from './browser.mjs';
 import { plannerHtml } from '../.build/planner-resource.mjs';
 import { calculatePlan, callPlanner } from '../src/planner.mjs';
 
 const dental = { practice_type: 'dental_gp', providers: 1, operatories: 5, exam_rooms: 0, market: 'mobile_downtown' };
 async function host(t, { delay = false, contextSupport = true, echo = false } = {}) {
-  const executablePath = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', chromium.executablePath()].find(p => fs.existsSync(p));
-  assert.ok(executablePath, 'Browser regressions must run, never skip');
-  const browser = await chromium.launch({ executablePath, headless: true });
-  t.after(() => browser.close());
+  const browser = await testBrowser(t);
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' });
   page.setDefaultTimeout(3000);
   await page.exposeFunction('calculate', params => calculatePlan(params.arguments));
