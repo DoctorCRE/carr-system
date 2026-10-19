@@ -16,6 +16,25 @@ def loop_reply(name, row):
 
 
 class HealthTests(unittest.TestCase):
+    def test_refused_loop_read_warns_and_preserves_pending_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            config = home / ".config/carr"
+            config.mkdir(parents=True)
+            (config / "launchd-hold").write_text("")
+            state = config / "launchd-hold-health.json"
+            state.write_text(json.dumps({"com.carr.fixture": {"loop_id": "fixture-loop"}}))
+            calls = []
+            def verb(name, payload):
+                calls.append((name, payload))
+                return {"ok": False, "refused": True}
+            line, code = health.check(home, verb)
+            self.assertEqual(code, 1)
+            self.assertIn("RuntimeError: repair loop read failed", line)
+            self.assertEqual(calls, [("read-loop", {"loop_id": "fixture-loop"})])
+            self.assertEqual(json.loads(state.read_text())["com.carr.fixture"]["loop_id"],
+                             "fixture-loop")
+
     def test_age_and_bound_loop_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)

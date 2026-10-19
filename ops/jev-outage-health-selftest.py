@@ -22,6 +22,20 @@ def loop_reply(name, row):
 
 
 class OutageTests(unittest.TestCase):
+    def test_refused_loop_read_reports_error_and_preserves_open_loop(self):
+        from unittest import mock
+        from lib.record_call import VerbResult
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"loop_id": "fixture-loop", "body": "outage"}))
+            recovered = {"status": "ok", "state": "healthy",
+                         "recovered_by_usable_success": True}
+            with mock.patch.object(health.record_call, "call_verb", return_value=
+                    VerbResult("read-loop", "refused", {"error": "not_found"})) as call:
+                self.assertEqual(health.reconcile(recovered, state, health.call_verb), "error")
+            call.assert_called_once_with("read-loop", {"loop_id": "fixture-loop"}, timeout=35)
+            self.assertEqual(json.loads(state.read_text())["loop_id"], "fixture-loop")
+
     def test_health_action_names_remedy_and_clear_condition(self):
         self.assertIn("add TypeSafe credits", health.action("billing_exhausted"))
         self.assertIn("repair the Jev response contract", health.action("invalid_data"))

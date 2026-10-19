@@ -22,6 +22,21 @@ NOW = datetime(2026, 10, 5, 19, 0, 0, tzinfo=timezone.utc)
 
 
 class UptimeHealthTests(unittest.TestCase):
+    def test_refused_or_malformed_loop_read_reports_error(self):
+        replies = ({"ok": False, "refused": True}, {"loop": None}, {"loop": []},
+                   {"loop_id": "fixture-loop", "version": 1, "status": "open"})
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"key": "fixture-key", "loop_id": "fixture-loop"}))
+            for reply in replies:
+                calls = []
+                def verb(name, payload):
+                    calls.append((name, payload))
+                    return reply
+                with self.subTest(reply=reply):
+                    self.assertEqual(module.reconcile_monitor(False, True, state, verb), "error")
+                    self.assertEqual(calls, [("read-loop", {"loop_id": "fixture-loop"})])
+
     def test_dropped_monitor_loop_does_not_block_a_new_fault(self):
         state = Path(__file__).resolve().parents[1] / "out/_to_delete" / f"uptime-dropped-{uuid.uuid4()}.json"
         opens = []
