@@ -945,6 +945,61 @@ class RecoveryCrash(BaseException):
 
 
 class ReleaseJournalRecovery(Base):
+    def assert_failed_live_can_fix_forward(self, latest, runner, restart):
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], latest)
+        self.assertEqual(state.get("failed_sha"), latest)
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertFalse([row for row in self.fx.records() if row["status"] == "shipped"])
+        receipts = [row for row in self.fx.records() if row["status"] == "worker_promoted"]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual((receipts[0]["sha"], receipts[0]["provider_version_id"]), (latest, VERSION))
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        fix = self.fx.commit({"mcp-server/src/a.js": "fix forward"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], fix)
+        self.assertIsNone(self.fx.state()["worker"]["failed_sha"])
+        self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_kill_between_promote_and_receipt_recovers_live_checkpoint_without_redeploy(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if "--promote-version" in argv:
+                raise RecoveryCrash()
+            return result
+
+        with mock.patch.object(runner, "run", side_effect=run), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        self.assertEqual(live["sha"], latest)
+        self.assertNotIn("health", runner.names())
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_kill_between_receipt_and_health_keeps_verification_incomplete(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        self.assertTrue(self.fx.records(), "promotion needs a durable receipt before health")
+        self.assertEqual(self.fx.records()[-1]["status"], "worker_promoted")
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "post-promote-verification-incomplete")
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_health_failure_checkpoints_live_sha_and_allows_green_fix_forward(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        runner.health_findings = [{"key": "fixture_regression", "subject": "worker", "count": 1,
+                                   "hard_error": True, "time_rolling": False, "detail": "new failure"}]
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "health")
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        runner.health_findings = []
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
     def case(self, lane, checkpoint=True):
         self.case_ordinal = getattr(self, "case_ordinal", 0) + 1
         latest = self.fx.commit({"mcp-server/src/a.js" if lane == "worker" else "src/worker.js": f"{lane}-{self.case_ordinal}"})
