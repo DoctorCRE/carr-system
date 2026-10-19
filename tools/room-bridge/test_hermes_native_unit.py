@@ -135,7 +135,8 @@ class NativeTests(unittest.TestCase):
     def test_billing_response_stops_sync_and_async_calls_even_without_a_usage_receipt(self):
         import asyncio
         for asynchronous in (False, True):
-            for status, body in ((402, b''), (429, b'quota exhausted'), (403, b'payment required')):
+            for status, body in ((402, b''), (429, b'{"error":{"message":"quota exhausted"}}'),
+                                 (403, b'{"error":{"code":"payment_required"}}')):
                 with self.subTest(asynchronous=asynchronous, status=status), tempfile.TemporaryDirectory() as tmp:
                     guard = self.guard()
                     guard.credits_path = Path(tmp) / 'credits-exhausted'

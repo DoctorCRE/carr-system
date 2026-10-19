@@ -9,8 +9,8 @@ import threading
 from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from nous_budget import CONFIG, dollars
-from hermes_wire import CREDIT_ERROR
+from nous_budget import CONFIG, Ledger, dollars
+from hermes_wire import billing_error
 
 MAX_TURNS = 32
 
@@ -41,7 +41,7 @@ def quote_model(model):
 
 
 class CallBudget:
-    def __init__(self, allowance, price, model):
+    def __init__(self, allowance, price, model, *, ledger=None):
         self.allowance = dollars(allowance)
         self.input_price = dollars(price.get('input_usd_per_token'))
         self.output_price = dollars(price.get('output_usd_per_token'))
@@ -51,6 +51,7 @@ class CallBudget:
         self.stopped = False
         self.credits_exhausted = False
         self.credits_path = None
+        self.ledger = ledger
 
     def stop(self):
         self.stopped = True
@@ -106,6 +107,13 @@ class CallBudget:
         # failures/retries. Never refund: auxiliary/client retries may already have been billed.
         ceiling = len(request.content) * self.input_price + outputs * self.output_price
         with self.lock:
+            if self.ledger is not None:
+                try:
+                    shared_stop = self.ledger.read()['stop']
+                except (OSError, ValueError, KeyError, TypeError):
+                    self.stop()
+                if shared_stop:
+                    self.stop()
             if self.stopped or self.reserved + ceiling > self.allowance:
                 self.stop()
             self.reserved += ceiling
@@ -136,8 +144,14 @@ class CallBudget:
             httpx.Client.send, httpx.AsyncClient.send = sync, asynchronous
 
     def billing_response(self, status, body):
-        if status == 402 or (status >= 400 and CREDIT_ERROR.search(body.decode('utf-8', errors='replace'))):
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeError):
+            payload = None
+        if status == 402 or (status >= 400 and billing_error(payload)):
             self.credits_exhausted = self.stopped = True
+            if self.ledger is not None:
+                self.ledger.exhaust_credits()
             if self.credits_path is not None:
                 self.credits_path.write_text('nous credits exhausted')
 
@@ -181,7 +195,8 @@ def main():
     os.environ['HERMES_IGNORE_USER_CONFIG'] = '1'
     os.environ['HERMES_SINGLE_QUERY_SESSION'] = '1'
     os.environ['HERMES_YOLO_MODE'] = '1'
-    budget = CallBudget(args.allowance_usd, json.loads(args.price_json), args.m)
+    budget = CallBudget(args.allowance_usd, json.loads(args.price_json), args.m,
+                        ledger=Ledger(os.environ['CARR_NOUS_BUDGET_RESULTS']))
     budget.credits_path = Path(args.usage_file).with_suffix('.credits-exhausted')
     try:
         code = run_native(args.z, args.m, args.reasoning, args.usage_file, budget)

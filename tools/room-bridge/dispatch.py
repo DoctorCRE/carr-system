@@ -46,9 +46,11 @@ Nous picker (/v1/models), with conservative exact-model config pins as fallback.
 Missing prices refuse the job before inference. The ledger books the greater of this request ceiling
 and observed usage cost (reported dollars, otherwise Portal token prices).
 Booked costs round upward to cents. Unknown costs block later spending.
-HTTP payment/credit/quota failures set a sticky stop even without failed-turn
-usage; only a human may reconcile or
-clear it in the ledger. There is no automatic reset or paid-provider fallback.
+HTTP 402 or structured provider credit/payment/quota errors immediately commit
+a shared sticky stop, even without failed-turn usage. Every inference admission
+rechecks the shared stop. Answer/diagnostic text never establishes exhaustion.
+Only a human may reconcile or clear the ledger; there is no automatic reset or
+paid-provider fallback.
 This is a local request ceiling using Portal prices, not a provider billing limit.
 
     dispatch.py register nous-builder --kind hermes-nous --provider nous --family glm --timeout 900

@@ -104,6 +104,11 @@ class Ledger:
         with self.locked() as state:
             return self.totals(state)
 
+    def exhaust_credits(self):
+        with self.locked() as state:
+            state['stop'] = 'nous credits exhausted'
+            self.save(state)
+
     def reserve(self, run_id):
         with self.locked() as state:
             if state['stop']:

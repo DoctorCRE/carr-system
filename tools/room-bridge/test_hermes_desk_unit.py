@@ -54,7 +54,7 @@ if sys.argv[1:] == ['portal', 'status']:
     sys.exit(0)
 pathlib.Path('invocation.json').write_text(json.dumps(sys.argv[1:]))
 pathlib.Path('native_env.json').write_text(json.dumps({key: os.environ.get(key) for key in
-    ('HERMES_YOLO_MODE', 'HERMES_IGNORE_USER_CONFIG')}))
+    ('HERMES_YOLO_MODE', 'HERMES_IGNORE_USER_CONFIG', 'CARR_NOUS_BUDGET_RESULTS')}))
 if mode == 'timeout':
     child = subprocess.Popen([sys.executable, '-c', "import time; time.sleep(0.5); open('escaped', 'w').write('bad')"])
     pathlib.Path('child.pid').write_text(str(child.pid))
@@ -75,6 +75,10 @@ if mode == 'fail':
     print('fixture-private-diagnostic', file=sys.stderr)
     sys.exit(3)
 if mode == 'credits':
+    usage_path = pathlib.Path(sys.argv[sys.argv.index('--usage-file') + 1])
+    receipt = json.loads(usage_path.read_text())
+    receipt.update(json.loads(os.environ['FAKE_CREDIT_ERROR']))
+    usage_path.write_text(json.dumps(receipt))
     print(os.environ['FAKE_CREDIT_ERROR'], file=sys.stderr)
     sys.exit(3)
 if mode == 'silent-credits':
@@ -132,7 +136,8 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertIn('--price-json', argv)
         self.assertIn('-z', argv)
         self.assertEqual(json.loads((self.root / 'native_env.json').read_text()),
-                         {'HERMES_YOLO_MODE': '1', 'HERMES_IGNORE_USER_CONFIG': '1'})
+                         {'HERMES_YOLO_MODE': '1', 'HERMES_IGNORE_USER_CONFIG': '1',
+                          'CARR_NOUS_BUDGET_RESULTS': str(self.results.absolute())})
 
     def test_failure_records_usage_without_private_diagnostics(self):
         self.register()
@@ -189,13 +194,14 @@ print(json.dumps({'paidRecommendedModels': [
 
     def test_credit_errors_set_a_sticky_stop_across_later_dispatches(self):
         self.register()
-        for index, message in enumerate(('HTTP 402 Payment Required', 'insufficient_credits',
-                                         'out of credits', 'quota exhausted',
-                                         '{"status_code":402,"error":"billing"}')):
+        for index, message in enumerate(({'status_code': 402}, {'error': {'code': 'insufficient_credits'}},
+                                         {'error': {'message': 'out of credits'}},
+                                         {'error': {'message': 'quota exhausted'}},
+                                         {'status_code': 402, 'error': 'billing'})):
             with self.subTest(message=message):
                 self.results = self.root / f'credit-{index}.jsonl'
                 dispatch.DEFAULT_RESULTS = self.results
-                self.env.update(FAKE_MODE='credits', FAKE_CREDIT_ERROR=message)
+                self.env.update(FAKE_MODE='credits', FAKE_CREDIT_ERROR=json.dumps(message))
                 first = self.send()
                 self.assertEqual(first['status'], 'failed')
                 self.assertEqual(first['detail'], 'nous credits exhausted')

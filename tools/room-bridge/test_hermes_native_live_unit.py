@@ -36,6 +36,7 @@ class InstalledNativeTest(unittest.TestCase):
             try:
                 env = {**os.environ, 'HERMES_HOME': str(root / 'home'),
                        'PYTHONDONTWRITEBYTECODE': '1', 'HERMES_IGNORE_USER_CONFIG': '1',
+                       'CARR_NOUS_BUDGET_RESULTS': str(root / 'results.jsonl'),
                        'HERMES_TUI_GATEWAY_URL': 'ws://127.0.0.1:' + str(gateway.getsockname()[1])}
                 discovered = subprocess.run(['hermes', '--print-runtime-command', '--module',
                     'hermes_cli.gateway_client'], env=env, capture_output=True, text=True, check=True, timeout=20)
@@ -55,8 +56,9 @@ class InstalledNativeTest(unittest.TestCase):
 import httpx, runpy
 from pathlib import Path
 native = runpy.run_path(sys.argv[1])
+ledger = native['Ledger'](os.environ['CARR_NOUS_BUDGET_RESULTS'])
 guard = native['CallBudget']('1.00', {'input_usd_per_token': '0.000002',
-    'output_usd_per_token': '0.000006'}, 'probe')
+    'output_usd_per_token': '0.000006'}, 'probe', ledger=ledger)
 guard.bind('https://inference.example/v1', 'nous', 'probe')
 guard.credits_path = Path('billing-stop')
 with guard.enforce(), httpx.Client(transport=httpx.MockTransport(
@@ -66,6 +68,7 @@ with guard.enforce(), httpx.Client(transport=httpx.MockTransport(
     assert response.status_code == 402
 assert guard.credits_exhausted
 assert guard.credits_path.read_text() == 'nous credits exhausted'
+assert ledger.read()['stop'] == 'nous credits exhausted'
 """
                 billing = dispatch._run_headless_process(
                     [*command[:3], before + '; exec(' + repr(billing_probe) + ')',

@@ -18,8 +18,14 @@ CREDIT_ERROR = re.compile(r'out of credits|payment[_ ]required|insufficient[_ ](
                           r'|(?:HTTP|status)[_ :=]*402|"(?:status(?:_code)?|code)"\s*:\s*402\b', re.I)
 
 
-class CreditsExhausted(ValueError):
-    pass
+def billing_error(payload):
+    if not isinstance(payload, dict):
+        return False
+    if payload.get('status_code') in (402, '402') or payload.get('status') in (402, '402'):
+        return True
+    error = payload.get('error')
+    return isinstance(error, dict) and (error.get('code') in (402, '402') or bool(CREDIT_ERROR.search(
+        ' '.join(str(error.get(key, '')) for key in ('code', 'type', 'message')))))
 
 
 def native_command(raw):
@@ -49,6 +55,7 @@ def select_model(payload: dict, family: str) -> str:
 def run_task(entry: dict, task: str, *, env: dict, run, results_path, run_id) -> dict:
     accounting = {'launched': False, 'usage': {}}
     try:
+        results_path = Path(results_path).absolute()
         ledger = nous_budget.Ledger(results_path)
         ledger.reserve(run_id)
         accounting['before_launch'] = lambda: ledger.launch(run_id)
@@ -57,6 +64,7 @@ def run_task(entry: dict, task: str, *, env: dict, run, results_path, run_id) ->
         return {'status': 'failed', 'code': 'nous_spend_stop', 'detail': str(exc)}
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {'status': 'failed', 'code': 'nous_spend_stop', 'detail': 'Nous budget ledger unavailable'}
+    env = {**env, 'CARR_NOUS_BUDGET_RESULTS': str(results_path)}
     outcome = _run_task(entry, task, env=env, run=run, accounting=accounting)
     try:
         outcome['budget'] = ledger.settle(run_id, accounting['usage'], accounting['launched'],
@@ -83,8 +91,6 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
             raise subprocess.TimeoutExpired('hermes job', entry['timeout_s'])
         proc = run(argv, cwd=entry['cwd'], env=env,
                    timeout=min(remaining, ceiling) if ceiling else remaining)
-        if CREDIT_ERROR.search((proc.stdout or '') + '\n' + (proc.stderr or '')):
-            raise CreditsExhausted()
         return proc
 
     with tempfile.TemporaryDirectory(prefix='room-hermes-') as tmp:
@@ -127,9 +133,6 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
                        'exit_code': proc.returncode, 'result': (proc.stdout or '').strip()}
         except nous_budget.BudgetStop as exc:
             outcome = {'status': 'failed', 'code': 'nous_spend_stop', 'detail': str(exc)}
-        except CreditsExhausted:
-            accounting['exhausted'] = True
-            outcome = {'status': 'failed', 'detail': 'nous credits exhausted'}
         except subprocess.TimeoutExpired as exc:
             outcome = {'status': 'timed_out', 'detail': 'Hermes job deadline exceeded',
                        'termination_confirmed': getattr(exc, 'termination_confirmed', True)}
@@ -148,7 +151,7 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
         if raw_usage.get('spend_limit_reached'):
             outcome.update(status='failed', code='nous_spend_stop', detail='Nous run spending limit reached')
         if (usage_path.with_suffix('.credits-exhausted').exists() or raw_usage.get('nous_credits_exhausted')
-                or CREDIT_ERROR.search(str(raw_usage.get('failure', '')) + str(raw_usage.get('error', '')))):
+                or billing_error(raw_usage)):
             accounting['exhausted'] = True
             outcome.update(status='failed', detail='nous credits exhausted')
         if outcome['status'] == 'completed':

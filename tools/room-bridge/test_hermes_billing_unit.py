@@ -5,6 +5,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import hermes_native as native
 import hermes_wire as wire
@@ -16,6 +17,17 @@ MODEL = 'z-ai/glm-5.3:US'
 
 
 class BillingTests(unittest.TestCase):
+    def test_http_boundary_uses_status_or_a_structured_provider_error(self):
+        for status, body, exhausted in (
+                (402, b'', True),
+                (403, b'{"error":{"message":"insufficient credits"}}', True),
+                (400, b'Fixed HTTP 402 billing handling', False),
+                (400, b'{"answer":"HTTP 402 payment required"}', False)):
+            with self.subTest(status=status, body=body):
+                guard = native.CallBudget('1.00', PRICE, MODEL)
+                guard.billing_response(status, body)
+                self.assertEqual(guard.credits_exhausted, exhausted)
+
     def test_http_402_stops_another_job_before_the_failed_worker_exits(self):
         # Adapted from review-r2-probes.py. Hold the first worker AFTER its HTTP
         # error; a subsequent dispatch must already see the durable stop.
@@ -108,6 +120,36 @@ class BillingTests(unittest.TestCase):
                     self.assertEqual(probe.send()['status'], 'completed')
                 finally:
                     probe.doCleanups()
+
+    def test_native_main_uses_the_dispatchers_shared_ledger(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            results, usage = Path(tmp) / 'results.jsonl', Path(tmp) / 'usage.json'
+            ledger = nous_budget.Ledger(results)
+            ledger.reserve('first')
+            def response(*args):
+                args[-1].billing_response(402, b'')
+                return 1
+            argv = ['hermes_native.py', '-z', 'probe', '-m', MODEL, '--reasoning', 'high',
+                    '--usage-file', str(usage), '--allowance-usd', '1.00', '--price-json', json.dumps(PRICE)]
+            with patch.dict('os.environ', {'CARR_NOUS_BUDGET_RESULTS': str(results)}), \
+                    patch('sys.argv', argv), patch.object(native, 'run_native', side_effect=response):
+                self.assertEqual(native.main(), 3)
+            self.assertEqual(ledger.read()['stop'], 'nous credits exhausted')
+
+    def test_unstructured_usage_failure_text_is_not_provider_billing_evidence(self):
+        probe = fixture.HermesTests()
+        probe.setUp()
+        try:
+            binary = probe.bin / 'hermes'
+            binary.write_text(binary.read_text().replace(
+                "'failure': 'fixture-private-diagnostic'", "'failure': 'Example: HTTP 402 out of credits'"))
+            probe.register()
+            probe.env['FAKE_MODE'] = 'fail'
+            row = probe.send()
+            self.assertEqual(row['status'], 'failed')
+            self.assertIsNone(row['budget']['stop'])
+        finally:
+            probe.doCleanups()
 
 
 if __name__ == '__main__':
