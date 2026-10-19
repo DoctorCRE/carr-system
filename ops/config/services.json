@@ -369,8 +369,8 @@
     },
     {
       "key": "storage-hygiene",
-      "name": "Studio storage hygiene",
-      "purpose": "Daily bounded cleanup of known stale Chrome code-sign clones. Allowlisted CARR scratch and unlocked gate-replay residue require explicit command-line opt-in. Reports unknown paths without deleting them and opens a record-layer investigation on findings or a Data-volume threshold breach.",
+      "name": "Automatic machine cleanup",
+      "purpose": "Hourly bounded cleanup of clean idle worktrees, finished Codex job clones, old completed desk threads, and stale Chrome clones. Keeps dirty, unpushed, live, and open-PR work. Writes local JSON receipts and reports health through the orchestrator watchdog.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "orchestrator",
@@ -381,9 +381,9 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.storage-hygiene.plist",
           "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Daily at 04:10 local after nightly record-layer work. Source ships uninstalled; activation and first watched run are separate machine effects."
+          "expected_cadence_seconds": 3600,
+          "cadence_grace_seconds": 7200,
+          "notes": "Every machine. StartCalendarInterval comes from the shared renderer. Job watchdog enforces a five-minute process-group budget. Source only; no machine installation in this change."
         }
       ]
     },

@@ -197,13 +197,83 @@ def wait_response(wire: Wire | _StdioWire, request_id: str, transcript: list[dic
             return message["result"]
 
 
-def _initialize(wire: Wire | _StdioWire) -> None:
+def _initialize(wire: Wire | _StdioWire, *, experimental: bool = False) -> None:
     wire.upgrade()
     wire.send_json({'id': 'initialize', 'method': 'initialize', 'params': {
         'clientInfo': {'name': 'hermes-dispatch', 'version': '0.1.0'},
-        'capabilities': {'experimentalApi': False}}})
+        'capabilities': {'experimentalApi': experimental}}})
     wait_response(wire, 'initialize', [])
     wire.send_json({'method': 'initialized'})
+
+
+def archive_finished_thread(thread_id: str, *, before: float, process_probe,
+                            timeout: float = 30, wire_factory=_StdioWire,
+                            dry_run: bool = False) -> dict:
+    """Archive an old idle job and its idle descendants through Codex itself.
+
+    Protocol reference: https://developers.openai.com/codex/app-server/
+    A rejected or incomplete observation keeps every session file in place.
+    """
+    result = {'kind': 'thread', 'thread_id': thread_id, 'status': 'kept'}
+    wire = None
+    try:
+        wire = wire_factory(timeout)
+        _initialize(wire, experimental=True)
+        sequence = 0
+
+        def rpc(method, params):
+            nonlocal sequence
+            sequence += 1
+            request_id = 'cleanup-' + str(sequence)
+            wire.send_json({'id': request_id, 'method': method, 'params': params})
+            return wait_response(wire, request_id, [])
+
+        def safe(thread):
+            path = thread.get('path')
+            if (thread.get('status', {}).get('type') not in {'idle', 'notLoaded'} or
+                    thread.get('isPinned') or not isinstance(thread.get('updatedAt'), (int, float)) or
+                    thread['updatedAt'] >= before or not path):
+                return False
+            busy = process_probe([path])
+            return busy is not None and not busy
+
+        thread = rpc('thread/read', {'threadId': thread_id})['thread']
+        if thread.get('id') == thread_id and 'archived_sessions' in (thread.get('path') or '').split('/'):
+            return {**result, 'status': 'archived', 'reason': 'native archive effect read back before retry'}
+        if thread.get('id') != thread_id or not safe(thread):
+            return {**result, 'reason': 'thread active, recent, pinned, live, or evidence unavailable'}
+        descendants, cursor = [], None
+        while True:
+            page = rpc('thread/list', {'ancestorThreadId': thread_id, 'archived': False,
+                'sourceKinds': ['cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview',
+                                'subAgentCompact', 'subAgentThreadSpawn', 'subAgentOther', 'unknown'],
+                                       'limit': 50, **({'cursor': cursor} if cursor else {})})
+            if 'data' not in page or 'nextCursor' not in page:
+                raise ValueError('descendant collection incomplete')
+            for child in page['data']:
+                if not safe(child) or len(descendants) >= 100:
+                    return {**result, 'reason': 'descendant active, recent, pinned, live, or collection too large'}
+                descendants.append(child['id'])
+            cursor = page['nextCursor']
+            if not cursor:
+                break
+        for tid in [thread_id, *descendants]:
+            if not safe(rpc('thread/read', {'threadId': tid})['thread']):
+                return {**result, 'reason': 'thread or descendant changed before archive'}
+        if dry_run:
+            return {**result, 'status': 'would_archive', 'reason': 'old completed job thread'}
+        rpc('thread/archive', {'threadId': thread_id})
+        observed = rpc('thread/read', {'threadId': thread_id})['thread']
+        if observed.get('id') != thread_id or 'archived_sessions' not in (observed.get('path') or '').split('/'):
+            raise RuntimeError('native archive readback unavailable')
+        return {**result, 'status': 'archived', 'reason': 'native thread/archive read back',
+                'descendants_checked': len(descendants)}
+    except Exception as exc:
+        return {**result, 'reason': 'Codex archive evidence unavailable or request failed',
+                'error': type(exc).__name__}
+    finally:
+        if wire is not None:
+            wire.close()
 
 
 def desktop_turn_terminated(thread_id: str, marker: str, timeout: float = 5.0) -> bool:

@@ -470,6 +470,7 @@ def _defaults() -> tuple[Path, Path, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--machine", action="store_true", help="also retire local worktrees, finished job clones, and old completed desk threads")
     parser.add_argument("--health-row", action="store_true")
     parser.add_argument("--include-scratch", action="store_true",
                         help="also clean allowlisted scratch in the pinned user temp root")
@@ -490,6 +491,22 @@ def main(argv: list[str] | None = None) -> int:
         return int(used > DATA_THRESHOLD_BYTES)
 
     started = time.monotonic()
+    machine = None
+    if args.machine:
+        import importlib.util
+        sys.path.insert(0, str(REPO / "lib"))
+        from job_watchdog import load_config, repository_roots
+        from machine_cleanup import run as clean_machine
+        config = load_config(REPO / "ops/config/job-watchdog.json")
+        config["machine_cleanup"]["max_seconds"] = min(config["machine_cleanup"]["max_seconds"], args.max_seconds)
+        spec = importlib.util.spec_from_file_location("cleanup_worktree_hook", REPO / "hooks/worktree-self-plumb.py")
+        hook = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = hook
+        spec.loader.exec_module(hook)
+        machine = clean_machine(REPO, config, hook=hook, tmp_root=Path("/private/tmp"),
+            dispatch_path=Path.home() / ".config/carr/hermes-dispatch-results.jsonl",
+            roots=repository_roots(config), dry_run=args.dry_run)
+        print(json.dumps({k: v for k, v in machine.items() if k not in {"removed", "kept"}}))
     plan = plan_cleanup(
         clone_root=clone_root, tmp_root=tmp_root, replay_root=replay_root,
         include_scratch=args.include_scratch, include_replay=args.include_gate_replay,
@@ -522,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {candidate.kind}: {candidate.path}")
     for path in sorted(plan.unrecognized):
         print(f"  unrecognized sample, report only: {path}")
-    return 0 if result.record_status != "record-failed" else 1
+    return int(result.record_status == "record-failed" or bool(machine and machine["errors"]))
 
 
 if __name__ == "__main__":

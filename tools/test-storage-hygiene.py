@@ -119,7 +119,7 @@ class StorageHygieneTests(unittest.TestCase):
 
     def test_launchd_child_records_with_script_import_path(self):
         job = plistlib.loads((ROOT / "ops/launchd/com.carr.storage-hygiene.plist").read_bytes())
-        script = job["ProgramArguments"][5].replace("{{REPO}}", str(ROOT))
+        script = next(arg for arg in job["ProgramArguments"] if arg.endswith("/tools/storage_hygiene.py")).replace("{{REPO}}", str(ROOT))
         harness = self.root / "scheduled-fixture"
         harness.mkdir()
         # Instrument only filesystem/transport effects; execute launchd's actual child script.
