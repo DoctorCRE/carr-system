@@ -3109,7 +3109,7 @@ class CandidateStaging(Base):
                     owner.live.update(source_commit=argv[-1], provider_version_id=VERSION)
                 if "scripts/rollback-staging.mjs" in argv:
                     owner.live.update(source_commit=owner.fx.base, provider_version_id=argv[-1])
-                return rp.Result(0, "published")
+                return rp.Result(0, f"Worker Version ID: {VERSION}")
 
         pipe = self.fx.pipeline(Provider(), cfg=cfg, github=FakeGitHub(checks=[
             {"name": "test", "status": "completed", "conclusion": "success",

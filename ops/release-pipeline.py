@@ -2304,6 +2304,10 @@ class Pipeline:
                 sha = journal["sha"]
             elif command == "restore-candidate":
                 raise Blocked("candidate_missing", "no candidate staging identity was recorded")
+            prior_sha = self.store.load().get("app", {}).get("last_released_sha")
+            prior = journal["prior"] if command == "restore-candidate" else live
+            if not isinstance(prior_sha, str) or prior["source_commit"] != prior_sha:
+                raise Blocked("candidate_prior", "restore target must equal the last released app main SHA in pipeline state")
             repo_dir = lane_repo_dir(self.cfg, "app", self.repo)
             if command == "stage-candidate":
                 self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
