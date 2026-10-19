@@ -38,7 +38,7 @@ class JobTree:
         self.thread = threading.Thread(target=self.watch, daemon=True)
         self.thread.start()
 
-    def snapshot(self):
+    def inventory(self):
         rows = subprocess.run(['/bin/ps', '-axo', 'pid=,ppid=,uid=,stat='],
                               capture_output=True, text=True, check=True, timeout=2)
         table = {}
@@ -46,6 +46,10 @@ class JobTree:
             pid, parent, uid, state = row.split()
             if int(uid) == os.getuid() and not state.startswith('Z'):
                 table[int(pid)] = int(parent)
+        return table
+
+    def snapshot(self):
+        table = self.inventory()
         with self.lock:
             for pid, parent in table.items():
                 if pid in self.starts:
@@ -64,7 +68,7 @@ class JobTree:
                     if tagged(pid, self.tag):
                         self.starts[pid] = start
                 except OSError:
-                    if write_ownership.process_start(pid) == start:
+                    if pid in self.inventory() and write_ownership.process_start(pid) == start:
                         self.complete = False
             return {pid for pid in self.starts if pid in table
                     and write_ownership.process_start(pid) == self.starts[pid]}

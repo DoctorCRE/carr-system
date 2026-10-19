@@ -717,7 +717,7 @@ def dispatch(
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
     with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
-         (write_ownership.checkout_writer(workspace) if declared_writes else nullcontext()) as bind:
+         (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
             if (entry['kind'] not in codex_models.CODEX_KINDS
