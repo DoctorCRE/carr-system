@@ -11,13 +11,15 @@ import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
+from typing import Any
 import unittest
 from unittest import mock
 from urllib.parse import urlsplit, urlunsplit
 
 REPO = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("staging_recovery_provision", REPO / "tools/provision-staging-app-writer.py")
-provision = importlib.util.module_from_spec(SPEC)
+assert SPEC is not None and SPEC.loader is not None
+provision: Any = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = provision
 SPEC.loader.exec_module(provision)
 OPERATION = "021cf377-d2fc-4b26-9146-d1ddc1556df1"
@@ -56,7 +58,7 @@ class Recovery(unittest.TestCase):
         real_profile = provision.credential.profile
         self.file_profile = lambda label, **kw: real_profile(label, config_root=kw.get("config_root") or self.canonical)
         self.patch("replacement_credential_root", lambda _operation: self.operation)
-        self.patch("read_worker_database_secret_names", lambda: set(self.live))
+        self.patch("read_worker_database_secret_names", lambda **_kwargs: set(self.live))
         self.patch("bulk_worker_database_secrets", self.bulk)
         self.patch("apply_login_profile", self.apply)
         self.patch("validate_profile_login", self.validate)
@@ -176,6 +178,49 @@ class Recovery(unittest.TestCase):
         published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
         values, _rotations = self.prepare()
         self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+
+    def test_final_value_resumes_after_promotion_before_receipt(self):
+        original = provision.save_private_json
+        def die(path, value):
+            if path.name == "prior-worker-credential-recovery.json" and any(
+                    p["outcome"] == "rotated" for p in value["profiles"].values()):
+                raise ProcessDeath()
+            original(path, value)
+        with mock.patch.object(provision, "save_private_json", side_effect=die):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, rotations = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(rotations[0]["outcome"], "rotated")
+        self.assertEqual(len(self.changes), 1)
+
+    def test_current_live_binding_overrides_retained_absence_for_deletion_safety(self):
+        provision.save_private_json(self.operation / "prior-worker-secret-names.json", {
+            **provision.prior_worker_identity(self.binding),
+            "secret_names": sorted(set(self.live) - {"CARR_DB_AUTHORITY_JOE_URL"})})
+        values, rotations = self.prepare()
+        self.assertIsNotNone(values["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(rotations[0]["outcome"], "rotated")
+
+    def test_all_live_profiles_can_recover_without_deleting_bindings(self):
+        for profile in provision.PROFILES:
+            self.file_profile(profile.label).paths.final.unlink(missing_ok=True)
+        values, rotations = self.prepare()
+        self.assertEqual(len(rotations), 5)
+        self.assertTrue(all(values.values()))
+        self.assertEqual(self.live, values)
+        self.assertEqual(self.prepare()[0], values)
+        self.assertEqual(len(self.changes), 5)
+
+    def test_a_later_loss_of_the_final_file_can_recover_the_live_binding_again(self):
+        first, _rotations = self.prepare()
+        self.file_profile("authority_joe").paths.final.unlink()
+        second, rotations = self.prepare()
+        self.assertNotEqual(first["CARR_DB_AUTHORITY_JOE_URL"], second["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(rotations[0]["outcome"], "rotated")
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], second["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(len(self.changes), 2)
 
     def test_production_scope_refuses_before_rotation_or_publication(self):
         self.binding.old = dataclasses.replace(self.binding.old, project_id=provision.PRODUCTION_PROJECT_ID)

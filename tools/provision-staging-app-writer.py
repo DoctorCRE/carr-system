@@ -17,6 +17,11 @@ Worker and read back, and only then committed and promoted. Any failure before
 the commit rolls the ALTER back and removes the pending file. Each committed
 rotation is reported in the run output with its profile, role, time and reason.
 
+An old staging binding whose canonical credential was lost is recovered before
+cutover. Its guarded rotation reuses one durable pending value across retries,
+rebinds the staging Worker, and publishes an authenticated canonical final file.
+A private operation receipt records the recovery without credential values.
+
 STAGING ONLY, AND THAT IS THE DESIGN RATHER THAN A GAP. Every scope this tool
 resolves is refused if it lands on the Production project id. Migration 0502
 creates the Gate Zero producer seat WITHOUT a password, and this tool ADOPTS
@@ -629,17 +634,16 @@ def load_rollback_worker_values(
     return values
 
 
-def prepare_worker_rollback(
-    binding: ReplacementBinding, *, capture: bool = False,
-) -> dict[str, str | None]:
-    """Load rollback values under the cutover lock, retaining pre-cutover names."""
-    root = replacement_credential_root(binding.target.candidate_operation_id)
-    path = root / "prior-worker-secret-names.json"
+def prior_worker_identity(binding: ReplacementBinding) -> dict[str, str]:
+    if (binding.old.project_id == PRODUCTION_PROJECT_ID
+            or binding.old.project_name != replacement.STAGING_NAME
+            or binding.old.project_id == binding.candidate.project_id):
+        raise ProvisioningRefusal("rollback credential recovery requires the canonical staging project")
     with WRANGLER_CONFIG.open("rb") as handle:
         worker_name = tomllib.load(handle).get("env", {}).get("staging", {}).get("name")
-    if not isinstance(worker_name, str) or not worker_name:
+    if worker_name != "carr-mcp-staging":
         raise ProvisioningRefusal("staging Worker name is not pinned")
-    identity = {
+    return {
         "schema": "staging-prior-worker-secret-names/v1",
         "candidate_operation_id": str(binding.target.candidate_operation_id),
         "prior_project_id": binding.old.project_id,
@@ -649,6 +653,132 @@ def prepare_worker_rollback(
         "cloudflare_account_id": CLOUDFLARE_ACCOUNT_ID,
         "worker_name": worker_name,
     }
+
+
+def save_private_json(path: pathlib.Path, value: dict[str, Any]) -> None:
+    """Caller holds the cutover lock; a rename leaves a readable single-link file."""
+    credential._validate_private_directory(path.parent)
+    credential._safe_lstat(path)
+    temporary = path.parent / f".{path.stem}-{uuid.uuid4()}.pending"
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(value, handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        credential._fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
+    if json.loads(credential._secure_read(path)) != value:
+        raise ProvisioningRefusal("staging recovery receipt readback disagrees")
+
+
+def recover_live_rollback_credentials(
+    binding: ReplacementBinding, protected_names: set[str], plans: Mapping[str, Sequence[str]],
+    identity: dict[str, str],
+) -> list[dict[str, str]]:
+    old = binding.old
+    path = replacement_credential_root(binding.target.candidate_operation_id) / "prior-worker-credential-recovery.json"
+    receipt = (json.loads(credential._secure_read(path))
+               if credential._safe_lstat(path) is not None else {"identity": identity, "profiles": {}})
+    if (not isinstance(receipt, dict) or set(receipt) != {"identity", "profiles"}
+            or receipt["identity"] != identity or not isinstance(receipt["profiles"], dict)
+            or not set(receipt["profiles"]) <= {p.label for p in PROFILES}):
+        raise ProvisioningRefusal("staging rollback recovery receipt identity disagrees")
+    records = receipt["profiles"]
+    root = credential.profile("reader").paths.final.parent
+    with credential.exclusive_lock(root / ".staging-prior-rollback-role.lock"):
+        for profile in PROFILES:
+            file_profile = credential.profile(profile.label)
+            if (profile.login_role != file_profile.role_name
+                    or profile.secret_name not in WORKER_DATABASE_SECRET_NAMES
+                    or profile.label not in plans):
+                raise ProvisioningRefusal("rollback credential profile is not registered for staging rotation")
+            metadata = {"profile": profile.label, "role": profile.login_role,
+                        "worker_secret": profile.secret_name, "project_id": old.project_id,
+                        "reason": "live staging rollback credential missing; recover canonical binding"}
+            record = records.get(profile.label)
+            record_keys = {*metadata, "outcome"}
+            if isinstance(record, dict) and record.get("outcome") == "rotated":
+                record_keys.add("rotated_at")
+            if record is not None and (
+                    not isinstance(record, dict)
+                    or any(record.get(k) != v for k, v in metadata.items())
+                    or record.get("outcome") not in {"rotating", "rotated"}
+                    or set(record) != record_keys
+                    or (record.get("outcome") == "rotated" and not isinstance(record.get("rotated_at"), str))):
+                raise ProvisioningRefusal("staging rollback rotation receipt is malformed")
+            try:
+                stored = credential.load_existing(
+                    file_profile.paths, key=file_profile.key, role_name=profile.login_role,
+                    expected_endpoint=old.endpoint_host, expected_port=5432, expected_database="neondb")
+            except credential.CredentialRefusal as exc:
+                if str(exc) != "staging credential is absent":
+                    raise
+                if profile.secret_name not in protected_names and record is None:
+                    continue
+                stored = None
+            if stored is not None and stored.state == "final" and record is None:
+                continue
+            if record is not None and record["outcome"] == "rotated":
+                if stored is not None and stored.state == "final":
+                    continue
+                if stored is not None or profile.secret_name not in protected_names:
+                    raise ProvisioningRefusal("completed staging rotation has no live recoverable credential")
+                record = None
+            if stored is not None and record is None:
+                raise ProvisioningRefusal("pending rollback credential has no owned rotation receipt")
+            secret = replacement.derive_dsn(old, replacement.OWNER_ROLE, run=subprocess.run, environ=os.environ)
+            owner = psycopg.connect(secret.value)
+            try:
+                cur = owner.cursor()
+                expected_creator = require_direct_owner_identity(cur)
+                owner.commit()
+                if stored is None:
+                    action = decide_profile_action(
+                        role_exists_now=role_exists(cur, profile.login_role), credential_state="absent",
+                        role_passwordless=role_is_passwordless(cur, profile.login_role), rotate_lost=True)
+                    if action != "rotate":
+                        raise ProvisioningRefusal("live staging rollback profile cannot rotate")
+                    if record is None:
+                        records[profile.label] = {**metadata, "outcome": "rotating"}
+                        save_private_json(path, receipt)
+                    stored = credential.prepare_pending(
+                        file_profile.paths, key=file_profile.key, role_name=profile.login_role,
+                        owner_uri=secret.value, expected_endpoint=old.endpoint_host,
+                        expected_port=5432, expected_database="neondb")
+                if stored.state == "pending":
+                    # The pending password is stable even when the commit acknowledgement was lost.
+                    apply_login_profile(owner, profile, plans[profile.label], stored.password,
+                                        expected_creator=expected_creator, rotate=True, commit=False)
+                expected_names = read_worker_database_secret_names() | {profile.secret_name}
+                bulk_worker_database_secrets({profile.secret_name: stored.value})
+                verify_worker_database_secret_bindings(expected_names=expected_names)
+                owner.commit()
+                validate_profile_login(stored.value, profile, plans[profile.label], expected_creator=expected_creator)
+                if stored.state == "pending":
+                    credential.promote_pending(file_profile.paths, key=file_profile.key, expected_value=stored.value)
+                records[profile.label] = {
+                    **metadata, "outcome": "rotated",
+                    "rotated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+                save_private_json(path, receipt)
+            finally:
+                owner.rollback()
+                owner.close()
+    return list(records.values())
+
+
+def prepare_worker_rollback(
+    binding: ReplacementBinding, *, capture: bool = False,
+    plans: Mapping[str, Sequence[str]] | None = None, rotations: list[dict[str, str]] | None = None,
+) -> dict[str, str | None]:
+    """Retain prior names and recover live staging profiles before any rollback can delete them."""
+    root = replacement_credential_root(binding.target.candidate_operation_id)
+    path = root / "prior-worker-secret-names.json"
+    identity = prior_worker_identity(binding)
     exists = credential._safe_lstat(path) is not None
     if exists:
         try:
@@ -668,25 +798,19 @@ def prepare_worker_rollback(
             or not {"DATABASE_URL_READER", "DATABASE_URL_WRITER"} <= set(names) \
             or not set(names) <= set(WORKER_DATABASE_SECRET_NAMES):
         raise ProvisioningRefusal("prior Worker inventory proof secret names are not exact")
-    values = load_rollback_worker_values(binding.old, set(names))
+    protected_names = set(names)
+    if plans is not None:
+        live_names = read_worker_database_secret_names()
+        if (not {"DATABASE_URL_READER", "DATABASE_URL_WRITER"} <= live_names
+                or not live_names <= set(WORKER_DATABASE_SECRET_NAMES)):
+            raise ProvisioningRefusal("live staging Worker database secret names are not exact")
+        protected_names |= live_names
+        recovered = recover_live_rollback_credentials(binding, protected_names, plans, identity)
+        if rotations is not None:
+            rotations.extend(recovered)
+    values = load_rollback_worker_values(binding.old, protected_names)
     if not exists:
-        credential._validate_private_directory(root)
-        temporary = root / f".prior-worker-secret-names-{uuid.uuid4()}.pending"
-        descriptor = os.open(
-            temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-        )
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                os.fchmod(handle.fileno(), 0o600)
-                json.dump({**identity, "secret_names": names}, handle, sort_keys=True)
-                handle.flush()
-                os.fsync(handle.fileno())
-            # Link publication cannot replace an existing historical proof.
-            os.link(temporary, path)
-        finally:
-            temporary.unlink()
-        credential._fsync_directory(root)
+        save_private_json(path, {**identity, "secret_names": names})
     return values
 
 
@@ -1511,11 +1635,11 @@ def bulk_worker_database_secrets(
     values: Mapping[str, str | None], *, wrangler: str = str(WRANGLER),
     run: Run = subprocess.run, environ: Mapping[str, str] | None = None,
 ) -> None:
-    if set(values) != set(WORKER_DATABASE_SECRET_NAMES) \
+    if not values or not set(values) <= set(WORKER_DATABASE_SECRET_NAMES) \
             or any(value is not None and (not isinstance(value, str) or not value)
                    for value in values.values()):
         raise ProvisioningRefusal("Worker database secret bulk payload is not exact")
-    payload = json.dumps({name: values[name] for name in WORKER_DATABASE_SECRET_NAMES},
+    payload = json.dumps(dict(values),
                          sort_keys=True, separators=(",", ":"))
     try:
         result = run(
@@ -1881,7 +2005,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.rollback_to_prior_staging:
             with credential.exclusive_lock(worker_cutover_lock_path()):
-                rollback_values = prepare_worker_rollback(binding)
+                rollback_values = prepare_worker_rollback(binding, plans=plans, rotations=rotations)
                 rollback_names = {name for name, value in rollback_values.items()
                                   if value is not None}
                 rollback_worker_to_prior(
@@ -1896,6 +2020,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "receipt_id": str(target.receipt_id), "git_sha": target.expected_sha,
                 "prior_staging_project_id": binding.old.project_id,
                 "worker_secret_update": "atomic_bulk_pair", "candidate_roles_mutated": False,
+                "prior_rollback_rotations": rotations,
             }, sort_keys=True))
             return 0
 
@@ -1917,14 +2042,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "target_count": before.target_count, "batch_count": before.batch_count,
                 "reader_least_privilege_required": True,
                 "worker_secret_update": "atomic_bulk_pair",
-                "rollback_source": "untouched canonical old-staging credential files",
+                "rollback_source": "authenticated canonical old-staging credential files",
                 "next_phase": "rerun with --apply after local checks are green",
             }, sort_keys=True))
             return 0
 
         preserve_provider_scopes()
         with credential.exclusive_lock(worker_cutover_lock_path()):
-            rollback_values = prepare_worker_rollback(binding, capture=True)
+            rollback_values = prepare_worker_rollback(binding, capture=True, plans=plans, rotations=rotations)
         rollback_names = {name for name, value in rollback_values.items()
                           if value is not None}
         config_root = replacement_credential_root(target.candidate_operation_id)

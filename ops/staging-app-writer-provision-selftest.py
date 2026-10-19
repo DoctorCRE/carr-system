@@ -1121,6 +1121,7 @@ commit;
         "resolve_replacement_binding": provision.resolve_replacement_binding,
         "load_rollback_worker_values": provision.load_rollback_worker_values,
         "prepare_worker_rollback": provision.prepare_worker_rollback,
+        "recover_live_rollback_credentials": provision.recover_live_rollback_credentials,
         "read_worker_database_secret_names": provision.read_worker_database_secret_names,
         "replacement_credential_root": provision.replacement_credential_root,
         "bulk_worker_database_secrets": provision.bulk_worker_database_secrets,
@@ -1270,9 +1271,20 @@ commit;
                   "foundation_assurance_oracle": "reused"})
 
         live_names = set(provision.WORKER_DATABASE_SECRET_NAMES) - {"CARR_DB_AUTHORITY_JOE_URL"}
+        recovered_authority = False
+        rotation_available = True
+        def recover_release(_binding, protected_names, _plans, _identity):
+            nonlocal recovered_authority
+            if "CARR_DB_AUTHORITY_JOE_URL" in protected_names and not recovered_authority:
+                if not rotation_available:
+                    raise provision.ProvisioningRefusal("staging credential is absent; rotation unavailable")
+                recovered_authority = True
+                return [{"profile": "authority_joe", "outcome": "rotated"}]
+            return []
+        provision.recover_live_rollback_credentials = recover_release
         def load_release_credential(paths, *, role_name, expected_endpoint, **kwargs):
             if expected_endpoint == old.endpoint_host:
-                if role_name == "carr_authority_joe":
+                if role_name == "carr_authority_joe" and not recovered_authority:
                     raise provision.credential.CredentialRefusal("staging credential is absent")
                 return provision.credential.StoredCredential(
                     "final", paths.final, f"prior-{role_name}", "fixture-password",
@@ -1307,13 +1319,16 @@ commit;
                     "--candidate-operation-id", str(CANDIDATE_OPERATION_ID),
                     "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA, "--apply",
                 ])
-            check("candidate names without historical proof refuse lost old authority without saving false history",
-                  rc == 2 and stdout.getvalue() == "" and not proof_path.exists()
-                  and not any(event[0] == "bulk" for event in orchestration_events))
+            check("live authority without canonical file or inventory recovers before candidate provisioning",
+                  rc == 0 and json.loads(stdout.getvalue())["deliberate_rotations"] == [
+                      {"profile": "authority_joe", "outcome": "rotated"}]
+                  and proof_path.exists() and any(event[0] == "bulk" for event in orchestration_events))
+            proof_path.unlink()
+            recovered_authority = False
             live_names.remove("CARR_DB_AUTHORITY_JOE_URL")
             for release_number in (1, 2):
                 if release_number == 2:
-                    check("second release begins with candidate Joe authority live, not an old canonical file",
+                    check("second release begins with candidate Joe authority live and can recover canonical material",
                           "CARR_DB_AUTHORITY_JOE_URL" in live_names)
                 seed_reads = preserve_calls = 0
                 orchestration_events.clear()
@@ -1329,9 +1344,6 @@ commit;
                       and seed_reads == 2 and stderr.getvalue() == "")
                 if release_number == 1:
                     original_proof = proof_path.read_bytes()
-                    def reject_current_inventory():
-                        raise AssertionError("current candidate names cannot replace prior inventory")
-                    provision.read_worker_database_secret_names = reject_current_inventory
             check("consecutive releases preserve a private create-once prior inventory",
                   proof_path.read_bytes() == original_proof
                   and proof_path.stat().st_mode & 0o777 == 0o600
@@ -1345,9 +1357,9 @@ commit;
                     "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA,
                     "--rollback-to-prior-staging", "--apply",
                 ])
-            check("explicit rollback reuses historical absence after candidate authority was live",
+            check("explicit rollback retains recovered authority after candidate authority was live",
                   rc == 0 and json.loads(stdout.getvalue())["state"] == "rolled_back_to_prior_staging"
-                  and "CARR_DB_AUTHORITY_JOE_URL" not in live_names
+                  and "CARR_DB_AUTHORITY_JOE_URL" in live_names
                   and proof_path.read_bytes() == original_proof)
             proof = json.loads(original_proof)
             for field in ("candidate_operation_id", "prior_project_id", "prior_branch_id",
@@ -1384,6 +1396,8 @@ commit;
                     "final", paths.final, f"prior-{role_name}", "fixture-password",
                     old.endpoint_host, 5432, "neondb")
             provision.prepare_worker_rollback(binding_fixture, capture=True)
+            recovered_authority = False
+            rotation_available = False
             provision.credential.load_existing = load_release_credential
             for extra in ([], ["--rollback-to-prior-staging"]):
                 seed_reads = preserve_calls = 0
@@ -1394,11 +1408,12 @@ commit;
                         "--candidate-operation-id", str(CANDIDATE_OPERATION_ID),
                         "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA, "--apply", *extra,
                     ])
-                check("saved live authority with missing canonical file refuses before Worker bulk or success",
+                check("saved live authority refuses before publication when rotation is unavailable",
                       rc == 2 and stdout.getvalue() == ""
                       and not any(event[0] == "bulk" for event in orchestration_events)
                       and "staging credential is absent" in stderr.getvalue())
         provision.replacement_credential_root = saved_main_dependencies["replacement_credential_root"]
+        provision.recover_live_rollback_credentials = saved_main_dependencies["recover_live_rollback_credentials"]
         provision.prepare_worker_rollback = lambda _binding, **_kwargs: dict(old_values)
         provision.read_worker_database_secret_names = saved_main_dependencies[
             "read_worker_database_secret_names"]
@@ -1517,6 +1532,7 @@ commit;
             "read_worker_database_secret_names"]
         provision.load_rollback_worker_values = saved_main_dependencies["load_rollback_worker_values"]
         provision.prepare_worker_rollback = saved_main_dependencies["prepare_worker_rollback"]
+        provision.recover_live_rollback_credentials = saved_main_dependencies["recover_live_rollback_credentials"]
         provision.replacement_credential_root = saved_main_dependencies["replacement_credential_root"]
         provision.bulk_worker_database_secrets = saved_main_dependencies["bulk_worker_database_secrets"]
         provision.verify_worker_database_secret_bindings = saved_main_dependencies[
