@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import http.client
 import importlib.util
 import json
 import os
@@ -32,9 +33,11 @@ import re
 import subprocess
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 from pathlib import Path
 
@@ -577,6 +580,51 @@ class GitFetchDiagnostics(Base):
 
 
 class WorkerIdentityReconciliation(Base):
+    def test_malformed_or_permanent_identity_read_blocks_without_retry(self):
+        responses = [json.JSONDecodeError("fixture invalid JSON", "{", 1),
+                     {}, {"git_sha": "malformed"},
+                     {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}},
+                     urllib.error.HTTPError("https://fixture.invalid/release", 503, "unavailable", {}, None),
+                     urllib.error.URLError(socket.gaierror(socket.EAI_NONAME, "fixture unknown host")),
+                     PermissionError("fixture access denied")]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 1)
+                sleep.assert_not_called()
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(runner.calls, [])
+
+    def test_transient_identity_read_recovers_after_one_bounded_retry(self):
+        errors = [http.client.RemoteDisconnected("fixture dropped connection"),
+                  ConnectionResetError("fixture connection reset"), TimeoutError("fixture timeout"),
+                  urllib.error.URLError(ConnectionResetError("fixture reset")),
+                  urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "fixture DNS timeout")),
+                  http.client.IncompleteRead(b"partial identity")]
+        for error in errors:
+            with self.subTest(error=error):
+                runner, verbs = FakeRunner(), []
+                pipe = self.fx.pipeline(runner, verbs=verbs)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[error, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(self.fx.records(), [])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
         latest = self.fx.commit({"mcp-server/src/a.js": "next"})
