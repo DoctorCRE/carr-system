@@ -143,6 +143,24 @@ class RetirementKeepTests(unittest.TestCase):
 
 
 class JobCloneTests(unittest.TestCase):
+    def test_clone_outside_authorized_repository_identity_is_kept(self):
+        import machine_cleanup as cleanup
+        from branch_retirement import GitHub
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-other-repository'
+        workspace.mkdir()
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        result = cleanup.clean_clone(workspace, {'status': 'completed',
+            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+            'dispatched_at': '2020-01-01T00:00:00+00:00'}, provider=GitHub(),
+            process_probe=lambda paths: set(), now=time.time(), older_than=1, dry_run=False)
+        self.assertEqual(result['status'], 'kept', result)
+        self.assertNotIn('error', result)
+        self.assertIn('identity', result['reason'])
+        self.assertTrue(clone.exists())
+        self.assertFalse((workspace.parent / '_to_delete').exists())
+
     def test_finished_clone_keep_rules(self):
         import machine_cleanup as cleanup
         for condition in ('dirty', 'unpushed', 'live', 'open_pr', 'unfinished', 'unknown_process'):
