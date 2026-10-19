@@ -980,6 +980,39 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_later_success_clears_same_job_failures_without_deleting_history(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def report(self, finding):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / c["paths"]["registry"]
+            path = root / c["paths"]["findings"]
+            for job_id, start in (("first", 100), ("second", 120)):
+                w.append(registry, {"id": job_id, "card": "branch-janitor",
+                                   "executor": "deterministic reaper", "start": start,
+                                   "exit_code": 1, "ended_at": w.stamp(start + 10),
+                                   "log_tail": "repository maintenance lock held; preserve pending run"})
+            def reconcile(now):
+                jobs = list(w.read_latest(registry).values())
+                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, now), Effects(), now)
+            self.assertEqual(len(reconcile(140)), 2)
+            before = path.read_text().splitlines()
+            w.append(registry, {"id": "retry", "card": "branch-janitor",
+                               "executor": "deterministic reaper", "start": 200,
+                               "alive": True, "log_mtime": 200, "limit": 3600})
+            self.assertEqual(len(reconcile(210)), 2, "an unfinished retry is not recovery")
+            w.append(registry, {"id": "retry", "exit_code": 0, "ended_at": w.stamp(220)})
+            self.assertEqual(reconcile(230), [])
+            latest = w.read_latest(path)
+            self.assertEqual({row["cleared_at"] for row in latest.values()}, {w.stamp(230)})
+            self.assertEqual(w.digest(root, c), "")
+            self.assertTrue(all(line in path.read_text().splitlines() for line in before))
+            self.assertEqual(reconcile(240), [])
+            self.assertEqual(w.read_latest(path), latest)
+
     def test_scan_recovers_after_verified_absent_effect_without_relaunch(self):
         from unittest.mock import Mock, patch
         import job_watchdog as w
