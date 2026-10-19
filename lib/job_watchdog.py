@@ -331,18 +331,21 @@ def detect(facts, config, now):
     jobs = facts.get("jobs", [])
     failures = set()
     successes = {}
+    for job in jobs:
+        if job.get("exit_code") == 0 and "start" in job:
+            card = job.get("card", job["id"])
+            successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
     for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
             card = job.get("card", subject)
-            if job["exit_code"] == 0 and "start" in job:
-                successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
             if job["exit_code"] != 0 and not job.get("superseded"):
                 if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
                     continue
                 reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
-                key = f"job_failed:{card}:" + hashlib.sha256(reason.encode()).hexdigest()
+                incident = json.dumps([reason, successes.get(card)])
+                key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
                 if key not in failures:
                     failures.add(key)
                     emit("jobs", "job_failed", card, reason, key=key, **fields)

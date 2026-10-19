@@ -126,9 +126,9 @@ class ReplayTests(unittest.TestCase):
             later = {**failed, "id": "failed-2", "start": 30}
             found = w.detect({"jobs": [later, success, failed]}, config, 35)
             self.assertEqual(len(found), 1)
-            self.assertEqual(found[0]["key"], key)
+            self.assertNotEqual(found[0]["key"], key)
             w.reconcile(root, config, found, effects, 35)
-            self.assertIsNone(w.read_latest(root / config["paths"]["findings"])[key]["cleared_at"])
+            self.assertIsNone(w.read_latest(root / config["paths"]["findings"])[found[0]["key"]]["cleared_at"])
             self.assertEqual(effects.report.call_count, 2)
 
     def test_identical_job_failures_collapse_by_card_and_cause(self):
