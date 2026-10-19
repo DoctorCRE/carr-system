@@ -3,9 +3,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_receipts
+import dispatch
 
 
 class SkillReceiptTests(unittest.TestCase):
@@ -66,6 +68,25 @@ class SkillReceiptTests(unittest.TestCase):
             skill_receipts.require_skills('Skills: grill-with-docs', {'available': ['tdd']})
         with self.assertRaisesRegex(ValueError, 'inventory unknown'):
             skill_receipts.require_skills('Skills: tdd', None)
+
+    def test_completed_job_uses_its_own_thread_and_dispatch_time(self):
+        row = {'msg_id': 'job', 'status': 'completed', 'thread_id': 'own-session',
+               'kind': 'codex-session', 'dispatched_at': '2026-10-19T15:00:00Z',
+               'result': 'https://github.com/jbookout/carr-system/pull/2000'}
+        with patch.object(skill_receipts, 'session_path', return_value=Path('/own-log')) as locate, \
+             patch.object(skill_receipts, 'scan', return_value={'available': ['tdd'], 'opened': []}) as scan, \
+             patch.object(dispatch, '_skill_gh', side_effect=[
+                 {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
+                 {'html_url': 'https://github.com/jbookout/carr-system/issues/2000#issuecomment-1'}, {}]):
+            value = dispatch.finish_skill_receipt(row)
+        locate.assert_called_once_with('own-session', 'codex')
+        scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'])
+        self.assertFalse(value['skills'][0]['opened'])
+
+    def test_delivery_is_not_completion(self):
+        with patch.object(dispatch, '_skill_gh') as gh:
+            self.assertIsNone(dispatch.finish_skill_receipt({'status': 'delivered'}))
+        gh.assert_not_called()
 
 
 if __name__ == '__main__':
