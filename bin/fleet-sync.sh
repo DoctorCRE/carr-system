@@ -147,6 +147,11 @@ if [ "$canonical_skip" -eq 0 ]; then
       print -r -- "fleet-sync: SKIP — main has diverged from origin/main; a human decides this one"
       canonical_status=$EX_CONFIG
       canonical_skip=1
+    elif ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" "$remote_sha")"; then
+      print -r -- "fleet-sync: SKIP — local changes appeared before fast-forward:"
+      print -r -- "    $dirt_reason"
+      canonical_status=$EX_CONFIG
+      canonical_skip=1
     elif ! git merge --ff-only origin/main >/dev/null 2>&1; then
       print -ru2 -- "fleet-sync: fast-forward failed unexpectedly"
       canonical_status=1
