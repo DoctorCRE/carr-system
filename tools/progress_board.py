@@ -78,7 +78,8 @@ SNAPSHOT_TASK_FIELDS = frozenset("""
     pr_phase pr_head pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
     release_wait created_at updated_at completed_at merged_at manual_stage
     stage_entered_at stage_history question_ids human_ref kind related
-    work_request work_request_ref milestone milestone_source slice
+    work_request work_request_ref plan_ref plan_id slice_ref slice_id task_ref task_id job_ref job_id
+    milestone milestone_source slice
 """.split())
 BLOCKER_EXCERPT_LIMIT = 192
 
