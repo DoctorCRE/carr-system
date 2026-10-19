@@ -74,6 +74,10 @@ class DisposablePostgres:
     def run(self, command, **kwargs):
         global _main_launches, _pending_signal
         args = [str(arg) for arg in command]
+        if Path(args[0]).name == 'initdb' and '-D' in args and not any(
+                arg.startswith('-E') or arg == '--encoding'
+                or arg.startswith('--encoding=') for arg in args[1:]):
+            args.append('--encoding=UTF8')
         launch = Path(args[0]).name == 'initdb' or (Path(args[0]).name == 'pg_ctl' and 'start' in args)
         if launch:
             self.register(args[args.index('-D') + 1])
