@@ -16,6 +16,9 @@ import tempfile
 import time
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from git_env import fixture_env, scrubbed_env, GIT_LOCATION_VARS  # noqa: E402
 
@@ -28,7 +31,7 @@ check = CHECKER.check
 
 
 def make_repo(prefix, email):
-    repo = tempfile.mkdtemp(prefix=prefix)
+    repo = temporary_directory(prefix=prefix)
     env = fixture_env()
     for args in (["init", "-q"],
                  ["config", "user.email", email],
@@ -58,7 +61,7 @@ victim_email = git_out(victim, "config", "--get", "user.email", env=fixture_env(
 # if this case ever stops failing to isolate, the whole file is testing nothing.
 hostile = dict(os.environ)
 hostile["GIT_DIR"] = os.path.join(victim, ".git")
-naive = tempfile.mkdtemp(prefix="gitenv-naive-")
+naive = temporary_directory(prefix="gitenv-naive-")
 subprocess.run(["git", "init", "-q"], cwd=naive, env=hostile, capture_output=True)
 subprocess.run(["git", "config", "user.email", "leaked@example.invalid"],
                cwd=naive, env=hostile, capture_output=True)
@@ -73,7 +76,7 @@ subprocess.run(["git", "config", "user.email", victim_email], cwd=victim,
                env=fixture_env(), capture_output=True)
 
 # THE ACTUAL CASES. Same hostile environment, routed through the helper.
-fixture = tempfile.mkdtemp(prefix="gitenv-fixture-")
+fixture = temporary_directory(prefix="gitenv-fixture-")
 fenv = fixture_env(hostile)
 subprocess.run(["git", "init", "-q"], cwd=fixture, env=fenv, capture_output=True)
 # BOTH halves of the identity, and the omission of user.name here failed on the

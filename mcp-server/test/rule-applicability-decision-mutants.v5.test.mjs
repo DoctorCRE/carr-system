@@ -11,9 +11,9 @@
 // anchors are exact and unique, so a refactor that turns a mutant into a no-op
 // fails here instead of reporting a meaningless green run.
 
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,6 +25,7 @@ import * as real from "../src/rule-applicability.v5.js";
 const SOURCE = new URL("../src/rule-applicability.v5.js", import.meta.url);
 const SOURCE_DIR = fileURLToPath(new URL("../src/", import.meta.url));
 const WORK = mkdtempSync(join(tmpdir(), "v5-f05-decision-mutants-"));
+after(() => rmSync(WORK, { recursive: true, force: true }));
 
 function mutate(id, anchor, replacement) {
   const source = readFileSync(SOURCE, "utf8");

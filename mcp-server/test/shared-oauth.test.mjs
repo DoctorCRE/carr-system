@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { launchTestChrome } from "../../dealroom/test/chrome-launch.mjs";
 import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
 import { handleAuthorize, s256 } from "../src/google-oidc.js";
 import * as policy from "../src/oauth-policy.js";
@@ -480,18 +480,14 @@ test("denial completes the registered client attempt with access_denied and orig
 test("Chrome completes approve and deny at an external client while consent form stays restricted", { timeout: 90000 }, async t => {
   const chrome = await findDisposableChromium();
   if (!chrome) { t.skip("Chrome for Testing/Playwright Chromium is unavailable"); return; }
-  const browser = await launchChrome(chrome);
+  const browser = await launchTestChrome(t, chrome);
   const socket = new WebSocket(browser.pageWsUrl);
   const servers = [];
   t.after(async () => {
     socket.close();
-    try {
-      await Promise.all(servers.map(server => new Promise(resolve => {
-        server.closeAllConnections(); server.close(resolve);
-      })));
-    } finally {
-      await browser.close();
-    }
+    await Promise.all(servers.map(server => new Promise(resolve => {
+      server.closeAllConnections(); server.close(resolve);
+    })));
   });
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
   let serial = 0;
