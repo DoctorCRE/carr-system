@@ -241,6 +241,33 @@ class ReaperTest(unittest.TestCase):
         self.assertEqual([r["repo"] for r in refused["deferred"]], ["fleet"])
         self.assertEqual([p.read_bytes() for p in paths], before)
 
+    def test_reap_main_exits_nonzero_for_malformed_configuration(self):
+        with tempfile.TemporaryDirectory(prefix="branch-retire-config-") as directory:
+            source = Path(directory)
+            config = source / "ops/config/job-watchdog.json"
+            config.parent.mkdir(parents=True)
+            config.write_text("{")
+            program = f"""import runpy
+import sys
+from pathlib import Path
+sys.path[:0] = [{str(ROOT / 'lib')!r}, {str(ROOT / 'ops')!r}]
+import job_watchdog
+job_watchdog.SOURCE = Path({str(source)!r})
+sys.argv = [{str(ROOT / 'hooks/worktree-self-plumb.py')!r}, '--reap', '--repo', {str(source)!r}]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+            result = subprocess.run([sys.executable, "-c", program], env=fixture_env(),
+                                    text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("JSONDecodeError", result.stderr)
+
+    def test_session_start_remains_fail_soft_on_unexpected_error(self):
+        import io
+        with patch.object(sys, "argv", [str(ROOT / "hooks/worktree-self-plumb.py")]), \
+                patch.object(sys, "stdin", io.StringIO("{}")), \
+                patch.object(hook, "resolve_cwd", side_effect=ValueError("fixture boot error")):
+            self.assertEqual(hook.main(), 0)
+
     def test_contended_cli_defers_without_failure_or_replacing_receipts(self):
         import contextlib
         import io
@@ -255,8 +282,10 @@ class ReaperTest(unittest.TestCase):
         output = io.StringIO()
         with maintenance(fixture.repo), patch.object(hook, "fleet_reaper", return_value=reaper), \
                 patch("branch_retirement.repository_roots", return_value=roots), \
+                patch.object(sys, "argv", [str(ROOT / "hooks/worktree-self-plumb.py"),
+                                           "--reap", "--fleet", "--repo", str(fixture.repo)]), \
                 contextlib.redirect_stdout(output):
-            status = hook.reap_main(["--reap", "--fleet", "--repo", str(fixture.repo)])
+            status = hook.main()
         report = json.loads(output.getvalue())
         self.assertEqual(status, 0, report)
         self.assertFalse(report["errors"])
@@ -328,7 +357,8 @@ reaper = hook.fleet_reaper(repo, provider=module['FakeProvider'](),
     clock=lambda: {now!r})
 with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         patch('branch_retirement.repository_roots', return_value={{'jbookout/carr-system': repo}}):
-    sys.exit(hook.reap_main(['--reap', '--fleet', '--repo', str(repo)]))
+    sys.argv = [hook.__file__, '--reap', '--fleet', '--repo', str(repo)]
+    sys.exit(hook.main())
 """)
         output = io.StringIO()
         with patch.object(watchdog, "board_task", return_value={}), \
