@@ -77,6 +77,18 @@ def hosted_checks(remote, group):
         raise Refusal('other hosted checks at this head are not all green; no remote retry consumed')
 
 
+def retry_binding(snapshot):
+    """Bind admission facts, excluding GitHub's repository and mergeability caches."""
+    run, job, pr = snapshot
+    return (
+        tuple(run.get(key) for key in ('id', 'name', 'path', 'event', 'status',
+                                       'conclusion', 'head_sha', 'run_attempt')),
+        tuple(job.get(key) for key in ('id', 'run_id', 'name', 'status', 'conclusion')),
+        tuple(pr.get(key) for key in ('number', 'state', 'draft')),
+        pr.get('head', {}).get('sha'), pr.get('base', {}).get('sha'),
+    )
+
+
 def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
     """Pin the candidate to the supplied local head, or the fetched PR head."""
     snapshot = remote.snapshot(run_id, job_id)
@@ -90,7 +102,7 @@ def rerun(remote, run_id, job_id, head, policy, checks, dispatch):
                                {'candidate_sha': head, 'local_checks_green': True})
     current = remote.snapshot(run_id, job_id)
     admit(*current, head, remote.repo)
-    if current != snapshot:
+    if retry_binding(current) != retry_binding(snapshot):
         raise Refusal('run, job or PR changed during local checks; no dispatch')
     dispatch(run_id, job_id, current[0]['run_attempt'], head)
 
