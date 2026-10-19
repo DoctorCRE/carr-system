@@ -135,6 +135,9 @@ def aggregate(values):
 def validate_copy(title, description):
     if not isinstance(title, str) or not 1 <= len(title.split()) <= 3 or not re.fullmatch(r"[A-Za-z][A-Za-z' ]*", title):
         raise ValueError('Card titles require one to three plain words')
+    words = title.lower().split()
+    if words[0] in {'a', 'an', 'the'} or words[-1] in {'and', 'or', 'that', 'the', 'a', 'an', 'to', 'for', 'with', 'of', 'in', 'on'}:
+        raise ValueError('Card titles must name the work, not a sentence fragment')
     if re.search(r'(?i)\b(?:[a-f0-9]{8,}|(?:WR|PR)\s*\d+)', title):
         raise ValueError('Identifiers belong in card details')
     if not isinstance(description, str) or not description.strip() or re.match(r'(?i)\s*(?:(?:WR|PR|J|S)[- .#]?\d|(?:carr|app|factory)#\d|#\d|\d{4,}|[0-9a-f]{8,}\b)', description):
@@ -146,7 +149,8 @@ def validate_copy(title, description):
 def plain_text(text):
     text = re.sub(r'(?m)^#{1,6}[^\n]*\n', '', str(text or ''))
     text = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', text)
-    text = re.sub(r'https?://\S+|`[^`]*`', '', text)
+    text = re.sub(r'`([^`]*)`', lambda match: match[1].replace('-', ' ') if re.fullmatch(r'[A-Za-z][A-Za-z -]*', match[1]) else '', text)
+    text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'(?i)\b(?:WR[- ]?\d+|PR\s*#?\d+|[a-f0-9]{12,})\b', '', text)
     text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor)(?:\([^)]*\))?:\s*', '', text)
     text = re.sub(r'^\s*(?:V\d+[- ]+[A-Z]\d*[a-z]?:?\s*|[A-Z]\d+[a-z]?:\s*)', '', text)
@@ -154,6 +158,12 @@ def plain_text(text):
 
 
 TOPICS = (
+    (r'^Bump |^chore\(deps', 'Build dependencies'),
+    (r'what.?s.new|whats new', 'Recent changes'),
+    (r'job watchdog|watchdog.*job', 'Job monitoring'),
+    (r'SECURITY DEFINER', 'Database safety'),
+    (r'\bQA\b|qa fixes', 'App repairs'),
+    (r'slices register|slice registry', 'Slice registration'),
     (r'\bV\d+\b.*delivery', 'Application delivery'),
     (r'site map|sitemap', 'Site navigation'),
     (r'progress.?board|\bboard\b', 'Board cleanup'),
@@ -172,13 +182,16 @@ TOPICS = (
 def propose_copy(record):
     source = plain_text(record.get('title'))
     title = next((label for pattern, label in TOPICS if re.search(pattern, source, re.I)), None)
-    words = [w for w in source.split() if re.fullmatch(r"[A-Za-z][A-Za-z']*", w)]
+    stop = {'a', 'an', 'the', 'this', 'that', 'to', 'for', 'of', 'in', 'on', 'with', 'and', 'or', 'by', 'from', 'it', 'is', 'are', 'as', 'its', 'each'}
+    words = [w for w in source.split() if re.fullmatch(r"[A-Za-z][A-Za-z']*", w) and w.lower() not in stop]
     if title is None and len(words) >= 2:
         title = ' '.join(words[:3]).capitalize()
     description = plain_text(record.get('description') or record.get('body') or record.get('summary'))
     if len(description.split()) < 7 or re.match(r'(?i)^(?:absent|natural run|summary)\b', description):
         description = source
-    if source.lower().startswith('industry events'):
+    if re.match(r'(?i)^Bump |^chore\(deps', source):
+        description = 'Update the selected dependency to keep the build configuration current.'
+    elif source.lower().startswith('industry events'):
         description = 'Verify industry events so missing application features can be identified.'
     elif source.lower().startswith('crm capture'):
         description = 'Check that CRM capture saves new information reliably for later use.'

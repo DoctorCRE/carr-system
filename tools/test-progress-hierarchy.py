@@ -221,6 +221,14 @@ class HierarchyTests(unittest.TestCase):
         self.assertEqual(row['pr_counts'], {'build':1})
         self.assertEqual(row['job_counts'], {'queued':1})
 
+    def test_summary_keeps_meaningful_method_words_and_rejects_sentence_fragments(self):
+        row = {'title':'A `whats-new` answer that remembers what each partner saw',
+               'body':'Show changes since the last visit so returning partners can catch up.'}
+        h.propose_copy(row)
+        self.assertEqual(row['card_title'], 'Recent changes')
+        with self.assertRaises(ValueError):
+            h.validate_copy('A answer that', 'Show changes since the last visit.')
+
 
 if __name__ == '__main__':
     unittest.main()
