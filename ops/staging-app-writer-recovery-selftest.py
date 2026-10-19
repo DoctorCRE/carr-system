@@ -290,6 +290,33 @@ class Recovery(unittest.TestCase):
         self.assertEqual(outcomes[0]["outcome"], "created")
         self.assertEqual({password for _role, password in self.changes}, {urlsplit(published).password})
 
+    def test_missing_old_authority_resumes_after_commit_before_final_publication(self):
+        del self.passwords["carr_authority_joe"]
+        with mock.patch.object(provision.credential, "promote_pending", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+
+    def test_creation_receipt_cannot_create_a_missing_reader(self):
+        profile = next(p for p in provision.PROFILES if p.label == "reader")
+        paths = self.file_profile("reader").paths
+        paths.final.rename(paths.pending)
+        del self.passwords["app_reader"]
+        provision.save_private_json(self.operation / "prior-worker-credential-recovery.json", {
+            "identity": provision.prior_worker_identity(self.binding),
+            "protected_names": sorted(self.live),
+            "profiles": {"reader": {
+                "profile": "reader", "role": profile.login_role,
+                "worker_secret": profile.secret_name, "project_id": self.binding.old.project_id,
+                "reason": "live staging rollback credential missing; recover canonical binding",
+                "outcome": "creating"}}})
+        with self.assertRaises(provision.ProvisioningRefusal):
+            self.prepare()
+        self.assertEqual(self.bulk_calls, [])
+
     def test_missing_reader_role_still_refuses_instead_of_deleting_binding(self):
         del self.passwords["app_reader"]
         self.file_profile("reader").paths.final.unlink()
