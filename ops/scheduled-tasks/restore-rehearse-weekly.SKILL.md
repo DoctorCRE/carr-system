@@ -7,7 +7,7 @@ Run this command once in one Bash call. The parser reads the completed stdout
 and stderr, including teardown, and prints the report.
 
 ```bash
-cd ~/carr-system && ./run.sh restore-rehearse 2>&1 | python3 tools/restore-rehearse-report.py
+cd ~/carr-system && { ./run.sh restore-rehearse 2>&1 || printf '\nREHEARSAL FAILED: producer exited %s\n' "$?"; } | python3 tools/restore-rehearse-report.py
 ```
 
 Report the parser output verbatim. On FAIL, stop and raise the report as the

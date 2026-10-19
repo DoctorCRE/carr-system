@@ -75,6 +75,20 @@ class RestoreReportTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("REHEARSAL FAILED: no fixture dump exists\n", result.stdout)
 
+    def test_cannot_run_preflight_diagnostic_survives(self):
+        diagnostic = "REHEARSAL CANNOT RUN: no age private key at /synthetic/identity"
+        result = self.run_report(diagnostic + "\n")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(diagnostic + "\n", result.stdout)
+
+    def test_unterminated_transcript_cannot_report_pass(self):
+        for transcript in (PASS[:-1], PASS + "  evidence: recor"):
+            with self.subTest(transcript=transcript):
+                result = self.run_report(transcript)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertTrue(result.stdout.startswith("RESTORE REHEARSAL: FAIL\n"))
+                self.assertIn("missing final newline", result.stdout)
+
     def test_assertion_verdict_is_reported_verbatim(self):
         marker = "RESTORE REHEARSAL: FAIL (3 assertion(s) failed)"
         result = self.run_report(PASS.replace("RESTORE REHEARSAL: PASS", marker))
@@ -123,7 +137,7 @@ class RestoreReportTests(unittest.TestCase):
             with self.subTest(duplicate=duplicate):
                 self.assertEqual(self.run_report(duplicate + PASS).returncode, 1)
 
-    def test_prompt_pipeline_includes_stderr_and_uses_report_verdict(self):
+    def test_prompt_pipeline_includes_stderr_and_rejects_nonzero_producer(self):
         prompt = (REPO / "ops/scheduled-tasks/restore-rehearse-weekly.SKILL.md").read_text()
         command = re.search(r"```(?:bash|sh)\n(.+)\n```", prompt)
         self.assertIsNotNone(command, "the scheduled prompt must carry one executable pipeline")
@@ -132,17 +146,21 @@ class RestoreReportTests(unittest.TestCase):
             (root / "tools").mkdir()
             (root / "tools/restore-rehearse-report.py").symlink_to(SCRIPT)
             producer = root / "run.sh"
-            producer.write_text('#!/bin/sh\ncat transcript >&2\nexit 73\n')
-            producer.chmod(0o755)
             pipeline = command[1].replace("~/carr-system", shlex.quote(directory))
-            for transcript, expected in ((PASS, 0), ("", 1),
-                                         ("REHEARSAL FAILED: synthetic preflight refusal\n", 1)):
-                with self.subTest(transcript=transcript):
+            for transcript, status, expected in ((PASS, 0, 0), (PASS, 73, 1),
+                                                 (PASS, 137, 1), (PASS[:-1], 0, 1), ("", 0, 1),
+                                                 ("REHEARSAL FAILED: synthetic preflight refusal\n", 1, 1)):
+                with self.subTest(transcript=transcript, status=status):
+                    producer.write_text(f'#!/bin/sh\ncat transcript >&2\nexit {status}\n')
+                    producer.chmod(0o755)
                     (root / "transcript").write_text(transcript)
                     result = subprocess.run(["/bin/sh", "-c", pipeline], text=True,
                                             capture_output=True, timeout=5)
                     self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                    self.assertTrue(result.stdout.startswith("RESTORE REHEARSAL:"), result.stderr)
+                    verdict = "PASS |" if expected == 0 else "FAIL\n"
+                    self.assertTrue(result.stdout.startswith("RESTORE REHEARSAL: " + verdict), result.stdout)
+                    if status:
+                        self.assertIn(f"producer exited {status}", result.stdout)
 
 
 if __name__ == "__main__":

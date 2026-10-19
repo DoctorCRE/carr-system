@@ -16,10 +16,12 @@ def report(transcript: str) -> tuple[bool, str]:
     branch = field(r"^\s*ok\s+created restore-rehearse-\S+ \(([^\s()]+)\)$")
     deleted = re.findall(r"^\s*teardown: branch (\S+) deleted$", transcript, re.M)
     failures = [line for line in transcript.splitlines()
-                if re.search(r"\b(?:FAIL|MISMATCH)\b|^REHEARSAL FAILED:|teardown: (?:KEEPING|COULD NOT DELETE)", line)]
+                if re.search(r"\b(?:FAIL|MISMATCH)\b|^REHEARSAL (?:FAILED|CANNOT RUN):|teardown: (?:KEEPING|COULD NOT DELETE)", line)]
     warnings = [line for line in transcript.splitlines()
                 if re.search(r"\bWARN\b|EVIDENCE WARNING:|^\s+(?:was NOT recorded to ops.run|skipped whenever)", line)]
     problems = []
+    if not transcript.endswith("\n"):
+        problems.append("transcript incomplete: missing final newline")
     if verdicts != ["PASS"]:
         problems.append("expected exactly one terminal PASS verdict")
     if not (dump and pct and branch):
