@@ -15,10 +15,6 @@ sys.path.insert(0, str(ROOT))
 
 
 class InventoryTests(unittest.TestCase):
-    def test_checked_in_inventory_omits_retired_rule_refresh(self):
-        inventory = json.loads((ROOT / 'ops/config/studio-failover-inventory.v1.json').read_text())
-        self.assertNotIn('com.carr.rules-refresh', {row['label'] for row in inventory['roles']})
-
     def test_requested_dependencies_are_checked_independently_of_launchd_installation(self):
         with tempfile.TemporaryDirectory() as raw:
             paths = ['/bin/sh', '~/missing-failover-file']

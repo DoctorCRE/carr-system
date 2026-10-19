@@ -314,6 +314,31 @@
       }
     },
     {
+      "label": "com.carr.rules-refresh",
+      "path": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
+      "executables": [
+        "/bin/zsh"
+      ],
+      "dependencies": [
+        "~/carr-system/bin/run-scheduled.sh",
+        "/bin/zsh",
+        "~/carr-system/bin/refresh-rules.sh"
+      ],
+      "disabled": false,
+      "environment_names": [
+        "PATH"
+      ],
+      "schedule_source": "~/Library/LaunchAgents/com.carr.rules-refresh.plist",
+      "classification": "leader-job",
+      "macbook_installed": false,
+      "macbook_missing": [],
+      "schedule_expectation": {
+        "scheduler": "launchd",
+        "expected_enabled": false,
+        "expected_installed": false
+      }
+    },
+    {
       "label": "com.carr.tailscale-up",
       "path": "~/Library/LaunchAgents/com.carr.tailscale-up.plist",
       "executables": [
