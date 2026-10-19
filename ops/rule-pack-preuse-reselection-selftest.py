@@ -51,7 +51,7 @@ class DeliveryTests(unittest.TestCase):
         gap = dict(id='22222222', statement='Moment rule.',
                    scope={'moment': 'Before review'}, personal_to=None)
         for event in ('PreToolUse', 'UserPromptSubmit'):
-            output = self.invoke([known, gap], event=event)
+            output = self.invoke([known, gap], event=event, judge=lambda *_: None)
             row = json.loads(output['hookSpecificOutput']['additionalContext'])
             self.assertEqual(row['rules'], [known])
             self.assertNotIn('unresolved', row)
@@ -91,34 +91,31 @@ class DeliveryTests(unittest.TestCase):
                                scope={'tools': ['Bash']}, personal_to='dell')])
         self.assertEqual(out['hookSpecificOutput']['permissionDecision'], 'deny')
 
-    def test_read_only_reviewer_keeps_deterministic_rules_and_reports_disabled_judgment(self):
-        known = dict(id='11111111', statement='Inspect the current diff.',
-                     scope={'tools': ['collaborationspawn_agent']}, personal_to=None)
+    def test_read_only_reviewer_is_complete_without_unpicked_rule_ids(self):
         moments = [dict(id=f'{i:08x}', statement='Before code review.',
                         scope={'moment': 'Before reviewing code'}, personal_to=None)
                    for i in range(200, 400)]
         payload = {'tool_name': 'collaborationspawn_agent',
+                   'session_id': '01a15200-75fd-7b12-aabd-d28e8c56e6ff',
+                   'turn_id': '01a15207-5306-7310-8a41-5845b376b858',
+                   'tool_use_id': 'call_4a2b92f3ea1446b987813b120927b21c',
                    'tool_input': {'task_name': 'review', 'message': 'Read-only review of the PR.'}}
         with tempfile.TemporaryDirectory() as raw, patch.object(hook, 'GAP_LOG', Path(raw) / 'gaps.jsonl'):
-            output = self.invoke([known, *moments], payload=payload)
+            output = self.invoke(moments, payload=payload)
             specific = output['hookSpecificOutput']
             self.assertNotIn('permissionDecision', specific)
-            row = json.loads(specific['additionalContext'])
-            self.assertEqual(row['rules'], [known])
-            self.assertEqual(row['unresolved_count'], 200)
-            self.assertEqual(row['unresolved_reasons'], {'moment_judge_not_configured': 200})
-            self.assertFalse(row['complete'])
-            self.assertIn('Selection gaps are advisory and do not deny this action', row['instruction'])
+            text = specific['additionalContext']
+            row = json.loads(text)
+            self.assertTrue(row['complete'])
+            self.assertEqual(row['selection_mode'], 'deterministic')
+            self.assertEqual(row['rules'], [])
+            for field in ('unresolved', 'unresolved_count', 'unresolved_reasons'):
+                self.assertNotIn(field, row)
+            self.assertNotIn('incomplete selection', text)
+            self.assertNotIn('000000c8', text)
+            self.assertLess(len(text.encode()), 1024)
             self.assertTrue(validate_lookup_receipt(row, repo=REPO))
-            issues = json.loads(hook.GAP_LOG.read_text())['unresolved']
-            self.assertEqual({i['rule_id'] for i in issues}, {r['id'] for r in moments})
-            self.assertEqual({i['reason'] for i in issues}, {'moment_judge_not_configured'})
-            for counts in ({'moment_judge_not_configured': 199},
-                           {'moment_judge_not_configured': True},
-                           {'moment_judge_not_configured': 0}, {'': 200}, []):
-                forged = dict(row, unresolved_reasons=counts)
-                forged['receipt_id'] = hook.receipt_id(forged)
-                self.assertFalse(validate_lookup_receipt(forged, repo=REPO))
+            self.assertFalse(hook.GAP_LOG.exists())
 
     def test_scope_defects_and_unavailable_judgment_deliver_known_matches_without_denial(self):
         known = dict(id='11111111', statement='Inspect the current diff.',

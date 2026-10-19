@@ -85,21 +85,22 @@ class LookupTests(unittest.TestCase):
 
     def test_no_model_available_or_uncertain_is_unresolved_not_a_negative(self):
         row = rule("11111111", {"moment": "Before closing a message to Joe"})
-        for judge in (None, lambda *_: {"model": "wrong", "answers": {}},
+        for judge in (lambda *_: {"model": "wrong", "answers": {}},
                       lambda *_: {"model": "jev-1.13.0", "answers": {"bind_11111111": {"type": "choice", "choice": "uncertain", "confidence": 0.9}}}):
             result = select_rules(catalog(row), dict(task="Reply"), judge=judge)
             self.assertEqual(result["rules"], [])
             self.assertEqual(result["unresolved"][0]["rule_id"], row["id"])
             self.assertFalse(result["complete"])
 
-    def test_disabled_judgment_keeps_deterministic_matches_and_names_the_missing_adapter(self):
+    def test_deterministic_selection_is_complete_without_unpicked_moments(self):
         known = rule("11111111", {"tools": ["Bash"]})
         moment = rule("22222222", {"moment": "Before reviewing code"})
+        moment["statement"] = "x" * 100000
         result = select_rules(catalog(known, moment), dict(tool_name="Bash"))
         self.assertEqual(result["rules"], [known])
-        self.assertEqual(result["unresolved"], [{"rule_id": "22222222",
-                         "reason": "moment_judge_not_configured"}])
-        self.assertFalse(result["complete"])
+        self.assertEqual(result["unresolved"], [])
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["selection_mode"], "deterministic")
         self.assertEqual(result["models"], [])
 
     def test_malformed_choice_is_explicitly_unresolved(self):
@@ -163,7 +164,7 @@ class LookupTests(unittest.TestCase):
     def test_oversized_moment_is_reported_and_exact_text_is_never_truncated(self):
         row = rule("11111111", {"moment": "Before replying"})
         row["statement"] = "x" * 100000
-        result = select_rules(catalog(row), dict(hook_event_name="Stop"))
+        result = select_rules(catalog(row), dict(hook_event_name="Stop"), judge=lambda *_: None)
         self.assertEqual(result["unresolved"], [{"rule_id": row["id"], "reason": "moment_input_too_large"}])
         row["scope"] = {"tools": ["Bash"]}
         result = select_rules(catalog(row), dict(tool_name="Bash"))
