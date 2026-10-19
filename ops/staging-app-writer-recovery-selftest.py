@@ -268,6 +268,28 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.prepare()[0], values)
         self.assertEqual(len(self.changes), 1)
 
+    def test_missing_old_authority_resumes_after_intent_before_pending_value(self):
+        del self.passwords["carr_authority_joe"]
+        original = provision.credential.prepare_pending
+        with mock.patch.object(provision.credential, "prepare_pending", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        with mock.patch.object(provision.credential, "prepare_pending", original):
+            values, outcomes = self.prepare()
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], values["CARR_DB_AUTHORITY_JOE_URL"])
+
+    def test_missing_old_authority_resumes_after_publication_before_commit(self):
+        del self.passwords["carr_authority_joe"]
+        self.fail_commit = True
+        with self.assertRaises(ProcessDeath):
+            self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual({password for _role, password in self.changes}, {urlsplit(published).password})
+
     def test_missing_reader_role_still_refuses_instead_of_deleting_binding(self):
         del self.passwords["app_reader"]
         self.file_profile("reader").paths.final.unlink()
