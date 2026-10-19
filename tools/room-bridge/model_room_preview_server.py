@@ -3,6 +3,11 @@
 
 This is test-only plumbing: it serves the materialized, pinned DoctorCRE Model Room assets and a
 single synthetic typed wire turn from the existing execution-fabric fixtures.
+Materialize the release before starting this server:
+
+    python3 tools/release-manifest.py doctorcre-artifact materialize \
+        --pin ops/config/doctorcre-artifact.v1.json --root out/doctorcre-artifacts
+
 It neither writes a room turn nor stands in for the deployed Worker.
 """
 
