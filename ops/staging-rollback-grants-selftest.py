@@ -24,6 +24,15 @@ class InstalledGrants(unittest.TestCase):
                 directory, {"0001_authority.sql": hashlib.sha256(old.encode()).hexdigest()}, "carr_authority")
             self.assertEqual(set(grants.acl_facts(plan)), {("schema", "public", "usage", False)})
 
+    def test_unverified_or_unknown_installed_source_refuses(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw) / "migrations"
+            directory.mkdir()
+            (directory / "0001_authority.sql").write_text("grant usage on schema public to carr_authority;")
+            for ledger in ({}, {"0001_authority.sql": "0" * 64}, {"0002_unknown.sql": "0" * 64}):
+                with self.subTest(ledger=ledger), self.assertRaises(grants.SnapshotGrantError):
+                    grants.load_applied_grants_to_role(directory, ledger, "carr_authority")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

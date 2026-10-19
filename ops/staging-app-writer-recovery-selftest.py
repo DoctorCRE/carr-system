@@ -62,6 +62,7 @@ class Recovery(unittest.TestCase):
         self.patch("bulk_worker_database_secrets", self.bulk)
         self.patch("apply_login_profile", self.apply)
         self.patch("validate_profile_login", self.validate)
+        self.patch("rollback_authority_grants", lambda _cur: ())
         self.patch("profile", self.file_profile, provision.credential)
         self.patch("derive_dsn", lambda *_a, **_kw: SimpleNamespace(value=self.owner_uri), provision.replacement)
         self.patch("connect", lambda _dsn: self.Owner(self), provision.psycopg)
@@ -267,6 +268,15 @@ class Recovery(unittest.TestCase):
         self.assertEqual(outcomes[0]["outcome"], "created")
         self.assertEqual(self.prepare()[0], values)
         self.assertEqual(len(self.changes), 1)
+
+    def test_old_authority_uses_its_installed_schema_plan(self):
+        expected = ("grant usage on schema public to carr_authority;",)
+        def apply(owner, profile, grants, password, **kwargs):
+            self.assertEqual(grants, expected)
+            self.apply(owner, profile, grants, password, **kwargs)
+        with mock.patch.object(provision, "rollback_authority_grants", return_value=expected, create=True), \
+                mock.patch.object(provision, "apply_login_profile", side_effect=apply):
+            self.prepare()
 
     def test_missing_old_authority_resumes_after_intent_before_pending_value(self):
         del self.passwords["carr_authority_joe"]
