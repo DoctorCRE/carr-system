@@ -121,10 +121,16 @@ test("strict aggregate runs after failed classes and requires complete successfu
   assert.match(step.run, /python3 ops\/ci-evidence.py verdict/);
   const fixture = mkdtempSync(join(tmpdir(), "ci-verdict-test-"));
   try {
-    // Keep the hosted deadline and jump to its final poll in the fixture.
-    writeFileSync(join(fixture, "sitecustomize.py"),
-      "import time\nclock = [0]\ntime.monotonic = lambda: clock[0]\n" +
-      "def sleep(seconds):\n    clock[0] = 235\ntime.sleep = sleep\n");
+    const python = spawnSync("python3", ["-c", "import sys; print(sys.executable)"], { encoding: "utf8" });
+    assert.equal(python.status, 0, python.stderr);
+    // Scope the simulated deadline to the verdict; subprocess keeps its real clock.
+    const interpreter = join(fixture, "python3");
+    writeFileSync(interpreter, `#!${python.stdout.trim()}\n` +
+      "import runpy, sys, types\nscript = runpy.run_path(sys.argv[1])\nclock = [0]\n" +
+      "def sleep(seconds):\n    clock[0] = 235\n" +
+      "script['main'].__globals__['time'] = types.SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep)\n" +
+      "sys.argv = sys.argv[1:]\nraise SystemExit(script['main']())\n");
+    chmodSync(interpreter, 0o755);
     const jobs = ci.jobs.classes.strategy.matrix.classes.map(group => ({
       name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
     const gh = join(fixture, "gh");
@@ -137,11 +143,11 @@ test("strict aggregate runs after failed classes and requires complete successfu
         const output = spawnSync("bash", ["-e", "-c", step.run], {
           cwd: new URL("../../", import.meta.url),
           env: { PATH: fixture + ":" + process.env.PATH, CLASSES_RESULT: result,
-            PYTHONPATH: fixture, GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1",
+            GITHUB_REPOSITORY: "jbookout/carr-system", GITHUB_RUN_ID: "1",
             GITHUB_RUN_ATTEMPT: "1", GITHUB_STEP_SUMMARY: join(fixture,"summary") },
           encoding: "utf8", timeout: 5000 });
         assert.ifError(output.error);
-        assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stderr);
+        assert.equal(output.status === 0, result === "success" && evidence.length === jobs.length, output.stdout + output.stderr);
         if (evidence.length !== jobs.length) assert.match(output.stdout, /MISSING/);
       }
     }
