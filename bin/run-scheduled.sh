@@ -19,7 +19,7 @@ done
 
 if [ $# -lt 3 ]; then
   print -ru2 -- "usage: bin/run-scheduled.sh [--heartbeat-interval SECONDS] <service-key> <run-key> <command> [args...]"
-  print -ru2 -- "  e.g. bin/run-scheduled.sh nightly-record-layer rules.refresh /bin/zsh {{REPO}}/bin/refresh-rules.sh"
+  print -ru2 -- "  e.g. bin/run-scheduled.sh nightly-record-layer availability.matcher {{REPO}}/.venv/bin/python {{REPO}}/pipelines/availability_matcher.py"
   exit $EX_USAGE
 fi
 

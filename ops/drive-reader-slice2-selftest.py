@@ -380,8 +380,8 @@ with tempfile.TemporaryDirectory(prefix="drive-reader-slice2-") as td:
     check("normal report card refuses Drive-era metric semantics",
           "facade_stale_rows" in p.stdout and
           "code_drift_rows" in p.stdout and
-          "rules_live_agreement" in p.stdout and
-          p.stdout.count("source_mode=recovery; mixed semantics refused") == 3,
+          "rules_live_agreement" not in p.stdout and
+          p.stdout.count("source_mode=recovery; mixed semantics refused") == 2,
           p.stdout + p.stderr)
 
     vault_a = tmp / "vault-a"

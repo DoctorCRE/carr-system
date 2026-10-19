@@ -94,7 +94,7 @@ MODULES: dict[str, dict[str, Any]] = {
     "RS": dict(name="run.sh", grid=(0, 3.6), foot=(1.0, 1.0), shape="block",
         glob=["run.sh"],
         blurb="The operator front door for repository jobs and checks that are not MCP verb calls.",
-        cites=["run.sh", "bin/refresh-rules.sh", "bin/worktree.sh", "bin/nightly.sh"],
+        cites=["run.sh", "bin/worktree.sh", "bin/nightly.sh"],
         note="The case block and usage output are the executable surface; prose summaries are not the command registry."),
     "MC": dict(name="MCP transport", grid=(4.2, 0.3), foot=(1.2, 1.2), shape="block",
         glob=["mcp-server/src/mcp.js", "mcp-server/src/index.js"],
