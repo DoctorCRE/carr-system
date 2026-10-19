@@ -266,7 +266,7 @@ class SkillReceiptTests(unittest.TestCase):
     def test_completion_boundary_survives_publication_failure_and_retry(self):
         class Registry:
             def resolve(self, name):
-                return {'kind': 'claude-session'}
+                return {'kind': 'claude-session', 'cwd': str(Path(__file__).resolve().parents[2])}
         start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02.500000Z'
         pr = 'https://github.com/jbookout/carr-system/pull/2000'
         with tempfile.TemporaryDirectory() as directory:
@@ -295,6 +295,29 @@ class SkillReceiptTests(unittest.TestCase):
             receipt = json.loads(dispatch._skill_ledger(results).read_text().splitlines()[-1])
             self.assertEqual(receipt['completed_at'], end)
             self.assertFalse(receipt['skill_receipt']['skills'][0]['opened'])
+
+    def test_unknown_checkout_cannot_borrow_the_dispatchers_revision(self):
+        class Registry:
+            def resolve(self, name):
+                return {'kind': 'claude-session'}
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory) / 'results.jsonl'
+            with patch.object(dispatch, 'desk_skill_inventory', return_value=None), \
+                 patch.object(dispatch, '_execute', return_value={'status': 'delivered'}):
+                row = dispatch.dispatch('builder', 'review it', registry=Registry(), results_path=results)
+            self.assertIsNone(row.get('source_revision'))
+            self.assertIsNone(json.loads(results.read_text()).get('source_revision'))
+
+    def test_missing_source_revision_cannot_be_recovered_from_the_current_pr(self):
+        row = {'msg_id': 'job', 'status': 'completed', 'thread_id': 'own-session',
+               'kind': 'codex-session', 'dispatched_at': '2026-10-19T15:00:00Z',
+               'completed_at': '2026-10-19T15:00:02Z',
+               'result': 'https://github.com/jbookout/carr-system/pull/2000'}
+        with patch.object(dispatch, 'skill_observation', return_value={'available': [], 'opened': []}), \
+             patch.object(dispatch, '_skill_gh') as gh:
+            with self.assertRaisesRegex(ValueError, 'persisted source revision'):
+                dispatch.finish_skill_receipt(row)
+            gh.assert_not_called()
 
     def test_missing_completion_window_cannot_publish(self):
         row = {'msg_id': 'job', 'status': 'completed', 'kind': 'codex-session',
