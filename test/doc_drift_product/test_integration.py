@@ -18,6 +18,12 @@ class ProductIntegrationTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_committed_checker_matches_source_manifest(self):
+        spec = importlib.util.spec_from_file_location('doc_drift_ci', ROOT / 'scripts/doc-drift/ci.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.verify_snapshot(ROOT)
+
     def test_artifact_omits_unchecked_values_everywhere(self):
         module = self.load('doc-drift-product')
         claim = dict(file='README.md', line=1, kind='path', target='/private/person@example.invalid/key',
