@@ -2935,7 +2935,7 @@ export const TOOLS = {
           "Its edges below are real, but run `find` on the name and re-target the survivor before " +
           "you write anything.");
       if (paths.rows.length)
-        notes.push("The FIRST name in each chain is who to ask. Run the pairing through DNA/Network/introduction-rules.md before making the ask — a path existing does not make it a clean ask.");
+        notes.push('The FIRST name in each chain is who to ask. Read doctrine engine#section-1-ripe-introductions through read-doctrine (document: "engine") and apply current intro_politics compatibility rules from standing-context (detail: "scopes") before making the ask. A path existing does not make it a clean ask.');
       else if (unwalkableHere.length)
         // "may not be logged" would be the wrong diagnosis when the edges are
         // sitting right there. Zero walkable paths and a non-empty unwalkable list

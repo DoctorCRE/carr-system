@@ -300,13 +300,16 @@ class FleetReaper:
             landed = self.ancestor(root, head, main) or bool(merge_pr)
             classification = branch_verdict(merged=landed, successor=successor,
                 open_pr=bool(active), idle=self.clock() - int(updated) >= self.branch_idle)
+            retire_pr = merge_pr or next((p for p in related if p["state"] == "closed"
+                and not p.get("merged_at") and p["head"]["sha"] == head and self.target_matches(p, repo)), None)
             protected = protected_branch(self.config, name)
             if protected:
                 classification = "live"
             row = {"kind": "branch", "repo": repo, "name": name, "ref": ref, "head": head,
                    "class": classification, "main": main, "successor": successor,
-                   "merge_pr": merge_pr["number"] if merge_pr else None,
-                   "action": "delete_remote" if classification == "merged" and
+                   "retire_pr": retire_pr["number"] if retire_pr else None,
+                   "action": "delete_remote" if (classification == "merged" or
+                   classification == "abandoned" and retire_pr) and
                    ref.startswith("refs/remotes/origin/") and not protected else None}
             rows.append(row)
             by_branch.setdefault(name, []).append(row)
@@ -514,9 +517,13 @@ class FleetReaper:
         if self.provider.open_pulls(repo, row["name"]):
             return {"status": "preserved", "reason": "open PR now protects branch"}
         if not self.ancestor(root, row["head"], row["main"]):
-            proof = self.provider.pull(repo, row["merge_pr"])
-            if not proof.get("merged_at") or proof["head"]["sha"] != row["head"] or \
-                    proof["base"]["ref"] != "main" or not self.ancestor(root, proof["merge_commit_sha"], row["main"]):
+            proof = self.provider.pull(repo, row["retire_pr"])
+            if proof["state"] != "closed" or proof["head"]["sha"] != row["head"] or \
+                    proof["head"]["ref"] != row["name"] or \
+                    (proof["head"].get("repo") or {}).get("full_name") != repo or not self.target_matches(proof, repo):
+                return {"status": "preserved", "reason": "retirement PR changed"}
+            if row["class"] == "merged" and (not proof.get("merged_at") or
+                    not self.ancestor(root, proof["merge_commit_sha"], row["main"])):
                 return {"status": "preserved", "reason": "merge proof changed"}
         backup = "refs/retired-branches/" + row["head"] + "-" + hashlib.sha256(ref.encode()).hexdigest()[:16]
         git(root, "update-ref", backup, row["head"])

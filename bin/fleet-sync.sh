@@ -18,10 +18,10 @@
 # were audited on 2026-08-18 and not one touched a git remote.
 #
 # WHAT IT REFUSES TO DO, which is most of its design:
-#   - It NEVER discards local work. A dirty tracked tree exits 78 (skip) with
+#   - It refuses observed local work. A dirty tracked tree exits 78 (skip) with
 #     the paths named. Dell's machine deliberately carries two uncommitted edits
 #     from his migration; a blind fast-forward would have destroyed them.
-#   - It NEVER merges, rebases, resets or force-anythings. Fast-forward only.
+#   - It only fast-forwards. It never rebases, resets or forces an update.
 #     If the branches have diverged it skips and says so — a diverged checkout
 #     is a human question, not a job's decision.
 #   - It NEVER runs off main, and never inside a worktree. Worktree-per-session
@@ -132,27 +132,32 @@ if [ "$canonical_skip" -eq 0 ]; then
   local_sha="$(git rev-parse HEAD)"
   remote_sha="$(git rev-parse origin/main)"
 
-  if [ "$local_sha" = "$remote_sha" ]; then
+  if ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" "$remote_sha")"; then
+    print -r -- "fleet-sync: SKIP — local changes present, refusing to fast-forward or install wiring:"
+    print -r -- "    $dirt_reason"
+    canonical_status=$EX_CONFIG
+    canonical_skip=1
+  elif [ "$local_sha" = "$remote_sha" ]; then
     print -r -- "fleet-sync: checkout already current at ${local_sha:0:8}"
   else
     # Tracked changes only. Untracked scratch is a session's business, not this
     # job's, and refusing on it would mean this never runs on a working machine.
-    if ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" origin/main)"; then
-      print -r -- "fleet-sync: SKIP — local changes present, refusing to fast-forward over them:"
-      print -r -- "    $dirt_reason"
-      canonical_status=$EX_CONFIG
-      canonical_skip=1
-    elif ! git merge-base --is-ancestor HEAD origin/main; then
+    if ! git merge-base --is-ancestor HEAD "$remote_sha"; then
       # Fast-forward only: HEAD must already be an ancestor of origin/main.
       print -r -- "fleet-sync: SKIP — main has diverged from origin/main; a human decides this one"
       canonical_status=$EX_CONFIG
       canonical_skip=1
-    elif ! git merge --ff-only origin/main >/dev/null 2>&1; then
-      print -ru2 -- "fleet-sync: fast-forward failed unexpectedly"
-      canonical_status=1
-      canonical_skip=1
-    else
+    # Git owns its index transaction. Eligibility is checked immediately before
+    # and after merge; only an eligible result may install wiring. Editors do
+    # not honor Git locks: writes during native checkout can still be overwritten
+    # before the post-check sees them. Do not treat this as editor isolation.
+    elif merge_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" --fast-forward "$REPO" "$remote_sha" 2>&1)"; then
       print -r -- "fleet-sync: fast-forwarded ${local_sha:0:8} -> ${remote_sha:0:8}"
+    else
+      canonical_status=$?
+      print -ru2 -- "fleet-sync: update failed; refusing wiring install:"
+      print -ru2 -- "$merge_reason"
+      canonical_skip=1
     fi
   fi
 fi

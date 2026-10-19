@@ -885,7 +885,12 @@ def test_hosted_zsh_cache_requires_authenticated_bytes():
             "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
             "sudo": '#!/bin/sh\nexec "$@"\n',
             "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib, os, pathlib, sys
+import hashlib, os, pathlib, sys, time
+mode = os.environ["CI_CACHE_MODE"]
+downloaded = pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()
+if ((mode == "metadata-timeout" and not downloaded)
+        or (mode == "install-metadata-timeout" and downloaded)):
+    time.sleep(31)
 if (os.environ["CI_CACHE_MODE"] == "missing-metadata"
         and not pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()):
     sys.exit(0)
@@ -929,23 +934,27 @@ log.write_text(json.dumps(state))
             path.write_text(source)
             path.chmod(0o755)
         for mode in ("valid", "same-size-tampered", "other-version", "old-version-filename",
-                     "missing-metadata", "metadata-error", "replace-after-verification",
+                     "missing-metadata", "metadata-error", "metadata-timeout",
+                     "install-metadata-timeout", "replace-after-verification",
                      "replace-during-retries", "replace-downloaded-archive"):
             archives = fixture / mode
             archives.mkdir()
             archive = archives / ("zsh_2_amd64.deb" if mode == "old-version-filename" else "zsh_1_amd64.deb")
             restored = (b"trusted-zsh-package" if mode in ("valid", "old-version-filename",
                         "replace-after-verification", "replace-during-retries",
-                        "replace-downloaded-archive") else
+                        "replace-downloaded-archive", "metadata-timeout",
+                        "install-metadata-timeout") else
                         b"older-zsh-package!!" if mode == "other-version" else b"altered-zsh-package")
             archive.write_bytes(restored)
+            if mode == "metadata-timeout":
+                (archives / "zsh-common_1_all.deb").write_bytes(b"cached-zsh-common")
             log = fixture / (mode + ".json")
             env = scrubbed_env()
             env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
                        ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0",
                        CI_CACHE_MODE=mode, CI_CACHE_LOG=str(log))
             ran = subprocess.run(["bash", "-c", installer], cwd=fixture, env=env,
-                                 capture_output=True, text=True, timeout=10)
+                                 capture_output=True, text=True, timeout=40)
             state = json.loads(log.read_text()) if log.exists() else {}
             if mode == "metadata-error":
                 check("zsh cache verification error stops before apt can consume archives",
@@ -953,6 +962,10 @@ log.write_text(json.dumps(state))
                 continue
             if mode == "replace-downloaded-archive":
                 check("zsh refuses a same-size replacement of downloaded bytes before install",
+                      ran.returncode != 0 and "installed" not in state, state)
+                continue
+            if mode == "install-metadata-timeout":
+                check("zsh refuses downloaded bytes when their metadata verification times out",
                       ran.returncode != 0 and "installed" not in state, state)
                 continue
             check(f"zsh cache {mode} installs authenticated package bytes",
@@ -975,6 +988,10 @@ log.write_text(json.dumps(state))
                 quarantined = archives / "quarantine" / archive.name
                 check(f"zsh cache {mode} preserves rejected bytes in quarantine",
                       quarantined.is_file() and quarantined.read_bytes() == restored)
+                if mode == "metadata-timeout":
+                    remaining = archives / "quarantine/zsh-common_1_all.deb"
+                    check("zsh quarantines remaining cached archives within the verification deadline",
+                          remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
 
 
 def main(argv=None):
