@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run installer proofs with hostile parent host state and deny native launchctl."""
+import fcntl
 import os
 from pathlib import Path
 import subprocess
@@ -41,6 +42,18 @@ class HostIsolation(unittest.TestCase):
 
     def test_orphan_reaper_proof_is_independent_of_host(self):
         self.run_suite('orphan-reaper-selftest.py')
+
+    def test_watchdog_streaming_proof_ignores_parent_capacity(self):
+        with tempfile.TemporaryDirectory(prefix='carr-parent-slots-') as temp:
+            root = Path(temp)
+            with (root / 'slot-0.lock').open('a') as occupied:
+                fcntl.flock(occupied, fcntl.LOCK_EX)
+                env = dict(fixture_env(), CARR_CODEX_SLOT_DIR=str(root),
+                           CARR_CODEX_MAX_CONCURRENT='1')
+                result = subprocess.run([sys.executable, str(ROOT / 'tools/test_job_watchdog.py'),
+                                         'RunnerTests.test_model_room_streams_progress_before_completion'],
+                                        env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':
