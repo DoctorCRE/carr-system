@@ -2094,7 +2094,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
     initial = read_state(args.project)
     keys = {next(iter(refs)) for task in initial.get("tasks", {}).values()
             if legacy_card(task) and len(refs := legacy_pr_refs(task)) == 1}
-    fetched = {}
+    fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]] = {}
     for repo, number in sorted(keys):
         time.sleep(2)
         try:
