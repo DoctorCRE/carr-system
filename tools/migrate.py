@@ -22,6 +22,7 @@ you confirm — read what it prints.
 
 Requires psycopg (pip install 'psycopg[binary]'); listed in requirements.txt.
 """
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -30,8 +31,6 @@ import re
 import sys
 from pathlib import Path
 from typing import NoReturn
-
-import migration_0882
 
 from migration_baseline import MANIFEST, MigrationBaseline
 
@@ -90,13 +89,13 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "on every database; all 0248 adds here is a binding to the autonomy rule, "
         "which this database does not carry",
     ),
-    "0884_refresh_pack_delivery_catalog_after_shadow_retirement.sql": (
-        "select 1 where exists (select 1 from ops.enforcement_control_catalog "
-        "where control_key='pack_delivery' and installed) "
-        "or exists (select 1 from ops.rule_control_binding b join public.rule r on r.id=b.rule_id "
-        "where b.control_key='pack_delivery' and r.status='active')",
-        "the text-delivery control is no longer installed and backs no active rule; "
-        "the frozen refresh has no live control to update",
+    "0897_national_account_classification_correction.sql": (
+        "select 1 from client where roster_ref in ('C-161','C-204','C-205') "
+        "or id in ('9c323aa5-b9c0-45e7-b958-ef1ee3738660'::uuid, "
+        "'8550b702-e6fb-4bea-8b3e-1fec5b9499bd'::uuid, "
+        "'2f7364a7-8167-421d-8492-79815307fba3'::uuid)",
+        "0897 corrects only the historical C-204/C-205 classifications against C-161; "
+        "none of those clients exists here, so unrelated synthetic accounts need no correction",
     ),
 }
 
@@ -452,6 +451,9 @@ create table if not exists schema_migrations (
 
 
 def fail(msg: str) -> NoReturn:
+    error_type = sys.exc_info()[0]
+    if error_type is not None:
+        print(f"{error_type.__module__}.{error_type.__name__}:", file=sys.stderr)
     print(f"ERROR: {msg}", file=sys.stderr)
     sys.exit(1)
 
@@ -771,15 +773,7 @@ def main() -> None:
                     cur.execute(f"set local lock_timeout = '{LOCK_TIMEOUT}'")
                     cur.execute(f"set local statement_timeout = '{STATEMENT_TIMEOUT}'")
                     try:
-                        execution_sql = sql
-                        if name == migration_0882.FILENAME:
-                            execution_sql = migration_0882.retirement_sql(cur, sql, digest)
-                            if execution_sql != sql:
-                                print('retained retired-v3 historical controls; '
-                                      f'source sha256={digest}; execution sha256='
-                                      + hashlib.sha256(execution_sql.encode()).hexdigest(),
-                                      end=' ... ', flush=True)
-                        cur.execute(execution_sql)
+                        cur.execute(sql)
                     except psycopg.errors.LockNotAvailable:
                         conn.rollback()
                         fail(f"{name} could not acquire its lock within {LOCK_TIMEOUT} and was "
