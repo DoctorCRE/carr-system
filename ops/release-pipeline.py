@@ -1361,6 +1361,42 @@ class Pipeline:
             self.store.save(state)
         return live
 
+    def reconcile_worker_promotion(self, state: dict, main: str) -> None:
+        lane_state = state.setdefault("worker", {})
+        pending = lane_state.get("pending_promotion")
+        if not pending:
+            return
+        # Fully verified releases retain the stronger journal recovery path.
+        if any(row.get("status") == "release_verified"
+               and all(row.get(key) == pending.get(key) for key in
+                       ("lane", "sha", "from_sha", "run_id", "provider_version_id", "release_endpoint"))
+               for row in self.store.records()):
+            return
+        cfg = self.cfg["worker"]
+        if (pending.get("release_endpoint") != cfg["live_release_url"]
+                or pending.get("from_sha") != lane_state.get("last_released_sha", pending.get("from_sha"))
+                or not SHA_RE.fullmatch(str(pending.get("sha") or ""))
+                or not UUID_RE.fullmatch(str(pending.get("provider_version_id") or ""))
+                or not self._at_or_before(pending["sha"], main, self.repo)):
+            raise Blocked("journal_proof_invalid", "pending Worker promotion does not match its source and lane")
+        live = self.http(cfg["live_release_url"])
+        if ((live.get("git_sha") or {}).get("value") == pending["sha"]
+                and (live.get("worker_version") or {}).get("id") == pending["provider_version_id"]):
+            receipt = next((row for row in reversed(self.store.records())
+                            if row.get("status") == "worker_promoted"
+                            and all(row.get(key) == value for key, value in pending.items())), None)
+            if receipt:
+                self.store.recover_durable(receipt)
+            else:
+                self.store.record_durable({**pending, "status": "worker_promoted"})
+            lane_state["last_released_sha"] = pending["sha"]
+            lane_state.pop("pending_promotion")
+        failed = lane_state.get("failed_sha")
+        if failed != pending["sha"] and (not failed or self._at_or_before(failed, pending["sha"], self.repo)):
+            lane_state.update({"failed_sha": pending["sha"],
+                               "failed_step": "post-promote-verification-incomplete"})
+        self.store.save(state)
+
     def tick(self, lanes: Iterable[str]) -> int:
         why = kill_switch(self.cfg)
         if why:
@@ -1534,6 +1570,7 @@ class Pipeline:
                            if row.get("proof_digest") == proof["proof_digest"] and row.get("status") == "shipped")
         lane_state = state.setdefault(lane, {})
         lane_state.pop("rejection", None)
+        lane_state.pop("pending_promotion", None)
         lane_state.update({"last_released_sha": proof["sha"], "failed_sha": None, "failed_step": None,
                            "last_shipped_at": shipped["ts"], "last_shipped_proof": proof["proof_digest"]})
         self.store.save(state)
@@ -1624,6 +1661,8 @@ class Pipeline:
                 if not self.dry_run:
                     self.reconcile_release_proof(state, lane, lane_cfg, sha)
                     lane_state = state.setdefault(lane, {})
+                    if lane == "worker":
+                        self.reconcile_worker_promotion(state, sha)
             live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
                     None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
@@ -1830,6 +1869,11 @@ class Pipeline:
         state.setdefault(lane, {}).update({
             "failed_sha": sha, "failed_step": step,
             "failed_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
+        if lane == "worker" and state[lane].get("pending_promotion"):
+            try:
+                self.reconcile_worker_promotion(state, self.observed_main)
+            except Exception as exc:
+                self.out(f"release-pipeline[worker]: promotion checkpoint remains pending: {type(exc).__name__}")
         owned = [wt for _, wt in self.worktrees if wt.name.startswith(f"{lane}-{sha[:12]}-")]
         if owned:
             state[lane]["failed_worktree"] = str(owned[-1])
@@ -2039,6 +2083,12 @@ class Pipeline:
         # 7. promotion
         if not staging_ok:  # pragma: no cover — structural; StepFailed above already left
             raise StepFailed("promote", 1, "", "staging did not pass")
+        if not self.dry_run:
+            state[lane]["pending_promotion"] = {
+                "lane": lane, "sha": sha, "from_sha": base, "run_id": self.run_id,
+                "provider_version_id": version, "release_endpoint": lane_cfg["live_release_url"],
+                "live_identity": {"url": lane_cfg["live_url"]}}
+            self.store.save(state)
         self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
                   env=self.deploy_env())
 
@@ -2047,8 +2097,10 @@ class Pipeline:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require git_sha.value == {sha}")
         else:
             live = self.http(lane_cfg["live_release_url"])
-            if (live.get("git_sha") or {}).get("value") != sha:
-                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA")
+            if ((live.get("git_sha") or {}).get("value") != sha
+                    or (live.get("worker_version") or {}).get("id") != version):
+                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA and version")
+            self.store.record_durable({**state[lane]["pending_promotion"], "status": "worker_promoted"})
         health_excused = self.health_gate(wt, health_baseline)
         post_release = self.post_release_proof(
             "worker", sha, smoke_baseline, worker_dir=mcp,
