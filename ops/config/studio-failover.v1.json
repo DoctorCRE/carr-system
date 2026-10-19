@@ -40,15 +40,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.cutover-watch",
-      "source": "ops/launchd/com.carr.cutover-watch.plist",
-      "credentials": [
-        "~/.config/carr/mcp-tokens.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.delivery-cadence-a05-sweep",
       "source": "ops/launchd/com.carr.delivery-cadence-a05-sweep.plist",
       "credentials": [
@@ -153,13 +144,6 @@
     {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
-      "credentials": [],
-      "state": [],
-      "enabled": true
-    },
-    {
-      "label": "com.carr.timebomb-audit",
-      "source": "ops/launchd/com.carr.timebomb-audit.plist",
       "credentials": [],
       "state": [],
       "enabled": true

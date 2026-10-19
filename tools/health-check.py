@@ -1783,6 +1783,8 @@ def _canonical_health():
             print(feature_result.stdout.rstrip())
             if feature_result.returncode == 1:
                 rc = _red("feature_switch_retirement", feature_result.stdout.strip())
+            elif feature_result.returncode == 3:
+                rc = _red("feature_switch_pending_deploy", feature_result.stdout.strip())
             elif feature_result.returncode:
                 rc = _red("feature_switch_unreadable", feature_result.stdout.strip(), hard_error=True)
         except (OSError, subprocess.TimeoutExpired):
