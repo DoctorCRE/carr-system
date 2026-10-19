@@ -79,6 +79,7 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
+AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
@@ -370,7 +371,7 @@ def _to_codex(
                     "bad_codex_config",
                     "Codex config overrides must be non-empty strings")
             argv += ["-c", override]
-        if entry.get("name") == "luna-desk":
+        if entry.get("name") in AUTOMATIC_CODEX_DESKS:
             argv += ["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"']
         # Bind both starts and resumes, after overrides, so an old thread or
         # caller config cannot restore human approval cards.
@@ -574,8 +575,8 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
-    if name == "luna-desk" and entry["kind"] != "codex-session":
-        raise DeskError("unsafe_automatic_desk", "automatic Luna work requires the Codex subscription desk")
+    if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
+        raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',

@@ -831,9 +831,9 @@ def test_a_code_run_timeout_kills_the_whole_process_group():
     assert len(_out(project, "worktree", "list").strip().splitlines()) == 1
 
 
-def test_the_real_policy_names_code_project_roots_and_routes_code_to_flash():
+def test_the_real_policy_names_code_project_roots_and_routes_code_to_luna():
     policy = kanban_adapter._model_router().load_policy()
-    assert policy["queue_targets"]["code"] == "claude-desktop", policy["queue_targets"]
+    assert policy["queue_targets"]["code"] == "luna", policy["queue_targets"]
     assert isinstance(policy.get("code_project_roots"), list) and policy["code_project_roots"]
     assert "repo-write" in kanban_adapter.load_catalog()["targets"]["flash"]["capabilities"]
 
