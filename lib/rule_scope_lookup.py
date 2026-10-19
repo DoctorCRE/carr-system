@@ -127,6 +127,7 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
         batch_size += row_size
     models = set()
     for batch in batches:
+        assert judge is not None  # moments are only collected when a judge is configured
         questions = _moment_questions(batch)
         try:
             answer = judge({"event": event, "rules": {r["id"][:8]: r for r in batch}}, questions)
