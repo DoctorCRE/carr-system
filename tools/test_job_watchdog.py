@@ -31,6 +31,28 @@ def tearDownModule():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_success_and_recurrence_between_scans_starts_a_new_incident(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        effects = Mock()
+        effects.report.return_value = {}
+        failed = {"id": "run-1", "card": "recurring", "start": 10,
+                  "exit_code": 1, "log_tail": "synthetic failure"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = w.detect({"jobs": [failed]}, config, 15)
+            w.reconcile(root, config, first, effects, 15)
+            jobs = [failed, {"id": "success", "card": "recurring", "start": 20, "exit_code": 0},
+                    {**failed, "id": "run-2", "start": 30}]
+            second = w.detect({"jobs": jobs}, config, 35)
+            w.reconcile(root, config, second, effects, 35)
+            self.assertEqual(effects.report.call_count, 2)
+            self.assertNotEqual(first[0]["key"], second[0]["key"])
+            latest = w.read_latest(root / config["paths"]["findings"])
+            self.assertIsNotNone(latest[first[0]["key"]]["cleared_at"])
+            self.assertEqual(sum(not r.get("cleared_at") for r in latest.values()), 1)
+
     def test_job_recovery_requires_a_later_success_for_the_same_card(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
