@@ -2100,6 +2100,8 @@ class HealthGate(Base):
         writer = self.fx.tmp / "unrelated-writer"
         git(self.fx.tmp, "clone", "-q", "--branch", "main", str(self.fx.origin), str(writer))
         git(writer, "config", "user.useConfigOnly", "true")
+        git(writer, "config", "user.email", "t@example.invalid")
+        git(writer, "config", "user.name", "t")
         live = {"sha": self.fx.base}
         fx = self.fx
 
