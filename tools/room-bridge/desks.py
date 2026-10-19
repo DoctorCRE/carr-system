@@ -22,6 +22,7 @@ DESK KINDS:
   codex-session    a standing Codex thread, resumed per task through the CLI
   codex-live       a live Codex app-server, addressed by its unix socket
   flash-local      the local Flash model itself, answering direct questions (flash_wire.py)
+  claude-api       a fresh API-key coding agent in a retained job checkout
 
 BOTH KINDS KEEP THEIR CONTEXT, and that is the whole point. Joe, 2026-08-20:
 The kinds differ only in HOW a turn reaches them: a Claude desk is a live
@@ -42,11 +43,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import codex_models
+import claude_api_config
 
 NAME_OK = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 PID_SOCKET = re.compile(r"^\d+\.sock$")
 
-KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli")
+KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "claude-api")
 KIND_ALIASES = {"codex-exec": "codex-session"}
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
 
@@ -123,7 +125,7 @@ def refuse_pid_socket(sock: str) -> None:
 def _normalize_effort(kind: str, effort: str | None) -> str | None:
     if effort is None:
         return None
-    choices = ("low", "medium", "high", "xhigh", "max") if kind == "claude-remote" else EFFORT_CHOICES
+    choices = ("low", "medium", "high", "xhigh", "max") if kind in ("claude-remote", "claude-api") else EFFORT_CHOICES
     if effort not in choices:
         raise DeskError(
             "bad_effort",
@@ -152,6 +154,19 @@ def remote_posture(entry: dict) -> None:
     timeout = entry.get("timeout_s")
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 3600:
         raise DeskError("bad_remote_timeout", "remote desk deadline must be greater than 0 and at most 3600 seconds")
+
+
+def api_posture(entry: dict) -> None:
+    model = entry.get('model')
+    if not isinstance(model, str) or not re.fullmatch(r'claude-[a-z0-9]+(?:-[a-z0-9]+)+', model):
+        raise DeskError('missing_model', 'Claude API desk requires a full Claude model ID')
+    if not entry.get('effort'):
+        raise DeskError('missing_effort', 'Claude API desk requires explicit effort')
+    _normalize_effort('claude-api', entry['effort'])
+    dispatched_permission_mode(entry.get('permission_mode'))
+    timeout = entry.get('timeout_s')
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 7200:
+        raise DeskError('bad_api_timeout', 'Claude API deadline must be greater than 0 and at most 7200 seconds')
 
 
 class Registry:
@@ -249,6 +264,11 @@ class Registry:
                 "cwd": str(cwd or Path.cwd()),
                 "permission_mode": dispatched_permission_mode(permission_mode),
             }
+        elif kind == "claude-api":
+            entry = {'kind': kind, 'model': model or claude_api_config.MODEL,
+                     'effort': effort, 'timeout_s': timeout_s,
+                     'permission_mode': dispatched_permission_mode(permission_mode)}
+            api_posture(entry)
         elif kind == "claude-remote":
             entry = {"kind": kind, "host": host, "model": model, "effort": effort,
                      "timeout_s": timeout_s, "permission_mode": dispatched_permission_mode(permission_mode)}
@@ -318,6 +338,8 @@ class Registry:
         entry = {**entry, "kind": kind}
         if kind not in KINDS:
             raise DeskError("bad_kind", f"desk {name!r} has kind {kind!r}")
+        if kind == "claude-api":
+            api_posture(entry)
         if kind == "claude-remote":
             remote_posture(entry)
         if kind in ("claude-session", "claude-desktop"):
