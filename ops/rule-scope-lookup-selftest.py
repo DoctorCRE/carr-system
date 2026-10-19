@@ -92,6 +92,16 @@ class LookupTests(unittest.TestCase):
             self.assertEqual(result["unresolved"][0]["rule_id"], row["id"])
             self.assertFalse(result["complete"])
 
+    def test_disabled_judgment_keeps_deterministic_matches_and_names_the_missing_adapter(self):
+        known = rule("11111111", {"tools": ["Bash"]})
+        moment = rule("22222222", {"moment": "Before reviewing code"})
+        result = select_rules(catalog(known, moment), dict(tool_name="Bash"))
+        self.assertEqual(result["rules"], [known])
+        self.assertEqual(result["unresolved"], [{"rule_id": "22222222",
+                         "reason": "moment_judge_not_configured"}])
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["models"], [])
+
     def test_malformed_choice_is_explicitly_unresolved(self):
         row = rule("11111111", {"moment": "Before replying"})
         for choice in ([], {}):
