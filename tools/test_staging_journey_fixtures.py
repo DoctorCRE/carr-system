@@ -1,8 +1,14 @@
 import importlib.util
+import contextlib
+import io
+import json
+import os
 import pathlib
+import subprocess
 import sys
 import unittest
 import uuid
+from unittest.mock import MagicMock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -33,6 +39,58 @@ class JourneyContractTests(unittest.TestCase):
             with self.assertRaisesRegex(Exception, 'identity is absent or forbidden'):
                 journey.main()
             connect.assert_not_called()
+
+
+class JourneyBindingTests(unittest.TestCase):
+    def test_remaining_resolves_configured_replacement_without_fixture_exports(self):
+        operation = json.loads((ROOT / 'ops/config/release-pipeline.v1.json').read_text())['worker']['staging_candidate_operation_id']
+        projects = [
+            {'id': 'steep-field-48688294', 'name': 'production'},
+            {'id': 'synthetic-old', 'name': 'carr-staging'},
+            {'id': 'synthetic-candidate', 'name': 'carr-staging-replacement-' + uuid.UUID(operation).hex,
+             'pg_version': 18, 'region_id': 'aws-us-east-1'},
+        ]
+        host = 'ep-synthetic-candidate.us-east-1.aws.neon.tech'
+        owner = f'postgresql://neondb_owner:password@{host}/neondb?sslmode=require&channel_binding=require'  # ci-secret-scan: allow — synthetic provider fixture
+        calls = []
+
+        def provider(args, **kwargs):
+            calls.append(args)
+            self.assertEqual(kwargs['env']['NEON_API_KEY'], 'synthetic-provider-key')
+            if args[1:3] == ['projects', 'list']:
+                value = projects
+            elif args[1:3] == ['branches', 'list']:
+                project = args[args.index('--project-id') + 1]
+                value = [{'id': 'br-' + project, 'project_id': project,
+                          'name': 'production' if project == 'steep-field-48688294' else 'main', 'default': True}]
+            elif args[1] == 'api':
+                project = args[2].split('/')[2]
+                value = [{'id': 'ep-' + project, 'branch_id': 'br-' + project, 'type': 'read_write',
+                          'host': 'ep-' + project + '.us-east-1.aws.neon.tech',
+                          'autoscaling_limit_min_cu': 0.25, 'autoscaling_limit_max_cu': 2}]
+            elif args[1] == 'connection-string':
+                self.assertEqual(args[args.index('--project-id') + 1], 'synthetic-candidate')
+                self.assertEqual(args[args.index('--role-name') + 1], 'neondb_owner')
+                return subprocess.CompletedProcess(args, 0, owner, '')
+            else:
+                self.fail('unexpected provider action')
+            return subprocess.CompletedProcess(args, 0, json.dumps(value), '')
+
+        conn = MagicMock()
+        cur = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
+        cur.fetchone.side_effect = lambda: (True,) if 'session_user' in cur.execute.call_args.args[0] else (0,)
+        output = io.StringIO()
+        run = str(uuid.uuid4())
+        with patch.dict(os.environ, {'NEON_API_KEY': 'synthetic-provider-key'}, clear=True), \
+             patch.object(subprocess, 'run', side_effect=provider), \
+             patch.object(journey.psycopg, 'connect', return_value=conn) as connect, \
+             patch.object(sys, 'argv', ['staging-journey-fixtures.py', 'remaining', '--run', run]), \
+             contextlib.redirect_stdout(output):
+            journey.main()
+        self.assertEqual(json.loads(output.getvalue()), {'schema': journey.SCHEMA, 'run': run, 'remaining': 0})
+        connect.assert_called_once_with(owner, connect_timeout=10)
+        self.assertNotIn(owner, output.getvalue())
+        self.assertTrue(calls)
 
 
 class JourneyPostgresTests(unittest.TestCase):
