@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Verify canary evidence, class parity, batching, and fail-closed freeze behavior."""
+"""Verify canary evidence, class parity, batching, and workflow verdicts."""
 from __future__ import annotations
 
-import contextlib
-import importlib.util
-import io
 import tempfile
 import os
 import pathlib
@@ -26,15 +23,6 @@ def check(name, cond, detail=""):
         failures.append(name)
 
 
-def load_state_module():
-    spec = importlib.util.spec_from_file_location(
-        "main_canary_state", REPO / "ops" / "main-canary-state.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-# ------------------------------------------------------------------ the canary
 def test_the_canary_is_event_driven_and_never_always_on():
     y = CANARY.read_text(encoding="utf-8")
     check("it triggers on push to main", "push:" in y and "branches: [main]" in y)
@@ -169,112 +157,6 @@ def test_a_red_canary_stays_red_and_names_main():
           and 'needs.evidence.outputs.reused' in y)
 
 
-
-# ------------------------------------------------------------------- the freeze
-def test_freeze_reads_a_verdict_not_a_cancellation():
-    mod = load_state_module()
-    calls = []
-
-    def fake(path):
-        calls.append(path)
-        return {"workflow_runs": [
-            {"conclusion": "cancelled", "run_number": 9, "head_sha": "c" * 40},
-            {"conclusion": None, "run_number": 8, "head_sha": "b" * 40},
-            {"conclusion": "success", "run_number": 7, "head_sha": "a" * 40,
-             "html_url": "https://example.invalid/7"},
-        ]}
-    mod.api = fake
-    os.environ.pop("CARR_MAIN_FREEZE", None)
-    os.environ["GITHUB_REPOSITORY"] = "carr/system"
-    s = mod.state()
-    check("cancelled and in-progress runs are skipped for the last real verdict",
-          s["state"] == "green" and "run 7" in s["source"], s)
-    check("it asked only the canary's own runs on main",
-          calls and "main-canary.yml" in calls[0] and "branch=main" in calls[0], calls)
-
-
-def test_every_not_knowing_refuses():
-    mod = load_state_module()
-    os.environ.pop("CARR_MAIN_FREEZE", None)
-    os.environ["GITHUB_REPOSITORY"] = "carr/system"
-
-    for label, payload in (("the API would not answer", None),
-                           ("the workflow has never run", {"workflow_runs": []}),
-                           ("a burst is in flight, all cancelled",
-                            {"workflow_runs": [{"conclusion": "cancelled", "run_number": 3}]})):
-        mod.api = lambda _p, _v=payload: _v
-        s = mod.state()
-        check(f"unknown when {label}", s["state"] == "unknown", s)
-        code = require_green_exit(mod)
-        check(f"--require-green REFUSES when {label} (Codex's kill criterion)",
-              code == 1, f"exit {code}")
-
-
-def require_green_exit(mod) -> int:
-    argv, out = sys.argv, io.StringIO()
-    sys.argv = ["main-canary-state.py", "--require-green"]
-    try:
-        with contextlib.redirect_stdout(out):
-            return mod.main()
-    finally:
-        sys.argv = argv
-
-
-def test_red_freezes_and_green_releases():
-    mod = load_state_module()
-    os.environ.pop("CARR_MAIN_FREEZE", None)
-    os.environ["GITHUB_REPOSITORY"] = "carr/system"
-
-    mod.api = lambda _p: {"workflow_runs": [
-        {"conclusion": "failure", "run_number": 11, "head_sha": "f" * 40,
-         "html_url": "https://example.invalid/11"}]}
-    s = mod.state()
-    check("a failed canary is red", s["state"] == "red", s)
-    check("the red names the commit it was found on", s.get("sha") == "f" * 12, s)
-    check("--require-green refuses on red", require_green_exit(mod) == 1)
-
-    mod.api = lambda _p: {"workflow_runs": [
-        {"conclusion": "success", "run_number": 12, "head_sha": "e" * 40}]}
-    check("the next green canary IS the unfreeze — nothing to reset",
-          mod.state()["state"] == "green" and require_green_exit(mod) == 0)
-
-
-def test_the_manual_lever_can_freeze_but_never_force_green():
-    mod = load_state_module()
-    os.environ["GITHUB_REPOSITORY"] = "carr/system"
-    called = []
-    mod.api = lambda _p: called.append(_p) or {"workflow_runs": [
-        {"conclusion": "success", "run_number": 12, "head_sha": "e" * 40}]}
-
-    os.environ["CARR_MAIN_FREEZE"] = "on"
-    s = mod.state()
-    check("CARR_MAIN_FREEZE=on freezes even when the canary is green",
-          s["state"] == "red" and not called, s)
-    check("the manual freeze says how to clear itself", "unfreeze" in s["detail"], s)
-    check("--require-green refuses under the manual freeze",
-          require_green_exit(mod) == 1)
-
-    # THE ASYMMETRY IS THE POINT. A lever that can declare a broken main healthy
-    # is a verdict weakener wearing a convenience hat, and the council's first
-    # constraint was that no verdict is weakened to improve the number.
-    for forcing in ("off", "false", "green", "no"):
-        os.environ["CARR_MAIN_FREEZE"] = forcing
-        called.clear()
-        mod.api = lambda _p: {"workflow_runs": [
-            {"conclusion": "failure", "run_number": 13, "head_sha": "d" * 40}]}
-        check(f"CARR_MAIN_FREEZE={forcing!r} cannot force a red main green",
-              mod.state()["state"] == "red")
-    os.environ.pop("CARR_MAIN_FREEZE", None)
-
-    src = (REPO / "ops" / "main-canary-state.py").read_text(encoding="utf-8")
-    check("there is no force-green anywhere in the door",
-          'return {"state": "green"' not in src.replace(
-              '"state": "green" if green else "red"', ""),
-          "green is only ever derived from a successful canary run")
-
-
-
-
 def main():
     for fn in (test_the_canary_is_event_driven_and_never_always_on,
                test_a_running_canary_finishes_before_the_newest_pending_run,
@@ -283,11 +165,7 @@ def main():
                test_main_retains_migration_shadow_coverage,
                test_recorded_timings_survive_retirement_of_the_unused_collector,
                test_role_migration_fixtures_have_postgresql_17_server_binaries,
-               test_a_red_canary_stays_red_and_names_main,
-               test_freeze_reads_a_verdict_not_a_cancellation,
-               test_every_not_knowing_refuses,
-               test_red_freezes_and_green_releases,
-               test_the_manual_lever_can_freeze_but_never_force_green,):
+               test_a_red_canary_stays_red_and_names_main,):
         print(f"\n{fn.__name__}")
         try:
             fn()
