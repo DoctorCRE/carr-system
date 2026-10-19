@@ -14,21 +14,21 @@ to route costs the tokens the routing was supposed to save.
     dispatch.py register codex-desk --family sol --effort high --cwd ~/carr-system
     dispatch.py where            # how to find THIS session's socket
 
-Codex desks preserve their thread context. The registry names a default family,
-never a model version. Each send resolves Sol or Luna from the current local
-Codex catalog, prints the executor slug and effort, and records them in its row.
+`send` saves a card in the durable work queue and returns its queued receipt.
+The detached runner claims cards in the current global order when their desk
+and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
+and `merge-order` all use that same store.
 
-EVERY DISPATCH LEAVES A LINE in the results file, NDJSON, one object per
-dispatch. That file is how Hermes learns what happened without holding a
-connection open — a claude-session answers in its own window on its own time,
-so the line records that the turn was DELIVERED, not what the session decided.
-A headless Codex run is synchronous, so its line carries the actual result.
+The worker resolves the current Codex family at execution time and records the
+executor model and effort on the card. The `dispatch()` function is the
+synchronous executor used by workers and existing bounded adapters. Execution
+receipts still append to the requested NDJSON results file. Asynchronous desks
+report delivery there and retain their queue reservation until completion.
 """
 
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext
-import fcntl
+from contextlib import nullcontext
 import argparse
 import errno
 import json
@@ -82,46 +82,9 @@ CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
-# WR-000356: five or more concurrent Codex jobs died mid-run with "exceeded
-# retry limit, last status: 429"; four ran clean. A job past its start may
-# already have committed or pushed, so retrying it is not safe. Instead every
-# Codex job sent through `dispatch.py send` holds one of a few machine-wide
-# slots for its whole run and extra jobs wait for one. flock slots free
-# themselves when a process dies, so a killed job never leaves one held.
-CODEX_MAX_CONCURRENT = 4
-CODEX_SLOT_DIR = Path.home() / ".config" / "carr" / "codex-slots"
-CODEX_SLOT_POLL_S = 5.0
-
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
-
-
-@contextmanager
-def _codex_slot(env):
-    limit = max(1, int(env.get("CARR_CODEX_MAX_CONCURRENT") or CODEX_MAX_CONCURRENT))
-    slot_dir = Path(env.get("CARR_CODEX_SLOT_DIR") or CODEX_SLOT_DIR)
-    slot_dir.mkdir(parents=True, exist_ok=True)
-    announced = False
-    while True:
-        for index in range(limit):
-            handle = open(slot_dir / f"slot-{index}.lock", "a")
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                handle.close()
-                continue
-            try:
-                yield index
-            finally:
-                fcntl.flock(handle, fcntl.LOCK_UN)
-                handle.close()
-            return
-        if not announced:
-            print(f"queued: all {limit} Codex slots busy; waiting for one to free",
-                  file=sys.stderr, flush=True)
-            announced = True
-        time.sleep(CODEX_SLOT_POLL_S)
 
 
 def _now() -> str:
@@ -550,6 +513,7 @@ def dispatch(
     effort: str | None = None,
     writes: list[str] | None = None,
     checkout: str | None = None,
+    on_started=None,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -623,6 +587,9 @@ def dispatch(
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
               file=sys.stderr, flush=True)
+
+    if on_started is not None:
+        on_started(entry)
 
     if checkout is not None:
         prepared = codex_checkout.prepare(checkout, env)
@@ -940,6 +907,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--registry", default=None, help="desk registry file")
     p.add_argument("--results", default=None, help="NDJSON results file")
     sub = p.add_subparsers(dest="cmd", required=True)
+    import work_cli
+    work_cli.add_commands(sub)
 
     r = sub.add_parser("register", help="name a desk")
     r.add_argument("name")
@@ -972,7 +941,15 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
-    s = sub.add_parser("send", help="dispatch one task to one desk")
+    s = sub.add_parser("send", help="enqueue one task; return a durable receipt immediately")
+    s.add_argument('--card-id')
+    s.add_argument('--wr')
+    s.add_argument('--slice')
+    s.add_argument('--title')
+    s.add_argument('--description')
+    s.add_argument('--actor', default='orchestrator')
+    s.add_argument('--stage', choices=('building', 'review', 'fixing'),
+                   help='requeue a stage of an existing --card-id at the tail')
     s.add_argument("name")
     s.add_argument("task")
     s.add_argument("--family", choices=codex_models.FAMILIES)
@@ -996,6 +973,9 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        handled = work_cli.handle(a, reg, results)
+        if handled is not None:
+            return handled
         if a.cmd == "where":
             return _cmd_where()
 
@@ -1065,14 +1045,13 @@ def main(argv: list[str]) -> int:
             blocked = seat_gate.check({**desk_entry, "name": a.name})
             if blocked:
                 raise DeskError(*blocked)
-        codex_job = isinstance(desk_entry, dict) and desk_entry.get("kind") in codex_models.CODEX_KINDS
-        with _codex_slot(os.environ) if codex_job else nullcontext():
-            row = dispatch(a.name, task, registry=reg, results_path=results,
-                           fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
-                           retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                           checkout=a.checkout)
+        row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
-        return 0 if row["status"] in ("delivered", "completed") else 1
+        return 0
+
+    except (ValueError, OSError) as e:
+        print(f'refused: {e}', file=sys.stderr)
+        return 2
 
     except DeskError as e:
         print(f"refused ({e.code}): {e}", file=sys.stderr)
