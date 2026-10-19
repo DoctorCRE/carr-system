@@ -50,6 +50,7 @@ PID_SOCKET = re.compile(r"^\d+\.sock$")
 
 KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "claude-api")
 KIND_ALIASES = {"codex-exec": "codex-session"}
+AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
 
 DESK_INSTRUCTION = (

@@ -676,6 +676,29 @@ def save_private_json(path: pathlib.Path, value: dict[str, Any]) -> None:
         raise ProvisioningRefusal("staging recovery receipt readback disagrees")
 
 
+def rollback_authority_grants(cur: Any) -> list[str]:
+    """Bind old staging authority to its installed SQL, including PostgreSQL type spellings."""
+    cur.execute("select filename,sha256 from public.schema_migrations order by filename")
+    rows = cur.fetchall()
+    ledger = dict(rows)
+    if len(ledger) != len(rows):
+        raise ProvisioningRefusal("rollback migration ledger has duplicate filenames")
+    plan = snapshot_grants.load_applied_grants_to_role(MIGRATIONS, ledger, "carr_authority")
+    facts = snapshot_grants.acl_facts(plan)
+    functions = [identity for kind, identity, _privilege, _grantable in facts if kind == "function"]
+    cur.execute("""select source.identity,
+                   n.nspname||'.'||p.proname||'('||oidvectortypes(p.proargtypes)||')'
+                   from unnest(%s::text[]) source(identity)
+                   left join pg_proc p on p.oid=to_regprocedure(source.identity)
+                   left join pg_namespace n on n.oid=p.pronamespace""", (functions,))
+    identities = dict(cur.fetchall())
+    if any(identities.get(identity) is None for identity in functions):
+        raise ProvisioningRefusal("rollback authority source names an absent function")
+    return snapshot_grants.render_acl_facts(
+        ((kind, identities[identity] if kind == "function" else identity, privilege, grantable)
+         for kind, identity, privilege, grantable in facts), "carr_authority")
+
+
 def recover_live_rollback_credentials(
     binding: ReplacementBinding, protected_names: set[str], plans: Mapping[str, Sequence[str]],
     identity: dict[str, str],
@@ -711,14 +734,16 @@ def recover_live_rollback_credentials(
                         "reason": "live staging rollback credential missing; recover canonical binding"}
             record = records.get(profile.label)
             record_keys = {*metadata, "outcome"}
-            if isinstance(record, dict) and record.get("outcome") == "rotated":
-                record_keys.add("rotated_at")
+            if isinstance(record, dict) and record.get("outcome") in {"rotated", "created"}:
+                record_keys.add(record["outcome"] + "_at")
             if record is not None and (
                     not isinstance(record, dict)
                     or any(record.get(k) != v for k, v in metadata.items())
-                    or record.get("outcome") not in {"rotating", "rotated"}
+                    or record.get("outcome") not in {"rotating", "rotated", "creating", "created"}
+                    or (record.get("outcome") in {"creating", "created"} and profile.label != "authority_joe")
                     or set(record) != record_keys
-                    or (record.get("outcome") == "rotated" and not isinstance(record.get("rotated_at"), str))):
+                    or (record.get("outcome") in {"rotated", "created"}
+                        and not isinstance(record.get(record["outcome"] + "_at"), str))):
                 raise ProvisioningRefusal("staging rollback rotation receipt is malformed")
             try:
                 stored = credential.load_existing(
@@ -732,7 +757,7 @@ def recover_live_rollback_credentials(
                 stored = None
             if stored is not None and stored.state == "final" and record is None:
                 continue
-            if record is not None and record["outcome"] == "rotated":
+            if record is not None and record["outcome"] in {"rotated", "created"}:
                 if stored is not None and stored.state == "final":
                     continue
                 if stored is not None or profile.secret_name not in protected_names:
@@ -746,14 +771,23 @@ def recover_live_rollback_credentials(
                 cur = owner.cursor()
                 expected_creator = require_direct_owner_identity(cur)
                 owner.commit()
+                grants = (rollback_authority_grants(cur) if profile.label == "authority_joe"
+                          else plans[profile.label])
                 if stored is None:
+                    exists = role_exists(cur, profile.login_role)
+                    # 0161 creates only the bundle. Old staging can legitimately
+                    # lack the externally provisioned login already live on the candidate.
+                    creating = (not exists and profile.label == "authority_joe"
+                                and (record is None or record["outcome"] == "creating"))
                     action = decide_profile_action(
-                        role_exists_now=role_exists(cur, profile.login_role), credential_state="absent",
-                        role_passwordless=role_is_passwordless(cur, profile.login_role), rotate_lost=True)
-                    if action != "rotate":
+                        role_exists_now=exists, credential_state="absent",
+                        role_passwordless=role_is_passwordless(cur, profile.login_role) if exists else None,
+                        rotate_lost=not creating)
+                    if action not in {"rotate", "prepare_create"}:
                         raise ProvisioningRefusal("live staging rollback profile cannot rotate")
                     if record is None:
-                        records[profile.label] = {**metadata, "outcome": "rotating"}
+                        record = {**metadata, "outcome": "creating" if creating else "rotating"}
+                        records[profile.label] = record
                         save_private_json(path, receipt)
                     stored = credential.prepare_pending(
                         file_profile.paths, key=file_profile.key, role_name=profile.login_role,
@@ -761,18 +795,20 @@ def recover_live_rollback_credentials(
                         expected_port=5432, expected_database="neondb")
                 if stored.state == "pending":
                     # The pending password is stable even when the commit acknowledgement was lost.
-                    apply_login_profile(owner, profile, plans[profile.label], stored.password,
-                                        expected_creator=expected_creator, rotate=True, commit=False)
+                    apply_login_profile(owner, profile, grants, stored.password,
+                                        expected_creator=expected_creator,
+                                        rotate=records[profile.label]["outcome"] == "rotating", commit=False)
                 expected_names = read_worker_database_secret_names() | {profile.secret_name}
                 bulk_worker_database_secrets({profile.secret_name: stored.value})
                 verify_worker_database_secret_bindings(expected_names=expected_names)
                 owner.commit()
-                validate_profile_login(stored.value, profile, plans[profile.label], expected_creator=expected_creator)
+                validate_profile_login(stored.value, profile, grants, expected_creator=expected_creator)
                 if stored.state == "pending":
                     credential.promote_pending(file_profile.paths, key=file_profile.key, expected_value=stored.value)
+                outcome = "created" if records[profile.label]["outcome"] == "creating" else "rotated"
                 records[profile.label] = {
-                    **metadata, "outcome": "rotated",
-                    "rotated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+                    **metadata, "outcome": outcome,
+                    outcome + "_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
                 save_private_json(path, receipt)
             finally:
                 owner.rollback()

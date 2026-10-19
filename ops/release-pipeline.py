@@ -522,7 +522,7 @@ def queue_turn(lane: str, sha: str, step: str, rc: int, log: str, record_path: s
                   f"treat Production as serving {sha[:12]} through the deploy that applied it. Cloudflare "
                   "blocks rollback to any version from before that migration, so the fix is forward "
                   "only and must keep working with the migrated Durable Object class.\n")
-    body = (f"@queue enqueue target=claude-desktop cap=repo-write priority=P1 runtime=3h "
+    body = (f"@queue enqueue target=sol-fixer cap=repo-write priority=P1 runtime=3h "
             f"key={key} :: Fix forward: {lane} release of {sha[:12]} failed at {step}\n"
             f"The scripted release pipeline (ops/release-pipeline.py) stopped: step `{step}` "
             f"exited {rc} releasing {sha} ({lane} lane).\n{ahead}"
