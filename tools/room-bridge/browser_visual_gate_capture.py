@@ -30,7 +30,6 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
-from urllib.request import urlopen
 
 import design_kernel
 
@@ -321,27 +320,16 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
     browser = chrome_binary(args.chrome)
     if browser is None:
         return _unavailable_report(kernel, args, "chrome_not_found")
-    with tempfile.TemporaryDirectory(prefix="carr-visual-gate-") as directory, serving_target(args) as url:
-        profile = Path(directory) / "chrome-profile"
-        command = [browser, "--headless=new", "--no-first-run", "--disable-gpu", "--remote-debugging-port=0", f"--user-data-dir={profile}", "about:blank"]
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with serving_target(args) as url, subprocess.Popen(
+            ["node", str(Path(__file__).with_name("test-browser-cdp.mjs")), browser],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True) as process:
         cdp: DevTools | None = None
         try:
-            active_file = profile / "DevToolsActivePort"
-            for _ in range(100):
-                if active_file.is_file():
-                    break
-                if process.poll() is not None:
-                    return _unavailable_report(kernel, args, "chrome_launch_failed")
-                time.sleep(0.05)
-            if not active_file.is_file():
-                return _unavailable_report(kernel, args, "chrome_devtools_timeout")
-            port = active_file.read_text().splitlines()[0]
-            targets = json.loads(urlopen(f"http://127.0.0.1:{port}/json/list", timeout=5).read())
-            target = next((item for item in targets if item.get("type") == "page"), None)
-            if target is None:
-                return _unavailable_report(kernel, args, "chrome_page_target_missing")
-            cdp = DevTools(target["webSocketDebuggerUrl"])
+            endpoint = process.stdout.readline()
+            if not endpoint:
+                return _unavailable_report(kernel, args, "chrome_launch_failed")
+            cdp = DevTools(json.loads(endpoint)["pageWsUrl"])
             cdp.call("Page.enable")
             narrow = {width: _capture(cdp, url, width, tab=(width == 280)) for width in (280, 320, 414)}
             light = _capture(cdp, url, 1024, dark=False)
@@ -352,9 +340,8 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         finally:
             if cdp is not None:
                 cdp.close()
-            process.terminate()
-            with contextlib.suppress(Exception):
-                process.wait(timeout=3)
+            process.stdin.close()
+            process.wait(timeout=30)
 
     profile = next(row["evaluation_profile"] for row in kernel["design_intents"] if row["intent_id"] == args.intent)
     required = next(row["required_gates"] for row in kernel["visual_gate_portfolio"]["profiles"] if row["profile_id"] == profile)

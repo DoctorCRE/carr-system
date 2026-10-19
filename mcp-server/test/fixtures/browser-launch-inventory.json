@@ -4,5 +4,173 @@
     "path": "mcp-server/test/independent.mjs",
     "source": "spawn(chrome, [\"--headless=new\"]);",
     "allowed": false
+  },
+  {
+    "name": "an independent launch in a nested tools directory",
+    "path": "tools/nested/render.mjs",
+    "source": "await chromium.launch();",
+    "allowed": false
+  },
+  {
+    "name": "Chromium launch API",
+    "path": "dealroom/test/api.mjs",
+    "source": "await chromium.launch();",
+    "allowed": false
+  },
+  {
+    "name": "persistent Playwright context",
+    "path": "practice-plugin/test/api.mjs",
+    "source": "await chromium.launchPersistentContext(\"profile\");",
+    "allowed": false
+  },
+  {
+    "name": "Playwright server",
+    "path": "control-room/test/api.mjs",
+    "source": "await playwright.chromium.launchServer();",
+    "allowed": false
+  },
+  {
+    "name": "namespaced spawn",
+    "path": "workspace/test/spawn.cjs",
+    "source": "childProcess.spawn(CHROME_BIN, []);",
+    "allowed": false
+  },
+  {
+    "name": "Chrome executable path",
+    "path": "tools/render.js",
+    "source": "execFileSync(\"/opt/google-chrome-stable\", []);",
+    "allowed": false
+  },
+  {
+    "name": "Chromium executable path",
+    "path": "tools/render.ts",
+    "source": "spawnSync(\"/opt/chromium-browser\", []);",
+    "allowed": false
+  },
+  {
+    "name": "an executable alias",
+    "path": "tools/alias.mjs",
+    "source": "const executable = \"/cache/chrome-linux64/chrome\";\nspawn(executable, []);",
+    "allowed": false
+  },
+  {
+    "name": "a Python subprocess command",
+    "path": "tools/render.py",
+    "source": "command = [browser, \"--headless=new\"]\nsubprocess.Popen(command)",
+    "allowed": false
+  },
+  {
+    "name": "Python Playwright context",
+    "path": "new-package/tests/browser.py",
+    "source": "page = playwright.chromium.launch_persistent_context(\"profile\")",
+    "allowed": false
+  },
+  {
+    "name": "a shell launch",
+    "path": "tools/render.sh",
+    "source": "#!/bin/sh\n/usr/bin/chromium --headless=new",
+    "allowed": false
+  },
+  {
+    "name": "a new test directory",
+    "path": "new-package/tests/browser.mjs",
+    "source": "await chromium.launch();",
+    "allowed": false
+  },
+  {
+    "name": "a Python Chrome path",
+    "path": "tools/path.py",
+    "source": "subprocess.run([\"/opt/chromium/chrome\", \"--headless=new\"])",
+    "allowed": false
+  },
+  {
+    "name": "CDP test helper",
+    "path": "new-package/test/shared.mjs",
+    "source": "import { launchTestChrome } from \"../../dealroom/test/chrome-launch.mjs\";\nawait launchTestChrome(t, chrome);",
+    "allowed": true
+  },
+  {
+    "name": "Playwright test helper",
+    "path": "tools/shared.mjs",
+    "source": "import { testBrowser } from \"../practice-plugin/test/browser.mjs\";\nawait testBrowser(t);",
+    "allowed": true
+  },
+  {
+    "name": "the shared CDP launcher",
+    "path": "dealroom/test/chrome-launch.mjs",
+    "source": "spawn(chrome, [\"--headless=new\"]);",
+    "allowed": true
+  },
+  {
+    "name": "the shared Playwright launcher",
+    "path": "practice-plugin/test/browser.mjs",
+    "source": "await chromium.launch();",
+    "allowed": true
+  },
+  {
+    "name": "a non-browser subprocess",
+    "path": "tools/check.mjs",
+    "source": "spawn(process.execPath, [\"test-chrome.mjs\"]);",
+    "allowed": true
+  },
+  {
+    "name": "a non-browser Python launch method",
+    "path": "ops/agent-selftest.py",
+    "source": "self.launch(agent, prompt)",
+    "allowed": true
+  },
+  {
+    "name": "a JSX test launch",
+    "path": "new-package/tests/view.jsx",
+    "source": "await chromium.launch();",
+    "allowed": false
+  },
+  {
+    "name": "an extensionless tool launch",
+    "path": "tools/render",
+    "source": "#!/bin/sh\n/usr/bin/google-chrome --headless=new",
+    "allowed": false
+  },
+  {
+    "name": "a Python Playwright alias",
+    "path": "tools/render_alias.py",
+    "source": "from playwright.sync_api import sync_playwright\nengine.launch()",
+    "allowed": false
+  },
+  {
+    "name": "a required Playwright alias",
+    "path": "tools/render_alias.cjs",
+    "source": "const { chromium: engine } = require(\"playwright-core\");\nconst start = engine.launch;\nstart();",
+    "allowed": false
+  },
+  {
+    "name": "the shared CDP tool helper",
+    "path": "tools/capture.mjs",
+    "source": "import { launchChrome } from \"../dealroom/test/chrome-launch.mjs\";\nconst browser = await launchChrome(executable);\ntry { await capture(browser); } finally { await browser.close(); }",
+    "allowed": true
+  },
+  {
+    "name": "an unowned test launch through the low-level helper",
+    "path": "workspace/test/unowned.mjs",
+    "source": "import { launchChrome } from \"../../dealroom/test/chrome-launch.mjs\";\nawait launchChrome(chrome);",
+    "allowed": false
+  },
+  {
+    "name": "a shell executable variable",
+    "path": "tools/variable.sh",
+    "source": "CHROME_BIN=/opt/chromium\n\"$CHROME_BIN\" --headless=new",
+    "allowed": false
+  },
+  {
+    "name": "a quoted macOS browser path",
+    "path": "tools/path.sh",
+    "source": "\"/cache/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\" --headless=new",
+    "allowed": false
+  },
+  {
+    "name": "a shell browser path assignment without a launch",
+    "path": "tools/config.sh",
+    "source": "CHROME_BIN=/opt/chromium",
+    "allowed": true
   }
 ]
