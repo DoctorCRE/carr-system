@@ -8,6 +8,9 @@ must become visible atomically. Forward-only by design: a bad migration is
 fixed by a NEW migration, never by editing an applied file (applied files'
 sha256 is recorded and re-checked, so drift is caught).
 
+Empty databases must first load db/schema.sql. Historical migrations depend
+on imported data and are not a supported rebuild base.
+
 Usage:
     DATABASE_URL=postgres://... python3 tools/migrate.py            # dry run
     DATABASE_URL=postgres://... python3 tools/migrate.py --through 0170_guidance_import_lifecycle.sql
@@ -433,14 +436,6 @@ def contains_transaction_control(sql: str) -> bool:
 LOCK_TIMEOUT = os.environ.get("CARR_MIGRATE_LOCK_TIMEOUT", "5s")
 STATEMENT_TIMEOUT = os.environ.get("CARR_MIGRATE_STATEMENT_TIMEOUT", "5min")
 
-BOOTSTRAP = """
-create table if not exists schema_migrations (
-  filename   text primary key,
-  sha256     text not null,
-  applied_at timestamptz not null default now()
-);
-"""
-
 
 def fail(msg: str) -> NoReturn:
     error_type = sys.exc_info()[0]
@@ -685,6 +680,9 @@ def main() -> None:
             else:
                 cur.execute("select filename, sha256 from schema_migrations")
                 applied = dict(cur.fetchall())
+            if not applied:
+                fail("snapshot-only rebuild: load db/schema.sql before running migrations; "
+                     "historical migrations cannot rebuild an empty database")
 
         try:
             validate_applied_ledger(migrations, applied, baseline)
@@ -733,8 +731,6 @@ def main() -> None:
             if answer != host:
                 fail("confirmation did not match host; nothing applied")
 
-        with conn.cursor() as cur:
-            cur.execute(BOOTSTRAP)
         conn.commit()
         print(f"lock_timeout: {LOCK_TIMEOUT}   statement_timeout: {STATEMENT_TIMEOUT}")
         for batch in migration_batches(pending):

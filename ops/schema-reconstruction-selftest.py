@@ -43,15 +43,22 @@ class ReconstructionTests(unittest.TestCase):
                 result = fixture.run(command, capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stderr)
             dsn = f'postgresql://neondb_owner@127.0.0.1:{port}/postgres'
-            for arguments in ([], ['--apply', '--yes']):
-                refused = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
-                    *arguments], cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
-                    capture_output=True, text=True, timeout=600)
-                self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
-                self.assertIn('load db/schema.sql', refused.stderr)
-                with psycopg.connect(dsn) as conn:
-                    tables = conn.execute("select count(*) from pg_tables where schemaname='public'").fetchone()[0]
-                self.assertEqual(tables, 0, 'empty-database refusal must precede all migration writes')
+            for empty_ledger in (False, True):
+                if empty_ledger:
+                    with psycopg.connect(dsn) as conn:
+                        conn.execute('create table schema_migrations(filename text primary key, sha256 text)')
+                for arguments in ([], ['--apply', '--yes']):
+                    refused = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
+                        *arguments], cwd=ROOT, env={**os.environ, 'DATABASE_URL': dsn},
+                        capture_output=True, text=True, timeout=600)
+                    self.assertNotEqual(refused.returncode, 0, refused.stdout + refused.stderr)
+                    self.assertIn('load db/schema.sql', refused.stderr)
+                    with psycopg.connect(dsn) as conn:
+                        tables = conn.execute("select tablename from pg_tables where schemaname='public'").fetchall()
+                    self.assertEqual(tables, [('schema_migrations',)] if empty_ledger else [],
+                                     'empty-database refusal must precede all migration writes')
+            with psycopg.connect(dsn) as conn:
+                conn.execute('drop table schema_migrations')
             loaded = subprocess.run([str(bins / 'psql'), '-X', '--single-transaction',
                 '-v', 'ON_ERROR_STOP=1', '-q', '-d', dsn, '-f', str(ROOT / 'db/schema.sql')],
                 capture_output=True, text=True, timeout=180)
