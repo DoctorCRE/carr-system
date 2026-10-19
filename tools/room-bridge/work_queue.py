@@ -53,11 +53,17 @@ def timestamp():
 
 
 class WorkQueue:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, read_only=False):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.path, timeout=30)
+        self.read_only = read_only
+        if read_only:
+            self.db = sqlite3.connect(self.path.resolve().as_uri() + '?mode=ro', uri=True, timeout=30)
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.db = sqlite3.connect(self.path, timeout=30)
         self.db.row_factory = sqlite3.Row
+        if read_only:
+            return
         self.db.executescript('''
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=FULL;
@@ -94,7 +100,7 @@ class WorkQueue:
     @contextmanager
     def transaction(self):
         with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+            self.db.execute('BEGIN' if self.read_only else 'BEGIN IMMEDIATE')
             yield
 
     def _item(self, card):
@@ -435,7 +441,7 @@ def board_projection(path=None):
         path = default_path()
     if not Path(path).exists():
         return None
-    with WorkQueue(path) as queue:
+    with WorkQueue(path, read_only=True) as queue:
         snapshot = queue.export()
     finished = [i for i in snapshot['items'] if i['stage'] in TERMINAL]
     retained = {i['card_id'] for i in finished[-20:]}

@@ -200,6 +200,15 @@ with WorkQueue(Path(sys.argv[2])) as q:
         self.assertTrue(self.q.publish(lambda: None, now=12))
         self.assertEqual(self.q.publication()['published'], self.q.export()['revision'])
 
+    def test_read_projection_opens_an_existing_store_without_write_access(self):
+        import sqlite3
+        self.add('A')
+        with WorkQueue(self.path, read_only=True) as reader:
+            self.assertEqual(reader.export()['items'][0]['card_id'], 'A')
+            with self.assertRaises(sqlite3.OperationalError):
+                reader.enqueue('B', desk='sol', task='refused write', actor='test')
+        self.assertEqual(len(self.q.export()['items']), 1)
+
 
 if __name__ == '__main__':
     unittest.main()

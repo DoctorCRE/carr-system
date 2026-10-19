@@ -69,7 +69,7 @@ def handle(args, registry, results):
     mutate = args.cmd in ('prioritize', 'requeue', 'stage', 'details', 'complete', 'import-results')
     if args.cmd == 'run':
         return work_runner.main(['--db', str(path), '--registry', str(registry.path), '--results', str(results)])
-    with WorkQueue(path) as queue:
+    with WorkQueue(path, read_only=not mutate) as queue:
         if args.cmd in ('queue', 'export'):
             out = queue.export()
         elif args.cmd == 'show':
