@@ -376,6 +376,43 @@ def test_staging_at_merge_entry_is_excluded():
     print("PASS  staging at merge entry is excluded; files, index and HEAD stay intact")
 
 
+def test_interrupted_sync_leaves_git_usable():
+    for sig in ("SIGTERM", "SIGKILL"):
+        for phase in ("before-merge", "post-merge-hook"):
+            with tempfile.TemporaryDirectory() as tmp:
+                b = build(tmp)
+                head = git(b, "rev-parse", "HEAD")
+                stubs = Path(tmp, "git-stubs")
+                stubs.mkdir()
+                real_git = shutil.which("git", path=ENV.get("PATH"))
+                wrapper = stubs / "git"
+                wrapper.write_text(
+                    f"#!{sys.executable}\n"
+                    "import os, signal, sys\n"
+                    "if sys.argv[1] == 'merge':\n"
+                    "    os.environ['FLEET_HELPER_PID'] = str(os.getppid())\n"
+                    + (f"    os.kill(os.getppid(), signal.{sig})\n    sys.exit(128)\n"
+                       if phase == "before-merge" else "")
+                    + f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n")
+                wrapper.chmod(0o755)
+                if phase == "post-merge-hook":
+                    hook = Path(b, ".git/hooks/post-merge")
+                    hook.write_text('#!/bin/sh\nkill -' + sig.removeprefix("SIG")
+                                    + ' "$FLEET_HELPER_PID"\n')
+                    hook.chmod(0o755)
+                r = run_sync(b, {"PATH": str(stubs) + os.pathsep + ENV.get("PATH", "")})
+                assert r.returncode != 0, r.stdout + r.stderr
+                assert not Path(b, ".git/index.lock").exists(), f"{sig} {phase}: stale lock"
+                assert (git(b, "rev-parse", "HEAD") != head) == (phase == "post-merge-hook")
+                assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}"), \
+                    f"{sig} {phase}: HEAD and index diverged"
+                git(b, "add", "f.txt")
+                retry = run_sync(b)
+                assert retry.returncode == 0, retry.stdout + retry.stderr
+                assert behind(b) == 0
+            print(f"PASS  {sig} {phase} leaves no lock, matching HEAD/index, usable add and retry")
+
+
 def test_existing_index_lock_refuses_without_stealing():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -1015,6 +1052,7 @@ def main():
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
     test_staging_at_merge_entry_is_excluded()
+    test_interrupted_sync_leaves_git_usable()
     test_existing_index_lock_refuses_without_stealing()
     test_split_index_is_published_and_lock_released()
     test_concurrent_merge_conflict_refuses_and_reports()
