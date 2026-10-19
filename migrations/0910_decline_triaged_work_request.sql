@@ -65,7 +65,7 @@ language plpgsql security definer
 set search_path to 'pg_catalog', 'ops', 'pg_temp' as $fn$
 declare
   v_id uuid;
-  v_actor uuid;
+  v_actor public.actor%rowtype;
   v_state text;
   v_version integer;
   v_sourced boolean;
@@ -74,9 +74,17 @@ begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
     raise exception 'withdrawal_reason_missing: a withdrawal must record why';
   end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
+  select a.* into v_actor from public.actor a where a.slug = p_actor_slug;
+  if v_actor.id is null then
     raise exception 'unknown_actor: unknown actor %', p_actor_slug;
+  end if;
+  if not coalesce(v_actor.active and (
+    v_actor.kind = 'human'
+    or (v_actor.kind = 'automation'
+        and nullif(btrim(current_setting('carr.sponsoring_human_slug', true)), '') in ('joe', 'dell'))
+  ), false) then
+    raise exception 'sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent'
+      using errcode = '42501';
   end if;
 
   select w.id, w.state, w.version, w.capture_idempotency_key is not null
@@ -98,7 +106,7 @@ begin
     (work_request_id, idempotency_key, base_version, result_version, final_state,
      exit_reason, superseded_by, withdrawn_by_actor_id, withdrawn_at)
   values (v_id, p_idempotency_key, p_base_version, p_base_version + 1, 'declined',
-          p_exit_reason, null, v_actor, v_now)
+          p_exit_reason, null, v_actor.id, v_now)
   on conflict (idempotency_key) do nothing;
 
   update ops.work_request w

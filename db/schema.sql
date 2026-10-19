@@ -10987,7 +10987,7 @@ CREATE FUNCTION ops.decline_sourced_work_request(p_work_request text, p_base_ver
     AS $$
 declare
   v_id uuid;
-  v_actor uuid;
+  v_actor public.actor%rowtype;
   v_state text;
   v_version integer;
   v_sourced boolean;
@@ -10996,9 +10996,17 @@ begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
     raise exception 'withdrawal_reason_missing: a withdrawal must record why';
   end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
+  select a.* into v_actor from public.actor a where a.slug = p_actor_slug;
+  if v_actor.id is null then
     raise exception 'unknown_actor: unknown actor %', p_actor_slug;
+  end if;
+  if not coalesce(v_actor.active and (
+    v_actor.kind = 'human'
+    or (v_actor.kind = 'automation'
+        and nullif(btrim(current_setting('carr.sponsoring_human_slug', true)), '') in ('joe', 'dell'))
+  ), false) then
+    raise exception 'sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent'
+      using errcode = '42501';
   end if;
 
   select w.id, w.state, w.version, w.capture_idempotency_key is not null
@@ -11020,7 +11028,7 @@ begin
     (work_request_id, idempotency_key, base_version, result_version, final_state,
      exit_reason, superseded_by, withdrawn_by_actor_id, withdrawn_at)
   values (v_id, p_idempotency_key, p_base_version, p_base_version + 1, 'declined',
-          p_exit_reason, null, v_actor, v_now)
+          p_exit_reason, null, v_actor.id, v_now)
   on conflict (idempotency_key) do nothing;
 
   update ops.work_request w
@@ -122889,7 +122897,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
 0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
-0910_decline_triaged_work_request.sql	564cc6bc7335a1d7d3a772d1765ad830f55588ec00eed765ae250f4d02f70e82	2026-10-19 11:46:49.012465+00
+0910_decline_triaged_work_request.sql	02d7a5696149c883a55674227944437fad0196e7f2a1e22350c7023625761698	2026-10-19 12:53:32.223408+00
 \.
 
 

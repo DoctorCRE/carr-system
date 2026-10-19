@@ -327,12 +327,12 @@ def main() -> int:
         with rollback_only_connection(dsn) as conn:
             cur = conn.cursor()
             actor = fixture(cur)
+            grant_settable_runtime_roles(cur, "carr_writer")
             for state, version in (("captured", 1), ("triaged", 2)):
                 request = capture(cur, f"Sponsored {state} decline")
                 if state == "triaged":
                     triage(cur, request)
-                cur.execute("select set_config('carr.acting_actor_slug','codex',true),"
-                            " set_config('carr.sponsoring_human_slug','',true)")
+                cur.execute("select set_config('carr.acting_actor_slug','codex',true)")
                 cur.execute("set local role carr_writer")
                 try:
                     refuses_named(cur,
@@ -356,6 +356,7 @@ def main() -> int:
                     cur.execute("reset role")
                 if row != ("declined", version + 1):
                     raise RuntimeError(f"Joe's sponsored local {state} decline did not land: {row}")
+                cur.execute("select set_config('carr.sponsoring_human_slug','',true)")
                 print(f"PASS: {state} decline refuses an unsponsored writer and accepts Joe's sponsored local actor")
             cur.execute("select set_config('carr.acting_actor_slug','joe',true),"
                         " set_config('carr.sponsoring_human_slug','',true)")

@@ -14,7 +14,7 @@ const TRIAGE_CLASSES = new Set(["operational", "needs_judgment", "safety_review"
 const JOE_ANSWER_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "answer_text", "scope_confirmed", "evidence_ref"]);
 const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason"]);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
-const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "work_request_not_declinable", "work_request_not_found"]);
+const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "sponsored_actor_required", "work_request_not_declinable", "work_request_not_found"]);
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
   "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
   "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
@@ -812,16 +812,9 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // passing actor.slug records the agent that actually acted rather than
     // flattening every act to 'joe', which is the gap ACTING_IDENTITY above
     // exists to report.
-    //
-    // humanOnly is not declared either: the label stopped being read by
-    // executeRegisteredTool on 2026-08-26 (decision dc57f62d) and WR-000019
-    // slice S1 is removing the stale declarations. A new one would be dead on
-    // arrival and would misreport this verb's protection in the derived
-    // action-risk registry. base_version is the live guard, as it is for
-    // propose-ready-plan and propose-outcome-feedback.
     "decline-work-request": {
       write: true,
-      description: "Withdraw one sourced Work Request from captured or triaged by declining it, recording why and preserving its intake history. It never withdraws ready or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
+      description: "A human partner or sponsored agent may withdraw one sourced Work Request from captured or triaged by declining it, recording why and preserving its intake history. It never withdraws ready or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
@@ -830,6 +823,10 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
       }, required: ["idempotency_key", "human_ref", "base_version", "exit_reason"] },
       handler: async (c, actor, args) => {
         validateDecline(args, ToolError);
+        const authorizationClass = authorizationClassForActor(actor);
+        if (authorizationClass !== "verified_partner" && authorizationClass !== "sponsored_agent")
+          throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass,
+            hint: "Only a partner or a sponsored agent may decline a Work Request. Nothing was written." });
         // Bind replays to the authenticated actor without admitting actor data
         // into the closed client schema.
         return withEnvelope(c, actor, "decline-work-request", { ...args, _server_actor_id: actor.id }, async () => {

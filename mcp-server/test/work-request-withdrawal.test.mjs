@@ -114,6 +114,14 @@ for (const from of ["captured", "triaged"]) {
     const call = db.calls.find(x => x.sql.includes("decline_sourced_work_request"));
     assert.equal(call.params[3], "joe-local");
   });
+
+  test(`the database sponsorship refusal stays named for a ${from} request`, async () => {
+    const detail = "sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent";
+    const db = new WithdrawFake({ from, refusal: detail });
+    const out = await rejected(() => executeRegisteredTool(db, LOCAL, "decline-work-request",
+      { ...DECLINE, base_version: db.version }));
+    assert.deepEqual(out, { error: "sponsored_actor_required", human_ref: DECLINE.human_ref, detail });
+  });
 }
 
 test("decline preserves the triaged origin in its audit event", async () => {
