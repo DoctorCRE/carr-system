@@ -390,6 +390,114 @@ def test_ignored_incoming_collision_refuses():
     print("PASS  ignored incoming collision refuses and preserves local content")
 
 
+def tracked_state(clone):
+    return (git(clone, "rev-parse", "HEAD"), git(clone, "ls-files", "--stage"),
+            git(clone, "diff", "--binary"), git(clone, "diff", "--cached", "--binary"))
+
+
+def test_intermediate_landed_residue_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "f.txt").write_text("base\nnewer\nnewest\n")
+        git(a, "commit", "-qam", "newest")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "landed upstream: f.txt" in r.stdout, r.stdout
+        assert tracked_state(b) == before
+        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+    print("PASS  residue matching an intermediate upstream commit stays untouched")
+
+
+def test_landed_residue_beside_real_work_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "pull", "-q", "--ff-only", "origin", "main")
+        a = Path(tmp, "A")
+        Path(a, "new.txt").write_text("incoming\n")
+        git(a, "add", "new.txt")
+        git(a, "commit", "-qm", "new file")
+        git(a, "push", "-q", "origin", "main")
+        git(b, "rm", "f.txt")
+        Path(b, "new.txt").write_text("incoming\n")
+        git(b, "add", "-N", "new.txt")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout and "new.txt" in r.stdout, r.stdout
+        assert tracked_state(b) == before
+        assert not Path(b, "f.txt").exists()
+        assert Path(b, "new.txt").read_text() == "incoming\n"
+    print("PASS  landed bytes beside a staged deletion preserve both files and index")
+
+
+def test_staged_landed_residue_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        git(b, "add", "f.txt")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert tracked_state(b) == before
+    print("PASS  staged landed residue stays staged")
+
+
+def test_staged_and_unstaged_versions_refuse():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("staged work\n")
+        git(b, "add", "f.txt")
+        Path(b, "f.txt").write_text("unstaged work\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert tracked_state(b) == before
+        assert git(b, "show", ":f.txt") == "staged work"
+        assert Path(b, "f.txt").read_text() == "unstaged work\n"
+    print("PASS  distinct staged and unstaged versions both survive refusal")
+
+
+def test_landed_residue_reedited_during_proof_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        Path(b, "f.txt").write_text("base\nnewer\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        env, marker = git_edit_env(tmp, b, "hash-object", "edited during proof\n")
+        r = run_sync(b, env)
+        assert marker.exists(), "the editor never interrupted residue diagnosis"
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "f.txt" in r.stdout
+        assert Path(b, "f.txt").read_text() == "edited during proof\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+    print("PASS  landed residue reedited during proof is refused without restoring")
+
+
+def test_untracked_incoming_collision_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "new.txt").write_text("incoming\n")
+        git(a, "add", "new.txt")
+        git(a, "commit", "-qm", "new file")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, "new.txt").write_text("local untracked work\n")
+        before = tracked_state(b)
+        r = run_sync(b)
+        assert r.returncode != 0, r.stdout + r.stderr
+        assert "new.txt" in r.stdout + r.stderr
+        assert tracked_state(b) == before
+        assert Path(b, "new.txt").read_text() == "local untracked work\n"
+    print("PASS  untracked incoming collision refuses without touching local content")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -852,6 +960,12 @@ def main():
     test_concurrent_staged_landed_bytes_refuse()
     test_concurrent_merge_conflict_refuses_and_reports()
     test_ignored_incoming_collision_refuses()
+    test_intermediate_landed_residue_refuses()
+    test_landed_residue_beside_real_work_refuses()
+    test_staged_landed_residue_refuses()
+    test_staged_and_unstaged_versions_refuse()
+    test_landed_residue_reedited_during_proof_refuses()
+    test_untracked_incoming_collision_refuses()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()

@@ -133,7 +133,7 @@ if [ "$canonical_skip" -eq 0 ]; then
   remote_sha="$(git rev-parse origin/main)"
 
   if ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" "$remote_sha")"; then
-    print -r -- "fleet-sync: SKIP — local changes present, refusing to synchronize:"
+    print -r -- "fleet-sync: SKIP — local changes present, refusing to fast-forward or install wiring:"
     print -r -- "    $dirt_reason"
     canonical_status=$EX_CONFIG
     canonical_skip=1
