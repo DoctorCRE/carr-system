@@ -37,7 +37,7 @@
   "routes": {
     "code": {"model": "luna", "effort": "low", "protocol": "model-room-desk", "desk": "luna-desk",
              "then": {"model": "sol", "effort": "high", "desk": "sol-fixer"}},
-    "escalate": {"model": "luna", "effort": "low", "protocol": "model-room-desk", "desk": "luna-desk"},
+    "escalate": {"model": "sol", "effort": "high", "protocol": "model-room-desk", "desk": "sol-fixer"},
     "script": {"model": "luna", "effort": "low",
                "protocol": "model-room-desk", "desk": "luna-desk",
                "then": {"model": "luna", "effort": "low", "desk": "luna-desk"}},
