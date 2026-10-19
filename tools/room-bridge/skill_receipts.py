@@ -41,7 +41,7 @@ def _read_paths(name, args):
     if command is None and isinstance(args.get('code'), str):
         # A wrapper's first unconditional, literal call can be paired with its first result.
         # Later calls and arbitrary JavaScript need native execution evidence, not source matching.
-        match = re.match(r'\s*(?:// @exec:[^\n]*\n)?\s*text\(await tools\.exec_command\(\{\s*cmd\s*:\s*("(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27)', args['code'])
+        match = re.match(r'\s*(?:// @exec:[^\n]*\n)?\s*text\(await tools\.exec_command\(\{\s*cmd\s*:\s*("(?:\\.|[^"\\])*"|\x27(?:\\.|[^\x27\\])*\x27)\s*\}\)\)\s*;', args['code'])
         if match:
             try:
                 return _read_paths('exec_command', {'cmd': ast.literal_eval(match[1])})
@@ -51,7 +51,10 @@ def _read_paths(name, args):
     if not isinstance(command, str):
         return []
     try:
-        tokens = list(shlex.shlex(command, posix=True, punctuation_chars=';&|<>\n'))
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|<>\n')
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        tokens = list(lexer)
     except ValueError:
         return []
     # One shell status proves only one unconditional read, never a compound command.
@@ -60,7 +63,14 @@ def _read_paths(name, args):
         return []
     if not tokens or Path(tokens[0]).name not in ('cat', 'head', 'tail', 'sed'):
         return []
-    return [value for value in tokens[1:] if _skill_path(value)]
+    reader, operands = Path(tokens[0]).name, tokens[1:]
+    if reader == 'sed':
+        if len(operands) < 3 or operands[0] != '-n' or not re.fullmatch(r'[1-9]\d*(?:,[1-9]\d*)?p', operands[1]):
+            return []
+        operands = operands[2:]
+    if operands[:1] == ['--']:
+        operands = operands[1:]
+    return operands if operands and all(_skill_path(path) and not path.startswith('-') for path in operands) else []
 
 
 def _success(output):
