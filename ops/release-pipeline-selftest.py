@@ -1063,7 +1063,7 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(restart().tick(["worker"]), 0)
         self.assert_failed_live_can_fix_forward(latest, runner, restart)
 
-    def test_older_pending_promotion_cannot_erase_a_newer_failed_fix(self):
+    def pending_promotion_with_newer_failed_fix(self):
         latest, live, runner, pipe, restart = self.case("worker")
         with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
             pipe.tick(["worker"])
@@ -1073,6 +1073,10 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(restart().tick(["worker"]), 1)
         self.assertEqual(self.fx.state()["worker"]["failed_sha"], fix)
         self.assertEqual(self.fx.state()["worker"]["failed_step"], "staging")
+        return latest, live, runner, restart, fix
+
+    def test_older_pending_promotion_cannot_erase_a_newer_failed_fix(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
         before = len(runner.calls)
         self.assertEqual(restart().tick(["worker"]), 0)
         self.assertEqual(len(runner.calls), before)
@@ -1087,6 +1091,46 @@ class ReleaseJournalRecovery(Base):
         self.assertEqual(restart().tick(["worker"]), 0)
         self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
         self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_stale_then_current_identity_keeps_pending_source_bound_and_allows_newer_fix(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        live.update(sha=latest, version=VERSION)
+        pipe = restart()
+        before = len(runner.calls)
+        stale = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+        current = {"git_sha": {"value": latest}, "worker_version": {"id": VERSION}}
+        with mock.patch.object(pipe, "http", side_effect=[stale, current]):
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["pending_promotion"]["from_sha"], self.fx.base)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(len(runner.calls), before)
+        newer = self.fx.commit({"mcp-server/src/a.js": "second fix"})
+        runner.fail_at = None
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertNotIn("pending_promotion", self.fx.state()["worker"])
+        self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_wrong_version_after_newer_failure_cannot_advance_pending_checkpoint(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        live.update(sha=latest, version=PRIOR)
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["pending_promotion"]["provider_version_id"], VERSION)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(len(runner.calls), before)
+        live["version"] = VERSION
+        self.assertEqual(restart().tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], latest)
+        self.assertNotIn("pending_promotion", state)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(state["failed_step"], "staging")
+        self.assertEqual(len(runner.calls), before)
 
     def case(self, lane, checkpoint=True):
         self.case_ordinal = getattr(self, "case_ordinal", 0) + 1
