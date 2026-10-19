@@ -180,6 +180,8 @@ class WorkQueue:
                 item['stages'] = [dict(s) for s in self.db.execute(
                     'SELECT stage,enqueued_at,started_at,finished_at,elapsed FROM stage_runs WHERE card_id=? ORDER BY id',
                     (r['card_id'],))]
+                if r['stage'] == 'merging':
+                    item['active'] = bool(item['stages'][-1]['started_at'])
                 item['total_time_s'] = sum(s['elapsed'] for s in item['stages'])
                 running = self.db.execute('SELECT started FROM stage_runs WHERE card_id=? AND started IS NOT NULL AND finished_at IS NULL', (r['card_id'],)).fetchall()
                 item['total_time_s'] += sum(max(0, time.time() - s[0]) for s in running)
@@ -274,6 +276,19 @@ class WorkQueue:
             self._event(card, self._state(old), self._state(self._item(card)), actor,
                         f'executor {status}', 'stage')
 
+    def begin_merge(self, card, *, actor, reason):
+        with self.transaction():
+            row = self._item(card)
+            if row['stage'] != 'merging':
+                raise ValueError('merge executor can start only a merging-stage card')
+            run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
+            if run['started_at'] is None:
+                at = timestamp()
+                self.db.execute('UPDATE stage_runs SET started_at=?,started=? WHERE id=?', (at, time.time(), run['id']))
+                self._event(card, {**self._state(row), 'started_at': None},
+                            {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
+        return self.get(card)
+
     def transition(self, card, stage, *, actor, reason):
         allowed = {'queued': {'blocked', 'parked', 'failed'},
                    'building': {'review', 'blocked', 'failed', 'parked'},
@@ -297,7 +312,9 @@ class WorkQueue:
             raise ValueError('requeue stage must be queued, building, review or fixing')
         with self.transaction():
             old = self._item(card)
-            if old['claim']:
+            merge_started = old['stage'] == 'merging' and self.db.execute(
+                'SELECT started_at FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()[0]
+            if old['claim'] or merge_started:
                 raise ValueError('active executor requires a completion receipt')
             if stage == 'review' and old['review_round'] >= 3:
                 raise ValueError('three review rounds exhausted')

@@ -9,13 +9,13 @@ from work_queue import WorkQueue, STAGES, EXECUTABLE, default_path
 import work_runner
 
 COMMANDS = ('queue', 'show', 'history', 'export', 'merge-order', 'prioritize', 'requeue',
-            'stage', 'details', 'complete', 'import-results', 'run')
+            'stage', 'start-merge', 'details', 'complete', 'import-results', 'run')
 
 
 def add_commands(sub):
     for name in COMMANDS:
         p = sub.add_parser(name, help=f'work queue {name}')
-        if name in ('show', 'prioritize', 'requeue', 'stage', 'details', 'complete'):
+        if name in ('show', 'prioritize', 'requeue', 'stage', 'start-merge', 'details', 'complete'):
             p.add_argument('card_id')
         if name == 'history':
             p.add_argument('card_id', nargs='?')
@@ -34,7 +34,7 @@ def add_commands(sub):
         if name == 'import-results':
             p.add_argument('path', type=Path)
         p.add_argument('--actor', default='orchestrator')
-        if name in ('prioritize', 'requeue', 'stage', 'details'):
+        if name in ('prioritize', 'requeue', 'stage', 'start-merge', 'details'):
             p.add_argument('--reason', required=True)
 
 
@@ -66,7 +66,7 @@ def handle(args, registry, results):
     if args.cmd not in COMMANDS:
         return None
     path = default_path()
-    mutate = args.cmd in ('prioritize', 'requeue', 'stage', 'details', 'complete', 'import-results')
+    mutate = args.cmd in ('prioritize', 'requeue', 'stage', 'start-merge', 'details', 'complete', 'import-results')
     if args.cmd == 'run':
         return work_runner.main(['--db', str(path), '--registry', str(registry.path), '--results', str(results)])
     with WorkQueue(path, read_only=not mutate) as queue:
@@ -84,6 +84,8 @@ def handle(args, registry, results):
             out = queue.requeue(args.card_id, stage=args.stage, actor=args.actor, reason=args.reason)
         elif args.cmd == 'stage':
             out = queue.transition(args.card_id, args.stage, actor=args.actor, reason=args.reason)
+        elif args.cmd == 'start-merge':
+            out = queue.begin_merge(args.card_id, actor=args.actor, reason=args.reason)
         elif args.cmd == 'details':
             fields = json.loads(args.json)
             if not isinstance(fields, dict):

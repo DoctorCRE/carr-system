@@ -209,6 +209,26 @@ with WorkQueue(Path(sys.argv[2])) as q:
                 reader.enqueue('B', desk='sol', task='refused write', actor='test')
         self.assertEqual(len(self.q.export()['items']), 1)
 
+    def test_merge_executor_start_is_idempotent_and_records_stage_timing(self):
+        self.add('A')
+        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
+        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
+        self.q.update('A', actor='reviewer', reason='approved', prs=[
+            {'repo': 'jbookout/carr-system', 'number': 1960, 'head': 'a' * 40}])
+        self.q.transition('A', 'merging', actor='orchestrator', reason='reviews passed')
+        self.q.begin_merge('A', actor='merge-daemon', reason='pinned head claimed')
+        revision = self.q.export()['revision']
+        self.q.begin_merge('A', actor='merge-daemon', reason='restart readback')
+        self.assertEqual(self.q.export()['revision'], revision)
+        self.assertTrue(self.q.get('A')['active'])
+        with self.assertRaisesRegex(ValueError, 'completion receipt'):
+            self.q.requeue('A', stage='fixing', actor='test', reason='cannot preempt merge')
+        self.assertIsNotNone(self.q.get('A')['stages'][-1]['started_at'])
+        self.q.transition('A', 'done', actor='merge-daemon', reason='provider receipt')
+        merged = self.q.get('A')['stages'][-2]
+        self.assertIsNotNone(merged['finished_at'])
+        self.assertGreaterEqual(merged['elapsed'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()
