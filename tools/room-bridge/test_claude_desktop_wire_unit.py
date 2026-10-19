@@ -304,9 +304,9 @@ def test_done_pending_hands_off_then_finishes_queue() -> None:
     posted: list[dict] = []
 
     class Executor:
-        def finish_pending(self, pending: dict, raw_result: str) -> dict:
+        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
             finished.append((pending, raw_result))
-            return {
+            terminal = {
                 "outcome": "review", "task_id": "t_queue0001",
                 "completion": {"queue_completion": {
                     "v": 1, "task_id": "t_queue0001", "target": "claude-desktop",
@@ -314,6 +314,8 @@ def test_done_pending_hands_off_then_finishes_queue() -> None:
                     "source_seq": 1, "source_msg_id": "queue:t_queue0001",
                 }},
             }
+            post_completion(terminal["completion"])
+            return terminal
 
     def post(**row) -> None:
         posted.append(row)
@@ -354,9 +356,9 @@ def test_handoff_timeout_after_completion_finishes_and_never_relaunches() -> Non
     posted: list[dict] = []
 
     class Executor:
-        def finish_pending(self, pending: dict, raw_result: str) -> dict:
+        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
             finished.append((pending, raw_result))
-            return {
+            terminal = {
                 "outcome": "done", "task_id": "t_24f60cef",
                 "completion": {"queue_completion": {
                     "v": 1, "task_id": "t_24f60cef", "target": "claude-desktop",
@@ -364,6 +366,8 @@ def test_handoff_timeout_after_completion_finishes_and_never_relaunches() -> Non
                     "source_seq": 1, "source_msg_id": "queue:t_24f60cef",
                 }},
             }
+            post_completion(terminal["completion"])
+            return terminal
 
         def fail_pending(self, pending: dict, reason: str, *, now=None) -> dict:
             raise AssertionError(
@@ -412,9 +416,11 @@ def test_already_open_handoff_receipt_is_honest() -> None:
     posted: list[dict] = []
 
     class Executor:
-        def finish_pending(self, pending: dict, raw_result: str) -> dict:
-            return {"outcome": "done", "task_id": "t_24b0a0c6",
+        def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion, **_kwargs) -> dict:
+            terminal = {"outcome": "done", "task_id": "t_24b0a0c6",
                     "completion": {"queue_completion": {"v": 1, "task_id": "t_24b0a0c6"}}}
+            post_completion(terminal["completion"])
+            return terminal
 
     outcome = bridge.handle_pending(
         "claude-desktop", "claude", state,
