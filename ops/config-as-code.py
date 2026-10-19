@@ -1673,7 +1673,18 @@ def cmd_check():
     except (OSError, ValueError) as exc:
         print(f"config-as-code: HOLD INVALID — {exc}")
         return 1
+    flash_drift = []
+    if os.path.exists(os.path.join(LAUNCHD_REPO, "local.ds4-flash-next.plist")):
+        from tools import flash_install
+        try:
+            flash_drift = flash_install.check(HOME)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            flash_drift = [f"Flash state unavailable: {exc}"]
+        for finding in flash_drift:
+            print("config-as-code: FLASH DRIFT  " + finding)
     verdict = _cmd_check(holds)
+    if flash_drift:
+        verdict = 1
     for hold in holds.values():
         print(hold.describe())
     print(git_hooks_path_report())
@@ -2369,6 +2380,16 @@ def cmd_install(apply):
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
         print(f"  HOLD REFUSED: {exc}")
         return 1
+    if os.path.exists(os.path.join(LAUNCHD_REPO, "local.ds4-flash-next.plist")):
+        from tools import flash_install
+        if apply:
+            try:
+                flash_install.install(Path(REPO), Path(HOME))
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                print(f"ERROR: Flash off-by-default convergence failed: {exc}")
+                return 1
+        else:
+            print("  Would converge Flash off-by-default and install the expiry watcher on this machine")
     settings_existed = os.path.exists(SETTINGS)
     raw = read(SETTINGS) if settings_existed else "{}"
     if not settings_existed:
@@ -2528,6 +2549,8 @@ def cmd_install(apply):
     if apply:
         os.makedirs(LAUNCHD_SRC, exist_ok=True)
     for f in sorted(os.listdir(LAUNCHD_REPO)) if os.path.isdir(LAUNCHD_REPO) else []:
+        if f in {"local.ds4-flash-next.plist", "local.flash-desk.plist", "com.carr.flash-idle-stop.plist"}:
+            continue
         source = read(launchd_repo_path(f))
         if (launchd_calendar.plist_label(source or "") or f.removesuffix(".plist")) in held_labels:
             continue

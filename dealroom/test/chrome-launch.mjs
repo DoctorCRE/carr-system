@@ -182,7 +182,10 @@ export async function launchChrome(chrome, {
         "--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-gpu", "--no-sandbox",
         "--disable-background-networking", "--disable-default-apps", "--disable-dev-shm-usage",
         "--allow-file-access-from-files", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank",
-      ], { stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32" });
+      ], {
+        stdio: ["ignore", "ignore", "pipe"], detached: process.platform !== "win32",
+        env: { ...process.env, TMPDIR: profile, TMP: profile, TEMP: profile },
+      });
       child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-4000); });
       exitPromise = new Promise((resolve) => {
         child.once("exit", () => { exited = true; resolve(); });
