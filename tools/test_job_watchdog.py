@@ -220,27 +220,31 @@ class ReplayTests(unittest.TestCase):
         facts["jobs"][1]["log_mtime"] = 1400.1
         self.assertNotIn("job_silent", {f["kind"] for f in w.detect(facts, c, 2000)})
 
-    def test_job_recovery_requires_same_scope_and_strictly_later_start(self):
+    def test_job_recovery_requires_same_scope_and_strictly_later_completion(self):
         import job_watchdog as w
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
         failed = {"id": "failed", "card": "scheduled", "executor": "worker",
                   "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
-                  "start": 100, "exit_code": 1}
-        success = {**failed, "id": "success", "start": 200, "exit_code": 0}
+                  "start": 100, "ended_at": w.stamp(110), "exit_code": 1}
+        success = {**failed, "id": "success", "start": 200, "ended_at": w.stamp(210), "exit_code": 0}
         for change in ({"card": "other"}, {"executor": "other"}, {"repo": "fixture/other"},
-                       {"pr": 2}, {"head": "b" * 40}, {"start": 99}, {"start": 100}):
+                       {"pr": 2}, {"head": "b" * 40}, {"start": 50, "ended_at": w.stamp(99)},
+                       {"start": 50, "ended_at": w.stamp(110)}):
             with self.subTest(change=change):
                 found = w.detect({"jobs": [failed, {**success, **change}]}, c, 300)
                 self.assertEqual([f["subject"] for f in found], ["failed"])
-        for missing in ("card", "start"):
+        for missing in ("card", "start", "ended_at"):
             with self.subTest(missing=missing):
                 incomplete = {k: v for k, v in failed.items() if k != missing}
                 self.assertEqual(len(w.detect({"jobs": [incomplete, success]}, c, 300)), 1)
-        newer_failure = {**failed, "id": "newer-failure", "start": 250}
+                incomplete = {k: v for k, v in success.items() if k != missing}
+                self.assertEqual(len(w.detect({"jobs": [failed, incomplete]}, c, 300)), 1)
+        newer_failure = {**failed, "id": "newer-failure", "start": 250, "ended_at": w.stamp(260)}
         for jobs in ([failed, success, newer_failure], [newer_failure, success, failed]):
             with self.subTest(order=[j["id"] for j in jobs]):
                 self.assertEqual([f["subject"] for f in w.detect({"jobs": jobs}, c, 300)],
                                  ["newer-failure"])
+        self.assertEqual(w.detect({"jobs": [failed, {**success, "start": 50}]}, c, 300), [])
 
     def test_branch_janitor_recovery_requires_completed_fleet_report(self):
         import job_watchdog as w
@@ -1021,6 +1025,30 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_failure_completing_after_overlapping_success_remains_visible(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def report(self, finding):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / c["paths"]["registry"]
+            job = {"id": "failure", "card": "scheduled", "executor": "worker",
+                   "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
+                   "start": 100, "alive": True, "log_mtime": 100, "limit": 3600}
+            w.append(registry, job)
+            w.append(registry, {**job, "id": "success", "start": 200,
+                               "exit_code": 0, "ended_at": w.stamp(210)})
+            def reconcile(now):
+                jobs = list(w.read_latest(registry).values())
+                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, now), Effects(), now)
+            self.assertEqual(reconcile(220), [])
+            w.append(registry, {"id": "failure", "exit_code": 9, "ended_at": w.stamp(300)})
+            self.assertEqual([f["subject"] for f in reconcile(310)], ["failure"])
+            latest = w.read_latest(root / c["paths"]["findings"])
+            self.assertIsNone(latest["job_failed:failure"]["cleared_at"])
+
     def test_lock_deferred_cli_cannot_clear_real_job_failure(self):
         import contextlib
         import io
