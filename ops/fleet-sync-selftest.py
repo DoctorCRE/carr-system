@@ -293,6 +293,24 @@ def test_landed_residue_refuses_without_restoring():
     print("PASS  landed residue is reported and refused without restoring files")
 
 
+def test_current_dirty_checkout_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "pull", "-q", "--ff-only", "origin", "main")
+        path = Path(b, "f.txt")
+        path.write_text("uncommitted work on current main\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout
+        assert path.read_text() == "uncommitted work on current main\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  current dirty checkout refuses before installing wiring")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -751,6 +769,7 @@ def main():
         return 1
     test_dirty_tree_refuses()
     test_landed_residue_refuses_without_restoring()
+    test_current_dirty_checkout_refuses()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
