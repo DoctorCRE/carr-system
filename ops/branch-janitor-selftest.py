@@ -53,6 +53,91 @@ class ReaperTest(unittest.TestCase):
         self.assertFalse(fixture.git("ls-remote", "origin", "refs/heads/old"))
         self.assertEqual(fixture.git("rev-parse", result["backup_ref"]), head)
 
+    def test_main_advancing_during_proof_retries_only_three_times(self):
+        for continuous in (False, True):
+            with self.subTest(continuous=continuous):
+                fixture = Fixture()
+                base = fixture.git("rev-parse", "main")
+                head = fixture.commit("branch work", cwd=fixture.tree("old"))
+                landed = fixture.commit("landed work")
+                fixture.git("push", "origin", "main", "old")
+                provider = FakeProvider([pull(1, head, base, merged=landed)])
+                reaper = fixture.reaper(provider=provider)
+                row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo)
+                           if r.get("ref") == "refs/remotes/origin/old")
+                advances = []
+                original = provider.pull
+                def advance_during_proof(repo, number):
+                    if continuous or not advances:
+                        advances.append(fixture.commit("advance " + str(len(advances))))
+                        fixture.git("push", "origin", "main")
+                    return original(repo, number)
+                provider.pull = advance_during_proof
+                result = reaper.apply("fixture/repo", fixture.repo, row, [])
+                if continuous:
+                    self.assertEqual(result["status"], "preserved", result)
+                    self.assertIn("main kept advancing after 3 replans", result["reason"])
+                    self.assertEqual(len(advances), 4)
+                    self.assertIn(head, fixture.git("ls-remote", "origin", "refs/heads/old"))
+                    self.assertFalse(fixture.git("for-each-ref", "refs/retired-branches"))
+                else:
+                    self.assertEqual(result["status"], "retired", result)
+                    self.assertEqual(result["main"], advances[0])
+                    self.assertEqual(result["main_replans"], 1)
+                    self.assertFalse(fixture.git("ls-remote", "origin", "refs/heads/old"))
+                    self.assertEqual(fixture.git("rev-parse", result["backup_ref"]), head)
+
+    def test_replan_preserves_branch_when_pr_or_remote_tip_changes(self):
+        for change in ("open", "proof_head", "remote_head"):
+            with self.subTest(change=change):
+                fixture = Fixture()
+                base = fixture.git("rev-parse", "main")
+                tree = fixture.tree("old")
+                head = fixture.commit("closed work", cwd=tree)
+                fixture.git("push", "origin", "old")
+                closed = pull(1, head, base)
+                closed["state"] = "closed"
+                provider = FakeProvider([closed])
+                reaper = fixture.reaper(provider=provider, clock=lambda: time.time() + 86400)
+                row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo)
+                           if r.get("ref") == "refs/remotes/origin/old")
+                advanced = []
+                def advance_and_change(repo, root):
+                    if advanced:
+                        return
+                    advanced.append(fixture.commit("main advanced"))
+                    fixture.git("push", "origin", "main")
+                    if change == "open":
+                        closed["state"] = "open"
+                    elif change == "proof_head":
+                        closed["head"]["sha"] = base
+                    else:
+                        fixture.commit("new branch work", cwd=tree)
+                        fixture.git("push", "origin", "old")
+                provider.verify_repository = advance_and_change
+                result = reaper.apply("fixture/repo", fixture.repo, row, [])
+                self.assertEqual(result["status"], "preserved", result)
+                self.assertEqual(result["main_replans"], 1)
+                self.assertIn("refs/heads/old", fixture.git("ls-remote", "origin"))
+                self.assertFalse(fixture.git("for-each-ref", "refs/retired-branches"))
+
+    def test_replan_preserves_branch_when_main_is_replaced(self):
+        fixture = Fixture()
+        head = fixture.git("rev-parse", "main")
+        fixture.git("push", "origin", "main:refs/heads/old")
+        reaper = fixture.reaper()
+        row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo)
+                   if r.get("ref") == "refs/remotes/origin/old")
+        fixture.git("checkout", "--orphan", "replacement")
+        replacement = fixture.commit("unrelated main")
+        fixture.git("push", "origin", "replacement")
+        fixture.git("--git-dir=" + str(fixture.remote), "update-ref", "refs/heads/main", replacement)
+        result = reaper.apply("fixture/repo", fixture.repo, row, [])
+        self.assertEqual(result["status"], "preserved", result)
+        self.assertEqual(result["reason"], "main no longer descends from planned main")
+        self.assertIn(head, fixture.git("ls-remote", "origin", "refs/heads/old"))
+        self.assertFalse(fixture.git("for-each-ref", "refs/retired-branches"))
+
     def test_closed_pr_retirement_requires_idle_matching_same_repository_main_head(self):
         import copy
         fixture = Fixture()
