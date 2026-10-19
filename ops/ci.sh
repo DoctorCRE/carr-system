@@ -136,6 +136,11 @@ check_freshness() {
 }
 
 check_types() {
+  if ! run_quiet "$LOGDIR/worker-types.log" npm --prefix mcp-server run typecheck; then
+    tail -25 "$LOGDIR/worker-types.log" >&2
+    bad types "Worker verb contract types failed"
+    return
+  fi
   if [ ! -x bin/type-check.sh ]; then
     skip types "bin/type-check.sh not present"
     return
@@ -144,7 +149,7 @@ check_types() {
   run_quiet "$LOGDIR/types.log" ./bin/type-check.sh
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    ok types "mypy clean across the repo's Python"
+    ok types "Worker verb contracts and Python types pass"
   elif [ "$rc" -eq 78 ]; then
     local tcpy
     tcpy="$( { [ -x "$REPO/.venv/bin/python" ] && "$REPO/.venv/bin/python" -c 'import sys;print("%d.%d"%sys.version_info[:2])'; } 2>/dev/null || python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "unknown" )"
