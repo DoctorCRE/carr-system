@@ -37,14 +37,14 @@ class ReplayTests(unittest.TestCase):
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
         effects = Mock()
         effects.report.return_value = {}
-        failed = {"id": "run-1", "card": "recurring", "start": 10,
+        failed = {"id": "run-1", "card": "recurring", "start": 10, "ended_at": w.stamp(11),
                   "exit_code": 1, "log_tail": "synthetic failure"}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             first = w.detect({"jobs": [failed]}, config, 15)
             w.reconcile(root, config, first, effects, 15)
-            jobs = [failed, {"id": "success", "card": "recurring", "start": 20, "exit_code": 0},
-                    {**failed, "id": "run-2", "start": 30}]
+            jobs = [failed, {"id": "success", "card": "recurring", "start": 20, "ended_at": w.stamp(21), "exit_code": 0},
+                    {**failed, "id": "run-2", "start": 30, "ended_at": w.stamp(31)}]
             second = w.detect({"jobs": jobs}, config, 35)
             w.reconcile(root, config, second, effects, 35)
             self.assertEqual(effects.report.call_count, 2)
@@ -87,7 +87,7 @@ class ReplayTests(unittest.TestCase):
             registry = root / config["paths"]["registry"]
             findings = root / config["paths"]["findings"]
             for index in range(3):
-                job = {"id": f"run-{index}", "card": "recurring", "start": index,
+                job = {"id": f"run-{index}", "card": "recurring", "start": index, "ended_at": w.stamp(index + 0.5),
                        "exit_code": 1, "log_tail": "synthetic failure"}
                 w.append(registry, job)
                 w.append(findings, {**w.finding("job_failed", job["id"], "legacy failure", config),
@@ -99,12 +99,12 @@ class ReplayTests(unittest.TestCase):
             active = scan()
             self.assertEqual(len(active), 1)
             self.assertEqual(active[0]["job"]["id"], "run-2")
-            w.append(registry, {**job, "id": "run-3", "start": 3})
+            w.append(registry, {**job, "id": "run-3", "start": 3, "ended_at": w.stamp(3.5)})
             active = scan()
             self.assertEqual(len(active), 1)
             self.assertEqual(active[0]["job"]["id"], "run-3")
             self.assertEqual(effects.report.call_count, 1)
-            w.append(registry, {"id": "success", "card": "recurring", "start": 4, "exit_code": 0})
+            w.append(registry, {"id": "success", "card": "recurring", "start": 4, "ended_at": w.stamp(4.5), "exit_code": 0})
             self.assertEqual(scan(), [])
 
     def test_job_success_clears_earlier_failures_and_recurrence_reopens(self):
@@ -113,9 +113,9 @@ class ReplayTests(unittest.TestCase):
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
         effects = Mock()
         effects.report.return_value = {}
-        failed = {"id": "failed-1", "card": "recurring", "start": 10,
+        failed = {"id": "failed-1", "card": "recurring", "start": 10, "ended_at": w.stamp(11),
                   "exit_code": 1, "log_tail": "synthetic failure"}
-        success = {"id": "success", "card": "recurring", "start": 20, "exit_code": 0}
+        success = {"id": "success", "card": "recurring", "start": 20, "ended_at": w.stamp(21), "exit_code": 0}
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             found = w.detect({"jobs": [failed]}, config, 15)
@@ -126,7 +126,7 @@ class ReplayTests(unittest.TestCase):
                 self.assertEqual(found, [])
                 w.reconcile(root, config, found, effects, 25)
             self.assertIsNotNone(w.read_latest(root / config["paths"]["findings"])[key]["cleared_at"])
-            later = {**failed, "id": "failed-2", "start": 30}
+            later = {**failed, "id": "failed-2", "start": 30, "ended_at": w.stamp(31)}
             found = w.detect({"jobs": [later, success, failed]}, config, 35)
             self.assertEqual(len(found), 1)
             self.assertNotEqual(found[0]["key"], key)
@@ -147,6 +147,20 @@ class ReplayTests(unittest.TestCase):
         repeated = next(f for f in found if f["job"]["id"] == "run-3")
         next_run = w.detect({"jobs": [{**jobs[0], "id": "run-4", "start": 4}]}, config, 101)[0]
         self.assertEqual(repeated["key"], next_run["key"])
+
+    def test_identical_failures_preserve_each_recovery_scope(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        failed = {"id": "first", "card": "scheduled", "executor": "worker",
+                  "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
+                  "start": 10, "ended_at": w.stamp(11), "exit_code": 1,
+                  "log_tail": "synthetic failure"}
+        for change in ({"card": "other"}, {"executor": "other"}, {"repo": "fixture/other"},
+                       {"pr": 2}, {"head": "b" * 40}):
+            with self.subTest(change=change):
+                other = {**failed, "id": "second", "start": 20, "ended_at": w.stamp(21), **change}
+                found = w.detect({"jobs": [failed, other]}, config, 30)
+                self.assertEqual({f["job"]["id"] for f in found}, {"first", "second"})
 
     def test_ci_replacement_attempts_restore_ready_without_false_red(self):
         import job_watchdog as w
@@ -336,6 +350,51 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(next(f["needs_joe"] for f in found if f["kind"] == "job_failed"), "credentials")
         facts["jobs"][1]["log_mtime"] = 1400.1
         self.assertNotIn("job_silent", {f["kind"] for f in w.detect(facts, c, 2000)})
+
+    def test_job_recovery_requires_same_scope_and_strictly_later_completion(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        failed = {"id": "failed", "card": "scheduled", "executor": "worker",
+                  "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
+                  "start": 100, "ended_at": w.stamp(110), "exit_code": 1}
+        success = {**failed, "id": "success", "start": 200, "ended_at": w.stamp(210), "exit_code": 0}
+        for change in ({"card": "other"}, {"executor": "other"}, {"repo": "fixture/other"},
+                       {"pr": 2}, {"head": "b" * 40}, {"start": 50, "ended_at": w.stamp(99)},
+                       {"start": 50, "ended_at": w.stamp(110)}):
+            with self.subTest(change=change):
+                found = w.detect({"jobs": [failed, {**success, **change}]}, c, 300)
+                self.assertEqual([f["job"]["id"] for f in found], ["failed"])
+        for missing in ("card", "start", "ended_at"):
+            with self.subTest(missing=missing):
+                incomplete = {k: v for k, v in failed.items() if k != missing}
+                self.assertEqual(len(w.detect({"jobs": [incomplete, success]}, c, 300)), 1)
+                incomplete = {k: v for k, v in success.items() if k != missing}
+                self.assertEqual(len(w.detect({"jobs": [failed, incomplete]}, c, 300)), 1)
+        newer_failure = {**failed, "id": "newer-failure", "start": 250, "ended_at": w.stamp(260)}
+        for jobs in ([failed, success, newer_failure], [newer_failure, success, failed]):
+            with self.subTest(order=[j["id"] for j in jobs]):
+                self.assertEqual([f["job"]["id"] for f in w.detect({"jobs": jobs}, c, 300)],
+                                 ["newer-failure"])
+        self.assertEqual(w.detect({"jobs": [failed, {**success, "start": 50}]}, c, 300), [])
+
+    def test_branch_janitor_recovery_requires_completed_fleet_report(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        failed = {"id": "failed", "card": "branch-janitor", "executor": "reaper",
+                  "start": 100, "ended_at": w.stamp(110), "exit_code": 9}
+        report = {"schema": "branch-retirement/v1", "execute": True, "deferred": [], "errors": [],
+                  "counts": {repo: {} for repo in c["repositories"]}}
+        success = {**failed, "id": "success", "start": 200, "ended_at": w.stamp(210), "exit_code": 0,
+                   "log_tail": json.dumps(report)}
+        self.assertEqual(w.detect({"jobs": [failed, success]}, c, 300), [])
+        incomplete = ["", "truncated JSON", "[]", "null", json.dumps({})]
+        incomplete += [json.dumps({**report, **change}) for change in (
+            {"execute": False}, {"deferred": [{"repo": "fleet"}]}, {"errors": [{"error": "failed"}]},
+            {"counts": {}}, {"counts": {c["repositories"][0]: {}}})]
+        for output in incomplete:
+            with self.subTest(output=output):
+                found = w.detect({"jobs": [failed, {**success, "log_tail": output}]}, c, 300)
+                self.assertEqual([f["job"]["id"] for f in found], ["failed"])
 
     def test_release_block_counts_only_while_it_is_the_lane_outcome(self):
         import job_watchdog as w
@@ -1127,6 +1186,112 @@ class RunnerTests(unittest.TestCase):
 
 
 class StateTests(unittest.TestCase):
+    def test_failure_completing_after_overlapping_success_remains_visible(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def report(self, finding):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / c["paths"]["registry"]
+            job = {"id": "failure", "card": "scheduled", "executor": "worker",
+                   "repo": "fixture/repo", "pr": 1, "head": "a" * 40,
+                   "start": 100, "alive": True, "log_mtime": 100, "limit": 3600}
+            w.append(registry, job)
+            w.append(registry, {**job, "id": "success", "start": 200,
+                               "exit_code": 0, "ended_at": w.stamp(210)})
+            def reconcile(now):
+                jobs = list(w.read_latest(registry).values())
+                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, now), Effects(), now)
+            self.assertEqual(reconcile(220), [])
+            w.append(registry, {"id": "failure", "exit_code": 9, "ended_at": w.stamp(300)})
+            found = reconcile(310)
+            self.assertEqual([f["job"]["id"] for f in found], ["failure"])
+            latest = w.read_latest(root / c["paths"]["findings"])
+            self.assertIsNone(latest[found[0]["key"]]["cleared_at"])
+
+    def test_lock_deferred_cli_cannot_clear_real_job_failure(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        import job_watchdog as w
+        from branch_retirement import maintenance
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def report(self, finding):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            registry = root / c["paths"]["registry"]
+            path = root / c["paths"]["findings"]
+            subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+            program = f"""import runpy, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / 'lib')!r})
+import job_watchdog
+job_watchdog.repository_roots = lambda config=None: {{'jbookout/carr-system': Path({str(root)!r})}}
+sys.argv = [{str(ROOT / 'hooks/worktree-self-plumb.py')!r}, '--reap', '--fleet', '--repo', {str(root)!r}]
+runpy.run_path(sys.argv[0], run_name='__main__')
+"""
+            def reconcile():
+                jobs = list(w.read_latest(registry).values())
+                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, 1000), Effects(), 1000)
+            with patch.object(w, "board_task", return_value={}), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(w.run_job(root, c, "branch-janitor", "deterministic reaper", 1,
+                                          [sys.executable, "-c", "print('unrepaired failure'); raise SystemExit(9)"]), 9)
+                failed = reconcile()[0]["key"]
+                before = path.read_bytes()
+                registry_before = registry.read_bytes()
+                with maintenance(root):
+                    self.assertEqual(w.run_job(root, c, "branch-janitor", "deterministic reaper", 1,
+                                              [sys.executable, "-c", program]), 0)
+            retry = list(w.read_latest(registry).values())[-1]
+            report = json.loads(retry["log_tail"])
+            self.assertEqual([row["repo"] for row in report["deferred"]], ["fleet"])
+            self.assertEqual(report["counts"], {})
+            self.assertEqual(report["actions"], [])
+            self.assertEqual([f["key"] for f in reconcile()], [failed])
+            self.assertIsNone(w.read_latest(path)[failed]["cleared_at"])
+            self.assertTrue(path.read_bytes().startswith(before))
+            self.assertTrue(registry.read_bytes().startswith(registry_before))
+
+    def test_later_success_clears_same_job_failures_without_deleting_history(self):
+        import job_watchdog as w
+        c = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        class Effects:
+            def report(self, finding):
+                return {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / c["paths"]["registry"]
+            path = root / c["paths"]["findings"]
+            for job_id, start in (("first", 100), ("second", 120)):
+                w.append(registry, {"id": job_id, "card": "branch-janitor",
+                                   "executor": "deterministic reaper", "start": start,
+                                   "exit_code": 1, "ended_at": w.stamp(start + 10),
+                                   "log_tail": "repository maintenance lock held; preserve pending run"})
+            def reconcile(now):
+                jobs = list(w.read_latest(registry).values())
+                return w.reconcile(root, c, w.detect({"jobs": jobs}, c, now), Effects(), now)
+            self.assertEqual(len(reconcile(140)), 1)
+            before = path.read_text().splitlines()
+            w.append(registry, {"id": "retry", "card": "branch-janitor",
+                               "executor": "deterministic reaper", "start": 200,
+                               "alive": True, "log_mtime": 200, "limit": 3600})
+            self.assertEqual(len(reconcile(210)), 1, "an unfinished retry is not recovery")
+            report = {"schema": "branch-retirement/v1", "execute": True, "errors": [], "deferred": [],
+                      "counts": {repo: {} for repo in c["repositories"]}}
+            w.append(registry, {"id": "retry", "exit_code": 0, "ended_at": w.stamp(220),
+                               "log_tail": json.dumps(report)})
+            self.assertEqual(reconcile(230), [])
+            latest = w.read_latest(path)
+            self.assertEqual({row["cleared_at"] for row in latest.values()}, {w.stamp(230)})
+            self.assertEqual(w.digest(root, c), "")
+            self.assertTrue(all(line in path.read_text().splitlines() for line in before))
+            self.assertEqual(reconcile(240), [])
+            self.assertEqual(w.read_latest(path), latest)
+
     def test_scan_recovers_after_verified_absent_effect_without_relaunch(self):
         from unittest.mock import Mock, patch
         import job_watchdog as w
