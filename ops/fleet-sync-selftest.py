@@ -351,6 +351,23 @@ def test_concurrent_staged_landed_bytes_refuse():
     print("PASS  staged landed bytes appearing after preflight refuse and stay staged")
 
 
+def test_concurrent_merge_conflict_refuses_and_reports():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        env, marker = git_edit_env(tmp, b, "merge", "concurrent work\n")
+        r = run_sync(b, env)
+        assert marker.exists(), "the late concurrent editor never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr, "Git's refusal must name the conflicting file"
+        assert Path(b, "f.txt").read_text() == "concurrent work\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  late conflicting edit refuses and reports Git's original diagnostic")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -811,6 +828,7 @@ def main():
     test_landed_residue_refuses_without_restoring()
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
+    test_concurrent_merge_conflict_refuses_and_reports()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
