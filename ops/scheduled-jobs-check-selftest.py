@@ -561,6 +561,11 @@ class ReportTests(unittest.TestCase):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_retired_markdown_refresh_is_not_scheduled(self):
+        labels = {job["label"] for job in jobs.native_manifest()["jobs"]}
+        self.assertNotIn("com.carr.rules-refresh", labels)
+        self.assertIn("com.carr.nightly-record-layer", labels)
+
     def test_native_definitions_supply_program_and_schedule(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

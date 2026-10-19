@@ -228,6 +228,11 @@ def write_manifest(out) -> bool:
     if old is not None:
         a = {k: v for k, v in old.items() if k not in VOLATILE_KEYS}
         b = {k: v for k, v in out.items() if k not in VOLATILE_KEYS}
+        for manifest in (a, b):
+            manifest["files"] = [
+                {k: v for k, v in f.items() if k not in ("mtime", "mtime_iso", "mirrored_at")}
+                for f in manifest.get("files", [])
+            ]
         if a == b:
             return False
     with open(MANIFEST, "w", encoding="utf-8") as fh:

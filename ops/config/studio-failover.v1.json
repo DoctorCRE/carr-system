@@ -133,15 +133,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.rules-refresh",
-      "source": "ops/launchd/com.carr.rules-refresh.plist",
-      "credentials": [
-        "~/.config/carr/db.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
       "credentials": [],
