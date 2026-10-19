@@ -10,6 +10,13 @@ import unittest
 REPO = Path(__file__).resolve().parent.parent
 
 
+def declared_checks(catalog):
+    return [(name, path) for name, control in catalog.items()
+            if re.search(r'\bCI\b', control.get('failure_mode', ''))
+            for path in control.get('implementation', [])
+            if path.startswith('ops/') and path.endswith('.py')]
+
+
 def unwired_checks(catalog, ci):
     order = re.search(r'^CLASS_ORDER="([^"]+)"', ci, re.M)
     active = set(order[1].split()) if order else set()
@@ -30,11 +37,7 @@ def unwired_checks(catalog, ci):
                 calls.update(f'ops/{value}.py' for value in shlex.split(values, comments=True))
     return sorted(
         f'{name}: {path}'
-        for name, control in catalog.items()
-        if re.search(r'\bCI\b', control.get('failure_mode', ''))
-        for path in control.get('implementation', [])
-        if path.startswith('ops/') and path.endswith(('-check.py', '-gate.py'))
-        and path not in calls
+        for name, path in declared_checks(catalog) if path not in calls
     )
 
 
@@ -49,6 +52,8 @@ class EnforcementWiringTest(unittest.TestCase):
         mapping = json.loads((REPO / 'ops/config/rule-enforcement-map.json').read_text())
         self.assertEqual([], unwired_checks(mapping['control_catalog'],
                                            (REPO / 'ops/ci.sh').read_text()))
+        for name, path in declared_checks(mapping['control_catalog']):
+            self.assertTrue((REPO / path).is_file(), f'{name}: missing {path}')
 
     def test_selftest_comment_and_echo_are_not_checker_calls(self):
         ci = self.ci('  "$PY" ops/example-selftest.py\n'
