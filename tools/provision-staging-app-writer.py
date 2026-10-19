@@ -18,10 +18,8 @@ the commit rolls the ALTER back and removes the pending file. Each committed
 rotation is reported in the run output with its profile, role, time and reason.
 
 An old staging binding whose canonical credential was lost is recovered before
-cutover. A registered provisioner-owned login absent from the old database is
-created through the same guarded provisioning path used for the candidate.
-Recovery reuses one durable pending value across retries, rebinds the staging
-Worker, and publishes an authenticated canonical final file.
+cutover. Its guarded rotation reuses one durable pending value across retries,
+rebinds the staging Worker, and publishes an authenticated canonical final file.
 A private operation receipt records the recovery without credential values.
 
 STAGING ONLY, AND THAT IS THE DESIGN RATHER THAN A GAP. Every scope this tool
@@ -707,22 +705,21 @@ def recover_live_rollback_credentials(
             if (profile.login_role != file_profile.role_name
                     or profile.secret_name not in WORKER_DATABASE_SECRET_NAMES
                     or profile.label not in plans):
-                raise ProvisioningRefusal("rollback credential profile is not registered for staging recovery")
+                raise ProvisioningRefusal("rollback credential profile is not registered for staging rotation")
             metadata = {"profile": profile.label, "role": profile.login_role,
                         "worker_secret": profile.secret_name, "project_id": old.project_id,
                         "reason": "live staging rollback credential missing; recover canonical binding"}
             record = records.get(profile.label)
             record_keys = {*metadata, "outcome"}
-            if isinstance(record, dict) and record.get("outcome") in {"rotated", "created"}:
-                record_keys.add(record["outcome"] + "_at")
+            if isinstance(record, dict) and record.get("outcome") == "rotated":
+                record_keys.add("rotated_at")
             if record is not None and (
                     not isinstance(record, dict)
                     or any(record.get(k) != v for k, v in metadata.items())
-                    or record.get("outcome") not in {"rotating", "rotated", "creating", "created"}
+                    or record.get("outcome") not in {"rotating", "rotated"}
                     or set(record) != record_keys
-                    or (record.get("outcome") in {"rotated", "created"}
-                        and not isinstance(record.get(record["outcome"] + "_at"), str))):
-                raise ProvisioningRefusal("staging rollback recovery receipt is malformed")
+                    or (record.get("outcome") == "rotated" and not isinstance(record.get("rotated_at"), str))):
+                raise ProvisioningRefusal("staging rollback rotation receipt is malformed")
             try:
                 stored = credential.load_existing(
                     file_profile.paths, key=file_profile.key, role_name=profile.login_role,
@@ -735,14 +732,14 @@ def recover_live_rollback_credentials(
                 stored = None
             if stored is not None and stored.state == "final" and record is None:
                 continue
-            if record is not None and record["outcome"] in {"rotated", "created"}:
+            if record is not None and record["outcome"] == "rotated":
                 if stored is not None and stored.state == "final":
                     continue
                 if stored is not None or profile.secret_name not in protected_names:
-                    raise ProvisioningRefusal("completed staging recovery has no live recoverable credential")
+                    raise ProvisioningRefusal("completed staging rotation has no live recoverable credential")
                 record = None
             if stored is not None and record is None:
-                raise ProvisioningRefusal("pending rollback credential has no owned recovery receipt")
+                raise ProvisioningRefusal("pending rollback credential has no owned rotation receipt")
             secret = replacement.derive_dsn(old, replacement.OWNER_ROLE, run=subprocess.run, environ=os.environ)
             owner = psycopg.connect(secret.value)
             try:
@@ -750,17 +747,13 @@ def recover_live_rollback_credentials(
                 expected_creator = require_direct_owner_identity(cur)
                 owner.commit()
                 if stored is None:
-                    exists_now = role_exists(cur, profile.login_role)
-                    if not exists_now and profile.created_by_migration:
-                        raise ProvisioningRefusal(
-                            f"{profile.login_role} does not exist; its migration has not applied here")
                     action = decide_profile_action(
-                        role_exists_now=exists_now, credential_state="absent",
-                        role_passwordless=role_is_passwordless(cur, profile.login_role) if exists_now else None,
-                        rotate_lost=exists_now)
+                        role_exists_now=role_exists(cur, profile.login_role), credential_state="absent",
+                        role_passwordless=role_is_passwordless(cur, profile.login_role), rotate_lost=True)
+                    if action != "rotate":
+                        raise ProvisioningRefusal("live staging rollback profile cannot rotate")
                     if record is None:
-                        records[profile.label] = {
-                            **metadata, "outcome": "rotating" if action == "rotate" else "creating"}
+                        records[profile.label] = {**metadata, "outcome": "rotating"}
                         save_private_json(path, receipt)
                     stored = credential.prepare_pending(
                         file_profile.paths, key=file_profile.key, role_name=profile.login_role,
@@ -769,8 +762,7 @@ def recover_live_rollback_credentials(
                 if stored.state == "pending":
                     # The pending password is stable even when the commit acknowledgement was lost.
                     apply_login_profile(owner, profile, plans[profile.label], stored.password,
-                                        expected_creator=expected_creator,
-                                        rotate=records[profile.label]["outcome"] == "rotating", commit=False)
+                                        expected_creator=expected_creator, rotate=True, commit=False)
                 expected_names = read_worker_database_secret_names() | {profile.secret_name}
                 bulk_worker_database_secrets({profile.secret_name: stored.value})
                 verify_worker_database_secret_bindings(expected_names=expected_names)
@@ -778,10 +770,9 @@ def recover_live_rollback_credentials(
                 validate_profile_login(stored.value, profile, plans[profile.label], expected_creator=expected_creator)
                 if stored.state == "pending":
                     credential.promote_pending(file_profile.paths, key=file_profile.key, expected_value=stored.value)
-                outcome = "created" if records[profile.label]["outcome"] == "creating" else "rotated"
                 records[profile.label] = {
-                    **metadata, "outcome": outcome,
-                    outcome + "_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+                    **metadata, "outcome": "rotated",
+                    "rotated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
                 save_private_json(path, receipt)
             finally:
                 owner.rollback()

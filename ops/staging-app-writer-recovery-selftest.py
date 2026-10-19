@@ -133,9 +133,12 @@ class Recovery(unittest.TestCase):
             raise provision.ProvisioningRefusal("synthetic login did not authenticate")
 
     def bulk(self, values):
-        self.assertTrue(all(value is not None for value in values.values()))
         self.bulk_calls.append(dict(values))
-        self.live.update(values)
+        for name, value in values.items():
+            if value is None:
+                self.live.pop(name, None)
+            else:
+                self.live[name] = value
 
     def prepare(self):
         rotations = []
@@ -259,68 +262,71 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.changes, [])
         self.assertEqual(self.bulk_calls, [])
 
-    def test_live_authority_binding_with_missing_role_creates_registered_login(self):
+    def test_stale_authority_binding_retires_after_database_role_absence_proof(self):
         del self.passwords["carr_authority_joe"]
         values, outcomes = self.prepare()
-        authority = values["CARR_DB_AUTHORITY_JOE_URL"]
-        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], authority)
-        self.assertEqual(urlsplit(authority).password, self.passwords["carr_authority_joe"])
-        self.assertEqual(outcomes[0]["outcome"], "created")
-        self.assertTrue(self.file_profile("authority_joe").paths.final.is_file())
+        self.assertIsNone(values["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertNotIn("CARR_DB_AUTHORITY_JOE_URL", self.live)
+        self.assertEqual(outcomes[0]["outcome"], "retired")
+        self.assertEqual(self.changes, [])
+        self.assertFalse(self.file_profile("authority_joe").paths.pending.exists())
+        self.assertFalse(self.file_profile("authority_joe").paths.final.exists())
         self.assertEqual(self.prepare()[0], values)
-        self.assertEqual(len(self.changes), 1)
+        self.assertEqual(set(self.live), set(provision.WORKER_DATABASE_SECRET_NAMES) - {"CARR_DB_AUTHORITY_JOE_URL"})
 
-    def test_missing_migration_owned_seat_refuses_without_creating_or_publishing(self):
+    def test_missing_migration_owned_seat_refuses_without_deleting_binding(self):
         self.prepare()
-        self.changes.clear()
         self.bulk_calls.clear()
         profile = next(p for p in provision.PROFILES if p.created_by_migration)
         self.file_profile(profile.label).paths.final.unlink()
         del self.passwords[profile.login_role]
-        with self.assertRaisesRegex(provision.ProvisioningRefusal, "migration has not applied"):
+        with self.assertRaises(provision.ProvisioningRefusal):
             self.prepare()
-        self.assertEqual(self.changes, [])
         self.assertEqual(self.bulk_calls, [])
+        self.assertIn(profile.secret_name, self.live)
 
-    def test_creation_resumes_same_password_after_publication_before_commit(self):
+    def test_retirement_resumes_after_worker_deletion_before_readback(self):
         del self.passwords["carr_authority_joe"]
-        self.fail_commit = True
-        with self.assertRaises(ProcessDeath):
-            self.prepare()
-        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
-        self.assertNotIn("carr_authority_joe", self.passwords)
-        values, outcomes = self.prepare()
-        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
-        self.assertEqual(outcomes[0]["outcome"], "created")
-        self.assertEqual({password for _role, password in self.changes}, {urlsplit(published).password})
-
-    def test_creation_resumes_after_commit_before_final_publication(self):
-        del self.passwords["carr_authority_joe"]
-        with mock.patch.object(provision.credential, "promote_pending", side_effect=ProcessDeath):
+        original = self.bulk
+        def die(values):
+            original(values)
+            raise ProcessDeath()
+        with mock.patch.object(provision, "bulk_worker_database_secrets", side_effect=die):
             with self.assertRaises(ProcessDeath):
                 self.prepare()
-        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        self.assertNotIn("CARR_DB_AUTHORITY_JOE_URL", self.live)
         values, outcomes = self.prepare()
-        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
-        self.assertEqual(outcomes[0]["outcome"], "created")
-        self.assertEqual(len(self.changes), 1)
+        self.assertIsNone(values["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(outcomes[0]["outcome"], "retired")
+        self.assertEqual(self.changes, [])
 
-    def test_creation_resumes_after_final_publication_before_receipt(self):
+    def test_retirement_resumes_after_readback_before_completion_receipt(self):
         del self.passwords["carr_authority_joe"]
         original = provision.save_private_json
         def die(path, value):
             if path.name == "prior-worker-credential-recovery.json" and any(
-                    p["outcome"] == "created" for p in value["profiles"].values()):
+                    p["outcome"] == "retired" for p in value["profiles"].values()):
                 raise ProcessDeath()
             original(path, value)
         with mock.patch.object(provision, "save_private_json", side_effect=die):
             with self.assertRaises(ProcessDeath):
                 self.prepare()
-        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
         values, outcomes = self.prepare()
-        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
-        self.assertEqual(outcomes[0]["outcome"], "created")
-        self.assertEqual(len(self.changes), 1)
+        self.assertIsNone(values["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(outcomes[0]["outcome"], "retired")
+        self.assertEqual(self.changes, [])
+
+    def test_retirement_retry_refuses_if_role_appeared_after_interruption(self):
+        del self.passwords["carr_authority_joe"]
+        with mock.patch.object(provision, "bulk_worker_database_secrets", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        self.passwords["carr_authority_joe"] = "new-owner-fixture-password"
+        self.bulk_calls.clear()
+        with self.assertRaises(provision.ProvisioningRefusal):
+            self.prepare()
+        self.assertEqual(self.bulk_calls, [])
+        self.assertEqual(self.changes, [])
 
 
 class InventoryCrash(unittest.TestCase):
