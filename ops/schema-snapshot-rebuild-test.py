@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Restore a refreshed snapshot after a migration changes a carried seed."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("shadow", ROOT / "ops/migration-shadow.py")
+assert spec is not None and spec.loader is not None
 shadow = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(shadow)
 
@@ -54,6 +56,40 @@ def main():
         run([bindir / "psql", rebuilt, "-Xq", "-v", "ON_ERROR_STOP=1", "-f",
              ROOT / "pipelines/staging-isolation-proof.sql"], "rebuild business-data isolation")
         print("PASS: refreshed snapshot excludes business data")
+        seeds = shadow.seeds
+        seed_repo = fixture.root / "declarations"
+        (seed_repo / "ops/config").mkdir(parents=True)
+        declaration = {
+            "table": "public.snapshot_fixture_seed", "migration": "9999_snapshot_fixture.sql",
+            "where": "seed_key='reviewed'", "order_by": "seed_key", "exact_rows": 1,
+            "columns": ["seed_key", "value"],
+        }
+        config = {"carried_subset": {"snapshot_fixture_seed": "synthetic reviewed fixture only"},
+                  "renders": [declaration]}
+        (seed_repo / "ops/config/snapshot-seed-coverage.json").write_text(json.dumps(config))
+        ddl = "create table public.snapshot_fixture_seed(seed_key text primary key, value text not null)"
+        sql(dsn, ddl)
+        sql(rebuilt, ddl)
+        sql(dsn, "insert into public.snapshot_fixture_seed values ('reviewed', E'quote'' newline\\nbackslash\\\\'), ('runtime','excluded synthetic row')")
+        source_psql = [str(bindir / "psql"), dsn]
+        rebuilt_psql = [str(bindir / "psql"), rebuilt]
+        assert seeds.selected_rows(seed_repo, source_psql) == []
+        print("PASS: a future seed remains pending outside the source ledger")
+        for database in (dsn, rebuilt):
+            sql(database, "insert into public.schema_migrations(filename,sha256) values ('9999_snapshot_fixture.sql',repeat('0',64))")
+        for statement in seeds.render(seeds.selected_rows(seed_repo, source_psql)):
+            sql(rebuilt, statement)
+        seeds.compare(seed_repo, source_psql, rebuilt_psql)
+        assert sql(rebuilt, "select count(*) from public.snapshot_fixture_seed") == "1"
+        print("PASS: one declaration restores a different seed table and excludes unreviewed rows")
+        sql(rebuilt, "update public.snapshot_fixture_seed set value='corrupt fixture'")
+        try:
+            seeds.compare(seed_repo, source_psql, rebuilt_psql)
+        except ValueError as exc:
+            assert "snapshot_fixture_seed" in str(exc) and "9999_snapshot_fixture.sql" in str(exc)
+        else:
+            raise AssertionError("candidate verification accepted changed seed content")
+        print("PASS: rebuild verification names a changed seed and its migration")
 
 
 if __name__ == "__main__":

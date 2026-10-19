@@ -70,6 +70,10 @@
 # already-login carr_jobs is left exactly as it is, including its password.
 # Production is untouched because its existing carr_jobs is already LOGIN.
 #
+# Ordinary carried seeds use reviewed selectors in snapshot-seed-coverage.json.
+# Specialized sealed manifests retain their digest-verified restore protocols.
+# Every migration shadow export is restored and its selected seeds compared.
+#
 # Usage:
 #   bin/schema-snapshot.sh            # regenerate db/schema.sql from production
 #   bin/schema-snapshot.sh --check    # non-zero if the checked-in file is stale
@@ -222,14 +226,6 @@ export PGSERVICE=schema_snapshot PGSERVICEFILE="$SERVICE_FILE" PGPASSFILE="$PASS
 # source ledger.  A production-truth snapshot taken immediately before that
 # migration must leave the seed pending with the migration; embedding it early
 # makes the pending migration fail on its own primary key.
-RENEWAL_SOURCE_APPLIED="$("$PSQL" -Atqc \
-  "select exists (select 1 from schema_migrations where filename='0230_renewal_decision_delivery.sql')" \
-  2>/dev/null)"
-case "$RENEWAL_SOURCE_APPLIED" in
-  t|f) ;;
-  *) echo "schema-snapshot: could not read the renewal-delivery ledger state" >&2; exit 1 ;;
-esac
-
 RULE_DELIVERY_APPLIED="$("$PSQL" -Atqc \
   "select exists (select 1 from schema_migrations where filename='0291_rule_delivery_layers.sql')" \
   2>/dev/null)"
@@ -2005,35 +2001,6 @@ then
   exit 1
 fi
 
-if [ "$RENEWAL_SOURCE_APPLIED" = t ]; then
-cat >> "$TMP" <<'RENEWAL_SOURCE_JOB'
--- CARR RENEWAL SOURCE JOB (bin/schema-snapshot.sh) — exact disabled contract.
--- This is the one canonical 0230 definition needed to reconstruct its FK and
--- gate surface after 0230 has entered the migration ledger. It carries no run,
--- lease, client, party, deal, event, or credential data.
-insert into ops.job_definition
-  (key,version,enabled,risk,owner_actor,execution_kind,execution_contract,
-   inventory_contract,recurrence,state_contract,routing_contract,
-   filtering_contract,validation_contract,retry_policy,deduplication,
-   completion_contract,legacy_schedule)
-values
-  ('renewal-radar-source-daily',1,false,'yellow','system','deterministic',
-   '{"entrypoint":"ops.seal_renewal_decision_source_run","activation":"pending source-run adapter"}'::jsonb,
-   '{"owner":"ops.job","inputs":["renewal-radar candidate import"],"canonical_writes":["ops.renewal_decision_source_run","ops.renewal_decision_source_run_member"]}'::jsonb,
-   '{"cron":null,"timezone":"America/Chicago","source":"disabled pending source-run adapter"}'::jsonb,
-   '{"owner":"ops.job","initial":"queued"}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["renewal.source_complete"]}}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["renewal.pool_imported"]}}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["renewal.source_run_sealed"]}}'::jsonb,
-   '{"max_attempts":2,"backoff":"exponential","base_seconds":60,"cap_seconds":600,"timeout_seconds":300}'::jsonb,
-   '{"key_template":"renewal-radar-source-daily:{scheduled_for}"}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["renewal.source_run_sealed"]},"receipt_kind":"renewal_source_run"}'::jsonb,
-   '{"provider":"none","status":"disabled","activation":"explicit source-run adapter required"}'::jsonb)
-on conflict (key,version) do nothing;
-
-RENEWAL_SOURCE_JOB
-fi
-
 if [ "$RULE_DELIVERY_APPLIED" = t ]; then
 cat >> "$TMP" <<'RULE_DELIVERY_POLICY'
 -- CARR RULE DELIVERY POLICY (bin/schema-snapshot.sh) — safe rebuild default.
@@ -2212,31 +2179,6 @@ begin
 end
 $carr_governed_execution_seeds$;
 
--- The exact enabled on-demand engineering-slice:v1 job contract through 0312.
--- A post-0312 snapshot marks 0311/0312 applied in its migration ledger, so a
--- fresh rebuild will not replay their contract updates.  This INSERT uses
--- ON CONFLICT DO NOTHING deliberately: it must therefore already be the final
--- sponsored, lease-bound controller declaration rather than the old 0310 row.
--- It remains the existing ops.job queue projection, not a second workflow or
--- task store.
-insert into ops.job_definition
-  (key,version,enabled,risk,owner_actor,execution_kind,execution_contract,
-   inventory_contract,state_contract,routing_contract,filtering_contract,
-   recurrence,validation_contract,retry_policy,deduplication,completion_contract,legacy_schedule)
-values
-  ('engineering-slice',1,true,'yellow','hermes','deterministic',
-   '{"entrypoint":"mcp-server/src/engineering-runtime.js","export":"runEngineeringWorker","args":["room-bridge-engineering-controller"],"shadow_args":[],"canary":{"enabled":false,"reason":"fresh native Codex execution has no isolated canary adapter"}}'::jsonb,
-   '{"trigger":"MCP admission only; no scheduler","owner":"ops.job dispatcher","inputs":["accepted Work Request","accepted plan revision","typed engineering slice"],"canonical_reads":["ops.work_request","ops.sourced_work_request_plan","ops.engineering_slice_plan","ops.job_definition"],"canonical_writes":["ops.job","ops.engineering_execution_envelope","ops.engineering_slice_receipt","ops.engineering_reviewer_fact"],"external_dependencies":["room-bridge lease-bound controller","Codex Desktop fresh-native-session adapter"],"authority":"server-derived sponsored Codex execution with a closed repository action allowlist; no caller-selected identity, authority, model, action, or native session","current_completion_signal":"lease-bound typed receipt plus independent reviewer fact","replacement_program":"ops.job_definition:engineering-slice:v1","acceptance":"typed envelope, receipt, dependency, and independent-review gates","retirement_approval":"Joe approval after replacement evidence"}'::jsonb,
-   '{"states":["queued","running","succeeded","failed","timed_out"]}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["capability.candidate_admitted","runner.identity_bound"]},"description":"an accepted capability candidate and bound runner identity admit the slice"}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["command.registered_args_selected"]},"description":"only the registered fresh Codex adapter is selected"}'::jsonb,
-   '{"kind":"on_demand","schedule":null,"cron":null,"timezone":"America/Chicago","source":"MCP admit-engineering-slice only"}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["command.exit_zero","command.workflow_marker_valid"]},"description":"the bounded adapter succeeds and returns its typed workflow marker"}'::jsonb,
-   '{"max_attempts":2,"backoff":"constant","base_seconds":30,"cap_seconds":300,"timeout_seconds":1800}'::jsonb,
-   '{"key_template":"engineering-slice:{plan_digest}:{work_request}:{slice_ref}:generation:{generation}"}'::jsonb,
-   '{"key":"facts.all_true","spec":{"all_of":["command.receipt_persisted","command.execution_evidence_reconciles"]},"description":"lease-bound typed receipt persists and reconciles to the issued envelope","receipt_kind":"engineering_slice"}'::jsonb,
-   '{"provider":"none","status":"disabled","disable_requires":"no scheduler exists; on-demand MCP admission only"}'::jsonb)
-on conflict (key,version) do nothing;
 GOVERNED_EXECUTION_SEEDS
 
 # doctrine_meta is a singleton bootstrap rather than reference vocabulary: its
@@ -2468,57 +2410,9 @@ sed -e '/^-- Dumped from database version/d' \
     -e '/^\\unrestrict /d' "$TMP" | normalise_eof > "$TMP.clean"
 mv "$TMP.clean" "$TMP"
 
-# THE DOCTRINE VALIDATION REGISTRY — the seventh instance, and the first one the
-# check below found by being WRONG rather than by being silent. It sat in the
-# classification as "runtime evidence", which it is not: doctrine_gate_check is
-# the registry itself, and 0075's own comment states the contract — "A NEW GATE
-# IS A FUNCTION AND A ROW". Results live in doctrine_gate_finding.
-#
-# WHAT A REBUILD LOST. 0075 seeds 11 rows, every one severity=block and enabled,
-# and nothing writes the table at runtime. runGates() in mcp-server/src/doctrine.js
-# selects the enabled checks and treats an empty set as nothing to enforce, so a
-# database rebuilt from a snapshot carrying 0075's ledger row but not its rows ran
-# NO doctrine gates at all and let every write through — silently, because zero
-# findings is indistinguishable from zero problems.
-#
-# Rendered from the source rather than hand-listed, and column-list-free so a
-# later column cannot rot the block.
-cat >> "$TMP" <<'DOCTRINE_GATE_CHECK_HEADER'
-
--- CARR DOCTRINE VALIDATION REGISTRY (bin/schema-snapshot.sh) — the gate rows
--- themselves, not their findings. Without these a rebuilt database enforces no
--- doctrine gates and says nothing about it.
-DOCTRINE_GATE_CHECK_HEADER
-
-if ! "$PSQL" -X -Atq -v ON_ERROR_STOP=1 >> "$TMP" <<'DOCTRINE_GATE_CHECK_ROWS'
-select format(
-  'insert into public.doctrine_gate_check select * from jsonb_populate_record(null::public.doctrine_gate_check, %L::jsonb) on conflict (check_key) do nothing;',
-  to_jsonb(g)) from public.doctrine_gate_check g order by g.check_key;
-DOCTRINE_GATE_CHECK_ROWS
-then
-  echo "schema-snapshot: could not render the doctrine validation registry — nothing written" >&2
-  exit 1
-fi
-
-# THE NAMED AGENT PROFILE ROSTER — the eighth instance, and the second found by
-# the classification being WRONG rather than silent. It sat excluded on the claim
-# that its readers tolerate an empty set. They do not: bot-brief throws
-# profile_not_found and its hint says "new profiles are a migration", and nothing
-# inserts the table at runtime — agent-profiles.js only UPDATEs. A rebuild
-# without these rows fails the bot brief for every named profile.
-cat >> "$TMP" <<'AGENT_PROFILE_HEADER'
-
--- CARR NAMED AGENT PROFILES (bin/schema-snapshot.sh) — the seeded roster. No
--- runtime path creates these; a rebuild without them breaks the bot brief.
-AGENT_PROFILE_HEADER
-
-if ! "$PSQL" -X -Atq -v ON_ERROR_STOP=1 >> "$TMP" <<'AGENT_PROFILE_ROWS'
-select format(
-  'insert into public.agent_profile select * from jsonb_populate_record(null::public.agent_profile, %L::jsonb) on conflict (profile_key) do nothing;',
-  to_jsonb(p)) from public.agent_profile p order by p.profile_key;
-AGENT_PROFILE_ROWS
-then
-  echo "schema-snapshot: could not render the named agent profiles — nothing written" >&2
+# Reviewed selectors carry current seed values, including later migration
+# updates, without reproducing migration-time INSERT literals here.
+if ! "$CATALOG_PY" "$REPO/ops/snapshot-seeds.py" "$REPO" "$PSQL" >> "$TMP"; then
   exit 1
 fi
 
