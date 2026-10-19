@@ -1,3 +1,4 @@
+import { observeBoardLinkage } from './work-linkage.js';
 import { ToolError } from "./tool-error.js";
 import { organizationTenantForActor } from "./identity.js";
 import { NEEDS_JOE_LOCAL_BOARD } from "./needs-joe.js";
@@ -241,7 +242,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
               and a.question_id=q.question_id and a.question_revision=q.revision
             where q.organization_tenant_id=$1 and q.sponsoring_human_slug=$2 and q.board_id=$3 and q.current=true
             order by q.asked_at,q.question_id`, [tenant, principal, board]);
-        return boardResponse({ ok: true, snapshot: snapshot.rows[0] ?? null, questions: questions.rows });
+        return boardResponse({ ok: true, snapshot: (await observeBoardLinkage(c,snapshot.rows,tenant,principal))[0] ?? null, questions: questions.rows });
       },
     },
 
