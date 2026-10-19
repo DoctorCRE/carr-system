@@ -38,5 +38,5 @@ for (const [key, repository, cwd] of [
   }
 }
 const observed = new Date().toISOString();
-writeFileSync(destination, JSON.stringify({ observed, semantics: 'Artifact scores are independent of receipt availability. Missing receipts are unverified, not proof a skill was skipped.', rows }, null, 2) + '\n');
+writeFileSync(destination, JSON.stringify({ observed, semantics: 'Artifact scores are independent of receipt availability. Missing receipts are unverified, not proof a skill was skipped.' }).slice(0, -1) + ',\n"rows": [\n' + rows.map(row => JSON.stringify(row)).join(',\n') + '\n]}\n');
 for (const row of rows) console.log(`${row.repository}#${row.number}\t${row.verdict}\t${row.passed}/${row.required}\t${Object.entries(row.checks).map(([name, ok]) => `${name}=${ok ? 'pass' : 'fail'}`).join(', ')}`);

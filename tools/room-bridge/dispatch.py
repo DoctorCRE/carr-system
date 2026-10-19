@@ -1152,8 +1152,8 @@ def main(argv: list[str]) -> int:
             print(json.dumps({'desk': a.name, 'inventory': inventory}))
             return 0
         if a.cmd == 'receipt':
-            rows = [json.loads(line) for line in results.read_text().splitlines() if line.strip()]
-            row = next(row for row in reversed(rows) if row.get('msg_id') == a.dispatch_id)
+            receipt_rows = [json.loads(line) for line in results.read_text().splitlines() if line.strip()]
+            row = next(row for row in reversed(receipt_rows) if row.get('msg_id') == a.dispatch_id)
             if a.session_id:
                 row = {**row, 'session_id': a.session_id, 'status': 'completed',
                        'result': a.pr or row.get('result', '')}
