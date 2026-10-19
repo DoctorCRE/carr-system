@@ -415,6 +415,26 @@ async def query(*, prompt, options):
         self.assertEqual(row['model'], 'claude-sonnet-5-5')
         self.assertIn('pr create --title Fixture build', (Path(row['checkout_path']) / 'gh-call.txt').read_text())
 
+    def test_api_checkout_stays_exclusive_without_declared_paths(self):
+        REAL_RUN(['git', 'init', '-q', str(self.root)], env=fixture_env(), check=True)
+        registry = desks.Registry(self.root / 'desks.json')
+        registry.register('api-build', 'claude-api', effort='high')
+        prepared = {'checkout_path': str(self.root), 'checkout_workspace': str(self.root)}
+        def execute(request, *, on_executor):
+            with self.assertRaisesRegex(desks.DeskError, 'another writer'):
+                with dispatch.write_ownership.checkout_writer(str(self.root)):
+                    pass
+            self.assertTrue(callable(on_executor))
+            return {'status': 'completed', 'termination_confirmed': True}
+        with patch.object(codex_checkout, 'prepare', return_value=prepared), \
+                patch.object(dispatch, '_execute', side_effect=execute):
+            row = dispatch.dispatch('api-build', 'Inspect the checkout', registry=registry,
+                                    results_path=self.root / 'results.jsonl', env=self.env,
+                                    checkout='api-job')
+        self.assertEqual(row['status'], 'completed')
+        with dispatch.write_ownership.checkout_writer(str(self.root)):
+            pass
+
     def test_missing_key_fails_without_launch_or_spend_and_gives_setup_command(self):
         self.keychain = lambda *a, **k: subprocess.CompletedProcess(a, 44, '', 'missing')
         with patch.object(wire.subprocess, 'Popen') as launch:
