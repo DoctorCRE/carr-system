@@ -31,7 +31,7 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
-    def test_empty_lookup_with_selection_gaps_adds_zero_context_bytes(self):
+    def test_data_defects_remain_incomplete_at_pretooluse(self):
         gaps = [dict(id='22222222', statement='Moment rule.',
                      scope={'moment': 'Before review'}, personal_to=None),
                 dict(id='33333333', statement='Invalid scope.', scope={}, personal_to=None)]
@@ -39,23 +39,25 @@ class DeliveryTests(unittest.TestCase):
             for event in ('PreToolUse', 'UserPromptSubmit', 'Stop'):
                 output = self.invoke(gaps, event=event)
                 context = (output or {}).get('hookSpecificOutput', {}).get('additionalContext', '')
-                self.assertEqual(len(context.encode()), 0)
+                if event == 'PreToolUse':
+                    self.assertFalse(json.loads(context)['complete'])
+                else:
+                    self.assertEqual(len(context.encode()), 0)
             rows = [json.loads(line) for line in hook.GAP_LOG.read_text().splitlines()]
             self.assertEqual(len(rows), 3)
-            self.assertEqual(rows[0]['unresolved'][0]['rule_id'], '22222222')
+            self.assertEqual(rows[0]['unresolved'], [])
             self.assertEqual(rows[0]['data_defects'][0]['rule_id'], '33333333')
 
-    def test_matching_lookup_keeps_rules_without_unresolved_array(self):
+    def test_configured_judge_failure_keeps_rules_and_unresolved_entries(self):
         known = dict(id='11111111', statement='Inspect the current diff.',
                      scope={'tools': ['Bash']}, personal_to=None)
         gap = dict(id='22222222', statement='Moment rule.',
                    scope={'moment': 'Before review'}, personal_to=None)
         for event in ('PreToolUse', 'UserPromptSubmit'):
-            output = self.invoke([known, gap], event=event)
+            output = self.invoke([known, gap], event=event, judge=lambda *_: None)
             row = json.loads(output['hookSpecificOutput']['additionalContext'])
             self.assertEqual(row['rules'], [known])
-            self.assertNotIn('unresolved', row)
-            self.assertEqual(row['unresolved_count'], 1)
+            self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': 'moment_judgment_unavailable'}])
             self.assertFalse(row['complete'])
             self.assertTrue(validate_lookup_receipt(row, repo=REPO))
 
@@ -73,6 +75,7 @@ class DeliveryTests(unittest.TestCase):
         specific = out['hookSpecificOutput']
         self.assertNotIn('permissionDecision', specific)
         self.assertIn('RULE LOOKUP UNAVAILABLE', specific['additionalContext'])
+        self.assertFalse(json.loads(specific['additionalContext'])['complete'])
         self.assertIsNone(hook.process(dict(payload, hook_event_name='Stop'), runner=broken, dedupe=False))
 
     def test_stop_never_blocks_on_lookup_failure(self):
@@ -90,6 +93,37 @@ class DeliveryTests(unittest.TestCase):
         out = self.invoke([dict(id='11111111', statement='Binding text',
                                scope={'tools': ['Bash']}, personal_to='dell')])
         self.assertEqual(out['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_read_only_reviewer_is_complete_without_unpicked_rule_ids(self):
+        moments = [dict(id=f'{i:08x}', statement='Before code review.',
+                        scope={'moment': 'Before reviewing code'}, personal_to=None)
+                   for i in range(200, 400)]
+        payload = {'tool_name': 'collaborationspawn_agent',
+                   'session_id': '01a15200-75fd-7b12-aabd-d28e8c56e6ff',
+                   'turn_id': '01a15207-5306-7310-8a41-5845b376b858',
+                   'tool_use_id': 'call_4a2b92f3ea1446b987813b120927b21c',
+                   'tool_input': {'task_name': 'review', 'message': 'Read-only review of the PR.'}}
+        with tempfile.TemporaryDirectory() as raw, patch.object(hook, 'GAP_LOG', Path(raw) / 'gaps.jsonl'):
+            output = self.invoke(moments, payload=payload)
+            specific = output['hookSpecificOutput']
+            self.assertNotIn('permissionDecision', specific)
+            text = specific['additionalContext']
+            row = json.loads(text)
+            self.assertTrue(row['complete'])
+            self.assertEqual(row['selection_mode'], 'deterministic')
+            self.assertEqual(row['rules'], [])
+            for field in ('unresolved', 'unresolved_count', 'unresolved_reasons'):
+                self.assertNotIn(field, row)
+            self.assertNotIn('incomplete selection', text)
+            self.assertNotIn('000000c8', text)
+            self.assertLess(len(text.encode()), 1024)
+            self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+            for change in ({'selection_mode': 'unknown'}, {'unresolved': []},
+                           {'data_defects': [{'reason': 'missing_scope'}]}, {'complete': False}):
+                bad = dict(row, **change)
+                bad['receipt_id'] = hook.receipt_id(bad)
+                self.assertFalse(validate_lookup_receipt(bad, repo=REPO))
+            self.assertFalse(hook.GAP_LOG.exists())
 
     def test_scope_defects_and_unavailable_judgment_deliver_known_matches_without_denial(self):
         known = dict(id='11111111', statement='Inspect the current diff.',
@@ -112,8 +146,7 @@ class DeliveryTests(unittest.TestCase):
                 self.assertEqual(row['rules'], [known])
                 self.assertFalse(row['complete'])
                 if issue_key == 'unresolved':
-                    self.assertNotIn('unresolved', row)
-                    self.assertEqual(row['unresolved_count'], 1)
+                    self.assertEqual(row['unresolved'], [{'rule_id': '22222222', 'reason': reason}])
                 else:
                     self.assertEqual(row[issue_key], [{'rule_id': '22222222', 'reason': reason}])
                 self.assertNotIn('Must not broadcast', specific['additionalContext'])
@@ -184,6 +217,27 @@ class DeliveryTests(unittest.TestCase):
             with path.open('a') as f:
                 f.write(json.dumps({'type':'event_msg','payload':{'type':'user_message','message':'Changed task'}})+'\n')
             self.assertEqual(hook.task_text({'transcript_path':str(path)}),'Changed task')
+
+    def test_codex_native_child_uses_its_explicit_rollout(self):
+        agent = '01a1520b-a310-7cc1-86c0-4d3c49f8cec3'
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f'rollout-2026-10-18T21-44-16-{agent}.jsonl'
+            path.write_text(json.dumps({'type': 'response_item', 'payload': {
+                'type': 'message', 'role': 'user',
+                'content': [{'type': 'input_text', 'text': 'Read-only child PR review'}]}}) + '\n')
+            output = self.invoke([], payload={'prompt': None, 'transcript_path': str(path),
+                'agent_id': agent, 'turn_id': 'native-turn'})
+            specific = output['hookSpecificOutput']
+            self.assertNotIn('permissionDecision', specific)
+            row = json.loads(specific['additionalContext'])
+            self.assertTrue(row['complete'])
+            self.assertEqual(row['task_sha256'], digest('Read-only child PR review'))
+            sibling = path.with_suffix('') / 'subagents' / 'agent-another-child.jsonl'
+            sibling.parent.mkdir(parents=True)
+            sibling.write_text(path.read_text())
+            mismatch = self.invoke([], payload={'prompt': None, 'transcript_path': str(path),
+                'agent_id': 'another-child', 'turn_id': 'native-turn'})
+            self.assertEqual(mismatch['hookSpecificOutput']['permissionDecision'], 'deny')
 
     def test_native_child_call_uses_child_task_instead_of_parent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -344,7 +398,7 @@ class CardDeliveryTests(unittest.TestCase):
             raise TimeoutError('provider detail')
         moment = self.covered('24e10ee8', scope={'moment': 'Before a retry loop'})
         row = self.receipt(self.invoke([self.UNCOVERED, moment], judge=unavailable))
-        self.assertEqual(row['unresolved_count'], 0)
+        self.assertEqual(row['unresolved'], [])
         self.assertTrue(row['complete'])
 
     def test_cards_are_sent_once_per_context(self):
