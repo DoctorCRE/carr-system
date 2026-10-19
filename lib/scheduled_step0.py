@@ -1,10 +1,11 @@
 """Cheap recurrence decisions shared by task prompts and the headless runner."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,6 +21,7 @@ def stop_reason(task_id: str, now: datetime, rows: list[dict[str, Any]],
         return 'outside_monthly_window'
     if task_id.endswith('-weekly'):
         week = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        week = week.astimezone(timezone.utc)
         for row in rows:
             if (row.get('status') != 'success' or row.get('exit_code') != 0
                     or row.get('canonical_recorded') is not True):
@@ -30,9 +32,18 @@ def stop_reason(task_id: str, now: datetime, rows: list[dict[str, Any]],
             window = datetime.fromisoformat(row['window'].replace('Z', '+00:00'))
             if window.tzinfo is None:
                 raise ValueError('scheduled window requires an aware timestamp')
-            if week <= window.astimezone(CHICAGO) <= ended.astimezone(CHICAGO) <= local:
+            if week <= window.astimezone(timezone.utc) <= ended.astimezone(timezone.utc) <= now.astimezone(timezone.utc):
                 return 'weekly_completed'
     return None
+
+
+def monthly_gate(repo: Path, task_id: str) -> int:
+    try:
+        return subprocess.run([sys.executable, str(repo/'bin/monthly-gate.py'), task_id, '--quiet'],
+                              cwd=repo, timeout=30).returncode
+    except subprocess.TimeoutExpired:
+        print('PROCEED monthly_ledger_timeout')
+        return 0
 
 
 def version_unchanged(current: str, last: str) -> bool:

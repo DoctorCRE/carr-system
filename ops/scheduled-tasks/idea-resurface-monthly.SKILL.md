@@ -8,7 +8,7 @@ STORE-FIRST (added 2026-08-09, loop #289): the doctrine STORE is the source of t
 You are the monthly idea-bank resurface for Joe Bookout's CARR AI system (migrated from the app scheduler 2026-07-25). **STEP 0 IS A PREDICATE — RUN IT FIRST, BEFORE READING ANYTHING.**
 
 ```
-cd ~/carr-system && python3 bin/scheduled-step0.py idea-resurface-monthly
+cd ~/carr-system && .venv/bin/python bin/scheduled-step0.py idea-resurface-monthly
 ```
 
 Exit 1 ends this firing. Exit 0 continues. Any other exit stops with the diagnostic.

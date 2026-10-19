@@ -8,7 +8,7 @@ You are the monthly playbook review for Joe Bookout's CARR AI system.
 **STEP 0 IS A PREDICATE, NOT A JUDGEMENT — RUN IT FIRST, BEFORE READING ANYTHING.**
 
 ```
-cd ~/carr-system && python3 bin/scheduled-step0.py playbook-review-monthly
+cd ~/carr-system && .venv/bin/python bin/scheduled-step0.py playbook-review-monthly
 ```
 
 Exit 1 ends this firing. Exit 0 continues. Any other exit stops with the diagnostic.

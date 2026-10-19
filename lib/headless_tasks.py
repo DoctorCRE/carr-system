@@ -26,7 +26,7 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from lib.scheduled_step0 import stop_reason, version_gate
+from lib.scheduled_step0 import monthly_gate, stop_reason, version_gate
 
 UTC = timezone.utc
 PREFIX = 'com.carr.headless.'
@@ -656,14 +656,13 @@ def main(argv=None) -> int:
                 print(f'SKIP {args.task_id}: {predicate_reason}')
                 return 0
             if task.get('monthly'):
-                gate = subprocess.run([sys.executable, str(repo/'bin/monthly-gate.py'),
-                    args.task_id, '--quiet'], cwd=repo, capture_output=True, timeout=30)
-                if gate.returncode == 1:
+                gate = monthly_gate(repo, args.task_id)
+                if gate == 1:
                     row.update(end=stamp(datetime.now(UTC)), exit_code=0, status='skipped', reason='monthly_completed')
                     append_ledger(ledger, row)
                     print(f'SKIP {args.task_id}: monthly_completed')
                     return 0
-                if gate.returncode != 0:
+                if gate != 0:
                     raise ValueError('monthly predicate failed')
             row['wrapper_pid'] = os.getpid()
             row['wrapper_birth'] = process_birth(os.getpid())
