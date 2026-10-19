@@ -329,12 +329,26 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
+    failures = set()
+    successes = {}
     for job in jobs:
+        if job.get("exit_code") == 0 and "start" in job:
+            card = job.get("card", job["id"])
+            successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
+    for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
+            card = job.get("card", subject)
             if job["exit_code"] != 0 and not job.get("superseded"):
-                emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
+                if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
+                    continue
+                reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
+                incident = json.dumps([reason, successes.get(card) if "start" in job else None])
+                key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
+                if key not in failures:
+                    failures.add(key)
+                    emit("jobs", "job_failed", card, reason, key=key, **fields)
             continue
         if not job.get("alive"):
             emit("jobs", "job_dead", subject, "registered PID is dead or changed without an exit record", **fields)
@@ -644,7 +658,9 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
             row.update(loop_id=None if new_incident else prior.get("loop_id"),
                        loop_idempotency_key=incident_key if new_incident else prior.get("loop_idempotency_key", legacy_key),
                        reported=False if new_incident else prior.get("reported", False))
-        if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
+        if (not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]
+                or f["kind"] == "job_failed" and prior.get("job") != f["job"]):
+            row["reported"] = prior.get("reported", False) and not prior.get("cleared_at")
             append(findings_path, row)
         # An unchanged record request retries with the same idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
