@@ -52,8 +52,8 @@ already-correct case walks.
 
 THE ORPHAN REAPER. The existing --reap door now uses lib/branch_retirement.py
 for its census, ordered classification and actions. --fleet covers the three
-authorized repositories. SessionStart still spawns this same reaper. The
-watchdog also launches it hourly and registers its process and exit record.
+authorized repositories. The watchdog launches it hourly and registers its
+process and exit record. SessionStart only plumbs the invoking worktree.
 
 Live processes, fresh writes, locked paths and uncertain ownership preserve a
 worktree. Retired trees move to _to_delete with a manifest and keep their local
@@ -330,53 +330,6 @@ def reap_main(argv):
     return int(bool(report["errors"]))
 
 
-def maybe_spawn_reaper(canon, current_wt):
-    """Detach a reaper when the cheap signals say there may be orphans.
-
-    Cheap means list + stat only — no `git status` here, because this runs
-    inside the boot hook's 20s budget. The count returned is CANDIDATES
-    (registered, unlocked, idle 6h+); the background pass applies the
-    dirty/ancestry rules and may well keep them all.
-    """
-    skip_paths = {canon, os.path.realpath(current_wt)}
-    cands = 0
-    for entry in worktree_entries(canon):
-        wt = entry.get("path") or ""
-        if not wt or os.path.realpath(wt) in skip_paths:
-            continue
-        if entry.get("bare") or entry.get("locked") or entry.get("prunable"):
-            continue
-        if not os.path.isdir(wt):
-            cands += 1                       # prune fodder — worth a pass too
-            continue
-        age = index_age_s(wt)
-        if age is not None and age >= REAP_MIN_IDLE_S:
-            cands += 1
-    if not cands:
-        return 0
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
-    from branch_retirement import maintenance
-    try:
-        with maintenance(Path(canon)):
-            pass
-    except RuntimeError:
-        return 0
-    log = os.path.join(canon, "out", "worktree-reap.log")
-    os.makedirs(os.path.dirname(log), exist_ok=True)
-    try:
-        if os.path.getsize(log) > 1_000_000:
-            os.replace(log, log + ".old")
-    except OSError:
-        pass
-    with open(log, "a") as fh:
-        subprocess.Popen(
-            [sys.executable or "python3", os.path.abspath(__file__),
-             "--reap", "--fleet", "--skip", current_wt],
-            cwd=canon, stdout=fh, stderr=subprocess.STDOUT,
-            start_new_session=True)
-    return cands
-
-
 @decision(failure="raise")
 def decide(payload):
     try:
@@ -436,16 +389,6 @@ def decide(payload):
                         ".venv/bin/python -m pip install -r requirements.lock and npm --prefix mcp-server ci"
                     )
 
-        # The orphan reaper runs for canonical AND worktree sessions — the
-        # canonical tree is where a human most often sits, and its sessions
-        # are exactly the ones that notice 4.4GB of dead checkouts.
-        n = maybe_spawn_reaper(canon, toplevel)
-        if n:
-            print(
-                f"worktree reaper: {n} idle worktree candidate(s) — sweeping in "
-                "the background (clean + idle 6h + branch-safe rules; "
-                "log: out/worktree-reap.log)"
-            )
     except Exception:
         pass  # fail-soft: this must never block or fail a session
     return 0
