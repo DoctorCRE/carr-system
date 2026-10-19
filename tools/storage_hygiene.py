@@ -336,11 +336,15 @@ def _update_finding(loop: dict, body: str) -> dict:
     if not loop_id:
         return {"ok": False, "status": "refused", "detail": "no loop_id to update"}
     read = call_verb("read-loop", {"loop_id": loop_id}, timeout=30)
-    if not read.ok or not isinstance(read.reply, dict) or "version" not in read.reply:
+    if not read.ok:
         return {"ok": False, "status": read.kind, "detail": read.describe()}
+    current = read.reply.get("loop") if isinstance(read.reply, dict) else None
+    if not isinstance(current, dict) or type(current.get("version")) is not int:
+        return {"ok": False, "status": "refused",
+                "detail": "read-loop response requires an integer loop.version"}
     result = call_verb("update-loop", {
         "idempotency_key": str(uuid.uuid4()), "loop_id": loop_id,
-        "base_version": read.reply["version"], "body": body}, timeout=30)
+        "base_version": current["version"], "body": body}, timeout=30)
     return {"ok": result.ok, "status": result.kind, "detail": result.describe()}
 
 
