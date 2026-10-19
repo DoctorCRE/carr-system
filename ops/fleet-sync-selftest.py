@@ -311,6 +311,46 @@ def test_current_dirty_checkout_refuses():
     print("PASS  current dirty checkout refuses before installing wiring")
 
 
+def git_edit_env(tmp, clone, command, contents, staged=False):
+    """Inject one editor action at a Git subprocess, then run real Git."""
+    stubs = Path(tmp, "git-stubs")
+    stubs.mkdir()
+    marker = Path(tmp, "editor-ran")
+    real_git = shutil.which("git", path=ENV.get("PATH"))
+    wrapper = stubs / "git"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "import os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        f"marker = Path({str(marker)!r})\n"
+        f"if sys.argv[1] == {command!r} and not marker.exists():\n"
+        f"    Path({str(Path(clone, 'f.txt'))!r}).write_text({contents!r})\n"
+        "    marker.touch()\n"
+        + (f"    subprocess.run([{real_git!r}, 'add', 'f.txt'], check=True)\n"
+           if staged else "")
+        + f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
+    )
+    wrapper.chmod(0o755)
+    return {"PATH": str(stubs) + os.pathsep + ENV.get("PATH", "")}, marker
+
+
+def test_concurrent_staged_landed_bytes_refuse():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        env, marker = git_edit_env(tmp, b, "merge-base", "base\nnewer\n", staged=True)
+        r = run_sync(b, env)
+        assert marker.exists(), "the concurrent editor never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr
+        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+        assert git(b, "show", ":f.txt") == "base\nnewer"
+        assert git(b, "diff", "--cached", "--name-only") == "f.txt"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert "stub installer" not in r.stdout
+    print("PASS  staged landed bytes appearing after preflight refuse and stay staged")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -770,6 +810,7 @@ def main():
     test_dirty_tree_refuses()
     test_landed_residue_refuses_without_restoring()
     test_current_dirty_checkout_refuses()
+    test_concurrent_staged_landed_bytes_refuse()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
