@@ -29,7 +29,8 @@ def project(state):
         requests[address] = {'id': address, 'work_request': ref, 'card_title': request['card_title'],
                              'card_description': request['card_description'], 'slices': [],
                              'counts': dict.fromkeys(('done', 'active', 'blocked', 'failed'), 0)}
-        registered = request.get('slices') or [{'slice_id': 'implicit', 'title': request['title']}]
+        registered = request.get('slices') or [{'slice_id': 'implicit', 'title': request['card_title'],
+            'card_title': request['card_title'], 'card_description': request['card_description']}]
         for ordinal, row in enumerate(registered, 1):
             propose_copy(row)
             validate_copy(row['card_title'], row['card_description'])

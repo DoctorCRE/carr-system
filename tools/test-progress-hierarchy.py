@@ -246,6 +246,15 @@ class HierarchyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             h.validate_copy('Suggestion actions', 'One sentence. Another sentence. A third sentence.')
 
+    def test_implicit_slice_reuses_the_work_request_human_copy(self):
+        b = self.board()
+        b['work_requests']['WR-000014'].update(title='Reduce instruction handoffs while preserving source ownership',
+            card_title='Delivery flow', card_description='Keep delivery instructions together.', slices=[])
+        for task in b['tasks'].values():task['slice_id']='implicit'
+        row = h.project(b)['slices']['WR14.S1']
+        self.assertEqual(row['card_title'], 'Delivery flow')
+        self.assertEqual(row['card_description'], 'Keep delivery instructions together.')
+
 
 if __name__ == '__main__':
     unittest.main()
