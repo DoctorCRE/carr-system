@@ -3,6 +3,12 @@
   "work_request": "WR-000284",
   "declared": [
     {
+      "path": "bin/flash-off",
+      "class": "hand_tool",
+      "reason": "An explicit command revokes Flash's grant and immediately stops its server and desk.",
+      "evidence": "tools/test-flash-on-demand.py verifies immediate revocation and shutdown"
+    },
+    {
       "path": "bin/cutoff-doctrine.sh",
       "class": "one_shot",
       "reason": "Ended the vault's markdown era at the 2026-08-19 cutoff; the exporter flag it flips stays flipped, so it has no second run.",

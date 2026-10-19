@@ -287,11 +287,11 @@ def scan_for_result(log_path: Path, offset: int) -> str | None:
 def probe_live(entry: dict) -> bool:
     kind = entry.get("kind")
     if kind == "claude-session" and entry.get("room_seat") == "flash":
-        return True  # Demand dispatch starts this desk; probes must not load it.
+        return flash_wire.is_up() and desks.is_live(entry.get("socket", ""))
     if kind in ("claude-session", "codex-live"):
         return desks.is_live(entry.get("socket", ""))
     if kind == "flash-local":
-        return True  # A claimed task, rather than a bridge heartbeat, starts Flash.
+        return flash_wire.is_up()
     # claude-desktop and codex-session are durable rather than live
     # (dispatch.py's own framing) —
     # there is no process to probe between dispatches, so "live" here means
@@ -693,7 +693,11 @@ def run_once(*, registry: desks.Registry | None = None, state_path: Path = DEFAU
     session_directory_path = Path(session_directory_path or
                                   registry.path.parent / "session-directory.json")
 
-    desk_entries = registry.entries()
+    desk_entries = {
+        name: entry for name, entry in registry.entries().items()
+        if name not in {"flash", "flash-model"} and entry.get("room_seat") != "flash"
+        and entry.get("kind") != "flash-local"
+    }
     # A claude-desktop desk is explicit-queue-only. Keeping its seat in the
     # registry makes heartbeat and result attribution visible, while excluding
     # it from conversational fan-out prevents ordinary room chatter from
