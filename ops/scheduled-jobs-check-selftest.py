@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Fixture evidence exercises the scheduled-job report used by health and watchdog."""
 import copy
+import contextlib
+import io
 import importlib.util
 import os
 import sys
@@ -395,23 +397,49 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             manifest = dict(self.manifest, canonical_checkout=raw)
+            status = jobs.status_path(root)
             row = {"key": "scheduled_jobs:canonical:behind_main", "kind": "scheduled_job_drift",
                    "subject": "canonical", "reason": "old behind-main warning",
                    "next_action": "repair fleet-sync", "cleared_at": None}
             path = root / config['paths']['findings']
             path.parent.mkdir(parents=True)
             path.write_text(json.dumps(row) + '\n')
-            with patch.object(jobs, 'native_manifest', return_value=manifest), \
+            with patch.object(jobs, 'status_path', return_value=status), \
+                 patch.object(jobs, 'native_manifest', return_value=manifest), \
                  patch.object(jobs, 'collect', return_value=self.snapshot), \
                  patch.object(sys, 'argv', ['scheduled-jobs-check.py', '--now', '1000', '--json']):
                 self.assertEqual(cli.main(), 0)
             self.assertEqual(watchdog.digest(root, config), '')
             self.snapshot['git']['behind'] = 3
-            with patch.object(jobs, 'native_manifest', return_value=manifest), \
+            with patch.object(jobs, 'status_path', return_value=status), \
+                 patch.object(jobs, 'native_manifest', return_value=manifest), \
                  patch.object(jobs, 'collect', return_value=self.snapshot):
                 self.assertEqual(jobs.check(now=1000)[0]['code'], 'behind_main')
             self.assertIn('scheduled_job_drift', watchdog.digest(root, config))
             self.assertNotIn('old behind-main warning', watchdog.digest(root, config))
+
+    def test_definition_failure_replaces_healthy_observation_and_reaches_banner(self):
+        import job_watchdog as watchdog
+        spec = importlib.util.spec_from_file_location('schedule_cli', ROOT / 'ops/scheduled-jobs-check.py')
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        for error in (ValueError, OSError, KeyError, TypeError):
+            with self.subTest(error=error.__name__), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw)
+                status = jobs.status_path(root)
+                status.parent.mkdir(parents=True)
+                status.write_text('[]')
+                output = io.StringIO()
+                with patch.object(jobs, 'status_path', return_value=status), \
+                     patch.object(jobs, 'native_manifest', side_effect=error('bad native plist')), \
+                     patch.object(sys, 'argv', ['scheduled-jobs-check.py', '--json']), \
+                     contextlib.redirect_stdout(output):
+                    self.assertEqual(cli.main(), 1)
+                rows = json.loads(output.getvalue())
+                self.assertEqual(rows[0]['code'], 'evidence_unavailable')
+                self.assertEqual(json.loads(status.read_text()), rows)
+                self.assertIn('evidence could not be interpreted', watchdog.digest(root, config))
 
     def test_failed_checker_observation_replaces_previous_healthy_status(self):
         import job_watchdog as watchdog
@@ -419,10 +447,13 @@ class ReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
             manifest = dict(self.manifest, canonical_checkout=raw)
-            with patch.object(jobs, 'native_manifest', return_value=manifest), \
+            status = jobs.status_path(root)
+            with patch.object(jobs, 'status_path', return_value=status), \
+                 patch.object(jobs, 'native_manifest', return_value=manifest), \
                  patch.object(jobs, 'collect', return_value=self.snapshot):
                 self.assertEqual(jobs.check(now=1000), [])
-            with patch.object(jobs, 'native_manifest', return_value=manifest), \
+            with patch.object(jobs, 'status_path', return_value=status), \
+                 patch.object(jobs, 'native_manifest', return_value=manifest), \
                  patch.object(jobs, 'collect', side_effect=ValueError('bad native evidence')):
                 rows = jobs.check(now=1001)
             self.assertEqual(rows[0]['code'], 'evidence_unavailable')
