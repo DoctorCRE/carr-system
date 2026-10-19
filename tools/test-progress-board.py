@@ -1808,13 +1808,13 @@ class ReviewRound1420(BoardCase):
 
     # 3 ── the whole payload fits the server contract
     def test_3_the_complete_snapshot_is_measured_and_fitted(self):
-        tasks = {f"t{n}": {"title": "T" * 200, "summary": "S" * 160, "evidence": "E" * 200, "status": "done",
+        tasks = {f"t{n}": {"title": f"Task {n} " + "T" * 200, "summary": "S" * 160, "evidence": "E" * 200, "status": "done",
                            "stage": "live", **exercise_fields(), "executor": "Codex gpt-6-sol high", "updated_at": "2026-09-29T00:00:00Z",
                            "completed_at": f"2026-09-{1 + n % 28:02d}T00:00:00Z",
                            "stage_history": [{"stage": "live", "entered_at": "2026-09-29T00:00:00Z"}]}
                  for n in range(225)}
         state = {"project": "demo", "tasks": tasks,
-                 "notes": [{"text": "N" * 2000, "created_at": "2026-09-29T00:00:00Z"}] * 50}
+                 "notes": [{"text": "N" * 2000, "created_at": "2026-09-29T00:00:00Z"}] * 100}
         snapshot = BOARD.board_snapshot(state)
         text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
         self.assertLessEqual(len(text.encode("utf-16-le")) // 2, 262144)
@@ -1823,7 +1823,7 @@ class ReviewRound1420(BoardCase):
         self.assertEqual(BOARD.snapshot_size({"t": "✦😀"}), len('{"t":"✦"}') + 2)
 
     def test_3_a_board_that_cannot_fit_is_refused_not_published(self):
-        tasks = {f"t{n}": {"title": "T" * 1000, "status": "running", "executor": "Codex",
+        tasks = {f"t{n}": {"title": f"Task {n} " + "T" * 1000, "status": "running", "executor": "Codex",
                            "updated_at": "2026-09-29T00:00:00Z"} for n in range(300)}
         with self.assertRaises(BOARD.SnapshotTooLarge):
             BOARD.board_snapshot({"project": "demo", "tasks": tasks})
