@@ -456,6 +456,78 @@ class GitFetchDiagnostics(Base):
         self.assertIn("[exit 128]", logs)
         self.assertIn("[exit 0]", logs)
 
+    def test_repeated_timeout_stops_after_two_attempts_with_full_stderr(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        error = b"remote: " + b"diagnostic " * 50 + b"\nRecv failure: Operation timed out\n"
+        result = subprocess.CompletedProcess([], 128, b"remote output\n", error)
+        with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                mock.patch.object(pipe, "sleep") as sleep:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(failed.exception.rc, 128)
+        log = Path(failed.exception.log).read_text()
+        self.assertEqual(log.count(error.decode()), 2)
+        self.assertEqual(log.count("remote output"), 2)
+
+    def test_lock_ref_and_auth_errors_fail_without_retry(self):
+        errors = (
+            b"fatal: couldn't find remote ref refs/heads/deleted-branch\n",
+            b"fatal: Unable to create '/fixture/.git/shallow.lock': File exists.\n",
+            b"error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b\n",
+            b"fatal: Authentication failed for 'https://github.com/example/app.git/'\n",
+        )
+        for error in errors:
+            with self.subTest(error=error):
+                pipe = self.fx.pipeline(FakeRunner())
+                result = subprocess.CompletedProcess([], 128, b"", error)
+                with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                        mock.patch.object(pipe, "sleep") as sleep:
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+                self.assertIn(error.decode(), Path(failed.exception.log).read_text())
+
+    def test_app_tick_recovers_without_failed_release_or_diagnosis(self):
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        verbs, messages, attempts = [], [], []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
+        pipe.out = messages.append
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        run = subprocess.run
+
+        def flaky(argv, **kwargs):
+            if "fetch" in argv:
+                attempts.append(argv)
+                if len(attempts) == 1:
+                    return subprocess.CompletedProcess(argv, 128, b"", b"Recv failure: Operation timed out\n")
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky):
+            self.assertEqual(pipe.tick(["app"]), 0)
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse(self.fx.state()["app"].get("failed_sha"))
+        self.assertEqual(self.fx.records(), [])
+        self.assertEqual(verbs, [])
+        self.assertEqual(runner.calls, [])
+        self.assertTrue(any("already released" in line for line in messages))
+
+    def test_immutable_fetch_ignores_deleted_configured_branch_and_shared_ref_locks(self):
+        git(self.fx.origin, "update-ref", "refs/heads/deleted-branch", self.fx.base)
+        git(self.fx.repo, "config", "--add", "remote.origin.fetch",
+            "+refs/heads/deleted-branch:refs/remotes/origin/deleted-branch")
+        git(self.fx.origin, "update-ref", "-d", "refs/heads/deleted-branch")
+        for name in ("index.lock", "shallow.lock", "FETCH_HEAD.lock", "refs/remotes/origin/main.lock"):
+            lock = self.fx.repo / ".git" / name
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            lock.write_text("owned by another operation\n")
+        pipe = self.fx.pipeline(FakeRunner())
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+
 
 class WorkerIdentityReconciliation(Base):
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
