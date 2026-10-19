@@ -123,7 +123,8 @@ class VendorWatchTests(unittest.TestCase):
         board = json.loads((self.root / 'out/boards/carr-v5.json').read_text())
         self.assertEqual(len(board['tasks']), 1)
         card = next(iter(board['tasks'].values()))
-        self.assertEqual(card['status'], 'done')
+        self.assertEqual(card['status'], 'review')
+        self.assertIn('consumer proof', card['release_wait'])
         self.assertNotEqual(card.get('health'), 'blocked')
         self.assertNotIn('blocked_reason', card)
         self.assertNotIn('next_action', card)
@@ -173,7 +174,8 @@ class VendorWatchTests(unittest.TestCase):
             self.assertEqual(loops['loop-1']['status'], 'done')
             board = json.loads((self.root / 'out/boards/carr-v5.json').read_text())
             card = next(iter(board['tasks'].values()))
-            self.assertEqual(card['status'], 'done')
+            self.assertEqual(card['status'], 'review')
+            self.assertIn('consumer proof', card['release_wait'])
             self.assertNotEqual(card.get('health'), 'blocked')
             self.assertNotIn('blocked_reason', card)
             self.assertNotIn('next_action', card)
@@ -230,7 +232,9 @@ class VendorWatchTests(unittest.TestCase):
         self.error = False
         w.reconcile(self.root, self.config, self.check(4600), w.Effects(self.root, self.config), 4600)
         board = json.loads((self.root / 'out/boards/carr-v5.json').read_text())
-        self.assertEqual(next(iter(board['tasks'].values()))['status'], 'done')
+        card = next(iter(board['tasks'].values()))
+        self.assertEqual(card['status'], 'review')
+        self.assertIn('consumer proof', card['release_wait'])
 
     def test_loop_close_refusal_keeps_board_blocked_then_retries(self):
         self.config['actions']['file_defects'] = True
