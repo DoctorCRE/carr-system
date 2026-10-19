@@ -127,10 +127,11 @@ def select_rules(catalog: dict, event: dict, *, judge: Callable | None = None) -
         batch_size += row_size
     models = set()
     for batch in batches:
+        if judge is None:
+            unresolved.extend({"rule_id": r["id"], "reason": "moment_judge_not_configured"} for r in batch)
+            continue
         questions = _moment_questions(batch)
         try:
-            if judge is None:
-                raise ValueError("moment_judgment_unavailable")
             answer = judge({"event": event, "rules": {r["id"][:8]: r for r in batch}}, questions)
             if (answer.get("model") != MODEL or not isinstance(answer.get("answers"), dict)
                     or set(answer["answers"]) != set(questions)):

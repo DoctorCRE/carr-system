@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deliver current store-scoped rules for prompt, tool, and response events."""
 from __future__ import annotations
+from collections import Counter
 import json
 import re
 from pathlib import Path
@@ -158,7 +159,9 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
             'task_sha256': digest(task), 'corpus_digest': selection['corpus_digest'],
             'source_digest': source_sha256(REPO), 'identity': selection['identity'],
             'rule_ids': sorted(ids), 'data_defects': selection['data_defects'],
-            'unresolved_count': len(selection['unresolved']), 'models': selection['models'],
+            'unresolved_count': len(selection['unresolved']),
+            'unresolved_reasons': dict(sorted(Counter(i['reason'] for i in selection['unresolved']).items())),
+            'models': selection['models'],
             'complete': selection['complete'], 'instruction': LOOKUP_INSTRUCTION}
     if cards:
         base['cards'] = [rule_cards.card_view(c) for c in cards]

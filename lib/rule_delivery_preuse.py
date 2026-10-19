@@ -209,7 +209,7 @@ def _claude_user_text(record: object) -> str | None:
 def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     if not isinstance(row, dict):
         return False
-    keys = set(row) - {'cards'}
+    keys = set(row) - {'cards', 'unresolved_reasons'}
     if keys not in (LOOKUP_RECEIPT_KEYS, LOOKUP_RECEIPT_KEYS - {'unresolved'} | {'unresolved_count'}):
         return False
     if 'unresolved' in row:
@@ -219,6 +219,13 @@ def validate_lookup_receipt(row: object, *, repo: Path) -> bool:
     else:
         unresolved_count = row['unresolved_count']
         if type(unresolved_count) is not int or unresolved_count < 0:
+            return False
+    if 'unresolved_reasons' in row:
+        counts = row['unresolved_reasons']
+        if ('unresolved_count' not in row or not isinstance(counts, dict)
+                or any(not _nonempty(reason) or type(count) is not int or count <= 0
+                       for reason, count in counts.items())
+                or sum(counts.values()) != unresolved_count):
             return False
     if 'cards' in row and (not isinstance(row['cards'], list) or not row['cards'] or len(row['cards']) > 3
                            or any(not isinstance(c, dict) or set(c) != CARD_KEYS
