@@ -467,15 +467,6 @@
         "ops/github-burst-guard-selftest.py"
       ]
     },
-    "glanceable_lead": {
-      "failure_mode": "CI class failure",
-      "implementation": [
-        "ops/glanceable-lead-check.py"
-      ],
-      "test": [
-        "ops/glanceable-lead-selftest.py"
-      ]
-    },
     "index_upkeep": {
       "failure_mode": "pre-commit refusal",
       "implementation": [
@@ -806,12 +797,9 @@
       "why_unenforceable": "Whether a follow-up discovered during a build can be completed in the same session depends on live scope, authority and remaining context. The loop deferral gate separately refuses vague parking, but no predicate can decide build-now proportionality."
     },
     "17ffd587": {
-      "binding_moment": "over the rendered glanceable surfaces",
-      "category": "post_action_verification",
-      "control": "glanceable_lead",
-      "enforcement_class": "stop_gate",
-      "exceptions": "the rule's own DEAL carve-out, resolved against the RECORD rather than the render \u2014 a lead ref whose party also holds a client row or a live deal is permitted; bookkeeping and provenance mentions are not outreach; open-loops-backlog.md is read on cadence rather than glanceable",
-      "note": "Built 2026-08-15. Its first version flagged loop 338 (the Ramsey buyer advisory) and a session baselined it as a known violation. The record showed Ramsey holds a client row C-199 and a live deal, making the row a dated deal follow-up \u2014 the carve-out the rule writes into itself. Two bugs fed that: the render alone cannot answer the carve-out question, and `find` returns nothing for a bare ref, so asking it for the ref gave an empty answer that read as no-client-link. It now asks by the person name written before the ref, and an unreachable record reports UNVERIFIED rather than clean (rule 2b889e80)."
+      "category": "judgment_advisory",
+      "enforcement_class": "judgment_ambient",
+      "why_unenforceable": "Automated gate glanceable_lead removed under WR-000003: its generated file inputs are absent from source CI, where it reported success over zero surfaces. The rule remains guidance for lead reminders and the real-deal carve-out; source CI cannot verify live record-backed surfaces."
     },
     "185013c6": {
       "binding_moment": "model selection",
@@ -2012,11 +2000,11 @@
       ]
     },
     "17ffd587": {
-      "load_layer": "control",
+      "load_layer": "pack",
       "packs": [
         "client-deal"
       ],
-      "why": "An installed stop gate delivers this at its binding moment."
+      "why": "The generated-file checker was removed under WR-000003; deliver the reminder guidance through its client-deal pack."
     },
     "185013c6": {
       "load_layer": "pack",

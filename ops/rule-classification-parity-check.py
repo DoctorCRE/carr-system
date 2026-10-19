@@ -183,7 +183,7 @@ def compare(map_data: dict, export_data: dict) -> dict:
                           "normalize to a known bucket")
             continue
         compared += 1
-        if (removed_gate_reclassification(detail) and f_bucket == "judgment_advisory"
+        if (removed_gate_reclassification(detail, rule_id) and f_bucket == "judgment_advisory"
                 and d_bucket == "machine_enforceable"):
             # The map leads production here: bin/sync-rule-admission-prod.sh
             # --apply, run after merge, moves the admission and the next
@@ -204,15 +204,18 @@ def compare(map_data: dict, export_data: dict) -> dict:
     return {"errors": errors, "compared": compared, "mismatches": mismatches}
 
 
-def removed_gate_reclassification(detail: dict) -> bool:
-    """A rule PR 1801 moved from a removed automated gate to judgment_ambient.
+def removed_gate_reclassification(detail: dict, rule_id: str) -> bool:
+    """An approved checker retirement may lead the frozen admission export.
 
     Joe's 2026-10-15 purge ruling removed the gates; the reviewed map records
-    each such rule's why_unenforceable in one fixed sentence, so the exception
-    is read from the map and cannot cover any rule it does not name."""
+    each such rule's why_unenforceable. WR-000003 also retires a checker whose
+    generated-file inputs are absent from source CI."""
     why = detail.get("why_unenforceable") or ""
     return (detail.get("enforcement_class") == "judgment_ambient"
-            and why.startswith("Automated gate ") and " removed in PR 1801 " in why)
+            and why.startswith("Automated gate ")
+            and (" removed in PR 1801 " in why
+                 or (rule_id == "17ffd587"
+                     and why.startswith("Automated gate glanceable_lead removed under WR-000003:"))))
 
 
 def main() -> int:
