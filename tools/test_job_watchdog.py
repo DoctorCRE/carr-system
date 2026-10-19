@@ -821,7 +821,8 @@ class RunnerTests(unittest.TestCase):
             registry = root / "desk.json"
             (root / "models_cache.json").write_text(json.dumps({"models": [
                 {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol"}]}))
-            env = dict(os.environ, CODEX_HOME=str(root), PATH=str(root) + os.pathsep + os.environ["PATH"])
+            env = dict(os.environ, CODEX_HOME=str(root), CARR_CODEX_SLOT_DIR=str(root / 'slots'),
+                       PATH=str(root) + os.pathsep + os.environ["PATH"])
             registration = subprocess.run([sys.executable, str(dispatch), "--registry", str(registry),
                                            "register", "fixture", "--kind", "codex-session", "--family", "sol",
                                            "--effort", "high", "--sandbox", "workspace-write", "--cwd", directory],
