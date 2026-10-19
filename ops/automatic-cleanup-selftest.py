@@ -443,7 +443,10 @@ class CleanupHealthTests(unittest.TestCase):
                 full = storage_hygiene.allocated_bytes_evidence([root])
                 self.assertTrue(full['complete'])
                 self.assertGreaterEqual(full['allocated_bytes'], 8192)
-                self.assertLess(full['allocated_bytes'], 24576)
+                expected_kib = int(subprocess.check_output(
+                    ['/usr/bin/du', '-sk', str(root)], text=True, timeout=3).split()[0])
+                self.assertEqual((full['allocated_bytes'] + 1023) // 1024, expected_kib)
+                self.assertEqual(full['entries'], 33)
             finally:
                 outside.unlink(missing_ok=True)
 
