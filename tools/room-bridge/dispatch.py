@@ -18,6 +18,23 @@ Codex desks preserve their thread context. The registry names a default family,
 never a model version. Each send resolves Sol or Luna from the current local
 Codex catalog, prints the executor slug and effort, and records them in its row.
 
+Grok desks default to full workspace tools and select the newest standard model
+from `grok models`. Only `send --retrieve` runs read-only source retrieval.
+
+Hermes Nous desks run one-shot with full tools, local tests, commits, pushes and
+PR creation in the job clone. They use two independent slots, outside the Codex
+pool. Provider nous and family glm (default) or deepseek are stored in the desk.
+Each job selects the latest version from Portal's live recommended model list,
+preferring the full model over flash at the same version. No cached fallback.
+Auth is checked without opening a login prompt; signed-out jobs fail immediately
+with "Nous Portal not signed in". --timeout bounds preflight and the whole job
+process group. Final response and numeric usage are recorded in the results row.
+User configuration is ignored for the invocation to prevent provider fallback;
+AGENTS.md and project rules still load. Authentication stays with Hermes.
+
+    dispatch.py register nous-builder --kind hermes-nous --provider nous --family glm --timeout 900
+    dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
+
 EVERY DISPATCH LEAVES A LINE in the results file, NDJSON, one object per
 dispatch. That file is how Hermes learns what happened without holding a
 connection open — a claude-session answers in its own window on its own time,
@@ -61,6 +78,7 @@ import claude_remote_wire
 import codex_wire  # noqa: E402  — Codex worked out this protocol, see the module
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
+import hermes_wire
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
@@ -91,16 +109,27 @@ CODEX_CAPACITY_BACKOFF_S = 300
 CODEX_MAX_CONCURRENT = 4
 CODEX_SLOT_DIR = Path.home() / ".config" / "carr" / "codex-slots"
 CODEX_SLOT_POLL_S = 5.0
+HERMES_SLOT_DIR = Path.home() / '.config' / 'carr' / 'hermes-slots'
+HERMES_SLOT_POLL_S = 1.0
 
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
 
 
-@contextmanager
 def _codex_slot(env):
     limit = max(1, int(env.get("CARR_CODEX_MAX_CONCURRENT") or CODEX_MAX_CONCURRENT))
     slot_dir = Path(env.get("CARR_CODEX_SLOT_DIR") or CODEX_SLOT_DIR)
+    return _slot(limit, slot_dir, 'Codex', CODEX_SLOT_POLL_S)
+
+
+def _hermes_slot(env):
+    slot_dir = Path(env.get('CARR_HERMES_SLOT_DIR') or HERMES_SLOT_DIR)
+    return _slot(2, slot_dir, 'Hermes', HERMES_SLOT_POLL_S)
+
+
+@contextmanager
+def _slot(limit, slot_dir, label, poll_s):
     slot_dir.mkdir(parents=True, exist_ok=True)
     announced = False
     while True:
@@ -118,10 +147,10 @@ def _codex_slot(env):
                 handle.close()
             return
         if not announced:
-            print(f"queued: all {limit} Codex slots busy; waiting for one to free",
+            print(f"queued: all {limit} {label} slots busy; waiting for one to free",
                   file=sys.stderr, flush=True)
             announced = True
-        time.sleep(CODEX_SLOT_POLL_S)
+        time.sleep(poll_s)
 
 
 def _now() -> str:
@@ -225,7 +254,7 @@ def _codex_timeout_activity(output, thread, env):
     return thread_id, activity
 
 
-def _run_codex_process(argv, env, timeout, on_executor, stream_output, **options):
+def _run_headless_process(argv, env, timeout, on_executor, stream_output, **options):
     """Track a dedicated process group, including children surviving a CLI exit."""
     proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, **options,
                             start_new_session=True, stdout=subprocess.PIPE,
@@ -403,7 +432,7 @@ def _to_codex(
             # It is the same reason every command in CLAUDE.md carries
             # `</dev/null`.
             if provider_run is None and (on_executor or stream_output):
-                proc = _run_codex_process(argv, env or os.environ.copy(), limit_s,
+                proc = _run_headless_process(argv, env or os.environ.copy(), limit_s,
                                           on_executor, stream_output, **process_options)
             else:
                 proc = (provider_run or subprocess.run)(
@@ -490,6 +519,8 @@ def _execute(request: dict, *, on_executor=None) -> dict:
                                     if identity.get('kind') in ('codex_turn', 'no_launch') and entry.get('socket') else {})})
     executor_options: dict = {'on_executor': executor_started} if on_executor else {}
     codex_options: dict = {**executor_options, 'claim_id': request.get('claim_id')} if on_executor else {}
+    def run_cli(argv, *, timeout, env=None, cwd=None, **options):
+        return _run_headless_process(argv, env, timeout, on_executor, False, cwd=cwd)
     if entry["kind"] == "claude-session":
         if name == "flash":
             with flashlib.activity_scope():
@@ -502,9 +533,15 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
         grok_options = {"retrieval": True} if retrieval else {}
+        if env is not None:
+            grok_options['env'] = scrubbed_env(env)
         if request.get('provider_run') is not None:
             grok_options["run"] = request['provider_run']
+        elif on_executor:
+            grok_options['run'] = run_cli
         outcome = grok_wire.run_task(entry, task, **grok_options)
+    elif entry['kind'] == 'hermes-nous':
+        outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli)
     elif entry["kind"] == "flash-local":
         outcome = flash_wire.run_task(task)
     elif entry["kind"] == "codex-live":
@@ -576,8 +613,9 @@ def dispatch(
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
                         'network_access desks require --fresh for every dispatched turn')
-    if checkout is not None and entry['kind'] not in codex_models.CODEX_KINDS:
-        raise DeskError('unsupported_checkout', '--checkout requires a Codex desk')
+    checkout_kinds = (*codex_models.CODEX_KINDS, 'grok-cli', 'hermes-nous')
+    if checkout is not None and entry['kind'] not in checkout_kinds:
+        raise DeskError('unsupported_checkout', '--checkout requires a Codex, Grok or Hermes desk')
     if entry["kind"] in codex_models.CODEX_KINDS:
         entry = {**entry, "family": codex_models.family_default(family or entry.get("family"), entry.get("model")),
                  "effort": desks._normalize_effort(entry["kind"], effort or entry.get("effort"))}
@@ -617,8 +655,8 @@ def dispatch(
     declared_writes = write_ownership.declaration(original_task, writes)
     if declared_writes and provider_run is not None:
         raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
-    if declared_writes and entry['kind'] not in codex_models.CODEX_KINDS:
-        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex adapter')
+    if declared_writes and entry['kind'] not in checkout_kinds:
+        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex, Grok or Hermes adapter')
 
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
@@ -629,7 +667,9 @@ def dispatch(
         env = scrubbed_env(env)
         base.update(prepared)
         task = codex_checkout.instruction(prepared) + task
-        if fresh or cwd or not entry.get('thread_id'):
+        if entry['kind'] in ('grok-cli', 'hermes-nous'):
+            entry = {**entry, **prepared, 'cwd': prepared['checkout_path']}
+        elif fresh or cwd or not entry.get('thread_id'):
             entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
             if cwd:
                 cwd = prepared['checkout_workspace']
@@ -640,7 +680,8 @@ def dispatch(
                'provider_run': provider_run,
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
-    with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
+    with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
+         (write_ownership.checkout_writer(workspace) if declared_writes else nullcontext()) as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
             if (entry['kind'] not in codex_models.CODEX_KINDS
@@ -946,14 +987,15 @@ def main(argv: list[str]) -> int:
     r.add_argument("--kind", default=None, choices=list(desks.KINDS))
     r.add_argument("--socket", default=None)
     r.add_argument("--model", default=None)
-    r.add_argument("--family", choices=codex_models.FAMILIES)
+    r.add_argument("--family", choices=(*codex_models.FAMILIES, 'glm', 'deepseek'))
+    r.add_argument('--provider', choices=['nous'], help='inference provider for hermes-nous')
     r.add_argument("--effort", default=None, choices=[*desks.EFFORT_CHOICES, "max"])
     r.add_argument("--cwd", default=None)
     r.add_argument("--host", default=None, help="SSH destination for a claude-remote desk")
-    r.add_argument("--timeout", type=float, default=900, help="remote execution deadline in seconds")
+    r.add_argument("--timeout", type=float, default=900, help="remote or Hermes whole-job deadline in seconds")
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
-                   help="Codex sandbox for this desk; omit to leave Codex's default")
+                   help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
     r.add_argument("--network-access", action="store_true",
                    help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
@@ -1020,7 +1062,8 @@ def main(argv: list[str]) -> int:
                                  effort=a.effort, family=a.family,
                                  sandbox=getattr(a, "sandbox", None),
                                  network_access=a.network_access,
-                                 add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout)
+                                 add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout,
+                                 provider=a.provider)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
 

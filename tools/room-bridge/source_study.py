@@ -182,6 +182,9 @@ def _run_job(folder, phase, runtime):
     def confined_run(command, **kwargs):
         if command[0] not in ('codex', 'grok'):
             raise ValueError('research wire attempted an unexpected executable')
+        if phase == 'retrieval' and '--sandbox' in command:
+            command = list(command)
+            command[command.index('--sandbox') + 1] = 'read-only'
         binary = shutil.which(command[0], path=env['PATH'])
         if not binary:
             raise ValueError('research provider executable unavailable')
