@@ -97,6 +97,25 @@ class SchedulerHygieneTests(unittest.TestCase):
         self.write_snapshot([self.row, self.row])
         self.assert_refused_without_launchctl()
 
+    def test_conflicting_enabled_keys_must_refuse_before_launchctl(self):
+        self.snapshot.write_text('{"scheduledTasks":[{"id":"test-task","enabled":true,"enabled":false,"cronExpression":"45 9 * * 1"}]}')
+        self.assert_refused_without_launchctl()
+
+    def test_conflicting_task_lists_must_refuse_before_launchctl(self):
+        self.snapshot.write_text('{"scheduledTasks":[{"id":"test-task","enabled":true,"cronExpression":"45 9 * * 1"}],"scheduledTasks":[]}')
+        self.assert_refused_without_launchctl()
+
+    def test_duplicate_keys_in_reviewed_inventories_refuse_install(self):
+        paths = [self.repo / 'ops/headless-tasks/tasks.json',
+                 self.repo / 'ops/config/control-plane-workflows.v1.json']
+        for path in paths:
+            original = path.read_text()
+            with self.subTest(inventory=path.name):
+                path.write_text(original.replace('"cron": "45 9 * * 1"',
+                                                '"cron": "0 8 * * 1", "cron": "45 9 * * 1"'))
+                self.assert_refused_without_launchctl()
+            path.write_text(original)
+
     def test_native_cron_drift_refuses_install(self):
         self.row['cronExpression'] = '0 8 * * 1'
         self.write_snapshot()
@@ -135,7 +154,7 @@ class SchedulerHygieneTests(unittest.TestCase):
     def test_report_only_explicit_completed_ephemeral_one_shots_for_deletion(self):
         ephemeral = self.home / '.claude/scheduled-tasks/one-shot/SKILL.md'
         ephemeral.parent.mkdir()
-        ephemeral.write_text('---\nephemeral: true\n---\nSynthetic continuation.\n')
+        ephemeral.write_text('---\nname: one-shot\ndescription: Synthetic continuation.\nephemeral: true\n---\nSynthetic continuation.\n')
         completed = {'id': 'one-shot', 'enabled': False, 'cronExpression': None,
                      'lastRunAt': 123, 'lastRunStatus': 'succeeded'}
         self.write_snapshot([self.row, completed, {**completed, 'id': 'personal-task'}])
@@ -192,6 +211,33 @@ class SchedulerHygieneTests(unittest.TestCase):
                 result = self.report()
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(any(r['action'] == 'delete_completed_one_shot' for r in json.loads(result.stdout)['tasks']))
+
+    def assert_no_cleanup_candidate(self, marker, include_cron):
+        prompt = self.home / '.claude/scheduled-tasks/temporary/SKILL.md'
+        prompt.parent.mkdir(exist_ok=True)
+        prompt.write_text('---\n' + marker + '\n---\nSynthetic task.\n')
+        row = {'id': 'temporary', 'enabled': False, 'lastRunAt': 123, 'lastRunStatus': 'succeeded'}
+        if include_cron:
+            row['cronExpression'] = None
+        self.write_snapshot([self.row, row])
+        result = self.report()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.calls.exists())
+        self.assertNotIn('delete_completed_one_shot', result.stdout, result.stdout)
+        self.assertTrue(prompt.exists())
+
+    def test_conflicting_yaml_marker_must_not_nominate_cleanup(self):
+        for marker in ['ephemeral: true\nephemeral : false',
+                       'ephemeral: true\n"ephemeral": false',
+                       "ephemeral: true\n'ephemeral': false",
+                       'ephemeral: true\n"\\u0065phemeral": false',
+                       'description: "\nephemeral: true\nname: continuation"',
+                       'ephemeral: true\n<<: {ephemeral: false}']:
+            with self.subTest(marker=marker):
+                self.assert_no_cleanup_candidate(marker, True)
+
+    def test_missing_recurrence_must_not_nominate_cleanup(self):
+        self.assert_no_cleanup_candidate('ephemeral: true', False)
 
     def test_report_detects_leftover_headless_registration_after_manifest_removal(self):
         settings = self.repo / 'ops/headless-tasks/tasks.json'
