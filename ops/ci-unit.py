@@ -61,7 +61,8 @@ def main():
                                        if not line.startswith(PREFIX)
                                        or json.loads(line[len(PREFIX):]).get('status') != 'passed')
                 for line in output.splitlines():
-                    if line.startswith((PREFIX, 'QUARANTINED ')):
+                    if line.startswith('QUARANTINED ') or (
+                            line.startswith(PREFIX) and json.loads(line[len(PREFIX):]).get('status') != 'passed'):
                         print(line)
                 if result.returncode:
                     reason = f'command exited {result.returncode}'

@@ -140,6 +140,20 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('mcp-server: 1 tests, 1 passed', result.stdout)
 
+    def test_failed_receipt_survives_many_later_passing_suites(self):
+        self.all_packages()
+        mcp = self.root / 'mcp-server'
+        receipt = dict(version=1, test='broken.test.mjs', first_exit=1, status='failed')
+        passed = dict(version=1, test='passing.test.mjs', first_exit=0, status='passed')
+        lines = ['CARR_FLAKE_RESULT ' + json.dumps(receipt)]
+        lines += ['CARR_FLAKE_RESULT ' + json.dumps(passed)] * 300
+        (mcp / 'runner.mjs').write_text(
+            'console.log(' + json.dumps('\n'.join(lines)) + '); process.exitCode = 1;')
+        (mcp / 'package.json').write_text(json.dumps({'scripts': {'test': 'node runner.mjs'}}))
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('broken.test.mjs', result.stderr)
+
     def test_package_skip_exit_is_red(self):
         self.all_packages()
         (self.root / 'workspace/package.json').write_text(

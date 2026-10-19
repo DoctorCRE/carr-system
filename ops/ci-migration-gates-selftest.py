@@ -70,7 +70,8 @@ class Isolation(unittest.TestCase):
         with self.assertRaises(ValueError):
             runner.run_gates('postgres://owner@example.invalid/carr_ci', [], Path('/tmp'))
     def test_a_red_gate_is_not_hidden_by_other_green_gates(self):
-        root=Path(tempfile.mkdtemp(prefix='ci-gate-failure-'))
+        root=Path(self.enterContext(tempfile.TemporaryDirectory()))/'ci-gate-failure'
+        root.mkdir()
         try:
             good,bad=root/'good.py',root/'bad.py'
             good.write_text('raise SystemExit(0)\n')
