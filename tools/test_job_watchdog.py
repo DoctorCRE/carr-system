@@ -31,6 +31,123 @@ def tearDownModule():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_success_and_recurrence_between_scans_starts_a_new_incident(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        effects = Mock()
+        effects.report.return_value = {}
+        failed = {"id": "run-1", "card": "recurring", "start": 10,
+                  "exit_code": 1, "log_tail": "synthetic failure"}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = w.detect({"jobs": [failed]}, config, 15)
+            w.reconcile(root, config, first, effects, 15)
+            jobs = [failed, {"id": "success", "card": "recurring", "start": 20, "exit_code": 0},
+                    {**failed, "id": "run-2", "start": 30}]
+            second = w.detect({"jobs": jobs}, config, 35)
+            w.reconcile(root, config, second, effects, 35)
+            self.assertEqual(effects.report.call_count, 2)
+            self.assertNotEqual(first[0]["key"], second[0]["key"])
+            latest = w.read_latest(root / config["paths"]["findings"])
+            self.assertIsNotNone(latest[first[0]["key"]]["cleared_at"])
+            self.assertEqual(sum(not r.get("cleared_at") for r in latest.values()), 1)
+
+    def test_job_recovery_requires_a_later_success_for_the_same_card(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        failed = {"id": "failed", "card": "recurring", "start": 20, "exit_code": 1}
+        for recovery in ({"id": "older", "card": "recurring", "start": 10, "exit_code": 0},
+                         {"id": "other", "card": "another-job", "start": 30, "exit_code": 0},
+                         {"id": "undated", "card": "recurring", "exit_code": 0},
+                         {"id": "active", "card": "recurring", "start": 30,
+                          "alive": True, "limit": 3600}):
+            with self.subTest(recovery=recovery):
+                found = w.detect({"jobs": [failed, recovery]}, config, 35)
+                self.assertEqual([f["kind"] for f in found], ["job_failed"])
+        undated = {k: v for k, v in failed.items() if k != "start"}
+        initial = w.detect({"jobs": [undated]}, config, 25)
+        for start in (30, 40):
+            retained = w.detect({"jobs": [undated, {**failed, "start": start, "exit_code": 0}]}, config, 45)
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0]["key"], initial[0]["key"])
+
+    def test_scan_collapses_legacy_run_findings_and_clears_after_success(self):
+        from unittest.mock import Mock, patch
+        import contextlib
+        import io
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        config["repositories"] = []
+        config["paths"].update(merge_queue="queue.txt", queue_logs=[], release_log="release.log")
+        effects = Mock()
+        effects.report.return_value = {}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / config["paths"]["registry"]
+            findings = root / config["paths"]["findings"]
+            for index in range(3):
+                job = {"id": f"run-{index}", "card": "recurring", "start": index,
+                       "exit_code": 1, "log_tail": "synthetic failure"}
+                w.append(registry, job)
+                w.append(findings, {**w.finding("job_failed", job["id"], "legacy failure", config),
+                                    "reported": True, "cleared_at": None})
+            def scan():
+                with patch.object(w, "Effects", return_value=effects), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(w.scan(root, config), 0)
+                return [f for f in w.read_latest(findings).values() if not f.get("cleared_at")]
+            active = scan()
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0]["job"]["id"], "run-2")
+            w.append(registry, {**job, "id": "run-3", "start": 3})
+            active = scan()
+            self.assertEqual(len(active), 1)
+            self.assertEqual(active[0]["job"]["id"], "run-3")
+            self.assertEqual(effects.report.call_count, 1)
+            w.append(registry, {"id": "success", "card": "recurring", "start": 4, "exit_code": 0})
+            self.assertEqual(scan(), [])
+
+    def test_job_success_clears_earlier_failures_and_recurrence_reopens(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        effects = Mock()
+        effects.report.return_value = {}
+        failed = {"id": "failed-1", "card": "recurring", "start": 10,
+                  "exit_code": 1, "log_tail": "synthetic failure"}
+        success = {"id": "success", "card": "recurring", "start": 20, "exit_code": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            found = w.detect({"jobs": [failed]}, config, 15)
+            key = found[0]["key"]
+            w.reconcile(root, config, found, effects, 15)
+            for jobs in ([success, failed], [failed, success]):
+                found = w.detect({"jobs": jobs}, config, 25)
+                self.assertEqual(found, [])
+                w.reconcile(root, config, found, effects, 25)
+            self.assertIsNotNone(w.read_latest(root / config["paths"]["findings"])[key]["cleared_at"])
+            later = {**failed, "id": "failed-2", "start": 30}
+            found = w.detect({"jobs": [later, success, failed]}, config, 35)
+            self.assertEqual(len(found), 1)
+            self.assertNotEqual(found[0]["key"], key)
+            w.reconcile(root, config, found, effects, 35)
+            self.assertIsNone(w.read_latest(root / config["paths"]["findings"])[found[0]["key"]]["cleared_at"])
+            self.assertEqual(effects.report.call_count, 2)
+
+    def test_identical_job_failures_collapse_by_card_and_cause(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        jobs = [{"id": f"run-{n}", "card": "branch-janitor", "start": n,
+                 "exit_code": 1, "log_tail": "repository evidence refused"} for n in (1, 2, 3)]
+        jobs += [{**jobs[-1], "id": "other-cause", "log_tail": "process evidence unavailable"},
+                 {**jobs[-1], "id": "other-job", "card": "another-job"}]
+        found = w.detect({"jobs": jobs}, config, 100)
+        self.assertEqual(len(found), 3)
+        self.assertEqual({f["job"]["id"] for f in found}, {"run-3", "other-cause", "other-job"})
+        repeated = next(f for f in found if f["job"]["id"] == "run-3")
+        next_run = w.detect({"jobs": [{**jobs[0], "id": "run-4", "start": 4}]}, config, 101)[0]
+        self.assertEqual(repeated["key"], next_run["key"])
+
     def test_ci_replacement_attempts_restore_ready_without_false_red(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
@@ -1149,13 +1266,13 @@ class StateTests(unittest.TestCase):
                 output = io.StringIO()
                 with patch.object(w, "command", side_effect=record_boundary), contextlib.redirect_stdout(output):
                     self.assertEqual(w.scan(root, c), 0)
-                self.assertEqual([p["source_note"] for p in payloads],
-                                 [f"job watchdog: synthetic-job-{index}" for index in range(3)])
-                self.assertEqual([p["body"] for p in payloads],
+                self.assertEqual([p["source_note"] for p in payloads], ["job watchdog: shared-card"] * 3)
+                self.assertCountEqual([p["body"] for p in payloads],
                                  [f"exit 7: synthetic failure {index}\nNext action: " + c["next_actions"]["job_failed"]
                                   for index in range(3)])
                 findings = w.read_latest(root / c["paths"]["findings"])
-                self.assertEqual(set(findings), {f"job_failed:synthetic-job-{index}" for index in range(3)})
+                self.assertEqual(len(findings), 3)
+                self.assertTrue(all(key.startswith("job_failed:shared-card:") for key in findings))
                 self.assertTrue(all(f["reported"] for f in findings.values()))
                 self.assertIn("Orchestrator watchdog: 3 open finding(s).", output.getvalue())
                 self.assertEqual(w.read_latest(root / c["paths"]["scan_ledger"])["scan"]["findings"], 3)
