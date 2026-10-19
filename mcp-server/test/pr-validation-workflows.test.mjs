@@ -129,7 +129,9 @@ test("strict aggregate runs after failed classes and requires complete successfu
       name: "ops/ci.sh --strict --only " + group, status: "completed", conclusion: "success" }));
     const gh = join(fixture, "gh");
     for (const evidence of [jobs, jobs.slice(0, 1)]) {
-      writeFileSync(gh, "#!/usr/bin/env node\nconsole.log(" + JSON.stringify(JSON.stringify([{ jobs: evidence }])) + ");\n");
+      writeFileSync(gh, "#!/usr/bin/env node\nconst fs = require('node:fs');\n" +
+        "process.stdout.write(" + JSON.stringify(JSON.stringify([{ jobs: evidence }]) + "\n") +
+        ", () => { fs.closeSync(1); fs.closeSync(2); setTimeout(() => {}, 100); });\n");
       chmodSync(gh, 0o755);
       for (const result of ["success", "failure", "cancelled", "skipped", "unknown", ""]) {
         const output = spawnSync("bash", ["-e", "-c", step.run], {
