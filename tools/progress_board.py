@@ -2002,13 +2002,16 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
 def legacy_card(task: dict[str, Any]) -> bool:
     created = parse_time(task.get("created_at"))
     return (created is not None and created < LEGACY_PROOF_CUTOFF
-            and task.get("pr") is None and not is_retired(task)
+            and (task.get("pr") is not None or not is_retired(task))
             and not task.get("consumer_proof") and not task.get("consumer_proofs"))
 
 
 def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
+    if task.get("pr") is not None:
+        repo, number = pr_key(task)
+        return {(repo.lower(), number)}
     refs = set()
-    text = str(task.get("title") or "") + "\n" + str(task.get("note") or "")
+    text = "\n".join(str(task.get(field) or "") for field in ("title", "note", "summary"))
     for match in LEGACY_PR_REF.finditer(text):
         if match[1]:
             repo, number = match[1], match[2]
@@ -2054,7 +2057,7 @@ def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[
                 repo, number = next(iter(refs))
                 info, error = fetched.get((repo, number), (None, "PR not read"))
                 reason = f"GitHub not verified: {error}" if error or not info else f"GitHub {info.get('state')}; keep"
-                if not error and info and not legacy_pr_matches_subject(task, info):
+                if not error and info and task.get("pr") is None and not legacy_pr_matches_subject(task, info):
                     reason = f"{repo}#{number}; PR title/files do not corroborate card subject; keep"
                 elif not error and info and info.get("state") == "MERGED" and merge_sha(info):
                     disposition = "done"
