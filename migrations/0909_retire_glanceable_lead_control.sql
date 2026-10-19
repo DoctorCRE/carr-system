@@ -1,3 +1,6 @@
+-- rollback: forward-only; restore checker source and declarations before reseeding its control.
+-- expand-contract: contract; remove the catalog row after all source callers and declarations retire it.
+-- lock-review: one primary-key catalog delete; refuse bindings and active approvals first.
 -- Source CI no longer declares or runs glanceable_lead (WR-000003).
 -- Match the guarded control retirement in 0836; retain live rule authority.
 do $$
