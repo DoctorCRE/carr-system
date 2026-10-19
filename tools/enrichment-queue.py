@@ -66,7 +66,7 @@ def plan(lane: str, data: dict[str, Any]) -> dict[str, Any]:
                     add(1, (-max(map(instant, dates)),), 'client', subject_id, 'salesforce_client')
                 elif client['status'] in {'active_deal', 'engaged'}:
                     add(2, (-instant(client['created_at']),), 'client', subject_id, 'pipeline_client')
-            if client['roster_ref'] is None:
+            if client['status'] is None or client['roster_ref'] is None:
                 add(4, (-instant(client['created_at']),), 'client', subject_id, 'identity_anomaly')
         for participant in data['participants']:
             subject_id = participant['party_id']
