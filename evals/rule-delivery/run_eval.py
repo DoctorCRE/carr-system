@@ -343,7 +343,8 @@ def replay_cards_live(world, case, *, hook=None):
             selection = {'rules': [{'id': rid, 'statement': 'frozen replay rule', 'personal_to': None}
                                    for rid in sorted(inherited)],
                          'identity': identity, 'corpus_digest': '0' * 64, 'data_defects': [],
-                         'unresolved': [], 'models': [], 'complete': True}
+                         'unresolved': [], 'models': [], 'complete': True,
+                         'selection_mode': 'deterministic'}
             output = hook.delivery_receipt(dict(payload, session_id=session), selection,
                                            case['prompt'], dedupe=True)
             row = json.loads(output['hookSpecificOutput']['additionalContext']) if output else {}

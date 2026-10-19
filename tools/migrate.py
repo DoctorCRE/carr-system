@@ -22,6 +22,7 @@ you confirm — read what it prints.
 
 Requires psycopg (pip install 'psycopg[binary]'); listed in requirements.txt.
 """
+from __future__ import annotations
 
 import argparse
 import hashlib
@@ -87,6 +88,14 @@ DATA_DEPENDENT_MIGRATIONS: dict[str, tuple[str, str]] = {
         "0272 registers the conduct-stop control from ops/config/rule-enforcement-map.json "
         "on every database; all 0248 adds here is a binding to the autonomy rule, "
         "which this database does not carry",
+    ),
+    "0897_national_account_classification_correction.sql": (
+        "select 1 from client where roster_ref in ('C-161','C-204','C-205') "
+        "or id in ('9c323aa5-b9c0-45e7-b958-ef1ee3738660'::uuid, "
+        "'8550b702-e6fb-4bea-8b3e-1fec5b9499bd'::uuid, "
+        "'2f7364a7-8167-421d-8492-79815307fba3'::uuid)",
+        "0897 corrects only the historical C-204/C-205 classifications against C-161; "
+        "none of those clients exists here, so unrelated synthetic accounts need no correction",
     ),
 }
 
@@ -442,6 +451,9 @@ create table if not exists schema_migrations (
 
 
 def fail(msg: str) -> NoReturn:
+    error_type = sys.exc_info()[0]
+    if error_type is not None:
+        print(f"{error_type.__module__}.{error_type.__name__}:", file=sys.stderr)
     print(f"ERROR: {msg}", file=sys.stderr)
     sys.exit(1)
 
