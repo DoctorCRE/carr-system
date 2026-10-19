@@ -938,11 +938,14 @@ def collect(root, config, now=None):
         dates = {}
     t = config["thresholds"]
     for repo in config["repositories"]:
+        open_branches = None
         if limited:
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
+            open_branches = {pr["head"]["ref"] for page in pages for pr in page
+                             if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
             listed = {f"{repo}#{pr['number']}" for page in pages for pr in page}
             cache = {k: v for k, v in cache.items() if k in listed or not k.startswith(repo + "#")}
@@ -966,7 +969,11 @@ def collect(root, config, now=None):
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
             error(repo + " PRs", exc, "prs")
+            if open_branches is None:
+                error(repo + " branches", exc, "branches")
         if limited:
+            continue
+        if open_branches is None:
             continue
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
@@ -995,8 +1002,7 @@ def collect(root, config, now=None):
                             dates[key] = date
                         facts["branches"].append({"repo": repo, "name": branch["name"],
                                                   "updated": date,
-                            "open_pr": any(p["repo"] == repo and p.get("headRefName") == branch["name"]
-                                           for p in facts["prs"])})
+                            "open_pr": branch["name"] in open_branches})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
