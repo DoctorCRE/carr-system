@@ -204,6 +204,27 @@ class JobCloneTests(unittest.TestCase):
         verify.assert_not_called()
         self.assertEqual(receipt['status'], 'kept')
 
+    def test_process_starting_during_final_pr_check_keeps_clone(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-race'
+        workspace.mkdir()
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        provider = fixtures.FakeProvider()
+        live = []
+        def open_pulls(repo, branch):
+            live.append(True)
+            return []
+        provider.open_pulls = open_pulls
+        result = cleanup.clean_clone(workspace, {'status': 'completed', 'checkout_path': str(clone),
+            'checkout_workspace': str(workspace), 'dispatched_at': '2020-01-01T00:00:00+00:00'},
+            provider=provider, process_probe=lambda paths: set(paths) if live else set(),
+            now=time.time(), older_than=1, dry_run=False)
+        self.assertEqual(result['status'], 'kept', result)
+        self.assertTrue(workspace.exists())
+
 
 class ThreadArchiveTests(unittest.TestCase):
     def test_native_archive_preserves_active_recent_pinned_and_live_descendants(self):

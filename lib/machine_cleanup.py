@@ -50,6 +50,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                             clone.stat().st_mtime, (clone / '.git/index').stat().st_mtime)
         if not (merged or closed or now - last_activity >= older_than):
             return keep('clean abandoned checkout younger than age limit')
+        if branch and provider.open_pulls(repo, branch):
+            return keep('open PR appeared before staging')
         busy = process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
                 identity != (workspace.stat().st_ino, clone.stat().st_ino) or
@@ -57,8 +59,6 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                 git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
                 git(clone, 'rev-list', '-1', 'HEAD', '--not', '--remotes=origin')):
             return keep('checkout became live or changed before staging')
-        if branch and provider.open_pulls(repo, branch):
-            return keep('open PR appeared before staging')
         reason = 'merged branch' if merged else 'closed PR' if closed else 'old clean pushed checkout'
         if dry_run:
             return {**result, 'status': 'would_stage', 'reason': reason}
