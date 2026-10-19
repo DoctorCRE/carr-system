@@ -11,6 +11,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from lib.hook_runtime import Verdict, decision, run
+from ops.git_env import scrubbed_env
 
 CLAIM = re.compile(
     r"\b(?:saved|added|created)\b[^.!?\n]*\b(?:rule|lesson)\b"
@@ -79,13 +80,14 @@ def enforcement_path(path):
     directory = path.parent
     while not directory.exists():
         directory = directory.parent
+    env = scrubbed_env()
     try:
         root = Path(subprocess.run(
             ['git', '-C', str(directory), 'rev-parse', '--show-toplevel'],
-            check=True, capture_output=True, text=True, timeout=5).stdout.strip()).resolve()
+            check=True, capture_output=True, text=True, timeout=5, env=env).stdout.strip()).resolve()
         origin = subprocess.run(
             ['git', '-C', str(root), 'config', '--get', 'remote.origin.url'],
-            check=True, capture_output=True, text=True, timeout=5).stdout.strip()
+            check=True, capture_output=True, text=True, timeout=5, env=env).stdout.strip()
         if re.fullmatch(r'(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)'
                         r'jbookout/carr-system(?:\.git)?/?', origin):
             return path.relative_to(root).as_posix()
