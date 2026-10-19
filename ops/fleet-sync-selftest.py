@@ -357,23 +357,22 @@ def test_concurrent_staged_landed_bytes_refuse():
     print("PASS  staged landed bytes appearing after preflight refuse and stay staged")
 
 
-def test_staging_at_merge_entry_is_excluded():
+def test_conflicting_staging_at_merge_entry_refuses():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
         head = git(b, "rev-parse", "HEAD")
-        index = git(b, "ls-files", "--stage")
-        env, marker = git_edit_env(tmp, b, "merge", "base\nnewer\n", staged=True)
+        env, marker = git_edit_env(tmp, b, "merge", "concurrent staged work\n", staged=True)
         r = run_sync(b, env)
         assert marker.exists(), "the late index writer never ran"
         assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
-        assert Path(tmp, "stage-result").read_text() != "0", "concurrent staging was accepted"
-        assert "index.lock" in r.stdout + r.stderr, r.stdout + r.stderr
-        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+        assert Path(tmp, "stage-result").read_text() == "0"
+        assert "f.txt" in r.stdout + r.stderr
+        assert Path(b, "f.txt").read_text() == "concurrent staged work\n"
+        assert git(b, "show", ":f.txt") == "concurrent staged work"
         assert git(b, "rev-parse", "HEAD") == head
-        assert git(b, "ls-files", "--stage") == index
-        assert not Path(b, ".git", "index.lock").exists(), "fleet-sync leaked its index lock"
+        assert not Path(b, ".git", "index.lock").exists()
         assert "stub installer" not in r.stdout
-    print("PASS  staging at merge entry is excluded; files, index and HEAD stay intact")
+    print("PASS  conflicting staging at merge entry refuses and stays staged")
 
 
 def test_post_merge_edit_refuses_wiring_install():
@@ -385,6 +384,7 @@ def test_post_merge_edit_refuses_wiring_install():
         r = run_sync(b)
         assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
         assert "f.txt" in r.stdout + r.stderr
+        assert "refusing wiring install" in r.stderr
         assert "stub installer" not in r.stdout
         assert Path(b, "f.txt").read_text() == "concurrent editor work\n"
         assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
@@ -436,7 +436,7 @@ def test_existing_index_lock_refuses_without_stealing():
         lock = Path(b, ".git", "index.lock")
         lock.write_bytes(b"another writer owns this lock\n")
         r = run_sync(b)
-        assert r.returncode == 78, r.stdout + r.stderr
+        assert r.returncode != 0, r.stdout + r.stderr
         assert "index.lock" in r.stdout + r.stderr
         assert lock.read_bytes() == b"another writer owns this lock\n"
         assert tracked_state(b) == before
@@ -444,7 +444,7 @@ def test_existing_index_lock_refuses_without_stealing():
     print("PASS  an existing index lock refuses without stealing or changing work")
 
 
-def test_split_index_is_published_and_lock_released():
+def test_native_merge_supports_split_index():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
         git(b, "update-index", "--split-index")
@@ -453,11 +453,10 @@ def test_split_index_is_published_and_lock_released():
         assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
         assert git(b, "status", "--porcelain", "--untracked-files=no") == ""
         assert not Path(b, ".git", "index.lock").exists()
-        assert not list(Path(b, ".git").glob("fleet-sync-index-*"))
         Path(b, "f.txt").write_text("next staged change\n")
         git(b, "add", "f.txt")
         assert git(b, "show", ":f.txt") == "next staged change"
-    print("PASS  split index publishes the merged tree and admits the next writer")
+    print("PASS  native merge keeps split index consistent and admits the next writer")
 
 
 def test_concurrent_merge_conflict_refuses_and_reports():
@@ -1067,11 +1066,11 @@ def main():
     test_landed_residue_refuses_without_restoring()
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
-    test_staging_at_merge_entry_is_excluded()
+    test_conflicting_staging_at_merge_entry_refuses()
     test_post_merge_edit_refuses_wiring_install()
     test_interrupted_sync_leaves_git_usable()
     test_existing_index_lock_refuses_without_stealing()
-    test_split_index_is_published_and_lock_released()
+    test_native_merge_supports_split_index()
     test_concurrent_merge_conflict_refuses_and_reports()
     test_ignored_incoming_collision_refuses()
     test_intermediate_landed_residue_refuses()

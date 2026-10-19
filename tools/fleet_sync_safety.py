@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import glob
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -185,36 +184,16 @@ def eligible_for_fast_forward(repo: str, incoming: str) -> tuple[bool, str]:
 
 
 def fast_forward(repo: str, incoming: str) -> tuple[int, str]:
-    """Exclude canonical index writers until the checked merge is published."""
-    located = _git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
-    if located.returncode:
-        return 1, "could not locate the canonical index"
-    index = located.stdout.strip()
-    lock = index + ".lock"
-    try:
-        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return 78, f"another Git writer holds {lock}; refusing to fast-forward"
-    os.close(descriptor)
-    try:
-        with tempfile.TemporaryDirectory(prefix="fleet-sync-index-", dir=os.path.dirname(index)) as tmp:
-            private = os.path.join(tmp, "index")
-            shutil.copyfile(index, private)
-            allowed, reason = eligible_for_fast_forward(repo, incoming)
-            if not allowed:
-                return 78, reason
-            # Keep the canonical lock present until publication. Git takes its
-            # own lock on the private index, never releasing the canonical one.
-            merged = _git_with_index(repo, private, "merge", "--ff-only",
-                                     "--no-overwrite-ignore", incoming)
-            if merged.returncode:
-                allowed, reason = eligible_for_fast_forward(repo, incoming)
-                return (1 if allowed else 78,
-                        merged.stdout + merged.stderr + ("\n" + reason if not allowed else ""))
-            os.replace(private, index)
-            return 0, merged.stdout + merged.stderr
-    finally:
-        os.unlink(lock)
+    """Check around Git's native fast-forward without owning its transaction."""
+    allowed, reason = eligible_for_fast_forward(repo, incoming)
+    if not allowed:
+        return 78, reason
+    merged = _git(repo, "merge", "--ff-only", "--no-overwrite-ignore", incoming)
+    allowed, reason = eligible_for_fast_forward(repo, incoming)
+    output = merged.stdout + merged.stderr
+    if not allowed:
+        return 78, output + "\n" + reason
+    return merged.returncode, output
 
 
 def main() -> int:
