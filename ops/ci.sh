@@ -108,22 +108,12 @@ fail_tail() {  # fail_tail <logfile>
 }
 
 check_unit() {
-  local failed_pkgs=""
-  for pkg in mcp-server control-room workspace practice-plugin; do
-    [ -f "$pkg/package.json" ] || continue
-    local unit_env=""
-    [ "$pkg" = "mcp-server" ] && unit_env="F03_PARITY_REQUIRE_PYTHON=1"
-    if ! run_quiet "$LOGDIR/unit-$pkg.log" env $unit_env npm --prefix "$pkg" test; then
-      failed_pkgs="$failed_pkgs $pkg"
-      echo "--- $pkg ---" >&2
-      tail -25 "$LOGDIR/unit-$pkg.log" >&2
-    fi
-    "$PY" ops/ci-quarantine.py report "$LOGDIR/unit-$pkg.log"
-  done
-  if [ -n "$failed_pkgs" ]; then
-    bad unit "node suites failed:$failed_pkgs"
+  if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py; then
+    cat "$LOGDIR/unit.log"
+    ok unit "required Node package checks executed"
   else
-    ok unit "Node package suites pass"
+    fail_tail "$LOGDIR/unit.log"
+    bad unit "required Node package checks failed or did not execute"
   fi
 }
 
@@ -136,6 +126,11 @@ check_freshness() {
 }
 
 check_types() {
+  if ! run_quiet "$LOGDIR/worker-types.log" npm --prefix mcp-server run typecheck; then
+    tail -25 "$LOGDIR/worker-types.log" >&2
+    bad types "Worker verb contract types failed"
+    return
+  fi
   if [ ! -x bin/type-check.sh ]; then
     skip types "bin/type-check.sh not present"
     return
@@ -144,7 +139,7 @@ check_types() {
   run_quiet "$LOGDIR/types.log" ./bin/type-check.sh
   rc=$?
   if [ "$rc" -eq 0 ]; then
-    ok types "mypy clean across the repo's Python"
+    ok types "Worker verb contracts and Python types pass"
   elif [ "$rc" -eq 78 ]; then
     local tcpy
     tcpy="$( { [ -x "$REPO/.venv/bin/python" ] && "$REPO/.venv/bin/python" -c 'import sys;print("%d.%d"%sys.version_info[:2])'; } 2>/dev/null || python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo "unknown" )"

@@ -1555,6 +1555,59 @@ export function closureProjection(facts, ToolError) {
   return projection;
 }
 
+export function engineeringProgressProjection(facts, ToolError) {
+  const work = facts.source.work_request;
+  const accepted = facts.source.accepted_plan;
+  const scope = accepted && typeof accepted.plan_ref === "string" && ID.test(accepted.plan_ref) &&
+    Number.isInteger(Number(accepted.revision)) && Number(accepted.revision) > 0 &&
+    typeof accepted.digest === "string" && DIGEST.test(accepted.digest)
+    ? { plan_ref: accepted.plan_ref, revision: Number(accepted.revision), digest: accepted.digest } : null;
+  const registered = (facts.slice_plans || []).filter(row => {
+    try {
+      const plan = requirePlan(row.plan, ToolError);
+      return typeof work.id === "string" && row.work_request_id === work.id.replace(/^wr:/, "") &&
+        plan.work_request.id === work.id &&
+        row.work_request_version === plan.work_request.state_version &&
+        row.accepted_plan_hash === plan.accepted_plan_revision.digest &&
+        row.plan_digest === plan.plan_digest && UUID.test(row.accepted_plan_id);
+    } catch (cause) {
+      if (cause instanceof ToolError) return false;
+      throw cause;
+    }
+  });
+  const history = registered.map(row => ({
+    plan_ref: row.plan.accepted_plan_revision.id,
+    revision: row.plan.accepted_plan_revision.revision,
+    digest: row.plan.accepted_plan_revision.digest,
+    total_checks: row.plan.slices.reduce((total, slice) => total + slice.planned_checks.length, 0),
+  })).sort((a, b) => a.revision - b.revision || a.plan_ref.localeCompare(b.plan_ref) || a.digest.localeCompare(b.digest));
+  const unavailable = reason => ({
+    schema: "engineering-progress.v1", work_request: work.ref, state: "unavailable", reason,
+    scope, completed: null, total: null, checks: [], history,
+  });
+  if (!accepted) return unavailable("current_accepted_plan_unavailable");
+  if (!scope) return unavailable("current_scope_binding_invalid");
+  let source;
+  try { source = sourceParts(facts.source, ToolError); }
+  catch (cause) {
+    if (cause instanceof ToolError) return unavailable("current_scope_binding_invalid");
+    throw cause;
+  }
+  const row = registered.find(item => item.accepted_plan_id === accepted.record_id && item.accepted_plan_hash === accepted.digest);
+  if (!row) return unavailable("current_registered_plan_unavailable");
+  if (!planMatchesCurrentSource(row.plan, source)) return unavailable("registered_plan_stale");
+  const passport = closureProjection({ ...facts, slice_plans: [row] }, ToolError);
+  const verifiedSlices = new Set(passport.slices.filter(slice => slice.state === "verified_complete").map(slice => slice.slice_ref));
+  const checks = row.plan.slices.flatMap(slice => slice.planned_checks.map(check => ({
+    slice_ref: slice.slice_ref, check_ref: check.check_ref, objective: slice.objective,
+    state: verifiedSlices.has(slice.slice_ref) ? "verified" : "remaining",
+  })));
+  return {
+    schema: "engineering-progress.v1", work_request: work.ref, state: "available", reason: null,
+    scope, completed: checks.filter(check => check.state === "verified").length, total: checks.length, checks, history,
+  };
+}
+
 export async function runCodexSlice({ dispatchEnvelope, desk, envelope, task }) {
   if (envelope?.server_binding?.adapter?.surface !== "codex_desktop")
     throw new Error("engineering adapter unsupported: only codex_desktop is enabled in v1");
@@ -2241,6 +2294,17 @@ export function engineeringRuntimeTools({ withEnvelope, writeEvent, ToolError })
       description: "Read the canonical typed Engineering Passport projection. Closure is derived from persisted envelopes, receipts, and independent reviewer facts; it is not a task store or authority source.",
       inputSchema: { type: "object", additionalProperties: false, properties: { work_request: { type: "string" } }, required: ["work_request"] },
       handler: async (c, _actor, args) => { const work = text(args.work_request, "work_request", ToolError); const r = await c.query("select ops.engineering_passport_facts($1::text) as facts", [work]); if (!r.rows.length || !r.rows[0].facts?.source) error(ToolError, { error: "engineering_work_request_not_found" }); return closureProjection(r.rows[0].facts, ToolError); },
+    },
+    "engineering-progress": {
+      description: "Read completed and remaining planned checks in the exact current accepted registered Engineering scope, with canonical scope revision history. Missing or stale scope returns unavailable counts. Execution retries never add planned checks.",
+      inputSchema: { type: "object", additionalProperties: false, properties: { work_request: { type: "string" } }, required: ["work_request"] },
+      handler: async (c, _actor, args) => {
+        const work = text(args.work_request, "work_request", ToolError);
+        const result = await c.query("select ops.engineering_passport_facts($1::text) as facts", [work]);
+        const facts = result.rows[0]?.facts;
+        if (!facts?.source?.work_request) error(ToolError, { error: "engineering_work_request_not_found" });
+        return engineeringProgressProjection(facts, ToolError);
+      },
     },
     "source-merge-authority": {
       description: "Resolve one merge-only authority packet from the settled decision, Joe-accepted plan-hash file scope, and current unsuperseded Engineering receipt/reviewer generations through a reader-safe security-definer projection. Lease and assurance claims remain non-authorizing evidence and cannot add scope. The caller supplies only immutable locators plus exact PR identity.",
