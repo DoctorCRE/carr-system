@@ -3166,6 +3166,7 @@ class CandidateStaging(Base):
         def run(argv, *, cwd, **kwargs):
             if argv == ["npm", "run", "build"]:
                 roots.append(cwd.parent)
+                self.assertTrue((cwd / ".git").is_dir(), "build must not link back to the source repository")
                 self.assertFalse(cwd.resolve().is_relative_to(pipe.store.root.resolve()))
                 self.assertFalse(any((parent / "toolchain").exists() for parent in cwd.parents))
             return original(argv, cwd=cwd, **kwargs)
