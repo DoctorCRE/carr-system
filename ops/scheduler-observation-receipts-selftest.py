@@ -201,6 +201,22 @@ class ObservationTests(unittest.TestCase):
                 with self.assertRaises(CutoverRefusal):
                     self.collect(changed)
 
+    def test_source_change_while_reading_workflow_refuses_receipt(self):
+        from lib.control_plane_scheduler_cutover import CutoverRefusal
+        workflow_path = self.repo / 'ops/config/control-plane-workflows.v1.json'
+        read_text = Path.read_text
+        def advance_source(path, *args, **kwargs):
+            text = read_text(path, *args, **kwargs)
+            if path == workflow_path:
+                document = json.loads(text)
+                document['workflows'][0].update(version=8, enabled=False)
+                path.write_text(json.dumps(document))
+                self.revision = 'b' * 40
+            return text
+        with patch.object(Path, 'read_text', advance_source):
+            with self.assertRaisesRegex(CutoverRefusal, 'source revision changed'):
+                self.collect()
+
     def test_unavailable_hardware_or_launchctl_refuses_receipt(self):
         from lib.control_plane_scheduler_cutover import CutoverRefusal
         for executable in ['/usr/sbin/ioreg', '/bin/launchctl']:
