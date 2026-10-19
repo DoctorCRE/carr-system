@@ -52,9 +52,10 @@ def task_text(payload):
         if not isinstance(agent, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', agent):
             raise ValueError('invalid_agent_id')
         child_name = f'agent-{agent}.jsonl'
-        native_child = (payload.get('turn_id') and path.name.startswith('rollout-')
-                        and path.name.endswith(f'-{agent}.jsonl'))
-        if path.name != child_name and not native_child:
+        if payload.get('turn_id') and path.name.startswith('rollout-'):
+            if not path.name.endswith(f'-{agent}.jsonl'):
+                raise ValueError('agent_transcript_mismatch')
+        elif path.name != child_name:
             path = path.with_suffix('') / 'subagents' / child_name
     for line in _transcript_lines(path):
         if not line.strip():
