@@ -1247,6 +1247,37 @@ class RcAssignedOnlyViaRed(unittest.TestCase):
 
 
 class FeatureSwitchFindings(unittest.TestCase):
+    def test_pending_deploy_is_soft_but_unknown_and_execution_failures_stay_hard(self):
+        import contextlib
+        import io
+        import os
+        import subprocess
+        import sys
+        from unittest.mock import patch
+        section = next(node for node in _find_function('_canonical_health').body
+                       if isinstance(node, ast.If) and node.body
+                       and isinstance(node.body[0], ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == 'feature_command'
+                               for target in node.body[0].targets))
+        cases = [
+            (subprocess.CompletedProcess([], 3, 'WARN check-feature-switches pending deploy'), 'feature_switch_pending_deploy', False),
+            (subprocess.CompletedProcess([], 2, 'UNKNOWN feature switches: HTTP 401'), 'feature_switch_unreadable', True),
+            (subprocess.CompletedProcess([], 2, 'UNKNOWN feature switches: fetch failed'), 'feature_switch_unreadable', True),
+            (subprocess.TimeoutExpired('feature-health', 35), 'feature_switch_unreadable', True),
+            (OSError('cannot start reader'), 'feature_switch_unreadable', True),
+        ]
+        for response, key, hard_error in cases:
+            with self.subTest(key=key, response=response):
+                ns = _load_finding_and_red_functions()
+                ns.update(rc=0, CANONICAL_SECTION='registry', CANONICAL_FIXTURE=None,
+                          REPO_ROOT=str(HEALTH_CHECK_PATH.parent.parent), os=os, sys=sys, subprocess=subprocess)
+                option = {'side_effect': response} if isinstance(response, Exception) else {'return_value': response}
+                with patch.object(subprocess, 'run', **option), contextlib.redirect_stdout(io.StringIO()):
+                    exec(compile(ast.Module(body=[section], type_ignores=[]), str(HEALTH_CHECK_PATH), 'exec'), ns)
+                self.assertEqual(ns['rc'], 1)
+                self.assertEqual(ns['_FINDINGS'][0]['key'], key)
+                self.assertIs(ns['_FINDINGS'][0]['hard_error'], hard_error)
+
     def test_cli_results_map_to_business_or_unreadable_findings(self):
         import contextlib
         import io

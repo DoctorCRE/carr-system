@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 import subprocess
 import uuid
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from lib.record_call import REFUSED, call_verb
 
 BOUND='on breach: create/update deduplicated owner loop; retire and remove gates after review or record a reviewed future date; verify list-feature-switches and consumer tests; auto-clear when retired or no longer overdue'
 
@@ -28,14 +33,19 @@ def main():
                 raise ValueError('feature switch fixture unavailable')
             payload=fixture.get('feature_switches')
         else:
-            root=Path(__file__).resolve().parents[1]
-            result=subprocess.run([str(root/'run.sh'),'call','check-feature-switches',json.dumps({'idempotency_key':str(uuid.uuid4())})],
-                cwd=root,capture_output=True,text=True,timeout=30,check=True)
-            payload=json.loads(result.stdout)
+            result=call_verb('check-feature-switches', {'idempotency_key':str(uuid.uuid4())}, timeout=30)
+            if (result.kind == REFUSED and result.error == 'unknown_tool'
+                    and isinstance(result.reply, dict)
+                    and result.reply.get('name') == 'check-feature-switches'):
+                print(f'WARN feature switches: check-feature-switches pending deploy · {BOUND}; verify the verb after Worker promotion.')
+                return 3
+            if not result.ok:
+                raise ValueError(result.describe())
+            payload=result.reply
         code,lines=render(payload)
         for line in lines:print(line)
         return code
-    except (ValueError,TypeError,KeyError,OSError,subprocess.SubprocessError):
-        print(f'UNKNOWN feature switches: check unavailable · {BOUND}; retry the record check before reporting a count.')
+    except (ValueError,TypeError,KeyError,OSError,subprocess.SubprocessError) as exc:
+        print(f'UNKNOWN feature switches: {exc} · {BOUND}; retry the record check before reporting a count.')
         return 2
 if __name__=='__main__':raise SystemExit(main())

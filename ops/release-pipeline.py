@@ -2687,7 +2687,9 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     until it is fixed). A count that FELL, or is unchanged, is not a
     regression — improvement and no-op are both allowed to pass, which is
     the whole point of diffing against a baseline instead of failing on any
-    standing finding.
+    standing finding. A feature_switch_pending_deploy finding is permitted
+    only before promotion: the candidate source registers the required verb,
+    so its continued absence after promotion always fails.
 
     `excused` is every live finding whose key is on `HEALTH_REGRESSION_
     FIRST_APPEARANCE_ALLOWLIST` (`export_receipt`'s STALE variant,
@@ -2753,6 +2755,9 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
         detail = row.get("detail", "")
         if row.get("hard_error"):
             bad.append(f"{row['key']}[{row['subject']}]: hard_error — {detail}")
+            continue
+        if row["key"] == "feature_switch_pending_deploy":
+            bad.append(f"{row['key']}[{row['subject']}]: required verb still pending deploy after promotion — {detail}")
             continue
         prior = baseline_by_key_subject.get((row["key"], row["subject"], bool(row.get("time_rolling"))))
         if row.get("time_rolling"):

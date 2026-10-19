@@ -52,6 +52,17 @@ class FailoverTests(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_current_manifest_contract_has_only_retained_job_templates(self):
+        from lib.studio_failover_health import contract_hash
+        from lib.studio_failover import plan
+        digest = contract_hash(ROOT)
+        self.assertRegex(digest, r'^[a-f0-9]{64}$')
+        config = json.loads((ROOT / 'ops/config/studio-failover.v1.json').read_text())
+        installed = {step.get('label') for step in plan(config, {}, 'macbook')['steps']
+                     if step['action'] == 'install'}
+        self.assertNotIn('com.carr.cutover-watch', installed)
+        self.assertNotIn('com.carr.timebomb-audit', installed)
+
     def test_missing_canonical_template_does_not_hide_missing_executable(self):
         module = self.host_module()
         with tempfile.TemporaryDirectory() as raw:

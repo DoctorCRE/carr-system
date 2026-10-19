@@ -117,7 +117,8 @@ def call_verb(verb: str, args: Mapping[str, Any], *, timeout: float | None = 120
                 return VerbResult(verb, REFUSED, detail=line(stderr))
             return VerbResult(verb, REFUSED, reply=payload, detail=line(json.dumps(payload)))
         kind = TRANSIENT if _TRANSIENT.search(stderr) else FAILED
-        return VerbResult(verb, kind, detail=line(stderr or stdout) or f"exit {proc.returncode}")
+        cause = next((row for row in stderr.splitlines() if _TRANSIENT.search(row)), stderr or stdout)
+        return VerbResult(verb, kind, detail=line(cause) or f"exit {proc.returncode}")
 
     body = _json(stdout)
     if body is _UNPARSED:
