@@ -397,7 +397,8 @@ class ReaperTests(unittest.TestCase):
         launchctl.chmod(0o700)
         result = subprocess.run([sys.executable, str(ROOT / 'ops/config-as-code.py'),
             'reinstall-launchd-calendar', '--templates', str(templates), '--launch-agents', str(agents),
-            '--launchctl', str(launchctl), '--apply'], capture_output=True, text=True, timeout=30)
+            '--launchctl', str(launchctl), '--apply'], capture_output=True, text=True, timeout=30,
+            env=dict(ENV, HOME=str(self.repo)))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((agents / name).read_text(), installer.concrete(source))
         self.assertIn('bootstrap', log.read_text())

@@ -270,7 +270,7 @@ def main() -> int:
           and staging_seat.key != credential.profile("writer").key
           and staging_seat.paths.final != credential.profile("writer").paths.final)
     foundation_seat = credential.profile("foundation_assurance_oracle")
-    check("the Foundation assurance seat credential is a fourth isolated staging profile",
+    check("the Foundation assurance seat credential is isolated from other staging profiles",
           foundation_seat.role_name == "carr_foundation_assurance_oracle"
           and foundation_seat.bundle_role == "carr_foundation_assurance_oracle"
           and "STAGING" in foundation_seat.key

@@ -32,6 +32,7 @@ import { executeRegisteredTool } from "./tools.js";
 import { readDealWithJev } from "./jev-deal-reading.js";
 import { callTool } from "./mcp.js";
 import { isStagingBrowserEnvironment } from "./staging-browser.js";
+import { prepareStagingLoopFixtures } from "./staging-loop-fixtures.js";
 
 export const DEALROOM_ASSET_DIRECTORY = "../out/doctorcre-artifacts/current"; // mirrors wrangler.toml [assets]
 
@@ -407,6 +408,8 @@ async function e2eSession(request, env, dependencies) {
   const suppliedOrigin = request.headers.get("origin");
   if (suppliedOrigin && suppliedOrigin !== dealroomOrigin(env)) return json({ error: "forbidden" }, 403);
   if (new URL(request.url).search || await request.text() !== "") return json({ error: "invalid_request" }, 400);
+  try { await dependencies.prepareE2eSessionFn(env); }
+  catch { return json({ error: "e2e_fixture_unavailable" }, 503); }
   // Staging's Joe row is synthetic. Keep its existing partner semantics and
   // record the E2E principal separately so no read model needs an identity alias.
   const props = dependencies.propsForSlugFn("joe", { via: "dealroom-cookie", client_id: "dealroom-pwa" });
@@ -1132,6 +1135,7 @@ export function createDealroomHandler(overrides = {}) {
     verifyGoogleIdTokenFn: verifyGoogleIdToken,
     slugForEmailFn: slugForEmail,
     propsForSlugFn: propsForSlug,
+    prepareE2eSessionFn: prepareStagingLoopFixtures,
     // The Deal Room session surface builds an actor from grant props and needs
     // no receipt identity, so it presents no server witness and the actor it
     // gets back is deliberately unbranded (identity.js, amendment 8).
