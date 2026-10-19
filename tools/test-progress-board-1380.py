@@ -68,11 +68,11 @@ class EvidenceFreeLegacyRecordIsNotLive(unittest.TestCase):
                 self.assertNotEqual(board.task_stage(task), "live")
                 self.assertIsNone(board.completed_at(task))
 
-    def test_legacy_measured_with_evidence_is_still_live(self):
+    def test_legacy_measured_with_prose_stays_pending(self):
         task = {"status": "done", "pr": 42, "stage": "measured", "evidence": "Readback observed",
                 "updated_at": "2026-09-28T10:00:00+00:00"}
-        self.assertEqual(board.task_stage(task), "live")
-        self.assertIsNotNone(board.completed_at(task))
+        self.assertNotEqual(board.task_stage(task), "live")
+        self.assertIsNone(board.completed_at(task))
 
 
 if __name__ == "__main__":

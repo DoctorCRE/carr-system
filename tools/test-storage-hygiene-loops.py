@@ -14,6 +14,7 @@ import re
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +114,9 @@ class StorageHygieneLoopTests(unittest.TestCase):
 
         def fake_call(verb, args, timeout=None):
             calls.append((verb, dict(args)))
-            return Result({"version": 7} if verb == "read-loop" else {})
+            return Result({"loop": {"loop_id": "loop-1", "version": 7},
+                           "amended": False, "amendments": []}
+                          if verb == "read-loop" else {})
 
         import lib.record_call as rc
         original = rc.call_verb
@@ -127,6 +130,28 @@ class StorageHygieneLoopTests(unittest.TestCase):
         updates = [a for v, a in calls if v == "update-loop"]
         self.assertEqual([u["base_version"] for u in updates], [7, 7])
         self.assertNotEqual(updates[0]["idempotency_key"], updates[1]["idempotency_key"])
+
+    def test_refresh_refuses_malformed_read_before_writing(self):
+        from lib.record_call import VerbResult
+        for reply in (None, {}, {"version": 7}, {"loop": None},
+                      {"loop": {"version": "7"}}, {"loop": {"version": True}}):
+            with self.subTest(reply=reply), patch('lib.record_call.call_verb',
+                    return_value=VerbResult('read-loop', 'ok', reply)) as call:
+                answer = sh._update_finding({"loop_id": "loop-1"}, "new facts")
+                self.assertFalse(answer["ok"])
+                self.assertEqual(answer["status"], "refused")
+                self.assertIn('loop.version', answer["detail"])
+                call.assert_called_once_with('read-loop', {"loop_id": "loop-1"}, timeout=30)
+
+    def test_refresh_preserves_read_failure_without_writing(self):
+        from lib.record_call import VerbResult
+        with patch('lib.record_call.call_verb', return_value=VerbResult(
+                'read-loop', 'transient', detail='unavailable')) as call:
+            answer = sh._update_finding({"loop_id": "loop-1"}, "new facts")
+        self.assertFalse(answer["ok"])
+        self.assertEqual(answer["status"], "transient")
+        self.assertIn('unavailable', answer["detail"])
+        self.assertEqual(call.call_count, 1)
 
     def test_ledger_carries_the_creation_payload_across_runs(self):
         self.run_once(plan(removable=1))

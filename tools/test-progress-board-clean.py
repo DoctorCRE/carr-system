@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import progress_board as board
+from progress_board_test_support import exercise_fields
 
 AT = datetime(2026, 10, 5, 12, tzinfo=timezone.utc)
 REPO = board.DEFAULT_PR_REPO
@@ -82,7 +83,7 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(state, original)
         self.assertEqual(set(result["tasks"]), {"pr-1", "pr-2", "pr-3"})
         self.assertEqual(result["tasks"]["pr-1"]["stage"], "merged")
-        self.assertEqual(result["tasks"]["pr-1"]["status"], "done")
+        self.assertEqual(result["tasks"]["pr-1"]["status"], "review")
         self.assertEqual(result["tasks"]["pr-1"]["evidence"], "preserve")
         self.assertIn("pr-2", board.board_snapshot(result)["history"])
         self.assertTrue(report["check_passed"])
@@ -178,7 +179,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_counts_cover_trimmed_cards_and_follow_the_published_stale_rule(self):
         state = {"project": "test", "tasks": {
-            "a": {"status": "done", "title": "x" * 4000, "updated_at": "2026-10-05T11:00:00Z"},
+            "a": {**exercise_fields(), "status": "done", "title": "x" * 4000, "updated_at": "2026-10-05T11:00:00Z"},
             "b": {"status": "running", "updated_at": "2026-09-01T00:00:00Z"},
         }}
         with patch.object(board, "SNAPSHOT_BUDGET", 2500), patch.object(board, "now_utc", return_value=AT), \
@@ -191,12 +192,12 @@ class CleanupTests(unittest.TestCase):
 
     def test_milestone_completion_remains_visible_under_payload_trimming(self):
         state = {"project": "test", "tasks": {
-            "v1": {"status": "done", "stage": "live", "milestone": "V1", "evidence": "release", "title": "V1 slice"},
-            "old": {"status": "done", "title": "x" * 4000},
+            "v1": {**exercise_fields(), "status": "done", "stage": "live", "milestone": "V1", "evidence": "release", "title": "V1 slice"},
+            "old": {**exercise_fields(), "status": "done", "title": "x" * 4000},
         }}
-        with patch.object(board, "SNAPSHOT_BUDGET", 2000):
+        with patch.object(board, "SNAPSHOT_BUDGET", 3000):
             snapshot = board.board_snapshot(state, costs={})
-        self.assertLessEqual(board.snapshot_size(snapshot), 2000)
+        self.assertLessEqual(board.snapshot_size(snapshot), 3000)
         self.assertEqual(set(snapshot["tasks"]), {"v1"})
         self.assertEqual(snapshot["milestones"]["V1"]["tasks"], ["v1"])
         self.assertEqual(snapshot["omitted"]["live"], 1)
@@ -224,7 +225,7 @@ class CleanupTests(unittest.TestCase):
         groups = board.board_snapshot(result)["milestones"]
         self.assertEqual(groups["V1"]["counts"], {"waiting_on_release": 1, "review": 1})
         self.assertEqual(set(groups["V1"]["tasks"]), {"pr-3", "pr-15"})
-        result["tasks"]["pr-15"].update(stage="live", evidence="Verified release")
+        result["tasks"]["pr-15"].update(**exercise_fields("b" * 40), stage="live", evidence="Verified release")
         self.assertEqual(board.board_snapshot(result)["milestones"]["V1"]["counts"]["live"], 1)
 
 
@@ -260,7 +261,8 @@ class DiscoveryRenderTests(BoardFileCase):
         self.assertEqual(set(tasks), {"pr-15", "app-pr-3"})
         self.assertEqual(tasks["pr-15"]["delivery_target"], board.AUTOMATIC_DELIVERY_TARGETS[REPO])
         self.assertEqual(tasks["app-pr-3"]["delivery_target"], board.AUTOMATIC_DELIVERY_TARGETS[app])
-        self.assertEqual((tasks["pr-15"]["stage"], tasks["pr-15"]["evidence"]), ("live", "verified #15"))
+        self.assertEqual(tasks["pr-15"]["stage"], "merged")
+        self.assertIn("consumer proof", tasks["pr-15"]["release_wait"])
         self.assertEqual(tasks["app-pr-3"]["milestone"], "V1")
 
     def test_discovery_failure_marks_sync_stale_and_keeps_last_verified(self):
