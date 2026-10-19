@@ -3176,6 +3176,21 @@ class CandidateStaging(Base):
         self.assertEqual(journal["prior"]["provider_version_id"], PRIOR)
         self.assertEqual(pipe.store.state_path.read_bytes(), checkpoint)
 
+    def test_new_production_main_keeps_recorded_restore_and_restage_available(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        main = self.release_new_main(replace_staging=False)
+        checkpoint = pipe.store.state_path.read_bytes()
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(self.live["source_commit"], self.fx.base)
+        self.assertEqual(self.live["provider_version_id"], PRIOR_APP)
+        pipe = self.candidate_pipe(resume=True)
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=main), 0)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"]["source_commit"], self.fx.base)
+        self.assertEqual(pipe.store.state_path.read_bytes(), checkpoint)
+
     def test_unowned_same_sha_version_must_not_be_rolled_back(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
