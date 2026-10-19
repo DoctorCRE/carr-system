@@ -444,18 +444,9 @@ class FleetReaper:
                 if str(path.resolve()) in protected_paths or "_to_delete" in path.parts or entry.get("locked"):
                     yield self.worktree_row(repo, root, entry, main, {}, busy, protected_paths)
                     continue
-                branch_pulls = pulls if pulls is not None else self.provider.branch_pulls(repo, entry.get("branch", ""))
-                related = [p for p in branch_pulls if p["head"]["ref"] == entry.get("branch") and
-                           (p["head"].get("repo") or {}).get("full_name") == repo]
-                classification = branch_verdict(
-                    merged=self.ancestor(root, entry.get("head", ""), main), successor=None,
-                    open_pr=any(p["state"] == "open" for p in related), idle=True)
-                associated = {entry.get("branch"): [{"head": entry.get("head"), "class": classification,
-                    "retire_pr": next((p["number"] for p in related if p["state"] == "closed" and
-                                       p["head"]["sha"] == entry.get("head")), None)}]}
-                yield self.worktree_row(repo, root, entry, main, associated, busy, protected_paths)
+                yield self.worktree_row(repo, root, entry, main, None, busy, protected_paths, pulls=pulls)
 
-    def worktree_row(self, repo, root, entry, main, by_branch, busy, protected_paths):
+    def worktree_row(self, repo, root, entry, main, by_branch, busy, protected_paths, *, pulls=None):
         path = Path(entry["path"]).resolve()
         row = {"kind": "worktree", "repo": repo, "path": str(path), "head": entry.get("head"),
                "branch": entry.get("branch"), "detached": bool(entry.get("detached")), "canonical": path == root,
@@ -474,27 +465,38 @@ class FleetReaper:
             status = git(path, "status", "--porcelain=v1", "--untracked-files=all")
             row["status"] = status
             row["ownership"] = self.ownership_probe(path)
-            associated = by_branch.get(entry.get("branch"), [])
-            row["retire_pr"] = next((r.get("retire_pr") for r in associated if r.get("retire_pr")), None)
-            classification = next((r["class"] for r in associated if r["head"] == entry.get("head")),
-                                  "merged" if self.ancestor(root, entry.get("head", ""), main) else "abandoned")
             if status:
                 reasons.append("uncommitted work")
             elif git(path, "rev-list", "-1", "HEAD", "--not", "--remotes=origin"):
                 reasons.append("unpushed work")
             elif index_age is None or tree_age is None or min(index_age, tree_age) < self.tree_idle:
                 reasons.append("recent writes or unknown age")
-            elif classification == "live":
-                reasons.append("open PR or recent commits")
-            elif row["ownership"] == "owned":
-                reasons.append("session owns work")
-            elif classification != "merged" and not any(r.get("retire_pr") for r in associated) and min(index_age, tree_age) < self.config.get("machine_cleanup", {}).get("checkout_age_seconds", 7 * 86400):
-                reasons.append("clean abandoned tree younger than seven days")
-            elif entry.get("detached") and classification != "merged":
-                reasons.append("detached work without a surviving branch")
             else:
-                row["content"] = self.work_content(path)
-                row.update({"class": classification, "action": "stage_worktree"})
+                if by_branch is None:
+                    branch_pulls = pulls if pulls is not None else self.provider.branch_pulls(repo, entry.get("branch", ""))
+                    related = [p for p in branch_pulls if p["head"]["ref"] == entry.get("branch") and
+                               (p["head"].get("repo") or {}).get("full_name") == repo]
+                    classification = branch_verdict(
+                        merged=self.ancestor(root, entry.get("head", ""), main), successor=None,
+                        open_pr=any(p["state"] == "open" for p in related), idle=True)
+                    by_branch = {entry.get("branch"): [{"head": entry.get("head"), "class": classification,
+                        "retire_pr": next((p["number"] for p in related if p["state"] == "closed" and
+                                           p["head"]["sha"] == entry.get("head")), None)}]}
+                associated = by_branch.get(entry.get("branch"), [])
+                row["retire_pr"] = next((r.get("retire_pr") for r in associated if r.get("retire_pr")), None)
+                classification = next((r["class"] for r in associated if r["head"] == entry.get("head")),
+                                      "merged" if self.ancestor(root, entry.get("head", ""), main) else "abandoned")
+                if classification == "live":
+                    reasons.append("open PR or recent commits")
+                elif row["ownership"] == "owned":
+                    reasons.append("session owns work")
+                elif classification != "merged" and not any(r.get("retire_pr") for r in associated) and min(index_age, tree_age) < self.config.get("machine_cleanup", {}).get("checkout_age_seconds", 7 * 86400):
+                    reasons.append("clean abandoned tree younger than seven days")
+                elif entry.get("detached") and classification != "merged":
+                    reasons.append("detached work without a surviving branch")
+                else:
+                    row["content"] = self.work_content(path)
+                    row.update({"class": classification, "action": "stage_worktree"})
         row["reason"] = "; ".join(reasons) or "idle with recoverable branch and no live owner"
         return row
 
