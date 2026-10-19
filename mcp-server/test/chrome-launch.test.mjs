@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHROME_STOP_TIMEOUT_MS, launchChrome, processTreeStopsWithin } from "../../dealroom/test/chrome-launch.mjs";
+import { CHROME_STOP_TIMEOUT_MS, launchChrome, launchTestChrome, processTreeStopsWithin } from "../../dealroom/test/chrome-launch.mjs";
 
 const fixture = new URL("./fixtures/chrome-launch-fixture.mjs", import.meta.url);
 const nativeKill = process.kill.bind(process);
@@ -389,4 +390,33 @@ test("fake Chrome after hooks leave no fixture process alive", async (t) => {
   });
   assert.ok(pids.every((pid) => !processAlive(pid)), `fixture processes survived: ${pids.filter(processAlive).join(", ")}`);
   assert.ok(profiles.every((profile) => !existsSync(profile)), "fake Chrome profiles survive after-hook cleanup");
+});
+
+
+test("test-owned Chrome closes after an assertion fails without caller cleanup", { timeout: 10000 }, async () => {
+  const source = `
+    import test from 'node:test';
+    import { spawn } from 'node:child_process';
+    import { launchTestChrome } from ${JSON.stringify(new URL('../../dealroom/test/chrome-launch.mjs', import.meta.url).href)};
+    test('intentional failure', async t => {
+      await launchTestChrome(t, 'fake-chrome', { timeoutMs: 1500, spawnChrome(binary, args, options) {
+        const profile = args.find(arg => arg.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
+        const child = spawn(process.execPath, [${JSON.stringify(fixture.pathname)}, profile, 'ready'], options);
+        console.log('browser-pid=' + child.pid);
+        return child;
+      }});
+      throw new Error('intentional teardown probe');
+    });`;
+  let result;
+  try { await promisify(execFile)(process.execPath, ["--input-type=module", "--eval", source], { timeout: 5000 }); }
+  catch (error) { result = error; }
+  const pid = Number(result?.stdout?.match(/browser-pid=(\d+)/)?.[1]);
+  try {
+    assert.equal(result?.code, 1, result?.stdout);
+    assert.match(result.stdout, /intentional teardown probe/);
+    assert.ok(pid > 0, result.stdout);
+    assert.equal(processAlive(pid), false);
+  } finally {
+    if (pid > 0 && processAlive(pid)) nativeKill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+  }
 });
