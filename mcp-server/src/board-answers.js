@@ -112,7 +112,7 @@ export function boardAnswerTools({ withEnvelope: envelope, writeEvent }) {
         const board = ref(args.board_id, "board_id");
         version(args.base_version);
         if (!args.snapshot || Array.isArray(args.snapshot) || typeof args.snapshot !== "object" ||
-            JSON.stringify(args.snapshot).length > 262144)
+            JSON.stringify(args.snapshot).length > (args.snapshot.schema === "carr-progress-board.v4" ? 2097152 : 262144))
           throw new ToolError({ error: "board_snapshot_invalid" });
         const principal = sponsor(actor);
         return withEnvelope(c, actor, "publish-board-snapshot", args, async () => {
