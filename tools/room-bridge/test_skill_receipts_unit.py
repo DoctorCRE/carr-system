@@ -254,6 +254,62 @@ class SkillReceiptTests(unittest.TestCase):
                     dispatch.finish_skill_receipt({**row, **changes})
                 gh.assert_not_called()
 
+    def test_async_completion_uses_the_terminal_message_and_retries_the_saved_window(self):
+        start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02.500000Z'
+        pr = 'https://github.com/jbookout/carr-system/pull/2000'
+        row = {'msg_id': 'job', 'status': 'delivered', 'kind': 'claude-session',
+               'dispatched_at': start, 'session_id': 'own-session'}
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory) / 'results.jsonl'
+            results.write_text(json.dumps(row) + '\n')
+            transcript = Path(directory) / 'session.jsonl'
+            final = {'timestamp': end, 'type': 'assistant', 'message': {'stop_reason': 'end_turn',
+                'content': [{'type': 'text', 'text': pr}]}}
+            transcript.write_text('\n'.join(json.dumps(event) for event in [final,
+                *self.codex('cat /skills/tdd/SKILL.md', stamp='2026-10-19T15:00:03Z')]))
+            def fail_after_boundary_saved(*args, **kwargs):
+                saved = json.loads(dispatch._skill_ledger(results).read_text().splitlines()[-1])
+                self.assertEqual(saved['completed_at'], end)
+                raise ValueError('publication failed')
+            with patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch, '_skill_gh', side_effect=fail_after_boundary_saved):
+                dispatch.finish_pending_skill_receipt({'dispatch_msg_id': 'job'}, pr,
+                    Path(directory) / 'log', results_path=results)
+            with transcript.open('a') as handle:
+                handle.write('\n' + json.dumps({**final, 'timestamp': '2026-10-19T16:00:00Z'}))
+            with patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch, '_now') as now, \
+                 patch.object(dispatch, '_execute') as execute, \
+                 patch.object(dispatch, '_skill_gh', side_effect=[
+                     {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
+                     {'html_url': pr + '#issuecomment-1'}, {}]):
+                self.assertEqual(dispatch.main(['--results', str(results), 'receipt', 'job',
+                    '--session-id', 'own-session', '--pr', pr]), 0)
+            now.assert_not_called()
+            execute.assert_not_called()
+            saved = json.loads(dispatch._skill_ledger(results).read_text().splitlines()[-1])
+            self.assertEqual(saved['completed_at'], end)
+            self.assertFalse(saved['skill_receipt']['skills'][0]['opened'])
+
+    def test_completion_time_matches_the_first_terminal_reply_after_dispatch(self):
+        start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02Z'
+        for final in (
+            {'type': 'assistant', 'message': {'stop_reason': 'end_turn',
+                'content': [{'type': 'text', 'text': ' done ' }]}},
+            {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant',
+                'channel': 'final', 'content': [{'type': 'output_text', 'text': 'done'}]}},
+        ):
+            with self.subTest(final=final), tempfile.TemporaryDirectory() as directory:
+                transcript = Path(directory) / 'session.jsonl'
+                transcript.write_text('\n'.join(json.dumps(event) for event in (
+                    {**final, 'timestamp': '2026-10-19T14:00:00Z'},
+                    {**final, 'timestamp': end},
+                    {**final, 'timestamp': '2026-10-19T16:00:00Z'})))
+                self.assertEqual(skill_receipts.completion_time(transcript, since=start, result='done'), end)
+                self.assertIsNone(skill_receipts.completion_time(transcript, since=start, result='other'))
+                transcript.write_text(json.dumps(final))
+                self.assertIsNone(skill_receipts.completion_time(transcript, since=start, result='done'))
+
     def test_delivery_is_not_completion(self):
         with patch.object(dispatch, '_skill_gh') as gh:
             self.assertIsNone(dispatch.finish_skill_receipt({'status': 'delivered'}))
