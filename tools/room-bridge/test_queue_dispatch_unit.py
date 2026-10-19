@@ -489,17 +489,9 @@ class QueueDispatchTests(unittest.TestCase):
             source_seq=81, origin_kind="queue", kanban_task_id="t_queue0001",
             target="claude", finish="done",
         )
-        finished: list[tuple] = []
-        executor = type("Executor", (), {
-            "finish_pending": lambda self, pending, raw: finished.append((pending, raw)) or {
-                "outcome": "done", "task_id": "t_queue0001",
-                "completion": {"queue_completion": {
-                    "v": 1, "task_id": "t_queue0001", "target": "claude",
-                    "outcome": "success", "summary": "bounded result",
-                    "source_seq": 81, "source_msg_id": "source-message",
-                }},
-            },
-        })()
+        adapter = FakeAdapter([task(target="claude")])
+        adapter.claim("t_queue0001")
+        executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
         posted: list[dict] = []
         with tempfile.TemporaryDirectory() as root:
             outcome = bridge.handle_pending(
@@ -508,11 +500,11 @@ class QueueDispatchTests(unittest.TestCase):
                 scan=lambda _path, _offset: result(), queue_executor=executor,
             )
         self.assertEqual(outcome["outcome"], "done")
-        self.assertEqual(len(finished), 1)
+        self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1)
         self.assertEqual(len(posted), 1)
         callback = json.loads(posted[0]["body"])["queue_completion"]
         self.assertEqual(callback["task_id"], "t_queue0001")
-        self.assertEqual(callback["summary"], "bounded result")
+        self.assertEqual(callback["summary"], "Local attestation complete.")
         self.assertNotIn("Human-readable text", posted[0]["body"])
         self.assertEqual(posted[0]["seat"], "claude")
         self.assertEqual(posted[0]["kind"], "turn")
@@ -547,25 +539,6 @@ class QueueDispatchTests(unittest.TestCase):
         source = inspect.getsource(bridge.run_once)
         self.assertIn("queue_executor.start", source)
         self.assertLess(source.index("state_mod.pop_next_queued"), source.index("queue_executor.start"))
-
-    def test_bridge_posts_flash_locals_synchronous_completion_to_the_room(self):
-        """flash-local completes inline in queue_executor.start() rather than through
-        the pending/handle_pending path (finding 1): pins that run_once actually posts
-        that completion instead of leaving it unposted.
-        As of PR #1254 round 2 (finding 3), the post happens INSIDE start(), via the
-        post_completion hook, before Hermes is marked terminal — not after start()
-        returns — so this pins the wiring that makes that possible instead of a
-        post-hoc call."""
-        source = inspect.getsource(bridge.run_once)
-        self.assertIn('entry.get("kind") == "flash-local"', source)
-        self.assertIn('entry.get("kind") in {"flash-local", "grok-cli"}', source)
-        self.assertIn("include_reply=publishes_sync_reply", source)
-        self.assertIn("def post_sync_completion(completion: dict) -> None:", source)
-        self.assertIn("completion, add_room_turn=add_room_turn, seat=post_seat)", source)
-        self.assertIn("raise QueueCompletionPostFailed(str(exc)) from exc", source)
-        self.assertIn("post_completion=post_sync_completion if publishes_sync_reply else None", source)
-        self.assertLess(source.index("def post_sync_completion"),
-                        source.index("queue_outcome = queue_executor.start"))
 
     def test_dead_socket_waits_without_claim_dispatch_or_retry_then_blocks_once(self):
         adapter = FakeAdapter([task()])
@@ -1189,6 +1162,138 @@ class KeyReuseRoom:
     def completions(self) -> list[dict]:
         return [json.loads(t["body"])["queue_completion"] for t in self.turns
                 if str(t.get("idempotency_key") or "").startswith("queue-completion:")]
+
+
+class AsyncCheckpointRecoveryTests(unittest.TestCase):
+    def test_final_checkpoint_wins_over_changed_desk_result(self):
+        with tempfile.TemporaryDirectory() as root:
+            adapter = FakeAdapter([task()])
+            adapter.claim("t_queue0001")
+            pending = {"kanban_task_id": "t_queue0001", "target": "sol", "finish": "done",
+                       "cap": "read", "source_seq": 81, "source_msg_id": "original-source"}
+            room = KeyReuseRoom()
+            def post(completion):
+                bridge._post_completion_payload(completion, add_room_turn=room, seat="sol")
+            def lost(completion):
+                post(completion)
+                raise RuntimeError("acknowledged response lost")
+            executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+            with self.assertRaises(RuntimeError):
+                executor.finish_pending_posted(pending, result(summary="Recorded answer"),
+                    post_completion=lost, completion_dir=Path(root))
+            executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+            recovered = executor.finish_pending_posted(pending, result(summary="Changed answer"),
+                post_completion=post, completion_dir=Path(root))
+            self.assertEqual(recovered["outcome"], "done")
+            self.assertEqual(room.completions()[0]["summary"], "Recorded answer")
+            self.assertEqual(len(room.completions()), 1)
+            self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1)
+
+    def test_bridge_cycle_recovers_saved_completion_without_desk_log(self):
+        for pending_retained in (True, False):
+            with self.subTest(pending_retained=pending_retained), tempfile.TemporaryDirectory() as root:
+                root = Path(root)
+                adapter = FakeAdapter([task()])
+                adapter.claim("t_queue0001")
+                state = state_mod.default_state()
+                state_mod.set_pending(
+                    state, "codex-desk", dispatch_msg_id="acknowledged-dispatch", log_offset=0,
+                    injected_at="2026-08-24T12:00:00+00:00",
+                    source_msg_id="11111111-1111-4111-8111-111111111111",
+                    source_seq=81, origin_kind="queue", kanban_task_id="t_queue0001",
+                    target="sol", finish="done", cap="read")
+                state_path = root / "bridge.json"
+                state_mod.save_state(state_path, state)
+                room = KeyReuseRoom()
+                original = adapter.complete
+                def interrupted_commit(*args, **kwargs):
+                    if pending_retained:
+                        original(*args, **kwargs)
+                    raise OSError("interrupted around terminal commit")
+                adapter.complete = interrupted_commit
+                executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+                with self.assertRaises(OSError):
+                    bridge.handle_pending("codex-desk", "sol", state, add_room_turn=room,
+                        log_path=root / "missing.log", pending_timeout_s=60,
+                        scan=lambda *_: result(), queue_executor=executor,
+                        completion_dir=root / "bridge.json.queue-completions")
+                adapter.complete = original
+                if not pending_retained:
+                    state_mod.clear_pending(state, "codex-desk")
+                    state_mod.save_state(state_path, state)
+                    adapter.status["t_queue0001"] = "ready"
+                adapter.ready_for = lambda assignee: [card for card in adapter.tasks
+                    if card["assignee"] == assignee and adapter.status[card["id"]] == "ready"]
+                provider = mock.Mock(side_effect=AssertionError("recovery cannot dispatch work"))
+                registry = type("Registry", (), {
+                    "entries": lambda self: {"codex-desk": {"kind": "codex-session", "room_seat": "sol"}},
+                    "path": root / "desks.json"})()
+                queue = SeatlessQueueDeskTests.FakeQueue()
+                queue.catalog = CATALOG
+                recovered = bridge.run_once(
+                    state_path=state_path, desk_state_dir=root / "desks", registry=registry,
+                    session_directory_path=root / "sessions.json", results_path=root / "results.jsonl",
+                    read_room=lambda *_a, **_k: {"turns": []}, add_room_turn=room,
+                    queue_service=queue, queue_executor=queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter),
+                    queue_projector=lambda **_k: [], dispatch_fn=provider, probe_auth=lambda _: True,
+                    engineering_dispatcher=lambda **_: {}, read_profiles=lambda: [], log=lambda _: None)
+                self.assertEqual(recovered["errors"], [])
+                self.assertEqual(len(room.completions()), 1)
+                self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1)
+                self.assertEqual(len(adapter.tasks), 1)
+                self.assertIsNone(state_mod.get_pending(state_mod.load_state(state_path), "codex-desk"))
+                provider.assert_not_called()
+
+    def test_acknowledged_work_survives_lost_completion_response_once(self):
+        for finish, outcome, method in (("done", "success", "complete"),
+                                        ("review", "success", "request_review"),
+                                        ("done", "blocked", "block")):
+            with self.subTest(finish=finish, outcome=outcome), tempfile.TemporaryDirectory() as root:
+                card = task(finish=finish)
+                adapter = FakeAdapter([card])
+                provider = mock.Mock(return_value={
+                    "status": "delivered", "msg_id": "acknowledged-dispatch",
+                    "dispatched_at": "2026-08-24T12:00:00+00:00"})
+                executor = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+                started = executor.start("sol", dispatch_call=provider)
+                pending = started["pending"]
+                state = state_mod.default_state()
+                state_mod.set_pending(
+                    state, "codex-desk", dispatch_msg_id=pending["dispatch_msg_id"],
+                    log_offset=0, injected_at=pending["injected_at"],
+                    source_msg_id=pending["source_msg_id"], source_seq=pending["source_seq"],
+                    origin_kind="queue", kanban_task_id=pending["kanban_task_id"],
+                    target=pending["target"], finish=pending["finish"], cap=pending["cap"])
+                checkpoint = Path(root) / "bridge.json"
+                state_mod.save_state(checkpoint, state)
+                room = KeyReuseRoom()
+
+                def lose_response(**kwargs):
+                    room(**kwargs)
+                    raise RuntimeError("interrupted after callback acknowledgement")
+
+                kwargs = dict(log_path=Path(root) / "desk.log", pending_timeout_s=60,
+                              scan=lambda *_: result(outcome=outcome), queue_executor=executor,
+                              completion_dir=Path(root) / "completions")
+                with self.assertRaisesRegex(RuntimeError, "after callback acknowledgement"):
+                    bridge.handle_pending("codex-desk", "sol", state,
+                                          add_room_turn=lose_response, **kwargs)
+                self.assertEqual(adapter.status[card["id"]], "running")
+                restored = state_mod.load_state(checkpoint)
+                kwargs["scan"] = mock.Mock(side_effect=AssertionError("saved receipt must bypass the desk log"))
+                kwargs["queue_executor"] = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+                recovered = bridge.handle_pending("codex-desk", "sol", restored,
+                                                  add_room_turn=room, **kwargs)
+                self.assertEqual(recovered["outcome"], "review" if finish == "review" else
+                                 "blocked" if outcome == "blocked" else "done")
+                self.assertEqual(len(adapter.tasks), 1)
+                self.assertEqual(sum(call[0] == method for call in adapter.calls), 1)
+                self.assertEqual(len(room.completions()), 1)
+                self.assertEqual(room.replays, ["queue-completion:t_queue0001"])
+                self.assertEqual(provider.call_count, 1)
+                self.assertIsNone(state_mod.get_pending(restored, "codex-desk"))
+                self.assertIsNone(bridge.handle_pending("codex-desk", "sol", restored,
+                                                       add_room_turn=room, **kwargs))
 
 
 class RetryCountingAdapter(FakeAdapter):

@@ -557,6 +557,18 @@ class QueueDeskExecutor:
             retry_protocol_errors=retry_protocol_errors, now=now, post_completion=None,
         )
 
+    def resume_pending(self, pending: dict, *, post_completion,
+                       completion_dir: Path | None) -> dict | None:
+        task_id = pending.get("kanban_task_id")
+        if not isinstance(task_id, str) or not task_id.startswith("t_"):
+            raise QueueDispatchError("pending queue task identity is invalid")
+        receipt = self._read_final(completion_dir, {
+            "task_id": task_id, "meta": {key: pending.get(key) for key in
+                ("target", "finish", "cap", "source_seq", "source_msg_id")}})
+        if receipt is None:
+            return None
+        return self._apply_final(receipt, post_completion)
+
     def finish_pending_posted(self, pending: dict, raw_result: str, *, post_completion,
                               include_reply: bool = False, retry_protocol_errors: bool = False,
                               now: str | None = None, completion_dir: Path | None = None) -> dict:
@@ -582,6 +594,10 @@ class QueueDeskExecutor:
         rejects that key with a different body (key_reuse). A crash between a successful post and the Hermes
         transition re-posts the identical final body, which the server replays.
         """
+        recovered = self.resume_pending(pending, post_completion=post_completion,
+                                        completion_dir=completion_dir)
+        if recovered is not None:
+            return recovered
         return self._finish(
             pending, raw_result, include_reply=include_reply,
             retry_protocol_errors=retry_protocol_errors, now=now, post_completion=post_completion,
