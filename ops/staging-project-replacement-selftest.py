@@ -338,6 +338,23 @@ def migration_failure(stdout, stderr):
         return message
     raise AssertionError("failed migration was accepted")
 
+def readback_failure(stderr):
+    calls = iter([subprocess.CompletedProcess([], 0, "", ""), subprocess.CompletedProcess([], 1, "", stderr)])
+    try:
+        ctl.sync_control_plane(owner, run=lambda args, **unused: next(calls), environ={"PATH": "/bin"})
+    except ctl.ReplacementRefusal as exc:
+        message = str(exc)
+        for value in (secret, owner.value, ctl.urlsplit(owner.value).password, owner.scope.endpoint_host):
+            assert value and value not in message
+        return message
+    raise AssertionError("failed control-plane readback was accepted")
+
+assert "detail=workflow keys differ missing=[('a', 1)] extra=[]; ('b', 2) risk differs" in readback_failure(
+    "control-plane-registry-gate FAILED: workflow keys differ missing=[('a', 1)] extra=[]; ('b', 2) risk differs")
+assert "detail=unavailable" in readback_failure(f"psycopg.OperationalError: {secret} {owner.value}")
+assert "detail=unavailable" in readback_failure(
+    f"control-plane-registry-gate FAILED: {owner.scope.endpoint_host} leaked")
+
 diagnostic_stdout = f"applying {future_filename} ... "
 diagnostic_stderr = f"psycopg.errors.DuplicateTable: {secret} {owner.value} invented-row-1913"
 assert f"migration={future_filename}; error_class=DuplicateTable" in migration_failure(
