@@ -56,7 +56,8 @@ def hosted_verdict():
 
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
-    for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'requirements.lock',
+    for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
+                 'ops/ci-quarantine.py', 'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()

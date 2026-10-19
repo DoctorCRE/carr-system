@@ -149,6 +149,7 @@ def test_freshness_requires_main_without_a_second_config_checker():
         (root / "ops/config").mkdir(parents=True)
         (root / "ops/ci.sh").write_bytes(CI.read_bytes())
         shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
+        shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
         (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         env = fixture_env()
@@ -419,6 +420,21 @@ def _test_shaped_files(tree=None):
                 found.add(pathlib.Path(root, name)
                           .relative_to(tree).as_posix())
     return found
+
+def test_each_class_runs_in_exactly_one_hosted_group():
+    from collections import Counter
+    listed = subprocess.run(["bash", str(CI), "--list"], cwd=REPO,
+                            capture_output=True, text=True, check=True).stdout
+    classes = set(re.findall(r"^  ([a-z]+)\s", listed, re.MULTILINE))
+    workflow = (REPO / ".github/workflows/ci.yml").read_text()
+    block = workflow.split("        classes:\n", 1)[1].split("    #", 1)[0]
+    groups = re.findall(r'^          - "([a-z ]+)"$', block, re.MULTILINE)
+    membership = Counter(name for group in groups for name in group.split())
+    check("every hosted class runs in exactly one group",
+          bool(classes) and set(membership) == classes
+          and all(count == 1 for count in membership.values()),
+          f"classes={sorted(classes)}, membership={dict(membership)}")
+
 
 def test_every_test_file_in_the_tree_is_collected():
     ci = (REPO / "ops" / "ci.sh").read_text()
@@ -997,6 +1013,7 @@ log.write_text(json.dumps(state))
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
+        test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
     for fn in (test_freshness_requires_main_without_a_second_config_checker,
                test_no_green_without_running,
@@ -1008,6 +1025,7 @@ def main(argv=None):
                test_types_class_catches_a_seeded_type_error,
                test_no_env_claims_a_production_hostname,
                test_every_test_file_in_the_tree_is_collected,
+               test_each_class_runs_in_exactly_one_hosted_group,
                test_the_walk_prunes_named_roots_only,
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,

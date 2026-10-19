@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from node_test_summary import test_counts
+
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / 'ops/config/ci-quarantine.json'
 PREFIX = 'CARR_FLAKE_RESULT '
@@ -85,6 +87,9 @@ def run(args):
         effective = 0
         print(f"QUARANTINED {args.test} · owner {entry['owner']} · loop {entry['loop']} · expires {entry['expires']}")
     receipt = {'version': 1, 'test': args.test, 'first_exit': first, 'rerun_exit': rerun, 'status': status, 'candidate': candidate, **identity}
+    counts = test_counts(log.read_text(errors='replace'))
+    if counts is not None:
+        receipt['test_counts'] = counts
     Path(str(log) + '.result.json').write_text(json.dumps(receipt) + '\n')
     print(PREFIX + json.dumps(receipt, separators=(',', ':')))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
