@@ -178,6 +178,18 @@
       "sha256": "846862e0f4265916a57350fe6a1cfb7b9e0d7b8b973084135537caa3312defed",
       "rule": "credential-url",
       "reason": "Historical PR 1429 revision whose credential-URL redaction test used a synthetic placeholder password in a made-up example.com URL. Retained in PR history after the fixture moved to a placeholder password; exception binds only these exact immutable bytes and this detector."
+    },
+    {
+      "path": "deliverables/v2-slice11/outcomes-1440.png",
+      "sha256": "142b99d8a4ea207f0a61bf1bd695888edfefc1bb5acc96676a76b551a8793c14",
+      "rule": "opaque-binary",
+      "reason": "Inspected screenshot of the synthetic V2 slice 11 board fixture. All cards and shell examples are synthetic; no client data. Exception binds only this path and these exact image bytes."
+    },
+    {
+      "path": "deliverables/v2-slice11/outcomes-390.png",
+      "sha256": "f8dd7ee9c6081f4c626e6ac948d8e8079ee04f636379191ce1a5a5d688b156c3",
+      "rule": "opaque-binary",
+      "reason": "Inspected screenshot of the synthetic V2 slice 11 board fixture. All cards and shell examples are synthetic; no client data. Exception binds only this path and these exact image bytes."
     }
   ]
 }

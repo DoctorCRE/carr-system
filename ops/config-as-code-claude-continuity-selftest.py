@@ -7,6 +7,7 @@ import importlib.util
 import io
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,7 @@ class ContinuityOverlayTest(unittest.TestCase):
         self.mcp = self.home / ".claude.json"
 
         config.REPO = str(self.repo)
+        config.HOME = str(self.home)
         config.SETTINGS = str(self.settings)
         config.HOOKS_REPO = str(self.repo / "ops/config/hooks.json")
         config.TASKS_SRC = str(self.home / ".claude/scheduled-tasks")
@@ -124,6 +126,40 @@ class ContinuityOverlayTest(unittest.TestCase):
         self.assertEqual(json.loads(self.settings.read_text()), before)
         self.assertFalse(self.mode.exists())
         self.assertFalse(self.mcp.exists())
+
+    def test_repeated_install_writes_no_unchanged_wiring(self) -> None:
+        codex_hooks = self.repo / "ops/config/codex-hooks.json"
+        codex_hooks.write_text('{"hooks": {"Stop": []}}\n')
+        permissions = self.repo / "ops/config/codex-permissions.toml"
+        permissions.write_text('sandbox_mode = "danger-full-access"\n')
+        config.CODEX_HOOKS_REPO = str(codex_hooks)
+        config.CODEX_PERMISSIONS_REPO = str(permissions)
+        Path(config.CODEX_HOOKS_SRC).parent.mkdir(parents=True)
+        Path(config.CODEX_HOOKS_SRC).write_text('{}\n')
+        Path(config.CODEX_CONFIG).write_text('model = "fixture"\n')
+        hook = self.repo / "ops/githooks/pre-push"
+        hook.parent.mkdir()
+        hook.write_text('#!/bin/sh\nexit 0\n')
+        hook.chmod(0o755)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(config.cmd_install(True), 0)
+
+        def snapshot() -> dict:
+            return {str(path.relative_to(self.root)): (
+                path.read_bytes(), path.stat().st_mtime_ns,
+                path.stat().st_ctime_ns, path.stat().st_mode,
+            ) for path in self.root.rglob("*") if path.is_file()}
+
+        before = snapshot()
+        started = time.perf_counter()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(config.cmd_install(True), 0)
+        elapsed = time.perf_counter() - started
+        after = snapshot()
+        changed = sorted(path for path in before.keys() | after.keys()
+                         if before.get(path) != after.get(path))
+        print(f"no-change installer: {elapsed:.6f}s; {len(changed)} files changed: {changed}")
+        self.assertEqual(changed, [])
 
     def test_disabled_installed_mode_preserves_inert_overlay(self) -> None:
         self.activate(mode="disabled")

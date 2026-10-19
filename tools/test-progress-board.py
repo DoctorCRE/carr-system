@@ -35,6 +35,7 @@ SPEC = importlib.util.spec_from_file_location("progress_board", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 BOARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BOARD)
+from progress_board_test_support import exercise_fields
 
 def fixture_budget(fixture):
     return BOARD.repo_lib("github_rate_limit").GitHubReadBudget(
@@ -208,6 +209,12 @@ class BoardCase(unittest.TestCase):
 
     def write_state(self, project, state):
         (self.root / "boards" / f"{project}.json").write_text(json.dumps(state))
+
+    def prove_task(self, project="demo", task_id="a"):
+        state = self.read_state(project)
+        task = state["tasks"][task_id]
+        task.update(exercise_fields(task.get("merge_sha") or SHA_M, task.get("repo") or BOARD.DEFAULT_PR_REPO))
+        self.write_state(project, state)
 
     def fake_gh(self, fixture):
         self.env.pop("PROGRESS_BOARD_SKIP_GH", None)
@@ -472,6 +479,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex",
                        "--pr", "42", "--health", "blocked", "--reason", "Review round 1",
                        "--next-action", "Fix the findings")
+        self.prove_task()
         self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Served in production")
         task = self.read_state("demo")["tasks"]["a"]
         for field in ("health", "blocked_reason", "next_action"):
@@ -482,7 +490,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         for n in range(5):
             state["tasks"][f"old{n}"] = {"title": f"Old {n}", "status": "done", "stage": "live",
                                          "evidence": "Measured", "health": "blocked", "executor": "Codex",
-                                         "updated_at": iso(), "completed_at": iso()}
+                                         "updated_at": iso(), "completed_at": iso(), **exercise_fields()}
         state["tasks"]["merged"] = {"title": "Merged", "status": "done", "stage": "merged", "pr": 7,
                                     "pr_phase": "Merged", "health": "blocked", "executor": "Codex",
                                     "updated_at": iso()}
@@ -502,7 +510,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
             self.assertFalse(BOARD.is_stale({**task, "updated_at": "2026-09-21T12:00:01Z"}, at))
         for status in ("done", "blocked", "failed", "superseded"):
             self.assertFalse(BOARD.is_stale({"status": status, "updated_at": "2026-09-01T00:00:00Z"}, at))
-        self.assertFalse(BOARD.is_stale({"status": "running", "stage": "live", "evidence": "x",
+        self.assertFalse(BOARD.is_stale({**exercise_fields(), "status": "running", "stage": "live", "evidence": "x",
                                          "updated_at": "2026-09-01T00:00:00Z"}, at))
         self.assertEqual(BOARD.STALE_AFTER, timedelta(days=14))
 
@@ -621,12 +629,14 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.run_board("task", "demo", "plain", "--title", "Plain", "--status", "done", "--executor", "Codex")
         tasks = self.read_state("demo")["tasks"]
         self.assertEqual(BOARD.task_stage(tasks["legacy"]), "build")
-        self.assertEqual(BOARD.task_stage(tasks["plain"]), "live")
+        self.assertEqual(BOARD.task_stage(tasks["plain"]), "review")
 
     def test_reopening_live_clears_completion(self):
         self.run_board("init", "demo", "--title", "Demo")
         self.run_board("task", "demo", "a", "--title", "A", "--status", "done",
-                       "--executor", "Codex", "--stage", "live", "--evidence", "Observed outcome")
+                       "--executor", "Codex")
+        self.prove_task()
+        self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Observed outcome")
         self.run_board("task", "demo", "a", "--status", "running")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["status"], "running")
@@ -641,16 +651,19 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("evidence", missing.stderr.lower())
         self.assertEqual(self.read_state("demo")["tasks"]["a"].get("stage"), None)
+        self.prove_task()
         self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Page returned expected data")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "live")
-        self.assertEqual(task["evidence"], "Page returned expected data")
+        self.assertIn("Page returned expected data", task["evidence"])
         self.assertTrue(task["completed_at"])
 
     def test_legacy_measured_maps_to_live(self):
         self.run_board("init", "demo", "--title", "Demo")
         self.run_board("task", "demo", "legacy", "--title", "Legacy", "--status", "done",
-                       "--executor", "Codex", "--pr", "42", "--stage", "measured", "--evidence", "Legacy verified")
+                       "--executor", "Codex", "--pr", "42")
+        self.prove_task(task_id="legacy")
+        self.run_board("task", "demo", "legacy", "--stage", "measured", "--evidence", "Legacy verified")
         self.assertEqual(self.read_state("demo")["tasks"]["legacy"]["stage"], "live")
 
 
@@ -762,7 +775,7 @@ class PullRequestStatus(BoardCase):
         self.run_board("render", "demo")
         old = self.read_state("demo")["tasks"]["a"]
         self.assertEqual((old["status"], old["stage"], old["pr_phase"], old["pr_head"]),
-                         ("done", "merged", "Merged", SHA_A))
+                         ("review", "merged", "Merged", SHA_A))
         self.set_fixture({})
         self.run_board("task", "demo", "a", "--repo", "jbookout/doctorcre-app")
         moved = self.read_state("demo")["tasks"]["a"]
@@ -789,7 +802,7 @@ class PullRequestStatus(BoardCase):
         ]
         self.assertEqual(BOARD.derived_pr_state({**base, "state": "CLOSED"}),
                          ("failed", "ci", "Closed unmerged"))
-        cases.append(({"state": "MERGED"}, "done", "merged", "Merged"))
+        cases.append(({"state": "MERGED"}, "review", "merged", "Merged"))
         previous_update = self.read_state("demo")["tasks"]["a"]["updated_at"]
         for change, status, stage, phase in cases:
             with self.subTest(phase=phase):
@@ -811,6 +824,7 @@ class PullRequestStatus(BoardCase):
         self.set_fixture({"view": {**base, "state": "MERGED"}})
         self.run_board("render", "demo")
         self.assertEqual(self.read_state("demo")["tasks"]["a"]["stage"], "merged")
+        self.prove_task()
         self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Production response measured")
         completed_at = self.read_state("demo")["tasks"]["a"]["completed_at"]
         self.run_board("render", "demo")
@@ -838,7 +852,7 @@ class PullRequestStatus(BoardCase):
         self.assertEqual([c for c in self.gh_calls() if "/compare/" in c[1]], [])
 
     def test_all_repos_card_in_an_exact_release_needs_no_compare(self):
-        card = {"status": "done", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
+        card = {**exercise_fields(SHA_M), "status": "review", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
         release = {"sha": SHA_M, "lane": "worker", "ts": "2026-09-29T12:00:00+00:00", "source": "releases.jsonl"}
         with patch.object(BOARD, "latest_release", return_value=release), \
              patch.object(BOARD, "compare_status", side_effect=AssertionError("compare called")):
@@ -887,7 +901,13 @@ class PullRequestStatus(BoardCase):
             self.assertEqual(task["stage"], "merged")
             self.assertEqual(task["release_wait"],
                              "production does not show this change yet; release pipeline failed at canary: canary pending")
-            # Once the production readback shows it, the wait note goes away.
+            state = self.read_state("demo")
+            fields = exercise_fields(SHA_M)
+            fields["delivery_target"] = "worker"
+            fields["consumer_proof"]["target"] = "https://api.doctorcre.com"
+            state["tasks"]["a"].update(fields)
+            self.write_state("demo", state)
+            # Both the exercise receipt and production readback are required.
             evidence["value"] = f"GET https://example.invalid/release observed production source {SHA_M}"
             BOARD.render("demo")
         BOARD.RELEASE_CACHE.clear()
@@ -976,7 +996,7 @@ class GitHubSync(BoardCase):
             ("failing checks", {"statusCheckRollup": failing}, "blocked", "ci", "Checks failing",
              "Failing checks: unit, types"),
             ("approved", {"reviewDecision": "APPROVED"}, "review", "review", "Approved", None),
-            ("merged", {"state": "MERGED", "mergeCommit": {"oid": SHA_M}}, "done", "merged", "Merged", None),
+            ("merged", {"state": "MERGED", "mergeCommit": {"oid": SHA_M}}, "review", "merged", "Merged", None),
         ]
         for name, change, status, stage, phase, reason in cases:
             with self.subTest(name):
@@ -989,7 +1009,7 @@ class GitHubSync(BoardCase):
         # the same sync names what it is waiting for.
         self.shipped("worker", SHA_M)
         task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
-        self.assertEqual((task["status"], task["stage"]), ("done", "merged"))
+        self.assertEqual((task["status"], task["stage"]), ("review", "merged"))
         self.assertIn("no delivery target recorded", task["release_wait"])
 
     def test_legacy_commit_statuses_do_not_void_the_sync(self):
@@ -1008,7 +1028,7 @@ class GitHubSync(BoardCase):
         self.fake_gh({})
         self.run_board("task", "demo", "a", "--status", "blocked", "--reason", "Hold", "--next-action", "Wait")
         task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
-        self.assertEqual((task["status"], task["stage"]), ("done", "merged"))
+        self.assertEqual((task["status"], task["stage"]), ("review", "merged"))
         self.assertNotIn("blocked_reason", task)
 
     def test_github_block_clears_itself_when_checks_recover(self):
@@ -1113,8 +1133,8 @@ class AllRepositoriesBoard(BoardCase):
             "carr-system-4": ("review", "blocked", "Changes requested", True),
             "carr-system-5": ("ci", "running", "CI", False),
             "carr-system-6": ("review", "review", "Awaiting review", False),
-            "carr-system-7": ("live", "done", "Merged", False),
-            "carr-system-8": ("merged", "done", "Merged", False),
+            "carr-system-7": ("merged", "review", "Merged", False),
+            "carr-system-8": ("merged", "review", "Merged", False),
             "doctorcre-app-1": ("review", "review", "Awaiting review", False),
         }
         self.assertEqual(set(tasks), set(expect))
@@ -1138,7 +1158,7 @@ class AllRepositoriesBoard(BoardCase):
         self.assertEqual(tasks["carr-system-2"]["summary"], "Does thing 2.")
         self.assertFalse(BOARD.is_stale(tasks["carr-system-6"]))
         self.assertFalse(BOARD.is_stale(tasks["carr-system-5"]))
-        self.assertIn(SHA_M[:12], tasks["carr-system-7"]["evidence"])
+        self.assertIn("consumer proof", tasks["carr-system-7"]["release_wait"])
         counts = {row["repo"]: (row["open"], row["merged"]) for row in state["repos"]}
         self.assertEqual(counts["jbookout/carr-system"], (6, 2))
         self.assertEqual(counts["jbookout/doctorcre-app"], (1, 0))
@@ -1192,7 +1212,7 @@ class AllRepositoriesBoard(BoardCase):
 
     def test_snapshot_stays_under_the_server_limit(self):
         tasks = {f"carr-system-{n}": {"title": "t" * 200, "summary": "s" * 160, "status": "done", "stage": "live",
-                                      "evidence": "e" * 200, "repo": "jbookout/carr-system", "pr": n,
+                                      "evidence": "e" * 200, "repo": "jbookout/carr-system", "pr": n, **exercise_fields(),
                                       "completed_at": f"2026-09-{1 + n % 28:02d}T00:00:00Z"} for n in range(600)}
         tasks["carr-system-open"] = {"title": "Open", "status": "running", "stage": "build", "repo": "jbookout/carr-system", "pr": 9999}
         snapshot = BOARD.board_snapshot({"project": "all-repos", "kind": "all-repos", "tasks": tasks})
@@ -1548,35 +1568,34 @@ class CardColumns(unittest.TestCase):
     def state(self):
         return json.loads((self.root / "boards" / "demo.json").read_text())
 
-    def test_done_without_a_pr_is_live(self):
+    def test_done_without_a_pr_stays_pending_without_consumer_proof(self):
         self.board("task", "demo", "doc", "--title", "Write the runbook", "--status", "done",
                    "--executor", "Codex", "--note", "Shipped as PR #1234 per the thread")
         task = self.state()["tasks"]["doc"]
-        self.assertEqual(BOARD.task_stage(task), "live")
-        # Stored explicitly so the app, which derives stage itself, agrees.
-        self.assertEqual((task["status"], task["stage"]), ("done", "live"))
-        self.assertTrue(task["evidence"].strip())
-        self.assertTrue(task["completed_at"])
+        self.assertEqual(BOARD.task_stage(task), "review")
+        self.assertEqual((task["status"], task["stage"]), ("review", "review"))
+        self.assertNotIn("completed_at", task)
         # The note names a PR, but nothing is guessed from it.
         self.assertIsNone(task.get("pr"))
-        self.assertEqual(BOARD.board_snapshot(self.state())["tasks"]["doc"]["stage"], "live")
+        self.assertEqual(BOARD.board_snapshot(self.state())["tasks"]["doc"]["stage"], "review")
 
-    def test_legacy_done_card_without_a_pr_moves_to_live_on_render(self):
+    def test_legacy_done_card_without_a_pr_stays_pending_on_render(self):
         state = self.state()
         state["tasks"]["old"] = {"title": "Old", "status": "done", "executor": "Codex",
                                  "created_at": "2026-09-28T10:00:00+00:00", "updated_at": "2026-09-28T11:00:00+00:00"}
         (self.root / "boards" / "demo.json").write_text(json.dumps(state))
         self.board("render", "demo")
         task = self.state()["tasks"]["old"]
-        self.assertEqual((task["stage"], task["completed_at"]), ("live", "2026-09-28T11:00:00+00:00"))
+        self.assertEqual(task["stage"], "review")
+        self.assertNotIn("completed_at", task)
         self.assertEqual(task["updated_at"], "2026-09-28T11:00:00+00:00")
         snapshot = BOARD.board_snapshot(self.state())
-        self.assertEqual(snapshot["tasks"]["old"]["stage"], "live")
+        self.assertEqual(snapshot["tasks"]["old"]["stage"], "review")
 
     def test_done_with_a_merged_pr_not_yet_released_stays_merged(self):
         self.board("task", "demo", "fix", "--title", "Fix", "--status", "done", "--executor", "Codex", "--pr", "42")
         state = self.state()
-        state["tasks"]["fix"]["pr_phase"] = "Merged"
+        state["tasks"]["fix"].update(pr_phase="Merged", stage="merged")
         (self.root / "boards" / "demo.json").write_text(json.dumps(state))
         self.board("render", "demo")
         task = self.state()["tasks"]["fix"]
@@ -1790,7 +1809,7 @@ class ReviewRound1420(BoardCase):
     # 3 ── the whole payload fits the server contract
     def test_3_the_complete_snapshot_is_measured_and_fitted(self):
         tasks = {f"t{n}": {"title": "T" * 200, "summary": "S" * 160, "evidence": "E" * 200, "status": "done",
-                           "stage": "live", "executor": "Codex gpt-6-sol high", "updated_at": "2026-09-29T00:00:00Z",
+                           "stage": "live", **exercise_fields(), "executor": "Codex gpt-6-sol high", "updated_at": "2026-09-29T00:00:00Z",
                            "completed_at": f"2026-09-{1 + n % 28:02d}T00:00:00Z",
                            "stage_history": [{"stage": "live", "entered_at": "2026-09-29T00:00:00Z"}]}
                  for n in range(225)}
@@ -2016,7 +2035,7 @@ class ReviewRound1420(BoardCase):
                 (["tools/progress_board.py", "ops/launchd/com.carr.x.plist"], "merged", "outside the worker release paths"),
                 (None, "merged", "changed-file list"),
                 (["docs/runbook.md"], "merged", "outside the worker release paths"),
-                (["mcp-server/src/board-answers.js", "mcp-server/test/x.test.mjs", "mcp-server/README.md"], "live", None)):
+                (["mcp-server/src/board-answers.js", "mcp-server/test/x.test.mjs", "mcp-server/README.md"], "merged", "consumer proof")):
             with self.subTest(files=files):
                 card = {"status": "done", "stage": "merged", "merge_sha": SHA_M, "pr": 7, "repo": "jbookout/carr-system"}
                 with patch.dict(os.environ, self.env), patch.object(BOARD, "latest_release", return_value=release):
@@ -2024,7 +2043,8 @@ class ReviewRound1420(BoardCase):
                 self.assertEqual(card["stage"], stage)
                 if wait:
                     self.assertIn(wait, card["release_wait"])
-                    self.assertIn("operational receipt", card["release_wait"])
+                    if "consumer proof" not in wait:
+                        self.assertIn("operational receipt", card["release_wait"])
                     self.assertNotIn("evidence", card)
         truncated = {**merged, "files": [{"path": "mcp-server/src/a.js"}], "changedFiles": 150}
         self.assertIsNone(BOARD.changed_paths(truncated))
@@ -2316,8 +2336,8 @@ class DeliveryTargetRelease(BoardCase):
                      patch.object(BOARD, "urlopen", return_value=response):
                     BOARD.render(project)
                 tasks = self.read_state(project)["tasks"]
-                self.assertEqual(tasks["deployed"]["stage"], "live")
-                self.assertIn(released, tasks["deployed"]["evidence"])
+                self.assertEqual(tasks["deployed"]["stage"], "merged")
+                self.assertIn("consumer proof", tasks["deployed"]["release_wait"])
                 self.assertEqual(tasks["future"]["stage"], "merged")
                 self.assertNotIn("evidence", tasks["future"])
                 remote = {"snapshot": None}
@@ -2329,7 +2349,7 @@ class DeliveryTargetRelease(BoardCase):
                 with patch.dict(os.environ, self.env), patch.object(BOARD, "call_verb", call):
                     BOARD.publish_board(project)
                 published = remote["snapshot"]["snapshot_json"]["tasks"]
-                self.assertEqual(published["deployed"]["stage"], "live")
+                self.assertEqual(published["deployed"]["stage"], "merged")
                 self.assertEqual(published["future"]["stage"], "merged")
 
     def test_render_keeps_merged_when_production_identity_cannot_be_proven(self):

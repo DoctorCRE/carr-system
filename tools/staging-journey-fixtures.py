@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Run-owned synthetic lease, accepted Tour and confidential Share fixtures."""
 import argparse
-import importlib.util
+import importlib
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import uuid
 
 import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+provisioner = importlib.import_module('tools.provision-staging-app-writer')
+guard = importlib.import_module('tools.staging-fixtures')
 
 NAMESPACE = uuid.UUID('3fe45426-69e5-4295-aa47-b519b134c27d')
 
@@ -225,25 +231,31 @@ def cleanup(conn, run):
         raise
 
 
+def staging_owner():
+    config = json.loads((ROOT / 'ops/config/release-pipeline.v1.json').read_text())
+    operation = provisioner._canonical_uuid4(config['worker']['staging_candidate_operation_id'], 'candidate operation id')
+    env = provisioner.provider_environment(os.environ)
+    _, _, candidate = provisioner.replacement.resolve_existing_scopes(operation, run=subprocess.run, environ=env)
+    if candidate is None:
+        raise ValueError('configured replacement candidate does not exist; no fallback allowed')
+    owner = provisioner.provider_dsn(provisioner._local_scope(candidate), 'neondb_owner',
+                                    neonctl=str(provisioner.replacement.NEONCTL), run=subprocess.run, environ=env)
+    guard.validate_target(owner.value, candidate.project_id, candidate.endpoint_id)
+    guard.validate_provider_binding(owner.value, candidate.project_id, candidate.endpoint_id, run=subprocess.run, environ=env)
+    return owner
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'Environment: CARR_STAGING_FIXTURE_OWNER_URL, CARR_STAGING_FIXTURE_PROJECT, '
-        'CARR_STAGING_FIXTURE_ENDPOINT and NEON_API_KEY. Every action verifies the '
-        'replacement staging project with the provider before connecting. Reuse --run '
-        'for readback and cleanup after an interrupted invocation.'))
+        'Every action resolves the configured replacement staging project and owner '
+        'connection through the staging provisioner. Reuse --run for readback and '
+        'cleanup after an interrupted invocation.'))
     parser.add_argument('action', choices=('prepare', 'read', 'cleanup', 'remaining'))
     parser.add_argument('--run', required=True)
     args = parser.parse_args()
     identities(args.run)
-    spec = importlib.util.spec_from_file_location('staging_fixtures', pathlib.Path(__file__).with_name('staging-fixtures.py'))
-    guard = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = guard
-    spec.loader.exec_module(guard)
-    dsn = os.environ.get('CARR_STAGING_FIXTURE_OWNER_URL', '')
-    project, endpoint = os.environ.get('CARR_STAGING_FIXTURE_PROJECT', ''), os.environ.get('CARR_STAGING_FIXTURE_ENDPOINT', '')
-    guard.validate_target(dsn, project, endpoint)
-    guard.validate_provider_binding(dsn, project, endpoint)
-    with psycopg.connect(dsn, connect_timeout=10) as conn:
+    owner_dsn = staging_owner()
+    with psycopg.connect(owner_dsn.value, connect_timeout=10) as conn:
         if args.action == 'prepare':
             result = prepare(conn, args.run)
         elif args.action == 'read':

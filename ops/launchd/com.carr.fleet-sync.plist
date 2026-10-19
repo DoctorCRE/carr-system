@@ -8,15 +8,10 @@
   for existing is that the second machine drifts silently. It is therefore
   deliberately absent from PRIMARY_ONLY in ops/config-as-code.py.
 
-  HOURLY, PLUS RunAtLoad (2026-09-23). Joe wants this to "always" be current
-  without having to remember it: "if im on my macbook working or my studio or
-  whatever, i dont want to have to remember to do that." Four fixed fires a
-  day left a machine that had been asleep or unused for a stretch showing
-  stale work for up to twelve hours; RunAtLoad plus an hourly calendar fire
-  means login or wake catches a Mac up immediately, and nothing is ever more
-  than an hour behind while it's on. The job stays cheap and idempotent (a
-  no-op re-render when everything is already current), so an hourly cadence
-  costs nothing extra it didn't already tolerate at 07:45/11:45/15:45/19:45.
+  EVERY FIVE MINUTES, PLUS RunAtLoad. An hourly sync leaves releases blocked
+  on controller_stale after merges. Keep the existing fast-forward safeguards
+  and installer path; the release pipeline still waits for a fresh tick to
+  load the synced controller. RunAtLoad also catches the checkout up at login.
 -->
 <plist version="1.0">
 <dict>
@@ -33,10 +28,21 @@
     <string>{{REPO}}/bin/fleet-sync.sh</string>
   </array>
 
-  <!-- carr-launchd-interval-seconds: 3600 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
+  <!-- carr-launchd-interval-seconds: 300 | rendered by lib/launchd_calendar.py; macOS 27 launchd never fires StartInterval -->
   <key>StartCalendarInterval</key>
   <array>
-    <dict><key>Minute</key><integer>31</integer></dict>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Minute</key><integer>10</integer></dict>
+    <dict><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Minute</key><integer>20</integer></dict>
+    <dict><key>Minute</key><integer>25</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Minute</key><integer>35</integer></dict>
+    <dict><key>Minute</key><integer>40</integer></dict>
+    <dict><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Minute</key><integer>50</integer></dict>
+    <dict><key>Minute</key><integer>55</integer></dict>
   </array>
 
   <key>RunAtLoad</key>
