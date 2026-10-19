@@ -30,6 +30,7 @@ class RuleClaimGateTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.checkout('.')
         self.transcript = self.root / 'transcript.jsonl'
         self.invocations = 0
 
@@ -46,6 +47,35 @@ class RuleClaimGateTest(unittest.TestCase):
 
     def turn(self, *records):
         return [message('user', 'Please apply the correction.', uuid='human1'), *records]
+
+    def checkout(self, name, origin='https://github.com/jbookout/carr-system.git'):
+        root = self.root / name
+        root.mkdir(exist_ok=True)
+        subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)
+        subprocess.run(['git', '-C', str(root), 'remote', 'add', 'origin', origin], check=True)
+        return root
+
+    def test_enforcement_edits_in_external_clone_and_worktree_pass(self):
+        source = self.checkout('source')
+        subprocess.run(['git', '-C', str(source), '-c', 'user.name=Fixture',
+                        '-c', 'user.email=jbookout@users.noreply.github.com',
+                        'commit', '-q', '--allow-empty', '-m', 'Fixture'], check=True)
+        clone = self.root / 'scratchpad/clone'
+        subprocess.run(['git', 'clone', '-q', str(source), str(clone)], check=True)
+        subprocess.run(['git', '-C', str(clone), 'remote', 'set-url', 'origin',
+                        'git@github.com:jbookout/carr-system.git'], check=True)
+        worktree = self.root / 'scratchpad/worktree'
+        subprocess.run(['git', '-C', str(source), 'worktree', 'add', '-q', '-b',
+                        'fixture', str(worktree)], check=True)
+        event_cwd = self.root / 'session'
+        event_cwd.mkdir()
+        for root in [clone, worktree]:
+            for tool in ['Edit', 'Write']:
+                with self.subTest(checkout=root.name, tool=tool):
+                    self.assertNotEqual(self.run_hook(self.turn(
+                        call(tool, file_path=str(root / 'hooks/check.py')),
+                        assistant('I created a rule.')), cwd=str(event_cwd))
+                        .get('decision'), 'block')
 
     def test_memory_only_blocks_with_claim_and_remedy(self):
         claim = 'I saved a rule to remember this.'
