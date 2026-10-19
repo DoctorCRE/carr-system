@@ -3137,6 +3137,15 @@ class CandidateStaging(Base):
         with self.assertRaises(rp.Blocked):
             pipe.candidate("restore-candidate", lane="app")
 
+    def test_nonmain_prior_must_not_be_accepted_as_restore_target(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        self.live["source_commit"] = "f" * 40
+        with self.assertRaisesRegex(rp.Blocked, "last released app main SHA"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
     def test_candidate_requires_green_hosted_ci_for_exact_sha_before_any_step(self):
         sha = self.candidate_sha()
         for override in ([], [{"status": "in_progress"}], [{"conclusion": "failure"}],
