@@ -99,6 +99,24 @@ test("graceful Chrome shutdown does not grow the macOS code-sign clone directory
   assert.ok(after <= before, `Chrome code-sign clones grew ${before} -> ${after}`);
 });
 
+for (const scenario of ["temp-artifact", "temp-artifact-exit"]) {
+  test(`Chrome owns temporary downloads across close and startup failure (${scenario})`, async (t) => {
+    const parent = await mkdtemp(path.join(tmpdir(), "chrome-download-test-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const previousTmp = process.env.TMPDIR;
+    process.env.TMPDIR = parent;
+    t.after(() => {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+    });
+    const fake = fakeChrome(t, [scenario]);
+    const launched = launchChrome("fake-chrome", { spawnChrome: fake.spawnChrome, timeoutMs: 1500 });
+    if (scenario.endsWith("-exit")) await assert.rejects(launched, /Chrome failed to start/);
+    else await (await launched).close();
+    assert.deepEqual(await readdir(parent), []);
+  });
+}
+
 test("Chrome requests a real CDP shutdown before sending process signals", async (t) => {
   const fake = fakeChrome(t, ["ready"]);
   const shutdown = [];
