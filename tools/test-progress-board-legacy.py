@@ -18,6 +18,33 @@ AT = datetime(2026, 10, 19, 11, 29, 41, tzinfo=timezone.utc)
 
 
 class LegacyDispositionTests(unittest.TestCase):
+    def test_cli_keeps_oauth_card_pending_when_cited_pr_is_doc_plugin(self):
+        task = {
+            **FIXTURE['tasks']['build-j-doc-plugin'],
+            'title': 'Harden the shared OAuth layer: consent, audience binding, PKCE challenge, Origin check',
+        }
+        info = {
+            **FIXTURE['github']['jbookout/carr-system#1454'],
+            'title': 'Doc V0: a ChatGPT plugin and Claude connector endpoint over the record layer',
+            'files': [{'path': 'mcp-server/src/doc-profile.js'},
+                      {'path': 'mcp-server/test/doc-oauth.test.mjs'}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'boards/test.json'
+            path.parent.mkdir()
+            state = {'project': 'test', 'tasks': {'build-r-oauth-hardening': task}}
+            path.write_text(json.dumps(state))
+            original = path.read_bytes()
+            with patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': directory}), \
+                    patch.object(board, 'gh_json', return_value=info), patch.object(board.time, 'sleep'), \
+                    patch.object(board, 'now_utc', return_value=AT), contextlib.redirect_stdout(io.StringIO()) as output:
+                board.main(['dispose-legacy', 'test', '--apply'])
+            report = json.loads(output.getvalue().split('\n', 1)[1])
+            self.assertEqual(report['counts']['done'], 0)
+            self.assertEqual(report['counts']['kept'], 1)
+            self.assertIn('subject', report['samples'][0]['reason'])
+            self.assertEqual(path.read_bytes(), original)
+
     def test_cli_keeps_named_pr_on_read_failure_or_mismatched_identity(self):
         for answer in (RuntimeError('GitHub unavailable'), {'number': 1448, 'state': 'MERGED'}):
             with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
