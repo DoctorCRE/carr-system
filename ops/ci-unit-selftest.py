@@ -165,6 +165,30 @@ class UnitClassTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn('mcp-server: zero passing tests', result.stderr)
 
+    def test_empty_spec_file_is_not_a_test(self):
+        self.all_packages()
+        workspace = self.root / 'workspace'
+        (workspace / 'test/suite.test.mjs').rename(workspace / 'test/empty.spec.mjs')
+        (workspace / 'test/empty.spec.mjs').write_text('')
+        (workspace / 'package.json').write_text(
+            json.dumps({'scripts': {'test': 'node --test test/*.spec.mjs'}}))
+        result = self.run_class()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('workspace: zero passing tests', result.stderr)
+
+    def test_real_test_named_like_a_file_passes(self):
+        self.all_packages()
+        (self.root / 'workspace/test/suite.test.mjs').write_text(
+            "import test from 'node:test'; import assert from 'node:assert/strict'; "
+            "test('contract.test.mjs', () => assert.equal(2 + 2, 4));")
+        for reporter in ('tap', 'spec'):
+            with self.subTest(reporter=reporter):
+                (self.root / 'workspace/package.json').write_text(json.dumps({'scripts': {
+                    'test': f'node --test --test-reporter={reporter} test/*.test.mjs'}}))
+                result = self.run_class()
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()
