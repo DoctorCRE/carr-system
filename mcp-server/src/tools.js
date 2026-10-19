@@ -3416,7 +3416,7 @@ export const TOOLS = {
                 a.account_client_id,
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind
            from v_deal_board b
-           left join v_client_account a on a.client_ref=b.client_ref and a.is_sub_client
+           left join v_client_account a on a.client_id=b.client_id and a.is_sub_client
           where (b.phase = 'closed' or b.outcome is not null or b.invoiced_on is not null)
             and ($1 = 'all' or case when a.account_client_id is null then 'team' else 'national_account' end = $1)
             and ($2::uuid is null or a.account_client_id = $2::uuid)

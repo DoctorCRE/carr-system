@@ -104,6 +104,16 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("update deal set phase='closed',outcome='lost' where id=$1", [id(4)]);
+      await c.query('set local role carr_reader');
+      const team = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      const account = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'national_account',account_client_id:id(6)});
+      assert.deepEqual(team.lost_deals, [], 'account history never leaks into team history');
+      assert.deepEqual(account.lost_deals.map(d => [d.id,d.client_ref,d.workspace_kind,d.account_client_id]), [[id(4),null,'national_account',id(6)]]);
+    }));
+
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
     const readInvoiceDeals = async () => ({
       'deal-board': await TOOLS['deal-board'].handler(c),
