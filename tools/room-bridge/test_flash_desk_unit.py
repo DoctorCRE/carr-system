@@ -13,6 +13,9 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.append(str(Path(__file__).resolve().parents[2] / "lib"))
+from selftest_harness import temporary_directory
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -290,7 +293,7 @@ SCRIPT_POLICY = {**POLICY, "queue_targets": {**POLICY["queue_targets"], "script"
 
 
 def data_root():
-    root = tempfile.mkdtemp(prefix="flash-inputs-")
+    root = temporary_directory(prefix="flash-inputs-")
     with open(os.path.join(root, "sales.csv"), "w") as fh:
         fh.write("a,b\n1,2\n")
     os.mkdir(os.path.join(root, "leases"))
@@ -309,7 +312,7 @@ def test_script_inputs_takes_named_data_under_an_allowed_root():
 
 def test_script_inputs_refuses_data_outside_the_roots_or_through_a_link():
     root = data_root()
-    outside = tempfile.mkdtemp(prefix="flash-outside-")
+    outside = temporary_directory(prefix="flash-outside-")
     for text in (f"q\ndata: {outside}", f"q\ndata: {root}/../{os.path.basename(outside)}",
                  f"q\ndata: {root}/missing.csv", f"q\ndata: {root}"):
         paths, _, err = flash_wire.script_inputs(text, roots=[root])
@@ -471,7 +474,7 @@ def _git(cwd, *args):
 
 def code_root():
     """A folder of projects: one git project (`app`, with one test script), one plain folder and one link."""
-    root = os.path.realpath(tempfile.mkdtemp(prefix="flash-projects-"))
+    root = os.path.realpath(temporary_directory(prefix="flash-projects-"))
     app = os.path.join(root, "app")
     os.makedirs(os.path.join(app, "tests"))
     with open(os.path.join(app, "calc.py"), "w") as fh:
@@ -716,7 +719,7 @@ sys.exit(5)
 
 
 def fake_flash_run():
-    path = os.path.join(tempfile.mkdtemp(prefix="fake-flash-run-"), "flash-run.py")
+    path = os.path.join(temporary_directory(prefix="fake-flash-run-"), "flash-run.py")
     with open(path, "w") as fh:
         fh.write(FAKE_FLASH_RUN)
     return [sys.executable, path]
@@ -764,7 +767,7 @@ def test_code_run_desk_git_never_trusts_a_swapped_git_in_the_worktree():
     project = f"{root}/app"
     spec, _, err = flash_wire.code_inputs(code_body(root), roots=[root])
     assert err is None, err
-    hookdir = tempfile.mkdtemp(prefix="flash-canary-")
+    hookdir = temporary_directory(prefix="flash-canary-")
     canary = os.path.join(hookdir, "CANARY")
     hook = os.path.join(hookdir, "hook.sh")
     with open(hook, "w") as fh:
@@ -816,7 +819,7 @@ def test_a_code_run_timeout_kills_the_whole_process_group():
     root = code_root()
     project = f"{root}/app"
     spec, _, _ = flash_wire.code_inputs(code_body(root), roots=[root])
-    pidfile = os.path.join(tempfile.mkdtemp(), "pid")
+    pidfile = os.path.join(temporary_directory(), "pid")
     os.environ["FAKE_FLASH_PID"] = pidfile
     try:
         row = _run_with("sleep", spec, timeout=3)

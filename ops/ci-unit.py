@@ -56,7 +56,8 @@ def main():
                         env=env, stdout=output, stderr=subprocess.STDOUT)
                 output = log.read_text(errors='replace')
                 for line in output.splitlines():
-                    if line.startswith((PREFIX, 'QUARANTINED ')):
+                    if line.startswith('QUARANTINED ') or (
+                            line.startswith(PREFIX) and json.loads(line[len(PREFIX):]).get('status') != 'passed'):
                         print(line)
                 counts = package_counts(output)
                 if result.returncode:

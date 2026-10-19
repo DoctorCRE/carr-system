@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
 function websocketFrame(payload) {
@@ -24,6 +25,10 @@ function websocketPayload(buffer) {
 
 const [profile, scenario] = process.argv.slice(2);
 const portFile = path.join(profile, "DevToolsActivePort");
+if (scenario.startsWith("temp-artifact")) {
+  await writeFile(path.join(tmpdir(), "com.google.Chrome.chrome_chrome_url_fetcher_.fixture"), "fixture");
+  if (scenario.endsWith("-exit")) process.exit(17);
+}
 process.stderr.write(`fixture:${scenario}\n`);
 if (scenario === "inherited-stderr") {
   const holder = spawn(process.execPath, ["-e", "setTimeout(() => {}, 1500)"], { detached: true, stdio: ["ignore", "ignore", "inherit"] });
