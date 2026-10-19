@@ -2250,16 +2250,66 @@ class Pipeline:
             raise Blocked("candidate_identity", "staging requires a full source SHA, staging environment and provider version")
         return {key: value[key] for key in ("source_commit", "environment", "provider_version_id")}
 
+    def build_candidate(self, repo_dir: Path, sha: str, toolchain: Path) -> Path:
+        """Build without deploy configuration; hand off only regular artifact files."""
+        wt = self.store.release_worktree("app", sha, self.run_id)
+        self.add_worktree("app-worktree", repo_dir, wt, sha)
+        for path in [*wt.glob("wrangler.*"), wt / ".wrangler", wt / ".npmrc",
+                     *wt.glob(".env*"), *wt.glob(".dev.vars*")]:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        home = wt / ".build-home"
+        home.mkdir()
+        env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home),
+               "LANG": "en_US.UTF-8", "CI": "1", "DOCTORCRE_SOURCE_COMMIT": sha,
+               "NPM_CONFIG_USERCONFIG": "/dev/null", "NPM_CONFIG_GLOBALCONFIG": str(home / "npm-global")}
+        self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800, env=env)
+        self.step("app-build", ["npm", "run", "build"], wt, timeout=3600, env=env)
+        self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "prepare-deployment"], wt, env=env)
+        self.step("app-worker-build", [str(toolchain / "node_modules/.bin/esbuild"), "src/worker.js",
+                                      "--bundle", "--format=esm", "--platform=browser",
+                                      "--external:cloudflare:*", "--outfile=dist/worker.mjs"], wt, env=env)
+        source = wt / "dist"
+        artifact = self.run_dir / "app-artifact"
+        if source.is_symlink() or not source.is_dir():
+            raise Blocked("candidate_artifact", "build output must be a regular directory")
+        paths = [source / "worker.mjs", source / "site"]
+        if not paths[0].is_file() or not paths[1].is_dir():
+            raise Blocked("candidate_artifact", "build output requires Worker bundle and site directory")
+        for path in [*paths, *paths[1].rglob("*")]:
+            if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                raise Blocked("candidate_artifact", "artifact handoff cannot contain links or special files")
+        artifact.mkdir(parents=True)
+        shutil.copy2(paths[0], artifact / "worker.mjs")
+        shutil.copytree(paths[1], artifact / "site")
+        self.remove_worktrees()
+        return artifact
+
+    def candidate_publisher(self, repo_dir: Path, tooling_sha: str) -> tuple[Path, dict[str, str]]:
+        """Materialize trusted configuration outside the discarded build checkout."""
+        publish = self.run_dir / "app-publish"
+        publish.mkdir(parents=True, exist_ok=True)
+        config = self.git("show", f"{tooling_sha}:wrangler.jsonc", cwd=repo_dir)
+        (publish / "wrangler.jsonc").write_text(config + "\n")
+        home = publish / ".home"
+        home.mkdir(exist_ok=True)
+        env = {"PATH": BREW_PATH, "HOME": str(home), "TMPDIR": str(home), "CI": "1", "NO_COLOR": "1",
+               CLOUDFLARE_TOKEN_NAME: self.deploy_env()[CLOUDFLARE_TOKEN_NAME]}
+        return publish, env
+
     def candidate(self, command: str, *, lane: str, sha: str | None = None) -> int:
         """Temporarily publish an app SHA to staging under the release lock."""
         if lane != "app" or command not in ("stage-candidate", "restore-candidate"):
             raise Blocked("candidate_scope", "candidate operations support only the app staging lane")
         if self.dry_run:
             raise Blocked("candidate_scope", "candidate operations do not support --dry-run")
-        if command == "stage-candidate" and not SHA_RE.fullmatch(sha or ""):
+        if command == "stage-candidate" and (sha is None or not SHA_RE.fullmatch(sha)):
             raise Blocked("candidate_sha", "stage-candidate requires a full commit SHA")
         if command == "restore-candidate" and sha is not None:
             raise Blocked("candidate_sha", "restore-candidate uses its recorded staging identity")
+        sha = sha or ""
         with single_run_lock(self.store.root) as got:
             if not got:
                 raise Blocked("candidate_locked", "another release run holds the lock")
@@ -2286,6 +2336,10 @@ class Pipeline:
                 raise Blocked("candidate_journal", "candidate journal is unreadable; refusing publication") from exc
             staging = {"live_release_url": APP_STAGING_RELEASE_URL}
             live = self.staging_identity(self.http(APP_STAGING_RELEASE_URL))
+            prior_sha = self.store.load().get("app", {}).get("last_released_sha")
+            prior = journal["prior"] if journal and (command == "restore-candidate" or journal["status"] != "restored") else live
+            if not isinstance(prior_sha, str) or prior["source_commit"] != prior_sha:
+                raise Blocked("candidate_prior", "restore target must equal the last released app main SHA in pipeline state")
             if journal and (command == "restore-candidate" or journal["status"] != "restored"):
                 if command == "restore-candidate" and live == journal["prior"]:
                     journal["status"] = "restored"
@@ -2304,10 +2358,6 @@ class Pipeline:
                 sha = journal["sha"]
             elif command == "restore-candidate":
                 raise Blocked("candidate_missing", "no candidate staging identity was recorded")
-            prior_sha = self.store.load().get("app", {}).get("last_released_sha")
-            prior = journal["prior"] if command == "restore-candidate" else live
-            if not isinstance(prior_sha, str) or prior["source_commit"] != prior_sha:
-                raise Blocked("candidate_prior", "restore target must equal the last released app main SHA in pipeline state")
             repo_dir = lane_repo_dir(self.cfg, "app", self.repo)
             if command == "stage-candidate":
                 self.git("fetch", "--quiet", "origin", sha, cwd=repo_dir)
@@ -2320,42 +2370,44 @@ class Pipeline:
                                    "package-lock.json", "wrangler.*", ".wrangler", ".npmrc", cwd=repo_dir)
                 if changed:
                     raise Blocked("candidate_tooling", "candidate publication scripts, dependencies and staging target must match app main")
-                worktree_sha = sha
             else:
-                worktree_sha = journal["tooling_sha"]
-                self.git("fetch", "--quiet", "origin", worktree_sha, cwd=repo_dir)
-            wt = self.store.release_worktree("app", worktree_sha, self.run_id)
-            self.add_worktree("app-worktree", repo_dir, wt, worktree_sha)
+                tooling_sha = journal["tooling_sha"]
+                self.git("fetch", "--quiet", "origin", tooling_sha, cwd=repo_dir)
+            wrangler = self.auth_wrangler()
             try:
-                self.step("app-npm-ci", ["npm", "ci", "--no-audit", "--no-fund"], wt, timeout=1800)
+                artifact = None
                 if command == "stage-candidate":
-                    self.step("app-build", ["npm", "run", "build"], wt, timeout=3600,
-                              env={**self.env, "DOCTORCRE_SOURCE_COMMIT": sha})
-                    self.step("app-artifact-verify", ["node", "scripts/build-artifact.mjs", "verify"], wt)
+                    artifact = self.build_candidate(repo_dir, sha, wrangler.parents[2])
                     self.app_checks_green(self.cfg["app"], sha, hosted=True)
                 if self.staging_identity(self.http(APP_STAGING_RELEASE_URL)) != live:
                     raise Blocked("candidate_drift", "staging changed during preparation; refusing publication")
+                publish, env = self.candidate_publisher(repo_dir, tooling_sha)
+                common = ["--config", str(publish / "wrangler.jsonc"), "--env", "staging"]
                 if command == "stage-candidate":
+                    assert artifact is not None
                     journal = {"sha": sha, "tooling_sha": tooling_sha, "prior": live, "status": "publishing"}
                     journal_store.save(journal)
-                    publication = self.step("app-candidate-publish", ["node", "scripts/release-staging.mjs", "--source-sha", sha],
-                              wt, timeout=900, env=self.deploy_env())
+                    publication = self.step("app-candidate-upload", [str(wrangler), "versions", "upload",
+                                            str(artifact / "worker.mjs"), "--no-bundle", "--assets", str(artifact / "site"),
+                                            *common, "--tag", "staging-" + sha[:12], "--var", "GIT_SHA:" + sha],
+                                            publish, timeout=900, env=env)
                     versions = set(re.findall(r"Worker Version ID:\s*(" + UUID_RE.pattern + r")", publication.out))
                     if len(versions) != 1:
-                        raise StepFailed("app-candidate-publish", 1, publication.log, "provider returned no unique version ID")
+                        raise StepFailed("app-candidate-upload", 1, publication.log, "provider returned no unique version ID")
                     journal["published_version_id"] = versions.pop()
                     journal_store.save(journal)
-                    expected = lambda value: (
-                        value.get("source_commit") == sha and value.get("environment") == "staging"
-                        and isinstance(value.get("provider_version_id"), str)
-                        and bool(UUID_RE.fullmatch(value["provider_version_id"]))
-                        and value["provider_version_id"] == journal["published_version_id"])
+                    self.step("app-candidate-publish", [str(wrangler), "versions", "deploy",
+                              journal["published_version_id"] + "@100%", *common, "--yes"],
+                              publish, timeout=900, env=env)
+                    expected = lambda value: (value.get("source_commit") == sha
+                                              and value.get("environment") == "staging"
+                                              and value.get("provider_version_id") == journal["published_version_id"])
                 else:
                     journal["status"] = "restoring"
                     journal_store.save(journal)
-                    self.step("app-candidate-restore", ["node", "scripts/rollback-staging.mjs",
-                                                       journal["prior"]["provider_version_id"]],
-                              wt, timeout=900, env=self.deploy_env())
+                    self.step("app-candidate-restore", [str(wrangler), "versions", "deploy",
+                              journal["prior"]["provider_version_id"] + "@100%", *common, "--yes"],
+                              publish, timeout=900, env=env)
                     expected = lambda value: all(value.get(k) == v for k, v in journal["prior"].items())
                 matched, identity, _, log = self.await_live(staging, command + "-verify", expected)
                 if not matched:

@@ -3078,6 +3078,10 @@ class ReleaseTarget(Base):
 
 
 class CandidateStaging(Base):
+    def setUp(self):
+        super().setUp()
+        self.fx.base = self.fx.commit({"wrangler.jsonc": '{"name":"trusted-app","env":{"staging":{"name":"trusted-staging"}}}'})
+
     def candidate_sha(self, files=None):
         git(self.fx.repo, "checkout", "-b", "ui-candidate")
         for name, value in (files or {"src/worker.js": "candidate"}).items():
@@ -3104,11 +3108,17 @@ class CandidateStaging(Base):
                 if argv[0] == "git":
                     proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
                     return rp.Result(proc.returncode, proc.stdout + proc.stderr)
-                if "scripts/release-staging.mjs" in argv:
-                    owner.assertTrue((pipe.store.root / "app-candidate/state.json").is_file())
-                    owner.live.update(source_commit=argv[-1], provider_version_id=VERSION)
-                if "scripts/rollback-staging.mjs" in argv:
-                    owner.live.update(source_commit=owner.fx.base, provider_version_id=argv[-1])
+                if log.stem.endswith("app-worker-build"):
+                    (cwd / "dist/site").mkdir(parents=True, exist_ok=True)
+                    (cwd / "dist/site/index.html").write_text("candidate assets")
+                    (cwd / "dist/worker.mjs").write_text("export default {};")
+                if "deploy" in argv:
+                    journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+                    version = argv[3].split("@", 1)[0]
+                    if log.stem.endswith("app-candidate-publish"):
+                        owner.assertEqual(journal["published_version_id"], version)
+                    owner.live.update(source_commit=journal["sha"] if version == VERSION else owner.fx.base,
+                                      provider_version_id=version)
                 return rp.Result(0, f"Worker Version ID: {VERSION}")
 
         pipe = self.fx.pipeline(Provider(), cfg=cfg, github=FakeGitHub(checks=[
@@ -3126,7 +3136,7 @@ class CandidateStaging(Base):
         original = pipe.runner.run
 
         def interrupted_before_publish(argv, **kwargs):
-            if "scripts/release-staging.mjs" in argv or "upload" in argv:
+            if "upload" in argv:
                 raise OSError("interrupted before provider publication")
             return original(argv, **kwargs)
 
@@ -3171,9 +3181,11 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
                 self.assertEqual(result.rc, 0, result.out)
             if "CLOUDFLARE_API_TOKEN" in env:
                 credentialed.append((list(argv), cwd))
-                if "scripts/release-staging.mjs" in argv:
-                    real.run([node, "node_modules/wrangler/bin/wrangler.js"],
-                             cwd=cwd, log=log, env=env)
+                self.assertFalse(pipe.worktrees)
+                result = real.run(argv, cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+                config = Path(argv[argv.index("--config") + 1]).read_text()
+                self.assertEqual(json.loads(config)["env"]["staging"]["name"], "trusted-staging")
             return original(argv, cwd=cwd, log=log, env=env, timeout=timeout)
 
         pipe.env.update({"NODE_OPTIONS": "candidate-option", "NPM_CONFIG_USERCONFIG": "deploy-config",
@@ -3184,13 +3196,13 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
         self.assertTrue(credentialed)
         for argv, cwd in credentialed:
             executable = Path(argv[0]).resolve()
-            self.assertTrue(executable.is_relative_to(pipe.store.root / "toolchain"), argv)
+            self.assertTrue(executable.is_relative_to((pipe.store.root / "toolchain").resolve()), argv)
             self.assertIn("--config", argv)
             self.assertNotIn("node_modules", str(cwd))
         for env, configs in build_observations:
             self.assertEqual(configs, [])
             self.assertNotIn("NODE_OPTIONS", env)
-            self.assertNotIn("NPM_CONFIG_USERCONFIG", env)
+            self.assertEqual(env["NPM_CONFIG_USERCONFIG"], "/dev/null")
             self.assertNotIn("ARBITRARY_DEPLOY_SECRET", env)
             self.assertNotEqual(env["HOME"], pipe.env.get("HOME"))
 
@@ -3311,7 +3323,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
 
         def interrupted(argv, **kwargs):
             result = original(argv, **kwargs)
-            if "scripts/release-staging.mjs" in argv or "scripts/rollback-staging.mjs" in argv:
+            if "deploy" in argv:
                 raise OSError("interrupted after provider accepted publication")
             return result
 
@@ -3334,7 +3346,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
         original = pipe.runner.run
 
         def failed(argv, **kwargs):
-            if "scripts/release-staging.mjs" in argv:
+            if "upload" in argv:
                 self.calls.append(("failed-publication", argv, {}))
                 return rp.Result(1, "provider unavailable")
             return original(argv, **kwargs)
@@ -3352,7 +3364,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
     def test_candidate_failed_readbacks_keep_recovery_journal_and_release_state(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
-        pipe.store.save({"app": {"released_sha": self.fx.base}})
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
         before = pipe.store.state_path.read_bytes()
         original = pipe.runner.run
         wrong_identity = False
@@ -3366,7 +3378,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
         def run(argv, **kwargs):
             nonlocal wrong_identity
             result = original(argv, **kwargs)
-            if "scripts/release-staging.mjs" in argv or "scripts/rollback-staging.mjs" in argv:
+            if "deploy" in argv:
                 wrong_identity = True
             return result
 
@@ -3389,7 +3401,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
         original = pipe.runner.run
 
         def run(argv, **kwargs):
-            if argv == ["node", "scripts/build-artifact.mjs", "verify"]:
+            if argv == ["node", "scripts/build-artifact.mjs", "prepare-deployment"]:
                 return rp.Result(1, "artifact source mismatch")
             return original(argv, **kwargs)
 
@@ -3435,7 +3447,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
     def test_candidate_stage_and_restore_leave_release_state_untouched(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
-        pipe.store.save({"app": {"released_sha": self.fx.base}, "worker": {"failed_sha": sha}})
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}, "worker": {"failed_sha": sha}})
         before = pipe.store.state_path.read_bytes()
         self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=sha), 0)
         journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
@@ -3448,11 +3460,13 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
         self.assertEqual(pipe.store.state_path.read_bytes(), before)
         self.assertFalse(pipe.store.records_path.exists())
         self.assertFalse(pipe.worktrees)
-        publish = next(a for _, a, _ in self.calls if "scripts/release-staging.mjs" in a)
-        self.assertEqual(publish, ["node", "scripts/release-staging.mjs", "--source-sha", sha])
+        publish = next(a for _, a, _ in self.calls if "upload" in a)
+        self.assertEqual(publish[0], str(self.fx.wrangler))
+        self.assertIn("--no-bundle", publish)
+        self.assertIn("GIT_SHA:" + sha, publish)
         for _, argv, env in self.calls:
             if "CLOUDFLARE_API_TOKEN" in env:
-                self.assertTrue(any(a in argv for a in ("scripts/release-staging.mjs", "scripts/rollback-staging.mjs")))
+                self.assertEqual(argv[0], str(self.fx.wrangler))
             self.assertNotIn(CF_TOKEN, " ".join(argv))
         self.assertNotIn(CF_TOKEN, "\n".join(self.output))
 
