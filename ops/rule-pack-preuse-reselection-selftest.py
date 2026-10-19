@@ -31,6 +31,34 @@ class DeliveryTests(unittest.TestCase):
         runner = lambda command, **kwargs: subprocess.CompletedProcess(command, 0, json.dumps(source), '')
         return hook.process(payload, runner=runner, dedupe=False, **options)
 
+    def test_empty_lookup_with_selection_gaps_adds_zero_context_bytes(self):
+        gaps = [dict(id='22222222', statement='Moment rule.',
+                     scope={'moment': 'Before review'}, personal_to=None),
+                dict(id='33333333', statement='Invalid scope.', scope={}, personal_to=None)]
+        with tempfile.TemporaryDirectory() as raw, patch.object(hook, 'GAP_LOG', Path(raw) / 'gaps.jsonl', create=True):
+            for event in ('PreToolUse', 'UserPromptSubmit', 'Stop'):
+                output = self.invoke(gaps, event=event)
+                context = (output or {}).get('hookSpecificOutput', {}).get('additionalContext', '')
+                self.assertEqual(len(context.encode()), 0)
+            rows = [json.loads(line) for line in hook.GAP_LOG.read_text().splitlines()]
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[0]['unresolved'][0]['rule_id'], '22222222')
+            self.assertEqual(rows[0]['data_defects'][0]['rule_id'], '33333333')
+
+    def test_matching_lookup_keeps_rules_without_unresolved_array(self):
+        known = dict(id='11111111', statement='Inspect the current diff.',
+                     scope={'tools': ['Bash']}, personal_to=None)
+        gap = dict(id='22222222', statement='Moment rule.',
+                   scope={'moment': 'Before review'}, personal_to=None)
+        for event in ('PreToolUse', 'UserPromptSubmit'):
+            output = self.invoke([known, gap], event=event)
+            row = json.loads(output['hookSpecificOutput']['additionalContext'])
+            self.assertEqual(row['rules'], [known])
+            self.assertNotIn('unresolved', row)
+            self.assertEqual(row['unresolved_count'], 1)
+            self.assertFalse(row['complete'])
+            self.assertTrue(validate_lookup_receipt(row, repo=REPO))
+
     def test_stop_with_no_rules_and_gaps_stays_silent(self):
         gap = dict(id='22222222', statement='Moment rule.', scope={'moment': 'Before review'}, personal_to=None)
         out = self.invoke([gap], payload={'hook_event_name': 'Stop', 'last_assistant_message': 'done'})
@@ -83,7 +111,11 @@ class DeliveryTests(unittest.TestCase):
                 self.assertEqual(row['rule_ids'], ['11111111'])
                 self.assertEqual(row['rules'], [known])
                 self.assertFalse(row['complete'])
-                self.assertEqual(row[issue_key], [{'rule_id': '22222222', 'reason': reason}])
+                if issue_key == 'unresolved':
+                    self.assertNotIn('unresolved', row)
+                    self.assertEqual(row['unresolved_count'], 1)
+                else:
+                    self.assertEqual(row[issue_key], [{'rule_id': '22222222', 'reason': reason}])
                 self.assertNotIn('Must not broadcast', specific['additionalContext'])
                 self.assertNotIn('private provider detail', specific['additionalContext'])
                 self.assertTrue(validate_lookup_receipt(row, repo=REPO))
@@ -108,13 +140,7 @@ class DeliveryTests(unittest.TestCase):
     def test_defects_alone_do_not_block_prompt_or_stop(self):
         rows = [dict(id='11111111', statement='Undeliverable rule.', scope={}, personal_to=None)]
         self.assertIsNone(self.invoke(rows, event='Stop'))
-        for event in ('UserPromptSubmit',):
-            with self.subTest(event=event):
-                output = self.invoke(rows, event=event)
-                self.assertNotIn('decision', output)
-                row = json.loads(output['hookSpecificOutput']['additionalContext'])
-                self.assertEqual(row['rules'], [])
-                self.assertFalse(row['complete'])
+        self.assertIsNone(self.invoke(rows, event='UserPromptSubmit'))
 
     def test_overflow_is_explicit_and_never_audited_as_full_delivery(self):
         out = self.invoke([dict(id='11111111', statement='Binding text '*2000,
@@ -318,7 +344,7 @@ class CardDeliveryTests(unittest.TestCase):
             raise TimeoutError('provider detail')
         moment = self.covered('24e10ee8', scope={'moment': 'Before a retry loop'})
         row = self.receipt(self.invoke([self.UNCOVERED, moment], judge=unavailable))
-        self.assertEqual(row['unresolved'], [])
+        self.assertEqual(row['unresolved_count'], 0)
         self.assertTrue(row['complete'])
 
     def test_cards_are_sent_once_per_context(self):

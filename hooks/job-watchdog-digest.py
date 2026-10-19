@@ -12,11 +12,12 @@ import job_watchdog as watchdog  # noqa: E402
 
 
 def main():
+    payload = json.load(sys.stdin)
     config = watchdog.load_config(os.environ.get("CARR_WATCHDOG_CONFIG", str(SOURCE / "ops/config/job-watchdog.json")))
     try:
         root = Path(os.environ["CARR_JOB_ROOT"]) if os.environ.get("CARR_JOB_ROOT") else Path(
             watchdog.command(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], config, SOURCE).strip()).parent
-        context = watchdog.digest(root, config)
+        context = watchdog.digest(root, config, session_id=payload.get("session_id"))
     except (OSError, ValueError, RuntimeError) as exc:
         context = "Orchestrator watchdog digest unavailable; inspect out/watchdog/findings.jsonl: " + str(exc)
     if context:
