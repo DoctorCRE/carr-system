@@ -133,6 +133,27 @@ class ConsumerCompletion(unittest.TestCase):
             refreshed = board.assemble_all_repos(refreshed, {task["repo"]: ([], [info])})
             self.assertEqual(board.task_stage(refreshed["tasks"][key]), "merged")
 
+    def test_receipt_replays_cannot_erase_a_newer_observation(self):
+        task = self.proven_task()
+        old_pass = copy.deepcopy(task["consumer_proof"])
+        failed = {**old_pass, "outcome": "fail", "observed_at": "2026-10-02T12:00:00Z"}
+        new_pass = {**old_pass, "observed_at": "2026-10-03T12:00:00Z"}
+        state = {"tasks": {"feature": task}}
+        release = {"sha": "a" * 40, "lane": "app", "ts": "synthetic", "source": "fixture"}
+
+        def record(proof):
+            args = board.parser().parse_args(["task", "synthetic", "feature", "--consumer-proof", json.dumps(proof)])
+            board.update_task(state, args)
+            with patch.object(board, "latest_release", return_value=release):
+                board.auto_live(state["tasks"]["feature"], task["repo"], "2026-10-04T12:00:00Z", ["js/feature.js"])
+            return board.task_stage(state["tasks"]["feature"])
+
+        self.assertEqual(record(failed), "merged")
+        self.assertEqual(record(old_pass), "merged", "an old pass cannot erase the newer failure")
+        self.assertEqual(state["tasks"]["feature"]["consumer_proof"], failed)
+        self.assertEqual(record(new_pass), "live", "a newer exercised pass restores completion")
+        self.assertEqual(record(failed), "live", "an old failure cannot erase the newer pass")
+
     def test_malformed_receipts_and_retired_tasks_cannot_complete(self):
         for proof in (None, [], "pass", {"outcome": "pass"}):
             task = self.proven_task()
