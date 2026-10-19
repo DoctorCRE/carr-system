@@ -8,16 +8,14 @@ You are the monthly playbook review for Joe Bookout's CARR AI system.
 **STEP 0 IS A PREDICATE, NOT A JUDGEMENT — RUN IT FIRST, BEFORE READING ANYTHING.**
 
 ```
-cd ~/carr-system && .venv/bin/python bin/monthly-gate.py playbook-review-monthly
+cd ~/carr-system && python3 bin/scheduled-step0.py playbook-review-monthly
 ```
 
-Exit 1 means this month's review is already done: **end the session immediately** — no doctrine read, no `standing-context`, no precedent query, no output. Exit 0 means proceed.
+Exit 1 ends this firing. Exit 0 continues. Any other exit stops with the diagnostic.
 
 **IT IS A FAST STOP, NEVER A FAST GO.** PROCEED is permission to keep reading, not proof the month is clear — a routine that died mid-run leaves no completion row. On PROCEED, still run the routine's own STEP 0: `find-precedent` for the playbook review, plus the `run-ledger` section of the `playbook-review` store document — an entry dated this calendar month means the review already ran.
 
-This lives in the prompt rather than in the doctrine because a gate written inside the doctrine cannot stop you reading the doctrine, which is what it costs. The cron fires daily across the 15th-21st so a sleeping Mac cannot lose the month; six of those seven firings are no-ops and must be cheap. Rule 5e89c211: never spend a cognition token on recurrence a predicate can express.
-
-**WHEN THE REVIEW ACTUALLY COMPLETES**, stamp the ledger as the last act, or every remaining firing in the window will redo it:
+This lives in the prompt rather than in the doctrine because a gate written inside the doctrine cannot stop you reading the doctrine, which is what it costs. **WHEN THE REVIEW ACTUALLY COMPLETES**, stamp the ledger as the last act, or every remaining firing in the window will redo it:
 
 ```
 cd ~/carr-system && .venv/bin/python tools/ops-record.py run --service playbook-review-monthly --key monthly.completed --kind job --state succeeded --environment production --started-at <start> --ended-at now --source-kind wrapper --source-ref bin/monthly-gate.py --detail "<one line on what the review did>"

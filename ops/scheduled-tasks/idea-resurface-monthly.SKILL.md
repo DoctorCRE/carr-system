@@ -8,14 +8,12 @@ STORE-FIRST (added 2026-08-09, loop #289): the doctrine STORE is the source of t
 You are the monthly idea-bank resurface for Joe Bookout's CARR AI system (migrated from the app scheduler 2026-07-25). **STEP 0 IS A PREDICATE — RUN IT FIRST, BEFORE READING ANYTHING.**
 
 ```
-cd ~/carr-system && .venv/bin/python bin/monthly-gate.py idea-resurface-monthly
+cd ~/carr-system && python3 bin/scheduled-step0.py idea-resurface-monthly
 ```
 
-Exit 1 means this month's run is already done: **end the session immediately** — no doctrine read, no `standing-context`, no output. Exit 0 means keep going.
+Exit 1 ends this firing. Exit 0 continues. Any other exit stops with the diagnostic.
 
 **IT IS A FAST STOP, NEVER A FAST GO.** PROCEED is permission to keep reading, not proof the month is clear — a routine that died mid-run leaves no completion row. On PROCEED, still run the routine's own STEP 0 against the `round-ledger` section of that document AND the idea bank itself — that routine checks two signals on purpose, and either one saying the round ran ends the firing.
-
-The cron fires daily across the window so a sleeping Mac cannot lose the month; most of those firings are no-ops and must be cheap. Rule 5e89c211: never spend a cognition token on recurrence a predicate can express.
 
 Read and execute EXACTLY the instruction set in the STORE document `idea-resurface-task` — `read-doctrine {"document":"idea-resurface-task"}`. **NAME THE SLUG, NEVER A PATH.** This prompt pointed at `{{VAULT}}/Automation/local-tasks/` until 2026-08-19; that Drive file is staged to `_to_delete` and anything written there is lost rather than implemented. All behavior lives in the store document (thin-prompt law).
 

@@ -26,6 +26,8 @@ import uuid
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from lib.scheduled_step0 import stop_reason, version_gate
+
 UTC = timezone.utc
 PREFIX = 'com.carr.headless.'
 DEFAULT_TOOLS = 'Read,Write,Glob,Grep,Bash(./run.sh *),Bash(./bin/*),Bash(./ops/*),WebFetch,WebSearch'
@@ -643,6 +645,15 @@ def main(argv=None) -> int:
                 append_ledger(ledger, row)
                 log.write('SKIP window_succeeded\n')
                 print(f'SKIP {args.task_id}: window_succeeded')
+                return 0
+            predicate_reason = stop_reason(args.task_id, start, prior,
+                monthly_days=fields(task['cron'])[2] if task.get('monthly') else None)
+            if predicate_reason is None and args.task_id == 'cc-update-audit' and version_gate(repo, Path.home()):
+                predicate_reason = 'version_unchanged'
+            if predicate_reason:
+                row.update(end=stamp(datetime.now(UTC)), exit_code=0, status='skipped', reason=predicate_reason)
+                append_ledger(ledger, row)
+                print(f'SKIP {args.task_id}: {predicate_reason}')
                 return 0
             if task.get('monthly'):
                 gate = subprocess.run([sys.executable, str(repo/'bin/monthly-gate.py'),

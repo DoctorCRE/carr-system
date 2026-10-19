@@ -104,14 +104,59 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
 ''')
         self.env['FAKE_OPS_RECORDS'] = str(self.home/'ops-records.jsonl')
 
-    def run_task(self, mode='success', timeout='30'):
-        return subprocess.run([str(REPO / 'bin/headless-task'), 'test-task',
+    def run_task(self, mode='success', timeout='30', task_id='test-task'):
+        return subprocess.run([str(REPO / 'bin/headless-task'), task_id,
                                '--repo', str(self.repo), '--timeout-seconds', timeout],
                               env={**self.env, 'FAKE_MODE': mode},
                               capture_output=True, text=True, timeout=90)
 
     def ledger(self):
         return [json.loads(s) for s in (self.repo / 'out/headless/test-task/ledger.jsonl').read_text().splitlines()]
+
+    def configure_task(self, task_id):
+        path = self.repo/'ops/headless-tasks/tasks.json'
+        settings = json.loads(path.read_text())
+        settings['tasks'][task_id] = settings['tasks'].pop('test-task')
+        if task_id.endswith('-monthly'):
+            days = '15-21' if task_id == 'system-sweep-monthly' else '6-10'
+            settings['tasks'][task_id].update(cron=f'0 9 {days} * *', monthly=True)
+        path.write_text(json.dumps(settings))
+
+    def test_step0_stops_weekly_completion_before_model(self):
+        self.configure_task('radar-weekly')
+        folder = self.repo/'out/headless/radar-weekly'
+        folder.mkdir(parents=True)
+        (folder/'ledger.jsonl').write_text(json.dumps({
+            'run_id': 'synthetic-prior', 'window': datetime.now(timezone.utc).isoformat(), 'status': 'success', 'exit_code': 0,
+            'canonical_recorded': True, 'end': datetime.now(timezone.utc).isoformat()})+'\n')
+        result = self.run_task(task_id='radar-weekly')
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('weekly_completed', result.stdout)
+        self.assertFalse((self.home/'args.json').exists())
+
+    def test_step0_stops_outside_monthly_window_before_model(self):
+        from zoneinfo import ZoneInfo
+        day = datetime.now(ZoneInfo('America/Chicago')).day
+        task_id = 'system-sweep-monthly' if 6 <= day <= 10 else 'health-audit-monthly'
+        self.configure_task(task_id)
+        result = self.run_task(task_id=task_id)
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('outside_monthly_window', result.stdout)
+        self.assertFalse((self.home/'args.json').exists())
+
+    def test_step0_stops_unchanged_versions_before_model(self):
+        self.configure_task('cc-update-audit')
+        (self.repo/'bin').mkdir()
+        helper = self.repo/'bin/cc-version-string.sh'
+        helper.write_text('#!/bin/sh\necho "cli=2.1.1 app=2.1.2"\n')
+        helper.chmod(0o755)
+        sentinel = self.home/'.claude/scheduled-tasks/cc-update-audit/last-audited-version.txt'
+        sentinel.parent.mkdir(parents=True)
+        sentinel.write_text('cli=2.1.1 app=2.1.2\n')
+        result = self.run_task(task_id='cc-update-audit')
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertIn('version_unchanged', result.stdout)
+        self.assertFalse((self.home/'args.json').exists())
 
     def test_success_cli_and_private_log(self):
         result = self.run_task()
