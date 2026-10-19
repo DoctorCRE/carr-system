@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { checkUiCopy } from "../scripts/check-ui-copy.mjs";
 
 test("UI copy lint reports banned voice with a path and matched text", async t => {
@@ -57,4 +58,13 @@ test("UI copy lint covers the live CARR UI and fixtures", async () => {
   ]);
 
   assert.deepEqual(findings, []);
+});
+
+test("UI copy CLI exits unsuccessfully for a planted UI phrase", async t => {
+  const root = await mkdtemp(join(tmpdir(), "carr-ui-copy-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "planted.html"), "Nothing needs you right now.");
+  const result = spawnSync(process.execPath, [new URL("../scripts/check-ui-copy.mjs", import.meta.url).pathname, root], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /planted\.html:1: banned UI copy/);
 });

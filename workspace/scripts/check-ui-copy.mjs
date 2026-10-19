@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const blockedVoice = /\b(?:nothing\s+needs?\s+your?\b|what\s+needs?\s+your?\b|needs?\s+you\b|(?:deals?|things?)\s+that\s+need\s+you\b|(?:one|1)\s+thing\s+is\s+broken\b|nothing\s+is\s+(?:stuck|waiting\s+on\s+you)\b|everything\s+is\s+clear\b)/gi;
 const textExtensions = new Set([".html", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".json", ".css", ".svg"]);
-const ignoredDirectories = new Set([".git", "node_modules", "vendor", "vendors", "third_party"]);
+const ignoredDirectories = new Set([".git", "node_modules", "vendor"]);
 
 async function textFiles(root) {
   const files = [];
@@ -50,13 +50,15 @@ export async function checkUiCopy(paths) {
   return findings;
 }
 
-const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const paths = process.argv.slice(2);
-const roots = paths.length ? paths : [resolve(workspace, "public"), resolve(workspace, "fixtures")];
-const findings = await checkUiCopy(roots);
-if (findings.length) {
-  for (const finding of findings) console.error(`${finding.path}:${finding.line}: ${finding.message}`);
-  process.exitCode = 1;
-} else {
-  console.log(`UI copy lint passed (${roots.length} roots).`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const paths = process.argv.slice(2);
+  const roots = paths.length ? paths : [resolve(workspace, "public"), resolve(workspace, "fixtures")];
+  const findings = await checkUiCopy(roots);
+  if (findings.length) {
+    for (const finding of findings) console.error(`${finding.path}:${finding.line}: ${finding.message}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`UI copy lint passed (${roots.length} roots).`);
+  }
 }
