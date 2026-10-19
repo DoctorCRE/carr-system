@@ -256,13 +256,13 @@ def finish_pending_skill_receipt(pending, result_text, log_path, *, results_path
                     sid = event.get('session_id')
                     break
     completed = {**row, 'status': 'completed', 'session_id': sid, 'result': result_text}
-    if not completed.get('completed_at'):
-        runtime = 'codex' if completed.get('kind', '').startswith('codex') else 'claude'
-        path = skill_receipts.session_path(sid, runtime)
-        completed['completed_at'] = (skill_receipts.completion_time(
-            path, since=row.get('dispatched_at'), result=result_text) if path else None)
-    _record(_skill_ledger(results_path), {**completed, 'record_kind': 'skill-receipt'})
     try:
+        if not completed.get('completed_at'):
+            runtime = 'codex' if completed.get('kind', '').startswith('codex') else 'claude'
+            path = skill_receipts.session_path(sid, runtime)
+            completed['completed_at'] = (skill_receipts.completion_time(
+                path, since=row.get('dispatched_at'), result=result_text) if path else None)
+        _record(_skill_ledger(results_path), {**completed, 'record_kind': 'skill-receipt'})
         completed['skill_receipt'] = finish_skill_receipt(completed)
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         completed['skill_receipt_error'] = str(exc)
