@@ -376,6 +376,22 @@ def test_staging_at_merge_entry_is_excluded():
     print("PASS  staging at merge entry is excluded; files, index and HEAD stay intact")
 
 
+def test_post_merge_edit_refuses_wiring_install():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        hook = Path(b, ".git/hooks/post-merge")
+        hook.write_text("#!/bin/sh\nprintf 'concurrent editor work\\n' > f.txt\n")
+        hook.chmod(0o755)
+        r = run_sync(b)
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "f.txt" in r.stdout + r.stderr
+        assert "stub installer" not in r.stdout
+        assert Path(b, "f.txt").read_text() == "concurrent editor work\n"
+        assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
+        assert behind(b) == 0
+    print("PASS  post-merge editor work refuses wiring install and preserves content")
+
+
 def test_interrupted_sync_leaves_git_usable():
     for sig in ("SIGTERM", "SIGKILL"):
         for phase in ("before-merge", "post-merge-hook"):
@@ -1052,6 +1068,7 @@ def main():
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
     test_staging_at_merge_entry_is_excluded()
+    test_post_merge_edit_refuses_wiring_install()
     test_interrupted_sync_leaves_git_usable()
     test_existing_index_lock_refuses_without_stealing()
     test_split_index_is_published_and_lock_released()
