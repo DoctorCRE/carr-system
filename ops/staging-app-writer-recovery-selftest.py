@@ -118,10 +118,15 @@ class Recovery(unittest.TestCase):
             self.rollback()
 
     def apply(self, owner, profile, _grants, password, *, rotate=False, commit=True, **_kwargs):
-        self.assertEqual(rotate, profile.login_role in self.passwords)
         self.assertFalse(commit)
+        if not rotate and profile.login_role in self.passwords:
+            self.assertEqual(password, self.passwords[profile.login_role])
+            return False
+        if rotate:
+            self.assertIn(profile.login_role, self.passwords)
         owner.pending[profile.login_role] = password
         self.changes.append((profile.login_role, password))
+        return not rotate
 
     def validate(self, dsn, profile, _grants, **_kwargs):
         if urlsplit(dsn).password != self.passwords[profile.login_role]:
@@ -263,6 +268,58 @@ class Recovery(unittest.TestCase):
         self.assertEqual(outcomes[0]["outcome"], "created")
         self.assertTrue(self.file_profile("authority_joe").paths.final.is_file())
         self.assertEqual(self.prepare()[0], values)
+        self.assertEqual(len(self.changes), 1)
+
+    def test_missing_migration_owned_seat_refuses_without_creating_or_publishing(self):
+        self.prepare()
+        self.changes.clear()
+        self.bulk_calls.clear()
+        profile = next(p for p in provision.PROFILES if p.created_by_migration)
+        self.file_profile(profile.label).paths.final.unlink()
+        del self.passwords[profile.login_role]
+        with self.assertRaisesRegex(provision.ProvisioningRefusal, "migration has not applied"):
+            self.prepare()
+        self.assertEqual(self.changes, [])
+        self.assertEqual(self.bulk_calls, [])
+
+    def test_creation_resumes_same_password_after_publication_before_commit(self):
+        del self.passwords["carr_authority_joe"]
+        self.fail_commit = True
+        with self.assertRaises(ProcessDeath):
+            self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        self.assertNotIn("carr_authority_joe", self.passwords)
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual({password for _role, password in self.changes}, {urlsplit(published).password})
+
+    def test_creation_resumes_after_commit_before_final_publication(self):
+        del self.passwords["carr_authority_joe"]
+        with mock.patch.object(provision.credential, "promote_pending", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual(len(self.changes), 1)
+
+    def test_creation_resumes_after_final_publication_before_receipt(self):
+        del self.passwords["carr_authority_joe"]
+        original = provision.save_private_json
+        def die(path, value):
+            if path.name == "prior-worker-credential-recovery.json" and any(
+                    p["outcome"] == "created" for p in value["profiles"].values()):
+                raise ProcessDeath()
+            original(path, value)
+        with mock.patch.object(provision, "save_private_json", side_effect=die):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
         self.assertEqual(len(self.changes), 1)
 
 
