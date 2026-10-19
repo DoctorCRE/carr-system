@@ -675,6 +675,7 @@ commit;
     legacy_values = dict(future_values)
     legacy_values["DATABASE_URL_GATE_ZERO_WRITER"] = None
     legacy_values["DATABASE_URL_FOUNDATION_ASSURANCE_WRITER"] = None
+    legacy_values["CARR_DB_AUTHORITY_JOE_URL"] = None
     provision.bulk_worker_database_secrets(
         legacy_values, wrangler="wrangler", run=legacy_runner, environ={})
     provision.verify_worker_database_secret_bindings(
@@ -691,6 +692,7 @@ commit;
             "DATABASE_URL_READER", "DATABASE_URL_WRITER"}
         def load_legacy_credential(_paths, *, role_name, **_kwargs):
             if role_name in {
+                "carr_authority_joe",
                 provision.GATE_ZERO_PRODUCER_ROLE,
                 provision.FOUNDATION_ASSURANCE_ORACLE_ROLE,
             }:
@@ -705,12 +707,13 @@ commit;
         provision.credential.profile = saved_profile
         provision.credential.load_existing = saved_load_existing
         provision.read_worker_database_secret_names = saved_secret_names
-    check("legacy rollback derives absence only for migration-created seats",
+    check("legacy rollback preserves absent producer seats and Joe authority",
           rollback_values == {
               "DATABASE_URL_READER": "dsn-app_reader",
               "DATABASE_URL_WRITER": "dsn-app_writer",
               "DATABASE_URL_GATE_ZERO_WRITER": None,
               "DATABASE_URL_FOUNDATION_ASSURANCE_WRITER": None,
+              "CARR_DB_AUTHORITY_JOE_URL": None,
           })
     check("Worker child environment is an exact allowlist with pinned account",
           all(set(call[1]["env"]) == {
@@ -763,6 +766,20 @@ commit;
         check("Worker readback requires the exact declared DATABASE_URL name set", True)
     else:
         raise AssertionError("wrong Worker database secret name list was accepted")
+
+    class ExtraAuthorityRunner:
+        def __call__(self, args, **_kwargs):
+            return subprocess.CompletedProcess(args, 0, json.dumps([
+                {"name": name, "type": "secret_text"}
+                for name in (*provision.WORKER_DATABASE_SECRET_NAMES, "CARR_DB_AUTHORITY_URL")
+            ]), "")
+    try:
+        provision.verify_worker_database_secret_bindings(
+            wrangler="wrangler", run=ExtraAuthorityRunner(), environ={})
+    except provision.ProvisioningRefusal:
+        check("Worker readback refuses an undeclared authority fallback binding", True)
+    else:
+        raise AssertionError("extra Worker authority binding was accepted")
 
     rollback_events: list[tuple[str, Any]] = []
     old_values = {name: f"old-secret-for-{name}"
@@ -1010,11 +1027,12 @@ commit;
     check("prior rollback repair adopts only missing migration-created seats",
           repaired == {
               "reader": "reused", "writer": "reused",
+              "authority_joe": "reused",
               "gate_zero_producer": "adopted",
               "foundation_assurance_oracle": "adopted",
           }
           and repair_events == [
-              ("validate", "reader"), ("validate", "writer"),
+              ("validate", "reader"), ("validate", "writer"), ("validate", "authority_joe"),
               ("prepare", "gate_zero_producer"), ("adopt", "gate_zero_producer"),
               ("validate", "gate_zero_producer"), ("promote", "gate_zero_producer"),
               ("prepare", "foundation_assurance_oracle"),
@@ -1044,12 +1062,14 @@ commit;
         f"postgresql://carr_foundation_assurance_oracle:candidate-foundation-secret@{candidate.endpoint_host}/neondb?sslmode=require"  # ci-secret-scan: allow — hermetic non-routable fixture
     )
     candidate_by_role = {
+        "carr_authority_joe": f"postgresql://carr_authority_joe:password@{candidate.endpoint_host}/neondb?sslmode=require",  # ci-secret-scan: allow — synthetic fixture
         provision.READER_ROLE: reader_candidate,
         provision.APP_ROLE: writer_candidate,
         provision.GATE_ZERO_PRODUCER_ROLE: gate_zero_candidate,
         provision.FOUNDATION_ASSURANCE_ORACLE_ROLE: foundation_candidate,
     }
     expected_candidate_values = {
+        "CARR_DB_AUTHORITY_JOE_URL": candidate_by_role["carr_authority_joe"],
         "DATABASE_URL_READER": reader_candidate,
         "DATABASE_URL_WRITER": writer_candidate,
         "DATABASE_URL_GATE_ZERO_WRITER": gate_zero_candidate,
@@ -1204,6 +1224,7 @@ commit;
         check("an already-credentialed seat is reused, never adopted",
               apply_output["role_outcomes"] == {
                   "reader": "reused", "writer": "reused",
+                  "authority_joe": "reused",
                   "gate_zero_producer": "reused",
                   "foundation_assurance_oracle": "reused"})
 
