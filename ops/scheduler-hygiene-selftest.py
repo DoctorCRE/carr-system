@@ -55,7 +55,8 @@ class SchedulerHygieneTests(unittest.TestCase):
         self.calls = self.home / 'launch-calls'
         self.env = {**os.environ, 'HOME': str(self.home),
                     'PATH': str(fakebin) + os.pathsep + os.environ['PATH'],
-                    'LAUNCH_CALLS': str(self.calls), 'PYTHONPATH': str(fakebin)}
+                    'LAUNCH_CALLS': str(self.calls), 'PYTHONPATH': str(fakebin),
+                    'PYTHONDONTWRITEBYTECODE': '1'}
 
     def write_workflow(self):
         (self.repo / 'ops/config/control-plane-workflows.v1.json').write_text(
