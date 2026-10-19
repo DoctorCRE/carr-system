@@ -3218,6 +3218,49 @@ class CandidateStaging(Base):
             pipe.candidate("stage-candidate", lane="app", sha=sha)
         self.assertEqual(self.calls, [])
 
+    def test_unsealed_legacy_toolchain_is_quarantined_and_reinstalled_before_publication(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        home = self.fx.wrangler.parents[2]
+        home.with_name(home.name + ".sha256").unlink()
+        self.fx.wrangler.write_text("legacy untrusted publisher")
+        original = pipe.runner.run
+        quarantined = []
+
+        def run(argv, *, cwd, log, **kwargs):
+            if log.stem.endswith("wrangler-install"):
+                quarantined.extend((pipe.store.root / "_to_delete").glob(home.name + "-*"))
+                self.assertEqual(len(quarantined), 1)
+                self.assertEqual((quarantined[0] / "node_modules/.bin/wrangler").read_text(),
+                                 "legacy untrusted publisher")
+                self.assertFalse(quarantined[0].is_relative_to(home.parent))
+                with rp.single_run_lock(pipe.store.root) as got:
+                    self.assertFalse(got, "quarantine and install must hold the release lock")
+                binary = cwd / "node_modules/.bin/wrangler"
+                binary.parent.mkdir(parents=True)
+                binary.write_text("fresh pinned publisher")
+            return original(argv, cwd=cwd, log=log, **kwargs)
+
+        pipe.runner.run = run
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=sha), 0)
+        self.assertEqual(self.live["source_commit"], sha)
+        self.assertEqual(len(quarantined), 1)
+        self.assertTrue(quarantined[0].is_dir(), "stale-install cleanup must retain quarantine")
+        self.assertEqual(home.with_name(home.name + ".sha256").read_text().strip(), rp.toolchain_digest(home))
+        self.assertTrue(any(name.endswith("wrangler-install") for name, _, _ in self.calls))
+
+    def test_sealed_toolchain_receipt_mismatch_refuses_publication_without_reinstall(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        home = self.fx.wrangler.parents[2]
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text("0" * 64 + "\n")
+        with self.assertRaisesRegex(rp.Blocked, "toolchain_integrity"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(receipt.read_text(), "0" * 64 + "\n")
+        self.assertFalse((pipe.store.root / "_to_delete").exists())
+
     def test_candidate_build_tree_is_outside_pipeline_store_and_removed(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
@@ -5287,7 +5330,7 @@ class TokenCheckWrangler(Base):
                 elif damage == "dependency":
                     (home / "node_modules/injected.js").write_text("changed dependency")
                 elif damage == "receipt":
-                    home.with_name(home.name + ".sha256").unlink()
+                    home.with_name(home.name + ".sha256").write_text("0" * 64 + "\n")
                 else:
                     self.fx.wrangler.unlink()
                     self.fx.wrangler.symlink_to("/bin/sh")
@@ -5296,6 +5339,50 @@ class TokenCheckWrangler(Base):
                 self.assertEqual(pipe.tick(["worker"]), 0)
                 self.assertEqual(runner.calls, [])
                 self.assertEqual(self.fx.records()[-1]["reason"], "toolchain_integrity")
+
+    def test_saved_toolchain_integrity_refusal_rechecks_after_fresh_sealed_install(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "new main"})
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text("mismatched publisher")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live, github=FakeGitHub())
+        clock = [1000.0]
+        pipe.now = lambda: clock[0]
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["rejection"]["reason"], "toolchain_integrity")
+        self.assertEqual(runner.calls, [])
+        quarantine = pipe.store.root / "_to_delete" / "fixture-replaced-toolchain"
+        quarantine.mkdir(parents=True)
+        home.rename(quarantine / home.name)
+        home.with_name(home.name + ".sha256").rename(quarantine / "old.sha256")
+        install_toolchain_wrangler(self.fx.repo)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [], "the retry interval must still apply")
+        clock[0] += pipe.REJECTION_RECHECK_SECONDS
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), sha)
+        self.assertIn("promote", runner.names())
+        self.assertNotIn("rejection", self.fx.state()["worker"])
+
+    def test_clear_failed_clears_rejection_only_state_for_its_exact_recorded_sha(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "new main"})
+        self.fx.wrangler.write_text("mismatched publisher")
+        pipe = self.fx.pipeline(FakeRunner(), github=FakeGitHub())
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        before = self.fx.state()
+        self.assertNotIn("failed_sha", before["worker"])
+        with self.assertRaises(SystemExit):
+            rp.clear_failed(pipe.store, "worker", "0" * 40, "repair verified", repo_dir=self.fx.repo)
+        self.assertEqual(self.fx.state(), before)
+        message = rp.clear_failed(pipe.store, "worker", sha, "repair verified", repo_dir=self.fx.repo)
+        self.assertNotIn("rejection", self.fx.state()["worker"])
+        self.assertIn("next tick retries", message)
+        self.assertEqual(self.fx.records()[-1]["status"], "rejection_cleared")
+        self.assertEqual(self.fx.records()[-1]["sha"], sha)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["rejection"]["reason"], "toolchain_integrity",
+                         "clearance must not bypass toolchain verification")
 
     def test_reused_toolchain_checks_internal_symlink_target_content(self):
         self.fx.commit({"mcp-server/src/a.js": "new main"})

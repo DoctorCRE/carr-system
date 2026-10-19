@@ -1210,8 +1210,15 @@ class Pipeline:
         home = wrangler_toolchain(self.repo, self.store.root)
         wrangler = home / "node_modules/.bin/wrangler"
         if home.exists():
-            self.verify_toolchain(home)
-            return wrangler
+            receipt = home.with_name(home.name + ".sha256")
+            if receipt.exists() or receipt.is_symlink() or home.is_symlink() or not home.is_dir():
+                self.verify_toolchain(home)
+                return wrangler
+            if not self.dry_run:
+                quarantine = self.store.root / "_to_delete" / f"{home.name}-{uuid.uuid4().hex}"
+                quarantine.parent.mkdir(parents=True, exist_ok=True)
+                home.rename(quarantine)
+                self.toolchain_integrity.pop(home, None)
         if self.dry_run:
             self.out(f"  [dry-run] would install the token-check wrangler into {home}")
             return wrangler
@@ -1447,7 +1454,7 @@ class Pipeline:
     REJECTION_RECHECK_SECONDS = 900
     # These prerequisites depend on live state without a cheap GitHub change
     # signal. An elapsed interval permits a fresh judgment, never a promotion.
-    LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown",
+    LIVE_REJECTIONS = frozenset({"github_unreadable", "bootstrap_unknown", "toolchain_integrity",
         "live_identity_unreadable", "credential_missing", "health_baseline_unavailable", "health_baseline_stalled",
         "health_baseline_hard_error"})
 
@@ -3154,7 +3161,19 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     state = store.load()
     lane_state = state.get(lane) or {}
     if not lane_state.get("failed_sha"):
-        return f"release-pipeline[{lane}]: nothing to clear"
+        rejection = lane_state.get("rejection")
+        if not rejection:
+            return f"release-pipeline[{lane}]: nothing to clear"
+        target = next((row for row in reversed(store.records()) if row.get("lane") == lane
+                       and row.get("status") == "blocked"
+                       and row.get("rejection_fingerprint") == rejection["fingerprint"]), None)
+        if not target or target.get("sha") != sha:
+            raise SystemExit(f"release-pipeline[{lane}]: rejection SHA mismatch; refusal NOT cleared")
+        store.record_durable({"lane": lane, "sha": sha, "status": "rejection_cleared", "reason": reason,
+                              "rejection_fingerprint": rejection["fingerprint"]})
+        lane_state.pop("rejection")
+        store.save(state)
+        return f"release-pipeline[{lane}]: cleared rejection for {sha[:12]}; next tick retries it"
     if lane_state["failed_sha"] != sha:
         raise SystemExit(f"release-pipeline[{lane}]: failed SHA is {lane_state['failed_sha']}, not {sha}")
     kept = Path(lane_state.get("failed_worktree") or store.release_worktree(lane, sha))
