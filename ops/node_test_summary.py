@@ -12,12 +12,11 @@ def test_counts(output):
         return None
     if counts['tests'] != sum(counts[name] for name in FIELDS[1:]):
         return None
-    # Node counts an empty test file as one passing test under its filename.
-    empty_files = re.findall(
-        r"^(?:# Subtest: (.+\.test\.(?:mjs|cjs|js))|✔ (.+\.test\.(?:mjs|cjs|js)) \([\d.]+ms\))$",
-        output, re.MULTILINE)
-    counts['tests'] -= len(empty_files)
-    counts['pass'] -= len(empty_files)
+    files = re.findall(r'^(?:# )?CARR_TEST_FILE ([01])\s*$', output, re.MULTILINE)
+    if not files:
+        return None
+    counts['tests'] -= files.count('0')
+    counts['pass'] -= files.count('0')
     if counts['pass'] < 0:
         return None
     return counts

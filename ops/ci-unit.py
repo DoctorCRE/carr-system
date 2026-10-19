@@ -43,6 +43,8 @@ def main():
                 failed = True
                 continue
             env = dict(os.environ)
+            preload = (ROOT / 'ops/ci-node-file.mjs').as_uri()
+            env['NODE_OPTIONS'] = f"{env.get('NODE_OPTIONS', '')} --import={preload}"
             if package == 'mcp-server':
                 env['F03_PARITY_REQUIRE_PYTHON'] = '1'
             log = Path(directory) / f'{package}.log'

@@ -22,7 +22,7 @@ class UnitClassTests(unittest.TestCase):
         (self.root / 'bin').mkdir()
         shutil.copy2(ROOT / 'bin/with-timeout.py', self.root / 'bin/with-timeout.py')
         for name in ('ci.sh', 'ci-quarantine.py', 'git_env.py', 'ci-unit.py', 'node_test_summary.py',
-                     'ci-secret-scan.py', 'pii_guard.py'):
+                     'ci-secret-scan.py', 'pii_guard.py', 'ci-node-file.mjs'):
             source = ROOT / 'ops' / name
             if source.exists():
                 shutil.copy2(source, self.root / 'ops' / name)
@@ -188,6 +188,28 @@ class UnitClassTests(unittest.TestCase):
                 result = self.run_class()
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
+
+    def test_mixed_empty_and_skipped_files_do_not_inflate_counts(self):
+        self.all_packages()
+        tests = self.root / 'workspace/test'
+        (tests / 'empty.test.mjs').write_text("import 'node:test';")
+        (tests / 'skipped.test.mjs').write_text(
+            "import test from 'node:test'; test.skip('conditional', () => {});")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('workspace: 2 tests, 1 passed, 1 skipped', result.stdout)
+
+    def test_nested_node_tool_is_not_counted_as_an_empty_test_file(self):
+        self.all_packages()
+        (self.root / 'workspace/test/suite.test.mjs').write_text(
+            "import test from 'node:test'; import {spawnSync} from 'node:child_process'; "
+            "import assert from 'node:assert/strict'; "
+            "test('nested tool', () => { const child = spawnSync(process.execPath, "
+            "['-e', 'console.log(123)'], {encoding: 'utf8'}); "
+            "assert.equal(child.status, 0); assert.equal(child.stdout.trim(), '123'); });")
+        result = self.run_class()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
 
 
 if __name__ == '__main__':
