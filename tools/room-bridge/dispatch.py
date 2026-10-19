@@ -5,10 +5,7 @@ Hermes runs this. It reasons about WHICH seat a task belongs in; this file
 does not reason at all, which is the point — a router that needs its own model
 to route costs the tokens the routing was supposed to save.
 
-    dispatch.py send claude-desk "reconcile the loop board"
-    dispatch.py send codex-desk "rename this variable across the package" --family luna --effort low
-    dispatch.py send codex-desk "repair the build" --family sol --effort high --fresh --checkout new:repair-build
-    dispatch.py send codex-desk "Own PR: #1667\nWrites: tools/room-bridge/*.py\nrepair dispatch" --effort high
+    dispatch.py send codex-desk "Repair dispatch." --wr WR-000014 --slice S1 --title "Job dispatch" --description "Keep jobs attached to their requests."
     dispatch.py desks
     dispatch.py register claude-desk --socket /tmp/cc-socks/claude-desk.sock
     dispatch.py register codex-desk --family sol --effort high --cwd ~/carr-system
@@ -63,6 +60,7 @@ import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the m
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
+import dispatch_card
 
 TOOLS_ROOT = HERE.parent
 if str(TOOLS_ROOT) not in sys.path:
@@ -972,9 +970,16 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
+    sub.add_parser('emergency-report', help='list every retained emergency use; run weekly')
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--wr', help='captured Work Request reference')
+    s.add_argument('--slice', help='S<number>; S1 for a WR without a slice plan')
+    s.add_argument('--title', help='one to three plain words for the card')
+    s.add_argument('--description', help='one or two plain sentences for the card')
+    s.add_argument('--pr', help='existing PR card for a review or fix: carr#123, app#123, factory#123')
+    s.add_argument('--emergency', metavar='REASON', help='skip card requirements and log the OS actor before launch')
     s.add_argument("--family", choices=codex_models.FAMILIES)
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
@@ -996,6 +1001,9 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        if a.cmd == 'emergency-report':
+            print(json.dumps(dispatch_card.emergency_report(results), indent=2))
+            return 0
         if a.cmd == "where":
             return _cmd_where()
 
@@ -1005,7 +1013,6 @@ def main(argv: list[str]) -> int:
             print(f"{a.name} {state} (pid {out['pid']})")
             print(f"  socket  {out['socket']}")
             print(f"  log     {out['log']}")
-            print(f'  send    dispatch.py send {a.name} "<task>"')
             print(f"  stop    dispatch.py stop {a.name}")
             return 0
 
@@ -1066,6 +1073,19 @@ def main(argv: list[str]) -> int:
             if blocked:
                 raise DeskError(*blocked)
         codex_job = isinstance(desk_entry, dict) and desk_entry.get("kind") in codex_models.CODEX_KINDS
+        owned_pr = re.search(r'^Own PR:[ \t]*(?:((?:carr|app|factory))#|#)([1-9]\d*)[ \t]*$', task, re.M | re.I)
+        pr = a.pr or (f'{(owned_pr[1] or "carr").lower()}#{owned_pr[2]}' if owned_pr else None)
+        try:
+            if a.emergency is not None:
+                instruction = dispatch_card.emergency(results, a.name, a.emergency, _record)
+            else:
+                card = dispatch_card.prepare(a.wr, a.slice, a.title, a.description, a.name,
+                                             verb_io._run_verb, pr=pr)
+                instruction = dispatch_card.instruction(card)
+        except (ValueError, OSError) as error:
+            raise DeskError('dispatch_card_required', str(error)) from error
+        if instruction not in task:
+            task += '\n\n' + instruction
         with _codex_slot(os.environ) if codex_job else nullcontext():
             row = dispatch(a.name, task, registry=reg, results_path=results,
                            fresh=getattr(a, "fresh", False), stream_output=a.stream_output,

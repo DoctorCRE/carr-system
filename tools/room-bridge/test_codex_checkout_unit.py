@@ -24,6 +24,11 @@ REAL_RUN = subprocess.run
 
 class CheckoutDispatchTests(unittest.TestCase):
     def setUp(self):
+        card = patch.object(dispatch.dispatch_card, 'prepare', return_value={
+            'work_request': 'WR-000014', 'card_id': 'WR14.S1.J1',
+            'card_title': 'Job dispatch', 'card_description': 'Keep jobs attached to their requests.'})
+        card.start()
+        self.addCleanup(card.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

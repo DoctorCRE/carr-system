@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
 const pr = event.pull_request;
@@ -13,4 +15,12 @@ const release = ["jbookout", "github-actions[bot]"].includes(pr.user?.login)
 if (!declared && !dependency && !release) {
   console.error("PR body requires a non-empty Skills used: line.");
   process.exitCode = 1;
+}
+if (!dependency && !release) {
+  const result = spawnSync('python3', [fileURLToPath(new URL('./check-pr-card.py', import.meta.url))],
+    { input: JSON.stringify(event), encoding: 'utf8' });
+  if (result.status !== 0) {
+    console.error(result.error?.message ?? result.stderr);
+    process.exitCode = 1;
+  }
 }

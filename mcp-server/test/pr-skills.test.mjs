@@ -7,12 +7,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const checker = fileURLToPath(new URL("../../ops/check-pr-skills.mjs", import.meta.url));
-function check(body, overrides = {}) {
+const card = 'Work Request: WR-000014\nCard ID: WR14.S1.J1.carr#42\nCard title: Job dispatch\nCard description: Keep jobs attached to their requests.';
+function check(body, overrides = {}, metadata = true) {
   const directory = mkdtempSync(join(tmpdir(), "pr-skills-"));
   try {
     const event = join(directory, "event.json");
     writeFileSync(event, JSON.stringify({ repository: { full_name: "jbookout/carr-system" },
-      pull_request: { body, user: { login: "jbookout" },
+      pull_request: { number: 42, body: metadata ? `${body ?? ''}\n${card}` : body, user: { login: "jbookout" },
         head: { ref: "feature/example", repo: { full_name: "jbookout/carr-system" } }, ...overrides } }));
     return spawnSync(process.execPath, [checker], {
       env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: event }, encoding: "utf8",
@@ -23,6 +24,45 @@ function check(body, overrides = {}) {
 test("a PR with a non-empty Skills used line passes", () => {
   const result = check("## Change\nFix behavior.\n\nSkills used: poteto-mode, tdd\n");
   assert.equal(result.status, 0, result.stdout + result.stderr);
+});
+
+test('builder PRs require all card fields', () => {
+  for (const label of ['Work Request', 'Card ID', 'Card title', 'Card description']) {
+    const body = 'Skills used: tdd\n' + card.split('\n').filter(line => !line.startsWith(label + ':')).join('\n');
+    const result = check(body, {}, false);
+    assert.equal(result.status, 1, label);
+    assert.match(result.stderr, /PR body requires/);
+  }
+});
+
+test('builder PR card identity and copy use the hierarchy rules', () => {
+  for (const [before, after] of [
+    ['WR14.S1.J1.carr#42', 'WR15.S1.J1.carr#42'],
+    ['WR14.S1.J1.carr#42', 'WR14.S1.J1.app#42'],
+    ['WR14.S1.J1.carr#42', 'WR14.S1.J1.carr#43'],
+    ['Job dispatch', 'Four words are excessive'],
+    ['Job dispatch', 'Fix the'],
+    ['Keep jobs attached to their requests.', 'WR14 needs work.'],
+    ['Keep jobs attached to their requests.', 'First. Second. Third.'],
+  ]) {
+    assert.equal(check('Skills used: tdd\n' + card.replace(before, after), {}, false).status, 1, after);
+  }
+  assert.equal(check('Skills used: tdd\n' + card, {}, false).status, 0);
+  assert.equal(check(('Skills used: tdd\n' + card).replaceAll('\n', '\r\n'), {}, false).status, 0);
+  assert.equal(check('Skills used: tdd\n```text\n' + card + '\n```', {}, false).status, 1);
+  assert.equal(check('Skills used: tdd\n' + card + '\nCard ID: WR14.S1.J2.carr#42', {}, false).status, 1);
+});
+
+test('explicit emergency PRs retain skills and require receipt, actor and reason', () => {
+  const emergency = 'Emergency dispatch: 72e00172-68a9-4d22-a806-41de90117bde\nEmergency actor: test@host\nEmergency reason: Restore dispatch during outage.';
+  assert.equal(check('Skills used: tdd\n' + emergency, {}, false).status, 0);
+  assert.equal(check(('Skills used: tdd\n' + emergency).replaceAll('\n', '\r\n'), {}, false).status, 0);
+  assert.equal(check('Skills used: tdd\n```text\n' + emergency + '\n```', {}, false).status, 1);
+  assert.equal(check(emergency, {}, false).status, 1);
+  for (const label of ['Emergency dispatch', 'Emergency actor', 'Emergency reason']) {
+    const body = emergency.split('\n').filter(line => !line.startsWith(label + ':')).join('\n');
+    assert.equal(check('Skills used: tdd\n' + body, {}, false).status, 1);
+  }
 });
 
 for (const [name, body] of [

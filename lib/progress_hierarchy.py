@@ -148,6 +148,51 @@ def validate_copy(title, description):
         raise ValueError('Card descriptions require one or two sentences')
 
 
+def metadata_text(body):
+    text = re.sub(r'<!--[\s\S]*?(?:-->|$)', '', (body or '').replace('\r\n', '\n'))
+    return re.sub(r'(?ms)^```.*?^```[^\n]*', '', text)
+
+
+def pr_binding(body, repo, number, *, required=False):
+    text = metadata_text(body)
+    fields = {}
+    for label, field in (('Work Request', 'work_request'), ('Card ID', 'card_id'),
+                         ('Card title', 'card_title'), ('Card description', 'card_description')):
+        values = re.findall(r'^' + label + r':[ \t]*([^\r\n]*)$', text, re.M)
+        if len(values) != 1 or not values[0].strip():
+            if not required and not re.search(r'^Work Request:', text, re.M):
+                return None
+            raise ValueError(f'PR body requires one non-empty {label}: line')
+        fields[field] = values[0].strip()
+    ref = fields['work_request']
+    address = wr_address(ref)
+    match = re.fullmatch(re.escape(address) + r'\.S([1-9]\d*)\.J([1-9]\d*)\.'
+                         + re.escape(REPOSITORIES[repo]) + '#' + str(number), fields['card_id'])
+    if not match:
+        raise ValueError('Card ID must match Work Request and this PR: WR<n>.S<k>.J<j>.<repo>#<pr>')
+    validate_copy(fields['card_title'], fields['card_description'])
+    return fields
+
+
+def attach_pr(tasks, repo, pr):
+    if not re.search(r'^Card ID:', pr.get('body') or '', re.M):
+        return {}
+    binding = pr_binding(pr.get('body'), repo, pr['number'])
+    if not binding:
+        return {}
+    base = binding['card_id'].rsplit('.', 1)[0]
+    matches = [(key, task) for key, task in tasks.items()
+               if task.get('card_id') == base or str(task.get('card_id', '')).startswith(base + '.')]
+    if not matches:
+        raise ValueError(f"No dispatched card for {binding['card_id']}; preserve the dispatch card before linking its PR")
+    key, task = next(((key, task) for key, task in matches
+                     if task.get('repo') == repo and task.get('pr') == pr['number']), matches[0])
+    prior = {**task, **binding}
+    if not task.get('pr'):
+        tasks.pop(key)
+    return prior
+
+
 def plain_text(text):
     text = re.sub(r'(?m)^#{1,6}[^\n]*\n', '', str(text or ''))
     text = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', text)
@@ -348,6 +393,8 @@ def request_record(card, passport=None):
 
 def load_request(ref, call):
     card = call('work-request-card', {'work_request': ref})
+    if wr_address(card.get('human_ref')) != wr_address(ref):
+        raise ValueError('Work Request readback does not match the requested reference')
     passport = None
     if card.get('plan'):
         try:

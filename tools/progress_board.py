@@ -1734,6 +1734,9 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
+                linked = repo_lib('progress_hierarchy').attach_pr(tasks, repo, pr)
+                if linked:
+                    previous = linked
                 for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs",
                               "work_request", "slice_id", "job_id", "job_ref", "card_id", "card_title", "card_description", "proposed_copy"):
                     if field in previous:

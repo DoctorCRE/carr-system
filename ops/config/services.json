@@ -1181,6 +1181,26 @@
           "notes": "External runtime must be provisioned and verified; guarded process group retains one leader. Source declaration only; no service import or activation performed."
         }
       ]
+    },
+    {
+      "key": "dispatch-emergencies-weekly",
+      "name": "Weekly dispatch emergency audit",
+      "purpose": "List every retained emergency dispatch with the OS actor, desk, receipt and reason; cumulative output prevents delayed weekly checks from missing uses.",
+      "family": "Local Mac edge",
+      "criticality": "medium",
+      "owner_actor": "joe",
+      "repo_path": "tools/room-bridge/dispatch.py",
+      "runtime": "launchd",
+      "environments": [
+        {
+          "environment": "production",
+          "deploy_mechanism": "ops/launchd/com.carr.dispatch-emergencies-weekly.plist",
+          "runs_on": "every",
+          "expected_cadence_seconds": 604800,
+          "cadence_grace_seconds": 86400,
+          "notes": "Monday 08:00 machine local time. Read the local dispatch results and retain the complete report in out/dispatch-emergencies-weekly.log. Source declaration only; not installed by this PR."
+        }
+      ]
     }
   ],
   "dependencies": [

@@ -15,6 +15,9 @@ class BuilderSkillsTests(unittest.TestCase):
     def send(self, task, *flags):
         with tempfile.TemporaryDirectory() as root, \
              patch.object(dispatch, 'dispatch', return_value={'status': 'completed'}) as send, \
+             patch.object(dispatch.dispatch_card, 'prepare', return_value={
+                 'work_request': 'WR-000014', 'card_id': 'WR14.S1.J1',
+                 'card_title': 'Job dispatch', 'card_description': 'Keep jobs attached to their requests.'}), \
              contextlib.redirect_stdout(io.StringIO()):
             result = dispatch.main(['--registry', str(Path(root) / 'desks.json'),
                                     'send', 'builder', task, *flags])

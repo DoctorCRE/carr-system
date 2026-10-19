@@ -163,3 +163,5 @@ def record(path: Path, row: dict) -> None:
     with path.open('a') as output:
         fcntl.flock(output, fcntl.LOCK_EX)
         output.write(json.dumps(row, separators=(',', ':')) + '\n')
+        output.flush()
+        os.fsync(output.fileno())

@@ -72,6 +72,11 @@ class SendThroughTheGate(unittest.TestCase):
     """The CLI door: a refused send launches nothing; a live seat still dispatches."""
 
     def setUp(self):
+        card = patch.object(dispatch.dispatch_card, 'prepare', return_value={
+            'work_request': 'WR-000014', 'card_id': 'WR14.S1.J1',
+            'card_title': 'Job dispatch', 'card_description': 'Keep jobs attached to their requests.'})
+        card.start()
+        self.addCleanup(card.stop)
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
