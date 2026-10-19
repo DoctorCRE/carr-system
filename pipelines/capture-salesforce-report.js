@@ -72,6 +72,12 @@
       if (values.length !== names.length) { window.SF._skipped++; continue; }
       const row = store[key] || (store[key] = {});
       names.forEach((h, i) => { if (values[i] !== '') row[h] = values[i]; });
+      const opportunityIds = [...new Set([...tr.querySelectorAll('a[href]')].map(a =>
+        (a.getAttribute('href') || '').match(/\/(006[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?)(?=[/?#]|$)/)?.[1]).filter(Boolean))];
+      if (opportunityIds.length === 1) {
+        row['Opportunity ID'] = opportunityIds[0];
+        if (!headerOrder.includes('Opportunity ID')) headerOrder.push('Opportunity ID');
+      }
     }
   }
 
