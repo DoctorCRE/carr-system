@@ -11,9 +11,19 @@ import io
 import re
 from collections import Counter
 
-from lib.salesforce_deal_sync import OWNERS, STAGES, fingerprint, norm, sfid
+from lib.salesforce_deal_sync import OWNERS, STAGES, fingerprint, guarded_deal_fields, norm, sfid
 
 HEADERS = 'sf_id_tail|name|type|close|commission|phase|transaction|owner|company'.split('|')
+
+
+def _unguarded_market_agent_change(item):
+    agent = item['desired'].get('market_agent')
+    if not agent:
+        return False
+    if item.get('prior'):
+        return item['prior'].get('market_agent') != agent
+    create = item.get('create', {})
+    return create.get('verb') != 'create-national-market-deal' or create.get('args', {}).get('agent_name') != agent
 
 
 def build_plan(source, board, *, expected_count, bindings):
@@ -68,6 +78,9 @@ def build_plan(source, board, *, expected_count, bindings):
             continue
         prior = matches[0] if matches else None
         item['prior'] = prior
+        if prior and binding.get('client_ref') and prior.get('client_ref') != binding['client_ref']:
+            item['reason'] = 'client_conflict'
+            continue
         owner = binding.get('owner') or OWNERS.get(norm(row['owner'])) or (prior or {}).get('owner')
         if owner not in ('joe', 'dell'):
             item['reason'] = 'partner_owner_unmapped'
@@ -116,9 +129,11 @@ def build_plan(source, board, *, expected_count, bindings):
     targets = Counter(i['prior']['id'] for i in items if i.get('prior'))
     names = Counter(norm(i['name']) for i in items if i['kind'] == 'create')
     for item in items:
+        if item['kind'] != 'held' and _unguarded_market_agent_change(item):
+            item.update(kind='held', reason='market_agent_requires_guarded_contract')
         if keys[item['source_key']] > 1 or targets[(item.get('prior') or {}).get('id')] > 1 or (item['kind'] == 'create' and names[norm(item['name'])] > 1):
             item.update(kind='held', reason='duplicate_source_or_target')
-    result = {'schema': 'salesforce-active-snapshot.v1', 'source_digest': fingerprint(source),
+    result = {'schema': 'salesforce-active-snapshot.v2', 'source_digest': fingerprint(source),
               'board_digest': fingerprint(board), 'items': items,
               'counts': {'source': len(rows), **{kind: sum(i['kind'] == kind for i in items)
                          for kind in ('create', 'update', 'unchanged', 'held')},
@@ -144,7 +159,7 @@ def apply_plan(plan, call_verb, journal_path):
     import os
     import uuid
 
-    if plan.get('schema') != 'salesforce-active-snapshot.v1' or plan.get('plan_digest') != fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'}):
+    if plan.get('schema') != 'salesforce-active-snapshot.v2' or plan.get('plan_digest') != fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'}):
         raise ValueError('plan_changed_run_dry_run_again')
     if journal_path.exists():
         raise ValueError('attempt_already_recorded_reconcile_receipts')
@@ -208,7 +223,7 @@ def apply_plan(plan, call_verb, journal_path):
             fields = {k: v for k, v in item['desired'].items() if k in ('phase', 'salesforce_id')
                       and (sfid(row.get(k)) != sfid(v) if k == 'salesforce_id' else row.get(k) != v)}
             if fields:
-                write('update-deal', {'deal': deal_id, 'base_version': row['base_version'], 'fields': fields})
+                write('update-deal', {'deal': deal_id, 'base_version': row['base_version'], 'fields': guarded_deal_fields(row, fields)})
             for field in ('owner', 'operating_state'):
                 value = item['desired'][field]
                 if row.get(field) != value:
@@ -216,10 +231,6 @@ def apply_plan(plan, call_verb, journal_path):
                           'value': {'state': value} if field == 'operating_state' else value,
                           'base_event_id': (prior or {}).get('field_base', {}).get(field, {}).get('id'),
                           'change_reason': 'Reconcile the partner-authorized Salesforce active snapshot'})
-            agent = item['desired'].get('market_agent')
-            if agent and row.get('market_agent') != agent:
-                write('set-market-agent', {'deal': deal_id, 'agent_name': agent,
-                      'source': 'Salesforce active list: stated Opportunity owner, partner owner preserved'})
             after = call_verb('get-deal-room', {'deal': deal_id})
             if any(sfid(after.get(k)) != sfid(v) if k == 'salesforce_id' else after.get(k) != v
                    for k, v in item['desired'].items()):

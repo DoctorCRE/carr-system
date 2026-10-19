@@ -37,6 +37,11 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def guarded_deal_fields(row, changes):
+    return {**{key: row.get(key) for key in ('salesforce_id', 'phase', 'outcome', 'closed_on', 'invoiced_on')},
+            **changes}
+
+
 HEADER_ALIASES = {
     "opportunity id": "id", "sf id": "id", "id": "id",
     "opportunity name": "name", "deal name": "name", "name": "name",
@@ -103,7 +108,9 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
         if not matches:
             matches = [d for d in deals if norm(d["name"]) == norm(row["name"])]
         if not matches and row["client"]:
-            matches = [d for d in deals if not d.get("salesforce_id") and norm(d.get("client_name", "")) == norm(row["client"])]
+            if any(not d.get("salesforce_id") and norm(d.get("client_name", "")) == norm(row["client"]) for d in deals):
+                item.update(kind="held", reason="reviewed_alias_required")
+                continue
         if len(matches) > 1 or (matches and matches[0].get("salesforce_id") and sfid(matches[0]["salesforce_id"]) != sfid(sid)):
             item.update(kind="held", reason="ambiguous_or_conflicting_identity")
             continue
@@ -141,7 +148,7 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
     for item in items:
         if source_ids[sfid(item["opportunity_id"])] > 1 or targets.get(item.get("deal"), 0) > 1 or (item["kind"] == "create" and new_names[norm(item["name"])] > 1):
             item.update(kind="held", reason="duplicate_source_or_target")
-    result = {"schema": "salesforce-deal-sync.v1", "as_of": as_of.isoformat(),
+    result = {"schema": "salesforce-deal-sync.v2", "as_of": as_of.isoformat(),
               "report_digest": fingerprint(report), "record_digest": fingerprint(sorted(deals, key=lambda d: d["id"])),
               "items": items, "counts": {"source": len(rows), **{kind: sum(i["kind"] == kind for i in items)
               for kind in ("create", "update", "unchanged", "held", "out_of_scope")}}}
@@ -157,7 +164,7 @@ def read_snapshot(call_verb):
 
 
 def apply_plan(plan, call_verb, journal_path):
-    if plan.get("schema") != "salesforce-deal-sync.v1" or plan.get("plan_digest") != fingerprint({k: v for k, v in plan.items() if k != "plan_digest"}):
+    if plan.get("schema") != "salesforce-deal-sync.v2" or plan.get("plan_digest") != fingerprint({k: v for k, v in plan.items() if k != "plan_digest"}):
         raise ValueError("plan_changed_run_dry_run_again")
     current = read_snapshot(call_verb)
     if plan["record_digest"] != fingerprint(sorted(current, key=lambda d: d["id"])):
@@ -202,9 +209,8 @@ def apply_plan(plan, call_verb, journal_path):
             else:
                 deal_id = item["deal"]
                 if item["fields"]:
-                    guarded_fields = {k: prior.get(k) for k in ("salesforce_id", "phase", "outcome")}
                     write("update-deal", {"deal": deal_id, "base_version": prior["base_version"],
-                                          "fields": {**guarded_fields, **item["fields"]}})
+                                          "fields": guarded_deal_fields(prior, item["fields"])})
             current = read_snapshot(call_verb)
             row = next((d for d in current if d["id"] == deal_id), None)
             expected = {k: v for k, v in item["fields"].items() if item["kind"] != "create" or k != "outcome"}
@@ -233,7 +239,7 @@ def apply_plan(plan, call_verb, journal_path):
 
 def deployed_verb(verb, args):
     if verb not in {"read-deal-reconciliation", "find", "new-deal", "update-deal", "set-lead",
-                    "deal-room-board", "get-deal-room", "patch-deal-field", "set-market-agent",
+                    "deal-room-board", "get-deal-room", "patch-deal-field",
                     "add-party", "new-client", "create-national-market-deal"}:
         raise ValueError("verb_not_allowed")
     result = subprocess.run([sys.executable, str(REPO / "tools/call-verb.py"), verb, json.dumps(args)],
@@ -262,7 +268,7 @@ def main(argv=None, call_verb=deployed_verb):
                 parser.error("--apply takes only a saved plan")
             from lib import salesforce_active_snapshot as active
             saved = json.loads(args.apply.read_text())
-            apply = active.apply_plan if saved.get("schema") == "salesforce-active-snapshot.v1" else apply_plan
+            apply = active.apply_plan if saved.get("schema") == "salesforce-active-snapshot.v2" else apply_plan
             result = apply(saved, call_verb, args.apply.with_suffix(".receipts.jsonl"))
             print(json.dumps(result, sort_keys=True))
             return 2 if result["held"] else 0

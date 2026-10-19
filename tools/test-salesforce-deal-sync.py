@@ -75,14 +75,21 @@ class SalesforceSyncTests(unittest.TestCase):
         self.assertEqual(item["owner"], "joe")
         self.assertEqual(item["fields"], {"phase": "negotiation", "sf_close_date_placeholder": "2026-11-01"})
 
-    def test_unique_name_then_client_matching_backfills_ids(self):
-        for name, client_name in [("Example expansion", "Example Practice"), ("Different", "Example Practice")]:
-            with self.subTest(name=name):
-                p = self.plan("006000000000001,Example expansion,Example Practice,Research,Joe Bookout,2026-12-01\n",
-                              deals=[{"id": "d1", "name": name, "client_name": client_name,
-                                      "base_version": 1, "phase": "research", "owner": "joe"}])
-                self.assertEqual(p["items"][0]["deal"], "d1")
-                self.assertEqual(p["items"][0]["fields"]["salesforce_id"], "006000000000001")
+    def test_unique_name_matching_backfills_id_with_consistent_client(self):
+        p = self.plan("006000000000001,Example expansion,Example Practice,Research,Joe Bookout,2026-12-01\n",
+                      deals=[{"id": "d1", "name": "Example expansion", "client_name": "Example Practice",
+                              "base_version": 1, "phase": "research", "owner": "joe"}])
+        self.assertEqual(p["items"][0]["deal"], "d1")
+        self.assertEqual(p["items"][0]["fields"]["salesforce_id"], "006000000000001")
+
+    def test_company_alone_cannot_claim_an_unlinked_opportunity(self):
+        p = self.plan("006000000000001,Second office,Example Practice,Research,Joe,2026-12-01\n",
+                      deals=[{"id": "d1", "name": "First office", "client_name": "Example Practice",
+                              "base_version": 1, "phase": "research", "owner": "joe"}],
+                      clients=[{"ref": "C-001", "name": "Example Practice"}])
+        self.assertEqual(p['items'][0]['kind'], 'held')
+        self.assertEqual(p['items'][0]['reason'], 'reviewed_alias_required')
+        self.assertNotIn('deal', p['items'][0])
 
     def test_second_opportunity_for_same_client_creates_a_distinct_deal(self):
         p = self.plan("006000000000002,Second office,Example Practice,Legal,Dell McCraney,2026-12-01\n",
@@ -178,6 +185,15 @@ class SalesforceSyncTests(unittest.TestCase):
             uuid.UUID(args["idempotency_key"])
         self.assertEqual(self.plan(row, deals=records.deals)["counts"]["unchanged"], 1)
 
+    def test_old_company_matching_plans_require_a_new_dry_run(self):
+        plan = self.plan("006000000000001,Example office,Example Practice,Legal,Dell,2026-12-01\n",
+                         clients=[{"ref": "C-001", "name": "Example Practice"}])
+        plan['schema'] = 'salesforce-deal-sync.v1'
+        plan['plan_digest'] = sync.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
+        with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
+            sync.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
+                            Path(folder) / 'receipts')
+
     def test_stale_or_edited_plan_performs_no_writes(self):
         p = self.plan("006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n",
                       clients=[{"ref": "C-001", "name": "Example Practice"}])
@@ -233,7 +249,7 @@ class SalesforceSyncTests(unittest.TestCase):
             sync.apply_plan(p, records, Path(tmp) / "receipts.jsonl")
         fields = next(args["fields"] for verb, args in records.calls if verb == "update-deal")
         self.assertEqual(fields, {"salesforce_id": "006000000000001", "phase": "research", "outcome": None,
-                                  "sf_close_date_placeholder": "2026-12-01"})
+                                  "sf_close_date_placeholder": "2026-12-01", "closed_on": None, "invoiced_on": None})
 
     def test_interrupted_create_is_journaled_and_reconciled_without_duplicate(self):
         row = "006000000000001,Example expansion,Example Practice,Closed Won,Dell McCraney,2026-10-01\n"

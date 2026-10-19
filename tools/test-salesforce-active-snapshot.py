@@ -46,6 +46,15 @@ class ActiveSnapshotTests(unittest.TestCase):
         self.assertNotIn('market_agent', item['desired'])
         self.assertEqual(item['source_owner'], 'Outside Agent')
 
+    def test_reviewed_client_ref_must_match_even_when_the_deal_name_matches(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
+        board = {'deals': [{'id': 'd1', 'name': 'Example office', 'client_ref': 'C-OTHER',
+                           'phase': 'research', 'owner': 'dell', 'operating_state': 'active'}], 'accounts': []}
+        binding = {'00001AAA': {'salesforce_id': '006000000000001AAA', 'client_ref': 'C-RIGHT'}}
+        item = active.build_plan(source, board, expected_count=1, bindings=binding)['items'][0]
+        self.assertEqual(item['kind'], 'held')
+        self.assertEqual(item['reason'], 'client_conflict')
+
     def test_missing_id_mapping_and_duplicate_targets_are_held(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Joe|Example Practice\n'
         self.assertEqual(active.build_plan(source, {'deals': [], 'accounts': []}, expected_count=1, bindings={})['counts']['held'], 1)
@@ -80,6 +89,86 @@ class ActiveSnapshotTests(unittest.TestCase):
             result = active.apply_plan(plan, record, Path(folder) / 'receipts')
         self.assertEqual(result, {'verified': 1, 'held': 1})
         self.assertEqual(writes, ['add-party', 'update-deal'])
+
+    def test_market_agent_changes_are_held_without_an_atomic_guarded_contract(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Source Agent|Example Brand\n'
+        row = {'id': 'd1', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
+               'operating_state': 'active', 'account_client_id': 'account-1', 'market_agent': 'Partner correction'}
+        plan = active.build_plan(source, {'deals': [row], 'accounts': []}, expected_count=1, bindings={})
+        self.assertEqual(plan['items'][0]['kind'], 'held')
+        self.assertEqual(plan['items'][0]['reason'], 'market_agent_requires_guarded_contract')
+        self.assertEqual(plan['counts']['update'], 0)
+
+    def test_concurrent_market_agent_correction_is_preserved_and_not_reported_verified(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Source Agent|Example Brand\n'
+        row = {'id': 'd1', 'name': 'Example office', 'phase': 'legal', 'owner': 'dell',
+               'operating_state': 'active', 'account_client_id': 'account-1', 'market_agent': 'Source Agent',
+               'salesforce_id': None, 'base_version': 1}
+        board = {'deals': [row], 'accounts': []}
+        writes = []
+        room_reads = 0
+        def record(verb, args):
+            nonlocal room_reads
+            if verb == 'deal-room-board':
+                return copy.deepcopy(board)
+            if verb == 'read-deal-reconciliation':
+                return copy.deepcopy(row)
+            if verb == 'get-deal-room':
+                room_reads += 1
+                if room_reads == 1:
+                    row['market_agent'] = 'Concurrent partner correction'
+                return copy.deepcopy(row)
+            writes.append(verb)
+            if verb == 'set-market-agent':
+                row['market_agent'] = args['agent_name']
+                return {'ok': True}
+            self.fail(verb)
+        plan = active.build_plan(source, board, expected_count=1, bindings={})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'receipts'
+            with self.assertRaises(ValueError):
+                active.apply_plan(plan, record, path)
+            self.assertFalse(any(json.loads(line)['status'] == 'verified' for line in path.read_text().splitlines()))
+        self.assertEqual(row['market_agent'], 'Concurrent partner correction')
+        self.assertEqual(writes, [])
+
+    def test_plans_from_before_the_safety_fix_require_a_new_dry_run(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
+        plan = active.build_plan(source, {'deals': [], 'accounts': []}, expected_count=1, bindings={})
+        plan['schema'] = 'salesforce-active-snapshot.v1'
+        plan['plan_digest'] = active.fingerprint({k: v for k, v in plan.items() if k != 'plan_digest'})
+        with tempfile.TemporaryDirectory() as folder, self.assertRaisesRegex(ValueError, 'plan_changed'):
+            active.apply_plan(plan, lambda verb, args: self.fail('old plan must stop before a record read'),
+                              Path(folder) / 'receipts')
+
+    def test_identity_and_terminal_races_refuse_before_changing_the_phase(self):
+        source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
+        for field, value in [('salesforce_id', '006000000000002AAA'), ('outcome', 'lost'),
+                             ('closed_on', '2026-10-19'), ('invoiced_on', '2026-10-19')]:
+            with self.subTest(field=field):
+                row = {'id': 'd1', 'name': 'Example office', 'phase': 'research', 'owner': 'dell',
+                       'operating_state': 'active', 'salesforce_id': '006000000000001AAA', 'base_version': 1,
+                       'outcome': None, 'closed_on': None, 'invoiced_on': None}
+                board = {'deals': [row], 'accounts': []}
+                def record(verb, args):
+                    if verb == 'deal-room-board':
+                        return copy.deepcopy(board)
+                    if verb in ('read-deal-reconciliation', 'get-deal-room'):
+                        return copy.deepcopy(row)
+                    self.assertEqual(verb, 'update-deal')
+                    row[field] = value
+                    row['base_version'] += 1
+                    # Deployed update-deal rebases disjoint fields, refuses touched-field races.
+                    if field in args['fields']:
+                        return {'ok': False, 'error': 'version_conflict'}
+                    row.update(args['fields'])
+                    return {'ok': True, 'rebased': True}
+                plan = active.build_plan(source, board, expected_count=1, bindings={
+                    '00001AAA': {'salesforce_id': '006000000000001AAA'}})
+                with tempfile.TemporaryDirectory() as folder, self.assertRaises(ValueError):
+                    active.apply_plan(plan, record, Path(folder) / 'receipts')
+                self.assertEqual(row['phase'], 'research')
+                self.assertEqual(row[field], value)
 
     def test_uncertain_write_leaves_pending_receipt_and_is_never_retried(self):
         source = PSV + '00001AAA|Example office|L|12/1/2026|15000|Legal|Start Up|Dell|Example Practice\n'
