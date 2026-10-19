@@ -134,6 +134,44 @@ class ConsumerCompletion(unittest.TestCase):
             refreshed = board.assemble_all_repos(refreshed, {task["repo"]: ([], [info])})
             self.assertEqual(board.task_stage(refreshed["tasks"][key]), "merged")
 
+    def cli_observations(self, observations):
+        proof = self.proven_task()["consumer_proof"]
+        with tempfile.TemporaryDirectory() as root:
+            env = {**os.environ, "PROGRESS_BOARD_ROOT": root, "PROGRESS_BOARD_LOCAL_ONLY": "1",
+                   "PROGRESS_BOARD_SKIP_GH": "1", "PROGRESS_BOARD_SKIP_PROBE": "1"}
+
+            def run(*args):
+                subprocess.run([sys.executable, str(Path(board.__file__)), *args],
+                               env=env, text=True, capture_output=True, check=True)
+
+            run("init", "synthetic", "--title", "Synthetic chronology")
+            run("task", "synthetic", "feature", "--title", "Synthetic workflow A", "--status", "done",
+                "--executor", "Codex", "--repo", proof["repo"], "--delivery-target", "app",
+                "--delivery-workflow", proof["workflow"], "--delivery-source-sha", proof["source_sha"])
+            states = []
+            for observation in observations:
+                run("task", "synthetic", "feature", "--status", "done",
+                    "--consumer-proof", json.dumps(observation))
+                states.append(json.loads((Path(root) / "boards/synthetic.json").read_text())["tasks"]["feature"])
+            return states
+
+    def test_cli_unrelated_workflow_cannot_erase_failure_before_stale_pass(self):
+        proof = self.proven_task()["consumer_proof"]
+        failed = {**proof, "outcome": "fail", "observed_at": "2026-10-03T12:00:00Z"}
+        unrelated = {**failed, "workflow": "workflow B", "observed_at": "2026-10-04T12:00:00Z"}
+        replay = {**proof, "observed_at": "2026-10-02T12:00:00Z"}
+        states = self.cli_observations([failed, unrelated, replay])
+        self.assertTrue(all(task["stage"] != "live" for task in states))
+        self.assertEqual(states[-1]["consumer_proof"], failed)
+
+    def test_cli_newer_matching_pass_restores_completion(self):
+        proof = self.proven_task()["consumer_proof"]
+        failed = {**proof, "outcome": "fail", "observed_at": "2026-10-03T12:00:00Z"}
+        passed = {**proof, "observed_at": "2026-10-05T12:00:00Z"}
+        before, after = self.cli_observations([failed, passed])
+        self.assertNotEqual(before["stage"], "live")
+        self.assertEqual((after["stage"], after["status"]), ("live", "done"))
+
     def test_receipt_replays_cannot_erase_a_newer_observation(self):
         task = self.proven_task()
         old_pass = copy.deepcopy(task["consumer_proof"])
