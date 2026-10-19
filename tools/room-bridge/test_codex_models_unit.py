@@ -34,7 +34,8 @@ class FamilyDispatchTests(unittest.TestCase):
         self.catalog.write_text(json.dumps({'models': [
             {'slug': slug, 'display_name': slug.upper()} for slug in
             ['gpt-5.6-sol', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.6-luna', 'gpt-6-luna']]}))
-        self.env = patch.dict(os.environ, {'CODEX_HOME': str(self.root)})
+        self.env = patch.dict(os.environ, {'CODEX_HOME': str(self.root),
+                                         'CARR_CODEX_SLOT_DIR': str(self.root / 'slots')})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.reg = desks.Registry(self.root / 'desks.json')
