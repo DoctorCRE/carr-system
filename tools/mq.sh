@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# usage: tools/mq.sh PR... (serial, bounded, update before checking red)
+# usage: tools/mq.sh PR... (serial, bounded; a PR behind main is updated before any red verdict,
+# because the CI freshness class fails stale heads without GitHub reporting BEHIND)
 R=${R:-jbookout/carr-system}
 for p in "$@"; do
   for ((i=1; i<=80; i++)); do
@@ -11,7 +12,12 @@ for p in "$@"; do
     [ "$st" = MERGED ] && { echo "MERGED $p (already)"; break; }
     [ "$st" = OPEN ] || { echo "MERGEFAIL $p"; break; }
     [ "$ms" = DIRTY ] && { echo "CONFLICT $p"; break; }
-    if [ "$ms" = BEHIND ]; then
+    behind=0
+    if [ "$ms" != CLEAN ]; then
+      sleep 2
+      behind=$(gh api "repos/$R/compare/main...$sha" -q .behind_by 2>/dev/null || echo 0)
+    fi
+    if [ "$ms" = BEHIND ] || [ "${behind:-0}" -gt 0 ]; then
       sleep 2
       gh api -X PUT "repos/$R/pulls/$p/update-branch" -f update_method=merge >/dev/null && echo "UPDATED $p"
       sleep 120
