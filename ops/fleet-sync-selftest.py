@@ -368,6 +368,28 @@ def test_concurrent_merge_conflict_refuses_and_reports():
     print("PASS  late conflicting edit refuses and reports Git's original diagnostic")
 
 
+def test_ignored_incoming_collision_refuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        a = Path(tmp, "A")
+        Path(a, "scratch.txt").write_text("incoming tracked content\n")
+        git(a, "add", "scratch.txt")
+        git(a, "commit", "-qm", "track scratch")
+        git(a, "push", "-q", "origin", "main")
+        Path(b, ".git", "info", "exclude").write_text("scratch.txt\n")
+        Path(b, "scratch.txt").write_text("local ignored work\n")
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        r = run_sync(b)
+        assert r.returncode != 0, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert "scratch.txt" in r.stdout + r.stderr
+        assert Path(b, "scratch.txt").read_text() == "local ignored work\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert "stub installer" not in r.stdout
+    print("PASS  ignored incoming collision refuses and preserves local content")
+
+
 def test_existing_board_agent_is_rebound_after_main_sync():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -829,6 +851,7 @@ def main():
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
     test_concurrent_merge_conflict_refuses_and_reports()
+    test_ignored_incoming_collision_refuses()
     test_clean_tree_fast_forwards()
     test_existing_board_agent_is_rebound_after_main_sync()
     test_already_current_is_a_noop()
