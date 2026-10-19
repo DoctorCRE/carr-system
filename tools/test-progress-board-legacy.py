@@ -45,6 +45,28 @@ class LegacyDispositionTests(unittest.TestCase):
             self.assertIn('subject', report['samples'][0]['reason'])
             self.assertEqual(path.read_bytes(), original)
 
+    def test_corrected_oauth_citation_uses_1460_and_unrelated_or_missing_facts_stay_pending(self):
+        task = FIXTURE['tasks']['build-r-oauth-hardening']
+        oauth = FIXTURE['github']['jbookout/carr-system#1460']
+        doc = FIXTURE['github']['jbookout/carr-system#1454']
+        for info, done in ((oauth, 1), (doc, 0), ({**oauth, 'title': ''}, 0)):
+            with self.subTest(info=info):
+                state = {'project': 'test', 'tasks': {'oauth': task}}
+                result, report = board.dispose_legacy(state, {('jbookout/carr-system', 1460): (info, None)}, AT)
+                self.assertEqual(report['counts']['done'], done)
+                if done:
+                    self.assertIn('carr-system#1460', result['legacy_history']['oauth']['reason'])
+                else:
+                    self.assertEqual(result, state)
+
+    def test_changed_file_can_corroborate_subject_when_pr_title_is_uninformative(self):
+        task = {**FIXTURE['tasks']['build-r-oauth-hardening'], 'title': 'OAuth consent hardening'}
+        info = {**FIXTURE['github']['jbookout/carr-system#1460'], 'title': 'Security improvements',
+                'files': [{'path': 'mcp-server/src/oauth-consent-state.js'}]}
+        _, report = board.dispose_legacy({'project': 'test', 'tasks': {'oauth': task}},
+                                         {('jbookout/carr-system', 1460): (info, None)}, AT)
+        self.assertEqual(report['counts']['done'], 1)
+
     def test_cli_keeps_named_pr_on_read_failure_or_mismatched_identity(self):
         for answer in (RuntimeError('GitHub unavailable'), {'number': 1448, 'state': 'MERGED'}):
             with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
@@ -80,6 +102,8 @@ class LegacyDispositionTests(unittest.TestCase):
     def test_preview_samples_cover_each_disposition_even_after_many_kept_cards(self):
         tasks = {f'ordinary-{i}': FIXTURE['tasks']['events-verify'] for i in range(20)}
         tasks.update(FIXTURE['tasks'])
+        tasks['build-i-pr1448'] = {**tasks['build-i-pr1448'],
+                                  'title': FIXTURE['github']['jbookout/carr-system#1448']['title']}
         facts = {(key.split('#')[0], int(key.split('#')[1])): (value, None)
                  for key, value in FIXTURE['github'].items()}
         _, report = board.dispose_legacy({'project': 'test', 'tasks': tasks}, facts, AT)
@@ -117,7 +141,8 @@ class LegacyDispositionTests(unittest.TestCase):
             path.write_text(json.dumps({'project': 'test', 'tasks': FIXTURE['tasks']}))
             original = path.read_bytes()
             def github(args):
-                return FIXTURE['github'][f'{args[4]}#{args[2]}']
+                info = FIXTURE['github'][f'{args[4]}#{args[2]}']
+                return {key: info[key] for key in args[-1].split(',') if key in info}
             with patch.dict(os.environ, {'PROGRESS_BOARD_ROOT': directory}), \
                     patch.object(board, 'now_utc', return_value=AT), \
                     patch.object(board, 'gh_json', side_effect=github), \
@@ -133,7 +158,7 @@ class LegacyDispositionTests(unittest.TestCase):
                 self.assertEqual(list(path.parent.iterdir()), [path])
                 board.main(['dispose-legacy', 'test', '--apply'])
                 applied = path.read_bytes()
-                self.assertEqual(len(json.loads(applied)['legacy_history']), 8)
+                self.assertEqual(len(json.loads(applied)['legacy_history']), 6)
                 board.main(['dispose-legacy', 'test', '--apply'])
                 self.assertEqual(path.read_bytes(), applied)
                 self.assertTrue(all(call.args == (2,) for call in pause.call_args_list))
@@ -150,14 +175,16 @@ class LegacyDispositionTests(unittest.TestCase):
         self.assertEqual(state['legacy_history']['dot-old']['status'], 'archived')
         self.assertIn('legacy, unverified', board.board_snapshot(state, costs={})['history']['dot-old']['reason'])
 
-    def test_ten_evidence_cards_archive_only_stale_retired_producers(self):
+    def test_evidence_cards_archive_only_stale_retired_producers(self):
         state = {'project': 'test', 'tasks': FIXTURE['tasks']}
         facts = {tuple([key.split('#')[0], int(key.split('#')[1])]): (value, None)
                  for key, value in FIXTURE['github'].items()}
         result, report = board.dispose_legacy(state, facts, AT)
-        self.assertEqual(report['counts'], {'done': 3, 'dropped': 2, 'legacy, unverified': 3, 'kept': 2})
+        self.assertEqual(report['counts'], {'done': 3, 'dropped': 0, 'legacy, unverified': 3, 'kept': 5})
         self.assertEqual(len(report['samples']), 10)
-        self.assertEqual(set(result['tasks']), {'events-verify', 'jev-apply'})
+        self.assertEqual(set(result['tasks']), {
+            'events-verify', 'jev-apply', 'build-i-pr1448',
+            'dot-002-AF-carr-system-1461', 'cloud-jev-codereview'})
         snapshot = board.board_snapshot(result, costs={})
         for key in ('dot-job10', 'dot-job7', 'dot-job15'):
             self.assertEqual(snapshot['history'][key]['status'], 'archived')
@@ -166,7 +193,8 @@ class LegacyDispositionTests(unittest.TestCase):
         self.assertEqual(board.dispose_legacy(result, facts, AT)[0], result)
 
     def test_closed_unmerged_is_dropped_with_receipt_and_never_done(self):
-        state = {'project': 'test', 'tasks': {'old': FIXTURE['tasks']['build-i-pr1448']}}
+        state = {'project': 'test', 'tasks': {'old': {**FIXTURE['tasks']['build-i-pr1448'],
+                                                    'title': FIXTURE['github']['jbookout/carr-system#1448']['title']}}}
         facts = {('jbookout/carr-system', 1448): (FIXTURE['github']['jbookout/carr-system#1448'], None)}
         result, report = board.dispose_legacy(state, facts, AT)
         snapshot = board.board_snapshot(result, costs={})
@@ -177,12 +205,12 @@ class LegacyDispositionTests(unittest.TestCase):
         self.assertIn('legacy pre-proof card verified by GitHub state', snapshot['history']['old']['reason'])
 
     def test_merged_legacy_note_moves_to_history_without_weakening_new_proof(self):
-        task = copy.deepcopy(FIXTURE['tasks']['cloud-jev-codereview'])
+        task = copy.deepcopy(FIXTURE['tasks']['build-j-doc-plugin'])
         state = {'project': 'test', 'tasks': {'old': task, 'new': {
             'title': 'New completion', 'created_at': '2026-10-19T10:00:00Z',
             'updated_at': '2026-10-19T10:00:00Z', 'status': 'done',
-            'note': 'PR 1408'}}}
-        facts = {('jbookout/carr-system', 1408): (FIXTURE['github']['jbookout/carr-system#1408'], None)}
+            'note': 'PR 1454'}}}
+        facts = {('jbookout/carr-system', 1454): (FIXTURE['github']['jbookout/carr-system#1454'], None)}
         with patch.object(board, 'now_utc', return_value=AT):
             result, report = board.dispose_legacy(state, facts, AT)
             snapshot = board.board_snapshot(result, costs={})
@@ -192,8 +220,8 @@ class LegacyDispositionTests(unittest.TestCase):
         self.assertEqual(snapshot['history']['old']['status'], 'done')
         receipt = snapshot['history']['old']['reason']
         self.assertIn('legacy pre-proof card verified by GitHub state', receipt)
-        self.assertIn('jbookout/carr-system#1408', receipt)
-        self.assertIn(FIXTURE['github']['jbookout/carr-system#1408']['mergeCommit']['oid'], receipt)
+        self.assertIn('jbookout/carr-system#1454', receipt)
+        self.assertIn(FIXTURE['github']['jbookout/carr-system#1454']['mergeCommit']['oid'], receipt)
         self.assertEqual(snapshot['tasks']['new']['status'], 'review')
         again, _ = board.dispose_legacy(result, facts, AT)
         self.assertEqual(again, result)

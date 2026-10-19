@@ -240,6 +240,30 @@
       ],
       "stage_entered_at": "2026-10-01T19:47:09+00:00",
       "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "build-r-oauth-hardening": {
+      "title": "Harden the shared OAuth layer: consent, audience binding, PKCE challenge, Origin check",
+      "status": "review",
+      "executor": "gpt-6.1-sol high (Codex)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Opened carr-system PR 1460; tracked on its PR row",
+      "created_at": "2026-10-01T15:20:25+00:00",
+      "updated_at": "2026-10-01T15:30:45+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T15:30:45+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T15:30:45+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T15:30:45+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
     }
   },
   "github": {
@@ -251,6 +275,7 @@
       "mergedAt": "2026-09-29T19:54:45Z",
       "number": 1408,
       "state": "MERGED",
+      "title": "Structural partition pilot for the Jev code review",
       "url": "https://github.com/jbookout/carr-system/pull/1408"
     },
     "jbookout/carr-system#1448": {
@@ -259,6 +284,7 @@
       "mergedAt": null,
       "number": 1448,
       "state": "CLOSED",
+      "title": "Fix database design defects found by the Dot's schema review",
       "url": "https://github.com/jbookout/carr-system/pull/1448"
     },
     "jbookout/carr-system#1454": {
@@ -269,6 +295,7 @@
       "mergedAt": "2026-10-01T17:38:16Z",
       "number": 1454,
       "state": "MERGED",
+      "title": "Doc V0: a ChatGPT plugin and Claude connector endpoint over the record layer",
       "url": "https://github.com/jbookout/carr-system/pull/1454"
     },
     "jbookout/doctorcre-app#116": {
@@ -279,6 +306,7 @@
       "mergedAt": "2026-10-01T12:47:53Z",
       "number": 116,
       "state": "MERGED",
+      "title": "Fix Tour defects found by the Dot's V0 Tour review",
       "url": "https://github.com/jbookout/doctorcre-app/pull/116"
     },
     "jbookout/carr-system#1461": {
@@ -287,12 +315,31 @@
       "mergedAt": null,
       "number": 1461,
       "state": "CLOSED",
+      "title": "Fix forward: renumber Progress directory migration 0757 -> 0764 so it sorts after applied 0759",
       "url": "https://github.com/jbookout/carr-system/pull/1461"
+    },
+    "jbookout/carr-system#1460": {
+      "closedAt": "2026-10-03T18:43:22Z",
+      "mergeCommit": {
+        "oid": "211e557cbc999e91b708a7f672d812c80cd0a585"
+      },
+      "mergedAt": "2026-10-03T18:43:21Z",
+      "number": 1460,
+      "state": "MERGED",
+      "title": "Harden the shared OAuth layer: consent, audience binding, PKCE challenge, Origin check",
+      "url": "https://github.com/jbookout/carr-system/pull/1460"
     }
   },
   "proof_cutover": {
     "pr": "https://github.com/jbookout/carr-system/pull/1940",
     "merge_sha": "2f372d5e59e489e60efb402d372694b1c234f339",
     "merged_at": "2026-10-19T09:33:08Z"
+  },
+  "source_note_corrections": {
+    "build-r-oauth-hardening": {
+      "original": "Opened carr-system PR 1454; tracked on its PR row",
+      "corrected_pr": "https://github.com/jbookout/carr-system/pull/1460",
+      "basis": "Card title exactly matches PR 1460; PR 1454 is the Doc plugin"
+    }
   }
 }

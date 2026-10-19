@@ -2023,6 +2023,20 @@ def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
     return refs
 
 
+def legacy_pr_matches_subject(task: dict[str, Any], info: dict[str, Any]) -> bool:
+    ignored = set("the and for with from over into that this shared layer check test tests "
+                  "review independent public pull request follow build code fix add update "
+                  "opened tracked complete done carr system jbookout".split())
+
+    def words(text: str) -> set[str]:
+        return set(re.findall(r"[a-z][a-z0-9]{2,}", text.lower())) - ignored
+
+    subject = words(str(task.get("title") or ""))
+    candidates = [str(info.get("title") or "")]
+    candidates.extend(str(file.get("path") or "") for file in info.get("files", []))
+    return any(len(subject & words(candidate)) >= 2 for candidate in candidates)
+
+
 def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[dict[str, Any], dict[str, Any]]:
     """Plan the pre-proof migration on a copy; never grants consumer proof."""
     result = copy.deepcopy(state)
@@ -2039,7 +2053,9 @@ def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[
                 repo, number = next(iter(refs))
                 info, error = fetched.get((repo, number), (None, "PR not read"))
                 reason = f"GitHub not verified: {error}" if error or not info else f"GitHub {info.get('state')}; keep"
-                if not error and info and info.get("state") == "MERGED" and merge_sha(info):
+                if not error and info and not legacy_pr_matches_subject(task, info):
+                    reason = f"{repo}#{number}; PR title/files do not corroborate card subject; keep"
+                elif not error and info and info.get("state") == "MERGED" and merge_sha(info):
                     disposition = "done"
                     reason = (f"{repo}#{number}; merge SHA {merge_sha(info)}; "
                               "legacy pre-proof card verified by GitHub state")
@@ -2076,7 +2092,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
         time.sleep(2)
         try:
             info = gh_json(["pr", "view", str(number), "--repo", repo, "--json",
-                            "number,state,mergeCommit,mergedAt,closedAt,url"])
+                            "number,title,files,state,mergeCommit,mergedAt,closedAt,url"])
             if not isinstance(info, dict) or info.get("number") != number or info.get("url") != f"https://github.com/{repo}/pull/{number}":
                 raise RuntimeError("GitHub returned a mismatched PR identity")
             fetched[repo, number] = info, None
