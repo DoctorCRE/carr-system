@@ -261,6 +261,35 @@ def logical_allocated_bytes(candidates: list[Candidate], timeout_seconds: float)
         return None
 
 
+def allocated_bytes_evidence(paths, *, max_entries=10000, max_seconds=1):
+    import stat
+    result = {'allocated_bytes': 0, 'entries': 0, 'complete': True, 'reason': 'complete'}
+    deadline = time.monotonic() + max_seconds
+    seen = set()
+    def scan(path):
+        if result['entries'] >= max_entries:
+            raise TimeoutError('entry budget')
+        if time.monotonic() >= deadline:
+            raise TimeoutError('time budget')
+        info = path.lstat()
+        result['entries'] += 1
+        identity = info.st_dev, info.st_ino
+        if identity in seen:
+            return
+        seen.add(identity)
+        result['allocated_bytes'] += info.st_blocks * 512
+        if stat.S_ISDIR(info.st_mode):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    scan(Path(entry.path))
+    try:
+        for path in paths:
+            scan(Path(path))
+    except (OSError, RecursionError) as exc:
+        result.update(complete=False, reason=str(exc) if isinstance(exc, TimeoutError) else type(exc).__name__)
+    return result
+
+
 def health_row(*, used_bytes: int, clone_count: int,
                threshold_bytes: int = DATA_THRESHOLD_BYTES) -> str:
     state = "WARN" if used_bytes > threshold_bytes else "OK"
@@ -463,15 +492,21 @@ def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
     return RunResult(removed, findings, status)
 
 
-def _temp_activity(path, deadline):
+def _temp_activity(path, deadline, *, max_entries=None):
     import hashlib
     digest = hashlib.sha256()
     latest = 0.0
+    size = 0
+    seen = set()
     def inspect(entry):
-        nonlocal latest
-        if deadline():
+        nonlocal latest, size
+        if deadline() or max_entries is not None and len(seen) >= max_entries:
             raise TimeoutError('fixture inspection budget')
         info = entry.lstat()
+        identity = info.st_dev, info.st_ino
+        if identity not in seen:
+            seen.add(identity)
+            size += info.st_blocks * 512
         latest = max(latest, info.st_mtime)
         digest.update(repr((str(entry.relative_to(path)), info.st_dev, info.st_ino,
                             info.st_mode, info.st_size, info.st_mtime_ns)).encode())
@@ -482,7 +517,7 @@ def _temp_activity(path, deadline):
         dirs.sort()
         for name in sorted(dirs + files):
             inspect(Path(parent) / name)
-    return digest.hexdigest(), latest
+    return digest.hexdigest(), latest, size
 
 
 def recover_test_temp(pending, *, deadline):
@@ -536,6 +571,7 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                     break
                 path = root / name
                 row = {'kind': 'test_temp', 'path': str(path), 'status': 'kept', 'reason': 'recent fixture'}
+                target = None
                 try:
                     info = path.lstat()
                     if path.is_symlink() or not path.is_dir():
@@ -543,12 +579,10 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                     elif busy is None or str(path) in busy:
                         row['reason'] = 'live process or process evidence unavailable'
                     else:
-                        activity, latest = _temp_activity(path, deadline)
+                        inspection_deadline = time.monotonic() + 2
+                        activity, latest, size = _temp_activity(path,
+                            lambda: deadline() or time.monotonic() >= inspection_deadline, max_entries=10000)
                         if now - latest >= min_age:
-                            size = logical_allocated_bytes([Candidate('test_temp', path, now - latest)], 3)
-                            if size is None:
-                                raise OSError('fixture size evidence unavailable')
-                            target = None
                             if not dry_run:
                                 staging = root / '_to_delete'
                                 staging.mkdir(exist_ok=True)
@@ -562,7 +596,7 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                 record({**row, 'status': 'intent'})
                             final_busy = process_probe([str(path)])
                             # A nested write can leave the candidate directory's mtime unchanged.
-                            final_activity, newest = _temp_activity(path, deadline)
+                            final_activity, newest, _ = _temp_activity(path, deadline)
                             rechecked = _open_root(root, (identity.st_dev, identity.st_ino))
                             os.close(rechecked)
                             if final_busy is None or str(path) in final_busy or activity != final_activity or now - newest < min_age:
@@ -573,8 +607,10 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                 assert target is not None
                                 os.rename(name, target / 'fixture', src_dir_fd=descriptor)
                                 staged_busy = process_probe([str(path), str(target / 'fixture')])
+                                verification_deadline = time.monotonic() + 2
                                 if (staged_busy is None or any(p in staged_busy for p in (str(path), str(target / 'fixture'))) or
-                                        _temp_activity(target / 'fixture', deadline)[0] != activity):
+                                        _temp_activity(target / 'fixture', lambda: time.monotonic() >= verification_deadline,
+                                                       max_entries=10000)[0] != activity):
                                     if path.exists() or path.is_symlink():
                                         raise RuntimeError('fixture restore destination occupied')
                                     os.rename(target / 'fixture', name, dst_dir_fd=descriptor)
@@ -585,6 +621,15 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                             if target is not None:
                                 save(target / 'manifest.json', {**row,
                                     'status': 'staged' if row['status'] == 'staged' else 'verified_no_effect'})
+                except TimeoutError:
+                    if target is not None and (target / 'fixture').exists():
+                        row.update(error='TimeoutError', reason='staged fixture inspection incomplete')
+                        report['errors'].append({'kind': 'test_temp', 'error': 'TimeoutError'})
+                    else:
+                        row.update(status='kept', reason='fixture inspection budget exhausted; no move performed')
+                        if target is not None:
+                            save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
+                    report['budget_exhausted'] = deadline()
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                     row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
                     report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
@@ -595,7 +640,8 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                     return report
             if report['budget_exhausted']:
                 break
-        if not report['budget_exhausted'] and len(names) < max_items:
+        report['budget_exhausted'] |= len(names) == max_items or deadline()
+        if not report['budget_exhausted']:
             report['cursor'] = ''
         return report
     finally:

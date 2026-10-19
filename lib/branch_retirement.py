@@ -257,16 +257,21 @@ class MainAdvanced(RuntimeError):
 
 
 @contextmanager
-def maintenance(root):
+def maintenance(root, *, deadline=None):
     lock = root / "out/worktree-reap.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     # Keep this inode permanently. Renaming or unlinking an acquired flock
     # would allow a second caller to lock a different inode at the same path.
     with lock.open("a+") as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise MaintenanceDeferred("repository maintenance lock held; preserve pending run") from exc
+        while True:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                remaining = 0 if deadline is None else deadline - time.monotonic()
+                if remaining <= 0:
+                    raise MaintenanceDeferred("repository maintenance lock held; preserve pending run") from exc
+                time.sleep(min(.1, remaining))
         try:
             yield
         finally:
@@ -702,11 +707,11 @@ class FleetReaper:
         cursors = json.loads(cursor_path.read_text()) if cursor_path.exists() else {}
         deadline = time.monotonic() + max_seconds
         try:
-            with maintenance(self.root):
+            with maintenance(self.root, deadline=deadline if local_only else None):
                 for repo, path in roots.items():
                     root = Path(path).expanduser().resolve()
                     try:
-                        with nullcontext() if root == self.root else maintenance(root):
+                        with nullcontext() if root == self.root else maintenance(root, deadline=deadline if local_only else None):
                             if execute:
                                 report["recovered"].extend(self.recover_pending(repo, root))
                             report["counts"][repo] = {kind: {c: 0 for c in CLASSES}
