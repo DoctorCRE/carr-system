@@ -9,6 +9,7 @@ permits arbitrary production execution rows into db/schema.sql.
 """
 from pathlib import Path
 import re
+import json
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,11 +33,12 @@ def main() -> int:
         "03090000-0000-4000-8000-000000000001",
         "03090000-0000-4000-8000-000000000002",
         "03090000-0000-4000-8000-000000000008",
-        "'engineering-slice',1,true,'yellow','hermes','deterministic'",
-        '"mcp-server/src/engineering-runtime.js"',
-        '"MCP admission only; no scheduler"',
     ):
         check(f"generator pins {value}", value in generator)
+    declarations = json.loads((ROOT / "ops/config/snapshot-seed-coverage.json").read_text())["renders"]
+    check("reviewed selectors carry both job contracts",
+          {row["where"] for row in declarations if row["table"] == "ops.job_definition"} ==
+          {"key='engineering-slice' and version=1", "key='renewal-radar-source-daily' and version=1"})
     check("snapshot carries the governed execution seed block",
           "CARR GOVERNED EXECUTION SEEDS" in snapshot)
     check("snapshot carries the protected Hermes provider",
