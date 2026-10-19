@@ -113,9 +113,12 @@ def _stamp(value):
         return None
 
 
-def scan(path, *, since=None):
+def scan(path, *, since=None, until=None):
     available, opened, pending = set(), set(), {}
-    cutoff = _stamp(since) if since else None
+    cutoff, end = _stamp(since), _stamp(until)
+    if (since is not None and cutoff is None or until is not None and end is None
+            or cutoff is not None and end is not None and cutoff > end):
+        raise ValueError('invalid skill receipt window')
     with Path(path).open(encoding='utf-8') as handle:
         for line in handle:
             try:
@@ -138,7 +141,8 @@ def scan(path, *, since=None):
                 if row.get('subtype') == 'init':
                     available.update(canonical(item) for item in row.get('skills', []) if isinstance(item, str))
             stamp = _stamp(row.get('timestamp'))
-            current = cutoff is None or stamp is not None and stamp >= cutoff
+            current = ((cutoff is None and end is None) or stamp is not None
+                       and (cutoff is None or stamp >= cutoff) and (end is None or stamp <= end))
             if payload.get('type') in ('function_call', 'custom_tool_call') and current:
                 try:
                     args = ({'code': payload.get('input', '')} if payload['type'] == 'custom_tool_call'
@@ -148,7 +152,7 @@ def scan(path, *, since=None):
                     continue
             elif payload.get('type') in ('function_call_output', 'custom_tool_call_output'):
                 paths = pending.pop(payload.get('call_id'), [])
-                if _success(payload.get('output')):
+                if current and _success(payload.get('output')):
                     opened.update(paths)
             for block in content:
                 if not isinstance(block, dict):
@@ -158,7 +162,7 @@ def scan(path, *, since=None):
                                                 block.get('name') in ('Read', 'read_file', 'Bash'))
                 elif block.get('type') == 'tool_result':
                     paths, direct = pending.pop(block.get('tool_use_id'), ([], False))
-                    if not block.get('is_error') and (direct or _success(block.get('content'))):
+                    if current and not block.get('is_error') and (direct or _success(block.get('content'))):
                         opened.update(paths)
     return {'available': sorted(available), 'opened': sorted(opened)}
 
