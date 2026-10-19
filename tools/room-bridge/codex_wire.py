@@ -182,6 +182,10 @@ class _StdioWire:
 class RequestRejected(RuntimeError):
     """A correlated JSON-RPC error proves that this request was rejected."""
 
+    def __init__(self, request_id, error):
+        self.error = error
+        super().__init__(f"request {request_id} failed: {error}")
+
 
 def wait_response(wire: Wire | _StdioWire, request_id: str, transcript: list[dict]) -> dict:
     while True:
@@ -192,7 +196,7 @@ def wait_response(wire: Wire | _StdioWire, request_id: str, transcript: list[dic
                 error = message['error']
                 if (isinstance(error, dict) and type(error.get('code')) is int
                         and isinstance(error.get('message'), str) and 'result' not in message):
-                    raise RequestRejected(f"request {request_id} failed: {error}")
+                    raise RequestRejected(request_id, error)
                 raise RuntimeError(f"request {request_id} has an invalid error response")
             return message["result"]
 
@@ -237,7 +241,12 @@ def archive_finished_thread(thread_id: str, *, before: float, process_probe,
             busy = process_probe([path])
             return busy is not None and not busy
 
-        thread = rpc('thread/read', {'threadId': thread_id})['thread']
+        try:
+            thread = rpc('thread/read', {'threadId': thread_id})['thread']
+        except RequestRejected as exc:
+            if exc.error == {'code': -32600, 'message': 'thread not loaded: ' + thread_id}:
+                return {**result, 'reason': 'historical thread not loaded; kept without attempting archive'}
+            raise
         if thread.get('id') == thread_id and 'archived_sessions' in (thread.get('path') or '').split('/'):
             return {**result, 'status': 'archived', 'reason': 'native archive effect read back before retry'}
         if thread.get('id') != thread_id or not safe(thread):
