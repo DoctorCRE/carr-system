@@ -3157,6 +3157,24 @@ class CandidateStaging(Base):
             pipe.candidate("stage-candidate", lane="app", sha=sha)
         self.assertEqual(self.calls, [])
 
+    def test_candidate_build_tree_is_outside_pipeline_store_and_removed(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        roots = []
+
+        def run(argv, *, cwd, **kwargs):
+            if argv == ["npm", "run", "build"]:
+                roots.append(cwd.parent)
+                self.assertFalse(cwd.resolve().is_relative_to(pipe.store.root.resolve()))
+                self.assertFalse(any((parent / "toolchain").exists() for parent in cwd.parents))
+            return original(argv, cwd=cwd, **kwargs)
+
+        pipe.runner.run = run
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertTrue(roots)
+        self.assertTrue(all(not root.exists() for root in roots))
+
     def test_candidate_build_cannot_replace_credentialed_provider(self):
         sha = self.candidate_sha()
         pipe = self.candidate_pipe()
