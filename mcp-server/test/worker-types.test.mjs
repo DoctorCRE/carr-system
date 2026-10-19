@@ -1,11 +1,21 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { tmpdir } from "node:os";
 
 const root = path.resolve(fileURLToPath(new URL("../", import.meta.url)));
+const cacheRoot = mkdtempSync(path.join(tmpdir(), "worker-types-"));
+const previousTmp = process.env.TMPDIR;
+process.env.TMPDIR = cacheRoot;
+after(() => {
+  if (previousTmp === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = previousTmp;
+  rmSync(cacheRoot, { recursive: true, force: true });
+});
+
 
 function generate(schema) {
   const script = `import { registerHooks } from "node:module";

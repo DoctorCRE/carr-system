@@ -31,6 +31,7 @@ module the suite already resolves from its own directory or from the repo.
 """
 from __future__ import annotations
 
+import atexit
 import contextlib
 import importlib.util
 import json
@@ -51,7 +52,16 @@ else:
     from hook_runtime import Verdict
 
 __all__ = ["Checker", "load_module", "load_hook", "fixture_dir", "hook_env",
-           "HookSandbox", "HookResult"]
+           "HookSandbox", "HookResult", "temporary_directory"]
+
+_TEMP_DIRS = contextlib.ExitStack()
+atexit.register(_TEMP_DIRS.close)
+
+
+def temporary_directory(*args, **kwargs):
+    """Own an escaping fixture path until the test process exits."""
+    return _TEMP_DIRS.enter_context(tempfile.TemporaryDirectory(*args, **kwargs))
+
 
 OK_LINE = "OK all checks passed"
 
