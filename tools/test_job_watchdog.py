@@ -31,6 +31,20 @@ def tearDownModule():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_identical_job_failures_collapse_by_card_and_cause(self):
+        import job_watchdog as w
+        config = w.load_config(ROOT / "ops/config/job-watchdog.json")
+        jobs = [{"id": f"run-{n}", "card": "branch-janitor", "start": n,
+                 "exit_code": 1, "log_tail": "repository evidence refused"} for n in (1, 2, 3)]
+        jobs += [{**jobs[-1], "id": "other-cause", "log_tail": "process evidence unavailable"},
+                 {**jobs[-1], "id": "other-job", "card": "another-job"}]
+        found = w.detect({"jobs": jobs}, config, 100)
+        self.assertEqual(len(found), 3)
+        self.assertEqual({f["job"]["id"] for f in found}, {"run-3", "other-cause", "other-job"})
+        repeated = next(f for f in found if f["job"]["id"] == "run-3")
+        next_run = w.detect({"jobs": [{**jobs[0], "id": "run-4", "start": 4}]}, config, 101)[0]
+        self.assertEqual(repeated["key"], next_run["key"])
+
     def test_ci_replacement_attempts_restore_ready_without_false_red(self):
         import job_watchdog as w
         config = w.load_config(ROOT / "ops/config/job-watchdog.json")
