@@ -291,6 +291,22 @@ class SkillReceiptTests(unittest.TestCase):
             self.assertEqual(saved['completed_at'], end)
             self.assertFalse(saved['skill_receipt']['skills'][0]['opened'])
 
+    def test_async_unreadable_completion_records_a_receipt_error_without_losing_the_job(self):
+        row = {'msg_id': 'job', 'status': 'delivered', 'kind': 'claude-session',
+               'dispatched_at': '2026-10-19T15:00:00Z', 'session_id': 'own-session'}
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory) / 'results.jsonl'
+            results.write_text(json.dumps(row) + '\n')
+            with patch.object(skill_receipts, 'session_path', return_value=Path(directory) / 'missing'), \
+                 patch.object(dispatch, '_skill_gh') as gh:
+                dispatch.finish_pending_skill_receipt({'dispatch_msg_id': 'job'}, 'done',
+                    Path(directory) / 'log', results_path=results)
+            gh.assert_not_called()
+            saved = json.loads(dispatch._skill_ledger(results).read_text().splitlines()[-1])
+            self.assertEqual(saved['status'], 'completed')
+            self.assertIn('skill_receipt_error', saved)
+            self.assertIsNone(saved.get('completed_at'))
+
     def test_completion_time_matches_the_first_terminal_reply_after_dispatch(self):
         start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02Z'
         for final in (
