@@ -104,6 +104,8 @@ class SkillReceiptTests(unittest.TestCase):
     def test_aliases_and_missing_inventory_fail_before_launch(self):
         self.assertEqual(skill_receipts.claims('Skills: Pocock TDD, Prove It Works; poteto-mode'),
                          ['tdd', 'prove-it-works', 'poteto-mode'])
+        self.assertEqual(skill_receipts.claims((Path(__file__).parent / 'brief-footer.md').read_text()),
+                         ['tdd', 'poteto-mode', 'prove-it-works', 'grill-with-docs'])
         with self.assertRaisesRegex(ValueError, 'not available.*grill-with-docs'):
             skill_receipts.require_skills('Skills: grill-with-docs', {'available': ['tdd']})
         with self.assertRaisesRegex(ValueError, 'inventory unknown'):

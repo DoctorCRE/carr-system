@@ -203,6 +203,8 @@ class CheckoutDispatchTests(unittest.TestCase):
         try:
             with patch.dict(os.environ, slots), \
                  patch.object(dispatch, 'CODEX_SLOT_POLL_S', 0.01), \
+                 patch.object(dispatch, 'desk_skill_inventory', return_value={
+                     'available': ['tdd', 'poteto-mode', 'prove-it-works', 'grill-with-docs']}), \
                  patch.object(dispatch.seat_gate, 'check', return_value=None), \
                  patch.object(dispatch.subprocess, 'run', side_effect=self.execute), \
                  contextlib.redirect_stdout(io.StringIO()):
