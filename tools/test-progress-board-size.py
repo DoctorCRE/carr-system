@@ -188,6 +188,18 @@ class SnapshotSizeTests(unittest.TestCase):
                 self.assertEqual(datetime.fromisoformat(board.stage_entered_at(card)),
                                  datetime.fromisoformat(expected_histories[task_id][-1]["entered_at"]))
         self.assertEqual(state, before, "publication must preserve full local source records")
+    def test_exact_work_lineage_survives_projection_and_title_changes(self):
+        refs = {"work_request_ref": "WR-900", "plan_ref": "plan:synthetic-v2",
+                "slice_ref": "slice:seven", "task_ref": "task:linked-card", "job_ref": "job:synthetic-build"}
+        task = {"title": "Synthetic card", "status": "review", "pr": 73, **refs}
+        state = {"project": "fixture", "tasks": {"app-pr-73": task}}
+        for title in ("Synthetic card", "Renamed card"):
+            task["title"] = title
+            projected = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})["tasks"]["app-pr-73"]
+            self.assertEqual({key: projected.get(key) for key in refs}, refs)
+        del task["plan_ref"]
+        projected = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})["tasks"]["app-pr-73"]
+        self.assertNotIn("plan_ref", projected)
 
     def test_app_evidence_and_inline_question_survive_projection(self):
         task = {"title": "Review", "status": "review", "stage": "review", "pr": 1553,
