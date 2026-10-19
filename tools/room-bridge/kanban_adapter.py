@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import List, TypedDict
 
 import queue_grammar
+from desks import AUTOMATIC_CODEX_DESKS
 
 
 BOARD = "carr-build"
@@ -472,7 +473,13 @@ class QueueService:
                         "reason": "no enabled target accepts this task", "hint": "Name a target explicitly",
                     }}}
                 command = {**command, "target": routed["target"]}
-            created = self.adapter.create(command, turn, self.catalog["targets"][command["target"]])
+            target = self.catalog["targets"][command["target"]]
+            if (routed is not None or command["origin_channel"] != "browser-human") \
+                    and target.get("adapter") == "desk" \
+                    and (target.get("desk") or target.get("assignee", "").removeprefix("desk:")) \
+                    not in AUTOMATIC_CODEX_DESKS:
+                raise QueueError("unsafe_automatic_desk", "automatic work requires a guarded Codex subscription desk")
+            created = self.adapter.create(command, turn, target)
             report_target = command["target"]
             if routed is not None and not created["created"]:
                 report_target = self._existing_task_target(created["task_id"], default=report_target)
