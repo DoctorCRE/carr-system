@@ -232,6 +232,9 @@ class DeliveryTests(unittest.TestCase):
             row = json.loads(specific['additionalContext'])
             self.assertTrue(row['complete'])
             self.assertEqual(row['task_sha256'], digest('Read-only child PR review'))
+            sibling = path.with_suffix('') / 'subagents' / 'agent-another-child.jsonl'
+            sibling.parent.mkdir(parents=True)
+            sibling.write_text(path.read_text())
             mismatch = self.invoke([], payload={'prompt': None, 'transcript_path': str(path),
                 'agent_id': 'another-child', 'turn_id': 'native-turn'})
             self.assertEqual(mismatch['hookSpecificOutput']['permissionDecision'], 'deny')
