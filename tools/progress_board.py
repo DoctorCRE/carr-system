@@ -2008,8 +2008,8 @@ def legacy_card(task: dict[str, Any]) -> bool:
 
 def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
     if task.get("pr") is not None:
-        repo, number = pr_key(task)
-        return {(repo.lower(), number)}
+        repo, recorded_number = pr_key(task)
+        return {(repo.lower(), recorded_number)}
     refs = set()
     text = "\n".join(str(task.get(field) or "") for field in ("title", "note", "summary"))
     for match in LEGACY_PR_REF.finditer(text):
@@ -2091,7 +2091,7 @@ def command_dispose_legacy(args: argparse.Namespace) -> None:
     initial = read_state(args.project)
     keys = {next(iter(refs)) for task in initial.get("tasks", {}).values()
             if legacy_card(task) and len(refs := legacy_pr_refs(task)) == 1}
-    fetched = {}
+    fetched: dict[tuple[str, int], tuple[dict[str, Any] | None, str | None]] = {}
     for repo, number in sorted(keys):
         time.sleep(2)
         try:
