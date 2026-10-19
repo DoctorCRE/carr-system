@@ -172,6 +172,39 @@ class ConsumerCompletion(unittest.TestCase):
         self.assertNotEqual(before["stage"], "live")
         self.assertEqual((after["stage"], after["status"]), ("live", "done"))
 
+    def test_cli_unrelated_failure_preserves_passing_workflow(self):
+        proof = self.proven_task()["consumer_proof"]
+        passed = {**proof, "observed_at": "2026-10-03T12:00:00Z"}
+        unrelated = {**passed, "workflow": "workflow B", "outcome": "fail",
+                     "observed_at": "2026-10-04T12:00:00Z"}
+        states = self.cli_observations([passed, unrelated])
+        self.assertTrue(all(task["stage"] == "live" for task in states))
+        self.assertEqual(states[-1]["consumer_proof"], passed)
+
+    def test_cli_rejects_malformed_observation(self):
+        proof = self.proven_task()["consumer_proof"]
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.cli_observations([{**proof, "observed_at": "not a timestamp"}])
+
+    def test_refresh_keeps_each_bindings_latest_observation(self):
+        task = self.proven_task()
+        proof = task["consumer_proof"]
+        state = {"tasks": {"feature": task}}
+        failed = {**proof, "outcome": "fail", "observed_at": "2026-10-03T12:00:00Z"}
+        for observation in (failed, {**failed, "workflow": "workflow B", "observed_at": "2026-10-04T12:00:00Z"}):
+            args = board.parser().parse_args(["task", "synthetic", "feature", "--consumer-proof", json.dumps(observation)])
+            board.update_task(state, args)
+        key = "doctorcre-app-42"
+        info = {"number": 42, "mergeCommit": {"oid": "a" * 40}, "state": "MERGED"}
+        with patch.object(board, "latest_release", return_value=None):
+            refreshed = board.assemble_all_repos({"tasks": {key: state["tasks"]["feature"]}}, {task["repo"]: ([], [info])})
+        args = board.parser().parse_args(["task", "synthetic", key, "--consumer-proof", json.dumps(proof)])
+        board.update_task(refreshed, args)
+        self.assertEqual(refreshed["tasks"][key]["consumer_proof"], failed)
+        self.assertEqual(board.task_stage(refreshed["tasks"][key]), "merged")
+        snapshot = board.board_snapshot(refreshed, costs={})["tasks"][key]
+        self.assertNotIn("consumer_proofs", snapshot)
+
     def test_receipt_replays_cannot_erase_a_newer_observation(self):
         task = self.proven_task()
         old_pass = copy.deepcopy(task["consumer_proof"])
@@ -196,6 +229,8 @@ class ConsumerCompletion(unittest.TestCase):
         self.assertEqual(record(new_pass), "merged", "a tied pass cannot erase a failure")
         other_workflow = {**old_pass, "workflow": "another synthetic workflow"}
         self.assertEqual(record(other_workflow, "--delivery-workflow", other_workflow["workflow"]), "live")
+        self.assertEqual(record(old_pass, "--delivery-workflow", old_pass["workflow"]), "merged")
+        self.assertEqual(record({**new_pass, "observed_at": "2026-10-05T12:00:00Z"}), "live")
 
     def test_malformed_receipts_and_retired_tasks_cannot_complete(self):
         for proof in (None, [], "pass", {"outcome": "pass"}):

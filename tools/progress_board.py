@@ -425,12 +425,55 @@ def task_stage(task: dict[str, Any]) -> str:
     return STATUS_TO_STAGE.get(task.get("status", "queued"), "queued")
 
 
+def valid_consumer_proof(proof: Any) -> bool:
+    return (isinstance(proof, dict) and set(proof) == CONSUMER_PROOF_FIELDS
+            and all(isinstance(value, str) and value.strip() and len(value) <= 1000 for value in proof.values())
+            and proof.get("schema") == "carr-consumer-proof.v1"
+            and proof.get("outcome") in {"pass", "fail"}
+            and parse_time(proof.get("observed_at")) is not None)
+
+
+def consumer_binding(proof: dict[str, Any]) -> str:
+    return json.dumps([proof.get(key) for key in ("repo", "source_sha", "target", "workflow")],
+                      separators=(",", ":"))
+
+
+def selected_consumer_proof(task: dict[str, Any]) -> Any:
+    proofs = task.get("consumer_proofs")
+    if not isinstance(proofs, dict):
+        return task.get("consumer_proof")
+    repo = task_repo(task)
+    target = task.get("delivery_target")
+    if isinstance(target, str) and target in {"worker", "app"}:
+        target = (release_config().get(target) or {}).get("live_url")
+    source = task.get("merge_sha") if task.get("pr") is not None else task.get("delivery_source_sha")
+    return proofs.get(consumer_binding({"repo": repo, "source_sha": source,
+                                       "target": target, "workflow": task.get("delivery_workflow")}))
+
+
+def record_consumer_proof(task: dict[str, Any], proof: Any) -> None:
+    if not valid_consumer_proof(proof):
+        raise SystemExit("--consumer-proof requires a valid pass/fail receipt with an observation timestamp")
+    stored = task.get("consumer_proofs")
+    proofs = dict(stored) if isinstance(stored, dict) else {}
+    legacy = task.get("consumer_proof")
+    observations = [proof] if isinstance(stored, dict) or not valid_consumer_proof(legacy) else [legacy, proof]
+    for observation in observations:
+        key = consumer_binding(observation)
+        previous = proofs.get(key)
+        observed = parse_time(observation["observed_at"])
+        last_observed = parse_time(previous.get("observed_at")) if isinstance(previous, dict) else None
+        if isinstance(previous, dict) and last_observed and observed and (observed < last_observed
+                or observed == last_observed and previous.get("outcome") == "fail"):
+            continue
+        proofs[key] = observation
+    task["consumer_proofs"] = proofs
+
+
 def consumer_proven(task: dict[str, Any]) -> bool:
     """A source/release assertion alone is never an exercise receipt."""
-    proof = task.get("consumer_proof")
-    if (is_retired(task) or not isinstance(proof, dict) or set(proof) != CONSUMER_PROOF_FIELDS
-            or any(not isinstance(value, str) or not value.strip() or len(value) > 1000 for value in proof.values())
-            or proof.get("schema") != "carr-consumer-proof.v1"):
+    proof = selected_consumer_proof(task)
+    if is_retired(task) or not valid_consumer_proof(proof):
         return False
     if task.get("pr") is not None and task.get("pr_phase") != "Merged":
         return False
@@ -453,7 +496,7 @@ def consumer_proven(task: dict[str, Any]) -> bool:
 
 
 def consumer_evidence(task: dict[str, Any], release_evidence: str) -> str:
-    proof = task["consumer_proof"]
+    proof = selected_consumer_proof(task)
     return (f"{proof['workflow']} passed on {proof['target']} for source {proof['source_sha']}; "
             f"receipt {proof['evidence_ref']}. {release_evidence}")
 
@@ -542,6 +585,8 @@ def record_stage(task: dict[str, Any], entered_at: str, prior_stage: str | None)
 def normalize_task(task: dict[str, Any]) -> bool:
     """Idempotent repair of stored state; never moves updated_at."""
     before = json.dumps(task, sort_keys=True)
+    if isinstance(task.get("consumer_proofs"), dict):
+        task["consumer_proof"] = selected_consumer_proof(task)
     if not is_retired(task) and (task.get("status") in {"done", "measured"} or task.get("stage") in {"live", "measured"}) and not consumer_proven(task):
         task["stage"] = "merged" if task.get("pr_phase") == "Merged" else "review"
         task["status"] = "review"
@@ -1679,7 +1724,7 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
-                for field in ("delivery_target", "delivery_workflow", "consumer_proof"):
+                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs"):
                     if field in previous:
                         card[field] = previous[field]
                 if merged and pr.get("_legacy_terminal") and previous:
@@ -2602,19 +2647,12 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     task = dict(prior)
     if args.delivery_target is not None:
         task["delivery_target"] = args.delivery_target
-    for field in ("delivery_workflow", "delivery_source_sha", "consumer_proof"):
+    for field in ("delivery_workflow", "delivery_source_sha"):
         value = getattr(args, field, None)
         if value is not None:
-            previous = prior.get(field)
-            if field == "consumer_proof" and isinstance(value, dict) and isinstance(previous, dict):
-                observed = parse_time(value.get("observed_at"))
-                last_observed = parse_time(previous.get("observed_at"))
-                same_binding = all(value.get(key) == previous.get(key)
-                                   for key in ("repo", "source_sha", "target", "workflow"))
-                if same_binding and observed and last_observed and (observed < last_observed
-                        or observed == last_observed and previous.get("outcome") == "fail"):
-                    continue
             task[field] = value
+    if args.consumer_proof is not None:
+        record_consumer_proof(task, args.consumer_proof)
     executor = args.executor or prior.get("executor")
     derived = executor_metadata(executor)
     new_executor = args.executor is not None
@@ -2636,7 +2674,7 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
         task["summary"] = args.summary.strip()
     if prior.get("pr") is not None and pr_key(prior) != pr_key(task):
         for field in ("pr_phase", "pr_checks", "pr_head", "evidence", "completed_at", "merge_sha",
-                      "review_verdict", "release_wait", "consumer_proof"):
+                      "review_verdict", "release_wait", "consumer_proof", "consumer_proofs"):
             task.pop(field, None)
         task["status"] = args.status or "running"
         task["stage"] = stage or "build"
