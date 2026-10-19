@@ -2,7 +2,7 @@
 from decimal import Decimal
 from pathlib import Path
 
-MODEL = 'claude-opus-5-5'
+MODEL = 'claude-sonnet-5-5'
 SDK_VERSION = '0.2.168'
 MONTHLY_BUDGET_USD = Decimal('200.00')
 RUN_ESTIMATE_USD = Decimal('10.00')

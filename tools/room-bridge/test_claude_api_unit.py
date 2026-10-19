@@ -59,12 +59,51 @@ async def query(*, prompt, options):
         self.keychain = lambda *a, **k: subprocess.CompletedProcess(a, 0, 'fake-api-key\n', '')
 
     def seed_spend(self, cost):
-        reservation = self.ledger.reserve()
+        reservation = self.ledger.reserve(self.entry['model'])
         self.ledger.settle(reservation, cost)
 
     def run_task(self, **kwargs):
         return wire.run_task(self.entry, 'finish the job', env=self.env,
                              ledger=self.ledger, keychain_run=self.keychain, **kwargs)
+
+    def test_sonnet_default_keeps_opus_selectable_per_desk(self):
+        registry = desks.Registry(self.root / 'desks.json')
+        default = registry.register('api-default', 'claude-api', effort='medium')
+        hard = registry.register('api-hard', 'claude-api', effort='high', model='claude-opus-5-5')
+        self.assertEqual(default['model'], 'claude-sonnet-5-5')
+        self.assertEqual(hard['model'], 'claude-opus-5-5')
+        for selected in (default, hard):
+            self.entry.update(selected)
+            row = self.run_task()
+            self.assertEqual(row['model'], selected['model'])
+            self.assertEqual(row['actual_model'], selected['model'])
+
+    def test_ledger_retains_each_model_and_cost_after_settlement(self):
+        for model in ('claude-sonnet-5-5', 'claude-opus-5-5'):
+            self.entry['model'] = model
+            row = self.run_task()
+            run = self.ledger.read()['runs'][row['spend_reservation']['run_id']]
+            self.assertEqual(run, {'model': model, 'actual_model': model,
+                                   'status': 'completed', 'cost_usd': '1.25'})
+        report = wire.Ledger(self.ledger.path).read()
+        self.assertEqual(len(report['runs']), 2)
+        self.assertEqual(report['spent_usd'], '2.50')
+        self.assertEqual(report['reserved_usd'], '0')
+
+    def test_model_records_preserve_legacy_balances_and_unknown_reservations(self):
+        month = wire.month_now()
+        self.ledger.path.write_text(json.dumps({'months': {month: {
+            'spent_usd': '3.00', 'reservations': {'legacy-run': '4.00'}}}}))
+        reservation = self.ledger.reserve('claude-sonnet-5-5')
+        run = self.ledger.read()['runs'][reservation[1]]
+        self.assertEqual(run['model'], 'claude-sonnet-5-5')
+        self.assertEqual(run['status'], 'reserved')
+        self.ledger.settle(reservation, None, status='timed_out')
+        report = self.ledger.read()
+        self.assertEqual(report['spent_usd'], '3.00')
+        self.assertEqual(report['reserved_usd'], '14.00')
+        self.assertEqual(report['runs'][reservation[1]]['model'], 'claude-sonnet-5-5')
+        self.assertEqual(report['runs'][reservation[1]]['status'], 'accounting_unknown')
 
     def test_corrupt_ledger_fails_closed_and_nan_cost_stops_future_jobs(self):
         self.ledger.path.write_text('{broken')
@@ -91,7 +130,7 @@ async def query(*, prompt, options):
 
     def test_ledger_includes_concurrent_reservations_in_budget(self):
         self.seed_spend('185.00')
-        self.ledger.reserve()
+        self.ledger.reserve(self.entry['model'])
         self.assertEqual(self.run_task()['detail'], 'monthly_budget_exceeded')
         self.assertEqual(self.ledger.read()['reserved_usd'], '10.00')
 
@@ -104,7 +143,7 @@ async def query(*, prompt, options):
 
     def test_reservations_survive_rollover_and_cross_month_cost_is_conservative(self):
         with patch.object(wire, 'month_now', return_value='2026-01'):
-            reservation = self.ledger.reserve()
+            reservation = self.ledger.reserve(self.entry['model'])
         with patch.object(wire, 'month_now', return_value='2026-02'):
             self.assertEqual(self.ledger.read()['reserved_usd'], '10.00')
             self.ledger.settle(reservation, '2.50')
@@ -206,7 +245,7 @@ async def query(*, prompt, options):
         (self.sdk / '__init__.py').write_text(code)
         registry = desks.Registry(self.root / 'desks.json')
         entry = registry.register('api-build', 'claude-api', effort='high')
-        self.assertEqual(entry['model'], 'claude-opus-5-5')
+        self.assertEqual(entry['model'], 'claude-sonnet-5-5')
         def fake_keychain(argv, **kwargs):
             if argv[0] == '/usr/bin/security':
                 return self.keychain(argv, **kwargs)
@@ -226,7 +265,7 @@ async def query(*, prompt, options):
                          'jbookout@users.noreply.github.com')
         self.assertFalse((source / 'done.txt').exists())
         self.assertEqual(json.loads(results.read_text())['cost_usd'], 1.25)
-        self.assertEqual(row['model'], 'claude-opus-5-5')
+        self.assertEqual(row['model'], 'claude-sonnet-5-5')
         self.assertIn('pr create --title Fixture build', (Path(row['checkout_path']) / 'gh-call.txt').read_text())
 
     def test_missing_key_fails_without_launch_or_spend_and_gives_setup_command(self):
@@ -234,6 +273,7 @@ async def query(*, prompt, options):
         with patch.object(wire.subprocess, 'Popen') as launch:
             result = self.run_task()
         self.assertEqual(result['detail'], 'Claude API key not set up')
+        self.assertEqual(result['model'], self.entry['model'])
         self.assertEqual(result['setup_command'],
                          'security add-generic-password -U -a model-room -s carr-model-room-claude-api -w')
         launch.assert_not_called()
@@ -285,6 +325,7 @@ async def query(*, prompt, options):
             result = self.run_task()
         self.assertEqual(result['status'], 'refused')
         self.assertEqual(result['detail'], 'monthly_budget_exceeded')
+        self.assertEqual(result['model'], self.entry['model'])
         launch.assert_not_called()
         self.assertEqual(self.ledger.read()['spent_usd'], '195.00')
         self.assertEqual(self.ledger.read()['budget_usd'], '200.00')

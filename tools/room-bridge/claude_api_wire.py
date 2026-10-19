@@ -4,6 +4,7 @@ Install its optional runtime with Python 3.10 or newer:
     python3 -m pip install -r tools/room-bridge/requirements.txt
 Register and send using dispatch.py:
     register api-build --kind claude-api --effort medium --timeout 3600
+    register api-hard --kind claude-api --model claude-opus-5-5 --effort high
     send api-build "Build the requested change; test, commit, push, open a PR" --checkout new:api-job
     claude-api-spend
     claude-api-spend --clear-stop
@@ -20,6 +21,8 @@ stops spending. Outstanding reservations carry across months. A run crossing
 a month boundary counts its full reported cost in both months conservatively.
 The ledger and its independent two-slot pool live under Library/Application
 Support/CARR, outside provider config. Results use dispatch's existing NDJSON.
+Each reserved and settled run records its requested and reported model. Older
+balances remain intact without inventing model attribution for historical spend.
 
 Security read of published claude-agent-sdk 0.2.168:
 https://github.com/anthropics/claude-agent-sdk-python/tree/v0.2.168
@@ -114,9 +117,9 @@ class Ledger:
             return {'month': month, 'spent_usd': account['spent_usd'],
                     'reserved_usd': str(sum((Decimal(x) for x in pending(data).values()), Decimal(0))),
                     'budget_usd': str(config.MONTHLY_BUDGET_USD), 'stop': data.get('stop'),
-                    'pending_runs': pending(data)}
+                    'pending_runs': pending(data), 'runs': account.get('runs', {})}
 
-    def reserve(self):
+    def reserve(self, model):
         with self.locked() as data:
             if data.get('stop'):
                 raise DeskError('claude_api_stopped', 'Claude API spending stopped until a human clears it')
@@ -127,20 +130,26 @@ class Ledger:
                 raise DeskError('monthly_budget_exceeded', 'Claude API monthly budget exceeded')
             run_id = str(uuid.uuid4())
             account['reservations'][run_id] = str(config.RUN_ESTIMATE_USD)
+            account.setdefault('runs', {})[run_id] = {
+                'model': model, 'actual_model': None, 'cost_usd': None, 'status': 'reserved'}
             return month, run_id
 
-    def settle(self, reservation, cost, *, billing_error=False):
+    def settle(self, reservation, cost, *, actual_model=None, status='settled', billing_error=False):
         with self.locked() as data:
             if billing_error:
                 data['stop'] = 'billing_error'
             account = data['months'][reservation[0]]
             cost = usd(cost)
+            run = account['runs'][reservation[1]]
+            run.update(actual_model=actual_model, cost_usd=str(cost) if cost is not None else None,
+                       status=status if cost is not None else 'accounting_unknown')
             if cost is None:
                 data.setdefault('stop', 'accounting_unknown')
                 return
             for month in {reservation[0], month_now()}:
                 charged = data['months'].setdefault(month, {'spent_usd': '0', 'reservations': {}})
                 charged['spent_usd'] = str(Decimal(charged['spent_usd']) + cost)
+                charged.setdefault('runs', {})[reservation[1]] = dict(run)
             del account['reservations'][reservation[1]]
 
     def clear_stop(self):
@@ -206,7 +215,7 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
     if not key:
         return {'status': 'failed', 'detail': 'Claude API key not set up',
                 'setup_command': config.KEY_SETUP}
-    reservation = ledger.reserve()
+    reservation = ledger.reserve(entry['model'])
     request = {'task': task, 'cwd': entry['checkout_path'], 'model': entry['model'],
                'effort': entry['effort'], 'estimate_usd': float(config.RUN_ESTIMATE_USD)}
     with tempfile.TemporaryDirectory(prefix='room-claude-api-') as isolated:
@@ -219,7 +228,7 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
                                     pass_fds=(() if write_ownership.CHECKOUT_FD is None
                                               else (write_ownership.CHECKOUT_FD,)))
         except OSError:
-            ledger.settle(reservation, 0)
+            ledger.settle(reservation, 0, status='failed')
             return {'status': 'failed', 'detail': 'sdk_worker_unavailable', 'cost_usd': 0}
 
         identity = {**write_ownership.process_owner(), 'pid': proc.pid, 'pgid': proc.pid,
@@ -260,5 +269,6 @@ def _run_task(entry, task, *, env, ledger, keychain_run, on_executor, deadline):
         if result.get('status') == 'completed':
             result.update(status='failed', detail='sdk_cost_missing')
     result['spend_reservation'] = {'month': reservation[0], 'run_id': reservation[1]}
-    ledger.settle(reservation, result.get('cost_usd'), billing_error=result.get('billing_error', False))
+    ledger.settle(reservation, result.get('cost_usd'), actual_model=result.get('actual_model'),
+                  status=result['status'], billing_error=result.get('billing_error', False))
     return result
