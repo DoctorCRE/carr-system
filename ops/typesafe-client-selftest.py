@@ -463,32 +463,37 @@ class UnusableResponseTests(unittest.TestCase):
         self.assertTrue(self.ask("answered earlier")["cache_hit"])
 
     def test_expired_credit_hold_admits_only_one_concurrent_probe(self):
+        self.enterContext(patch.object(client.time, "time", return_value=time.time()))
         client._open_hold("credit_hold", 0)
         start = threading.Barrier(8)
-        entered = threading.Event()
+        admissions = queue.Queue()
         release = threading.Event()
-        sent = []
         def transport(request, timeout=None):
-            sent.append(1)
-            entered.set()
-            release.wait(3)
+            admissions.put("probe")
+            release.wait()
             return vendor_refusal(402)(request, timeout)
         def attempt(i):
-            start.wait(3)
+            start.wait()
             try:
                 self.ask(f"concurrent probe {i}")
-            except client.TypeSafeError:
-                pass
+            except client.TypeSafeError as error:
+                return error
         with patch.object(client.urllib.request, "urlopen", transport):
             with ThreadPoolExecutor(max_workers=8) as pool:
                 futures = [pool.submit(attempt, i) for i in range(8)]
-                self.assertTrue(entered.wait(3))
-                # The other admissions finish while the exclusive probe waits.
-                time.sleep(0.2)
-                release.set()
                 for future in futures:
-                    future.result(5)
-        self.assertEqual(len(sent), 1)
+                    future.add_done_callback(admissions.put)
+                try:
+                    # Every caller must enter transport or finish before release.
+                    outcomes = [admissions.get() for _ in futures]
+                finally:
+                    release.set()
+                for future in futures:
+                    future.result()
+        self.assertEqual(outcomes.count("probe"), 1)
+        self.assertEqual([getattr(outcome.result(), "code", None)
+                          for outcome in outcomes if outcome != "probe"],
+                         ["vendor_credit_exhausted"] * 7)
 
     def test_hold_opened_between_preflight_and_transaction_refuses_transport(self):
         original = client._daily_cap_limit

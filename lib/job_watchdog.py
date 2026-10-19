@@ -329,12 +329,26 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
+    failures = set()
+    successes = {}
     for job in jobs:
+        if job.get("exit_code") == 0 and "start" in job:
+            card = job.get("card", job["id"])
+            successes[card] = max(successes.get(card, float("-inf")), epoch(job["start"]))
+    for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
+            card = job.get("card", subject)
             if job["exit_code"] != 0 and not job.get("superseded"):
-                emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
+                if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
+                    continue
+                reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
+                incident = json.dumps([reason, successes.get(card) if "start" in job else None])
+                key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
+                if key not in failures:
+                    failures.add(key)
+                    emit("jobs", "job_failed", card, reason, key=key, **fields)
             continue
         if not job.get("alive"):
             emit("jobs", "job_dead", subject, "registered PID is dead or changed without an exit record", **fields)
@@ -644,7 +658,9 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
             row.update(loop_id=None if new_incident else prior.get("loop_id"),
                        loop_idempotency_key=incident_key if new_incident else prior.get("loop_idempotency_key", legacy_key),
                        reported=False if new_incident else prior.get("reported", False))
-        if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
+        if (not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]
+                or f["kind"] == "job_failed" and prior.get("job") != f["job"]):
+            row["reported"] = prior.get("reported", False) and not prior.get("cleared_at")
             append(findings_path, row)
         # An unchanged record request retries with the same idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
@@ -922,11 +938,14 @@ def collect(root, config, now=None):
         dates = {}
     t = config["thresholds"]
     for repo in config["repositories"]:
+        open_branches = None
         if limited:
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
+            open_branches = {pr["head"]["ref"] for page in pages for pr in page
+                             if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
             listed = {f"{repo}#{pr['number']}" for page in pages for pr in page}
             cache = {k: v for k, v in cache.items() if k in listed or not k.startswith(repo + "#")}
@@ -950,7 +969,11 @@ def collect(root, config, now=None):
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
             error(repo + " PRs", exc, "prs")
+            if open_branches is None:
+                error(repo + " branches", exc, "branches")
         if limited:
+            continue
+        if open_branches is None:
             continue
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
@@ -979,8 +1002,7 @@ def collect(root, config, now=None):
                             dates[key] = date
                         facts["branches"].append({"repo": repo, "name": branch["name"],
                                                   "updated": date,
-                            "open_pr": any(p["repo"] == repo and p.get("headRefName") == branch["name"]
-                                           for p in facts["prs"])})
+                            "open_pr": branch["name"] in open_branches})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]

@@ -1,0 +1,191 @@
+{
+  "schema": "carr-progress-board.v2",
+  "kind": "project",
+  "project": "synthetic-slice11",
+  "title": "Synthetic delivery outcomes",
+  "tasks": {
+    "pending": {
+      "repo": "jbookout/doctorcre-app",
+      "pr": 42,
+      "status": "review",
+      "stage": "merged",
+      "pr_phase": "Merged",
+      "merge_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "delivery_target": "app",
+      "delivery_workflow": "open synthetic deal",
+      "title": "Synthetic merged source",
+      "summary": "Merged source is waiting for its consumer exercise.",
+      "updated_at": "2026-10-19T07:20:17+00:00",
+      "executor": "Codex",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow",
+      "stage_history": [
+        {
+          "stage": "merged",
+          "entered_at": "2026-10-19T07:20:17+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-19T07:20:17+00:00",
+      "provider": "Codex",
+      "model": "unknown",
+      "effort": "unknown",
+      "activity_status": "review"
+    },
+    "failed": {
+      "repo": "jbookout/doctorcre-app",
+      "pr": 42,
+      "status": "review",
+      "stage": "merged",
+      "pr_phase": "Merged",
+      "merge_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "delivery_target": "app",
+      "delivery_workflow": "open synthetic deal",
+      "evidence": "open synthetic deal passed on https://app.doctorcre.com for source aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; receipt synthetic-exercise-42. Synthetic exercise only.",
+      "consumer_proof": {
+        "schema": "carr-consumer-proof.v1",
+        "outcome": "fail",
+        "repo": "jbookout/doctorcre-app",
+        "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target": "https://app.doctorcre.com",
+        "workflow": "open synthetic deal",
+        "evidence_ref": "synthetic-exercise-42",
+        "observed_at": "2026-10-01T12:00:00Z"
+      },
+      "title": "Synthetic failed workflow",
+      "summary": "The synthetic consumer exercise failed.",
+      "updated_at": "2026-10-19T07:20:17+00:00",
+      "executor": "Codex",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow",
+      "stage_history": [
+        {
+          "stage": "merged",
+          "entered_at": "2026-10-19T07:20:17+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-19T07:20:17+00:00",
+      "provider": "Codex",
+      "model": "unknown",
+      "effort": "unknown",
+      "activity_status": "review"
+    },
+    "usable": {
+      "repo": "jbookout/doctorcre-app",
+      "pr": 42,
+      "status": "done",
+      "stage": "live",
+      "pr_phase": "Merged",
+      "merge_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "delivery_target": "app",
+      "delivery_workflow": "open synthetic deal",
+      "evidence": "open synthetic deal passed on https://app.doctorcre.com for source aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; receipt synthetic-exercise-42. Synthetic exercise only.",
+      "consumer_proof": {
+        "schema": "carr-consumer-proof.v1",
+        "outcome": "pass",
+        "repo": "jbookout/doctorcre-app",
+        "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "target": "https://app.doctorcre.com",
+        "workflow": "open synthetic deal",
+        "evidence_ref": "synthetic-exercise-42",
+        "observed_at": "2026-10-01T12:00:00Z"
+      },
+      "title": "Synthetic usable outcome",
+      "summary": "The synthetic deal workflow passed on its delivered target.",
+      "completed_at": "2026-10-01T12:00:00Z",
+      "updated_at": "2026-10-19T07:20:17+00:00",
+      "executor": "Codex",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-19T07:20:17+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-19T07:20:17+00:00",
+      "provider": "Codex",
+      "model": "unknown",
+      "effort": "unknown",
+      "activity_status": "done"
+    }
+  },
+  "task_counts": {
+    "queued": 0,
+    "running": 0,
+    "review": 2,
+    "blocked": 0,
+    "question-for-orchestrator": 0,
+    "done": 1,
+    "failed": 0,
+    "superseded": 0,
+    "stale": 0
+  },
+  "milestones": {},
+  "stale_policy": {
+    "statuses": [
+      "queued",
+      "review",
+      "running"
+    ],
+    "after_days": 14,
+    "exclude_from_active": true
+  },
+  "history": {},
+  "deliverables": [],
+  "notes": [],
+  "decisions": [],
+  "ledger": [
+    {
+      "pool": "codex",
+      "label": "Codex",
+      "glyph": "C",
+      "count": 3,
+      "violation": false,
+      "models": [
+        {
+          "provider": "Codex",
+          "model": "unknown",
+          "effort": "unknown",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "pool": "grok",
+      "label": "Grok",
+      "glyph": "G",
+      "count": 0,
+      "violation": false,
+      "models": []
+    },
+    {
+      "pool": "flash-next",
+      "label": "Flash Next",
+      "glyph": "F",
+      "count": 0,
+      "violation": false,
+      "models": []
+    },
+    {
+      "pool": "claude-cloud",
+      "label": "Claude cloud credits",
+      "glyph": "\u2726",
+      "count": 0,
+      "violation": false,
+      "models": []
+    },
+    {
+      "pool": "orchestrator",
+      "label": "Orchestrator seat",
+      "glyph": "O",
+      "count": 0,
+      "violation": false,
+      "models": []
+    }
+  ],
+  "repos": [],
+  "github_sync": null,
+  "costs": {},
+  "omitted": {
+    "live": 0,
+    "merged": 0,
+    "history": 0
+  },
+  "updated_at": null
+}
