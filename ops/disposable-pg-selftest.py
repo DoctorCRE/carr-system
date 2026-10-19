@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import importlib.util
 from pathlib import Path
 import signal
 import select
@@ -8,6 +9,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -15,6 +17,27 @@ from lib import disposable_pg_fixture as fixture
 
 
 class Lifecycle(unittest.TestCase):
+    def test_initdb_defaults_to_utf8_without_parent_locale(self):
+        spec = importlib.util.spec_from_file_location('local_pg_locale', ROOT / 'ops/local-pg-ci.py')
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        binaries = module.find_postgres_binaries()
+        env = module.scrub_cloud_environment(os.environ)
+        env.pop('LC_ALL', None)
+        with patch.dict(os.environ, env, clear=True), fixture.postgres_fixture_group(), \
+                fixture.DisposablePostgres('carr-locale-proof-', binaries.pg_ctl, env=env) as pg:
+            data = pg.root / 'data'
+            pg.run([binaries.initdb, '-D', data, '-A', 'trust', '-U', 'fixture'],
+                   check=True, capture_output=True, timeout=60, env=env)
+            pg.run([binaries.pg_ctl, '-D', data, '-l', pg.root / 'pg.log', '-o',
+                    f"-k {pg.root} -h ''", '-w', 'start'],
+                   check=True, capture_output=True, timeout=60, env=env)
+            result = pg.run([binaries.psql, '-XAt', '-h', pg.root, '-U', 'fixture',
+                             '-d', 'postgres', '-c', "show server_encoding; select 'café';"],
+                            check=True, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.stdout.splitlines(), ['UTF8', 'café'])
+
     def test_unproven_ownership_stops_clusters_and_retains_root_past_exit(self):
         stops = []
 
