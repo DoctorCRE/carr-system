@@ -11,7 +11,7 @@ import time
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from lib.rule_scope_lookup import lookup
-from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION,
+from lib.rule_delivery_preuse import (LOOKUP_RECEIPT_SCHEMA, LOOKUP_INSTRUCTION, LOOKUP_COMPLETE_INSTRUCTION,
     canonical, digest, receipt_id, source_sha256, valid_local_identity, _claude_user_text)
 from lib import rule_cards, rule_routes
 from lib.hook_runtime import decision, run
@@ -52,7 +52,10 @@ def task_text(payload):
         if not isinstance(agent, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', agent):
             raise ValueError('invalid_agent_id')
         child_name = f'agent-{agent}.jsonl'
-        if path.name != child_name:
+        if payload.get('turn_id') and path.name.startswith('rollout-'):
+            if not path.name.endswith(f'-{agent}.jsonl'):
+                raise ValueError('agent_transcript_mismatch')
+        elif path.name != child_name:
             path = path.with_suffix('') / 'subagents' / child_name
     for line in _transcript_lines(path):
         if not line.strip():
@@ -148,7 +151,7 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
                     sort_keys=True) + '\n')
         except OSError:
             pass  # Advisory diagnostics must not deny an otherwise valid action.
-    if not rules and not cards:
+    if not rules and not cards and event != 'PreToolUse':
         return None
     base = {'schema': LOOKUP_RECEIPT_SCHEMA,
             'client': 'codex' if payload.get('turn_id') else 'claude',
@@ -158,8 +161,16 @@ def delivery_receipt(payload, selection, task, *, dedupe=True):
             'task_sha256': digest(task), 'corpus_digest': selection['corpus_digest'],
             'source_digest': source_sha256(REPO), 'identity': selection['identity'],
             'rule_ids': sorted(ids), 'data_defects': selection['data_defects'],
-            'unresolved_count': len(selection['unresolved']), 'models': selection['models'],
-            'complete': selection['complete'], 'instruction': LOOKUP_INSTRUCTION}
+            'unresolved': selection['unresolved'],
+            'selection_mode': selection['selection_mode'],
+            'models': selection['models'],
+            'complete': selection['complete'],
+            'instruction': LOOKUP_COMPLETE_INSTRUCTION if selection['complete'] else LOOKUP_INSTRUCTION}
+    if selection['complete'] and selection['selection_mode'] == 'deterministic':
+        for field in ('data_defects', 'unresolved', 'models'):
+            del base[field]
+        if not rules:
+            del base['instruction']
     if cards:
         base['cards'] = [rule_cards.card_view(c) for c in cards]
     def render(full, overflow):
@@ -222,7 +233,8 @@ def process(payload, *, runner=subprocess.run, judge=None, dedupe=True):
         # Integrity failures (sponsor mismatch, invalid catalog) still refuse below.
         if str(error) != 'scope_catalog_unavailable':
             return refused(event)
-        return None if event == 'Stop' else context(UNAVAILABLE, event)
+        return None if event == 'Stop' else context(canonical({
+            'complete': False, 'reason': 'scope_catalog_unavailable', 'instruction': UNAVAILABLE}).decode(), event)
     except Exception:
         return refused(event)
 
