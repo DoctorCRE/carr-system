@@ -2146,6 +2146,35 @@ class HealthGate(Base):
     def test_mid_release_main_advance_does_not_fail_on_stale_remote_ref(self):
         self.main_advances_during_release(fetch=False)
 
+    def test_main_lag_hard_errors_are_never_excused(self):
+        for key in ("scheduled_jobs_behind_main", "scheduled_jobs_remote_ref_stale"):
+            with self.subTest(key=key):
+                finding = _finding(key, "unreadable", subject="canonical",
+                                   time_rolling=True, hard_error=True)
+                bad, excused = rp.health_regression([finding], [finding])
+                self.assertEqual(excused, [])
+                self.assertIn(key + "[canonical]: hard_error", bad[0])
+
+    def test_other_scheduled_job_regressions_still_fail(self):
+        findings = scheduled_job_findings({
+            "plists": {}, "launchctl_list": "", "launchctl_disabled": "", "cron": "",
+            "machine_role": "primary", "errors": ["launchctl"],
+            "git": {"ahead": 1, "behind": 0, "branch": "feature", "remote_matches": True}})
+        findings.append(_finding("scheduled_jobs_stale_log", "job stopped writing",
+                                 subject="job", time_rolling=True))
+        bad, excused = rp.health_regression([], findings)
+        self.assertEqual(excused, [])
+        self.assertEqual({line.split("[", 1)[0] for line in bad}, {
+            "scheduled_jobs_ahead_of_main", "scheduled_jobs_wrong_branch",
+            "scheduled_jobs_evidence_unavailable", "scheduled_jobs_stale_log"})
+
+    def test_main_lag_exception_requires_time_rolling_metadata(self):
+        for key in ("scheduled_jobs_behind_main", "scheduled_jobs_remote_ref_stale"):
+            with self.subTest(key=key):
+                bad, excused = rp.health_regression([], [_finding(key, "ordinary failure")])
+                self.assertEqual(excused, [])
+                self.assertIn(key + "[]: new", bad[0])
+
     def test_missing_feature_verb_after_promote_fails_even_when_baseline_was_pending(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         pending = _finding("feature_switch_pending_deploy", "check-feature-switches pending deploy")

@@ -2672,8 +2672,11 @@ HEALTH_REGRESSION_EXCLUDED_KEYS = frozenset({"repo_loose_work"})
 # ever be the REASON a release fails. `doctrine_gate` stays off this
 # allowlist and is unaffected: still fully count-sensitive, new subject
 # and count rise both still fail it, exactly as before round 12.
+# Main can advance before fleet sync fetches or fast-forwards the canonical
+# checkout. Neither lag finding is caused by promoting a Worker version.
 HEALTH_REGRESSION_FIRST_APPEARANCE_ALLOWLIST = frozenset(
-    {"export_receipt", "job_missing_due", "doctrine_stale"})
+    {"export_receipt", "job_missing_due", "doctrine_stale",
+     "scheduled_jobs_behind_main", "scheduled_jobs_remote_ref_stale"})
 
 
 def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str], list[str]]:
@@ -2693,12 +2696,13 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
 
     `excused` is every live finding whose key is on `HEALTH_REGRESSION_
     FIRST_APPEARANCE_ALLOWLIST` (`export_receipt`'s STALE variant,
-    `job_missing_due`, `doctrine_stale`) — round 13, point [coordinator]:
+    `job_missing_due`, `doctrine_stale`, and the two canonical main-lag
+    findings) — round 13, point [coordinator]:
     round 12 tried excusing an allowlisted key's already-present subjects
     while still failing a brand-new one, but a new subject is exactly what
     a job's due window crossing during the tens of minutes a release takes
     produces, bringing back the clock-driven false failure the allowlist
-    existed to prevent in the first place. Round 13 takes these three keys
+    existed to prevent in the first place. The allowlist takes these keys
     OUT of the regression comparison ENTIRELY — neither a new subject nor a
     count rise on an allowlisted key can ever land in `bad`, regardless of
     whether the baseline had any entry for it at all. They are never
@@ -2709,8 +2713,8 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     release's new-findings log, so nothing about them disappears from view,
     they simply cannot be the REASON a release fails.
 
-    Every OTHER `time_rolling` key (i.e. `doctrine_gate`, the only one
-    today) stays fully count-sensitive, unaffected by any of this, the
+    Every OTHER `time_rolling` key (including `doctrine_gate` and scheduled
+    job stale logs) stays fully count-sensitive, unaffected by any of this, the
     original round-2/round-4 rule: a (key, subject) pair with NO baseline
     entry at all still fails as "new" (see `test_point2r4_a_new_doctrine_
     gate_finding_with_no_baseline_still_fails` in ops/release-pipeline-
@@ -2762,7 +2766,7 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
         prior = baseline_by_key_subject.get((row["key"], row["subject"], bool(row.get("time_rolling"))))
         if row.get("time_rolling"):
             if row["key"] in HEALTH_REGRESSION_FIRST_APPEARANCE_ALLOWLIST:
-                # Round 13: these three confirmed-clock-driven keys are OUT
+                # These confirmed externally driven keys are OUT
                 # of the comparison entirely — neither a new subject nor a
                 # count rise ever fails the gate — but every one is still
                 # reported back, labeled, so nothing is hidden.
