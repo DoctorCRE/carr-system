@@ -210,6 +210,8 @@ def install_toolchain_wrangler(repo: Path) -> Path:
     wrangler.parent.mkdir(parents=True, exist_ok=True)
     wrangler.write_text("#!/bin/sh\nexit 0\n")
     wrangler.chmod(0o755)
+    home = wrangler.parents[2]
+    home.with_name(home.name + ".sha256").write_text(rp.toolchain_digest(home) + "\n")
     return wrangler
 
 
@@ -5222,7 +5224,7 @@ class TokenCheckWrangler(Base):
         self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["wrangler-install"])
         self.assertEqual(dict(runner.calls)["wrangler-auth"][0], str(self.fx.wrangler))
         self.assertTrue(self.fx.wrangler.exists())
-        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), [home.name])
+        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), sorted([home.name, home.name + ".sha256"]))
         for name in rp.TOOLCHAIN_FILES:
             self.assertEqual((home / name).read_bytes(), (self.fx.repo / "mcp-server" / name).read_bytes())
 

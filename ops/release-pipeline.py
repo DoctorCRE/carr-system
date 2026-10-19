@@ -287,6 +287,31 @@ def wrangler_toolchain(repo: Path, store_root: Path) -> Path:
     return store_root / "toolchain" / f"mcp-server-{digest.hexdigest()[:16]}"
 
 
+def toolchain_digest(home: Path) -> str:
+    """Bind installed contents, executable modes and internal link destinations."""
+    if home.is_symlink() or not home.is_dir():
+        raise ValueError("toolchain root must be a regular directory")
+    digest = hashlib.sha256()
+    for path in sorted(home.rglob("*")):
+        name = path.relative_to(home).as_posix()
+        if path.is_symlink():
+            if not path.resolve(strict=True).is_relative_to(home.resolve()):
+                raise ValueError("toolchain link escapes its install")
+            entry = [name, "link", os.readlink(path)]
+        elif path.is_file():
+            content = hashlib.sha256()
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    content.update(chunk)
+            entry = [name, "file", path.stat().st_mode & 0o777, content.hexdigest()]
+        elif path.is_dir():
+            entry = [name, "directory"]
+        else:
+            raise ValueError("toolchain contains a special file")
+        digest.update(json.dumps(entry, separators=(",", ":")).encode() + b"\n")
+    return digest.hexdigest()
+
+
 def expand(p: str) -> Path:
     return Path(os.path.expanduser(p))
 
@@ -623,6 +648,7 @@ class Pipeline:
         self.run_dir = self.store.root / "runs" / self.run_id
         self.executed: list[str] = []   # step names that actually ran, in order
         self.worktrees: list[tuple[Path, Path]] = []
+        self.toolchain_integrity: dict[Path, str] = {}
         self.db_ahead_of_worker = False
         self.do_migration: dict | None = None   # a Durable Object migration the upload step applied
         self.mutated = False   # set when the first worktree is created; nothing before it writes
@@ -717,6 +743,9 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] (cd {cwd}) {shown}")
             return Result(0, "")
+        for home in self.toolchain_integrity:
+            if Path(argv[0]).is_relative_to(home) or (env is not None and CLOUDFLARE_TOKEN_NAME in env):
+                self.verify_toolchain(home)
         n = len(self.executed) + 1
         log = self.run_dir / f"{n:02d}-{name}.log"
         self.out(f"  -> {name}: {shown}")
@@ -1156,6 +1185,18 @@ class Pipeline:
         env[CLOUDFLARE_TOKEN_NAME] = token
         return env
 
+    def verify_toolchain(self, home: Path) -> None:
+        """Never rebaseline an existing install, including after a build runs."""
+        try:
+            recorded = self.toolchain_integrity.get(home)
+            if recorded is None:
+                recorded = home.with_name(home.name + ".sha256").read_text().strip()
+            if not re.fullmatch(r"[0-9a-f]{64}", recorded) or toolchain_digest(home) != recorded:
+                raise ValueError("content digest mismatch")
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise Blocked("toolchain_integrity", "pinned toolchain integrity check failed; refusing execution") from exc
+        self.toolchain_integrity[home] = recorded
+
     def auth_wrangler(self) -> Path:
         """The wrangler binary that checks the deploy token: the pipeline's
         own install under <store>/toolchain, keyed by this checkout's
@@ -1167,7 +1208,8 @@ class Pipeline:
         is always a finished install."""
         home = wrangler_toolchain(self.repo, self.store.root)
         wrangler = home / "node_modules/.bin/wrangler"
-        if wrangler.exists():
+        if home.exists():
+            self.verify_toolchain(home)
             return wrangler
         if self.dry_run:
             self.out(f"  [dry-run] would install the token-check wrangler into {home}")
@@ -1183,9 +1225,15 @@ class Pipeline:
                              f"npm ci in {partial} finished without installing node_modules/.bin/wrangler")
         shutil.rmtree(home, ignore_errors=True)
         partial.rename(home)
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(toolchain_digest(home) + "\n")
+        self.verify_toolchain(home)
         for stale in home.parent.iterdir():
-            if stale != home:
-                shutil.rmtree(stale, ignore_errors=True)
+            if stale not in (home, receipt):
+                if stale.is_dir() and not stale.is_symlink():
+                    shutil.rmtree(stale, ignore_errors=True)
+                else:
+                    stale.unlink(missing_ok=True)
         return wrangler
 
     def wrangler_auth(self) -> None:
