@@ -203,6 +203,23 @@ class Recovery(unittest.TestCase):
         self.assertIsNotNone(values["CARR_DB_AUTHORITY_JOE_URL"])
         self.assertEqual(rotations[0]["outcome"], "rotated")
 
+    def test_a_binding_observed_later_stays_protected_after_its_name_and_file_disappear(self):
+        file_profile = self.file_profile("authority_joe")
+        stored = provision.credential.prepare_pending(
+            file_profile.paths, key=file_profile.key, role_name="carr_authority_joe",
+            owner_uri=self.owner_uri, expected_endpoint=self.binding.old.endpoint_host,
+            expected_port=5432, expected_database="neondb", password_factory=lambda: "o" * 48)
+        provision.credential.promote_pending(file_profile.paths, key=file_profile.key, expected_value=stored.value)
+        provision.save_private_json(self.operation / "prior-worker-secret-names.json", {
+            **provision.prior_worker_identity(self.binding),
+            "secret_names": sorted(set(self.live) - {"CARR_DB_AUTHORITY_JOE_URL"})})
+        self.prepare()
+        file_profile.paths.final.unlink()
+        del self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, rotations = self.prepare()
+        self.assertIsNotNone(values["CARR_DB_AUTHORITY_JOE_URL"])
+        self.assertEqual(rotations[0]["outcome"], "rotated")
+
     def test_all_live_profiles_can_recover_without_deleting_bindings(self):
         for profile in provision.PROFILES:
             self.file_profile(profile.label).paths.final.unlink(missing_ok=True)
