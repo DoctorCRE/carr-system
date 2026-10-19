@@ -54,7 +54,7 @@ class IntakeFake {
       doctrine_revision_id: "40000000-0000-0000-0000-000000000001",
     }] };
     if (sql.includes("work-request-intake:current")) return { rows: [{
-      ref: "WR-0002", title: "Review source freshness", state: "triaged",
+      ref: "WR-000381", title: "Review source freshness", state: "triaged",
       source_label: "control-room#evidence", source_freshness: "current",
       next_human_action: "Prepare or review bounded plan",
     }] };
@@ -85,7 +85,7 @@ test("report-problem is registered as a narrow additive write and work-request-c
 test("current-work-requests derives tenant server-side and returns only the typed bounded projection", async () => {
   const db = new IntakeFake();
   const result = await executeRegisteredTool(db, { ...ACTOR }, "current-work-requests", {});
-  assert.deepEqual(result, { ok: true, items: [{ human_ref: "WR-0002", title: "Review source freshness", state: "triaged", source: { label: "control-room#evidence", freshness: "current" }, next_human_action: "Prepare or review bounded plan" }] });
+  assert.deepEqual(result, { ok: true, items: [{ human_ref: "WR-000381", display_id: "WR-000381", title: "Review source freshness", state: "triaged", source: { label: "control-room#evidence", freshness: "current" }, next_human_action: "Prepare or review bounded plan" }] });
   const read = db.calls.find(call => call.sql.includes("work-request-intake:current"));
   assert.deepEqual(read.params, ["carr-internal"]);
   const rejectedArgs = await rejected(() => executeRegisteredTool(new IntakeFake(), { ...ACTOR }, "current-work-requests", { state: "ready" }));

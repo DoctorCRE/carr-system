@@ -867,6 +867,16 @@ class CanaryAggregate(Base):
 
 
 class DurableReleaseEvidence(Base):
+    def test_worker_release_log_carries_configured_live_url(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        cfg = self.fx.config()
+        cfg["worker"]["live_url"] = "https://worker.example.invalid"
+        pipe = self.fx.pipeline(FakeRunner(live=live), cfg=cfg, live=live)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        for row in self.fx.records():
+            self.assertEqual(row["live_identity"]["url"], "https://worker.example.invalid")
+
     def test_failed_proof_append_cannot_advance_release_or_slices(self):
         latest = self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
@@ -1008,6 +1018,8 @@ class ReleaseJournalRecovery(Base):
                 with mock.patch.object(pipe.store, "record_durable", side_effect=record), self.assertRaises(RecoveryCrash):
                     pipe.tick([lane])
                 proof = self.fx.records()[-1]
+                self.assertEqual(proof["live_identity"]["url"],
+                                 "https://api.doctorcre.com" if lane == "worker" else "https://app.doctorcre.com")
                 self.assertEqual(restart().tick([lane]), 0)
                 self.assert_one_release(lane, latest, runner)
                 final = self.fx.records()[-1]
@@ -2976,6 +2988,9 @@ class AppLane(Base):
         self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["app-build"])
         self.assertEqual(runner.cwds["app-build"], runner.cwds["app-release"])
         self.assertEqual(self.fx.records()[-1]["status"], "shipped")
+        for row in self.fx.records():
+            self.assertEqual(row["live_identity"]["url"], "https://app.doctorcre.com")
+            self.assertEqual(row["live_identity"]["source_commit"], sha)
         # The slice marker follows Worker releases only: the app lane records
         # no ops.release row for membership to attach to.
         self.assertEqual(self.fx.slice_marks, [])
