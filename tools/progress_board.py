@@ -2860,8 +2860,8 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
         value = getattr(args, field, None)
         if value is not None:
             task[field] = value
-    if state.get("work_requests"):
-        if task.get("work_request") not in state["work_requests"]:
+    if not prior or state.get("work_requests"):
+        if task.get("work_request") not in state.get("work_requests", {}):
             raise SystemExit("Capture and bind the Work Request before dispatching its job")
         task.setdefault("slice_id", "implicit")
     if args.delivery_target is not None:

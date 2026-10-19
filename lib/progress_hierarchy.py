@@ -31,10 +31,14 @@ def project(state):
                              'counts': dict.fromkeys(('done', 'active', 'blocked', 'failed'), 0)}
         registered = request.get('slices') or [{'slice_id': 'implicit', 'title': request['card_title'],
             'card_title': request['card_title'], 'card_description': request['card_description']}]
-        for ordinal, row in enumerate(registered, 1):
+        next_ordinal = max((row.get('ordinal', 0) for row in registered), default=0)
+        for row in registered:
+            if 'ordinal' not in row:
+                next_ordinal += 1
+                row['ordinal'] = next_ordinal
             propose_copy(row)
             validate_copy(row['card_title'], row['card_description'])
-            ordinal = row.get('ordinal', ordinal)
+            ordinal = row['ordinal']
             if not isinstance(ordinal, int) or ordinal < 1:
                 raise ValueError('Slice ordinals must be positive integers')
             sid = f'{address}.S{ordinal}'
@@ -44,7 +48,9 @@ def project(state):
                            'card_title': row['card_title'], 'card_description': row['card_description'],
                            'cards': [], 'pr_counts': {}, 'status': 'active'}
             requests[address]['slices'].append(sid)
-    for key, task in sorted({**state.get('legacy_history', {}), **state.get('tasks', {})}.items(), key=lambda item: (item[1].get('created_at', ''), item[0])):
+    for key, task in sorted({**state.get('legacy_history', {}), **state.get('tasks', {})}.items(), key=lambda item: (
+            0 if (item[1].get('pr') or item[1].get('pr_links')) and re.fullmatch(r'WR\d+\.S\d+\.J\d+', item[1].get('card_id', '')) else 1,
+            item[1].get('created_at', ''), item[0])):
         if not task.get('work_request') and state.get('legacy_work_request'):
             task['work_request'] = state['legacy_work_request']
             task['slice_id'] = 'implicit'
@@ -66,7 +72,14 @@ def project(state):
         allocation = jobs.setdefault(sid, {})
         links = task.get('pr_links') or ([{'repo': task.get('repo', 'jbookout/carr-system'), 'pr': task['pr']}] if task.get('pr') else [{}])
         pr_keys = [f"pr:{row.get('repo')}#{row['pr']}" for row in links if row.get('pr')]
-        number = next((allocation[k] for k in pr_keys if k in allocation), allocation.get(identity))
+        number = allocation.get(identity)
+        if number is None:
+            number = next((allocation[k] for k in pr_keys if k in allocation), None)
+        else:
+            displaced = {allocation[k] for k in pr_keys if k in allocation and allocation[k] != number}
+            for allocated, value in allocation.items():
+                if value in displaced:
+                    allocation[allocated] = number
         if number is None:
             number = max(allocation.values(), default=0) + 1
         allocation[identity] = number
@@ -89,7 +102,8 @@ def project(state):
                 card = previous
             if previous and merged(previous) and not merged(card):
                 card.update({field: previous[field] for field in ('merge_sha', 'merged_at')})
-            card['done'] = merged(card)
+            card['done'] = merged(card) or (not card.get('pr') and
+                (card.get('status') == 'done' or card.get('stage') == 'live'))
             card['stage'] = card_stage(card)
             cards[address] = card
             if address not in target['cards']:
@@ -134,8 +148,8 @@ def aggregate(values):
 
 
 def validate_copy(title, description):
-    if not isinstance(title, str) or not 1 <= len(title.split()) <= 3 or not re.fullmatch(r"[A-Za-z][A-Za-z' ]*", title):
-        raise ValueError('Card titles require one to three plain words')
+    if not isinstance(title, str) or not 2 <= len(title.split()) <= 3 or not re.fullmatch(r"[A-Za-z][A-Za-z' ]*", title):
+        raise ValueError('Card titles require two or three plain words')
     words = title.lower().split()
     if words[0] in {'a', 'an', 'the'} or words[-1] in {'and', 'or', 'that', 'the', 'a', 'an', 'to', 'for', 'with', 'of', 'in', 'on'}:
         raise ValueError('Card titles must name the work, not a sentence fragment')
@@ -151,8 +165,9 @@ def validate_copy(title, description):
 def plain_text(text):
     text = re.sub(r'(?m)^#{1,6}[^\n]*\n', '', str(text or ''))
     text = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', text)
-    text = re.sub(r'`([^`]*)`', lambda match: match[1].replace('-', ' ') if re.fullmatch(r'[A-Za-z][A-Za-z -]*', match[1]) else '', text)
+    text = re.sub(r'`([^`]*)`', lambda match: match[1].replace('-', ' '), text)
     text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'\*\*|</?[^>]+>', '', text)
     text = re.sub(r'(?i)\b(?:WR[- ]?\d+|PR\s*#?\d+|[a-f0-9]{12,})\b', '', text)
     text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor)\(([^)]*)\):\s*', r'\1: ', text)
     text = re.sub(r'(?i)^\s*(?:feat|fix|test|chore|refactor):\s*', '', text)
@@ -161,7 +176,13 @@ def plain_text(text):
 
 
 TOPICS = (
+    (r'^Bump actions/|github.actions', 'Actions updates'),
     (r'^Bump |^chore\(deps', 'Build dependencies'),
+    (r'\bdatabase|\bschema\b', 'Database repair'),
+    (r'cadence|activation anchor', 'Cadence checks'),
+    (r'provider.*API|billing', 'Provider billing'),
+    (r'social.media|social.automation', 'Social drafting'),
+    (r'^Dot research: Job queue', 'Research queue'),
     (r'what.?s.new|whats new', 'Recent changes'),
     (r'job watchdog|watchdog.*job', 'Job monitoring'),
     (r'SECURITY DEFINER', 'Database safety'),
@@ -170,13 +191,13 @@ TOPICS = (
     (r'\bV\d+\b.*delivery', 'Application delivery'),
     (r'site map|sitemap', 'Site navigation'),
     (r'progress.?board|\bboard\b', 'Board cleanup'),
+    (r'queue.*spacing|spacing.*queue', 'Queue spacing'),
     (r'merge.queue|\bFIFO\b', 'Merge queue'),
     (r'rule.*(?:admi|approv|activat)|admission.*rule', 'Rule admission'),
     (r'\brule\b|doctrine', 'Rule delivery'),
     (r'\btour\b', 'Tour tools'), (r'\blead\b', 'Lead map'),
     (r'\bcredential|\btoken|oauth', 'Access checks'),
     (r'\bdispatch|\bjob\b|\bcheckout', 'Job dispatch'),
-    (r'\breview\b', 'Review checks'), (r'\bdatabase|\bschema\b', 'Database repair'),
     (r'\bresearch\b|\bstudy\b', 'Research findings'),
     (r'\btest|\bCI\b|browser', 'Test coverage'),
 )
@@ -187,8 +208,8 @@ def propose_copy(record):
     title = next((label for pattern, label in TOPICS if re.search(pattern, source, re.I)), None)
     stop = {'a', 'an', 'the', 'this', 'that', 'to', 'for', 'of', 'in', 'on', 'with', 'and', 'or', 'by', 'from', 'it', 'is', 'are', 'as', 'its', 'each'}
     words = [w for w in source.split() if re.fullmatch(r"[A-Za-z][A-Za-z']*", w) and w.lower() not in stop]
-    if title is None and 1 <= len(words) <= 3:
-        title = ' '.join(words)
+    if title is None and len(words) >= 2 and not source.startswith('Dot research:'):
+        title = ' '.join(words[:3])
         title = title[:1].upper() + title[1:]
     description = plain_text(record.get('description') or record.get('body') or record.get('summary'))
     if len(description.split()) < 7 or re.match(r'(?i)^(?:absent|natural run|summary)\b', description):
@@ -201,10 +222,21 @@ def propose_copy(record):
         description = 'Check that CRM capture saves new information reliably for later use.'
     elif re.search(r'(?i)site map|sitemap', source):
         description = 'Update the site navigation so people can find the right section.'
+    if re.match(r'(?i)^This repair round|^Dot research:', description):
+        description = ''
+    if record.get('title', '').startswith('Dot research:'):
+        description = {'Research queue': 'Work through the research queue and record the findings.',
+            'Provider billing': 'Check official provider documentation for API billing and reporting support.',
+            'Social drafting': 'Research how to automate the weekly social media drafting job.'}.get(title, description)
     if description:
-        description = re.split(r'\n|(?<=[.!?])\s+', description)[0][:320].rstrip(' .') + '.'
-    elif source and len(words) >= 2:
-        description = source.rstrip(' .') + '. Follow this work to see what changes and what still needs attention.'
+        sentences = re.findall(r'.*?[.!?](?=\s|$)', description)
+        description = next((sentence.strip() for sentence in sentences if 7 <= len(sentence.split()) and len(sentence) <= 320), '')
+    if not description and title and source and len(source) <= 300 and not source.startswith('Dot research:'):
+        description = source.rstrip(' .') + '.'
+
+    if description:
+        description = description[:1].upper() + description[1:]
+        description = re.sub(r'^Repairs\b', 'Repair', description)
     if not title or not description:
         if record.get('card_title') and record.get('card_description'):
             validate_copy(record['card_title'], record['card_description'])
@@ -217,7 +249,12 @@ def propose_copy(record):
     except ValueError:
         record['summary_required'] = True
         return
-    record['proposed_copy'] = {'generator': 'plain-summary.v1',
+    previous = record.get('proposed_copy', {})
+    if previous.get('generator', '').startswith('plain-summary.'):
+        for field, proposed_field in [('card_title', 'title'), ('card_description', 'description')]:
+            if record.get(field) == previous.get('values', {}).get(proposed_field):
+                record.pop(field, None)
+    record['proposed_copy'] = {'generator': 'plain-summary.v2',
         'source_digest': digest([record.get('title'), record.get('summary'), record.get('description'), record.get('body')]),
         'values': {'title': title, 'description': description}}
     record.setdefault('card_title', title)
@@ -229,15 +266,52 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
+def related_pr_groups(facts):
+    # Only combine work with concrete shared evidence, never a generic topic label.
+    groups = {key: key for key in facts}
+    stop = {'fix', 'fixes', 'repair', 'repairs', 'review', 'findings', 'feat', 'chore',
+            'test', 'tests', 'add', 'update', 'the', 'and', 'for', 'with', 'from', 'after', 'round'}
+    def signals(row):
+        title = plain_text(row.get('title')).lower()
+        words = set(re.findall(r'[a-z]{3,}', title)) - stop
+        branch = row.get('headRefName') or row.get('branch') or ''
+        if branch.startswith('dependabot/github_actions/'):
+            prefix = 'github-actions'
+        else:
+            parts = [w for w in re.split(r'[-_/]', branch.lower()) if w and w not in stop and not w.isdigit()]
+            prefix = '-'.join(parts[:2]) if len(parts) >= 2 else ''
+        return words, prefix
+    keys = sorted(facts)
+    for index, key in enumerate(keys):
+        words, branch = signals(facts[key])
+        for other in keys[:index]:
+            if key.split('#')[0] != other.split('#')[0]:
+                continue
+            theirs, other_branch = signals(facts[other])
+            shared = len(words & theirs)
+            similar = shared >= 2 and shared / max(len(words), len(theirs)) >= .6
+            if (branch and branch == other_branch) or similar:
+                old, new = groups[key], groups[other]
+                for member in groups:
+                    if groups[member] == old:
+                        groups[member] = new
+    return {key: 'pr:' + group for key, group in groups.items()}
+
+
 def backfill(state, catalog=None, facts=None, summaries=None):
     import uuid
     catalog = catalog or {}
     facts = facts or {}
     summaries = summaries or {}
     assignments, requests, proposed = {}, {}, {}
+    related = related_pr_groups(facts)
     for key, original in {**state.get('legacy_history', {}), **state.get('tasks', {})}.items():
         task = copy.deepcopy(original)
         fact = facts.get(f"{task.get('repo', 'jbookout/carr-system')}#{task.get('pr')}", {})
+        if not fact:
+            target = re.search(r'(carr-system|doctorcre-app|software-factory)-(\d+)$', key)
+            if target:
+                fact = facts.get(f'jbookout/{target[1]}#{target[2]}', {})
         if not fact:
             note = str(task.get('note') or '')
             opened = re.search(r'Opened (carr-system|doctorcre-app|software-factory) PR (\d+)', note)
@@ -263,11 +337,12 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         if not series:
             match = re.search(r'\b(V\d+)\s+([A-Z]\d+[A-Za-z]?|\d+[A-Z]|[A-Z])\b', text)
             series = match[1] if match else None
-        standalone = f"pr:{original.get('repo', 'jbookout/carr-system')}#{original['pr']}" if original.get('pr') and fact and task.get('card_title') and task.get('card_description') else None
+        pr_key = f"{original.get('repo', 'jbookout/carr-system')}#{original.get('pr')}"
+        standalone = related.get(pr_key) if original.get('pr') and fact else None
         group = ref or ('series:' + str(series) if series else standalone or 'legacy')
         request = requests.setdefault(group, copy.deepcopy(catalog.get(ref) or state.get('work_requests', {}).get(ref) or {
             'title': 'Legacy backlog' if group == 'legacy' else (str(series) + ' delivery' if series and not ref else text),
-            'description': task['card_description'] if standalone and group == standalone else
+            'description': (task.get('card_description') or text) if standalone and group == standalone else
                            'Recover the work history and keep related changes together for later triage.'}))
         if (task.get('card_title') and task.get('card_description') and group != 'legacy'
                 and not group.startswith('series:') and ref not in catalog
@@ -292,6 +367,11 @@ def backfill(state, catalog=None, facts=None, summaries=None):
         if not key.startswith('WR-'):
             row['slices'].sort(key=lambda item: (str(item['slice_id']).upper() == 'E2E',
                 [(0, int(w)) if w.isdigit() else (1, w) for w in re.split(r'(\d+)', str(item['slice_id']))]))
+        next_ordinal = max((s.get('ordinal', 0) for s in row['slices']), default=0)
+        for slice_row in row['slices']:
+            if 'ordinal' not in slice_row:
+                next_ordinal += 1
+                slice_row['ordinal'] = next_ordinal
         propose_copy(row)
         if key.startswith('WR-'):
             continue

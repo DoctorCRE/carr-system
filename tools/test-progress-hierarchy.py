@@ -182,6 +182,121 @@ class HierarchyTests(unittest.TestCase):
         b['tasks']['one']['pr'] = 1960
         self.assertIn('WR14.S1.J1.carr#1960', h.project(b)['cards'])
 
+    def test_slice_addresses_survive_reordering_and_insertion(self):
+        b = self.board()
+        h.project(b)
+        rows = b['work_requests']['WR-000014']['slices']
+        rows.reverse()
+        rows.insert(0, {'slice_id': 'new', 'title': 'New slice'})
+        view = h.project(b)
+        self.assertEqual(view['aliases']['one'], 'WR14.S1.J1.carr#1960')
+        self.assertEqual(view['aliases']['two'], 'WR14.S2.J1.app#316')
+        self.assertEqual([row['ordinal'] for row in rows], [3, 2, 1])
+
+    def test_completed_jobs_without_pr_roll_up_as_done(self):
+        for field, value in [('status', 'done'), ('stage', 'live')]:
+            with self.subTest(field=field):
+                b = self.board()
+                b['tasks'] = {'one': b['tasks']['one']}
+                b['tasks']['one'].pop('pr')
+                b['tasks']['one'][field] = value
+                view = h.project(b)
+                self.assertTrue(view['cards']['WR14.S1.J1']['done'])
+                self.assertEqual(view['slices']['WR14.S1']['status'], 'done')
+
+    def test_new_jobs_require_a_captured_request_even_on_an_empty_board(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('board_dispatch', Path(__file__).with_name('progress_board.py'))
+        board = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(board)
+        args = board.parser().parse_args(['task', 'test', 'new', '--title', 'Board cleanup',
+            '--status', 'running', '--executor', 'Codex'])
+        for state in [{'tasks': {}}, {'tasks': {}, 'work_requests': {}}]:
+            with self.subTest(state=state), self.assertRaisesRegex(SystemExit, 'Capture and bind'):
+                board.update_task(state, args)
+            self.assertEqual(state['tasks'], {})
+
+    def test_backfill_groups_related_actions_queue_repairs_and_linked_requests(self):
+        tasks = {str(n): {'title': 'Imported change', 'repo': repo, 'pr': n} for repo, n in [
+            ('jbookout/doctorcre-app',155), ('jbookout/doctorcre-app',156),
+            ('jbookout/carr-system',1678), ('jbookout/carr-system',1682),
+            ('jbookout/carr-system',20), ('jbookout/carr-system',21)]}
+        facts = {
+            'jbookout/doctorcre-app#155': {'title':'Bump actions/download-artifact from 4 to 8', 'headRefName':'dependabot/github_actions/actions/download-artifact-8'},
+            'jbookout/doctorcre-app#156': {'title':'Bump actions/setup-node from 4 to 5', 'headRefName':'dependabot/github_actions/actions/setup-node-5'},
+            'jbookout/carr-system#1678': {'title':'Fix queue spacing', 'headRefName':'queue-spacing-first'},
+            'jbookout/carr-system#1682': {'title':'Repair queue spacing after review', 'headRefName':'queue-spacing-repair'},
+            'jbookout/carr-system#20': {'title':'First delivery', 'body':'Work Request: WR-000014'},
+            'jbookout/carr-system#21': {'title':'Second delivery', 'body':'Work Request: WR-000014'},
+        }
+        plan = h.backfill({'project':'test', 'tasks':tasks}, facts=facts)
+        for a,b in [('155','156'), ('1678','1682'), ('20','21')]:
+            self.assertEqual(plan['assignments'][a]['request_key'], plan['assignments'][b]['request_key'])
+        self.assertEqual(len(plan['requests']), 3)
+        self.assertTrue(all('ordinal' in row for request in plan['requests'].values() for row in request['slices']))
+
+    def test_copy_uses_specific_subjects_and_never_clips_a_sentence_or_method(self):
+        database = {'title': "Fix database design defects found by the Dot schema review",
+                    'body': 'This repair round resolves all three numbered findings in the latest REVIEW: BLOCKED comment.'}
+        h.propose_copy(database)
+        self.assertEqual(database['card_title'], 'Database repair')
+        self.assertNotIn('numbered findings', database['card_description'])
+        cadence = {'title':'Cadence activation checks',
+                   'body':'The cadence tests assert that a subject reads `no_receipt_on_record` before activation.'}
+        h.propose_copy(cadence)
+        self.assertIn('no_receipt_on_record', cadence['card_description'])
+        long = {'title':'Board cleanup', 'body':'Keep ' + 'related work ' * 50 + 'together.'}
+        h.propose_copy(long)
+        self.assertNotIn('rea.', long['card_description'])
+        clipped = {'title':'Dot research: Job queue, work through these in order on your own cloud computer, rea'}
+        h.propose_copy(clipped)
+        self.assertNotIn('rea.', clipped.get('card_description', ''))
+        with self.assertRaises(ValueError):
+            h.validate_copy('Review', 'Review the change.')
+
+    def test_regeneration_replaces_old_generated_copy_and_preserves_human_edits(self):
+        old = {'title':'Review checks', 'description':'The tests assert that a subject reads.'}
+        row = {'title':'Cadence activation checks', 'body':'The cadence tests follow the activation date recorded by the database.',
+            'card_title':old['title'], 'card_description':old['description'],
+            'proposed_copy':{'generator':'plain-summary.v1', 'values':old}}
+        h.propose_copy(row)
+        self.assertEqual(row['card_title'], 'Cadence checks')
+        self.assertNotEqual(row['card_description'], old['description'])
+        row['card_title'] = 'My wording'
+        row['card_description'] = 'A person wrote this.'
+        h.propose_copy(row)
+        self.assertEqual(row['card_title'], 'My wording')
+        self.assertEqual(row['card_description'], 'A person wrote this.')
+
+    def test_registered_request_accepts_a_new_job_and_backfilled_slices_keep_ordinals(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('board_captured', Path(__file__).with_name('progress_board.py'))
+        board = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(board)
+        state = {'tasks': {}, 'work_requests': {'WR-000014': {'title':'Board cleanup'}}}
+        args = board.parser().parse_args(['task', 'test', 'new', '--title', 'Board cleanup',
+            '--status', 'running', '--executor', 'Codex', '--work-request', 'WR-000014'])
+        board.update_task(state, args)
+        self.assertEqual(state['tasks']['new']['work_request'], 'WR-000014')
+        b = {'project':'test', 'tasks':{
+            'later':{'title':'V2 B: Board navigation', 'slice':'B', 'milestone':'V2'},
+            'first':{'title':'V2 A: Board grouping', 'slice':'A', 'milestone':'V2'}}}
+        plan = h.backfill(b)
+        self.assertEqual([(s['slice_id'],s['ordinal']) for s in plan['requests']['series:V2']['slices']], [('A',1),('B',2)])
+
+    def test_job_number_wins_over_a_discovered_pr_number(self):
+        for link in [{'pr':1960}, {'pr_links':[{'repo':'jbookout/carr-system','pr':1960}]}]:
+            with self.subTest(link=link):
+                b = self.board()
+                b['tasks']['one'].pop('pr')
+                h.project(b)
+                b['tasks']['discovered'] = {**b['tasks']['one'], 'job_id':'discovered', 'pr':1960}
+                h.project(b)
+                b['tasks']['one'].update(link)
+                view = h.project(b)
+                self.assertEqual(view['aliases']['one'], 'WR14.S1.J1.carr#1960')
+                self.assertEqual(view['aliases']['discovered'], 'WR14.S1.J1.carr#1960')
+
     def test_accepted_request_without_registered_slices_still_uses_implicit_slice(self):
         def record(verb, args):
             if verb == 'work-request-card':
