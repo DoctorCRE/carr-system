@@ -134,7 +134,7 @@ class StudySourcesTests(unittest.TestCase):
     def cards(self):
         return json.loads((self.root / 'out/boards/source-studies.json').read_text())['tasks']
 
-    def test_each_url_gets_one_retrieval_one_high_study_and_done_card(self):
+    def test_each_url_gets_one_retrieval_one_high_study_and_pending_card(self):
         urls = ('https://x.com/author/status/123', 'https://example.com/article')
         result = self.run_tool(*urls)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -155,7 +155,8 @@ class StudySourcesTests(unittest.TestCase):
             self.assertTrue((folder / 'retrieval.txt').is_file())
             self.assertTrue((folder / 'report.md').is_file())
         for card in self.cards().values():
-            self.assertEqual(card['status'], 'done')
+            self.assertEqual(card['status'], 'review')
+            self.assertIn('consumer proof', card['release_wait'])
             self.assertIn('report.md', card['note'])
 
     def test_missing_report_blocks_card_with_reason(self):
@@ -236,7 +237,8 @@ class StudySourcesTests(unittest.TestCase):
         self.assertGreater(peak, 1)
         self.assertFalse(active)
         self.assertEqual(len(self.cards()), 9)
-        self.assertTrue(all(card['status'] == 'done' for card in self.cards().values()))
+        self.assertTrue(all(card['status'] == 'review' and 'consumer proof' in card['release_wait']
+                            for card in self.cards().values()))
 
     def test_repeated_source_preserves_prior_report_and_card(self):
         url = 'https://example.com/article'
@@ -419,7 +421,8 @@ class StudySourcesTests(unittest.TestCase):
                 result = self.run_tool('https://example.com/a', cwd=self.root / 'fake-bin')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 cards = json.loads((directory / 'boards/source-studies.json').read_text())['tasks']
-                self.assertTrue(all(c['status'] == 'done' for c in cards.values()))
+                self.assertTrue(all(c['status'] == 'review' and 'consumer proof' in c['release_wait']
+                                    for c in cards.values()))
 
     def test_board_lock_wait_is_bounded(self):
         directory = self.root / 'out/boards'

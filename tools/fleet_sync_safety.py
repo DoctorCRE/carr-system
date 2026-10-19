@@ -117,6 +117,27 @@ def submodule_tree_is_exact_patch(repo: str) -> tuple[bool, str]:
         return False, "tracked Quill tree differs from recorded HEAD plus canonical patches"
 
 
+def landed_residue(repo: str, incoming: str, paths: list[str]) -> list[str]:
+    """Diagnose unstaged bytes found upstream without changing files or index."""
+    landed = []
+    for path in paths:
+        full = os.path.join(repo, path)
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        if _git(repo, "diff", "--cached", "--quiet", "HEAD", "--", path).returncode:
+            continue
+        live = _git(repo, "hash-object", "--", path)
+        commits = _git(repo, "rev-list", f"HEAD..{incoming}", "--", path)
+        if live.returncode or commits.returncode:
+            continue
+        for commit in commits.stdout.split():
+            blob = _git(repo, "rev-parse", "--verify", "--quiet", f"{commit}:{path}")
+            if blob.returncode == 0 and blob.stdout.strip() == live.stdout.strip():
+                landed.append(path)
+                break
+    return landed
+
+
 def eligible_for_fast_forward(repo: str, incoming: str) -> tuple[bool, str]:
     """Return whether a checkout may fast-forward without discarding work.
 
@@ -147,9 +168,11 @@ def eligible_for_fast_forward(repo: str, incoming: str) -> tuple[bool, str]:
 
     buckets = classify_loose_status(repo, rows)
     if buckets["actionable_tracked"]:
+        landed = landed_residue(repo, incoming, buckets["actionable_tracked"])
+        landed_note = "; landed upstream: " + ", ".join(landed) if landed else ""
         return False, "actionable local changes: " + ", ".join(
             buckets["actionable_tracked"]) + "; expected patched submodules: " + ", ".join(
-                buckets["expected_patched_submodules"])
+                buckets["expected_patched_submodules"]) + landed_note
     expected = buckets["expected_patched_submodules"]
     if expected != [QUILL]:
         return False, "unverifiable tracked submodule state: " + ", ".join(expected)
@@ -160,13 +183,35 @@ def eligible_for_fast_forward(repo: str, incoming: str) -> tuple[bool, str]:
     return True, exact_reason
 
 
+def fast_forward(repo: str, incoming: str) -> tuple[int, str]:
+    """Check around Git's native fast-forward without owning its transaction."""
+    allowed, reason = eligible_for_fast_forward(repo, incoming)
+    if not allowed:
+        return 78, reason
+    merged = _git(repo, "merge", "--ff-only", "--no-overwrite-ignore", incoming)
+    allowed, reason = eligible_for_fast_forward(repo, incoming)
+    output = merged.stdout + merged.stderr
+    if not allowed:
+        return 78, output + "\n" + reason
+    return merged.returncode, output
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: fleet_sync_safety.py REPO INCOMING", file=sys.stderr)
+    args = sys.argv[1:]
+    merge = args[:1] == ["--fast-forward"]
+    if merge:
+        args = args[1:]
+    if len(args) != 2:
+        print("usage: fleet_sync_safety.py [--fast-forward] REPO INCOMING", file=sys.stderr)
         return 2
-    allowed, reason = eligible_for_fast_forward(os.path.abspath(sys.argv[1]), sys.argv[2])
+    repo, incoming = os.path.abspath(args[0]), args[1]
+    if merge:
+        code, reason = fast_forward(repo, incoming)
+    else:
+        allowed, reason = eligible_for_fast_forward(repo, incoming)
+        code = 0 if allowed else 78
     print(reason)
-    return 0 if allowed else 78
+    return code
 
 
 if __name__ == "__main__":
