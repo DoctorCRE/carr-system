@@ -149,6 +149,28 @@ class WatchTests(unittest.TestCase):
             self.assertEqual(args[3:], ['-m', 'grok-4.5', '--reasoning-effort', 'high', '--sandbox', 'workspace', '--cwd', d])
             self.assertGreater(kwargs['timeout'], 0)
 
+    def test_cli_empty_search_ignores_progress_and_uses_structured_result(self):
+        commentary = "I'll search X for those replies and keep only concrete technique matches."
+        frames = [
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": commentary}]}},
+            {"type": "result", "subtype": "success", "is_error": False,
+             "result": commentary, "structured_output": {"ok": True, "replies": []}},
+        ]
+        def cli(args, **kwargs):
+            if '--output-format' not in args:
+                return commentary
+            return '\n'.join(json.dumps(frame) for frame in frames)
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            record = Mock()
+            def retrieve(entry, today, scratch):
+                return watch.grok_replies(entry, today, scratch, execute=cli)
+
+            self.assertEqual(watch.run([ENTRY], root, retrieve, record, today=TODAY), 0)
+            self.assertEqual(watch.load_ledger(root)['runs'][-1]['status'], 'ok')
+            record.assert_not_called()
+
     def test_schedule_and_installer_registration(self):
         plist = plistlib.loads((ROOT / 'ops/launchd/com.carr.expert-reply-watch.plist').read_bytes())
         self.assertEqual(plist['StartCalendarInterval'], {'Weekday': 1, 'Hour': 6, 'Minute': 0})
