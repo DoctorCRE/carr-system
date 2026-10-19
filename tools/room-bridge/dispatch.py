@@ -54,7 +54,7 @@ import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
 import write_ownership  # noqa: E402
 import desks  # noqa: E402
-from desks import DeskError, Registry  # noqa: E402
+from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
 import claude_wire as inject_mod  # noqa: E402  — the Idea 78 wire, see the module
 import claude_desktop_wire  # noqa: E402 — background supervisor + supported /desktop
 import claude_remote_wire
@@ -80,7 +80,6 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
-AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
