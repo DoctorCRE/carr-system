@@ -26,7 +26,6 @@ import { scheduleFailureRecord, rpcInternalErrorFailureClass, actorUnresolvedFai
 import { providerFor as judgeProviderFor } from "./judge-provider.js";
 import { countPaidJevAttemptsToday, jevAskBinding, prefetchJevAnswer, reserveJevCallAttempt,
   validateAskJevArgs } from "./jev-call-receipt.js";
-import { stampedGitSha } from "./build-stamp.js";
 import { parksADecision, classifyLoopText, needsDecider, loopRowText,
          ESCALATION_REASON, BLOCKER_DECIDER_REASON } from "./verb-gate-checks.js";
 import { controllerOperationInput, controllerToolList, isEngineeringControllerActor,
@@ -169,8 +168,6 @@ export async function dispatchEngineeringController(request, env, ctx, actor) {
   }
 }
 
-export const FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA =
-  "doctorcre-v5-foundation-assurance-runtime-binding.v1";
 const CANONICAL_OWNERSHIP_HOST_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,95}$/;
 
 // This is deployment metadata the Worker received from Cloudflare, not a
@@ -182,23 +179,6 @@ export function canonicalOwnershipExecutionHost(env) {
     ? env.CF_VERSION_METADATA.id.trim() : "";
   return CANONICAL_OWNERSHIP_HOST_VERSION.test(version)
     ? `cloudflare-workers:${version}` : null;
-}
-
-// The foundation oracle must prove which deployed Worker is answering before
-// the record layer exposes any material. These values are runtime/provider
-// facts, not caller input: the source comes from the same deploy stamp used by
-// /release and the provider id comes from Cloudflare's immutable metadata
-// binding. Missing values remain null so the SQL boundary can refuse by name.
-export function foundationAssuranceRuntimeBinding(env) {
-  const providerId = typeof env?.CF_VERSION_METADATA?.id === "string"
-    ? env.CF_VERSION_METADATA.id.trim() : "";
-  return Object.freeze({
-    schema_version: FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA,
-    environment: typeof env?.CARR_ENV === "string" ? env.CARR_ENV : null,
-    source_sha: stampedGitSha(env),
-    provider: "cloudflare-workers",
-    provider_version: providerId || null,
-  });
 }
 
 // Transaction-local actor context for SECURITY DEFINER functions that must

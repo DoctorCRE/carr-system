@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { TOOLS } from "../src/tools.js";
-import { implementationShapeError, shapeDecisionError, shapeDispositionError, workShapeTools } from "../src/work-shape.js";
+import { shapeDecisionError, shapeDispositionError, workShapeTools } from "../src/work-shape.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "../..");

@@ -178,24 +178,6 @@ export function verifyArtifactRootBindingAgainstDigest(
   });
 }
 
-export function evaluateArtifactRootBinding(artifactBundle, rootTrustEvents) {
-  const root = evaluateRootTrust(rootTrustEvents);
-  const artifact = verifyArtifactBundle(artifactBundle);
-  const bound = root.active_key_digest !== null && root.active_key_digest === artifactBundle.signature.signer_key_digest;
-  return Object.freeze({
-    artifact_digest: artifact.artifact_digest,
-    manifest_digest: artifact.manifest_digest,
-    signature_state: artifact.signature_state,
-    transparency_state: artifact.transparency_state,
-    root_binding_state: bound ? "current_nonproduction_root" : "untrusted_or_revoked_root",
-    artifact_trust_state: bound ? "eligible_nonproduction_only" : "untrusted",
-    reason_id: bound ? "scac.refusal.production_trust_inactive" : "scac.refusal.root_untrusted",
-    review_binding_state: root.review_binding_state,
-    root_trust_operational: false,
-    production_enforcement_active: false,
-  });
-}
-
 export function containsForbiddenRootMaterial(value) {
   const serialized = canonicalJson(value).toLowerCase();
   return /private[_ -]?key|secret[_ -]?key|seed phrase|recovery secret|age-secret-key/.test(serialized);

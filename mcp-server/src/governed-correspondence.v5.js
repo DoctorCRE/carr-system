@@ -316,11 +316,6 @@ function assertSafeInteger(value, path, { min = 0, max = Number.MAX_SAFE_INTEGER
   return value;
 }
 
-function assertBoolean(value, path) {
-  if (typeof value !== "boolean") fail("invalid_shape", `${path} must be a boolean`, { path });
-  return value;
-}
-
 function daysInMonth(year, month) {
   if (month === 2) return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 29 : 28;
   return [4, 6, 9, 11].includes(month) ? 30 : 31;
@@ -1004,11 +999,6 @@ function requireBinding(binding, path, mode) {
     }
   }
   return binding;
-}
-
-/** The wired accessor, kept as its own name so call sites read as what they are. */
-function requireCompiledBinding(binding, path) {
-  return requireBinding(binding, path, WIRED);
 }
 
 // ---------------------------------------------------------------------------
