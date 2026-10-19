@@ -16,6 +16,14 @@ spec.loader.exec_module(runner)
 from lib.disposable_pg_fixture import postgres_fixture_group
 
 class Isolation(unittest.TestCase):
+    def test_staging_authority_reports_active_sql_deadlines(self):
+        result = subprocess.run(
+            [runner.sys.executable, str(ROOT / 'ops/staging-authority-rollback-local-pg-gate.py')],
+            cwd=ROOT, capture_output=True, text=True, timeout=8)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('SQL deadlines: statement=10s lock=2s connect=5s', result.stdout)
+        self.assertIn('step: recover missing authority', result.stdout)
+
     def test_staging_authority_fixture_finishes_beside_isolated_gates(self):
         gate = ROOT / 'ops/staging-authority-rollback-local-pg-gate.py'
         isolated = Path('synthetic-isolated.py')
