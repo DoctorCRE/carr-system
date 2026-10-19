@@ -709,6 +709,19 @@ commit;
             type("OldScope", (), {"endpoint_host": "legacy.example"})())
         check("a second release keeps the same legacy rollback after candidate secrets appear",
               repeated_rollback_values == rollback_values)
+        for role_name in (provision.READER_ROLE, provision.APP_ROLE):
+            def missing_required(paths, **kwargs):
+                if kwargs["role_name"] == role_name:
+                    raise provision.credential.CredentialRefusal("staging credential is absent")
+                return load_legacy_credential(paths, **kwargs)
+            provision.credential.load_existing = missing_required
+            try:
+                provision.load_rollback_worker_values(old)
+            except provision.credential.CredentialRefusal as exc:
+                check(f"missing canonical {role_name} still refuses after cutover",
+                      str(exc) == "staging credential is absent")
+            else:
+                raise AssertionError(f"missing required rollback credential accepted: {role_name}")
     finally:
         provision.credential.profile = saved_profile
         provision.credential.load_existing = saved_load_existing
@@ -1088,6 +1101,7 @@ commit;
         "replacement_target": provision.replacement_target,
         "resolve_replacement_binding": provision.resolve_replacement_binding,
         "load_rollback_worker_values": provision.load_rollback_worker_values,
+        "read_worker_database_secret_names": provision.read_worker_database_secret_names,
         "bulk_worker_database_secrets": provision.bulk_worker_database_secrets,
         "verify_worker_database_secret_bindings": provision.verify_worker_database_secret_bindings,
         "read_seed_state": provision.read_seed_state,
@@ -1234,6 +1248,43 @@ commit;
                   "gate_zero_producer": "reused",
                   "foundation_assurance_oracle": "reused"})
 
+        live_names = set(provision.WORKER_DATABASE_SECRET_NAMES) - {"CARR_DB_AUTHORITY_JOE_URL"}
+        def load_release_credential(paths, *, role_name, expected_endpoint, **kwargs):
+            if expected_endpoint == old.endpoint_host:
+                if role_name == "carr_authority_joe":
+                    raise provision.credential.CredentialRefusal("staging credential is absent")
+                return provision.credential.StoredCredential(
+                    "final", paths.final, f"prior-{role_name}", "fixture-password",
+                    old.endpoint_host, 5432, "neondb")
+            return load_candidate_credential(
+                paths, role_name=role_name, expected_endpoint=expected_endpoint, **kwargs)
+        def publish_release(values):
+            record_bulk(values)
+            live_names.clear()
+            live_names.update(name for name, value in values.items() if value is not None)
+        provision.load_rollback_worker_values = saved_main_dependencies["load_rollback_worker_values"]
+        provision.read_worker_database_secret_names = lambda: set(live_names)
+        provision.credential.load_existing = load_release_credential
+        provision.bulk_worker_database_secrets = publish_release
+        for release_number in (1, 2):
+            seed_reads = preserve_calls = 0
+            orchestration_events.clear()
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                rc = provision.main([
+                    "--candidate-operation-id", str(CANDIDATE_OPERATION_ID),
+                    "--receipt-id", str(RECEIPT_ID), "--sha", EXPECTED_SHA, "--apply",
+                ])
+            check(f"release {release_number} publishes all candidate profiles with no old Joe authority file",
+                  rc == 0 and json.loads(stdout.getvalue())["state"] == "provisioned"
+                  and live_names == set(provision.WORKER_DATABASE_SECRET_NAMES)
+                  and seed_reads == 2 and stderr.getvalue() == "")
+        provision.load_rollback_worker_values = lambda _old: dict(old_values)
+        provision.read_worker_database_secret_names = saved_main_dependencies[
+            "read_worker_database_secret_names"]
+        provision.credential.load_existing = load_candidate_credential
+        provision.bulk_worker_database_secrets = record_bulk
+
         # Every field in the readable business-state snapshot is immutable
         # across credential publication. Any drift restores the prior pair.
         for drift_label, drift_state in (
@@ -1342,6 +1393,8 @@ commit;
         provision.reject_unsafe_environment = saved_main_dependencies["reject_unsafe_environment"]
         provision.replacement_target = saved_main_dependencies["replacement_target"]
         provision.resolve_replacement_binding = saved_main_dependencies["resolve_replacement_binding"]
+        provision.read_worker_database_secret_names = saved_main_dependencies[
+            "read_worker_database_secret_names"]
         provision.load_rollback_worker_values = saved_main_dependencies["load_rollback_worker_values"]
         provision.bulk_worker_database_secrets = saved_main_dependencies["bulk_worker_database_secrets"]
         provision.verify_worker_database_secret_bindings = saved_main_dependencies[

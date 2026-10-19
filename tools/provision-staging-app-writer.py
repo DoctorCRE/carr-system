@@ -600,7 +600,8 @@ def resolve_replacement_binding(
 
 
 def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
-    live_names = read_worker_database_secret_names()
+    # Live names describe the candidate after a successful cutover, not the
+    # untouched old project. Its files alone define the rollback snapshot.
     values: dict[str, str | None] = {}
     for login_profile in PROFILES:
         file_profile = credential.profile(login_profile.label)
@@ -615,7 +616,6 @@ def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
             if (
                 str(exc) == "staging credential is absent"
                 and (login_profile.created_by_migration or login_profile.label == "authority_joe")
-                and login_profile.secret_name not in live_names
             ):
                 # JSON null restores a binding that was absent before cutover.
                 values[login_profile.secret_name] = None
@@ -624,14 +624,7 @@ def load_rollback_worker_values(old: Any) -> dict[str, str | None]:
         if stored.state != "final":
             raise ProvisioningRefusal(
                 "canonical old-staging rollback credential is not final")
-        if login_profile.secret_name not in live_names:
-            raise ProvisioningRefusal(
-                "canonical old-staging credential has no matching Worker secret")
         values[login_profile.secret_name] = stored.value
-    expected_names = {name for name, value in values.items() if value is not None}
-    if live_names != expected_names:
-        raise ProvisioningRefusal(
-            "old-staging Worker database secret names differ from rollback material")
     return values
 
 
@@ -643,11 +636,9 @@ def repair_prior_rollback_credentials(
     """Complete the canonical rollback project without touching the Worker.
 
     Forward migrations can add a new migration-owned login seat after the
-    original staging credentials were minted.  A later candidate cutover must
-    not delete that live Worker binding merely because the untouched rollback
-    project predates it, and it must not rotate a credential whose local file
-    was lost.  This door closes that gap narrowly: only a migration-created,
-    still-passwordless seat may be adopted; ordinary missing credentials and
+    original staging credentials were minted. This door can extend the old
+    project's rollback profiles without rotating a lost credential. Only a
+    migration-created, still-passwordless seat may be adopted; ordinary missing credentials and
     already-passworded seats continue to refuse.
     """
     try:
