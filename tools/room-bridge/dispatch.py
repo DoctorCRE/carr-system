@@ -79,6 +79,7 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
+AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
@@ -370,6 +371,8 @@ def _to_codex(
                     "bad_codex_config",
                     "Codex config overrides must be non-empty strings")
             argv += ["-c", override]
+        if entry.get("name") in AUTOMATIC_CODEX_DESKS:
+            argv += ["-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"']
         # Bind both starts and resumes, after overrides, so an old thread or
         # caller config cannot restore human approval cards.
         argv += ["-c", 'approval_policy="never"']
@@ -572,6 +575,8 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
+        raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
@@ -791,6 +796,8 @@ def desk_start(
     by delivering its turn into the closing window of a session already on its
     way out. That is the failure this function exists to make impossible.
     """
+    if name == "flash" and flashlib.is_switched_off():
+        raise DeskError("flash_off", flashlib.OFF_REASON)
     registry = registry or Registry()
     state_dir = Path(state_dir or DESK_STATE)
     sock_dir = Path(sock_dir or SOCK_DIR)

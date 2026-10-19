@@ -3,11 +3,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>KeepAlive</key>
-	<dict>
-		<key>SuccessfulExit</key>
-		<false/>
-	</dict>
 	<key>Label</key>
 	<string>local.ds4-flash-next</string>
 	<key>ProcessType</key>
@@ -32,7 +27,7 @@
 		<string>40000</string>
 	</array>
 	<key>RunAtLoad</key>
-	<true/>
+	<false/>
 	<key>StandardErrorPath</key>
 	<string>{{HOME}}/Library/Logs/ds4-flash-next.log</string>
 	<key>StandardOutPath</key>
