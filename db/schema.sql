@@ -122862,6 +122862,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0904_one_step_gate_rule_approval.sql	905efb2e63c9c78be92f524634c1f829c3c71b8bc720f473d13d1bf2fe6dfc19	2026-10-18 09:49:15.78479+00
 0906_dot_database_design.sql	d7844153bf7d6da0d33cc358d9c3c5e0b4dc73b752da991c8a8026435ab2a128	2026-10-18 06:47:49.612561+00
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
+0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
 \.
 
 
