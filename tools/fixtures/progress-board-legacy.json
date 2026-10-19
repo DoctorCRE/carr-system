@@ -1,0 +1,257 @@
+{
+  "source": "carr-v5 local JSON copied read-only",
+  "source_sha256": "49d505142d167bdd7a99524996d072e3e30bd2789900791b4e0dc48c3b0d3b39",
+  "observed_at": "2026-10-19T11:29:41.144616+00:00",
+  "tasks": {
+    "cloud-jev-codereview": {
+      "title": "Jev follow-up: jev-codereview",
+      "status": "review",
+      "executor": "Anthropic Claude Opus 5.5 medium (cloud credit)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "PR 1408 CI green, awaiting independent review",
+      "created_at": "2026-09-29T15:17:58+00:00",
+      "updated_at": "2026-09-29T19:19:28+00:00",
+      "stage_history": [
+        {
+          "stage": "review",
+          "entered_at": "2026-09-29T19:19:28+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-09-29T19:19:28+00:00"
+    },
+    "build-i-pr1448": {
+      "title": "i-pr1448",
+      "status": "review",
+      "executor": "gpt-6.1-sol high (Codex)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Opened carr-system PR 1448; tracked on its PR row",
+      "created_at": "2026-10-01T14:25:30+00:00",
+      "updated_at": "2026-10-01T14:25:30+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T14:25:30+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "build-j-doc-plugin": {
+      "title": "Doc V0: a ChatGPT plugin and Claude connector endpoint over the record layer",
+      "status": "review",
+      "executor": "gpt-6.1-sol high (Codex)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Opened carr-system PR 1454; tracked on its PR row",
+      "created_at": "2026-10-01T14:25:30+00:00",
+      "updated_at": "2026-10-01T14:25:30+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T14:25:30+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "build-g-tour-app": {
+      "title": "Fix Tour defects found by the Dot's V0 Tour review",
+      "status": "review",
+      "executor": "gpt-6.1-sol high (Codex)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Opened doctorcre-app PR 116; tracked on its PR row",
+      "created_at": "2026-10-01T14:25:30+00:00",
+      "updated_at": "2026-10-01T14:25:30+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T14:25:30+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T14:25:30+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "dot-job10": {
+      "title": "Dot research: Job queue, work through these in order on your own cloud computer, rea",
+      "status": "review",
+      "executor": "the Dot (ChatGPT, free)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Report saved: report-A.md, report-C.md, report-B.md",
+      "created_at": "2026-10-01T14:28:27+00:00",
+      "updated_at": "2026-10-01T14:28:27+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T14:28:27+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T14:28:27+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T14:28:27+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "dot-job14": {
+      "title": "Dot research: read the public pull request https://github.com/jbookout/carr-system/p",
+      "status": "review",
+      "executor": "the Dot (ChatGPT, free)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Report saved: report-H.md",
+      "created_at": "2026-10-01T14:28:28+00:00",
+      "updated_at": "2026-10-01T15:20:27+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T15:20:27+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T15:20:27+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T15:20:27+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "dot-job7": {
+      "title": "Dot research: RULES, all required: 1. Report to the orchestrator only. 2. On THIS Ma",
+      "status": "review",
+      "executor": "the Dot (ChatGPT, free)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Report saved: report.md",
+      "created_at": "2026-10-01T14:28:28+00:00",
+      "updated_at": "2026-10-01T14:28:28+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T14:28:28+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T14:28:28+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T14:28:28+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "dot-job15": {
+      "title": "Dot research: OpenAI requires a privacy policy, terms of use and a support page befo",
+      "status": "review",
+      "executor": "the Dot (ChatGPT, free)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Report saved: report-I.md",
+      "created_at": "2026-10-01T15:20:27+00:00",
+      "updated_at": "2026-10-01T15:32:52+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T15:32:52+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T15:32:52+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T15:32:52+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "events-verify": {
+      "title": "Industry Events verification",
+      "status": "review",
+      "executor": "gpt-5.6-luna high (Codex)",
+      "pr": null,
+      "note": "absent in source, server and app",
+      "created_at": "2026-09-28T11:05:39+00:00",
+      "updated_at": "2026-09-29T03:02:35+00:00",
+      "repo": "jbookout/doctorcre-app",
+      "provider": "Codex",
+      "model": "gpt-5.6-luna",
+      "effort": "high",
+      "summary": "absent in source, server and app.",
+      "stage_history": [
+        {
+          "stage": "build",
+          "entered_at": "2026-09-29T03:02:35+00:00"
+        },
+        {
+          "stage": "live",
+          "entered_at": "2026-09-29T03:02:35+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-09-29T03:02:35+00:00"
+        }
+      ],
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_entered_at": "2026-09-29T03:02:35+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
+    },
+    "jev-apply": {
+      "title": "Apply Jev evaluation: intake and hook reshape (A); rule batching must ship via hill-climb, pinned callers (B)",
+      "status": "running",
+      "executor": "Codex gpt-6-sol high x2",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": null,
+      "created_at": "2026-09-29T13:48:55+00:00",
+      "updated_at": "2026-09-29T14:12:49+00:00",
+      "provider": "Codex",
+      "model": "gpt-6-sol",
+      "effort": "high",
+      "summary": "Apply Jev findings to intake, hooks, and rule batching.",
+      "stage_history": [
+        {
+          "stage": "build",
+          "entered_at": "2026-09-29T14:12:49+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-09-29T14:12:49+00:00"
+    }
+  },
+  "github": {
+    "jbookout/carr-system#1408": {
+      "closedAt": "2026-09-29T19:54:45Z",
+      "mergeCommit": {
+        "oid": "97dbfbac28a72dd0c20e63766678588091c65c39"
+      },
+      "mergedAt": "2026-09-29T19:54:45Z",
+      "number": 1408,
+      "state": "MERGED",
+      "url": "https://github.com/jbookout/carr-system/pull/1408"
+    }
+  }
+}
