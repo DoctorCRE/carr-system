@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { score } from '../../ops/check-pr-skills.mjs';
+import { score, gitCommits } from '../../ops/check-pr-skills.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const sha = 'a'.repeat(40);
 function evidence(body, opened = ['tdd'], commits = []) {
@@ -54,4 +58,30 @@ test('artifact requirements reject headings and accept concrete evidence', () =>
 });
 test('quoted evidence and HTML comments cannot satisfy artifacts', () => {
   assert.notDeepEqual(score(evidence('Skills used: grill-with-docs\n<!-- ## Decisions\nQuestion: X? Answer: Y. Rejected alternative: Z. -->', ['grill-with-docs'])), []);
+});
+test('git history reads real test-before-code commits and refuses deleting a test as proof', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-history-'));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
+    env: { PATH: process.env.PATH, HOME: cwd, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+  try {
+    git('init', '-q');
+    git('config', 'user.name', 'Fixture');
+    git('config', 'user.email', 'fixture@example.invalid');
+    git('commit', '-q', '--allow-empty', '-m', 'base');
+    const base = git('rev-parse', 'HEAD');
+    writeFileSync(join(cwd, 'test_widget.py'), 'assert widget() == 1\n');
+    git('add', 'test_widget.py'); git('commit', '-qm', 'test');
+    writeFileSync(join(cwd, 'widget.py'), 'def widget(): return 1\n');
+    git('add', 'widget.py'); git('commit', '-qm', 'code');
+    assert.deepEqual(score(evidence('Skills used: tdd', ['tdd'], gitCommits(base, git('rev-parse', 'HEAD'), cwd))), []);
+    const beforeDelete = git('rev-parse', 'HEAD');
+    git('rm', '-q', 'test_widget.py'); git('commit', '-qm', 'remove test');
+    writeFileSync(join(cwd, 'widget.py'), 'def widget(): return 2\n');
+    git('add', 'widget.py'); git('commit', '-qm', 'change code');
+    assert.match(score(evidence('Skills used: tdd', ['tdd'], gitCommits(beforeDelete, git('rev-parse', 'HEAD'), cwd))).join(), /TDD/);
+    git('checkout', '-q', '--detach', beforeDelete);
+    writeFileSync(join(cwd, 'test_new.py'), 'assert True\n');
+    git('add', 'test_new.py'); git('rm', '-q', 'widget.py'); git('commit', '-qm', 'test and delete code');
+    assert.match(score(evidence('Skills used: tdd', ['tdd'], gitCommits(beforeDelete, git('rev-parse', 'HEAD'), cwd))).join(), /TDD/);
+  } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
