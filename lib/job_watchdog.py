@@ -329,12 +329,19 @@ def detect(facts, config, now):
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
     jobs = facts.get("jobs", [])
-    for job in jobs:
+    failures = set()
+    for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
             if job["exit_code"] != 0 and not job.get("superseded"):
-                emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
+                reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
+                card = job.get("card", subject)
+                key = f"job_failed:{card}:" + hashlib.sha256(reason.encode()).hexdigest()
+                if key not in failures:
+                    failures.add(key)
+                    emit("jobs", "job_failed", card, reason,
+                         key=key if "card" in job else "job_failed:" + subject, **fields)
             continue
         if not job.get("alive"):
             emit("jobs", "job_dead", subject, "registered PID is dead or changed without an exit record", **fields)
