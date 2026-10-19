@@ -98,6 +98,7 @@ step "system costs" ./run.sh costs --publish --alerts
 step "Grok authentication health" ./.venv/bin/python tools/health-check.py --section grok-session
 step "health breach response" ./run.sh health --act
 step "defect bridge" ./.venv/bin/python ops/defect-bridge.py
+step "runtime error intake" node ops/runtime-error-watch.mjs
 portability_root="${CARR_EXPORT_HOME:-$HOME/Library/CloudStorage/OneDrive-CARR,Inc/Joe's Folder/CARR AI}"
 step "portability mirror" env DATABASE_URL="$CARR_DB_EXPORTER_URL" .venv/bin/python pipelines/doctrine_mirror.py \
   --out "$portability_root/Backups/portability-mirror" --also "$HOME/carr-system/out/mirror"

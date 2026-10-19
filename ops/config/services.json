@@ -249,26 +249,6 @@
       ]
     },
     {
-      "key": "rules-refresh",
-      "name": "Taught-rule refresh",
-      "purpose": "Re-renders the compiled rule files Dell's sessions boot from.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "bin/refresh-rules.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.rules-refresh.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 39600,
-          "cadence_grace_seconds": 3600,
-          "notes": "Hourly 07:00-20:00 by fourteen calendar entries, so the real worst-case gap is the eleven hours overnight \u2014 not one hour."
-        }
-      ]
-    },
-    {
       "key": "local-briefs",
       "name": "Local review queue maintenance",
       "purpose": "Refreshes the review queue every business morning; legacy brief-pack files are explicit recovery only.",
