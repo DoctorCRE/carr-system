@@ -19,7 +19,7 @@ class BudgetTests(unittest.TestCase):
         self.ledger = nous_budget.Ledger(self.results)
 
     def test_concurrent_reservations_cannot_spend_the_same_last_dollar(self):
-        for index in range(19):
+        for index in range(21):
             self.ledger.reserve(str(index))
         barrier = threading.Barrier(2)
         admitted, refused = [], []
@@ -30,7 +30,7 @@ class BudgetTests(unittest.TestCase):
                 admitted.append(run_id)
             except nous_budget.BudgetStop as exc:
                 refused.append(str(exc))
-        jobs = [threading.Thread(target=reserve, args=(str(index),)) for index in (19, 20)]
+        jobs = [threading.Thread(target=reserve, args=(str(index),)) for index in (21, 22)]
         for job in jobs:
             job.start()
         for job in jobs:
@@ -38,7 +38,7 @@ class BudgetTests(unittest.TestCase):
             self.assertFalse(job.is_alive())
         self.assertEqual(len(admitted), 1)
         self.assertEqual(refused, ['Nous credit budget spent'])
-        self.assertEqual(self.ledger.read()['reserved_usd'], '20.00')
+        self.assertEqual(self.ledger.read()['reserved_usd'], '22.00')
 
     def test_repeated_settlement_does_not_double_charge(self):
         self.ledger.reserve('job')
@@ -82,7 +82,7 @@ class BudgetTests(unittest.TestCase):
     def test_settled_spend_rechecks_the_budget_before_a_reserved_launch(self):
         self.ledger.reserve('first')
         self.ledger.reserve('second')
-        self.ledger.settle('first', {'estimated_cost_usd': '19.50'}, True)
+        self.ledger.settle('first', {'estimated_cost_usd': '21.50'}, True)
         with self.assertRaisesRegex(nous_budget.BudgetStop, 'Nous credit budget spent'):
             self.ledger.launch('second')
 

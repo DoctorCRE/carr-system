@@ -125,12 +125,12 @@ print(json.dumps({'paidRecommendedModels': [
 
     def test_cost_ledger_persists_spend_and_refuses_the_next_estimate(self):
         self.register()
-        self.env['FAKE_COST'] = '19.50'
+        self.env['FAKE_COST'] = '21.50'
         first = self.send()
         self.assertEqual(first['status'], 'completed')
         ledger = self.results.with_name(self.results.name + '.nous-spend.json')
         saved = json.loads(ledger.read_text())
-        self.assertEqual(saved['runs'][first['msg_id']]['cost_usd'], '19.50')
+        self.assertEqual(saved['runs'][first['msg_id']]['cost_usd'], '21.50')
         self.assertEqual(saved['runs'][first['msg_id']]['cost_source'], 'hermes_usage_usd')
         (self.root / 'invocation.json').unlink()
         second = self.send()
@@ -141,7 +141,7 @@ print(json.dumps({'paidRecommendedModels': [
 
     def test_redirected_results_do_not_create_a_fresh_budget(self):
         self.register()
-        self.env['FAKE_COST'] = '19.50'
+        self.env['FAKE_COST'] = '21.50'
         self.send()
         self.results = self.root / 'redirected-results.jsonl'
         self.assertEqual(self.send()['detail'], 'Nous credit budget spent')
@@ -210,7 +210,7 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(code, 0)
         readback = json.loads(output.getvalue())
         self.assertEqual(readback['spent_usd'], '0.04')
-        self.assertEqual(readback['budget_usd'], '20.00')
+        self.assertEqual(readback['budget_usd'], '22.00')
         self.assertEqual(path.read_bytes(), before)
 
     def test_signed_out_fails_before_catalog_or_inference(self):
