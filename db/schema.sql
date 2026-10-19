@@ -122865,7 +122865,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
 0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
-0910_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:22:56.304709+00
+0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 \.
 
 
