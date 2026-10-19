@@ -50,6 +50,16 @@ def main() -> int:
             raise AssertionError(label)
         print(f"  ok  {label}")
 
+    authority = next((row for row in provision.PROFILES if row.label == "authority_joe"), None)
+    check("staging provisions Joe authority separately from the ordinary writer",
+          authority is not None and authority.login_role == "carr_authority_joe"
+          and authority.bundle_role == "carr_authority"
+          and authority.secret_name == "CARR_DB_AUTHORITY_JOE_URL")
+    stored_authority = provision.credential.profile("authority_joe")
+    check("authority recovery keeps a separate staging credential identity",
+          stored_authority.role_name == "carr_authority_joe"
+          and stored_authority.bundle_role == "carr_authority")
+
     check("prior rollback credentials have a first-class repair door",
           callable(getattr(provision, "repair_prior_rollback_credentials", None)))
 
