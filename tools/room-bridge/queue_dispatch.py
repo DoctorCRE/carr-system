@@ -488,10 +488,11 @@ class QueueDeskExecutor:
                   "completion": receipt["completion"]}
         if receipt["block_kind"] == "transient":
             result["code"] = receipt["summary"]
-        if _task_status(self.adapter.show(task_id)) in TERMINAL_STATES:
-            return {**result, "outcome": "already_terminal"}
+        current = _task_status(self.adapter.show(task_id))
         if post_completion is not None:
             post_completion(receipt["completion"])
+        if current in TERMINAL_STATES:
+            return {**result, "outcome": "already_terminal"}
         if receipt["method"] == "block":
             self.adapter.block(task_id, receipt["summary"], kind=receipt["block_kind"])
         else:
@@ -630,7 +631,7 @@ class QueueDeskExecutor:
             return {"outcome": outcome, "task_id": task_id, "completion": completion}
 
         current = _task_status(self.adapter.show(task_id))
-        if current in TERMINAL_STATES:
+        if current in TERMINAL_STATES and post_completion is None:
             return result("already_terminal")
         try:
             terminal = parse_terminal_result(raw_result, task_id, str(pending.get("cap") or "read"))
