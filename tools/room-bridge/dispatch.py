@@ -49,12 +49,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-BUILDER_OPENING = (
-    "Use pstack's poteto-mode for this work. Step 1, size it: tiny -> build it now; "
-    "one session -> run /grill-with-docs first; bigger -> run /wayfinder. "
-    "Use /tdd for any behaviour change."
-)
-
 import codex_models  # noqa: E402
 import codex_checkout  # noqa: E402
 from ops.git_env import scrubbed_env  # noqa: E402
@@ -85,6 +79,8 @@ DEFAULT_RESULTS = Path(
 )
 
 CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
+CODEX_CAPACITY_ATTEMPTS = 6
+CODEX_CAPACITY_BACKOFF_S = 300
 
 # WR-000356: five or more concurrent Codex jobs died mid-run with "exceeded
 # retry limit, last status: 429"; four ran clean. A job past its start may
@@ -645,7 +641,18 @@ def dispatch(
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
     with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
-        outcome = _execute(request, on_executor=bind)
+        for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+            outcome = _execute(request, on_executor=bind)
+            if (entry['kind'] not in codex_models.CODEX_KINDS
+                    or outcome['status'] not in ('failed', 'capacity')
+                    or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
+                break
+            outcome['status'] = 'capacity'
+            if outcome.get('termination_confirmed') is False or attempt + 1 == CODEX_CAPACITY_ATTEMPTS:
+                break
+            print(f"capacity: retrying {name} in {CODEX_CAPACITY_BACKOFF_S}s "
+                  f"(attempt {attempt + 2}/{CODEX_CAPACITY_ATTEMPTS})", file=sys.stderr, flush=True)
+            time.sleep(CODEX_CAPACITY_BACKOFF_S)
     if outcome.get('thread_id') and not network_access and (entry['kind'] == 'codex-live'
             or entry['kind'] in codex_models.CODEX_KINDS and not cwd):
         registry.remember_thread(name, outcome['thread_id'])
@@ -1046,8 +1053,11 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
-        if (a.checkout or a.writes) and not task.startswith(BUILDER_OPENING):
-            task = BUILDER_OPENING + "\n\n" + task
+        for block in (HERE / 'brief-footer.md').read_text(encoding='utf-8').strip().split('\n\n'):
+            if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
+                continue
+            if block not in task:
+                task += '\n\n' + block
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
