@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Exercise scheduler reconciliation through the installer and read-only CLI."""
+import json
+import os
+from pathlib import Path
+import plistlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class SchedulerHygieneTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.repo = self.home / 'carr-system'
+        folder = self.repo / 'ops/headless-tasks'
+        folder.mkdir(parents=True)
+        (folder / 'tasks.json').write_text(json.dumps({
+            'timezone': 'America/Chicago', 'tasks': {
+                'test-task': {'cron': '45 9 * * 1', 'timeout_seconds': 5400}}}))
+        (folder / 'com.carr.headless.test-task.plist').write_bytes(plistlib.dumps({
+            'Label': 'com.carr.headless.test-task',
+            'StartCalendarInterval': [{'Minute': 45, 'Hour': 9, 'Weekday': 1}]}))
+        (self.repo / 'ops/config').mkdir()
+        self.workflow = {'key': 'test-task', 'enabled': True,
+                         'recurrence': {'cron': '45 9 * * 1', 'timezone': 'America/Chicago'},
+                         'legacy_schedule': {'provider': 'claude-code', 'status': 'enabled'}}
+        self.write_workflow()
+        prompt = self.home / '.claude/scheduled-tasks/test-task/SKILL.md'
+        prompt.parent.mkdir(parents=True)
+        prompt.write_text('---\nname: test-task\n---\nSynthetic audit.\n')
+        portable = self.repo / 'ops/scheduled-tasks/test-task.SKILL.md'
+        portable.parent.mkdir(parents=True)
+        portable.write_text(prompt.read_text())
+        self.snapshot = self.home / 'Library/Application Support/Claude/claude-code-sessions/a/b/scheduled-tasks.json'
+        self.snapshot.parent.mkdir(parents=True)
+        self.row = {'id': 'test-task', 'enabled': False, 'cronExpression': '45 9 * * 1'}
+        self.write_snapshot()
+        fakebin = self.home / 'fakebin'
+        fakebin.mkdir()
+        launch = fakebin / 'launchctl'
+        launch.write_text('#!/usr/bin/env python3\nimport os, pathlib, sys\n'
+                         'with pathlib.Path(os.environ["LAUNCH_CALLS"]).open("a") as f: f.write(" ".join(sys.argv[1:])+"\\n")\n'
+                         'sys.exit(113 if sys.argv[1] == "print" else 0)\n')
+        launch.chmod(0o755)
+        self.calls = self.home / 'launch-calls'
+        self.env = {**os.environ, 'HOME': str(self.home),
+                    'PATH': str(fakebin) + os.pathsep + os.environ['PATH'],
+                    'LAUNCH_CALLS': str(self.calls)}
+
+    def write_workflow(self):
+        (self.repo / 'ops/config/control-plane-workflows.v1.json').write_text(
+            json.dumps({'workflows': [self.workflow]}))
+
+    def write_snapshot(self, rows=None):
+        self.snapshot.write_text(json.dumps({'scheduledTasks': rows if rows is not None else [self.row]}))
+
+    def install(self, action='install'):
+        return subprocess.run(['sh', str(REPO / 'ops/headless-tasks/install.sh'), action, 'test-task'],
+                              env=self.env, text=True, capture_output=True, timeout=15)
+
+    def report(self):
+        return subprocess.run([sys.executable, str(REPO / 'ops/scheduler-hygiene.py'),
+                               '--repo', str(self.repo), '--home', str(self.home)],
+                              env=self.env, text=True, capture_output=True, timeout=15)
+
+    def assert_refused_without_launchctl(self):
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.calls.exists(), result.stdout + result.stderr)
+        self.assertFalse((self.home / 'Library/LaunchAgents').exists())
+
+    def test_enabled_native_task_refuses_headless_install(self):
+        self.row['enabled'] = True
+        self.write_snapshot()
+        self.assert_refused_without_launchctl()
+
+    def test_paused_workflow_cannot_be_reactivated_by_install(self):
+        self.workflow['enabled'] = False
+        self.write_workflow()
+        self.assert_refused_without_launchctl()
+
+    def test_unknown_native_state_refuses_install(self):
+        self.snapshot.write_text('{broken')
+        self.assert_refused_without_launchctl()
+
+    def test_ambiguous_task_identity_refuses_install(self):
+        self.write_snapshot([self.row, self.row])
+        self.assert_refused_without_launchctl()
+
+    def test_native_cron_drift_refuses_install(self):
+        self.row['cronExpression'] = '0 8 * * 1'
+        self.write_snapshot()
+        self.assert_refused_without_launchctl()
+
+    def test_disabled_native_task_allows_explicit_cutover(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('bootstrap', self.calls.read_text())
+        self.assertFalse(json.loads(self.snapshot.read_text())['scheduledTasks'][0]['enabled'])
+
+    def test_deleted_native_task_allows_cutover_with_prompt_retained(self):
+        self.write_snapshot([])
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_uninstall_does_not_depend_on_native_state(self):
+        self.snapshot.unlink()
+        result = self.install('uninstall')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_report_marks_duplicate_without_writes(self):
+        self.row['enabled'] = True
+        self.write_snapshot()
+        agents = self.home / 'Library/LaunchAgents'
+        agents.mkdir(parents=True)
+        (agents / 'com.carr.headless.test-task.plist').write_bytes(
+            (self.repo / 'ops/headless-tasks/com.carr.headless.test-task.plist').read_bytes())
+        before = {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()}
+        result = self.report()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('duplicate', result.stdout)
+        self.assertFalse(self.calls.exists())
+        self.assertEqual(before, {p: p.read_bytes() for p in self.home.rglob('*') if p.is_file()})
+
+    def test_report_only_explicit_completed_ephemeral_one_shots_for_deletion(self):
+        ephemeral = self.home / '.claude/scheduled-tasks/one-shot/SKILL.md'
+        ephemeral.parent.mkdir()
+        ephemeral.write_text('---\nephemeral: true\n---\nSynthetic continuation.\n')
+        completed = {'id': 'one-shot', 'enabled': False, 'cronExpression': None,
+                     'lastRunAt': 123, 'lastRunStatus': 'succeeded'}
+        self.write_snapshot([self.row, completed, {**completed, 'id': 'personal-task'}])
+        result = self.report()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(result.stdout)['tasks']
+        self.assertEqual([r['task_id'] for r in rows if r['action'] == 'delete_completed_one_shot'], ['one-shot'])
+        self.assertTrue(ephemeral.exists())
+        self.assertFalse(self.calls.exists())
+
+    def test_remaining_registration_set_uses_reviewed_crons(self):
+        tasks = json.loads((REPO / 'ops/headless-tasks/tasks.json').read_text())['tasks']
+        for task_id, cron in {'cc-update-audit': '45 9 * * 1',
+                              'deal-history-research-weekly': '0 10 * * 5',
+                              'restore-rehearse-weekly': '40 7 * * 2',
+                              'social-metrics-pull-weekly': '45 8 * * 3'}.items():
+            with self.subTest(task=task_id):
+                self.assertIn(task_id, tasks)
+                self.assertEqual(tasks[task_id]['cron'], cron)
+                plist = plistlib.loads((REPO / f'ops/headless-tasks/com.carr.headless.{task_id}.plist').read_bytes())
+                self.assertEqual(plist['ProgramArguments'], ['{{REPO}}/bin/headless-task', task_id])
+                self.assertNotIn('RunAtLoad', plist)
+                self.assertNotIn('KeepAlive', plist)
+        for excluded in ['ai-capability-builder', 'linkedin-engagement-daily', 'x-reply-run-daily', 'notes-sweep-hourly']:
+            self.assertNotIn(excluded, tasks)
+
+
+if __name__ == '__main__':
+    unittest.main()
