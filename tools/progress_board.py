@@ -2792,6 +2792,13 @@ def command_note(args: argparse.Namespace) -> None:
     mutate(args.project, add)
 
 
+def consumer_proof_argument(value: str) -> dict[str, Any]:
+    proof = json.loads(value)
+    if not isinstance(proof, dict):
+        raise argparse.ArgumentTypeError("consumer proof must be a JSON object")
+    return proof
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
@@ -2826,7 +2833,7 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--delivery-target", help="worker/app for the configured production URL, or an exact target URI")
     task.add_argument("--delivery-workflow", help="the workflow the consumer must exercise")
     task.add_argument("--delivery-source-sha", help="exact delivered source revision for a task without a PR")
-    task.add_argument("--consumer-proof", type=json.loads, help="carr-consumer-proof.v1 JSON exercise receipt, including pass/fail")
+    task.add_argument("--consumer-proof", type=consumer_proof_argument, help="carr-consumer-proof.v1 JSON exercise receipt, including pass/fail")
     task.set_defaults(func=command_task)
     ask = commands.add_parser("ask")
     ask.add_argument("project")
