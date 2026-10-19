@@ -1188,7 +1188,7 @@ class AsyncCheckpointRecoveryTests(unittest.TestCase):
                         target=pending["target"], finish=pending["finish"], cap=pending["cap"])
                     checkpoint = root / "bridge.json"
                     state_mod.save_state(checkpoint, state)
-                    raw = result(outcome=outcome)
+                    raw = result(outcome=outcome, summary="Original answer")
                     executor.finish_pending(pending, raw)
                     restored = state_mod.load_state(checkpoint)
                     room = KeyReuseRoom()
@@ -1210,10 +1210,13 @@ class AsyncCheckpointRecoveryTests(unittest.TestCase):
                                                   add_room_turn=post, **kwargs)
                         self.assertIsNotNone(state_mod.get_pending(restored, "codex-desk"))
                         restored = state_mod.load_state(checkpoint)
+                        raw = result(outcome=outcome, summary="Changed answer")
                     recovered = bridge.handle_pending("codex-desk", "sol", restored,
                                                       add_room_turn=room if lose_ack else post, **kwargs)
                     self.assertEqual(recovered["outcome"], "already_terminal")
                     self.assertEqual(len(room.completions()), 1)
+                    self.assertEqual(room.completions()[0]["summary"], "Original answer")
+                    self.assertEqual(room.replays, ["queue-completion:t_queue0001"] if lose_ack else [])
                     self.assertEqual(sum(call[0] == method for call in adapter.calls), 1)
                     self.assertEqual(len(adapter.tasks), 1)
                     self.assertEqual(provider.call_count, 1)
