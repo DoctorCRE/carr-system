@@ -108,22 +108,12 @@ fail_tail() {  # fail_tail <logfile>
 }
 
 check_unit() {
-  local failed_pkgs=""
-  for pkg in mcp-server control-room workspace practice-plugin; do
-    [ -f "$pkg/package.json" ] || continue
-    local unit_env=""
-    [ "$pkg" = "mcp-server" ] && unit_env="F03_PARITY_REQUIRE_PYTHON=1"
-    if ! run_quiet "$LOGDIR/unit-$pkg.log" env $unit_env npm --prefix "$pkg" test; then
-      failed_pkgs="$failed_pkgs $pkg"
-      echo "--- $pkg ---" >&2
-      tail -25 "$LOGDIR/unit-$pkg.log" >&2
-    fi
-    "$PY" ops/ci-quarantine.py report "$LOGDIR/unit-$pkg.log"
-  done
-  if [ -n "$failed_pkgs" ]; then
-    bad unit "node suites failed:$failed_pkgs"
+  if run_quiet "$LOGDIR/unit.log" "$PY" ops/ci-unit.py; then
+    cat "$LOGDIR/unit.log"
+    ok unit "required Node package checks executed"
   else
-    ok unit "Node package suites pass"
+    fail_tail "$LOGDIR/unit.log"
+    bad unit "required Node package checks failed or did not execute"
   fi
 }
 
