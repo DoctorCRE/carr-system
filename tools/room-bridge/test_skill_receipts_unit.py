@@ -53,6 +53,25 @@ class SkillReceiptTests(unittest.TestCase):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md',
                                              'Process exited with code 1'))['opened'], [])
 
+    def test_compound_shell_status_does_not_prove_an_individual_read(self):
+        for command in (
+            'true || cat /missing/tdd/SKILL.md',
+            'cat /missing/tdd/SKILL.md; true',
+            'cat /missing/tdd/SKILL.md | true',
+            'cat /missing/tdd/SKILL.md & true',
+            'cat /missing/tdd/SKILL.md\ntrue',
+            'false && cat /missing/tdd/SKILL.md || true',
+        ):
+            with self.subTest(command=command):
+                self.assertEqual(self.scan(self.codex(command))['opened'], [])
+                rows = [
+                    {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'r',
+                     'name': 'Bash', 'input': {'command': command}}]}},
+                    {'type': 'user', 'message': {'content': [{'type': 'tool_result',
+                     'tool_use_id': 'r', 'content': '', 'is_error': False}]}},
+                ]
+                self.assertEqual(self.scan(rows)['opened'], [])
+
     def test_exec_wrapper_and_claude_read(self):
         rows = self.codex('unused')
         rows[0]['payload'].update(name='functions.exec', arguments=json.dumps({
