@@ -172,5 +172,35 @@
     "path": "tools/config.sh",
     "source": "CHROME_BIN=/opt/chromium",
     "allowed": true
+  },
+  {
+    "name": "a JavaScript child-process callable alias",
+    "path": "tools/aliased-process.mjs",
+    "source": "import { execFile as start } from \"node:child_process\";\nstart(\"/usr/bin/chromium\", [\"--headless=new\"]);",
+    "allowed": false
+  },
+  {
+    "name": "a Python subprocess callable alias",
+    "path": "tools/aliased-process.py",
+    "source": "from subprocess import run as start\nstart([\"/usr/bin/chromium\", \"--headless=new\"])",
+    "allowed": false
+  },
+  {
+    "name": "a non-browser JavaScript callable alias",
+    "path": "tools/aliased-node.mjs",
+    "source": "import { execFile as start } from \"node:child_process\";\nstart(\"/usr/bin/node\", [\"check.mjs\"]);",
+    "allowed": true
+  },
+  {
+    "name": "a non-browser Python callable alias",
+    "path": "tools/aliased-python.py",
+    "source": "from subprocess import run as start\nstart([\"/usr/bin/python3\", \"check.py\"])",
+    "allowed": true
+  },
+  {
+    "name": "a shell launch after inline environment assignments",
+    "path": "tools/inline-env.sh",
+    "source": "DISPLAY=:0 chromium --headless=new",
+    "allowed": false
   }
 ]
