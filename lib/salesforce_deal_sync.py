@@ -220,7 +220,7 @@ def apply_plan(plan, call_verb, journal_path):
                 raise ValueError("owner_changed_during_apply_check_receipts")
             if item["kind"] == "create" and "outcome" in item["fields"]:
                 write("update-deal", {"deal": deal_id, "base_version": row["base_version"],
-                                     "fields": {"outcome": item["fields"]["outcome"]}})
+                                     "fields": guarded_deal_fields(row, {"outcome": item["fields"]["outcome"]})})
                 current = read_snapshot(call_verb)
                 row = next(d for d in current if d["id"] == deal_id)
                 if row.get("outcome") != item["fields"]["outcome"]:

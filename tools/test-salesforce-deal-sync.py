@@ -251,6 +251,24 @@ class SalesforceSyncTests(unittest.TestCase):
         self.assertEqual(fields, {"salesforce_id": "006000000000001", "phase": "research", "outcome": None,
                                   "sf_close_date_placeholder": "2026-12-01", "closed_on": None, "invoiced_on": None})
 
+    def test_new_closed_deal_cannot_mark_won_after_a_concurrent_identity_change(self):
+        plan = self.plan("006000000000001,Example office,Example Practice,Closed Won,Dell,2026-10-01\n",
+                         clients=[{"ref": "C-001", "name": "Example Practice"}])
+        records = RecordLayer()
+        def concurrent(verb, args):
+            if verb == 'update-deal':
+                row = records.deals[0]
+                row['salesforce_id'] = '006000000000002'
+                row['base_version'] += 1
+                if 'salesforce_id' in args['fields']:
+                    return {'ok': False, 'error': 'version_conflict'}
+                args = {**args, 'base_version': row['base_version']}
+            return records(verb, args)
+        with tempfile.TemporaryDirectory() as folder, self.assertRaises(ValueError):
+            sync.apply_plan(plan, concurrent, Path(folder) / 'receipts')
+        self.assertIsNone(records.deals[0].get('outcome'))
+        self.assertEqual(records.deals[0]['salesforce_id'], '006000000000002')
+
     def test_interrupted_create_is_journaled_and_reconciled_without_duplicate(self):
         row = "006000000000001,Example expansion,Example Practice,Closed Won,Dell McCraney,2026-10-01\n"
         p = self.plan(row, clients=[{"ref": "C-001", "name": "Example Practice"}])
