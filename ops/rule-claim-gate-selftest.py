@@ -8,8 +8,11 @@ import sys
 import tempfile
 import unittest
 
+from git_env import fixture_env
+
 REPO = Path(__file__).resolve().parent.parent
 HOOK = REPO / 'hooks/rule-claim-gate.py'
+ENV = fixture_env()
 
 
 def message(role, content, **extra):
@@ -40,7 +43,8 @@ class RuleClaimGateTest(unittest.TestCase):
         payload = {'hook_event_name': 'Stop', 'session_id': f'fixture-{self.invocations}',
                    'cwd': str(self.root), 'transcript_path': str(self.transcript),
                    **overrides}
-        result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload),
+        env = ENV | getattr(self, 'hook_env', {})
+        result = subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload), env=env,
                                 text=True, capture_output=True, cwd=self.root)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout) if result.stdout.strip() else {}
@@ -51,22 +55,23 @@ class RuleClaimGateTest(unittest.TestCase):
     def checkout(self, name, origin='https://github.com/jbookout/carr-system.git'):
         root = self.root / name
         root.mkdir(exist_ok=True)
-        subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True)
-        subprocess.run(['git', '-C', str(root), 'remote', 'add', 'origin', origin], check=True)
+        subprocess.run(['git', 'init', '-q', str(root)], check=True, capture_output=True, env=ENV)
+        subprocess.run(['git', '-C', str(root), 'remote', 'add', 'origin', origin],
+                       check=True, env=ENV)
         return root
 
     def test_enforcement_edits_in_external_clone_and_worktree_pass(self):
         source = self.checkout('source')
         subprocess.run(['git', '-C', str(source), '-c', 'user.name=Fixture',
                         '-c', 'user.email=jbookout@users.noreply.github.com',
-                        'commit', '-q', '--allow-empty', '-m', 'Fixture'], check=True)
+                        'commit', '-q', '--allow-empty', '-m', 'Fixture'], check=True, env=ENV)
         clone = self.root / 'scratchpad/clone'
-        subprocess.run(['git', 'clone', '-q', str(source), str(clone)], check=True)
+        subprocess.run(['git', 'clone', '-q', str(source), str(clone)], check=True, env=ENV)
         subprocess.run(['git', '-C', str(clone), 'remote', 'set-url', 'origin',
-                        'git@github.com:jbookout/carr-system.git'], check=True)
+                        'git@github.com:jbookout/carr-system.git'], check=True, env=ENV)
         worktree = self.root / 'scratchpad/worktree'
         subprocess.run(['git', '-C', str(source), 'worktree', 'add', '-q', '-b',
-                        'fixture', str(worktree)], check=True)
+                        'fixture', str(worktree)], check=True, env=ENV)
         event_cwd = self.root / 'session'
         event_cwd.mkdir()
         for root in [clone, worktree]:
@@ -113,6 +118,13 @@ class RuleClaimGateTest(unittest.TestCase):
                 self.assertEqual(self.run_hook(self.turn(
                     call('Edit', file_path=str(root / 'hooks/check.py')),
                     assistant('I saved a rule.'))).get('decision'), 'block')
+
+    def test_inherited_git_directory_does_not_override_edited_checkout(self):
+        foreign = self.checkout('foreign', 'https://github.com/jbookout/other.git')
+        self.hook_env = {'GIT_DIR': str(foreign / '.git')}
+        self.assertNotEqual(self.run_hook(self.turn(
+            call('Edit', file_path=str(self.root / 'hooks/check.py')),
+            assistant('I saved a rule.'))).get('decision'), 'block')
 
     def test_external_checkout_preserves_enforcement_path_restrictions(self):
         root = self.checkout('external', 'ssh://git@github.com/jbookout/carr-system.git')
@@ -278,7 +290,7 @@ class RuleClaimGateTest(unittest.TestCase):
     def test_parse_error_fails_open_and_logs(self):
         self.transcript.write_text('{broken json\n')
         result = subprocess.run([sys.executable, str(HOOK)], text=True, capture_output=True,
-            cwd=self.root, input=json.dumps({'cwd': str(self.root), 'hook_event_name': 'Stop',
+            cwd=self.root, env=ENV, input=json.dumps({'cwd': str(self.root), 'hook_event_name': 'Stop',
                                              'transcript_path': str(self.transcript)}))
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('"block"', result.stdout)
@@ -287,7 +299,7 @@ class RuleClaimGateTest(unittest.TestCase):
 
     def test_bad_stdin_fails_open_with_log_line(self):
         result = subprocess.run([sys.executable, str(HOOK)], input='{', text=True,
-                                capture_output=True, cwd=self.root)
+                                capture_output=True, cwd=self.root, env=ENV)
         self.assertEqual(result.returncode, 0)
         self.assertIn('parse_error', result.stderr)
 
