@@ -26,6 +26,7 @@ import time
 import sys
 import tempfile
 import urllib.request
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from http.client import HTTPException
 from pathlib import Path
@@ -2191,24 +2192,63 @@ class SnapshotTooLarge(RuntimeError):
 
 
 def snapshot_size(snapshot: dict[str, Any]) -> int:
-    """JSON.stringify(snapshot).length, as publish-board-snapshot measures it."""
+    """Compact JSON in UTF-16 units; numeric spellings can differ from JavaScript."""
     text = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
     return len(text.encode("utf-16-le")) // 2
 
 
 def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Trim until the whole payload fits: oldest Live cards first, then oldest
+    """Share repeated fields present on every task when the payload is oversized.
+    A v3 consumer restores each task by overlaying it on task_defaults.
+    Trim until the whole payload fits: oldest Live cards first, then oldest
     Merged cards, then the oldest History rows. Milestone cards, in-flight work, notes,
     decisions and the ledger are never dropped; if they alone are too large
     the snapshot is refused rather than published short."""
     tasks, history = snapshot["tasks"], snapshot["history"]
 
+    def discard_unused_defaults() -> int:
+        if "task_defaults" not in snapshot:
+            return 0
+        defaults = snapshot["task_defaults"]
+        before = snapshot_size({"task_defaults": defaults})
+        for field in list(defaults):
+            if all(field in task for task in tasks.values()):
+                defaults.pop(field)
+        if not defaults:
+            snapshot.pop("task_defaults")
+            snapshot["schema"] = SNAPSHOT_SCHEMA
+            return before - 1
+        return before - snapshot_size({"task_defaults": defaults})
+
+    discard_unused_defaults()
+    if tasks and "task_defaults" not in snapshot and snapshot_size(snapshot) > SNAPSHOT_BUDGET:
+        defaults = {}
+        for field in sorted(set.intersection(*(set(task) for task in tasks.values()))):
+            encoded = {key: json.dumps(task[field], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                       for key, task in tasks.items()}
+            value, count = Counter(encoded.values()).most_common(1)[0]
+            if count < 2:
+                continue
+            before = snapshot_size(snapshot)
+            removed = {key: tasks[key].pop(field) for key, text in encoded.items() if text == value}
+            defaults[field] = next(iter(removed.values()))
+            snapshot["task_defaults"] = defaults
+            if snapshot_size(snapshot) >= before:
+                defaults.pop(field)
+                for key, original in removed.items():
+                    tasks[key][field] = original
+                if not defaults:
+                    snapshot.pop("task_defaults")
+        if defaults:
+            snapshot["schema"] = "carr-progress-board.v3"
+    projected = {key: {**snapshot.get("task_defaults", {}), **task} for key, task in tasks.items()}
+
     def age(task: dict[str, Any]) -> str:
         return str(task.get("completed_at") or task.get("merged_at") or task.get("updated_at") or "")
     order = [("live", "tasks", key) for key in sorted(
-                 (k for k, t in tasks.items() if task_stage(t) == "live" and not t.get("milestone")), key=lambda k: (age(tasks[k]), k))]
+                 (k for k, t in projected.items() if task_stage(t) == "live" and not t.get("milestone")), key=lambda k: (age(projected[k]), k))]
     order += [("merged", "tasks", key) for key in sorted(
-                 (k for k, t in tasks.items() if task_stage(t) == "merged" and not t.get("milestone")), key=lambda k: (age(tasks[k]), k))]
+                 (k for k, t in projected.items() if task_stage(t) == "merged" and not t.get("milestone")), key=lambda k: (age(projected[k]), k))]
     order += [("history", "history", key) for key in sorted(
                  history, key=lambda k: (str(history[k].get("updated_at") or ""), k))]
     size = snapshot_size(snapshot)
@@ -2220,6 +2260,7 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             index += 1
             entry = snapshot[section].pop(key)
             freed += snapshot_size({key: entry}) - 1
+            freed += discard_unused_defaults()
             snapshot["omitted"][kind] += 1
         size = snapshot_size(snapshot)
     if size > SNAPSHOT_BUDGET:
@@ -2279,6 +2320,18 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
+        for key, value in card.items():
+            if key.endswith("_at") and isinstance(value, str) and value.endswith("+00:00"):
+                card[key] = value[:-6] + "Z"
+        history = card.get("stage_history") or []
+        for entry in history:
+            entered = entry["entered_at"]
+            if entered.endswith("+00:00"):
+                entry["entered_at"] = entered[:-6] + "Z"
+        if history and card.get("stage_entered_at") == history[-1]["entered_at"]:
+            card.pop("stage_entered_at", None)
+        if card.get("release_wait") == CONSUMER_PROOF_PENDING:
+            card["release_wait"] = "Matching consumer proof required."
         reason = card.get("blocked_reason")
         if isinstance(reason, str) and len(reason) > BLOCKER_EXCERPT_LIMIT:
             head = BLOCKER_EXCERPT_LIMIT // 2
