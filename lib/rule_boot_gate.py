@@ -109,7 +109,7 @@ _AGENT_FILE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 # id). Only these count as the fetch or as a pre-boot read; the same verb name
 # on any other server is an ordinary tool. A partner whose claude.ai connector
 # has a different id fetches through the Bash form, which is always allowed.
-CARR_MCP_PREFIXES = ("mcp__carr__", "mcp__carr_records__", "mcp__claude_ai_CARR_Record_Layer__",
+CARR_MCP_PREFIXES: tuple[str, ...] = ("mcp__carr__", "mcp__carr_records__", "mcp__claude_ai_CARR_Record_Layer__",
                      "mcp__b36e17b6-7e3b-4e65-b890-21f21d538440__")
 # Grok's native MCP names omit only the transport's mcp__ prefix.
 CARR_MCP_PREFIXES += tuple(prefix.removeprefix("mcp__") for prefix in CARR_MCP_PREFIXES)

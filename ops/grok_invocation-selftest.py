@@ -15,6 +15,7 @@ sys.path.insert(0, str(REPO))
 from hooks import grok_invocation
 
 spec = importlib.util.spec_from_file_location('boot_fixture', REPO / 'ops/rule-boot-gate-selftest.py')
+assert spec is not None and spec.loader is not None
 fixture = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixture)
 

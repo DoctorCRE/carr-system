@@ -557,7 +557,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
     elif entry["kind"] == "claude-remote":
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
-        grok_options = {"retrieval": True} if retrieval else {}
+        grok_options: dict = {"retrieval": True} if retrieval else {}
         if env is not None:
             grok_options['env'] = scrubbed_env(env)
         if request.get('provider_run') is not None:
