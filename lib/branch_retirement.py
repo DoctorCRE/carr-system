@@ -170,6 +170,10 @@ class MaintenanceDeferred(RuntimeError):
     pass
 
 
+class MainAdvanced(RuntimeError):
+    pass
+
+
 @contextmanager
 def maintenance(root):
     lock = root / "out/worktree-reap.lock"
@@ -300,13 +304,16 @@ class FleetReaper:
             landed = self.ancestor(root, head, main) or bool(merge_pr)
             classification = branch_verdict(merged=landed, successor=successor,
                 open_pr=bool(active), idle=self.clock() - int(updated) >= self.branch_idle)
+            retire_pr = merge_pr or next((p for p in related if p["state"] == "closed"
+                and not p.get("merged_at") and p["head"]["sha"] == head and self.target_matches(p, repo)), None)
             protected = protected_branch(self.config, name)
             if protected:
                 classification = "live"
             row = {"kind": "branch", "repo": repo, "name": name, "ref": ref, "head": head,
                    "class": classification, "main": main, "successor": successor,
-                   "merge_pr": merge_pr["number"] if merge_pr else None,
-                   "action": "delete_remote" if classification == "merged" and
+                   "retire_pr": retire_pr["number"] if retire_pr else None,
+                   "action": "delete_remote" if (classification == "merged" or
+                   classification == "abandoned" and retire_pr) and
                    ref.startswith("refs/remotes/origin/") and not protected else None}
             rows.append(row)
             by_branch.setdefault(name, []).append(row)
@@ -468,9 +475,26 @@ class FleetReaper:
         return recovered
 
     def apply(self, repo, root, row, skip):
+        for replans in range(4):
+            try:
+                result = self._apply(repo, root, row, skip)
+                return {**result, "main": row["main"], "main_replans": replans} if replans else result
+            except MainAdvanced:
+                if replans == 3:
+                    return {"status": "preserved", "reason": "main kept advancing after 3 replans",
+                            "main": row["main"], "main_replans": replans}
+                git(root, "fetch", "origin", "main")
+                main = git(root, "rev-parse", "refs/remotes/origin/main")
+                if not self.ancestor(root, row["main"], main):
+                    return {"status": "preserved", "reason": "main no longer descends from planned main"}
+                row = {**row, "main": main}
+
+    def _apply(self, repo, root, row, skip):
         self.provider.verify_repository(repo, root)
         advertised = git(root, "ls-remote", "--heads", "origin", "refs/heads/main").split()
         if not advertised or advertised[0] != row["main"]:
+            if advertised and row["action"] == "delete_remote":
+                raise MainAdvanced
             return {"status": "preserved", "reason": "evidence changed before action"}
         if row["action"] == "stage_worktree":
             entry = next((e for e in self.hook.worktree_entries(str(root)) if
@@ -514,10 +538,19 @@ class FleetReaper:
         if self.provider.open_pulls(repo, row["name"]):
             return {"status": "preserved", "reason": "open PR now protects branch"}
         if not self.ancestor(root, row["head"], row["main"]):
-            proof = self.provider.pull(repo, row["merge_pr"])
-            if not proof.get("merged_at") or proof["head"]["sha"] != row["head"] or \
-                    proof["base"]["ref"] != "main" or not self.ancestor(root, proof["merge_commit_sha"], row["main"]):
+            proof = self.provider.pull(repo, row["retire_pr"])
+            if proof["state"] != "closed" or proof["head"]["sha"] != row["head"] or \
+                    proof["head"]["ref"] != row["name"] or \
+                    (proof["head"].get("repo") or {}).get("full_name") != repo or not self.target_matches(proof, repo):
+                return {"status": "preserved", "reason": "retirement PR changed"}
+            if row["class"] == "merged" and (not proof.get("merged_at") or
+                    not self.ancestor(root, proof["merge_commit_sha"], row["main"])):
                 return {"status": "preserved", "reason": "merge proof changed"}
+        advertised = git(root, "ls-remote", "--heads", "origin", "refs/heads/main").split()
+        if not advertised:
+            return {"status": "preserved", "reason": "main unavailable before retirement"}
+        if advertised[0] != row["main"]:
+            raise MainAdvanced
         backup = "refs/retired-branches/" + row["head"] + "-" + hashlib.sha256(ref.encode()).hexdigest()[:16]
         git(root, "update-ref", backup, row["head"])
         if git(root, "rev-parse", backup) != row["head"]:

@@ -487,7 +487,8 @@ class RestRefresh(unittest.TestCase):
         with patch.object(B, "latest_release", return_value={"sha": task["merge_sha"], "lane": "worker",
                                                              "ts": None, "source": "test receipt"}):
             board = B.assemble_all_repos(B.read_state("all-repos"), {REPO: ([], [info])})
-        self.assertEqual(board["tasks"]["carr-system-1"]["stage"], "live")
+        self.assertEqual(board["tasks"]["carr-system-1"]["stage"], "merged")
+        self.assertIn("consumer proof", board["tasks"]["carr-system-1"]["release_wait"])
 
     def test_recorded_fixture_contact_fields_are_synthetic_and_provenance_says_so(self):
         root = Path(__file__).with_name("fixtures") / "progress-board-rest"

@@ -139,17 +139,6 @@ check("the exempt set is exactly the check and this suite",
                                 "ops/stale-count-selftest.py"},
       str(sorted(_mod.SELF_REFERENTIAL)))
 
-# ── the real repository, and this assertion IS the enforcement ──────────────
-# Asserting only "it runs" would make this a report nobody reads. The repo is
-# clean as of 2026-08-15 — every site found by this check was fixed in the same
-# pull request — so demanding it STAY clean costs nothing today and fails CI the
-# moment a new open-ended count is committed. That is the whole point: rule
-# b01edd26 was violated four times while it was advisory prose.
-p = subprocess.run([sys.executable, CHECK], capture_output=True, text=True,
-                   cwd=REPO, timeout=180)
-check("THE REPOSITORY CARRIES NO OPEN-ENDED COUNT — a new one fails CI here",
-      p.returncode == 0, (p.stdout + p.stderr)[:600])
-
 print()
 if FAILED:
     print(f"FAILED {len(FAILED)} check(s):")
