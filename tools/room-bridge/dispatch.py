@@ -32,7 +32,17 @@ process group. Final response and numeric usage are recorded in the results row.
 User configuration is ignored for the invocation to prevent provider fallback;
 AGENTS.md and project rules still load. Authentication stays with Hermes.
 
+Nous spending uses ops/config/nous-spend.v1.json and a durable .nous-spend.json
+ledger beside the canonical dispatch results. Redirecting --results does not
+reset the shared budget. Each admission reserves the configured run estimate.
+Reported usage dollars take priority; otherwise tokens use the selected Portal
+price. Booked costs round upward to cents. Unknown costs block later spending.
+Payment/credit/quota failures set a sticky stop; only a human may reconcile or
+clear it in the ledger. There is no automatic reset or paid-provider fallback.
+This admission budget does not impose a provider-side dollar ceiling on a run.
+
     dispatch.py register nous-builder --kind hermes-nous --provider nous --family glm --timeout 900
+    dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
 EVERY DISPATCH LEAVES A LINE in the results file, NDJSON, one object per
@@ -79,6 +89,7 @@ import codex_wire  # noqa: E402  — Codex worked out this protocol, see the mod
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import hermes_wire
+import nous_budget
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
@@ -541,7 +552,8 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             grok_options['run'] = run_cli
         outcome = grok_wire.run_task(entry, task, **grok_options)
     elif entry['kind'] == 'hermes-nous':
-        outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli)
+        outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli,
+                                      results_path=request['budget_results_path'], run_id=msg_id)
     elif entry["kind"] == "flash-local":
         outcome = flash_wire.run_task(task)
     elif entry["kind"] == "codex-live":
@@ -673,7 +685,7 @@ def dispatch(
             entry = {**entry, **prepared, 'cwd': prepared['checkout_workspace']}
             if cwd:
                 cwd = prepared['checkout_workspace']
-    request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env,
+    request = {'entry': entry, 'task': task, 'msg_id': msg_id, 'env': env, 'budget_results_path': str(DEFAULT_RESULTS),
                'fresh': fresh, 'cwd': cwd, 'retrieval': retrieval,
                'live_desktop': live_desktop, 'codex_timeout_s': codex_timeout_s,
                'config_overrides': config_overrides, 'stream_output': stream_output,
@@ -1005,6 +1017,7 @@ def main(argv: list[str]) -> int:
     f.add_argument("name")
 
     sub.add_parser("desks", help="list registered desks and whether they are live")
+    sub.add_parser('nous-budget', help='read Nous spent, reserved, budget and sticky stop from the results ledger')
 
     st = sub.add_parser("start", help="put a Claude desk on the line and register it")
     st.add_argument("name")
@@ -1038,6 +1051,13 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        if a.cmd == 'nous-budget':
+            try:
+                print(json.dumps(nous_budget.Ledger(DEFAULT_RESULTS).read(), indent=2))
+            except (OSError, ValueError, KeyError, TypeError):
+                print('Nous budget ledger unavailable', file=sys.stderr)
+                return 1
+            return 0
         if a.cmd == "where":
             return _cmd_where()
 

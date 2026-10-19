@@ -142,6 +142,16 @@ class FakeAdapter:
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_nous_spend_stop_is_terminal_and_never_schedules_a_retry(self):
+        adapter = FakeAdapter([task()])
+        controller = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+        outcome = controller.start('sol', dispatch_call=lambda _prompt: {
+            'status': 'failed', 'code': 'nous_spend_stop', 'detail': 'Nous credit budget spent'})
+        self.assertEqual(outcome['outcome'], 'blocked')
+        self.assertEqual(outcome['code'], 'nous_spend_stop')
+        self.assertEqual(adapter.status['t_queue0001'], 'blocked')
+        self.assertFalse(any(call[0] in ('retry_attempt', 'reclaim') for call in adapter.calls))
+
     def test_repository_catalog_keeps_profiles_mapped_and_ox_budget_gated(self):
         catalog = kanban_adapter.load_catalog()
         targets = catalog["targets"]

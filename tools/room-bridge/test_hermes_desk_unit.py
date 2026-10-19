@@ -27,6 +27,10 @@ class HermesTests(unittest.TestCase):
         hermes.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys, subprocess, time
 mode = os.environ.get('FAKE_MODE', '')
+if sys.argv[1:] == ['fallback', 'list']:
+    print('Fallback chain: other paid provider' if os.environ.get('FAKE_FALLBACK')
+          else '  No fallback providers configured.')
+    sys.exit(0)
 if sys.argv[1:] == ['portal', 'status']:
     if mode == 'auth-failure':
         print('fixture-private-diagnostic', file=sys.stderr)
@@ -50,11 +54,15 @@ if mode == 'missing-usage':
 pathlib.Path(sys.argv[sys.argv.index('--usage-file') + 1]).write_text(json.dumps({
     'model': 'other/model' if mode == 'mismatch' else model,
     'provider': 'nous', 'completed': mode not in ('fail', 'partial'), 'input_tokens': 123,
-    'output_tokens': 45, 'api_calls': 2, 'estimated_cost_usd': 0.02,
+    'output_tokens': 45, 'api_calls': 2,
+    'estimated_cost_usd': None if mode == 'token-cost' else float(os.environ.get('FAKE_COST', '0.02')),
     'failure': 'fixture-private-diagnostic'}))
 if mode == 'fail':
     print('Job failed.')
     print('fixture-private-diagnostic', file=sys.stderr)
+    sys.exit(3)
+if mode == 'credits':
+    print(os.environ['FAKE_CREDIT_ERROR'], file=sys.stderr)
     sys.exit(3)
 if mode == 'write':
     pathlib.Path('fixed.py').write_text('fixed = True\\n')
@@ -68,7 +76,8 @@ print('Fixed and tested.')
         catalog.write_text('''#!/usr/bin/env python3
 import json
 print(json.dumps({'paidRecommendedModels': [
-    {'modelName': 'z-ai/glm-8.9'}, {'modelName': 'z-ai/glm-8.10:US'},
+    {'modelName': 'z-ai/glm-8.9'}, {'modelName': 'z-ai/glm-8.10:US',
+     'tokenPrice': 'in $2.00 / out $6.00 per 1M'},
     {'modelName': 'z-ai/glm-8.10-flash:US'}, {'modelName': 'deepseek/deepseek-v7-pro'}]}))
 ''')
         catalog.chmod(0o755)
@@ -76,6 +85,9 @@ print(json.dumps({'paidRecommendedModels': [
                     'CARR_HERMES_SLOT_DIR': str(self.root / 'hermes-slots')}
         self.reg = desks.Registry(self.root / 'desks.json')
         self.results = self.root / 'results.jsonl'
+        default_results = patch.object(dispatch, 'DEFAULT_RESULTS', self.results)
+        default_results.start()
+        self.addCleanup(default_results.stop)
 
     def register(self, **options):
         return self.reg.register('nous-builder', 'hermes-nous', cwd=str(self.root),
@@ -110,6 +122,96 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['exit_code'], 3)
         self.assertEqual(row['usage']['api_calls'], 2)
         self.assertNotIn('fixture-private-diagnostic', self.results.read_text())
+
+    def test_cost_ledger_persists_spend_and_refuses_the_next_estimate(self):
+        self.register()
+        self.env['FAKE_COST'] = '19.50'
+        first = self.send()
+        self.assertEqual(first['status'], 'completed')
+        ledger = self.results.with_name(self.results.name + '.nous-spend.json')
+        saved = json.loads(ledger.read_text())
+        self.assertEqual(saved['runs'][first['msg_id']]['cost_usd'], '19.50')
+        self.assertEqual(saved['runs'][first['msg_id']]['cost_source'], 'hermes_usage_usd')
+        (self.root / 'invocation.json').unlink()
+        second = self.send()
+        self.assertEqual(second['status'], 'failed')
+        self.assertEqual(second['detail'], 'Nous credit budget spent')
+        self.assertEqual(second['code'], 'nous_spend_stop')
+        self.assertFalse((self.root / 'invocation.json').exists())
+
+    def test_redirected_results_do_not_create_a_fresh_budget(self):
+        self.register()
+        self.env['FAKE_COST'] = '19.50'
+        self.send()
+        self.results = self.root / 'redirected-results.jsonl'
+        self.assertEqual(self.send()['detail'], 'Nous credit budget spent')
+
+    def test_credit_errors_set_a_sticky_stop_across_later_dispatches(self):
+        self.register()
+        for index, message in enumerate(('HTTP 402 Payment Required', 'insufficient_credits',
+                                         'out of credits', 'quota exhausted',
+                                         '{"status_code":402,"error":"billing"}')):
+            with self.subTest(message=message):
+                self.results = self.root / f'credit-{index}.jsonl'
+                dispatch.DEFAULT_RESULTS = self.results
+                self.env.update(FAKE_MODE='credits', FAKE_CREDIT_ERROR=message)
+                first = self.send()
+                self.assertEqual(first['status'], 'failed')
+                self.assertEqual(first['detail'], 'nous credits exhausted')
+                self.env['FAKE_MODE'] = ''
+                (self.root / 'invocation.json').unlink()
+                second = self.send()
+                self.assertEqual(second['detail'], 'nous credits exhausted')
+                self.assertFalse((self.root / 'invocation.json').exists())
+
+    def test_missing_cost_stops_later_spending_instead_of_assuming_zero(self):
+        self.register()
+        self.env['FAKE_MODE'] = 'missing-usage'
+        self.send()
+        self.env['FAKE_MODE'] = ''
+        self.assertEqual(self.send()['detail'], 'Nous run cost unavailable; reconcile ledger')
+
+    def test_paid_fallback_configuration_refuses_inference(self):
+        self.register()
+        self.env['FAKE_FALLBACK'] = 'paid'
+        row = self.send()
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['detail'], 'Hermes fallback chain must be empty')
+        self.assertFalse((self.root / 'invocation.json').exists())
+
+    def test_tokens_use_the_selected_portal_price_when_dollars_are_absent(self):
+        self.register()
+        self.env['FAKE_MODE'] = 'token-cost'
+        row = self.send()
+        self.assertEqual(row['status'], 'completed')
+        path = self.results.with_name(self.results.name + '.nous-spend.json')
+        receipt = json.loads(path.read_text())['runs'][row['msg_id']]
+        self.assertEqual(receipt['cost_source'], 'portal_tokens')
+        self.assertEqual(receipt['calculated_cost_usd'], '0.000516')
+        self.assertEqual(receipt['cost_usd'], '0.01')
+        self.assertEqual(receipt['price']['source'], 'nous_recommended_models')
+
+    def test_unpriced_tokens_fail_closed_and_stop_later_spending(self):
+        self.reg.register('nous-builder', 'hermes-nous', cwd=str(self.root), family='deepseek')
+        self.env['FAKE_MODE'] = 'token-cost'
+        self.assertEqual(self.send()['status'], 'failed')
+        self.env['FAKE_MODE'] = ''
+        self.assertEqual(self.send()['detail'], 'Nous run cost unavailable; reconcile ledger')
+
+    def test_budget_read_command_prints_spend_without_changing_the_ledger(self):
+        self.register()
+        self.send()
+        self.send()
+        path = self.results.with_name(self.results.name + '.nous-spend.json')
+        before = path.read_bytes()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = dispatch.main(['--results', str(self.results), 'nous-budget'])
+        self.assertEqual(code, 0)
+        readback = json.loads(output.getvalue())
+        self.assertEqual(readback['spent_usd'], '0.04')
+        self.assertEqual(readback['budget_usd'], '20.00')
+        self.assertEqual(path.read_bytes(), before)
 
     def test_signed_out_fails_before_catalog_or_inference(self):
         self.register()
