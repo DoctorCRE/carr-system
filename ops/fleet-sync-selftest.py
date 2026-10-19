@@ -376,6 +376,37 @@ def test_staging_at_merge_entry_is_excluded():
     print("PASS  staging at merge entry is excluded; files, index and HEAD stay intact")
 
 
+def test_existing_index_lock_refuses_without_stealing():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        before = tracked_state(b)
+        lock = Path(b, ".git", "index.lock")
+        lock.write_bytes(b"another writer owns this lock\n")
+        r = run_sync(b)
+        assert r.returncode == 78, r.stdout + r.stderr
+        assert "index.lock" in r.stdout + r.stderr
+        assert lock.read_bytes() == b"another writer owns this lock\n"
+        assert tracked_state(b) == before
+        assert "stub installer" not in r.stdout
+    print("PASS  an existing index lock refuses without stealing or changing work")
+
+
+def test_split_index_is_published_and_lock_released():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        git(b, "update-index", "--split-index")
+        r = run_sync(b)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert git(b, "write-tree") == git(b, "rev-parse", "HEAD^{tree}")
+        assert git(b, "status", "--porcelain", "--untracked-files=no") == ""
+        assert not Path(b, ".git", "index.lock").exists()
+        assert not list(Path(b, ".git").glob("fleet-sync-index-*"))
+        Path(b, "f.txt").write_text("next staged change\n")
+        git(b, "add", "f.txt")
+        assert git(b, "show", ":f.txt") == "next staged change"
+    print("PASS  split index publishes the merged tree and admits the next writer")
+
+
 def test_concurrent_merge_conflict_refuses_and_reports():
     with tempfile.TemporaryDirectory() as tmp:
         b = build(tmp)
@@ -984,6 +1015,8 @@ def main():
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
     test_staging_at_merge_entry_is_excluded()
+    test_existing_index_lock_refuses_without_stealing()
+    test_split_index_is_published_and_lock_released()
     test_concurrent_merge_conflict_refuses_and_reports()
     test_ignored_incoming_collision_refuses()
     test_intermediate_landed_residue_refuses()

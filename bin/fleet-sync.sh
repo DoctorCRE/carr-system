@@ -147,23 +147,13 @@ if [ "$canonical_skip" -eq 0 ]; then
       print -r -- "fleet-sync: SKIP — main has diverged from origin/main; a human decides this one"
       canonical_status=$EX_CONFIG
       canonical_skip=1
-    elif ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" "$remote_sha")"; then
-      print -r -- "fleet-sync: SKIP — local changes appeared before fast-forward:"
-      print -r -- "    $dirt_reason"
-      canonical_status=$EX_CONFIG
-      canonical_skip=1
-    elif ! merge_reason="$(git merge --ff-only --no-overwrite-ignore "$remote_sha" 2>&1)"; then
+    elif merge_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" --fast-forward "$REPO" "$remote_sha" 2>&1)"; then
+      print -r -- "fleet-sync: fast-forwarded ${local_sha:0:8} -> ${remote_sha:0:8}"
+    else
+      canonical_status=$?
       print -ru2 -- "fleet-sync: fast-forward refused:"
       print -ru2 -- "$merge_reason"
-      canonical_status=1
-      if ! dirt_reason="$("$PY" "$REPO/tools/fleet_sync_safety.py" "$REPO" "$remote_sha")"; then
-        print -r -- "fleet-sync: SKIP — local changes present after refused fast-forward:"
-        print -r -- "    $dirt_reason"
-        canonical_status=$EX_CONFIG
-      fi
       canonical_skip=1
-    else
-      print -r -- "fleet-sync: fast-forwarded ${local_sha:0:8} -> ${remote_sha:0:8}"
     fi
   fi
 fi

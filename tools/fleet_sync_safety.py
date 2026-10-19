@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import glob
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -183,13 +184,55 @@ def eligible_for_fast_forward(repo: str, incoming: str) -> tuple[bool, str]:
     return True, exact_reason
 
 
+def fast_forward(repo: str, incoming: str) -> tuple[int, str]:
+    """Exclude canonical index writers until the checked merge is published."""
+    located = _git(repo, "rev-parse", "--path-format=absolute", "--git-path", "index")
+    if located.returncode:
+        return 1, "could not locate the canonical index"
+    index = located.stdout.strip()
+    lock = index + ".lock"
+    try:
+        descriptor = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return 78, f"another Git writer holds {lock}; refusing to fast-forward"
+    os.close(descriptor)
+    try:
+        with tempfile.TemporaryDirectory(prefix="fleet-sync-index-", dir=os.path.dirname(index)) as tmp:
+            private = os.path.join(tmp, "index")
+            shutil.copyfile(index, private)
+            allowed, reason = eligible_for_fast_forward(repo, incoming)
+            if not allowed:
+                return 78, reason
+            # Keep the canonical lock present until publication. Git takes its
+            # own lock on the private index, never releasing the canonical one.
+            merged = _git_with_index(repo, private, "merge", "--ff-only",
+                                     "--no-overwrite-ignore", incoming)
+            if merged.returncode:
+                allowed, reason = eligible_for_fast_forward(repo, incoming)
+                return (1 if allowed else 78,
+                        merged.stdout + merged.stderr + ("\n" + reason if not allowed else ""))
+            os.replace(private, index)
+            return 0, merged.stdout + merged.stderr
+    finally:
+        os.unlink(lock)
+
+
 def main() -> int:
-    if len(sys.argv) != 3:
-        print("usage: fleet_sync_safety.py REPO INCOMING", file=sys.stderr)
+    args = sys.argv[1:]
+    merge = args[:1] == ["--fast-forward"]
+    if merge:
+        args = args[1:]
+    if len(args) != 2:
+        print("usage: fleet_sync_safety.py [--fast-forward] REPO INCOMING", file=sys.stderr)
         return 2
-    allowed, reason = eligible_for_fast_forward(os.path.abspath(sys.argv[1]), sys.argv[2])
+    repo, incoming = os.path.abspath(args[0]), args[1]
+    if merge:
+        code, reason = fast_forward(repo, incoming)
+    else:
+        allowed, reason = eligible_for_fast_forward(repo, incoming)
+        code = 0 if allowed else 78
     print(reason)
-    return 0 if allowed else 78
+    return code
 
 
 if __name__ == "__main__":
