@@ -97,8 +97,13 @@ def compare(cur: Any, manifest: dict[str, Any], *, resolve_managed_enabled: bool
                where a.sponsor='joe')""")
             managed_joe_enabled = bool(fetchone_required(
                 cur.fetchone(), "Joe calendar prebrief activation receipt")[0])
-    if set(live) != set(expected):
-        failures.append(f"workflow keys differ missing={sorted(set(expected)-set(live))} extra={sorted(set(live)-set(expected))}")
+    # Sync disables a superseded version and keeps its row for the jobs that
+    # reference it; that history is not drift while its key is still declared.
+    declared = {key for key, _ in expected}
+    extra = sorted(i for i in set(live) - set(expected) if live[i][2] or i[0] not in declared)
+    missing = sorted(set(expected) - set(live))
+    if missing or extra:
+        failures.append(f"workflow keys differ missing={missing} extra={extra}")
     for identity, workflow in expected.items():
         row = live.get(identity)
         if row is None:
