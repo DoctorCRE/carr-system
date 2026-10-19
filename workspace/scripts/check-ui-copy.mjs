@@ -53,7 +53,11 @@ export async function checkUiCopy(paths) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const paths = process.argv.slice(2);
-  const roots = paths.length ? paths : [resolve(workspace, "public"), resolve(workspace, "fixtures")];
+  const repository = resolve(workspace, "..");
+  const roots = paths.length ? paths : [
+    resolve(workspace, "public"), resolve(workspace, "fixtures"), resolve(repository, "dealroom"),
+    resolve(repository, "practice-plugin/ui"), resolve(repository, "practice-plugin/src"), resolve(repository, "practice-plugin/test")
+  ];
   const findings = await checkUiCopy(roots);
   if (findings.length) {
     for (const finding of findings) console.error(`${finding.path}:${finding.line}: ${finding.message}`);

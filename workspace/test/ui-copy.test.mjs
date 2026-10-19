@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -51,13 +51,8 @@ test("UI copy lint rejects the related assistant-like status phrases", async t =
 });
 
 test("UI copy lint covers the live CARR UI and fixtures", async () => {
-  const workspace = new URL("../", import.meta.url);
-  const findings = await checkUiCopy([
-    new URL("public/", workspace),
-    new URL("fixtures/", workspace)
-  ]);
-
-  assert.deepEqual(findings, []);
+  const result = spawnSync(process.execPath, [new URL("../scripts/check-ui-copy.mjs", import.meta.url).pathname], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
 test("UI copy CLI exits unsuccessfully for a planted UI phrase", async t => {
@@ -67,4 +62,25 @@ test("UI copy CLI exits unsuccessfully for a planted UI phrase", async t => {
   const result = spawnSync(process.execPath, [new URL("../scripts/check-ui-copy.mjs", import.meta.url).pathname, root], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /planted\.html:1: banned UI copy/);
+});
+
+
+test("default CI lint covers every shipped UI source and fixture root", async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "carr-ui-roots-")));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const paths = ["workspace/public", "workspace/fixtures", "dealroom", "practice-plugin/ui", "practice-plugin/src", "practice-plugin/test"];
+  for (const path of [...paths, "workspace/scripts"]) await mkdir(join(root, path), { recursive: true });
+  const checker = join(root, "workspace/scripts/check-ui-copy.mjs");
+  await writeFile(checker, await readFile(new URL("../scripts/check-ui-copy.mjs", import.meta.url)));
+  const run = () => spawnSync(process.execPath, [checker], { encoding: "utf8" });
+  const clean = run();
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+  for (const path of paths) {
+    const planted = join(root, path, "planted.js");
+    await writeFile(planted, 'const label = "Needs you";');
+    const result = run();
+    assert.equal(result.status, 1, `${path}: ${result.stdout}${result.stderr}`);
+    assert.match(result.stderr, /planted\.js:1: banned UI copy/);
+    await rm(planted);
+  }
 });
