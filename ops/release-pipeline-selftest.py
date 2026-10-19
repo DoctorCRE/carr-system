@@ -1359,7 +1359,7 @@ class StopOnFailure(Base):
         self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
         self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
         body = verbs[0][1]["body"]
-        self.assertTrue(body.startswith("@queue enqueue target=claude-desktop cap=repo-write "))
+        self.assertTrue(body.startswith("@queue enqueue target=sol-fixer cap=repo-write "), body)
         self.assertIn(f"key=release-fix-{sha[:8]} ", body)
         self.assertEqual(verbs[0][1]["room"], "model-room")
         # the next tick on the same SHA runs nothing and dispatches nothing more
