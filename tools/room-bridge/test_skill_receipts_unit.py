@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_receipts
 import dispatch
+from ops.git_env import fixture_env
 
 
 class SkillReceiptTests(unittest.TestCase):
@@ -198,6 +200,7 @@ class SkillReceiptTests(unittest.TestCase):
     def test_completed_job_uses_its_own_thread_and_dispatch_time(self):
         row = {'msg_id': 'job', 'status': 'completed', 'thread_id': 'own-session',
                'kind': 'codex-session', 'dispatched_at': '2026-10-19T15:00:00Z',
+               'source_revision': 'a' * 40,
                'completed_at': '2026-10-19T15:00:02.500000Z',
                'result': 'https://github.com/jbookout/carr-system/pull/2000'}
         with patch.object(skill_receipts, 'session_path', return_value=Path('/own-log')) as locate, \
@@ -209,6 +212,56 @@ class SkillReceiptTests(unittest.TestCase):
         locate.assert_called_once_with('own-session', 'codex')
         scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'], until=row['completed_at'])
         self.assertFalse(value['skills'][0]['opened'])
+
+    def test_job_revision_is_saved_before_publication_and_cannot_follow_a_new_head(self):
+        class Registry:
+            def resolve(self, name):
+                return {'kind': 'claude-session', 'cwd': directory}
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                return subprocess.run(['git', *args], cwd=directory, env=fixture_env(),
+                    check=True, capture_output=True, text=True).stdout.strip()
+            git('init')
+            def commit(message):
+                git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                    'commit', '--allow-empty', '-m', message)
+                return git('rev-parse', 'HEAD')
+            commit('before job')
+            results = Path(directory) / 'results.jsonl'
+            transcript = Path(directory) / 'session.jsonl'
+            transcript.write_text('')
+            pr = 'https://github.com/jbookout/carr-system/pull/2000'
+            revision = None
+            def execute(*args, **kwargs):
+                nonlocal revision
+                revision = commit('job output')
+                return {'status': 'completed', 'session_id': 'own-session', 'result': pr}
+            def fail_publication(*args, **kwargs):
+                saved = json.loads(results.read_text().splitlines()[0])
+                self.assertEqual(saved.get('source_revision'), revision)
+                raise ValueError('publication failed')
+            with patch.object(dispatch, 'desk_skill_inventory', return_value=None), \
+                 patch.object(dispatch, '_execute', side_effect=execute), \
+                 patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch, '_skill_gh', side_effect=fail_publication):
+                row = dispatch.dispatch('builder', 'fix it', registry=Registry(), results_path=results)
+            self.assertEqual(row.get('source_revision'), revision)
+            newer = commit('later job')
+            for head in (revision, newer):
+                with self.subTest(head=head), \
+                     patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                     patch.object(dispatch, '_execute') as rerun, \
+                     patch.object(dispatch, '_skill_gh', side_effect=[
+                         {'head': {'sha': head}, 'body': 'Skills used: tdd'}, [],
+                         {'html_url': pr + '#issuecomment-1'}, {}]) as gh:
+                    code = dispatch.main(['--results', str(results), 'receipt', row['msg_id']])
+                    self.assertEqual(code, 0 if head == revision else 2)
+                    rerun.assert_not_called()
+                    if head == newer:
+                        self.assertEqual(gh.call_count, 1, 'stale job must not publish to a newer PR head')
+                    else:
+                        saved = dispatch._receipt_job(results, row['msg_id'])
+                        self.assertEqual(saved['skill_receipt']['head'], revision)
 
     def test_completion_boundary_survives_publication_failure_and_retry(self):
         class Registry:
