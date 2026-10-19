@@ -88,6 +88,8 @@ class WorkQueueTests(unittest.TestCase):
         old = self.q.export()['items'][0]
         self.assertEqual((old['stage'], old['model']), ('done', 'actual'))
         self.assertFalse(old['ready'])
+        self.assertEqual(self.q.publication()['dirty'], 0)
+        self.add('scheduled')
         published = []
         def fail():
             raise RuntimeError('board offline')

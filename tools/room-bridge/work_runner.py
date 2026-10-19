@@ -18,7 +18,7 @@ import time
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from work_queue import WorkQueue
+from work_queue import WorkQueue, QueueChanged
 import write_ownership
 
 CODEX_SLOT_DIR = Path.home() / '.config/carr/codex-slots'
@@ -61,7 +61,12 @@ class Runner:
 
     def tick(self):
         self.queue.recover(self.terminated, actor='runner')
-        for candidate in self.queue.candidates():
+        while self._claim_pass():
+            pass
+
+    def _claim_pass(self):
+        candidates = self.queue.candidates()
+        for candidate in candidates:
             active = self.queue.active()
             if candidate['desk'] in {r['desk'] for r in active}:
                 continue
@@ -73,7 +78,8 @@ class Runner:
                 continue
             try:
                 card = self.queue.claim(eligible_desks={candidate['desk']}, card_id=candidate['card_id'],
-                                        actor='runner', owner=write_ownership.process_owner())
+                                        actor='runner', owner=write_ownership.process_owner(),
+                                        expected_candidates=candidates)
                 if card is not None:
                     try:
                         self.launch(card, handles)
@@ -81,10 +87,14 @@ class Runner:
                         self.queue.finish(card['card_id'], card['claim'],
                                           {'status': 'failed', 'detail': f'worker launch failed: {exc}',
                                            'termination_confirmed': True}, actor='runner')
+            except QueueChanged:
+                return True
             finally:
                 # Close only this copy. LOCK_UN would release the worker's inherited lock.
                 for handle in handles:
                     handle.close()
+
+        return False
 
 
 def kick(path, registry, results):

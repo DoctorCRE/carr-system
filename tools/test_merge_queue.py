@@ -147,6 +147,8 @@ class QueueTests(unittest.TestCase):
         ps.write_text('#!/bin/sh\nexit 0\n')
         ps.chmod(0o755)
         self.env = os.environ.copy()
+        self.env['CARR_WORK_QUEUE_DB'] = str(self.root / 'work.sqlite3')
+        self.env['PROGRESS_BOARD_LOCAL_ONLY'] = '1'
         self.env['FAKE_GH_STATE'] = str(self.fake_state)
         self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
         self.env['CARR_GITHUB_READ_BUDGET'] = str(self.root / 'github-budget.json')
@@ -155,6 +157,7 @@ class QueueTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
         self.addCleanup(lambda: [child.wait(timeout=5) for child in self.q.children.values()])
         for repo in module.REPOS:
@@ -171,6 +174,26 @@ class QueueTests(unittest.TestCase):
 
         (self.root / 'tools/prepare_pr.py').write_text(
             'import json,sys\nprint(json.dumps({"head":sys.argv[sys.argv.index("--head")+1],"changed":False}))\n')
+
+    def bind_work_queue(self):
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])):
+            pass
+        enqueue = self.q.enqueue
+        def projected_enqueue(repo, n, head, note='', *, rearm=True):
+            entry = enqueue(repo, n, head, note, rearm=rearm)
+            if note == 'work queue projection':
+                return entry
+            card_id = f'{repo}#{n}@{head}'
+            with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+                if not any(c['card_id'] == card_id for c in work.export()['items']):
+                    work.enqueue(card_id, desk=card_id, task='synthetic merge', actor='test')
+                    claim = work.claim(eligible_desks={card_id}, card_id=card_id, actor='test', owner={})
+                    work.finish(card_id, claim['claim'], {'status': 'completed'}, actor='test')
+                    work.update(card_id, actor='test', reason='fixture pin', prs=[
+                        {'repo': repo, 'number': n, 'head': head}])
+                    work.transition(card_id, 'merging', actor='test', reason='fixture reviewed')
+            return entry
+        self.q.enqueue = projected_enqueue
 
     def test_preparation_push_waits_for_checks_on_the_new_head(self):
         self.pr()
@@ -224,6 +247,7 @@ class QueueTests(unittest.TestCase):
     def restart(self):
         self.q.db.close()
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
 
 
@@ -1311,6 +1335,14 @@ class QueueTests(unittest.TestCase):
         (bridge/'dispatch.py').write_text("import json,sys\nfrom pathlib import Path\n"
             "a=sys.argv[1:]\nif '--help' in a: print('send --fresh');sys.exit()\n"
             "assert '--family' not in a\n"
+            "import os\n"
+            + "sys.path.insert(0, " + repr(str(ROOT/'tools/room-bridge')) + ")\n"
+            "from work_queue import WorkQueue\n"
+            "with WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as q:\n"
+            " card=a[a.index('--card-id')+1]\n"
+            " q.enqueue(card, desk='free-sol', task='synthetic', actor='test')\n"
+            " claim=q.claim(eligible_desks={'free-sol'}, actor='test', owner={})\n"
+            " q.finish(card, claim['claim'], {'status':'completed','msg_id':'verified'}, actor='test')\n"
             "Path(a[a.index('--results')+1]).write_text(json.dumps({'desk':'free-sol','kind':'codex-session','status':'completed','thread_id':'new-thread','result':'fixed'})+'\\n')\n")
         self.q.dispatch_conflicts()
         self.assertEqual(self.q.db.execute('SELECT phase FROM actions').fetchone()[0],'planned')

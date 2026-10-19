@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Durable per-repository FIFO queues. Run, enqueue and inspect here."""
+"""Merge effects journal. Scheduling order belongs to the durable work queue."""
 from __future__ import annotations
 
 import argparse
@@ -23,7 +23,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ops'))
+sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
+from work_queue import WorkQueue, default_path
 from git_env import scrubbed_env
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
@@ -180,7 +182,8 @@ class Queue:
                             'ci_since': 'REAL', 'ci_head': 'TEXT',
                             'retry_at': 'REAL NOT NULL DEFAULT 0'},
                 'actions': {'attempts': 'INTEGER NOT NULL DEFAULT 0', 'expected_base': 'TEXT',
-                            'dispatcher_pid': 'INTEGER', 'dispatcher_identity': 'TEXT', 'receipt': 'TEXT'},
+                            'dispatcher_pid': 'INTEGER', 'dispatcher_identity': 'TEXT', 'receipt': 'TEXT', 'work_card': 'TEXT',
+                            'work_after': 'INTEGER NOT NULL DEFAULT 0'},
                 'github_failures': {'stopped': 'INTEGER NOT NULL DEFAULT 0'}}
             for table, columns in bounded_items('snapshot', additions.items()):
                 existing = {r['name'] for r in bounded_items('snapshot', self.db.execute(f'PRAGMA table_info({table})'))}
@@ -237,6 +240,8 @@ class Queue:
         return True
 
     def expire_dispatch(self, a):
+        if a['work_card']:
+            return False
         kind = 'dispatch_process' if a['phase'] == 'issued' else 'dispatch_desk'
         if time.time() < self.deadline(f'action:{a["key"]}', kind):
             return False
@@ -670,7 +675,7 @@ class Queue:
                 self._dispatch_conflicts()
             except WaitExpired as exc:
                 with self.db:
-                    self.db.execute("UPDATE actions SET phase='uncertain',desk=NULL WHERE kind='dispatch' AND phase IN ('planned','issued')")
+                    self.db.execute("UPDATE actions SET phase='uncertain',desk=NULL WHERE kind='dispatch' AND phase IN ('planned','issued') AND work_card IS NULL")
                     self.event(REPOS[0], 0, 'dispatch_transport_stopped', str(exc))
                     self.db.execute("UPDATE entries SET phase='blocked',outcome='dispatch_transport_stopped' WHERE phase='conflict'")
 
@@ -683,10 +688,32 @@ class Queue:
             return None
         return hashlib.sha256(text.encode()).hexdigest()
 
+    def observe_work_dispatch(self, a):
+        if not a['work_card']:
+            return False
+        try:
+            with WorkQueue(default_path(), read_only=True) as work:
+                snapshot = work.export()
+                card = next(c for c in snapshot['items'] if c['card_id'] == a['work_card'])
+                accepted = any(e['card_id'] == a['work_card'] and e['id'] > a['work_after']
+                               and e['kind'] in ('enqueue', 'requeue') for e in snapshot['history'])
+        except (OSError, ValueError, StopIteration, sqlite3.Error):
+            # An absent or unreadable receipt cannot prove that an effect stopped.
+            return True
+        if not accepted or card['active'] or card['ready']:
+            return True
+        if card['result_status'] or card['stage'] in ('done', 'failed', 'parked'):
+            outcome = 'dispatch_finished' if card['result_status'] == 'completed' else 'dispatch_failed'
+            with self.db:
+                self.db.execute("UPDATE actions SET phase='done',desk=NULL WHERE key=?", (a['key'],))
+                self.event(a['repo'], a['pr'], outcome,
+                           f'work card {a["work_card"]}: {card["result_status"]}; receipt {card["dispatch_ref"]}')
+        return True
+
     def _dispatch_conflicts(self):
         if self.stopped:
             return
-        # Expire reservations before any fallible registry or process read.
+        # Legacy sender reservations expire. Durable cards own their worker lifetime.
         for a in bounded_items('snapshot', self.db.execute("SELECT * FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued')").fetchall()):
             self.expire_dispatch(a)
         exited = set()
@@ -697,11 +724,15 @@ class Queue:
                 exited.add(key)
         if not self.db.execute("SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued')").fetchone():
             return
+        for a in bounded_items('snapshot', self.db.execute("SELECT * FROM actions WHERE kind='dispatch' AND phase='issued' AND work_card IS NOT NULL").fetchall()):
+            self.observe_work_dispatch(a)
+        if not self.db.execute("SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') AND work_card IS NULL").fetchone():
+            return
         registry_path = Path(os.environ.get('CARR_HERMES_DESKS', Path.home() / '.config/carr/hermes-desks.json'))
         registry = json.loads(registry_path.read_text())['desks']
         ps = [line.split() for line in bounded_items('snapshot', command(['ps', '-axo', 'command=']).splitlines())]
         for a in bounded_items('snapshot', self.db.execute("SELECT * FROM actions WHERE kind='dispatch' AND phase='issued'").fetchall()):
-            if self.expire_dispatch(a):
+            if self.observe_work_dispatch(a) or self.expire_dispatch(a):
                 continue
             results = Path(a['receipt']) if a['receipt'] else Path(a['payload']).with_suffix('.dispatch.jsonl')
             row = None
@@ -772,15 +803,25 @@ class Queue:
                         self.event(a['repo'], a['pr'], 'dispatch_waiting', 'No free authenticated Codex Sol high desk; brief remains queued')
                 continue
             results = Path(a['payload']).with_suffix('.dispatch.jsonl')
+            with WorkQueue(default_path(), read_only=True) as work:
+                snapshot = work.export()
+                cards = [c for c in snapshot['items'] if
+                         {'repo': a['repo'], 'number': a['pr'], 'head': a['head']} in c['prs']
+                         and c['stage'] not in ('done', 'failed', 'parked')]
+            if len(cards) > 1:
+                raise ValueError('multiple work cards own this pinned conflict; reconcile before dispatch')
+            work_card = cards[0]['card_id'] if cards else 'merge-fix:' + hashlib.sha256(a['key'].encode()).hexdigest()
             argv = [sys.executable, str(bridge), '--registry', str(registry_path), '--results', str(results), 'send', free,
-                    Path(a['payload']).read_text(), '--fresh']
+                    Path(a['payload']).read_text(), '--fresh', '--card-id', work_card]
+            if cards:
+                argv += ['--stage', 'fixing']
             if '--family' in command([sys.executable, str(bridge), 'send', '--help']):
                 argv += ['--family', 'sol']
             if self.stopped:
                 return
             # Persist the intent before spawning. Uncertain dispatches are not automatically repeated.
             with self.db:
-                self.db.execute("UPDATE actions SET phase='issued',desk=?,receipt=?,attempts=attempts+1 WHERE key=?", (free, str(results), a['key']))
+                self.db.execute("UPDATE actions SET phase='issued',desk=?,receipt=?,work_card=?,work_after=?,attempts=attempts+1 WHERE key=?", (free, str(results), work_card, snapshot['revision'], a['key']))
                 self.deadline(f'action:{a["key"]}', 'dispatch_process')
                 self.event(a['repo'], a['pr'], 'dispatch_started', f'{free}, {registry[free]["model"]}, {registry[free]["effort"]}; {results}')
             with Path(a['payload']).with_suffix('.dispatch.log').open('a') as log:
@@ -798,12 +839,12 @@ class Queue:
                         self.db.execute('UPDATE actions SET dispatcher_identity=? WHERE key=?', (identity, a['key']))
                 except Cancelled:
                     with self.db:
-                        self.db.execute("UPDATE actions SET phase='planned',desk=NULL,attempts=attempts-1 WHERE key=?", (a['key'],))
+                        self.db.execute("UPDATE actions SET phase='planned',desk=NULL,work_card=NULL,attempts=attempts-1 WHERE key=?", (a['key'],))
                     return
                 except OSError:
                     with self.db:
                         phase = 'exhausted' if a['attempts'] + 1 >= MAX_ATTEMPTS else 'planned'
-                        self.db.execute('UPDATE actions SET phase=?,desk=NULL WHERE key=?', (phase, a['key']))
+                        self.db.execute('UPDATE actions SET phase=?,desk=NULL,work_card=NULL WHERE key=?', (phase, a['key']))
                         self.event(a['repo'], a['pr'], 'dispatch_not_started', 'Process did not start; brief remains queued')
 
     def behind(self, repo, p):
@@ -912,176 +953,204 @@ class Queue:
 
     def tick(self):
         with self.runner_lock():
-            repos = [r[0] for r in bounded_items('snapshot', self.db.execute("SELECT repo FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') GROUP BY repo ORDER BY MIN(id)"))]
-            for repo in bounded_items('snapshot', repos):
+            with WorkQueue(default_path(), read_only=True) as work:
+                order = work.merge_order()['entries']
+            waiting = set()
+            for pin in bounded_items('snapshot', order):
                 if self.stopped:
                     return
-                self._tick_repo(repo)
+                repo = pin['repo']
+                if repo in waiting:
+                    continue
+                entry = self.enqueue(repo, pin['pr'], pin['head'], 'work queue projection', rearm=False)
+                e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
+                    continue
+                if self._tick_entry(e, pin['card_id']):
+                    waiting.add(repo)
 
-    def _tick_repo(self, queued_repo):
-        for e in bounded_items('snapshot', self.db.execute("SELECT * FROM entries WHERE repo=? AND phase IN ('pending','merging','merge_rejected','refreshing') ORDER BY id", (queued_repo,)).fetchall()):
-            repo, n = e['repo'], e['pr']
-            self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
-            try:
-                if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
-                    if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
-                        self.report(e, 'ci_timeout', 'Hosted checks did not turn green before the CI deadline', 'exhausted')
-                    else:
-                        self.report(e, 'entry_timeout', 'Entry deadline expired; intent retained; reconcile before retry', 'blocked')
-                    continue
-                retry_deadline = self.db.execute('SELECT deadline FROM waits WHERE owner=? AND kind=?',
-                                                 (f'entry:{e["id"]}', 'github_retry')).fetchone()
-                if retry_deadline and time.time() >= retry_deadline[0]:
-                    self.report(e, 'retry_exhausted', 'Transient GitHub retry window expired after 30 minutes', 'exhausted')
-                    continue
-                if time.time() < e['retry_at']:
-                    return
-                p = self.pr(repo, n)
-                if p.get('merged'):
-                    mc = p.get('merge_commit_sha')
-                    if not mc or not SHA.fullmatch(mc):
-                        raise RuntimeError('merge commit not available yet')
-                    self.fetch(repo, mc)
-                    self.git(repo, 'merge-base', '--is-ancestor', mc, 'origin/main')
-                    if e['tested'] is None:
-                        self.report(e, 'already_merged', f'Imported intent reconciled: {mc} on origin/main', 'done')
-                        continue
-                    self.report(e, 'merged', f'Merge commit {mc} confirmed on origin/main', 'refreshing')
-                    if not self.refresh(repo, p['head']['ref']):
-                        if self.retry(e, 'Post-merge refresh remains incomplete'):
-                            continue
-                        return
-                    self.report(e, 'merged', f'Merge commit {mc} confirmed; post-merge refresh complete', 'done')
-                    return
-                if p['state'] != 'open':
-                    self.report(e, 'closed', 'PR closed without merge', 'done')
-                    continue
+    def complete_work_merge(self, e, card_id, *, merged):
+        with WorkQueue(default_path()) as work:
+            work.finish_merge(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
+                              merged=merged, actor='merge-daemon',
+                              reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
+
+    def _tick_entry(self, e, card_id):
+        repo, n = e['repo'], e['pr']
+        self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
+        try:
+            if time.time() >= self.deadline(f'entry:{e["id"]}', 'entry'):
+                if e['ci_since'] is not None and time.time() - e['ci_since'] >= CI_WAIT_SECONDS:
+                    self.report(e, 'ci_timeout', 'Hosted checks did not turn green before the CI deadline', 'exhausted')
+                else:
+                    self.report(e, 'entry_timeout', 'Entry deadline expired; intent retained; reconcile before retry', 'blocked')
+                return False
+            retry_deadline = self.db.execute('SELECT deadline FROM waits WHERE owner=? AND kind=?',
+                                             (f'entry:{e["id"]}', 'github_retry')).fetchone()
+            if retry_deadline and time.time() >= retry_deadline[0]:
+                self.report(e, 'retry_exhausted', 'Transient GitHub retry window expired after 30 minutes', 'exhausted')
+                return False
+            if time.time() < e['retry_at']:
+                return True
+            p = self.pr(repo, n)
+            if p.get('merged') and p['head']['sha'] != e['approved']:
+                self.report(e, 'head_moved', 'Merged head differs from the pinned work card')
+                return False
+            if p.get('merged'):
+                mc = p.get('merge_commit_sha')
+                if not mc or not SHA.fullmatch(mc):
+                    raise RuntimeError('merge commit not available yet')
+                self.fetch(repo, mc)
+                self.git(repo, 'merge-base', '--is-ancestor', mc, 'origin/main')
+                if e['tested'] is None:
+                    self.complete_work_merge(e, card_id, merged=True)
+                    self.report(e, 'already_merged', f'Imported intent reconciled: {mc} on origin/main', 'done')
+                    return False
+                self.report(e, 'merged', f'Merge commit {mc} confirmed on origin/main', 'refreshing')
+                if not self.refresh(repo, p['head']['ref']):
+                    if self.retry(e, 'Post-merge refresh remains incomplete'):
+                        return False
+                    return True
+                self.complete_work_merge(e, card_id, merged=True)
+                self.report(e, 'merged', f'Merge commit {mc} confirmed; post-merge refresh complete', 'done')
+                return True
+            if p['state'] != 'open':
                 if p['head']['sha'] != e['approved']:
-                    self.report(e, 'head_moved', 'Live head differs from the approved SHA')
-                    continue
-                if p.get('draft'):
-                    self.report(e, 'draft', 'Waiting for PR to be marked ready')
-                    continue
-                if self.held(p):
-                    self.report(e, 'held', 'do_not_merge label present')
-                    continue
-                if e['phase'] == 'merge_rejected' or (e['phase'] == 'pending' and e['tested'] is not None):
-                    if self.merge_pending(repo, n, e['tested']):
-                        if self.wait(e, 'provider_merge', 'merge_pending', 'GitHub owns an automatic or queued merge'):
-                            return
-                        continue
-                    if e['merge_attempts'] >= MAX_ATTEMPTS:
-                        self.report(e, 'merge_exhausted', f'GitHub rejected {MAX_ATTEMPTS} merge attempts', 'exhausted')
-                    else:
-                        self.report(e, 'reconciled', 'GitHub rejected the request and now proves no pending merge', 'pending')
-                    if e['phase'] == 'merge_rejected' or e['merge_attempts'] >= MAX_ATTEMPTS:
-                        return
-                if p['base']['ref'] != 'main':
-                    self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
-                    continue
-                if e['phase'] == 'merging':
-                    if self.failure(e, 'Merge was issued; reconcile GitHub state before any retry',
-                                    'transient_attempts', 'merge_uncertain', 'merge_uncertain_exhausted', 'blocked'):
-                        continue
-                    return
-                head = p['head']['sha']
-                if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
-                    self.conflict(repo, p)
-                    self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
-                    continue
-                if self.behind(repo, p) and p.get('mergeable') is True:
-                    self.action('update', repo, n, head, 'main')
-                    self.report(e, 'updating', f'Waiting for clean update of {head}')
-                    return
-                if p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
-                    if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
-                        return
-                    continue
-                if self.prepare(repo, p):
-                    self.report(e, 'regenerated', f'Prepared {head}; new head must be enqueued and pass hosted CI')
-                    return
-                if not self.green(repo, n, head):
-                    since = e['ci_since'] if e['ci_head'] == head and e['ci_since'] is not None else time.time()
-                    with self.db:
-                        self.db.execute('UPDATE entries SET ci_since=?,ci_head=?,retry_at=0 WHERE id=?', (since, head, e['id']))
-                        self.db.execute("DELETE FROM waits WHERE owner=? AND kind='github_retry'", (f'entry:{e["id"]}',))
-                    if time.time() - since >= CI_WAIT_SECONDS:
-                        self.report(e, 'ci_timeout', f'Hosted checks did not turn green within 75 minutes at {head}', 'exhausted')
-                    else:
-                        self.report(e, 'waiting_ci', f'Waiting for green hosted checks on {head}')
-                    if time.time() - since >= CI_WAIT_SECONDS:
-                        continue
-                    return
-                current = self.pr(repo, n)
-                if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
-                    self.report(e, 'head_moved', 'Head, base or hold changed during checks')
-                    return
-                if self.stopped:
-                    return
-                current = self.pr(repo, n)
-                if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
-                    self.report(e, 'head_moved', 'Head, base or hold changed before merge')
-                    return
-                if self.stopped:
-                    return
+                    self.report(e, 'head_moved', 'Closed head differs from pinned work card')
+                    return False
+                self.complete_work_merge(e, card_id, merged=False)
+                self.report(e, 'closed', 'PR closed without merge', 'done')
+                return False
+            if p['head']['sha'] != e['approved']:
+                self.report(e, 'head_moved', 'Live head differs from the approved SHA')
+                return False
+            if p.get('draft'):
+                self.report(e, 'draft', 'Waiting for PR to be marked ready')
+                return False
+            if self.held(p):
+                self.report(e, 'held', 'do_not_merge label present')
+                return False
+            if e['phase'] == 'merge_rejected' or (e['phase'] == 'pending' and e['tested'] is not None):
+                if self.merge_pending(repo, n, e['tested']):
+                    if self.wait(e, 'provider_merge', 'merge_pending', 'GitHub owns an automatic or queued merge'):
+                        return True
+                    return False
                 if e['merge_attempts'] >= MAX_ATTEMPTS:
-                    self.report(e, 'merge_exhausted', f'Merge attempt cap reached at {head}', 'exhausted')
-                    return
+                    self.report(e, 'merge_exhausted', f'GitHub rejected {MAX_ATTEMPTS} merge attempts', 'exhausted')
+                else:
+                    self.report(e, 'reconciled', 'GitHub rejected the request and now proves no pending merge', 'pending')
+                if e['phase'] == 'merge_rejected' or e['merge_attempts'] >= MAX_ATTEMPTS:
+                    return True
+            if p['base']['ref'] != 'main':
+                self.report(e, 'stacked', f'Waiting for base {p["base"]["ref"]} to merge')
+                return False
+            if e['phase'] == 'merging':
+                if self.failure(e, 'Merge was issued; reconcile GitHub state before any retry',
+                                'transient_attempts', 'merge_uncertain', 'merge_uncertain_exhausted', 'blocked'):
+                    return False
+                return True
+            head = p['head']['sha']
+            if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
+                self.conflict(repo, p)
+                self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
+                return False
+            if self.behind(repo, p) and p.get('mergeable') is True:
+                self.action('update', repo, n, head, 'main')
+                self.report(e, 'updating', f'Waiting for clean update of {head}')
+                return True
+            if p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
+                if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
+                    return True
+                return False
+            if self.prepare(repo, p):
+                self.report(e, 'regenerated', f'Prepared {head}; new head must be enqueued and pass hosted CI')
+                return True
+            if not self.green(repo, n, head):
+                since = e['ci_since'] if e['ci_head'] == head and e['ci_since'] is not None else time.time()
                 with self.db:
-                    self.db.execute("UPDATE entries SET phase='merging',tested=?,merge_attempts=merge_attempts+1 WHERE id=?", (head, e['id']))
-                try:
-                    self.gh('pr', 'merge', str(n), '-R', repo, '--squash', '--match-head-commit', head)
-                except ActionRejected as exc:
-                    raise MergeRejected(str(exc)) from exc
-                except CommandFailed:
-                    self.report(e, 'merge_readback', 'Failed merge command requires provider readback', 'merge_rejected')
-                    raise
-                except (Cancelled, GitHubReadPaused):
-                    with self.db:
-                        self.db.execute("UPDATE entries SET phase='pending',merge_attempts=merge_attempts-1 WHERE id=?", (e['id'],))
-                    raise
-                with self.db:
+                    self.db.execute('UPDATE entries SET ci_since=?,ci_head=?,retry_at=0 WHERE id=?', (since, head, e['id']))
                     self.db.execute("DELETE FROM waits WHERE owner=? AND kind='github_retry'", (f'entry:{e["id"]}',))
-                self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
-                return
-            except GitHubReadPaused as exc:
-                self.report(e, 'github_paused', str(exc))
-                continue
-            except MergeRejected as exc:
-                self.report(e, 'merge_rejected', str(exc), 'merge_rejected')
-                return
-            except ActionUncertain as exc:
-                if self.failure(e, str(exc), 'transient_attempts', 'action_uncertain', 'action_uncertain_exhausted', 'blocked'):
-                    continue
-                return
-            except ActionExhausted as exc:
-                self.report(e, 'action_exhausted', str(exc), 'exhausted')
-                continue
-            except WaitExpired as exc:
-                self.report(e, 'wait_exhausted', str(exc), 'blocked')
-                continue
-            except subprocess.TimeoutExpired:
-                self.report(e, 'wait_exhausted', 'Ancestry or conflict transport deadline expired; reconcile before retry', 'blocked')
-                continue
-            except GitHubExhausted as exc:
-                self.report(e, 'github_exhausted', str(exc), 'blocked')
-                continue
-            except ReadRejected as exc:
-                if self.failure(e, str(exc), 'read_attempts', 'read_rejected', 'read_exhausted', 'blocked', exc):
-                    continue
-                return
+                if time.time() - since >= CI_WAIT_SECONDS:
+                    self.report(e, 'ci_timeout', f'Hosted checks did not turn green within 75 minutes at {head}', 'exhausted')
+                else:
+                    self.report(e, 'waiting_ci', f'Waiting for green hosted checks on {head}')
+                if time.time() - since >= CI_WAIT_SECONDS:
+                    return False
+                return True
+            current = self.pr(repo, n)
+            if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
+                self.report(e, 'head_moved', 'Head, base or hold changed during checks')
+                return True
+            if self.stopped:
+                return True
+            current = self.pr(repo, n)
+            if self.held(current) or current['head']['sha'] != head or current['base']['ref'] != 'main':
+                self.report(e, 'head_moved', 'Head, base or hold changed before merge')
+                return True
+            if self.stopped:
+                return True
+            if e['merge_attempts'] >= MAX_ATTEMPTS:
+                self.report(e, 'merge_exhausted', f'Merge attempt cap reached at {head}', 'exhausted')
+                return True
+            with WorkQueue(default_path()) as work:
+                work.begin_merge(card_id, actor='merge-daemon',
+                                 reason=f'journal entry {e["id"]}: merge pinned at {head}',
+                                 pin={'repo': repo, 'number': n, 'head': head})
+            with self.db:
+                self.db.execute("UPDATE entries SET phase='merging',tested=?,merge_attempts=merge_attempts+1 WHERE id=?", (head, e['id']))
+            try:
+                self.gh('pr', 'merge', str(n), '-R', repo, '--squash', '--match-head-commit', head)
             except ActionRejected as exc:
-                if self.failure(e, str(exc), 'transient_attempts', 'action_rejected', 'action_exhausted', 'blocked', exc):
-                    continue
-                return
-            except Cancelled:
-                return
-            except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
-                if self.retry(e, str(exc), exc):
-                    continue
-                return
-            finally:
-                self._github_entry = None
+                raise MergeRejected(str(exc)) from exc
+            except CommandFailed:
+                self.report(e, 'merge_readback', 'Failed merge command requires provider readback', 'merge_rejected')
+                raise
+            except (Cancelled, GitHubReadPaused):
+                with self.db:
+                    self.db.execute("UPDATE entries SET phase='pending',merge_attempts=merge_attempts-1 WHERE id=?", (e['id'],))
+                raise
+            with self.db:
+                self.db.execute("DELETE FROM waits WHERE owner=? AND kind='github_retry'", (f'entry:{e["id"]}',))
+            self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
+            return True
+        except GitHubReadPaused as exc:
+            self.report(e, 'github_paused', str(exc))
+            return False
+        except MergeRejected as exc:
+            self.report(e, 'merge_rejected', str(exc), 'merge_rejected')
+            return True
+        except ActionUncertain as exc:
+            if self.failure(e, str(exc), 'transient_attempts', 'action_uncertain', 'action_uncertain_exhausted', 'blocked'):
+                return False
+            return True
+        except ActionExhausted as exc:
+            self.report(e, 'action_exhausted', str(exc), 'exhausted')
+            return False
+        except WaitExpired as exc:
+            self.report(e, 'wait_exhausted', str(exc), 'blocked')
+            return False
+        except subprocess.TimeoutExpired:
+            self.report(e, 'wait_exhausted', 'Ancestry or conflict transport deadline expired; reconcile before retry', 'blocked')
+            return False
+        except GitHubExhausted as exc:
+            self.report(e, 'github_exhausted', str(exc), 'blocked')
+            return False
+        except ReadRejected as exc:
+            if self.failure(e, str(exc), 'read_attempts', 'read_rejected', 'read_exhausted', 'blocked', exc):
+                return False
+            return True
+        except ActionRejected as exc:
+            if self.failure(e, str(exc), 'transient_attempts', 'action_rejected', 'action_exhausted', 'blocked', exc):
+                return False
+            return True
+        except Cancelled:
+            return True
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            if self.retry(e, str(exc), exc):
+                return False
+            return True
+        finally:
+            self._github_entry = None
 
     def failure(self, e, detail, counter, pending, exhausted_outcome, phase, exc=None):
         with self.db:
@@ -1327,13 +1396,6 @@ class Queue:
             signal.signal(signal.SIGINT, stop)
             next_discover = 0.0
             while not self.stopped:
-                if not discover and legacy is None and not self.children and not self.db.execute(
-                        "SELECT 1 FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') "
-                        "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') LIMIT 1").fetchone():
-                    with (self.state / 'queue.log').open('a') as f:
-                        f.write(json.dumps({'outcome': 'idle',
-                                            'detail': 'No runnable entries or active conflict dispatches; discovery disabled'}) + '\n')
-                    return
                 try:
                     if legacy is not None and not self.db.execute("SELECT 1 FROM service_stops WHERE key='legacy_import'").fetchone():
                         try:
@@ -1354,6 +1416,13 @@ class Queue:
                                 f.write(json.dumps({'outcome': 'discovery_failed', 'detail': str(exc)}) + '\n')
                     self.tick()
                     self.dispatch_conflicts()
+                    if not discover and legacy is None and not self.children and not self.db.execute(
+                            "SELECT 1 FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') "
+                            "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') LIMIT 1").fetchone():
+                        with (self.state / 'queue.log').open('a') as f:
+                            f.write(json.dumps({'outcome': 'idle',
+                                                'detail': 'No runnable entries or active conflict dispatches; discovery disabled'}) + '\n')
+                        return
                 except Cancelled:
                     pass
                 except sqlite3.OperationalError:

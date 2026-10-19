@@ -98,7 +98,7 @@ def handle(args, registry, results):
             out = queue.get(args.card_id)
         elif args.cmd == 'import-results':
             out = queue.import_results(args.path, actor=args.actor)
-    if mutate:
+    if mutate and args.cmd != 'import-results':
         work_runner.kick(path, registry.path, results)
     print(json.dumps(out, indent=2))
     return 0
