@@ -1,5 +1,10 @@
+// @ts-check
+
+/** @typedef {Partial<Pick<Env, typeof WORKSPACE_COMMAND_CENTER_FLAG>>} WorkspaceEnv */
+
 export const WORKSPACE_COMMAND_CENTER_FLAG = "WORKSPACE_COMMAND_CENTER_READ_ENABLED";
 
+/** @param {WorkspaceEnv | null} [env] */
 export function workspaceCommandCenterPosture(env) {
   const value = env?.[WORKSPACE_COMMAND_CENTER_FLAG];
   if (value === "true") return { enabled: true, posture: "enabled", reason: null };
@@ -8,6 +13,7 @@ export function workspaceCommandCenterPosture(env) {
     reason: "WORKSPACE_COMMAND_CENTER_READ_ENABLED must be exactly true or false" };
 }
 
+/** @param {WorkspaceEnv | null} [env] */
 export function workspaceCommandCenterEnabled(env) {
   return workspaceCommandCenterPosture(env).enabled;
 }

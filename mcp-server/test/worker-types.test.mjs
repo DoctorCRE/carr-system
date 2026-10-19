@@ -34,3 +34,38 @@ const request: VerbInputs["standing-context"] = { detail: "boot", page: ${page} 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the converted Worker module rejects a wrong binding name and type in CI", () => {
+  const dir = mkdtempSync(path.join(root, "type-tests/env-"));
+  const source = path.join(dir, "bindings.ts");
+  const check = () => spawnSync("bash", ["ops/ci.sh", "--only", "types"], {
+    encoding: "utf8", cwd: path.dirname(root),
+  });
+  const valid = `import { workspaceCommandCenterPosture } from "../../src/workspace-feature-flag.js";
+declare const env: Parameters<typeof workspaceCommandCenterPosture>[0];
+workspaceCommandCenterPosture({ WORKSPACE_COMMAND_CENTER_READ_ENABLED: "true" });
+declare const bindings: Env;
+const kv: KVNamespace = bindings.OAUTH_KV;
+`;
+  try {
+    writeFileSync(source, valid);
+    const accepted = check();
+    assert.equal(accepted.status, 0, accepted.stdout + accepted.stderr);
+    writeFileSync(source, valid + `env?.WORKSPACE_COMMAND_CENTER_READ_ENABLE;
+const wrong: number = env?.WORKSPACE_COMMAND_CENTER_READ_ENABLED;
+bindings.OAUTH_KVV;
+const wrongBinding: number = bindings.OAUTH_KV;
+`);
+    const rejected = check();
+    assert.equal(rejected.status, 1, rejected.stdout + rejected.stderr);
+    assert.match(rejected.stdout + rejected.stderr, /TS2551.*WORKSPACE_COMMAND_CENTER_READ_ENABLE/s);
+    assert.match(rejected.stdout + rejected.stderr, /TS2322.*string.*number/s);
+    assert.match(rejected.stdout + rejected.stderr, /TS2551.*OAUTH_KVV/s);
+    assert.match(rejected.stdout + rejected.stderr, /TS2322.*KVNamespace.*number/s);
+    writeFileSync(source, valid);
+    const restored = check();
+    assert.equal(restored.status, 0, restored.stdout + restored.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
