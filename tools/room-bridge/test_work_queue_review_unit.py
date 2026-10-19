@@ -18,6 +18,7 @@ from work_runner import Runner, Resources
 import dispatch
 import work_runner
 spec = importlib.util.spec_from_file_location('review_merge_queue', ROOT / 'tools/merge_queue/main.py')
+assert spec is not None and spec.loader is not None
 mq = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mq)
 

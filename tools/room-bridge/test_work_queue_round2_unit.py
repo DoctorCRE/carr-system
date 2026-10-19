@@ -72,9 +72,9 @@ class Round2(unittest.TestCase):
         self.assertNotIn(1,effects, 'stale selection merged after priority changed before begin_merge')
 
 if __name__=='__main__':
-    suite=unittest.defaultTestLoader.loadTestsFromNames([
+    suite=unittest.TestSuite(Round2(name) for name in [
       'test_active_merge_done_transition_cannot_release_without_receipt',
       'test_legacy_unbound_planned_action_cannot_authorize_new_work',
-      'test_merge_revalidates_priority_before_provider_effect'], Round2)
+      'test_merge_revalidates_priority_before_provider_effect'])
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     raise SystemExit(not result.wasSuccessful())
