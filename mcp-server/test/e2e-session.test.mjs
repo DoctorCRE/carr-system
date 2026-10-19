@@ -28,10 +28,32 @@ function environment(overrides = {}) {
 
 function handler(overrides = {}) {
   return createDealroomHandler({ now: () => NOW,
+    prepareE2eSessionFn: async () => {},
     commandCenterReader: async (_env, actor) => ({ viewer: actor.slug, human: actor.human }),
     mcpHandler: async (_request, _env, _ctx, actor) => Response.json({ actor }),
     ...overrides });
 }
+
+test("E2E setup prepares staging reference data before publishing a session", async () => {
+  const env = environment();
+  let prepared = false;
+  const response = await exchange(handler({ prepareE2eSessionFn: async received => {
+    assert.equal(received.CARR_ENV, "staging");
+    assert.equal(env.OAUTH_KV.writes.length, 0);
+    prepared = true;
+  } }), env);
+  assert.equal(response.status, 200);
+  assert.equal(prepared, true);
+
+  const failedEnv = environment();
+  const failed = await exchange(handler({ prepareE2eSessionFn: async () => {
+    throw new Error("synthetic connection details must stay private");
+  } }), failedEnv);
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: "e2e_fixture_unavailable" });
+  assert.equal(failed.headers.get("set-cookie"), null);
+  assert.equal(failedEnv.OAUTH_KV.writes.length, 0);
+});
 
 function exchange(server, env, { host = APP_HOST, authorization = `Bearer ${SECRET}`, ...init } = {}) {
   return server.fetch(new Request(`https://${host}/auth/e2e-session`, {

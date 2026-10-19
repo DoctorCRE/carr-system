@@ -570,7 +570,7 @@ def blocker_loop(capability: str, detail: str, *, remedy: str = "", recovery: st
 # The candidate login profiles tools/provision-staging-app-writer.py knows (its
 # PROFILES labels, which are tools/staging_database_credential.py's profile()
 # keys). The selftest holds the two lists equal.
-ROTATABLE_STAGING_CREDENTIALS = ("reader", "writer", "gate_zero_producer",
+ROTATABLE_STAGING_CREDENTIALS = ("reader", "writer", "authority_joe", "gate_zero_producer",
                                  "foundation_assurance_oracle")
 
 

@@ -87,6 +87,7 @@ def build(root: Path) -> tuple[Path, Path, Path, Path]:
 
 def run(templates, agents, fake, *extra, env_extra=None):
     env = {k: v for k, v in os.environ.items() if k != cac.ACTIVE_LAUNCHD_LABEL_ENV}
+    env['HOME'] = str(agents.parent)
     env.update(env_extra or {})
     return subprocess.run(
         [sys.executable, str(SCRIPT), "reinstall-launchd-calendar", "--templates", str(templates),
@@ -173,11 +174,12 @@ import io  # noqa: E402
 
 
 def run_inproc(templates, agents, fake, *extra, env=None, patch=None):
-    saved = {k: getattr(cac, k) for k in ("PRIMARY_ONLY",
+    saved = {k: getattr(cac, k) for k in ("HOME", "PRIMARY_ONLY",
                                           "SECONDARY_ONLY", "IS_PRIMARY")}
     saved_registry = dict(cac.launchd_hold.DEFINITION_ONLY)
     saved_env = {k: os.environ.get(k) for k in (env or {})}
     try:
+        cac.HOME = str(agents.parent)
         for key, value in (patch or {}).items():
             if key == "DEFINITION_ONLY":
                 cac.launchd_hold.DEFINITION_ONLY.clear()

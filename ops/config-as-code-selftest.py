@@ -159,6 +159,7 @@ def main():
     ordinary_launchd_source = mod.launchd_repo_path("com.carr.example.plist")
     with tempfile.TemporaryDirectory(prefix="carr-claude-only-") as temp_home:
         home = Path(temp_home)
+        mod.HOME = str(home)
         repo = home / "carr-system"
         config = repo / "ops" / "config"
         launchd = repo / "ops" / "launchd"
@@ -339,12 +340,13 @@ def main():
         for p in [token_comment_case_config, token_comment_case_launchd]:
             p.mkdir(parents=True, exist_ok=True)
         original_state = {name: getattr(mod, name) for name in [
-            "REPO", "SETTINGS", "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE",
+            "HOME", "REPO", "SETTINGS", "TASKS_SRC", "TASKS_REPO", "TASKS_QUARANTINE",
             "LAUNCHD_SRC", "LAUNCHD_REPO", "HOOKS_REPO", "CODEX_HOOKS_SRC",
             "CODEX_HOOKS_REPO", "CODEX_CONFIG", "CODEX_PERMISSIONS_REPO",
             "CLAUDE_CONTINUITY_MODE_FILE", "CLAUDE_MCP_CONFIG",
         ]}
         token_comment_home = token_comment_case_home / "home"
+        mod.HOME = str(token_comment_home)
         token_comment_case_settings = token_comment_home / ".claude" / "settings.json"
         hooks = {"PreToolUse": []}
         (token_comment_home / ".claude").mkdir(parents=True, exist_ok=True)
@@ -425,6 +427,9 @@ def main():
         load_attempts = []
 
         def fail_launchctl(args, *call_args, **call_kwargs):
+            if args[:2] == ["launchctl", "print"] and args[-1].endswith('/com.carr.synthetic-load-failure'):
+                return SimpleNamespace(returncode=113,
+                    stderr='Could not find service "com.carr.synthetic-load-failure"', stdout="")
             if args[0] == "launchctl" and "synthetic-definition-only" in args[-1]:
                 if args[1] == "print":
                     return SimpleNamespace(returncode=113, stderr='Could not find service "com.carr.synthetic-definition-only"', stdout="")
@@ -436,6 +441,8 @@ def main():
             if args[:2] == ["launchctl", "load"]:
                 load_attempts.append(args[-1])
                 return SimpleNamespace(returncode=1, stderr="synthetic load failure", stdout="")
+            if Path(args[0]).name == 'launchctl':
+                raise AssertionError(f'unexpected launchctl call: {args}')
             return real_run(args, *call_args, **call_kwargs)
 
         mod.subprocess.run = fail_launchctl
@@ -445,32 +452,11 @@ def main():
                 launchd_retry_rc = mod.cmd_install(True)
         finally:
             mod.subprocess.run = real_run
-            # THE FIXTURE MUST NOT OUTLIVE THE BLOCK THAT NEEDS IT (loop 503,
-            # item 6). Every assertion about this plist is already made above,
-            # under the stub that keeps `launchctl load` from really running.
-            # Left on disk it is loaded FOR REAL by the next cmd_install in this
-            # file — which runs with the stub reverted — registering
-            # com.carr.synthetic-load-failure in the live gui domain from a temp
-            # HOME that is deleted moments later. That is precisely a job with
-            # no plist behind it: ops/launchd-plist-parity.py found exactly this
-            # one on Joe's Mac on 2026-08-22, nine days after the leak began,
-            # and it was the only thing standing between that detector and being
-            # wired into the nightly chain. A test that leaves a live job behind
-            # is not isolated, however green it reports.
-            # BOTH synthetic labels are cleaned up, not just the load-failure
-            # one. The definition-only fixture was added 2026-08-27 when the
-            # real control-plane tick was released from the hold, and it leaked
-            # the same way the comment above describes: on 2026-08-28
-            # scheduler-truth found com.carr.synthetic-definition-only loaded
-            # with no plist behind it, from a temp HOME deleted moments later.
-            # A fixture that can be loaded must be booted out by the same block
-            # that created it, whatever the assertions did.
             for _label in ("com.carr.synthetic-load-failure",
                            "com.carr.synthetic-definition-only"):
                 (launchd / f"{_label}.plist").unlink(missing_ok=True)
-                mod.subprocess.run(
-                    ["launchctl", "bootout", f"gui/{os.getuid()}/{_label}"],
-                    capture_output=True, text=True, check=False)
+                (Path(mod.LAUNCHD_SRC) / f"{_label}.plist").unlink(missing_ok=True)
+                (Path(mod.LAUNCHD_SRC) / f"{_label}.plist.pending-reload").unlink(missing_ok=True)
         mod.IS_PRIMARY = original_primary
         mod.launchd_hold.DEFINITION_ONLY.clear()
         mod.launchd_hold.DEFINITION_ONLY.update(original_definition_only)

@@ -166,6 +166,10 @@ def ownership(root, path):
         return "unknown"
 
 
+class MaintenanceDeferred(RuntimeError):
+    pass
+
+
 @contextmanager
 def maintenance(root):
     lock = root / "out/worktree-reap.lock"
@@ -176,7 +180,7 @@ def maintenance(root):
         try:
             fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise RuntimeError("repository maintenance lock held; preserve pending run") from exc
+            raise MaintenanceDeferred("repository maintenance lock held; preserve pending run") from exc
         try:
             yield
         finally:
@@ -528,7 +532,7 @@ class FleetReaper:
 
     def run(self, roots, *, execute=False, skip=()):
         report = {"schema": "branch-retirement/v1", "at": self.clock(), "execute": execute,
-                  "rows": [], "counts": {}, "errors": [], "actions": [], "recovered": []}
+                  "rows": [], "counts": {}, "errors": [], "deferred": [], "actions": [], "recovered": []}
         try:
             with maintenance(self.root):
                 for repo, path in roots.items():
@@ -551,11 +555,15 @@ class FleetReaper:
                                     result = self.apply(repo, root, row, skip)
                                     append(ledger, {**intent, **result})
                                     report["actions"].append({**intent, **result})
+                    except MaintenanceDeferred as exc:
+                        report["deferred"].append({"repo": repo, "reason": str(exc)})
                     except Exception as exc:
                         report["errors"].append({"repo": repo, "error": str(exc)})
                 save(self.root / "out/orch/branch-janitor-report.json", report)
                 append(self.root / "out/orch/branch-janitor-runs.jsonl",
                        {k: v for k, v in report.items() if k != "rows"})
+        except MaintenanceDeferred as exc:
+            report["deferred"].append({"repo": "fleet", "reason": str(exc)})
         except Exception as exc:
             report["errors"].append({"repo": "fleet", "error": str(exc)})
         return report

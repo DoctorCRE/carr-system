@@ -75,6 +75,12 @@
       "evidence": "ops/headless-tasks/install.sh header and lib/headless_tasks.py install_main (added f324adc2, #1482)"
     },
     {
+      "path": "ops/launchd-plist-parity.py",
+      "class": "hand_tool",
+      "reason": "A person runs this read-only audit by name to find loaded CARR jobs without a backing plist; it has no scheduled caller.",
+      "evidence": "ops/launchd-plist-parity.py docstring documents python3 ops/launchd-plist-parity.py [--quiet]; WR-000381 removes its only cross-file mention, an obsolete selftest comment."
+    },
+    {
       "path": "ops/incident-fingerprint-shadow.py",
       "class": "one_shot",
       "reason": "The process-audit council's confirm-or-kill shadow test of incident fingerprinting, run once against the August 15-23 ledger.",

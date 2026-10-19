@@ -76,6 +76,8 @@ def profile(label: str, *, config_root: pathlib.Path | None = None) -> Credentia
     profiles = {
         "writer": ("app_writer", "carr_writer", WRITER_KEY, "staging-writer.env"),
         "reader": ("app_reader", "carr_reader", READER_KEY, "staging-reader.env"),
+        "authority_joe": ("carr_authority_joe", "carr_authority",
+                          "CARR_DB_STAGING_AUTHORITY_JOE_URL", "staging-authority-joe.env"),
         # A DIRECT-GRANT PROFILE: the seat is one LOGIN role and there is no
         # bundle behind it, so the bundle column names the role itself.
         "gate_zero_producer": ("carr_gate_zero_producer", "carr_gate_zero_producer",

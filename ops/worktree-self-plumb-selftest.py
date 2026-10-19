@@ -102,7 +102,6 @@ with tempfile.TemporaryDirectory() as canon_root, tempfile.TemporaryDirectory() 
             patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
             patch.object(mod, "emit_delivery_policy", return_value=True), \
             patch.object(mod, "mark_alive", return_value=None), \
-            patch.object(mod, "maybe_spawn_reaper", return_value=0), \
             patch.object(_sp, "run", return_value=refusal):
         said = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
     if "self-plumb REFUSED" not in said or "requirements.lock" not in said or ".venv" not in said:
@@ -117,7 +116,6 @@ with tempfile.TemporaryDirectory() as canon_root, tempfile.TemporaryDirectory() 
             patch.object(mod, "canonical_root", return_value=os.path.realpath(canon_root)), \
             patch.object(mod, "emit_delivery_policy", return_value=True), \
             patch.object(mod, "mark_alive", return_value=None), \
-            patch.object(mod, "maybe_spawn_reaper", return_value=0), \
             patch.object(_sp, "run", return_value=applied):
         said_ok = mod.decide({"cwd": wt_root, "hook_event_name": "SessionStart"}).stdout
     if "Applied: ok  .venv" not in said_ok or "REFUSED" in said_ok:
