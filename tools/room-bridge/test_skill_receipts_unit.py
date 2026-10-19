@@ -49,6 +49,10 @@ class SkillReceiptTests(unittest.TestCase):
             'code': 'text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"}));'}))
         rows[1]['payload']['output'] = '{"exit_code":0,"output":"skill"}'
         self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
+        rows[0]['payload'].update(type='custom_tool_call', name='exec',
+            input='text(await tools.exec_command({cmd:"cat /skills/tdd/SKILL.md"}));')
+        rows[1]['payload']['type'] = 'custom_tool_call_output'
+        self.assertEqual(self.scan(rows)['opened'], ['/skills/tdd/SKILL.md'])
         self.assertEqual(self.scan([
             {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'r',
              'name': 'Read', 'input': {'file_path': '/skills/poteto-mode/SKILL.md'}}]}},
