@@ -946,7 +946,78 @@ class RecoveryCrash(BaseException):
     pass
 
 
+class CheckpointOwnership(unittest.TestCase):
+    def test_only_checkpoint_owner_can_write_last_released_sha(self):
+        tree = ast.parse((HERE / "release-pipeline.py").read_text())
+        writes = []
+
+        class Writers(ast.NodeVisitor):
+            scope = []
+
+            def visit_ClassDef(self, node):
+                self.scope.append(node.name)
+                self.generic_visit(node)
+                self.scope.pop()
+
+            visit_FunctionDef = visit_ClassDef
+            visit_AsyncFunctionDef = visit_ClassDef
+
+            def record(self, node):
+                writes.append((".".join(self.scope), node.lineno))
+
+            def visit_Subscript(self, node):
+                if (isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(node.slice, ast.Constant)
+                        and node.slice.value == "last_released_sha"):
+                    self.record(node)
+                self.generic_visit(node)
+
+            def visit_Dict(self, node):
+                if any(isinstance(key, ast.Constant) and key.value == "last_released_sha" for key in node.keys):
+                    self.record(node)
+                self.generic_visit(node)
+
+            def visit_Call(self, node):
+                if (any(keyword.arg == "last_released_sha" for keyword in node.keywords)
+                        or (isinstance(node.func, ast.Attribute)
+                            and node.func.attr in {"setdefault", "__setitem__", "__delitem__", "pop"}
+                            and node.args and isinstance(node.args[0], ast.Constant)
+                            and node.args[0].value == "last_released_sha")):
+                    self.record(node)
+                self.generic_visit(node)
+
+        Writers().visit(tree)
+        self.assertTrue(writes, "the checkpoint owner must contain the actual state mutation")
+        self.assertEqual({scope for scope, _ in writes}, {"Pipeline.advance_checkpoint"}, writes)
+
+
 class ReleaseJournalRecovery(Base):
+    def test_rollback_and_runtime_revert_retire_pending_intent_before_source_only_checkpoint(self):
+        prior = self.fx.commit({"mcp-server/src/a.js": "baseline"})
+        live = {"sha": self.fx.base, "version": PRIOR}
+        runner = FakeRunner(live=live, outputs={"upload": f"provider version: {PRIOR}\n"})
+        restart = lambda: self.fx.pipeline(runner, live=live)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        promoted = self.fx.commit({"mcp-server/src/a.js": "promoted"})
+        runner.outputs = {}
+        pipe = restart()
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        live.update(sha=prior, version=PRIOR)
+        reverted = self.fx.commit({"mcp-server/src/a.js": "baseline", "README.md": "revert"})
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], reverted)
+        self.assertNotIn("pending_promotion", state)
+        retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
+        self.assertEqual([row["sha"] for row in retired], [promoted])
+        self.assertTrue(retired[0]["reason"])
+        newer = self.fx.commit({"mcp-server/src/a.js": "fix forward"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertEqual(runner.names().count("promote"), 3)
+
     def assert_failed_live_can_fix_forward(self, latest, runner, restart):
         state = self.fx.state()["worker"]
         self.assertEqual(state["last_released_sha"], latest)
