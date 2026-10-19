@@ -324,6 +324,8 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
             ["node", str(Path(__file__).with_name("test-browser-cdp.mjs")), browser],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True) as process:
+        assert process.stdout is not None
+        assert process.stdin is not None
         cdp: DevTools | None = None
         try:
             endpoint = process.stdout.readline()
