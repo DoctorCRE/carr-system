@@ -13,11 +13,12 @@ for p in "$@"; do
     [ "$st" = OPEN ] || { echo "MERGEFAIL $p"; break; }
     [ "$ms" = DIRTY ] && { echo "CONFLICT $p"; break; }
     behind=0
-    if [ "$ms" != CLEAN ]; then
+    if [ "$ms" != CLEAN ] && [ "$ms" != BEHIND ]; then
       sleep 2
-      behind=$(gh api "repos/$R/compare/main...$sha" -q .behind_by 2>/dev/null || echo 0)
+      behind=$(gh api "repos/$R/compare/main...$sha" -q .behind_by 2>/dev/null)
+      [[ "$behind" =~ ^[0-9]+$ ]] || behind=0
     fi
-    if [ "$ms" = BEHIND ] || [ "${behind:-0}" -gt 0 ]; then
+    if [ "$ms" = BEHIND ] || [ "$behind" -gt 0 ]; then
       sleep 2
       gh api -X PUT "repos/$R/pulls/$p/update-branch" -f update_method=merge >/dev/null && echo "UPDATED $p"
       sleep 120
