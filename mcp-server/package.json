@@ -6,7 +6,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node run-tests.mjs",
-    "generate:types": "node generate-verb-types.mjs && wrangler types .generated/worker-configuration.d.ts --strict-vars=false --env-file /dev/null",
+    "generate:types": "node generate-verb-types.mjs && node generate-worker-types.mjs",
     "typecheck": "npm run generate:types && tsc --project tsconfig.json"
   },
   "keywords": [],
