@@ -365,6 +365,8 @@ class OutageTests(unittest.TestCase):
                 now=health.parse_time("2026-09-28T14:00:00Z"),
                 evidence=receipt("2026-09-28T14:00:00Z"))
             self.assertEqual(health.reconcile(recovered, state, verb), "cleared")
+            self.assertEqual(next(payload["base_version"] for name, payload in calls
+                                  if name == "close-loop"), 1)
             self.assertEqual(calls[-1][0], "close-loop")
             self.assertEqual(calls[-1][1]["loop_id"], "loop-123")
 

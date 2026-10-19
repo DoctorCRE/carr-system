@@ -228,6 +228,7 @@ class UptimeHealthTests(unittest.TestCase):
         self.assertEqual(sum(name == "close-loop" for name, _ in calls), 1)
         self.assertIn("monitoring unavailable", calls[0][1]["body"])
         self.assertIn("recovered", calls[-1][1]["outcome"])
+        self.assertEqual(calls[-1][1]["base_version"], 1)
 
     def test_monitor_loop_replays_after_lost_acknowledgement_and_refuses_corrupt_state(self):
         root = Path(__file__).resolve().parents[1]
