@@ -703,6 +703,12 @@ commit;
         provision.credential.load_existing = load_legacy_credential
         rollback_values = provision.load_rollback_worker_values(
             type("OldScope", (), {"endpoint_host": "legacy.example"})())
+        provision.read_worker_database_secret_names = lambda: set(
+            provision.WORKER_DATABASE_SECRET_NAMES)
+        repeated_rollback_values = provision.load_rollback_worker_values(
+            type("OldScope", (), {"endpoint_host": "legacy.example"})())
+        check("a second release keeps the same legacy rollback after candidate secrets appear",
+              repeated_rollback_values == rollback_values)
     finally:
         provision.credential.profile = saved_profile
         provision.credential.load_existing = saved_load_existing
