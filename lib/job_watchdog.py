@@ -344,7 +344,7 @@ def detect(facts, config, now):
                 if "start" in job and epoch(job["start"]) < successes.get(card, float("-inf")):
                     continue
                 reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
-                incident = json.dumps([reason, successes.get(card)])
+                incident = json.dumps([reason, successes.get(card) if "start" in job else None])
                 key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
                 if key not in failures:
                     failures.add(key)
