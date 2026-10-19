@@ -176,6 +176,8 @@ def plain_text(text):
 
 
 TOPICS = (
+    (r'lease.expiry', 'Lease expiry radar'),
+    (r'client.identifying', 'Data privacy'),
     (r'^Bump actions/|github.actions', 'Actions updates'),
     (r'^Bump |^chore\(deps', 'Build dependencies'),
     (r'\bdatabase|\bschema\b', 'Database repair'),
@@ -230,12 +232,19 @@ def propose_copy(record):
             'Social drafting': 'Research how to automate the weekly social media drafting job.'}.get(title, description)
     if description:
         sentences = re.findall(r'.*?[.!?](?=\s|$)', description)
-        description = next((sentence.strip() for sentence in sentences if 7 <= len(sentence.split()) and len(sentence) <= 320), '')
+        description = next((sentence.strip() for sentence in sentences
+            if 7 <= len(sentence.split()) and len(sentence) <= 320
+            and not re.match(r'(?i)^\s*(?:It pairs|Do not merge|Skills used|[A-Z]\d+\b)', sentence)), '')
     if not description and title and source and len(source) <= 300 and not source.startswith('Dot research:'):
         description = source.rstrip(' .') + '.'
 
+    if title == 'Lease expiry radar':
+        description = 'Expose lease expiry data so the app can show upcoming lease deadlines.'
+    elif title == 'Data privacy':
+        description = 'Remove client identifying data from the public source.'
     if description:
         description = description[:1].upper() + description[1:]
+        description = re.sub(r'^Repairs (.+?) failing with', r'Repair \1 when it fails with', description)
         description = re.sub(r'^Repairs\b', 'Repair', description)
     if not title or not description:
         if record.get('card_title') and record.get('card_description'):

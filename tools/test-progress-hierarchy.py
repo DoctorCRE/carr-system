@@ -284,6 +284,17 @@ class HierarchyTests(unittest.TestCase):
         plan = h.backfill(b)
         self.assertEqual([(s['slice_id'],s['ordinal']) for s in plan['requests']['series:V2']['slices']], [('A',1),('B',2)])
 
+    def test_summaries_name_the_subject_and_ignore_delivery_instructions(self):
+        for source, title, body in [
+            ('Expose authenticated client lease-expiry data', 'Lease expiry radar', 'W13 producer for the DoctorCRE lease expiry radar.'),
+            ('Remove client-identifying data from public source', 'Data privacy', 'Do not merge, approve, or enable auto-merge.'),
+            ('Interactive progress board', 'Board cleanup', 'It pairs with the producer for the published JSON contract. Show each request and its slices so people can follow the work.')]:
+            with self.subTest(source=source):
+                row = {'title':source, 'body':body}
+                h.propose_copy(row)
+                self.assertEqual(row['card_title'], title)
+                self.assertNotRegex(row['card_description'], r'^(?:W13|Do not merge|It pairs)')
+
     def test_job_number_wins_over_a_discovered_pr_number(self):
         for link in [{'pr':1960}, {'pr_links':[{'repo':'jbookout/carr-system','pr':1960}]}]:
             with self.subTest(link=link):
