@@ -252,7 +252,8 @@ class Reuse(unittest.TestCase):
         self.assertEqual(evidence.resolve(gh,'f'*40,self.tree,'d'*64,['gates','migration']), {'reused':False})
 
     def test_unavailable_github_evidence_runs_classes_without_disclosing_credentials(self):
-        root = pathlib.Path(tempfile.mkdtemp(prefix="ci-evidence-selftest-"))
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "ci-evidence-selftest"
+        root.mkdir()
         try:
             gh = root / 'gh'
             gh.write_text('#!/bin/sh\necho "$GH_TOKEN" >&2\nexit 1\n')

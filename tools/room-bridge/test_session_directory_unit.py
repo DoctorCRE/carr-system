@@ -16,6 +16,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[2] / "lib"))
+from selftest_harness import temporary_directory
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -256,7 +259,7 @@ def test_roster_rows_for_the_heartbeat():
 
 
 def test_directory_file_round_trip():
-    path = Path(tempfile.mkdtemp()) / "session-directory.json"
+    path = Path(temporary_directory()) / "session-directory.json"
     data = sd.load(path)
     assert data == sd.empty()
     sd.ingest(data, [presence("codex-6394537b")], host=HOST, now=NOW)
