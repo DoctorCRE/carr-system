@@ -70,25 +70,31 @@ class SnapshotSizeTests(unittest.TestCase):
         for field, value in (("title", "X" * 240000),
                              ("stage_history", [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}] * 5000)):
             with self.subTest(field=field):
-                merged = {"title": "Merged task", "stage": "merged", "status": "review", "pr_phase": "Merged", field: value}
-                task = {"title": "Open task", "stage": "build", "status": "running"}
+                merged = {"title": "Merged task", "stage": "merged", "status": "review", "pr_phase": "Merged",
+                          "updated_at": "2026-10-17T12:00:00Z", field: value}
+                newer = {"title": "Newer merged task", "stage": "merged", "status": "review", "pr_phase": "Merged",
+                         "updated_at": "2026-10-18T12:00:00Z"}
+                task = {"title": "Open task", "stage": "build", "status": "running", "updated_at": "2026-10-19T12:00:00Z"}
                 if field == "stage_history":
                     task[field] = [{"stage": "build", "entered_at": "2026-10-18T12:00:00Z"}]
+                    newer[field] = [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}]
                 state = {"project": "fixture", "tasks": {"merged-a": copy.deepcopy(merged),
-                                                         "merged-b": copy.deepcopy(merged), "open": task}}
+                                                         "merged-b": copy.deepcopy(merged), "merged-new": newer, "open": task}}
                 before = copy.deepcopy(state)
 
                 snapshot = board.board_snapshot(state, costs={"state": "unavailable", "providers": []})
 
                 self.assertLessEqual(board.snapshot_size(snapshot), board.SNAPSHOT_BUDGET)
-                self.assertEqual(set(snapshot["tasks"]), {"open"})
+                self.assertEqual(set(snapshot["tasks"]), {"open", "merged-new"})
+                self.assertEqual(snapshot["omitted"]["merged"], 2)
                 defaults = snapshot.get("task_defaults", {})
                 self.assertNotIn(field, defaults)
                 for default in defaults:
                     self.assertTrue(any(default not in card for card in snapshot["tasks"].values()))
-                restored = {**defaults, **snapshot["tasks"]["open"]}
-                for key, expected in task.items():
-                    self.assertEqual(restored[key], expected)
+                for task_id, expected_task in (("open", task), ("merged-new", newer)):
+                    restored = {**defaults, **snapshot["tasks"][task_id]}
+                    for key, expected in expected_task.items():
+                        self.assertEqual(restored[key], expected)
                 self.assertEqual(state, before)
 
     def test_projection_preserves_custom_waits_and_stage_time_precision_and_fallbacks(self):
