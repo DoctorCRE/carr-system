@@ -21,8 +21,8 @@ WHAT IT PROVES, in the order a reader would want it:
                            an earlier revision of this design would have made a
                            withdrawn row raise work_request_not_found, which is
                            the capability erasing the record it exists to write
-  captured only, for a decline
-                           a triaged request cannot be declined, at two layers
+  triaged decline          preserves triage and withdrawal receipts; ready and
+                           later states refuse with their state named
   triaged supersession     0888: a triaged request with nothing downstream is
                            superseded, keeps its triage fields, and its triage
                            receipt stays readable through superseded_by; one
@@ -408,8 +408,36 @@ def main() -> int:
             retired, successor, planned = capture(cur, "Retired"), capture(cur, "Successor"), capture(cur, "Planned")
             for ref in (retired, planned):
                 triage(cur, ref)
-            refuses(cur, "select ops.decline_sourced_work_request(%s,2,'r','joe',%s)",
-                    (retired, str(uuid.uuid4())), "declining a triaged request")
+            declined = capture(cur, "Answered request")
+            triage(cur, declined)
+            decline_key = uuid.uuid4()
+            reason = "already answered; no further work remains"
+            row = cur.execute(
+                "select state,version,exit_reason from ops.decline_sourced_work_request(%s,2,%s,'joe',%s)",
+                (declined, reason, decline_key)).fetchone()
+            if row != ("declined", 3, reason):
+                raise RuntimeError(f"triaged decline did not land: {row}")
+            card = cur.execute(
+                "select state,triage_classification,triaged_by_actor_slug,exit_reason,closed_at"
+                " from ops.work_request_card(%s,'carr-internal')", (declined,)).fetchone()
+            if card[:4] != ("declined", "operational", "joe", reason) or card[4] is None:
+                raise RuntimeError(f"triaged decline lost its history on the card: {card}")
+            receipt = cur.execute(
+                "select r.base_version,r.result_version,r.final_state,r.exit_reason,a.slug"
+                " from ops.work_request_withdrawal_receipt r join public.actor a on a.id=r.withdrawn_by_actor_id"
+                " where r.idempotency_key=%s", (decline_key,)).fetchone()
+            if receipt != (2, 3, "declined", reason, "joe"):
+                raise RuntimeError(f"triaged decline lost its withdrawal receipt: {receipt}")
+            kept = cur.execute(
+                "select r.classification,r.base_version,r.result_version from ops.work_request_triage_receipt r"
+                " join ops.work_request w on w.id=r.work_request_id where w.ref=%s", (declined,)).fetchall()
+            if kept != [("operational", 1, 2)]:
+                raise RuntimeError(f"triaged decline lost its triage receipt: {kept}")
+            message = refuses_named(cur,
+                "select ops.decline_sourced_work_request(%s,3,'r','joe',%s)",
+                (declined, uuid.uuid4()), "work_request_not_declinable:", "declining an already declined request")
+            if "state declined" not in message:
+                raise RuntimeError(f"decline refusal did not name its state: {message}")
             refuses_named(cur, "select ops.supersede_sourced_work_request(%s,1,'r',%s,'joe',%s)",
                           (retired, successor, str(uuid.uuid4())), "work_request_not_supersedable",
                           "superseding a triaged request at its captured version")
