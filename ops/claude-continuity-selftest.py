@@ -135,7 +135,7 @@ class ClaudeContinuityHookTest(unittest.TestCase):
 
     def test_untrusted_input_is_ignored(self):
         self.set_mode("inject")
-        outside = pathlib.Path(tempfile.mkdtemp()) / "session-1.jsonl"
+        outside = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory())) / "session-1.jsonl"
         for payload in ({"agent_id": "🧭" * 200}, {"transcript_path": str(outside)},
                         {"session_id": "other-session"}):
             result = self.run_hook("SessionStart", source="compact", **payload)

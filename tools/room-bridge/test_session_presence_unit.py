@@ -24,6 +24,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.append(str(Path(__file__).resolve().parents[2] / "lib"))
+from selftest_harness import temporary_directory
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -42,7 +45,7 @@ def claude_env(**extra):
 
 
 def tmpdir() -> Path:
-    return Path(tempfile.mkdtemp(prefix="presence-"))
+    return Path(temporary_directory(prefix="presence-"))
 
 
 def test_this_host_survives_a_scheduler_path_without_sbin():

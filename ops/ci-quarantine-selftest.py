@@ -16,6 +16,31 @@ RUNNER = REPO / 'ops' / 'ci-quarantine.py'
 
 
 class QuarantineTests(unittest.TestCase):
+    def test_temp_leaks_fail_without_rerun_or_quarantine(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entry = {'test': 'ops/example-selftest.py', 'loop': 'https://github.com/jbookout/carr-system/issues/123',
+                'owner': 'qa-engineer', 'expires': '2099-01-01', 'reason': 'Fixture'}
+            result = self.invoke(root, "import tempfile; tempfile.mkdtemp(prefix='leaked-fixture-')", [entry])
+            self.assertEqual(result.returncode, 125, result.stdout + result.stderr)
+            receipt = json.loads((root / 'test.log.result.json').read_text())
+            self.assertEqual(receipt['status'], 'temp-leak')
+            self.assertIsNone(receipt['rerun_exit'])
+            self.assertTrue(receipt['temp_leaks'][0].startswith('leaked-fixture-'))
+            self.assertFalse(Path(receipt['temp_root']).exists())
+
+    def test_private_temp_directory_preserves_unix_socket_path_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.invoke(Path(directory), "import tempfile,socket; from pathlib import Path; "
+                "t=tempfile.TemporaryDirectory(prefix='desk-start-test-'); "
+                "s=socket.socket(socket.AF_UNIX); s.bind(str(Path(t.name)/'test-desk.sock')); s.close(); t.cleanup()")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_owned_temporary_directory_passes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.invoke(Path(directory), "import tempfile; t=tempfile.TemporaryDirectory(); t.cleanup()")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def seed_repo(self, path):
         path.mkdir()
         (path / 'code.py').write_text('original')

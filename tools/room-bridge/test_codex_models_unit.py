@@ -78,6 +78,48 @@ class FamilyDispatchTests(unittest.TestCase):
         self.assertIn('model_reasoning_effort=low', seen[0])
         self.assertEqual(self.reg.entries()['cx']['family'], 'sol')
 
+    def test_automatic_desks_pin_subscription_auth_on_start_and_resume(self):
+        for desk, family, model in [('luna-desk', 'luna', 'gpt-6-luna'),
+                                    ('sol-fixer', 'sol', 'gpt-6.1-sol'),
+                                    ('codex-desk', 'sol', 'gpt-6.1-sol')]:
+            self.reg.register(desk, 'codex-session', family=family, effort='low')
+            for resume in (False, True):
+                with self.subTest(desk=desk, resume=resume):
+                    if resume:
+                        self.reg.remember_thread(desk, 'subscription-thread')
+                    seen = []
+                    def run(argv, **options):
+                        seen.append(argv)
+                        Path(argv[argv.index('-o') + 1]).write_text('done')
+                        return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
+                    with patch.object(dispatch.subprocess, 'run', side_effect=run):
+                        row = dispatch.dispatch(desk, 'automatic task', registry=self.reg,
+                                                results_path=self.results,
+                                                config_overrides=('forced_login_method="api"',
+                                                                  'model_provider="unguarded-api"'))
+                    self.assertEqual(row['model'], model)
+                    self.assertEqual('resume' in seen[0], resume)
+                    for forced, overridden in [('forced_login_method="chatgpt"', 'forced_login_method="api"'),
+                                               ('model_provider="openai"', 'model_provider="unguarded-api"')]:
+                        self.assertIn(forced, seen[0])
+                        self.assertGreater(seen[0].index(forced), seen[0].index(overridden))
+
+    def test_automatic_desks_refuse_a_rebound_max_transport(self):
+        for desk in ('luna-desk', 'sol-fixer', 'codex-desk'):
+            for kind in ('claude-session', 'claude-desktop'):
+                with self.subTest(desk=desk, kind=kind):
+                    self.reg.register(desk, 'codex-session', family='sol', effort='low')
+                    data = json.loads(self.reg.path.read_text())
+                    data['desks'][desk].update(kind=kind, model='opus')
+                    self.reg.path.write_text(json.dumps(data))
+                    with patch.object(dispatch, '_execute', return_value={'status': 'completed', 'detail': 'done'}) as execute, \
+                         patch.object(desks, 'is_live', return_value=True):
+                        with self.assertRaises(desks.DeskError) as raised:
+                            dispatch.dispatch(desk, 'automatic task', registry=self.reg,
+                                              results_path=self.results)
+                        self.assertEqual(raised.exception.code, 'unsafe_automatic_desk')
+                        execute.assert_not_called()
+
     def test_priority_order_is_not_version_order_for_either_family(self):
         self.reg.register('cx', 'codex-session', family='sol', effort='high')
         for family in ('sol', 'luna'):

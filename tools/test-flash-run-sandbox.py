@@ -61,7 +61,9 @@ def sandboxed(fn):
 
 
 def _work():
-    return _managed_temp(prefix="flash-run-sbx-")
+    work = _managed_temp(prefix="flash-run-sbx-")
+    TEMP_STACK.callback(fr.drop_scratch, work)
+    return work
 
 
 def _run(program, work, *, reads=(), execs=(), port=None, timeout=30):
