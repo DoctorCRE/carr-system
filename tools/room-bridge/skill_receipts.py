@@ -54,18 +54,13 @@ def _read_paths(name, args):
         tokens = list(shlex.shlex(command, posix=True, punctuation_chars=';&|<>\n'))
     except ValueError:
         return []
-    # Refuse redirected reads; copying a skill is not opening it in context.
-    if any('>' in token or '<' in token for token in tokens):
+    # One shell status proves only one unconditional read, never a compound command.
+    if any(char in command for char in '\n\r`$') or any(
+            any(char in token for char in ';&|<>()') for token in tokens):
         return []
-    paths, segment = [], []
-    for token in [*tokens, ';']:
-        if token in (';', '&&', '||', '|', '\n'):
-            if segment and Path(segment[0]).name in ('cat', 'head', 'tail', 'sed'):
-                paths.extend(value for value in segment[1:] if _skill_path(value))
-            segment = []
-        else:
-            segment.append(token)
-    return paths
+    if not tokens or Path(tokens[0]).name not in ('cat', 'head', 'tail', 'sed'):
+        return []
+    return [value for value in tokens[1:] if _skill_path(value)]
 
 
 def _success(output):
