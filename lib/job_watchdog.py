@@ -655,7 +655,9 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
             row.update(loop_id=None if new_incident else prior.get("loop_id"),
                        loop_idempotency_key=incident_key if new_incident else prior.get("loop_idempotency_key", legacy_key),
                        reported=False if new_incident else prior.get("reported", False))
-        if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
+        if (not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]
+                or f["kind"] == "job_failed" and prior.get("job") != f["job"]):
+            row["reported"] = prior.get("reported", False) and not prior.get("cleared_at")
             append(findings_path, row)
         # An unchanged record request retries with the same idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
