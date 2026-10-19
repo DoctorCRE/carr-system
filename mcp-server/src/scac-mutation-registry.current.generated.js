@@ -2,7 +2,7 @@
 // This is a non-authorizing source/build guard. The sealed DB registry is SIEP-11's sole metadata authority; SIEP-18 owns atomic admission.
 export const SCAC_MUTATION_REGISTRY_VERSION = "scac-mutation-registry.v118";
 export const SCAC_MUTATION_REGISTRY_DIGEST = "dc6f7a39d9a6879f73d92fde3081f87b79dc6c23dfa45052dc2c5d599f5fdbfd";
-export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "07a9902c9846099b030b8e11b99fa3ce5c1370df29c333e1ba3060797e6f6812";
+export const SCAC_MUTATION_SOURCE_CONTRACT_SET_DIGEST = "fbb25519f3bdb377fa1480231f4b26a2a1b03bc476150554a0be1fa72ba7b672";
 export const SCAC_MUTATION_DB_CATALOG_BASELINE_DIGEST = "b37445be9897851115806e549a6595c9f42f5d252af58ae7dc0cda328ec32877";
 export const SCAC_MUTATION_DB_METADATA_AUTHORITY = true;
 export const SCAC_MUTATION_RUNTIME_PROJECTION_AUTHORIZING = false;
@@ -2503,7 +2503,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "read-work-shape": {
     "ingress_key": "mcp-tool:read-work-shape",
     "source_locator": "mcp-server/src/work-shape.js",
-    "source_digest": "2d1dc3786985acd729a27cfa6411e21a5a4fcec31601a8a49f3250a2df341e60",
+    "source_digest": "3d8273373c5f57b3a65a9bd8853339c5e28e38cf1c3223e3b362fea902d83a5b",
     "schema_digest": "1fdd12ba613b33ad7907ec4b00801b41afe0b4ed02604f38c7c63a0fb2bf258e",
     "write": false,
     "human_only": false,
@@ -3478,7 +3478,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "set-work-shape-disposition": {
     "ingress_key": "mcp-tool:set-work-shape-disposition",
     "source_locator": "mcp-server/src/work-shape.js",
-    "source_digest": "2d1dc3786985acd729a27cfa6411e21a5a4fcec31601a8a49f3250a2df341e60",
+    "source_digest": "3d8273373c5f57b3a65a9bd8853339c5e28e38cf1c3223e3b362fea902d83a5b",
     "schema_digest": "dcc617e4d0702df7293ec660dd2bdbe9e439db385a9cd8b0a45e742a6381593c",
     "write": true,
     "human_only": false,
@@ -3800,7 +3800,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "write-work-shape": {
     "ingress_key": "mcp-tool:write-work-shape",
     "source_locator": "mcp-server/src/work-shape.js",
-    "source_digest": "2d1dc3786985acd729a27cfa6411e21a5a4fcec31601a8a49f3250a2df341e60",
+    "source_digest": "3d8273373c5f57b3a65a9bd8853339c5e28e38cf1c3223e3b362fea902d83a5b",
     "schema_digest": "57bc4cc3200199724de614ee3feb5467c03ede9ad40197c02c9c0d5dd9b7cf9f",
     "write": true,
     "human_only": false,
