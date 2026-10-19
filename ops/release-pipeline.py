@@ -1344,7 +1344,7 @@ class Pipeline:
             raise Blocked("live_identity_unreadable", f"{url} names no readable full Worker identity") from exc
         lane_state = state["worker"]
         previous = lane_state.get("last_released_sha")
-        if not previous or previous == sha:
+        if lane_state.get("pending_promotion") or not previous or previous == sha:
             return live
         if lane_state.get("failed_sha") == sha:
             raise Blocked("live_target_unreceipted", "failed release source identity has no durable shipped checkpoint")
