@@ -198,6 +198,7 @@ class SkillReceiptTests(unittest.TestCase):
     def test_completed_job_uses_its_own_thread_and_dispatch_time(self):
         row = {'msg_id': 'job', 'status': 'completed', 'thread_id': 'own-session',
                'kind': 'codex-session', 'dispatched_at': '2026-10-19T15:00:00Z',
+               'completed_at': '2026-10-19T15:00:02.500000Z',
                'result': 'https://github.com/jbookout/carr-system/pull/2000'}
         with patch.object(skill_receipts, 'session_path', return_value=Path('/own-log')) as locate, \
              patch.object(skill_receipts, 'scan', return_value={'available': ['tdd'], 'opened': []}) as scan, \
@@ -206,8 +207,52 @@ class SkillReceiptTests(unittest.TestCase):
                  {'html_url': 'https://github.com/jbookout/carr-system/issues/2000#issuecomment-1'}, {}]):
             value = dispatch.finish_skill_receipt(row)
         locate.assert_called_once_with('own-session', 'codex')
-        scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'])
+        scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'], until=row['completed_at'])
         self.assertFalse(value['skills'][0]['opened'])
+
+    def test_completion_boundary_survives_publication_failure_and_retry(self):
+        class Registry:
+            def resolve(self, name):
+                return {'kind': 'claude-session'}
+        start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02.500000Z'
+        pr = 'https://github.com/jbookout/carr-system/pull/2000'
+        with tempfile.TemporaryDirectory() as directory:
+            results = Path(directory) / 'results.jsonl'
+            transcript = Path(directory) / 'session.jsonl'
+            transcript.write_text('')
+            with patch.object(dispatch, 'desk_skill_inventory', return_value=None), \
+                 patch.object(dispatch, '_execute', return_value={'status': 'completed',
+                     'session_id': 'own-session', 'result': pr}), \
+                 patch.object(dispatch, '_now', side_effect=[start, end]), \
+                 patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch, '_skill_gh', side_effect=ValueError('publication failed')):
+                row = dispatch.dispatch('builder', 'fix it', registry=Registry(), results_path=results)
+            saved = json.loads(results.read_text().splitlines()[0])
+            self.assertEqual(saved['completed_at'], end)
+            self.assertIn('skill_receipt_error', row)
+            transcript.write_text('\n'.join(json.dumps(event) for event in
+                self.codex('cat /skills/tdd/SKILL.md', stamp='2026-10-19T15:00:02.500001Z')))
+            with patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch, '_execute') as execute, \
+                 patch.object(dispatch, '_skill_gh', side_effect=[
+                     {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
+                     {'html_url': pr + '#issuecomment-1'}, {}]):
+                self.assertEqual(dispatch.main(['--results', str(results), 'receipt', row['msg_id']]), 0)
+            execute.assert_not_called()
+            receipt = json.loads(dispatch._skill_ledger(results).read_text().splitlines()[-1])
+            self.assertEqual(receipt['completed_at'], end)
+            self.assertFalse(receipt['skill_receipt']['skills'][0]['opened'])
+
+    def test_missing_completion_window_cannot_publish(self):
+        row = {'msg_id': 'job', 'status': 'completed', 'kind': 'codex-session',
+               'dispatched_at': '2026-10-19T15:00:00Z',
+               'result': 'https://github.com/jbookout/carr-system/pull/2000'}
+        for changes in ({}, {'completed_at': 'invalid'},
+                        {'completed_at': '2026-10-19T15:00:02Z', 'dispatched_at': None}):
+            with self.subTest(changes=changes), patch.object(dispatch, '_skill_gh') as gh:
+                with self.assertRaisesRegex(ValueError, 'window'):
+                    dispatch.finish_skill_receipt({**row, **changes})
+                gh.assert_not_called()
 
     def test_delivery_is_not_completion(self):
         with patch.object(dispatch, '_skill_gh') as gh:
