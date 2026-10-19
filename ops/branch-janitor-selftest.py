@@ -24,6 +24,35 @@ spec.loader.exec_module(hook)
 
 
 class ReaperTest(unittest.TestCase):
+    def test_main_advance_replans_and_reverifies_merge_proof(self):
+        fixture = Fixture()
+        base = fixture.git("rev-parse", "main")
+        head = fixture.commit("branch work", cwd=fixture.tree("old"))
+        landed = fixture.commit("landed work")
+        fixture.git("push", "origin", "main", "old")
+        provider = FakeProvider([pull(1, head, base, merged=landed)])
+        reaper = fixture.reaper(provider=provider)
+        row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo)
+                   if r.get("ref") == "refs/remotes/origin/old")
+        advances, proof_mains = [], []
+        original = provider.pull
+        def advance_once(repo, root):
+            if not advances:
+                advances.append(fixture.commit("main advanced"))
+                fixture.git("push", "origin", "main")
+        def read_proof(repo, number):
+            proof_mains.append(fixture.git("rev-parse", "origin/main"))
+            return original(repo, number)
+        provider.verify_repository = advance_once
+        provider.pull = read_proof
+        result = reaper.apply("fixture/repo", fixture.repo, row, [])
+        self.assertEqual(result["status"], "retired", result)
+        self.assertEqual(proof_mains, advances)
+        self.assertEqual(result["main"], advances[0])
+        self.assertEqual(result["main_replans"], 1)
+        self.assertFalse(fixture.git("ls-remote", "origin", "refs/heads/old"))
+        self.assertEqual(fixture.git("rev-parse", result["backup_ref"]), head)
+
     def test_closed_pr_retirement_requires_idle_matching_same_repository_main_head(self):
         import copy
         fixture = Fixture()
