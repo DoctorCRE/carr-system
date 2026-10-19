@@ -4078,11 +4078,11 @@ export const TOOLS = {
 
   "update-deal": {
     write: true,
-    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on). invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
+    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder). invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" },
       base_version: { type: "integer" },
-      fields: { type: "object", description: "subset of: deal_type, phase, segment, outcome, closed_on, won_value, notes_path, salesforce_id, city, lane, invoiced_on" } },
+      fields: { type: "object", description: "subset of: deal_type, phase, segment, outcome, closed_on, won_value, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder (Salesforce estimate only, never a forecast or closed_on)" } },
       required: ["idempotency_key","deal","base_version","fields"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-deal", args, async () => {
       const s = await resolveSubject(c, args.deal);
@@ -4093,11 +4093,14 @@ export const TOOLS = {
       // invoiced_on joined in 0733 (V5-RW02): a won deal stays in the Salesforce
       // reconciliation absence scope until it is marked invoiced.
       const allowed = ["deal_type","phase","segment","outcome","closed_on","won_value","notes_path",
-                       "salesforce_id","city","lane","invoiced_on"];
+                       "salesforce_id","city","lane","invoiced_on","sf_close_date_placeholder"];
       if ("client_id" in args.fields) throw new ToolError({ error: "use_reassign_deal",
         hint: "moving a deal between clients is structural, not a field edit — use reassign-deal" });
       const keys = Object.keys(args.fields).filter(k => allowed.includes(k));
       if (!keys.length) throw new ToolError({ error: "no_updatable_fields", allowed });
+      if (keys.includes("sf_close_date_placeholder") && !isCalendarDate(args.fields.sf_close_date_placeholder))
+        throw new ToolError({ error: "invalid_sf_close_date_placeholder",
+          hint: "Salesforce close date is a calendar date YYYY-MM-DD; it never sets closed_on" });
       // A real calendar date: the pattern, then a round trip, so 2026-13-45 or
       // 2026-02-30 is refused here instead of failing later as a raw cast error.
       if (keys.includes("invoiced_on") && args.fields.invoiced_on !== null &&
@@ -4126,7 +4129,7 @@ export const TOOLS = {
 
   "new-deal": {
     write: true,
-    description: "Create a deal on an existing client. THE GAP THIS CLOSES: until 2026-08-07 nothing in the record layer could create a deal — new-client makes only a client row, reassign-deal and set-lead both need a deal that already exists, and the ONLY insert into `deal` in the whole repo was pipelines/import_wave1.py, the one-time bulk import. So every deal in the book traced back to that import, and the six deals the 2026-08-07 Salesforce read found had nowhere to land. The client must exist first (new-client over a party): a deal hangs off a client, never free-floating, and this verb will not invent one. humanOnly on purpose — a new deal is a real commitment in a partner's book, and salesforce-diff deliberately never auto-adds one. deal_type and phase are validated by the database against deal_type_ref and deal_phase, so a bad slug is refused with the live list rather than guessed at. Refuses a duplicate name and a salesforce_id already in use, naming the deal that holds it. Commission and close date from Salesforce are PLACEHOLDERS and land in the two labelled placeholder columns, never in won_value.",
+    description: "Create a deal on an existing client. Refuses duplicate names and Salesforce opportunity IDs. Validates deal_type and phase against the record vocabularies. Salesforce commission and close date go only to labeled placeholder columns. Never invents a client identity.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" },
       client: { type: "string", description: "C-ref or exact name of the client this deal belongs to" },
@@ -9006,9 +9009,19 @@ registerTools({
   },
 
   "read-deal-reconciliation": {
-    description: "Read the minimal all-deal reconciliation record. Use after update-deal closes a deal, because the Deal Room board intentionally contains only open deals. Returns the Salesforce reconciliation key, current base_version, and close-state fields; it never exposes Salesforce placeholders or source_row.",
-    inputSchema: { type: "object", properties: { deal: { type: "string" } }, required: ["deal"] },
+    description: "Read one minimal deal reconciliation record, including closed deals. Pass all:true instead of deal for the Salesforce sync snapshot with client, owner, version and explicitly labeled sf_close_date_placeholder. The single-deal read excludes placeholders. Neither read returns source_row or commission.",
+    inputSchema: { type: "object", additionalProperties: false,
+      properties: { deal: { type: "string" }, all: { type: "boolean", const: true } } },
     handler: async (c, _actor, args) => {
+      if ((args.all === true) === (typeof args.deal === "string" && args.deal.length > 0))
+        throw new ToolError({ error: "choose_deal_or_all" });
+      if (args.all === true) return { deals: (await c.query(
+        `select r.id, r.name, r.salesforce_id, r.base_version, r.phase, r.outcome,
+                to_jsonb(r.closed_on)#>>'{}' as closed_on,
+                to_jsonb(r.invoiced_on)#>>'{}' as invoiced_on,
+                e.client_ref, e.client_name, lower(e.owner) as owner,
+                to_jsonb(e."PLACEHOLDER_sf_close_date_never_forecast")#>>'{}' as sf_close_date_placeholder
+           from v_deal_reconciliation_read r join v_export_deals e on e.id=r.id order by r.id`)).rows };
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       const r = await c.query(
