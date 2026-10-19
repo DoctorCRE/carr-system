@@ -1025,7 +1025,12 @@ The supported lane builds and removes one for you: ./run.sh local-db-ci --class 
       > "$LOGDIR/migration-shadow.log" 2>&1 || shadow_rc=$?
     _mstep shadow
     case "$shadow_rc" in
-      0) shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow and db/schema.sql matches" ;;
+      0) if ! run_quiet "$LOGDIR/schema-snapshot-rebuild.log" "$PY" ops/schema-snapshot-rebuild-test.py; then
+           tail -30 "$LOGDIR/schema-snapshot-rebuild.log" >&2
+           bad migration "db/schema.sql loses an applied seed update during snapshot refresh and rebuild"
+           return
+         fi
+         shadow_note="; $(sed -n 's/^migration-shadow: \([0-9]* pending migration(s) applied\).*/\1/p' "$LOGDIR/migration-shadow.log" | head -1) on a PostgreSQL 18 shadow; refreshed snapshot restores with reviewed seeds intact" ;;
       3) if [ "$STRICT" = "1" ]; then
            cat "$LOGDIR/migration-shadow.log" >&2
            bad migration "the migration shadow needs PostgreSQL 18 server binaries (CI installs postgresql-18)"
