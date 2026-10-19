@@ -15,9 +15,9 @@ from uuid import UUID
 
 from lib.claude_scheduler_native import discover_snapshot, read_native_task, render_task_definition
 from lib.control_plane_scheduler_cutover import CutoverRefusal
-from lib.headless_tasks import calendar_entries, config
+from lib.headless_tasks import calendar_entries
 from lib.launchd_scheduler_native import Runner, read_native_launchd
-from lib.scheduler_hygiene import native_tasks, workflows
+from lib.scheduler_hygiene import native_tasks, read_json, workflows
 
 
 def _digest(value: object) -> str:
@@ -71,7 +71,8 @@ def collect_receipt(task_id: str, *, repo: Path, home: Path, runner: Runner = _r
     """Measure a reviewed headless task and its retained native registration."""
     if re.fullmatch(r'[a-z][a-z0-9-]*', task_id) is None:
         raise CutoverRefusal('task identity is invalid')
-    settings, registered = config(repo), workflows(repo)
+    settings = read_json(repo / 'ops/headless-tasks/tasks.json')
+    registered = workflows(repo)
     workflow = registered.get(task_id)
     if task_id not in settings['tasks'] or not workflow:
         raise CutoverRefusal('task has no reviewed headless workflow')

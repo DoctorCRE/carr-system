@@ -300,6 +300,14 @@ class ObservationTests(unittest.TestCase):
                 self.assertEqual(receipt['cutover_state'], expected)
                 self.assertFalse(receipt['headless']['enabled'])
 
+    def test_duplicate_manifest_keys_cannot_bind_an_ambiguous_version(self):
+        from lib.control_plane_scheduler_cutover import CutoverRefusal
+        path = self.repo / 'ops/headless-tasks/tasks.json'
+        tasks = json.dumps(json.loads(path.read_text())['tasks'])
+        path.write_text('{"timezone":"America/Chicago","tasks":' + tasks + ',"tasks":' + tasks + '}')
+        with self.assertRaises(CutoverRefusal):
+            self.collect()
+
     def test_headless_plist_with_home_tokens_can_be_observed(self):
         observed = self.read_launchd()
         self.assertTrue(observed['enabled'])
