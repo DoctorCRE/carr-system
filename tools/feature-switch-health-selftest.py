@@ -6,11 +6,26 @@ import json
 import subprocess
 import sys
 import tempfile
+import io
+from contextlib import redirect_stdout
+from unittest.mock import patch
 p=Path(__file__).with_name('feature-switch-health.py')
 spec=importlib.util.spec_from_file_location('feature_health',p)
 assert spec is not None and spec.loader is not None
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class Health(unittest.TestCase):
+    def test_worker_refusal_names_the_failed_verb_and_error(self):
+        response = subprocess.CompletedProcess([], 1, '',
+            'TOOL ERROR {"error":"unknown_tool","name":"check-feature-switches"}\n')
+        with patch.object(sys, 'argv', [str(p)]), \
+             patch.object(subprocess, 'run', return_value=response), \
+             redirect_stdout(io.StringIO()) as output:
+            code = m.main()
+        self.assertEqual(code, 2)
+        self.assertIn('check-feature-switches refused:', output.getvalue())
+        self.assertIn('unknown_tool', output.getvalue())
+        self.assertIn('UNKNOWN feature switches:', output.getvalue())
+
     def test_malformed_rows_are_rejected_at_render_interface(self):
         for row in ('x', None, [], 1):
             with self.subTest(row=row):
