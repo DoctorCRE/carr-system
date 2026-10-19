@@ -106,6 +106,7 @@ Read and follow [the required PR policy](AGENTS.md#before-every-pr-design-and-de
 
 ## Agent skills
 
+Use `tools/mq.sh` for serial merges, `tools/open-prs.sh` for open PRs across jbookout repos, and `tools/room-bridge/briefs/{builder,staging-score}.md` for dispatch briefs.
 
 ### Issue tracker
 

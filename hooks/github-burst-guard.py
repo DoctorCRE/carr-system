@@ -157,7 +157,8 @@ WORD_RE = re.compile(r"(?<![\w$-])(do|done)(?![\w-])")
 GITHUB_HOST_RE = re.compile(r"api\.github\.com")
 
 # Shown with every refusal: the cheaper alternatives, named once.
-CHEAPER = ("One `gh api --paginate` or `gh api graphql` call returns what a loop "
+CHEAPER = ("Use `tools/open-prs.sh` to list open PRs across jbookout repos with merge state. "
+           "One `gh api --paginate` or `gh api graphql` call returns what a loop "
            "of per-item calls does; or put `sleep 2` (or more) inside the loop.")
 
 
