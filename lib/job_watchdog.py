@@ -969,8 +969,10 @@ def collect(root, config, now=None):
     if sys.platform == "darwin" and Path(root).resolve() == repository_roots(config).get("jbookout/carr-system"):
         try:
             from machine_cleanup import health_findings
+            sys.path.append(str(Path(__file__).resolve().parents[1] / "tools"))
+            from storage_hygiene import storage_roots
             facts["machine_cleanup"] = health_findings(root, config, tmp_root=Path("/private/tmp"),
-                roots=repository_roots(config), now=now)
+                roots=repository_roots(config), now=now, user_tmp_root=storage_roots()[0])
         except Exception as exc:
             error("machine cleanup", exc, "machine_cleanup")
     queue = path_at(root, config["paths"]["merge_queue"])

@@ -26,6 +26,16 @@ TMP_PREFIXES = (
     "fake-flash-run", "hookenv-", "syncmap", "ipc", "factory",
     "design", "branch", "doctorcre",
 )
+TEST_TMP_PREFIXES = (
+    "carr-ci-test-",
+    "branch-janitor-fixture-", "carr-dispatch-door-", "carr-dispatch-paused-",
+    "flash-projects-", "doc-drift-fixture-", "doc-drift-ci-fixture-",
+    "doc-drift-pin-fixture-", "doc-drift-missing-pin-", "presence-", "jev-ring",
+    "flash-inputs-", "flash-outside-", "fake-flash-run-", "flash-canary-",
+    "hookenv-a-", "hookenv-b-", "playwright_chromiumdev_profile-",
+    "playwright_firefoxdev_profile-", "playwright_webkitdev_profile-", "playwright-artifacts-",
+)
+
 UNKNOWN_SAMPLE_LIMIT = 25
 PHYSICAL_ESTIMATE_METHOD = (
     "APFS shared extents make du totals logical, not physical reclaim. "
@@ -452,7 +462,84 @@ def apply_plan(plan: CleanupPlan, *, dry_run: bool, ledger_path: Path,
     return RunResult(removed, findings, status)
 
 
-def _defaults() -> tuple[Path, Path, Path]:
+def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
+                       deadline, dry_run, record=lambda row: None):
+    import heapq
+    root = Path(root)
+    report = {'removed': [], 'kept': [], 'cursor': cursor, 'removed_allocated_bytes': 0,
+              'free_space_delta_bytes': 0, 'budget_exhausted': False, 'errors': []}
+    descriptor = _open_root(root)
+    identity = os.fstat(descriptor)
+    before_free = shutil.disk_usage(root).free
+    try:
+        with os.scandir(descriptor) as entries:
+            names = heapq.nsmallest(max_items, (e.name for e in entries
+                if e.name.startswith(TEST_TMP_PREFIXES) and e.name > cursor))
+        for offset in range(0, len(names), 50):
+            if deadline():
+                report['budget_exhausted'] = True
+                break
+            batch = names[offset:offset + 50]
+            busy = process_probe([str(root / name) for name in batch])
+            for name in batch:
+                if deadline():
+                    report['budget_exhausted'] = True
+                    break
+                path = root / name
+                row = {'kind': 'test_temp', 'path': str(path), 'status': 'kept', 'reason': 'recent fixture'}
+                try:
+                    info = path.lstat()
+                    if path.is_symlink() or not path.is_dir():
+                        row['reason'] = 'symlink or non-directory'
+                    elif busy is None or str(path) in busy:
+                        row['reason'] = 'live process or process evidence unavailable'
+                    else:
+                        latest = info.st_mtime
+                        for parent, dirs, files in os.walk(path, followlinks=False):
+                            if deadline():
+                                raise TimeoutError('fixture inspection budget')
+                            for entry in (*dirs, *files):
+                                latest = max(latest, (Path(parent) / entry).lstat().st_mtime)
+                        if now - latest >= min_age:
+                            size = logical_allocated_bytes([Candidate('test_temp', path, now - latest)], 3)
+                            if size is None:
+                                raise OSError('fixture size evidence unavailable')
+                            final_busy = process_probe([str(path)])
+                            if final_busy is None or str(path) in final_busy:
+                                row['reason'] = 'fixture became live or process evidence unavailable'
+                            else:
+                                if deadline():
+                                    raise TimeoutError('fixture removal budget')
+                                check = path.lstat()
+                                if (check.st_dev, check.st_ino, check.st_mtime) != (info.st_dev, info.st_ino, info.st_mtime):
+                                    raise OSError('fixture changed during inspection')
+                                rechecked = _open_root(root, (identity.st_dev, identity.st_ino))
+                                os.close(rechecked)
+                                row.update(reason='old inactive disposable test fixture', allocated_bytes=size)
+                                if dry_run:
+                                    row['status'] = 'would_remove'
+                                else:
+                                    record({**row, 'status': 'removing'})
+                                    shutil.rmtree(name, dir_fd=descriptor)
+                                    row['status'] = 'removed'
+                                    report['removed_allocated_bytes'] += size
+                except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                    row.update(reason='fixture evidence or removal failed', error=type(exc).__name__)
+                    report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
+                report['removed' if row['status'] == 'removed' else 'kept'].append(row)
+                report['cursor'] = name
+                record(row)
+            if report['budget_exhausted']:
+                break
+        if not report['budget_exhausted'] and len(names) < max_items:
+            report['cursor'] = ''
+        report['free_space_delta_bytes'] = shutil.disk_usage(root).free - before_free
+        return report
+    finally:
+        os.close(descriptor)
+
+
+def storage_roots() -> tuple[Path, Path, Path]:
     if sys.platform != "darwin":
         raise OSError("storage hygiene root discovery requires macOS")
     result = subprocess.run(
@@ -483,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_items < 1 or args.max_seconds <= 0 or args.older_than_hours <= 0:
         parser.error("caps and age must be positive")
 
-    tmp_root, clone_root, replay_root = _defaults()
+    tmp_root, clone_root, replay_root = storage_roots()
     used, clone_count = storage_snapshot(Path("/System/Volumes/Data"), clone_root)
     row = health_row(used_bytes=used, clone_count=clone_count)
     if args.health_row:
@@ -500,12 +587,13 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(REPO / "ops/config/job-watchdog.json")
         config["machine_cleanup"]["max_seconds"] = min(config["machine_cleanup"]["max_seconds"], args.max_seconds)
         spec = importlib.util.spec_from_file_location("cleanup_worktree_hook", REPO / "hooks/worktree-self-plumb.py")
+        assert spec is not None and spec.loader is not None
         hook = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = hook
         spec.loader.exec_module(hook)
         machine = clean_machine(REPO, config, hook=hook, tmp_root=Path("/private/tmp"),
             dispatch_path=Path.home() / ".config/carr/hermes-dispatch-results.jsonl",
-            roots=repository_roots(config), dry_run=args.dry_run)
+            roots=repository_roots(config), user_tmp_root=tmp_root, dry_run=args.dry_run)
         print(json.dumps({k: v for k, v in machine.items() if k not in {"removed", "kept"}}))
     plan = plan_cleanup(
         clone_root=clone_root, tmp_root=tmp_root, replay_root=replay_root,

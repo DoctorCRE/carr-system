@@ -81,10 +81,28 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
 
-def health_findings(root, config, *, tmp_root, roots, now):
+def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
     from branch_retirement import iter_worktrees
     policy = config['machine_cleanup']
     rows = []
+    try:
+        import sys
+        sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
+        from storage_hygiene import logical_allocated_bytes, Candidate
+        clone_paths = [p for p in Path(tmp_root).glob('room-codex-*') if p.is_dir() and not p.is_symlink()]
+        # Staged clones still occupy the volume until their retention is resolved.
+        clone_paths.extend(p for p in (Path(tmp_root) / '_to_delete').glob('room-codex-*') if p.is_dir() and not p.is_symlink())
+        measurements = [('job_clone_bytes', clone_paths, policy['job_clone_bytes_threshold'])]
+        if user_tmp_root is not None:
+            measurements.append(('user_temp_bytes', [Path(user_tmp_root)], policy['user_temp_bytes_threshold']))
+        for code, paths, threshold in measurements:
+            size = logical_allocated_bytes([Candidate(code, p, 0) for p in paths], 10)
+            if size is None:
+                rows.append({'code': code + '_unavailable', 'detail': code + ' size evidence unavailable'})
+            elif size > threshold:
+                rows.append({'code': code, 'detail': f'{code}: {size} allocated bytes exceed {threshold}'})
+    except Exception as exc:
+        rows.append({'code': 'cleanup_size_unavailable', 'detail': 'Cleanup size evidence unavailable: ' + type(exc).__name__})
     try:
         count = sum(1 for path in Path(tmp_root).glob('room-codex-*') if path.is_dir() and not path.is_symlink())
         if count > policy['job_clone_threshold']:
@@ -144,7 +162,7 @@ def recover_clone(workspace):
 
 
 def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
-        process_probe=process_paths, archive_thread=None, dry_run=False):
+        process_probe=process_paths, archive_thread=None, user_tmp_root=None, dry_run=False):
     import heapq
     import sys
     from branch_retirement import FleetReaper, append
@@ -168,7 +186,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         save(receipt_path, report)
 
         def record(row):
-            report['removed' if row.get('status') in {'staged', 'archived'} else 'kept'].append(row)
+            report['removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept'].append(row)
             if row.get('error'):
                 report['errors'].append({'kind': row['kind'], 'error': row['error']})
             if not row.get('error'):
@@ -202,6 +220,33 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 record({**row, 'status': action['status'] if action else 'kept',
                         'reason': action.get('reason', row['reason']) if action else row['reason'],
                         **({'staged_path': action['staged_path']} if action and 'staged_path' in action else {})})
+        if user_tmp_root is not None:
+            sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
+            from storage_hygiene import cleanup_test_temps
+            temp_deadline = time.monotonic() + max(0, deadline - time.monotonic()) / 3
+            report['temp_removed_allocated_bytes'] = 0
+            report['temp_free_space_delta_bytes'] = 0
+            temp_roots = list(dict.fromkeys((Path(user_tmp_root).resolve(), tmp_root)))
+            for index, temp_root in enumerate(temp_roots):
+                root_deadline = time.monotonic() + max(0, temp_deadline - time.monotonic()) / (len(temp_roots) - index)
+                slot = 'test_temp:' + str(temp_root)
+                def temp_record(row):
+                    if row['status'] == 'removing':
+                        report['pending'] = row
+                        save(receipt_path, report)
+                    else:
+                        cursor[slot] = Path(row['path']).name
+                        if row['status'] == 'removed':
+                            report['temp_removed_allocated_bytes'] += row['allocated_bytes']
+                        record(row)
+                temps = cleanup_test_temps(temp_root, now=now, min_age=policy['test_temp_age_seconds'],
+                    max_items=policy['test_temp_max_items'], cursor=cursor.get(slot, ''),
+                    process_probe=process_probe, deadline=lambda: time.monotonic() >= root_deadline,
+                    dry_run=dry_run, record=temp_record)
+                cursor[slot] = temps['cursor']
+                report['temp_free_space_delta_bytes'] += temps['free_space_delta_bytes']
+                save(cursor_path, cursor)
+                save(receipt_path, report)
         remaining = max(0, deadline - time.monotonic())
         clone_deadline = time.monotonic() + remaining / 2
         candidates = heapq.nsmallest(policy['max_items'],

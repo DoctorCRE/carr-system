@@ -66,6 +66,7 @@ class WatchdogBudgetTests(unittest.TestCase):
 
 
 spec = importlib.util.spec_from_file_location('janitor_fixtures', ROOT / 'ops/branch-janitor-selftest.py')
+assert spec is not None and spec.loader is not None
 fixtures = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixtures)
 
@@ -299,6 +300,48 @@ class ThreadArchiveTests(unittest.TestCase):
 
 
 class CleanupHealthTests(unittest.TestCase):
+    def test_scheduled_cleanup_records_temp_effects_bytes_and_durable_receipt(self):
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch, clones = root / 'scratch', root / 'clones'
+            scratch.mkdir()
+            clones.mkdir()
+            old = scratch / 'jev-ring.fixture'
+            old.mkdir()
+            (old / 'payload').write_bytes(b'x' * 8192)
+            os.utime(old / 'payload', (0, 0))
+            os.utime(old, (0, 0))
+            system_temp = clones / 'carr-ci-test-old'
+            system_temp.mkdir()
+            os.utime(system_temp, (0, 0))
+            report = cleanup.run(root, config, hook=None, tmp_root=clones, user_tmp_root=scratch,
+                roots={}, dispatch_path=root / 'absent.jsonl', provider=object(),
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+            self.assertFalse(old.exists())
+            self.assertFalse(system_temp.exists())
+            self.assertEqual(report['status'], 'completed')
+            self.assertGreaterEqual(report['temp_removed_allocated_bytes'], 8192)
+            saved = json.loads((root / 'out/machine-cleanup.json').read_text())
+            self.assertEqual(saved['removed'][0]['status'], 'removed')
+            self.assertEqual(saved['temp_removed_allocated_bytes'], report['temp_removed_allocated_bytes'])
+
+
+    def test_temp_and_clone_byte_thresholds_feed_red_watchdog_findings(self):
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup'].update(user_temp_bytes_threshold=1, job_clone_bytes_threshold=1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / 'room-codex-fixture').mkdir()
+            (root / 'room-codex-fixture/payload').write_bytes(b'x' * 8192)
+            rows = cleanup.health_findings(root, config, tmp_root=root, user_tmp_root=root, roots={}, now=90000)
+            codes = {row['code'] for row in rows}
+            self.assertIn('job_clone_bytes', codes)
+            self.assertIn('user_temp_bytes', codes)
+
+
     def test_cleanup_health_reports_thresholds_and_stale_success_as_watchdog_findings(self):
         import machine_cleanup as cleanup
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')

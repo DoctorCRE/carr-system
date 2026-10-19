@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,7 +21,10 @@ const realChromeSkipReason = process.platform !== "darwin"
     : process.env.CODEX_SANDBOX === "seatbelt"
       ? "Codex seatbelt aborts Chrome before DevTools"
       : false;
-const codeSignCloneDirectory = path.resolve(tmpdir(), "..", "X", "com.google.Chrome.code_sign_clone");
+const systemTemp = process.platform === "darwin"
+  ? execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim()
+  : tmpdir();
+const codeSignCloneDirectory = path.resolve(systemTemp, "..", "X", "com.google.Chrome.code_sign_clone");
 function fakeChrome(t, scenarios, beforeSpawn = () => {}) {
   const calls = [];
   t.after(async () => {
@@ -57,6 +60,11 @@ async function directoryEntryCount(directory) {
   try { return (await readdir(directory)).length; }
   catch (error) { if (error.code === "ENOENT") return 0; throw error; }
 }
+
+test("code-sign clone root ignores the suite TMPDIR", { skip: process.platform !== "darwin" }, () => {
+  const userTemp = execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim();
+  assert.equal(codeSignCloneDirectory, path.resolve(userTemp, "..", "X", "com.google.Chrome.code_sign_clone"));
+});
 
 test("code-sign clone counting treats an absent directory as empty", async (t) => {
   const parent = await mkdtemp(path.join(tmpdir(), "chrome-clone-count-"));

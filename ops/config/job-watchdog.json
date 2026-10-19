@@ -123,6 +123,10 @@
     "job_clone_threshold": 30,
     "success_max_age_seconds": 86400,
     "max_seconds": 240,
-    "max_items": 20
+    "max_items": 20,
+    "test_temp_age_seconds": 21600,
+    "test_temp_max_items": 1000,
+    "user_temp_bytes_threshold": 21474836480,
+    "job_clone_bytes_threshold": 53687091200
   }
 }

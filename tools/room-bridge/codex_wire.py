@@ -242,7 +242,8 @@ def archive_finished_thread(thread_id: str, *, before: float, process_probe,
             return {**result, 'status': 'archived', 'reason': 'native archive effect read back before retry'}
         if thread.get('id') != thread_id or not safe(thread):
             return {**result, 'reason': 'thread active, recent, pinned, live, or evidence unavailable'}
-        descendants, cursor = [], None
+        descendants: list[dict] = []
+        cursor = None
         while True:
             page = rpc('thread/list', {'ancestorThreadId': thread_id, 'archived': False,
                 'sourceKinds': ['cli', 'vscode', 'exec', 'appServer', 'subAgent', 'subAgentReview',

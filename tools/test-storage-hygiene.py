@@ -7,6 +7,7 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -55,12 +56,12 @@ class StorageHygieneTests(unittest.TestCase):
         self.assertEqual([item.path for item in self.clone_only_plan().removable], [clone])
 
     @unittest.skipUnless(sys.platform == "darwin", "Darwin root discovery")
-    def test_defaults_ignore_environment_temp_roots(self):
+    def teststorage_roots_ignore_environment_temp_roots(self):
         expected = Path(subprocess.check_output(
             ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], text=True).strip()).resolve()
         with patch.dict(os.environ, {"TMPDIR": str(self.tmp), "TMP": str(self.tmp),
                                     "TEMP": str(self.tmp)}):
-            tmp, clones, _ = storage_hygiene._defaults()
+            tmp, clones, _ = storage_hygiene.storage_roots()
         self.assertEqual(tmp, expected)
         self.assertEqual(clones, expected.parent / "X" / "com.google.Chrome.code_sign_clone")
 
@@ -132,7 +133,7 @@ def configure(frame, event, arg):
     if event == 'call' and frame.f_code.co_name == 'main' and frame.f_code.co_filename == os.environ['FIXTURE_SCRIPT']:
         g = frame.f_globals
         g['REPO'] = Path(os.environ['FIXTURE_ROOT'])
-        g['_defaults'] = lambda: (g['REPO'], g['REPO'], g['REPO'])
+        g['storage_roots'] = lambda: (g['REPO'], g['REPO'], g['REPO'])
         g['plan_cleanup'] = lambda **kwargs: g['CleanupPlan']()
         g['storage_snapshot'] = lambda *args: (int(os.environ['FIXTURE_USED']), 0)
         def record_transport(argv, **kwargs):
@@ -454,6 +455,79 @@ sys.settrace(configure)
                     and node.func.value.id == "tempfile"
                     and node.func.attr == "mkdtemp"]
             self.assertEqual(bare, [], f"{relative} has bare mkdtemp calls at {bare}")
+
+
+class TestFixtureCleanup(unittest.TestCase):
+    def test_each_known_fixture_prefix_is_disposable_after_age_and_process_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for index, prefix in enumerate(storage_hygiene.TEST_TMP_PREFIXES):
+                path = root / (prefix + str(index))
+                path.mkdir()
+                os.utime(path, (0, 0))
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=lambda paths: set(), deadline=lambda: False, dry_run=False)
+            self.assertEqual(len(report['removed']), len(storage_hygiene.TEST_TMP_PREFIXES))
+            self.assertFalse(list(root.iterdir()))
+
+
+    def test_process_starting_during_fixture_inspection_keeps_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / 'branch-janitor-fixture-race'
+            path.mkdir()
+            os.utime(path, (0, 0))
+            calls = []
+            def probe(paths):
+                calls.append(paths)
+                return set() if len(calls) == 1 else set(paths)
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=probe, deadline=lambda: False, dry_run=False)
+            self.assertTrue(path.exists())
+            self.assertFalse(report['removed'])
+
+
+    def test_old_allowlisted_fixtures_remove_but_recent_live_unknown_and_symlinks_stay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            now = time.time()
+            for name in ('branch-janitor-fixture-old', 'presence-live', 'flash-inputs-new', 'unrelated-old', 'doc-drift-fixture-active-file'):
+                path = root / name
+                path.mkdir()
+                (path / 'payload').write_bytes(b'x' * 8192)
+                if name != 'doc-drift-fixture-active-file':
+                    os.utime(path / 'payload', (now - 30000, now - 30000))
+                os.utime(path, (now - (10 if name.endswith('-new') else 30000),) * 2)
+            (root / 'jev-ring-link').symlink_to(root / 'unrelated-old', target_is_directory=True)
+            report = storage_hygiene.cleanup_test_temps(root, now=now, min_age=21600, max_items=100,
+                cursor='', process_probe=lambda paths: {str(root / 'presence-live')},
+                deadline=lambda: False, dry_run=False)
+            self.assertFalse((root / 'branch-janitor-fixture-old').exists())
+            for name in ('presence-live', 'flash-inputs-new', 'unrelated-old', 'doc-drift-fixture-active-file', 'jev-ring-link'):
+                self.assertTrue((root / name).exists(), name)
+            self.assertEqual(len(report['removed']), 1)
+            self.assertGreaterEqual(report['removed_allocated_bytes'], 8192)
+            self.assertTrue(report['kept'])
+
+    def test_unknown_process_evidence_dry_run_budget_and_cursor_keep_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for name in ('jev-ring-a', 'hookenv-b-b', 'playwright_chromiumdev_profile-c'):
+                (root / name).mkdir()
+                os.utime(root / name, (0, 0))
+            kwargs = dict(now=time.time(), min_age=21600, max_items=1, cursor='', deadline=lambda: False)
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: None, dry_run=False)
+            self.assertFalse(report['removed'])
+            self.assertTrue(report['kept'])
+            self.assertEqual(report['cursor'], 'hookenv-b-b')
+            kwargs['cursor'] = report['cursor']
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=True)
+            self.assertEqual(report['kept'][0]['status'], 'would_remove')
+            self.assertEqual(len(list(root.iterdir())), 3)
+            kwargs['deadline'] = lambda: True
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=False)
+            self.assertTrue(report['budget_exhausted'])
+            self.assertFalse(report['removed'])
 
 
 if __name__ == "__main__":

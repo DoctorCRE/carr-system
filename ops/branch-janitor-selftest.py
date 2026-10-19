@@ -11,6 +11,9 @@ import time
 import unittest
 from unittest.mock import patch
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops"))
 sys.path.insert(0, str(ROOT / "lib"))
@@ -699,7 +702,7 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         self.assertEqual(abandoned, "abandoned")
 
     def test_dry_run_and_apply_keep_dirty_orphan_bytes_and_branch(self):
-        base = Path(tempfile.mkdtemp(prefix="branch-janitor-fixture-")).resolve()
+        base = Path(temporary_directory(prefix="branch-janitor-fixture-")).resolve()
         repo, remote, tree = base / "repo", base / "remote.git", base / "orphan"
         repo.mkdir()
         def git(*args, cwd=repo):
@@ -876,7 +879,7 @@ def pull(number, head, base, *, body="", merged=None):
 
 class Fixture:
     def __init__(self):
-        self.base = Path(tempfile.mkdtemp(prefix="branch-janitor-fixture-")).resolve()
+        self.base = Path(temporary_directory(prefix="branch-janitor-fixture-")).resolve()
         self.repo, self.remote = self.base / "repo", self.base / "remote.git"
         self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
