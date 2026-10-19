@@ -55,6 +55,9 @@ class ReconstructionTests(unittest.TestCase):
                 actual = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
             self.assertEqual(actual, expected)
 
+            # Replay only the correction: later DDL is already in this snapshot.
+            correction = '0897_national_account_classification_correction.sql'
+            correction_ledger = {name: digest for name, digest in expected.items() if name <= correction}
             with psycopg.connect(dsn) as conn:
                 conn.execute("""insert into party (id,kind,name,created_by,updated_by)
                     select '00000000-0000-0000-0000-000000000011','org',
@@ -64,16 +67,40 @@ class ReconstructionTests(unittest.TestCase):
                         '00000000-0000-0000-0000-000000000011','national_account',id,id
                     from actor where slug='system'""")
                 conn.execute("delete from schema_migrations where filename >= %s",
-                    ('0897_national_account_classification_correction.sql',))
+                    (correction,))
             resumed = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
-                '--apply', '--yes', '--through', highest], cwd=ROOT,
+                '--apply', '--yes', '--through', correction], cwd=ROOT,
                 env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=600)
             self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
             with psycopg.connect(dsn) as conn:
                 self.assertEqual(dict(conn.execute(
-                    'select filename, sha256 from schema_migrations').fetchall()), expected)
+                    'select filename, sha256 from schema_migrations').fetchall()), correction_ledger)
                 self.assertEqual(conn.execute("select roster_ref,client_type from client").fetchall(),
                     [('SYNTHETIC-ACCOUNT', 'national_account')])
+
+            historical_ids = ('9c323aa5-b9c0-45e7-b958-ef1ee3738660',
+                '8550b702-e6fb-4bea-8b3e-1fec5b9499bd',
+                '2f7364a7-8167-421d-8492-79815307fba3')
+            for roster_ref, client_id, client_type, merged in [
+                (ref, '00000000-0000-0000-0000-000000000012', None, True)
+                for ref in ('C-161', 'C-204', 'C-205')
+            ] + [('SYNTHETIC-ACCOUNT', identity, 'national_account', False) for identity in historical_ids]:
+                with self.subTest(roster_ref=roster_ref, client_id=client_id):
+                    with psycopg.connect(dsn) as conn:
+                        conn.execute("delete from schema_migrations where filename >= %s",
+                            (correction,))
+                        conn.execute('update client set id=%s,roster_ref=%s,client_type=%s,merged_into=%s',
+                            (client_id, roster_ref, client_type, client_id if merged else None))
+                    refused = subprocess.run([sys.executable, str(ROOT / 'tools/migrate.py'),
+                        '--apply', '--yes', '--through', correction], cwd=ROOT,
+                        env={**os.environ, 'DATABASE_URL': dsn}, capture_output=True, text=True, timeout=600)
+                    self.assertNotEqual(refused.returncode, 0)
+                    self.assertIn('national-account correction: live account census changed', refused.stderr)
+                    with psycopg.connect(dsn) as conn:
+                        self.assertEqual(conn.execute("select count(*) from schema_migrations where filename=%s",
+                            (correction,)).fetchone()[0], 0)
+                        self.assertEqual(conn.execute("select count(*) from event where "
+                            "verb='correct-national-account-classification'").fetchone()[0], 0)
 
 
 if __name__ == '__main__':
