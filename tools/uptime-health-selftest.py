@@ -31,7 +31,8 @@ class UptimeHealthTests(unittest.TestCase):
                 opens.append(payload)
                 return {"ok": True, "loop_id": f"loop-{len(opens)}"}
             if name == "read-loop":
-                return {"loop_id": payload["loop_id"], "version": 2, "status": "dropped"}
+                return {"loop": {"loop_id": payload["loop_id"], "version": 2, "status": "dropped"},
+                        "amended": False, "amendments": []}
             self.fail("must preserve the dropped disposition")
 
         self.assertEqual(module.reconcile_monitor(True, False, state, verb), "open")
@@ -66,7 +67,8 @@ class UptimeHealthTests(unittest.TestCase):
                     replay[key] = (manifest, result)
                     return result
                 if name == "read-loop":
-                    return loops[payload["loop_id"]].copy()
+                    return {"loop": loops[payload["loop_id"]].copy(),
+                            "amended": False, "amendments": []}
                 self.assertEqual(name, "close-loop")
                 loops[payload["loop_id"]]["status"] = "done"
                 return {"ok": True}
@@ -214,7 +216,8 @@ class UptimeHealthTests(unittest.TestCase):
             if name == "add-loop":
                 return {"ok": True, "loop_id": "fixture-monitor-loop"}
             if name == "read-loop":
-                return {"loop_id": "fixture-monitor-loop", "version": 1, "status": "open"}
+                return {"loop": {"loop_id": "fixture-monitor-loop", "version": 1, "status": "open"},
+                        "amended": False, "amendments": []}
             return {"ok": True}
 
         for _ in range(2):
