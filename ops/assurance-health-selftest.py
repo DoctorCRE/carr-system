@@ -2258,7 +2258,7 @@ RED_SEEDS = ("an acceptance subject that is both accepted and rejected",
 # keeps the namespace the run left behind.  Nothing is retyped here: the hook,
 # the predicate and the literals are the file's own objects.
 _ALARM_HOOK_PROBE = r"""
-import json, subprocess, sys, tempfile
+import atexit, json, os, subprocess, sys, tempfile
 
 REPO, seeds_path = sys.argv[1], sys.argv[2]
 sys.path.insert(0, REPO)
@@ -2275,6 +2275,7 @@ with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
     json.dump({"observed_at": "2026-09-09T12:00:00+00:00", "exports": None,
                "errors": [], "job_definitions": [], "jobs": []}, fh)
     fixture = fh.name
+atexit.register(os.unlink, fixture)
 sys.argv = ["health-check.py", "--section", "jobs", "--fixture", fixture]
 
 path = REPO + "/tools/health-check.py"

@@ -1,6 +1,14 @@
 {
   "v": 1,
   "targets": {
+    "luna": {
+      "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:luna-desk",
+      "desk": "luna-desk",
+      "effective_model": "luna (Codex subscription)",
+      "capabilities": ["read", "repo-write", "record-write"]
+    },
     "sol": {
       "enabled": true,
       "adapter": "desk",
@@ -10,7 +18,8 @@
       "capabilities": ["read"]
     },
     "flash": {
-      "enabled": true,
+      "enabled": false,
+      "unavailable_reason": "Flash is explicit-only. Use bin/flash-on on a direct human request, then dispatch directly.",
       "adapter": "desk",
       "assignee": "desk:flash-model",
       "desk": "flash-model",

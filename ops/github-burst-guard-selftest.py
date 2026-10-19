@@ -46,10 +46,14 @@ import sys
 import tempfile
 import time
 
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "hooks", "github-burst-guard.py")
 
-TMP = tempfile.mkdtemp(prefix="github-burst-guard-")
+TMP = temporary_directory(prefix="github-burst-guard-")
 STATE = os.path.join(TMP, "state.json")
 LOCK = os.path.join(TMP, "release-pipeline", "lock")
 ENV = dict(os.environ,
