@@ -152,7 +152,7 @@ if [ "$canonical_skip" -eq 0 ]; then
       print -r -- "    $dirt_reason"
       canonical_status=$EX_CONFIG
       canonical_skip=1
-    elif ! merge_reason="$(git merge --ff-only "$remote_sha" 2>&1)"; then
+    elif ! merge_reason="$(git merge --ff-only --no-overwrite-ignore "$remote_sha" 2>&1)"; then
       print -ru2 -- "fleet-sync: fast-forward refused:"
       print -ru2 -- "$merge_reason"
       canonical_status=1
