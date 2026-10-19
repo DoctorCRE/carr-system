@@ -113,7 +113,9 @@ class StorageHygieneLoopTests(unittest.TestCase):
 
         def fake_call(verb, args, timeout=None):
             calls.append((verb, dict(args)))
-            return Result({"version": 7} if verb == "read-loop" else {})
+            return Result({"loop": {"loop_id": "loop-1", "version": 7},
+                           "amended": False, "amendments": []}
+                          if verb == "read-loop" else {})
 
         import lib.record_call as rc
         original = rc.call_verb
