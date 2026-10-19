@@ -2613,8 +2613,10 @@ def cmd_install(apply):
             for h in sorted(os.listdir(hooks_dir)):
                 p = os.path.join(hooks_dir, h)
                 if os.path.isfile(p):
-                    os.chmod(p, os.stat(p).st_mode | 0o111)
-            print("  git hooks made executable "
+                    mode = os.stat(p).st_mode
+                    if mode & 0o111 != 0o111:
+                        os.chmod(p, mode | 0o111)
+            print("  git hooks executable "
                   "(core.hooksPath untouched — `check` reports the observed value)")
         else:
             print("  would make ops/githooks executable "
@@ -2653,51 +2655,55 @@ def cmd_install(apply):
             # the active scheduler directory contains no CARR definition.
             shutil.move(source_dir, destination)
 
-    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-    backup = SETTINGS + ".bak-config-as-code"
-    if settings_existed:
-        shutil.copy2(SETTINGS, backup)
-    write_claude_settings(SETTINGS, cfg, raw)
-    try:
-        json.loads(read(SETTINGS))
-    except Exception as exc:
+    written_backups = []
+    if raw != json.dumps(cfg, indent=2) + "\n":
+        os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
+        backup = SETTINGS + ".bak-config-as-code"
         if settings_existed:
-            shutil.copy2(backup, SETTINGS)
-            remedy = f"restored {backup}"
-        else:
-            os.unlink(SETTINGS)
-            remedy = "removed the invalid new file"
-        print(f"ERROR: write produced unparseable JSON ({exc}) — {remedy}")
-        return 1
-    written_backups = [backup] if settings_existed else []
+            shutil.copy2(SETTINGS, backup)
+            written_backups.append(backup)
+        write_claude_settings(SETTINGS, cfg, raw)
+        try:
+            json.loads(read(SETTINGS))
+        except Exception as exc:
+            if settings_existed:
+                shutil.copy2(backup, SETTINGS)
+                remedy = f"restored {backup}"
+            else:
+                os.unlink(SETTINGS)
+                remedy = "removed the invalid new file"
+            print(f"ERROR: write produced unparseable JSON ({exc}) — {remedy}")
+            return 1
     if codex_state == "configured":
-        os.makedirs(os.path.dirname(CODEX_HOOKS_SRC), exist_ok=True)
-        codex_backup = CODEX_HOOKS_SRC + ".bak-config-as-code"
-        if os.path.exists(CODEX_HOOKS_SRC):
-            shutil.copy2(CODEX_HOOKS_SRC, codex_backup)
-            written_backups.append(codex_backup)
-        with open(CODEX_HOOKS_SRC, "w", encoding="utf-8") as fh:
-            json.dump(merged_codex, fh, indent=2)
-            fh.write("\n")
-        try:
-            json.loads(read(CODEX_HOOKS_SRC))
-        except Exception as exc:
-            if os.path.exists(codex_backup):
-                shutil.copy2(codex_backup, CODEX_HOOKS_SRC)
-            print(f"ERROR: Codex hook write produced unparseable JSON ({exc}) — restored backup")
-            return 1
-        code_config_backup = CODEX_CONFIG + ".bak-config-as-code"
-        shutil.copy2(CODEX_CONFIG, code_config_backup)
-        written_backups.append(code_config_backup)
-        with open(CODEX_CONFIG, "w", encoding="utf-8") as fh:
-            fh.write(permission_config)
-        try:
-            import tomllib
-            tomllib.loads(read(CODEX_CONFIG))
-        except Exception as exc:
-            shutil.copy2(code_config_backup, CODEX_CONFIG)
-            print(f"ERROR: Codex config write produced invalid TOML ({exc}) — restored backup")
-            return 1
+        codex_render = json.dumps(merged_codex, indent=2) + "\n"
+        if live_codex_raw != codex_render:
+            os.makedirs(os.path.dirname(CODEX_HOOKS_SRC), exist_ok=True)
+            codex_backup = CODEX_HOOKS_SRC + ".bak-config-as-code"
+            if os.path.exists(CODEX_HOOKS_SRC):
+                shutil.copy2(CODEX_HOOKS_SRC, codex_backup)
+                written_backups.append(codex_backup)
+            with open(CODEX_HOOKS_SRC, "w", encoding="utf-8") as fh:
+                fh.write(codex_render)
+            try:
+                json.loads(read(CODEX_HOOKS_SRC))
+            except Exception as exc:
+                if os.path.exists(codex_backup):
+                    shutil.copy2(codex_backup, CODEX_HOOKS_SRC)
+                print(f"ERROR: Codex hook write produced unparseable JSON ({exc}) — restored backup")
+                return 1
+        if code_config != permission_config:
+            code_config_backup = CODEX_CONFIG + ".bak-config-as-code"
+            shutil.copy2(CODEX_CONFIG, code_config_backup)
+            written_backups.append(code_config_backup)
+            with open(CODEX_CONFIG, "w", encoding="utf-8") as fh:
+                fh.write(permission_config)
+            try:
+                import tomllib
+                tomllib.loads(read(CODEX_CONFIG))
+            except Exception as exc:
+                shutil.copy2(code_config_backup, CODEX_CONFIG)
+                print(f"ERROR: Codex config write produced invalid TOML ({exc}) — restored backup")
+                return 1
     if launchd_activation_failures:
         print("ERROR: LaunchAgent install/reload failed for: "
               + ", ".join(launchd_activation_failures))
@@ -2708,7 +2714,7 @@ def cmd_install(apply):
     else:
         client_note = ("Codex must trust a changed non-managed hook definition before it "
                        "runs. Both configured clients are protected.")
-    print(f"\nWROTE OK (backups: {backup_note}). Claude Code reads its hooks block "
+    print(f"\nINSTALL OK (backups: {backup_note}). Claude Code reads its hooks block "
           f"per tool call; {client_note}")
     return 0
 

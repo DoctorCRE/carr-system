@@ -134,12 +134,25 @@ def configure(frame, event, arg):
         g['REPO'] = Path(os.environ['FIXTURE_ROOT'])
         g['_defaults'] = lambda: (g['REPO'], g['REPO'], g['REPO'])
         g['plan_cleanup'] = lambda **kwargs: g['CleanupPlan']()
-        g['storage_snapshot'] = lambda *args: (1_000_000_000_001, 0)
+        g['storage_snapshot'] = lambda *args: (int(os.environ['FIXTURE_USED']), 0)
         def record_transport(argv, **kwargs):
-            assert argv[1:3] == ['call', 'add-loop'], argv
-            assert json.loads(argv[3])['kind'] == 'open_loop'
-            assert json.loads(argv[3])['owner'] in ('joe', 'dell', 'claude'), argv[3]
-            return subprocess.CompletedProcess(argv, 0, '{"ok":true}', '')
+            assert argv[1] == 'call', argv
+            verb, args = argv[2], json.loads(argv[3])
+            with (g['REPO'] / 'calls.jsonl').open('a') as handle:
+                handle.write(json.dumps({'verb': verb, 'args': args}) + chr(10))
+            if verb == 'add-loop':
+                assert args['kind'] == 'open_loop'
+                assert args['owner'] in ('joe', 'dell', 'claude'), args
+                reply = {'ok': True, 'loop_id': 'loop-1'}
+            elif verb == 'read-loop':
+                reply = {'loop': {'loop_id': 'loop-1', 'version': 7},
+                         'amended': False, 'amendments': []}
+            elif verb == 'update-loop':
+                assert args['base_version'] == 7, args
+                reply = {'ok': True}
+            else:
+                raise AssertionError(verb)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(reply), '')
         patch('subprocess.run', side_effect=record_transport).start()
         sys.settrace(None)
     return configure
@@ -149,7 +162,7 @@ sys.settrace(configure)
         env = {key: value for key, value in os.environ.items()
                if key not in ("PYTHONPATH", "PYTHONHOME")}
         env.update(PYTHONPATH=str(harness), FIXTURE_SCRIPT=script,
-                   FIXTURE_ROOT=str(harness))
+                   FIXTURE_ROOT=str(harness), FIXTURE_USED='1000000000001')
         result = subprocess.run([sys.executable, script], cwd=ROOT, env=env,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -158,6 +171,21 @@ sys.settrace(configure)
         self.assertIn("logical allocated size", result.stdout)
         self.assertIn("APFS", result.stdout)
         self.assertIn("free space", result.stdout)
+        env['FIXTURE_USED'] = '1000000000002'
+        refreshed = subprocess.run([sys.executable, script], cwd=ROOT, env=env,
+                                   capture_output=True, text=True)
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
+        rows = [json.loads(line) for line in
+                (harness / "out/storage-hygiene.jsonl").read_text().splitlines()]
+        self.assertEqual([row['record_status'] for row in rows], ['recorded', 'recorded'])
+        calls = [json.loads(line) for line in (harness / 'calls.jsonl').read_text().splitlines()]
+        self.assertEqual([call['verb'] for call in calls],
+                         ['add-loop', 'add-loop', 'read-loop', 'update-loop'])
+        self.assertEqual(calls[0]['args'], calls[1]['args'])
+        self.assertEqual(calls[-1]['args']['base_version'], 7)
+        self.assertIn('1000000000002', calls[-1]['args']['body'])
+        self.assertNotEqual(calls[-1]['args']['idempotency_key'],
+                            calls[0]['args']['idempotency_key'])
 
     def test_apply_protects_path_when_lsof_warns_on_recheck(self):
         target = self.old_dir(self.clones, "code_sign_clone.old")

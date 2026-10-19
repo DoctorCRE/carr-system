@@ -298,6 +298,7 @@ PYEOF
   "$PY" ops/boot-budget-check.py
 
   for inv in audit-queue-freshness-check \
+             stale-count-check \
              rule-load-layer-check rule-classification-parity-check \
              selftest-git-isolation-check \
              sync-core-rule-ids rule-route-coverage \
