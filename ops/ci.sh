@@ -21,6 +21,11 @@ if [ "${1:-}" = "--doc-drift" ]; then
   exec "${CARR_DOC_DRIFT_PYTHON:-$PY}" "$REPO/scripts/doc-drift/ci.py" "$@"
 fi
 
+if [ "${1:-}" = "--pr-skills" ]; then
+  node --test mcp-server/test/pr-skills.test.mjs || exit 1
+  exec node ops/check-pr-skills.mjs
+fi
+
 STRICT=0
 ONLY=""
 while [ "$#" -gt 0 ]; do

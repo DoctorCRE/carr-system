@@ -1562,7 +1562,8 @@ class Pipeline:
         else:
             identity = proof.get("live_identity") or {}
             matches = (UUID_RE.fullmatch(str(identity.get("provider_version_id") or "")) is not None
-                       and all(live.get(key) == value for key, value in identity.items())
+                       and all(live.get(key) == identity.get(key) for key in
+                               ("source_commit", "environment", "provider_version_id"))
                        and identity.get("source_commit") == proof["sha"]
                        and identity.get("environment") == "production")
         if not matches:
@@ -1702,6 +1703,7 @@ class Pipeline:
                 return 0
             proof = {"lane": lane, "sha": sha, "from_sha": base, "run_id": self.run_id,
                      "release_endpoint": lane_cfg["live_release_url"], "paths": hits[:50], **result}
+            proof["live_identity"] = {**(result.get("live_identity") or {}), "url": lane_cfg["live_url"]}
             proof["proof_digest"] = evidence_digest(proof)
             self.store.record_durable({**proof, "status": "release_verified"})
             self.finish_release_proof(proof, state, lane)
