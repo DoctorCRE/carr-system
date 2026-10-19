@@ -7,15 +7,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const checker = fileURLToPath(new URL("../../ops/check-pr-skills.mjs", import.meta.url));
-function check(body, overrides = {}) {
+function check(body, overrides = {}, comments = []) {
   const directory = mkdtempSync(join(tmpdir(), "pr-skills-"));
   try {
     const event = join(directory, "event.json");
+    const receipts = join(directory, "comments.json");
+    writeFileSync(receipts, JSON.stringify(comments));
     writeFileSync(event, JSON.stringify({ repository: { full_name: "jbookout/carr-system" },
       pull_request: { body, user: { login: "jbookout" },
         head: { ref: "feature/example", repo: { full_name: "jbookout/carr-system" } }, ...overrides } }));
     return spawnSync(process.execPath, [checker], {
-      env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: event }, encoding: "utf8",
+      env: { PATH: process.env.PATH, GITHUB_EVENT_PATH: event, SKILL_RECEIPT_COMMENTS: receipts }, encoding: "utf8",
     });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
@@ -25,6 +27,20 @@ test("a declaration without receipt or artifacts passes with unverified annotati
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /::warning::unverified.*receipt/);
   assert.match(result.stderr, /::warning::unverified.*TDD/);
+});
+
+for (const enrolled of [false, true]) test(`${enrolled ? "enrolled" : "unenrolled"} PR with stale receipt ${enrolled ? "fails" : "passes unverified"}`, () => {
+  const result = check("Skills used: poteto-mode", {
+    head: { sha: "b".repeat(40) },
+    labels: enrolled ? [{ name: "skill-receipts-enforced" }] : [],
+  }, [{ user: { login: "jbookout" }, body: '<!-- skill-run-receipt/v1 -->\n```json\n' + JSON.stringify({
+    schema: "skill-run-receipt/v1", repo: "jbookout/carr-system", head: "a".repeat(40),
+    session_id: "session", dispatch_id: "job", skills: [{ skill: "poteto-mode", opened: true,
+      paths: ["/skills/poteto-mode/SKILL.md"] }],
+  }) + '\n```' }]);
+  assert.equal(result.status, enrolled ? 1 : 0, result.stderr);
+  assert.match(result.stderr, /Missing trusted skill-run receipt/);
+  assert.equal(result.stderr.includes("::warning::unverified"), !enrolled);
 });
 
 for (const [name, body] of [
