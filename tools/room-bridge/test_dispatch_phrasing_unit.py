@@ -43,6 +43,7 @@ class PhrasingTests(unittest.TestCase):
             ('try to break it', 'confirm the expected invariants hold'),
             ('credential exposed', 'confirm sensitive values remain redacted'),
             ('overwrite the binary', 'confirm the executable remains unchanged'),
+            ('receive the token', 'confirm the deploy step alone uses pipeline configuration'),
         ]
         for phrase, suggestion in cases:
             with self.subTest(phrase=phrase), patch.object(dispatch.codex_checkout, 'prepare') as prepare:
