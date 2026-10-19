@@ -202,11 +202,16 @@ class UnitClassTests(unittest.TestCase):
     def test_nested_node_tool_is_not_counted_as_an_empty_test_file(self):
         self.all_packages()
         (self.root / 'workspace/test/suite.test.mjs').write_text(
-            "import test from 'node:test'; import {spawnSync} from 'node:child_process'; "
+            "import test from 'node:test'; import {spawnSync, fork} from 'node:child_process'; "
             "import assert from 'node:assert/strict'; "
-            "test('nested tool', () => { const child = spawnSync(process.execPath, "
+            "test('nested tool', async () => { const child = spawnSync(process.execPath, "
             "['-e', 'console.log(123)'], {encoding: 'utf8'}); "
-            "assert.equal(child.status, 0); assert.equal(child.stdout.trim(), '123'); });")
+            "assert.equal(child.status, 0); assert.equal(child.stdout.trim(), '123'); "
+            "const forked = fork(new URL('./tool.mjs', import.meta.url), {silent: true}); "
+            "let output = ''; forked.stdout.on('data', data => output += data); "
+            "await new Promise(resolve => forked.on('close', resolve)); "
+            "assert.equal(forked.exitCode, 0); assert.equal(output.trim(), '123'); });")
+        (self.root / 'workspace/test/tool.mjs').write_text('console.log(123);')
         result = self.run_class()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('workspace: 1 tests, 1 passed', result.stdout)
