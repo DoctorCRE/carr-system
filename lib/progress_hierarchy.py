@@ -89,6 +89,7 @@ def project(state):
             if previous and merged(previous) and not merged(card):
                 card.update({field: previous[field] for field in ('merge_sha', 'merged_at')})
             card['done'] = merged(card)
+            card['stage'] = card_stage(card)
             cards[address] = card
             if address not in target['cards']:
                 target['cards'].append(address)
@@ -99,7 +100,8 @@ def project(state):
         task['card_id'] = addresses[0]
     for row in slices.values():
         values = [cards[key] for key in row['cards']]
-        row['pr_counts'] = dict(Counter('done' if t['done'] else t.get('stage') or t.get('status', 'queued') for t in values))
+        row['pr_counts'] = dict(Counter('done' if t['done'] else t['stage'] for t in values if t.get('pr') and not t['archived']))
+        row['job_counts'] = dict(Counter(t['stage'] for t in values if not t.get('pr') and not t['archived']))
         row['status'] = aggregate([v for v in values if not v['archived']]) if any(not v['archived'] for v in values) or not values else 'archived'
         row['updated_at'] = max((t.get('updated_at', '') for t in values), default='')
         counts = requests[row['parent_id']]['counts']
@@ -233,10 +235,12 @@ def backfill(state, catalog=None, facts=None):
         if not series:
             match = re.search(r'\b(V\d+)\s+([A-Z]\d+[A-Za-z]?|\d+[A-Z]|[A-Z])\b', text)
             series = match[1] if match else None
-        group = ref or ('series:' + str(series) if series else 'legacy')
+        standalone = f"pr:{original.get('repo', 'jbookout/carr-system')}#{original['pr']}" if original.get('pr') and fact and task.get('proposed_copy') else None
+        group = ref or ('series:' + str(series) if series else standalone or 'legacy')
         request = requests.setdefault(group, copy.deepcopy(catalog.get(ref) or state.get('work_requests', {}).get(ref) or {
             'title': 'Legacy backlog' if group == 'legacy' else (str(series) + ' delivery' if series and not ref else text),
-            'description': 'Recover the work history and keep related changes together for later triage.'}))
+            'description': task['proposed_copy']['values']['description'] if standalone and group == standalone else
+                           'Recover the work history and keep related changes together for later triage.'}))
         request.setdefault('slices', [])
         slice_ref = original.get('slice_id') or original.get('slice_ref') or original.get('slice')
         if not slice_ref and series:
@@ -319,3 +323,12 @@ def load_request(ref, call):
             if str(error) != 'engineering-passport refused: engineering_slice_plan_not_registered':
                 raise
     return request_record(card, passport)
+
+
+def card_stage(card):
+    if card.get('done'):
+        return 'merged'
+    if card.get('stage') in ('queued', 'build', 'review', 'ci'):
+        return card['stage']
+    return {'queued': 'queued', 'running': 'build', 'review': 'review', 'blocked': 'review',
+            'failed': 'ci', 'superseded': 'ci'}.get(card.get('status'), 'review')

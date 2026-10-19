@@ -201,6 +201,26 @@ class HierarchyTests(unittest.TestCase):
         b['work_requests']['WR-000014']['slices'][1]['ordinal'] = 5
         self.assertEqual(list(h.project(b)['slices']), ['WR14.S2', 'WR14.S5'])
 
+    def test_clear_standalone_prs_get_work_requests_instead_of_a_maintenance_bucket(self):
+        b = {'project':'test', 'tasks':{
+            'one':{'title':'Board cleanup', 'repo':'jbookout/carr-system', 'pr':12},
+            'review':{'title':'Board cleanup', 'repo':'jbookout/carr-system', 'pr':12},
+            'two':{'title':'Merge queue', 'repo':'jbookout/carr-system', 'pr':13}}}
+        facts = {'jbookout/carr-system#12':{'title':'Group progress cards', 'body':'Group related changes so the board is easier to follow.'},
+                 'jbookout/carr-system#13':{'title':'Order the merge queue', 'body':'Keep reviewed changes moving in a predictable order.'}}
+        proposal = h.backfill(b, facts=facts)
+        self.assertEqual(len(proposal['create_requests']), 2)
+        self.assertEqual(proposal['assignments']['one']['request_key'], proposal['assignments']['review']['request_key'])
+        self.assertNotEqual(proposal['assignments']['one']['request_key'], proposal['assignments']['two']['request_key'])
+        self.assertEqual(proposal['later_triage'], [])
+
+    def test_slice_counts_separate_jobs_from_prs_and_use_pipeline_stages(self):
+        b = self.board()
+        b['tasks']['job'] = {'title':'Queue checks', 'work_request':'WR-000014', 'slice_id':'queue', 'status':'queued'}
+        row = h.project(b)['slices']['WR14.S1']
+        self.assertEqual(row['pr_counts'], {'build':1})
+        self.assertEqual(row['job_counts'], {'queued':1})
+
 
 if __name__ == '__main__':
     unittest.main()
