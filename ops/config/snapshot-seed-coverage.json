@@ -28,7 +28,9 @@
     "uses a declaration rather than another shell INSERT block. The migration field",
     "keeps its rows pending until that migration is applied. Scope and row counts",
     "are reviewed here; detection never automatically adds a table. Column lists",
-    "also prevent a later schema column from entering the export without review."
+    "also prevent a later schema column from entering the export without review.",
+    "The renderer refuses source columns outside columns plus omit_columns, so",
+    "a new seeded column cannot silently disappear from rebuild verification."
   ],
   "carried_after_apply": {
     "ops.canonical_ownership_issuer_generation": "0532a's exact two-principal issuer selector: repository-owned g1 is active and g2 is draining. These are bounded control configuration and the foreign-key target for canonical ownership runtime sessions, not session records or credentials. Once the migration enters the snapshot ledger, bin/schema-snapshot.sh verifies and carries only these two rows.",
@@ -171,6 +173,12 @@
         "deduplication",
         "completion_contract",
         "legacy_schedule"
+      ],
+      "omit_columns": [
+        "registered_at",
+        "updated_at",
+        "legacy_disabled_at",
+        "legacy_disable_reason"
       ]
     },
     {
@@ -197,6 +205,12 @@
         "deduplication",
         "completion_contract",
         "legacy_schedule"
+      ],
+      "omit_columns": [
+        "registered_at",
+        "updated_at",
+        "legacy_disabled_at",
+        "legacy_disable_reason"
       ]
     },
     {

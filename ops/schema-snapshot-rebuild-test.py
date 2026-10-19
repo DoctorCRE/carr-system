@@ -90,6 +90,14 @@ def main():
         else:
             raise AssertionError("candidate verification accepted changed seed content")
         print("PASS: rebuild verification names a changed seed and its migration")
+        sql(dsn, "alter table public.snapshot_fixture_seed add column new_contract text default 'synthetic'")
+        try:
+            seeds.selected_rows(seed_repo, source_psql)
+        except ValueError as exc:
+            assert "unreviewed source columns: new_contract" in str(exc)
+        else:
+            raise AssertionError("a later column silently escaped seed verification")
+        print("PASS: a newly seeded column requires a reviewed carry or omission")
 
 
 if __name__ == "__main__":

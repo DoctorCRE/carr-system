@@ -44,20 +44,25 @@ class ReviewedSeeds(unittest.TestCase):
             self.assertEqual(query.call_count, 1)
 
     def test_missing_applied_seed_names_table_and_migration(self):
-        with patch.object(seeds, "query", side_effect=[["9999_fixture.sql"], []]):
+        with patch.object(seeds, "query", side_effect=[["9999_fixture.sql"], ["key"], []]):
             with self.assertRaisesRegex(ValueError, "public.fixture from 9999_fixture.sql"):
                 seeds.selected_rows(self.repo, ["psql"])
 
+    def test_new_source_column_requires_review(self):
+        with patch.object(seeds, "query", side_effect=[["9999_fixture.sql"], ["key", "new_contract"]]):
+            with self.assertRaisesRegex(ValueError, "public.fixture.*unreviewed source columns: new_contract"):
+                seeds.selected_rows(self.repo, ["psql"])
+
     def test_only_reviewed_columns_enter_restore(self):
-        with patch.object(seeds, "query", side_effect=[["9999_fixture.sql"], [{"key": "reviewed"}]]) as query:
+        with patch.object(seeds, "query", side_effect=[["9999_fixture.sql"], ["key"], [{"key": "reviewed"}]]) as query:
             selected = seeds.selected_rows(self.repo, ["psql"])
         self.assertIn('select "key" from public.fixture', query.call_args.args[1])
         self.assertIn('(\"key\") select \"key\"', "\n".join(seeds.render(selected)))
 
     def test_changed_rebuilt_rows_name_the_seed(self):
         with patch.object(seeds, "query", side_effect=[
-            ["9999_fixture.sql"], [{"key": "reviewed", "value": 31}],
-            ["9999_fixture.sql"], [{"key": "reviewed", "value": 30}],
+            ["9999_fixture.sql"], ["key"], [{"key": "reviewed", "value": 31}],
+            ["9999_fixture.sql"], ["key"], [{"key": "reviewed", "value": 30}],
         ]):
             with self.assertRaisesRegex(ValueError, "public.fixture from 9999_fixture.sql"):
                 seeds.compare(self.repo, ["source"], ["rebuilt"])

@@ -23,7 +23,7 @@ def declarations(repo):
             raise ValueError(f"snapshot seed is not classified for carrying: {table}")
         if not seed["columns"]:
             raise ValueError(f"snapshot seed has no reviewed columns: {table}")
-        for column in seed["columns"]:
+        for column in [*seed["columns"], *seed.get("omit_columns", [])]:
             if not re.fullmatch(r"[a-z_][a-z_0-9]*", column):
                 raise ValueError(f"invalid seed column: {table}")
     return result
@@ -42,6 +42,11 @@ def selected_rows(repo, psql):
         if seed["migration"] not in applied:
             continue
         table = seed["table"]
+        actual_columns = set(query(psql, "select jsonb_agg(attname order by attnum) from pg_attribute "
+                                        f"where attrelid={literal(table)}::regclass and attnum>0 and not attisdropped"))
+        reviewed_columns = set(seed["columns"]) | set(seed.get("omit_columns", []))
+        if extra := actual_columns - reviewed_columns:
+            raise ValueError(f"db/schema.sql seed {table} from {seed['migration']} has unreviewed source columns: {','.join(sorted(extra))}")
         columns = ",".join('"' + column + '"' for column in seed["columns"])
         rows = query(psql, f"select coalesce(jsonb_agg(to_jsonb(s) order by {seed['order_by']}),'[]'::jsonb) "
                           f"from (select {columns} from {table} where {seed['where']}) s")
