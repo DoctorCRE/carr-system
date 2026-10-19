@@ -116,30 +116,6 @@
       "stage_entered_at": "2026-10-01T14:28:27+00:00",
       "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
     },
-    "dot-job14": {
-      "title": "Dot research: read the public pull request https://github.com/jbookout/carr-system/p",
-      "status": "review",
-      "executor": "the Dot (ChatGPT, free)",
-      "pr": null,
-      "repo": "jbookout/carr-system",
-      "note": "Report saved: report-H.md",
-      "created_at": "2026-10-01T14:28:28+00:00",
-      "updated_at": "2026-10-01T15:20:27+00:00",
-      "stage": "review",
-      "evidence": "Complete; no PR (marked done by the orchestrator)",
-      "stage_history": [
-        {
-          "stage": "live",
-          "entered_at": "2026-10-01T15:20:27+00:00"
-        },
-        {
-          "stage": "review",
-          "entered_at": "2026-10-01T15:20:27+00:00"
-        }
-      ],
-      "stage_entered_at": "2026-10-01T15:20:27+00:00",
-      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
-    },
     "dot-job7": {
       "title": "Dot research: RULES, all required: 1. Report to the orchestrator only. 2. On THIS Ma",
       "status": "review",
@@ -240,6 +216,30 @@
         }
       ],
       "stage_entered_at": "2026-09-29T14:12:49+00:00"
+    },
+    "dot-002-AF-carr-system-1461": {
+      "title": "Dot research: independent review of public pull request https://github.com/jbookout/",
+      "status": "review",
+      "executor": "the Dot (ChatGPT, free)",
+      "pr": null,
+      "repo": "jbookout/carr-system",
+      "note": "Report saved: reports/002-AF-carr-system-1461.txt",
+      "created_at": "2026-10-01T18:54:35+00:00",
+      "updated_at": "2026-10-01T19:47:09+00:00",
+      "stage": "review",
+      "evidence": "Complete; no PR (marked done by the orchestrator)",
+      "stage_history": [
+        {
+          "stage": "live",
+          "entered_at": "2026-10-01T19:47:09+00:00"
+        },
+        {
+          "stage": "review",
+          "entered_at": "2026-10-01T19:47:09+00:00"
+        }
+      ],
+      "stage_entered_at": "2026-10-01T19:47:09+00:00",
+      "release_wait": "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
     }
   },
   "github": {
@@ -252,6 +252,47 @@
       "number": 1408,
       "state": "MERGED",
       "url": "https://github.com/jbookout/carr-system/pull/1408"
+    },
+    "jbookout/carr-system#1448": {
+      "closedAt": "2026-10-18T11:07:03Z",
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 1448,
+      "state": "CLOSED",
+      "url": "https://github.com/jbookout/carr-system/pull/1448"
+    },
+    "jbookout/carr-system#1454": {
+      "closedAt": "2026-10-01T17:38:16Z",
+      "mergeCommit": {
+        "oid": "d85f1bc7d160997d715d54a3e8526dce357f9b0d"
+      },
+      "mergedAt": "2026-10-01T17:38:16Z",
+      "number": 1454,
+      "state": "MERGED",
+      "url": "https://github.com/jbookout/carr-system/pull/1454"
+    },
+    "jbookout/doctorcre-app#116": {
+      "closedAt": "2026-10-01T12:47:53Z",
+      "mergeCommit": {
+        "oid": "f9f422869cc157a660ab1eec9230581749165568"
+      },
+      "mergedAt": "2026-10-01T12:47:53Z",
+      "number": 116,
+      "state": "MERGED",
+      "url": "https://github.com/jbookout/doctorcre-app/pull/116"
+    },
+    "jbookout/carr-system#1461": {
+      "closedAt": "2026-10-01T20:56:08Z",
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 1461,
+      "state": "CLOSED",
+      "url": "https://github.com/jbookout/carr-system/pull/1461"
     }
+  },
+  "proof_cutover": {
+    "pr": "https://github.com/jbookout/carr-system/pull/1940",
+    "merge_sha": "2f372d5e59e489e60efb402d372694b1c234f339",
+    "merged_at": "2026-10-19T09:33:08Z"
   }
 }

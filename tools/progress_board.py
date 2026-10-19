@@ -41,6 +41,12 @@ STATUSES = ("queued", "running", "review", "blocked", "question-for-orchestrator
 RETIRED_STATUSES = ("failed", "superseded")
 CONSUMER_PROOF_PENDING = "consumer proof is missing, failed, or does not match the delivered source, target and workflow"
 CONSUMER_PROOF_FIELDS = frozenset({"schema", "outcome", "repo", "source_sha", "target", "workflow", "evidence_ref", "observed_at"})
+# PR #1940 introduced consumer proof. This cutoff never advances with the clock.
+LEGACY_PROOF_CUTOFF = datetime(2026, 10, 19, 9, 33, 8, tzinfo=timezone.utc)
+LEGACY_PR_REF = re.compile(
+    r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)"
+    r"|(?:(jbookout/(?:carr-system|doctorcre-app|software-factory)|carr-system|doctorcre-app|software-factory|App)\s+)?"
+    r"\bPR\s*#?\s*(\d+)", re.IGNORECASE)
 PIPELINE_STAGES = ("queued", "build", "review", "ci", "merged", "live")
 PR_STAGES = PIPELINE_STAGES[1:] + ("measured",)
 STAGE_LABELS = {
@@ -1965,6 +1971,11 @@ def render(project: str, *, discover: bool = False) -> None:
 def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict[str, Any]],
                         keep: Collection[str] = ()) -> int:
     """Expire old GitHub cards and watchdog projections while retaining their notes."""
+    proposed, report = dispose_legacy(state, {}, now_utc())
+    archived = report["counts"]["legacy, unverified"]
+    if archived:
+        state["tasks"] = proposed["tasks"]
+        state["legacy_history"] = proposed["legacy_history"]
     cutoff = now_utc() - RECENT_MERGED
     expired = []
     for task_id, task in state.get("tasks", {}).items():
@@ -1984,7 +1995,101 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
         expired.append(task_id)
     for task_id in expired:
         del state["tasks"][task_id]
-    return len(expired)
+    return len(expired) + archived
+
+
+def legacy_card(task: dict[str, Any]) -> bool:
+    created = parse_time(task.get("created_at"))
+    return (created is not None and created < LEGACY_PROOF_CUTOFF
+            and task.get("pr") is None and not is_retired(task)
+            and not task.get("consumer_proof") and not task.get("consumer_proofs"))
+
+
+def legacy_pr_refs(task: dict[str, Any]) -> set[tuple[str, int]]:
+    refs = set()
+    text = str(task.get("title") or "") + "\n" + str(task.get("note") or "")
+    for match in LEGACY_PR_REF.finditer(text):
+        if match[1]:
+            repo, number = match[1], match[2]
+        else:
+            repo, number = match[3] or task_repo(task), match[4]
+            if repo.lower() == "app":
+                repo = "doctorcre-app"
+            if "/" not in repo:
+                repo = "jbookout/" + repo
+        refs.add((repo.lower(), int(number)))
+    for repo, number in re.findall(r"reports/[\w.-]*-AF-(carr-system|doctorcre-app|software-factory)-(\d+)\.txt\b", text):
+        refs.add((f"jbookout/{repo}", int(number)))
+    return refs
+
+
+def dispose_legacy(state: dict[str, Any], fetched: dict, at: datetime) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Plan the pre-proof migration on a copy; never grants consumer proof."""
+    result = copy.deepcopy(state)
+    counts = {key: 0 for key in ("done", "dropped", "legacy, unverified", "kept")}
+    sample_groups: dict[str, list[dict[str, Any]]] = {key: [] for key in counts}
+    for task_id, task in list(result.get("tasks", {}).items()):
+        disposition, reason = "kept", "Outside the legacy disposition"
+        if legacy_card(task):
+            refs = legacy_pr_refs(task)
+            updated = parse_time(task.get("updated_at"))
+            if refs and (updated is None or updated >= LEGACY_PROOF_CUTOFF):
+                reason = "PR card updated since consumer proof was introduced, or update time is unknown"
+            elif len(refs) == 1:
+                repo, number = next(iter(refs))
+                info, error = fetched.get((repo, number), (None, "PR not read"))
+                reason = f"GitHub not verified: {error}" if error or not info else f"GitHub {info.get('state')}; keep"
+                if not error and info and info.get("state") == "MERGED" and merge_sha(info):
+                    disposition = "done"
+                    reason = (f"{repo}#{number}; merge SHA {merge_sha(info)}; "
+                              "legacy pre-proof card verified by GitHub state")
+                elif not error and info and info.get("state") == "CLOSED" and not info.get("mergeCommit"):
+                    disposition = "dropped"
+                    reason = (f"{repo}#{number}; merge SHA none (closed unmerged); "
+                              "legacy pre-proof card verified by GitHub state")
+            elif not refs and task_id.startswith(("dot-", "build-")):
+                if updated is not None and updated < at - STALE_AFTER:
+                    disposition = "legacy, unverified"
+                    reason = (f"legacy, unverified; retired {'Dot reports' if task_id.startswith('dot-') else 'builder handoffs'} "
+                              f"producer; last updated {task['updated_at']}; older than 14 days; no verifiable PR")
+            elif refs:
+                reason = "Multiple PR references; keep for review"
+        counts[disposition] += 1
+        if disposition != "kept":
+            result.setdefault("legacy_history", {})[task_id] = {
+                **result["tasks"].pop(task_id), "status": "archived" if disposition == "legacy, unverified" else disposition,
+                "reason": reason,
+                "legacy_disposition": {"schema": "carr-legacy-disposition.v1", "observed_at": at.isoformat()}}
+        if len(sample_groups[disposition]) < 10:
+            sample_groups[disposition].append({"card": task_id, "title": task.get("title", task_id),
+                                               "class": disposition, "reason": reason})
+    samples = [group[i] for i in range(10) for group in sample_groups.values() if len(group) > i][:10]
+    return result, {"counts": counts, "samples": samples}
+
+
+def command_dispose_legacy(args: argparse.Namespace) -> None:
+    initial = read_state(args.project)
+    keys = {next(iter(refs)) for task in initial.get("tasks", {}).values()
+            if legacy_card(task) and len(refs := legacy_pr_refs(task)) == 1}
+    fetched = {}
+    for repo, number in sorted(keys):
+        time.sleep(2)
+        try:
+            info = gh_json(["pr", "view", str(number), "--repo", repo, "--json",
+                            "number,state,mergeCommit,mergedAt,closedAt,url"])
+            if not isinstance(info, dict) or info.get("number") != number or info.get("url") != f"https://github.com/{repo}/pull/{number}":
+                raise RuntimeError("GitHub returned a mismatched PR identity")
+            fetched[repo, number] = info, None
+        except RuntimeError as exc:
+            fetched[repo, number] = None, str(exc)
+    proposed, report = dispose_legacy(initial, fetched, now_utc())
+    print("APPLY (local state only)" if args.apply else "DRY RUN (no board writes or publishes)")
+    print(json.dumps(report, indent=2))
+    if args.apply and proposed != initial:
+        with board_lock(args.project):
+            if read_state(args.project) != initial:
+                raise SystemExit("Board changed during legacy disposition; rerun dry-run")
+            write_json(proposed)
 
 
 def apply_sync(state: dict[str, Any],
@@ -2184,7 +2289,8 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
             task_id: {"title": task.get("title", task_id), "status": task.get("status"),
                       "reason": retired_reason(task), "executor": task.get("executor", "unassigned"),
                       "pr": task.get("pr"), "repo": task.get("repo"), "updated_at": task.get("updated_at")}
-            for task_id, task in all_tasks.items() if is_retired(task)},
+            for task_id, task in {**{k: t for k, t in all_tasks.items() if is_retired(t)},
+                                 **state.get("legacy_history", {})}.items()},
         "deliverables": list(state.get("deliverables") or [])[:24],
         "notes": [*list(state.get("notes") or []),
                   *({"text": str(note.get("title") or task_id) + "\n" + note["note"]}
@@ -2868,6 +2974,10 @@ def parser() -> argparse.ArgumentParser:
     reconcile.add_argument("--live", action="store_true", help="preview the published snapshot (read-only)")
     reconcile.add_argument("--apply", action="store_true", help="apply a verified plan to local state and publish")
     reconcile.set_defaults(func=command_reconcile)
+    legacy = commands.add_parser("dispose-legacy", help="preview pre-proof legacy disposition; never publishes")
+    legacy.add_argument("project")
+    legacy.add_argument("--apply", action="store_true", help="move verified or expired legacy cards to local History")
+    legacy.set_defaults(func=command_dispose_legacy)
     poll = commands.add_parser("poll-answers")
     poll.add_argument("project")
     poll.set_defaults(func=command_poll)
