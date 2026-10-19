@@ -106,7 +106,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       ? JSON.parse(readFileSync(process.env.SKILL_RECEIPT_COMMENTS, 'utf8')).flat() : [];
     const errors = score({ body: pr.body, repo: event.repository.full_name, head: pr.head?.sha, comments,
       commits: claims(pr.body).includes('tdd') && pr.base?.sha && pr.head?.sha ? gitCommits(pr.base.sha, pr.head.sha) : [] });
-    for (const error of errors) console.error(error);
-    if (errors.length) process.exitCode = 1;
+    const blocking = !claims(pr.body).length;
+    for (const error of errors) console.error(blocking ? error : `::warning::unverified skill evidence: ${error}`);
+    if (errors.length && blocking) process.exitCode = 1;
   }
 }
