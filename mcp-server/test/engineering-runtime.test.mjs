@@ -212,6 +212,124 @@ test("passport source is readable before an initial slice plan is registered", a
   assert.deepEqual(result.accepted_plan_revision, source.plan);
 });
 
+function progressFacts() {
+  const plan = typedEngineeringPlan([
+    engineeringSlice("slice:one", 1), engineeringSlice("slice:two", 2), engineeringSlice("slice:three", 3),
+  ]);
+  const envelope = envelopeRow("11111111-1111-4111-8111-111111111111", "slice:one", "2026-08-26T00:00:01Z");
+  const receipt = bindReceiptLineage(receiptRow("22222222-2222-4222-8222-222222222222", envelope.id, "slice:one", "claimed_complete", "2026-08-26T00:00:02Z"), plan, envelope);
+  const review = reviewerRow("33333333-3333-4333-8333-333333333333", receipt.id, "slice:one", "passed", "2026-08-26T00:00:03Z");
+  const facts = passportFacts(plan, { envelopes: [envelope], receipts: [receipt], reviewer_facts: [review] });
+  Object.assign(facts.slice_plans[0], { work_request_id: source.work.id.replace(/^wr:/, ""), work_request_version: 3, plan_digest: plan.plan_digest });
+  return facts;
+}
+
+async function readProgress(facts) {
+  const tools = engineeringRuntimeTools({ withEnvelope: () => assert.fail("progress must not write"), writeEvent: () => assert.fail("progress must not write"), ToolError: EngineeringToolError });
+  const c = { query: async (sql, params) => {
+    assert.equal(sql, "select ops.engineering_passport_facts($1::text) as facts");
+    assert.deepEqual(params, ["WR-301"]);
+    return { rows: [{ facts }] };
+  } };
+  return tools["engineering-progress"].handler(c, actor, { work_request: "WR-301" });
+}
+
+test("engineering progress counts one independently verified check in a fixed three-check scope", async () => {
+  assert.deepEqual(await readProgress(progressFacts()), {
+    schema: "engineering-progress.v1", work_request: "WR-301", state: "available", reason: null,
+    scope: { plan_ref: "plan:301", revision: 2, digest: source.plan.digest },
+    completed: 1, total: 3,
+    checks: [
+      { slice_ref: "slice:one", check_ref: "check:slice:one", objective: "Execute slice:one", state: "verified" },
+      { slice_ref: "slice:two", check_ref: "check:slice:two", objective: "Execute slice:two", state: "remaining" },
+      { slice_ref: "slice:three", check_ref: "check:slice:three", objective: "Execute slice:three", state: "remaining" },
+    ],
+    history: [{ plan_ref: "plan:301", revision: 2, digest: source.plan.digest, total_checks: 3 }],
+  });
+});
+
+test("engineering progress retries never add completion and an unreviewed successor removes the old pass", async () => {
+  const facts = progressFacts();
+  facts.reviewer_facts.push({ ...facts.reviewer_facts[0], id: "44444444-4444-4444-8444-444444444444" });
+  assert.equal((await readProgress(facts)).completed, 1);
+  const envelope = envelopeRow("55555555-5555-4555-8555-555555555555", "slice:one", "2026-08-26T00:00:04Z", facts.envelopes[0].id);
+  facts.envelopes.push(envelope);
+  const receipt = bindReceiptLineage(receiptRow("66666666-6666-4666-8666-666666666666", envelope.id, "slice:one", "claimed_complete", "2026-08-26T00:00:05Z", "attempt:2"), facts.slice_plans[0].plan, envelope);
+  facts.receipts.push(receipt);
+  let progress = await readProgress(facts);
+  assert.equal(progress.completed, 0);
+  assert.equal(progress.total, 3);
+  facts.reviewer_facts.push(reviewerRow("77777777-7777-4777-8777-777777777777", receipt.id, "slice:one", "passed", "2026-08-26T00:00:06Z", "attempt:2"));
+  progress = await readProgress(facts);
+  assert.equal(progress.completed, 1);
+  assert.equal(progress.total, 3);
+});
+
+test("engineering progress exposes changed scope revision and only validated work-bound registered history", async () => {
+  const facts = progressFacts();
+  const previous = structuredClone(facts.slice_plans[0]);
+  const current = structuredClone(previous);
+  const nextDigest = `sha256:${"4".repeat(64)}`;
+  Object.assign(current.plan.accepted_plan_revision, { id: "plan:302", revision: 3, digest: nextDigest });
+  current.plan.slices.push(engineeringSlice("slice:four", 4));
+  delete current.plan.plan_digest;
+  current.plan.plan_digest = digest(current.plan);
+  Object.assign(current, { id: "34343434-3434-4434-8434-343434343434", accepted_plan_id: "45454545-4545-4545-8545-454545454545", accepted_plan_hash: nextDigest, plan_digest: current.plan.plan_digest });
+  facts.source = { ...facts.source, accepted_plan: { ...source.plan, record_id: current.accepted_plan_id, plan_ref: "plan:302", revision: 3, digest: nextDigest } };
+  facts.slice_plans = [current, { ...previous, work_request_id: "56565656-5656-4565-8565-565656565656" }, { ...previous, plan_digest: nextDigest }, previous];
+  const progress = await readProgress(facts);
+  assert.deepEqual(progress.scope, { plan_ref: "plan:302", revision: 3, digest: nextDigest });
+  assert.equal(progress.completed, 0);
+  assert.equal(progress.total, 4);
+  assert.deepEqual(progress.history, [
+    { plan_ref: "plan:301", revision: 2, digest: source.plan.digest, total_checks: 3 },
+    { plan_ref: "plan:302", revision: 3, digest: nextDigest, total_checks: 4 },
+  ]);
+});
+
+test("engineering progress leaves unknown and stale denominators unavailable while retaining known scope", async () => {
+  const missing = progressFacts();
+  missing.slice_plans = [];
+  const unknown = await readProgress(missing);
+  assert.equal(unknown.state, "unavailable");
+  assert.equal(unknown.reason, "current_registered_plan_unavailable");
+  assert.equal(unknown.completed, null);
+  assert.equal(unknown.total, null);
+  assert.deepEqual(unknown.checks, []);
+  assert.deepEqual(unknown.history, []);
+  assert.deepEqual(unknown.scope, { plan_ref: "plan:301", revision: 2, digest: source.plan.digest });
+  const stale = progressFacts();
+  stale.source = { ...stale.source, work_request: { ...source.work, version: 4 } };
+  const progress = await readProgress(stale);
+  assert.equal(progress.state, "unavailable");
+  assert.equal(progress.reason, "registered_plan_stale");
+  assert.equal(progress.total, null);
+  assert.equal(progress.completed, null);
+  assert.deepEqual(progress.history, [{ plan_ref: "plan:301", revision: 2, digest: source.plan.digest, total_checks: 3 }]);
+  const noPlan = progressFacts();
+  noPlan.source = { ...noPlan.source, accepted_plan: null };
+  assert.equal((await readProgress(noPlan)).scope, null);
+});
+
+test("engineering progress excludes wrong-work review evidence", async () => {
+  const facts = progressFacts();
+  facts.reviewer_facts[0].work_request_id = "56565656-5656-4565-8565-565656565656";
+  const progress = await readProgress(facts);
+  assert.equal(progress.completed, 0);
+  assert.equal(progress.total, 3);
+});
+
+test("engineering progress reports malformed current source binding as unavailable", async () => {
+  const facts = progressFacts();
+  facts.source = { ...facts.source, accepted_plan: { ...source.plan, digest: null } };
+  const progress = await readProgress(facts);
+  assert.equal(progress.state, "unavailable");
+  assert.equal(progress.reason, "current_scope_binding_invalid");
+  assert.equal(progress.scope, null);
+  assert.equal(progress.completed, null);
+  assert.equal(progress.total, null);
+});
+
 test("server builds a fresh Codex envelope and receipt binding rejects wrong attempt", () => {
   const envelope = buildCodexEnvelope({ source, plan, slice, jobId: "44444444-4444-4444-8444-444444444444", sessionId: "55555555-5555-4555-8555-555555555555", actor });
   assert.equal(envelope.server_binding.adapter.surface, "codex_desktop");
