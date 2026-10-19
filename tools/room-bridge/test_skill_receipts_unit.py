@@ -288,7 +288,7 @@ class SkillReceiptTests(unittest.TestCase):
             with patch.object(skill_receipts, 'session_path', return_value=transcript), \
                  patch.object(dispatch, '_execute') as execute, \
                  patch.object(dispatch, '_skill_gh', side_effect=[
-                     {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
+                     {'head': {'sha': saved['source_revision']}, 'body': 'Skills used: tdd'}, [],
                      {'html_url': pr + '#issuecomment-1'}, {}]):
                 self.assertEqual(dispatch.main(['--results', str(results), 'receipt', row['msg_id']]), 0)
             execute.assert_not_called()
@@ -311,7 +311,7 @@ class SkillReceiptTests(unittest.TestCase):
         start, end = '2026-10-19T15:00:00Z', '2026-10-19T15:00:02.500000Z'
         pr = 'https://github.com/jbookout/carr-system/pull/2000'
         row = {'msg_id': 'job', 'status': 'delivered', 'kind': 'claude-session',
-               'dispatched_at': start, 'session_id': 'own-session'}
+               'dispatched_at': start, 'session_id': 'own-session', 'source_revision': 'a' * 40}
         with tempfile.TemporaryDirectory() as directory:
             results = Path(directory) / 'results.jsonl'
             results.write_text(json.dumps(row) + '\n')

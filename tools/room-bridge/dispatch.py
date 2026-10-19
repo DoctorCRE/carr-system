@@ -191,6 +191,16 @@ def _skill_ledger(results_path):
     return path.with_name(path.stem + '-skills.jsonl')
 
 
+def _source_revision(workspace, env):
+    try:
+        result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=workspace,
+                                env=scrubbed_env(env), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    revision = result.stdout.strip()
+    return revision if result.returncode == 0 and re.fullmatch(r'[a-f0-9]{40}', revision) else None
+
+
 def finish_skill_receipt(row):
     if row.get('status') != 'completed':
         return None
@@ -204,9 +214,14 @@ def finish_skill_receipt(row):
     urls = set(re.findall(r'https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)', row.get('result') or ''))
     if len(urls) != 1:
         raise ValueError('completed desk must identify exactly one PR for its skill receipt')
+    revision = row.get('source_revision')
+    if not re.fullmatch(r'[a-f0-9]{40}', revision or ''):
+        raise ValueError('completed job has no persisted source revision; skill receipt unverified')
     repo, number = urls.pop()
     pr = _skill_gh(f'repos/{repo}/pulls/{number}')
-    value = skill_receipts.receipt(row, repo=repo, head=pr['head']['sha'], body=pr.get('body'), observation=observation)
+    if pr['head']['sha'] != revision:
+        raise ValueError('PR head differs from persisted job source revision; skill receipt unverified')
+    value = skill_receipts.receipt(row, repo=repo, head=revision, body=pr.get('body'), observation=observation)
     body = skill_receipts.comment_body(value)
     comments = _skill_gh(f'repos/{repo}/issues/{number}/comments')
     existing = next((item for item in comments if item.get('body') == body
@@ -784,11 +799,14 @@ def dispatch(
                'provider_run': provider_run,
                'claim_id': msg_id if declared_writes else None}
     workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
+    base['source_revision'] = _source_revision(workspace, env) if entry['kind'] != 'claude-remote' else None
     with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
             if outcome['status'] == 'completed':
-                outcome = {**outcome, 'completed_at': _now()}
+                outcome = {**outcome, 'completed_at': _now(),
+                           'source_revision': _source_revision(workspace, env)
+                           if entry['kind'] != 'claude-remote' else None}
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
                     or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
@@ -1175,7 +1193,10 @@ def main(argv: list[str]) -> int:
             if a.session_id:
                 row = {**row, 'session_id': a.session_id, 'status': 'completed',
                        'result': a.pr or row.get('result', '')}
-            value = finish_skill_receipt(row)
+            try:
+                value = finish_skill_receipt(row)
+            except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                raise DeskError('skill_receipt_unavailable', str(exc)) from exc
             if value is None:
                 raise DeskError('skill_receipt_unavailable', 'completed session transcript unavailable')
             _record(_skill_ledger(results), {**row, 'record_kind': 'skill-receipt', 'skill_receipt': value})
