@@ -11,7 +11,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import launchd_hold, launchd_hold_health as health
 
 
+def loop_reply(name, row):
+    return {"loop": row, "amended": False, "amendments": []} if name == "read-loop" else row
+
+
 class HealthTests(unittest.TestCase):
+    def test_refused_loop_read_warns_and_preserves_pending_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            config = home / ".config/carr"
+            config.mkdir(parents=True)
+            (config / "launchd-hold").write_text("")
+            state = config / "launchd-hold-health.json"
+            state.write_text(json.dumps({"com.carr.fixture": {"loop_id": "fixture-loop"}}))
+            calls = []
+            def verb(name, payload):
+                calls.append((name, payload))
+                return {"ok": False, "refused": True}
+            line, code = health.check(home, verb)
+            self.assertEqual(code, 1)
+            self.assertIn("RuntimeError: repair loop read failed", line)
+            self.assertEqual(calls, [("read-loop", {"loop_id": "fixture-loop"})])
+            self.assertEqual(json.loads(state.read_text())["com.carr.fixture"]["loop_id"],
+                             "fixture-loop")
+
     def test_age_and_bound_loop_lifecycle(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
@@ -26,7 +49,7 @@ class HealthTests(unittest.TestCase):
                 calls.append((name, payload))
                 if name == "add-loop":
                     self.assertEqual(payload["owner"], "claude")
-                return {"ok": True, "loop_id": "fixture-loop", "version": 4, "status": "open"}
+                return loop_reply(name, {"ok": True, "loop_id": "fixture-loop", "version": 4, "status": "open"})
             line, rc = health.check(home, verb, now=now)
             self.assertEqual(rc, 1)
             for term in ("8.0d", "owner claude", "repair", "verify", "auto-clear", "API quota exhausted"):
@@ -51,7 +74,7 @@ class HealthTests(unittest.TestCase):
             calls = []
             def verb(name, payload):
                 calls.append(name)
-                return {"ok": True, "loop_id": "fixture", "version": 1, "status": "open"}
+                return loop_reply(name, {"ok": True, "loop_id": "fixture", "version": 1, "status": "open"})
             self.assertEqual(health.check(tmp, verb, now)[1], 1)
             path.write_text("com.carr.a stuck\ncom.carr.b unrelated\n")
             self.assertEqual(health.check(tmp, verb, now)[1], 1)
@@ -70,7 +93,7 @@ class HealthTests(unittest.TestCase):
             calls = []
             def verb(name, payload):
                 calls.append(name)
-                return {"ok": True, "loop_id": "fixture", "version": 1, "status": "open"}
+                return loop_reply(name, {"ok": True, "loop_id": "fixture", "version": 1, "status": "open"})
             line, code = health.check(tmp, verb)
             self.assertEqual(code, 1)
             self.assertIn("repair loops recorded", line)
@@ -109,8 +132,8 @@ class HealthTests(unittest.TestCase):
                 calls.append((name, payload.copy()))
                 if len(calls) == 1:
                     raise RuntimeError("lost response")
-                return {"ok": True, "loop_id": "fixture-loop", "version": 4,
-                        "status": "done" if closed else "open"}
+                return loop_reply(name, {"ok": True, "loop_id": "fixture-loop", "version": 4,
+                        "status": "done" if closed else "open"})
             health.check(tmp, verb)
             path.write_text("com.carr.fixture @2020-01-01T00:00:00Z corrected reason\n")
             health.check(tmp, verb)
@@ -132,7 +155,7 @@ class HealthTests(unittest.TestCase):
                 calls.append((name, payload.copy()))
                 if len(calls) == 1:
                     return {"ok": False}
-                return {"ok": True, "loop_id": "fixture-loop", "version": 4, "status": "open"}
+                return loop_reply(name, {"ok": True, "loop_id": "fixture-loop", "version": 4, "status": "open"})
             health.check(tmp, verb)
             path.write_text("")
             line, rc = health.check(tmp, verb)

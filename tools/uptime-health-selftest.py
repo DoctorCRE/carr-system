@@ -22,6 +22,21 @@ NOW = datetime(2026, 10, 5, 19, 0, 0, tzinfo=timezone.utc)
 
 
 class UptimeHealthTests(unittest.TestCase):
+    def test_refused_or_malformed_loop_read_reports_error(self):
+        replies = ({"ok": False, "refused": True}, {"loop": None}, {"loop": []},
+                   {"loop_id": "fixture-loop", "version": 1, "status": "open"})
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(json.dumps({"key": "fixture-key", "loop_id": "fixture-loop"}))
+            for reply in replies:
+                calls = []
+                def verb(name, payload):
+                    calls.append((name, payload))
+                    return reply
+                with self.subTest(reply=reply):
+                    self.assertEqual(module.reconcile_monitor(False, True, state, verb), "error")
+                    self.assertEqual(calls, [("read-loop", {"loop_id": "fixture-loop"})])
+
     def test_dropped_monitor_loop_does_not_block_a_new_fault(self):
         state = Path(__file__).resolve().parents[1] / "out/_to_delete" / f"uptime-dropped-{uuid.uuid4()}.json"
         opens = []
@@ -31,7 +46,8 @@ class UptimeHealthTests(unittest.TestCase):
                 opens.append(payload)
                 return {"ok": True, "loop_id": f"loop-{len(opens)}"}
             if name == "read-loop":
-                return {"loop_id": payload["loop_id"], "version": 2, "status": "dropped"}
+                return {"loop": {"loop_id": payload["loop_id"], "version": 2, "status": "dropped"},
+                        "amended": False, "amendments": []}
             self.fail("must preserve the dropped disposition")
 
         self.assertEqual(module.reconcile_monitor(True, False, state, verb), "open")
@@ -66,7 +82,8 @@ class UptimeHealthTests(unittest.TestCase):
                     replay[key] = (manifest, result)
                     return result
                 if name == "read-loop":
-                    return loops[payload["loop_id"]].copy()
+                    return {"loop": loops[payload["loop_id"]].copy(),
+                            "amended": False, "amendments": []}
                 self.assertEqual(name, "close-loop")
                 loops[payload["loop_id"]]["status"] = "done"
                 return {"ok": True}
@@ -214,7 +231,8 @@ class UptimeHealthTests(unittest.TestCase):
             if name == "add-loop":
                 return {"ok": True, "loop_id": "fixture-monitor-loop"}
             if name == "read-loop":
-                return {"loop_id": "fixture-monitor-loop", "version": 1, "status": "open"}
+                return {"loop": {"loop_id": "fixture-monitor-loop", "version": 1, "status": "open"},
+                        "amended": False, "amendments": []}
             return {"ok": True}
 
         for _ in range(2):
@@ -225,6 +243,7 @@ class UptimeHealthTests(unittest.TestCase):
         self.assertEqual(sum(name == "close-loop" for name, _ in calls), 1)
         self.assertIn("monitoring unavailable", calls[0][1]["body"])
         self.assertIn("recovered", calls[-1][1]["outcome"])
+        self.assertEqual(calls[-1][1]["base_version"], 1)
 
     def test_monitor_loop_replays_after_lost_acknowledgement_and_refuses_corrupt_state(self):
         root = Path(__file__).resolve().parents[1]
