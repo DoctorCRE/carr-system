@@ -326,7 +326,13 @@ def git_edit_env(tmp, clone, command, contents, staged=False):
         f"if sys.argv[1] == {command!r} and not marker.exists():\n"
         f"    Path({str(Path(clone, 'f.txt'))!r}).write_text({contents!r})\n"
         "    marker.touch()\n"
-        + (f"    subprocess.run([{real_git!r}, 'add', 'f.txt'], check=True)\n"
+        + ("    writer_env = os.environ.copy()\n"
+           "    writer_env.pop('GIT_INDEX_FILE', None)\n"
+           f"    staged = subprocess.run([{real_git!r}, 'add', 'f.txt'], env=writer_env, capture_output=True, text=True)\n"
+           f"    Path({str(Path(tmp, 'stage-result'))!r}).write_text(str(staged.returncode))\n"
+           "    if staged.returncode:\n"
+           "        print(staged.stderr, file=sys.stderr)\n"
+           "        sys.exit(staged.returncode)\n"
            if staged else "")
         + f"os.execv({real_git!r}, [{real_git!r}, *sys.argv[1:]])\n"
     )
@@ -349,6 +355,25 @@ def test_concurrent_staged_landed_bytes_refuse():
         assert git(b, "rev-parse", "HEAD") == head
         assert "stub installer" not in r.stdout
     print("PASS  staged landed bytes appearing after preflight refuse and stay staged")
+
+
+def test_staging_at_merge_entry_is_excluded():
+    with tempfile.TemporaryDirectory() as tmp:
+        b = build(tmp)
+        head = git(b, "rev-parse", "HEAD")
+        index = git(b, "ls-files", "--stage")
+        env, marker = git_edit_env(tmp, b, "merge", "base\nnewer\n", staged=True)
+        r = run_sync(b, env)
+        assert marker.exists(), "the late index writer never ran"
+        assert r.returncode == 78, f"{r.returncode}: {r.stdout}{r.stderr}"
+        assert Path(tmp, "stage-result").read_text() != "0", "concurrent staging was accepted"
+        assert "index.lock" in r.stdout + r.stderr, r.stdout + r.stderr
+        assert Path(b, "f.txt").read_text() == "base\nnewer\n"
+        assert git(b, "rev-parse", "HEAD") == head
+        assert git(b, "ls-files", "--stage") == index
+        assert not Path(b, ".git", "index.lock").exists(), "fleet-sync leaked its index lock"
+        assert "stub installer" not in r.stdout
+    print("PASS  staging at merge entry is excluded; files, index and HEAD stay intact")
 
 
 def test_concurrent_merge_conflict_refuses_and_reports():
@@ -958,6 +983,7 @@ def main():
     test_landed_residue_refuses_without_restoring()
     test_current_dirty_checkout_refuses()
     test_concurrent_staged_landed_bytes_refuse()
+    test_staging_at_merge_entry_is_excluded()
     test_concurrent_merge_conflict_refuses_and_reports()
     test_ignored_incoming_collision_refuses()
     test_intermediate_landed_residue_refuses()
