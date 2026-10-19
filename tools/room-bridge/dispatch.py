@@ -194,6 +194,8 @@ def _skill_ledger(results_path):
 
 
 def _source_revision(workspace, env):
+    if not workspace:
+        return None
     try:
         result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=workspace,
                                 env=scrubbed_env(env), capture_output=True, text=True, timeout=10)
@@ -804,15 +806,16 @@ def dispatch(
                'config_overrides': config_overrides, 'stream_output': stream_output,
                'provider_run': provider_run,
                'claim_id': msg_id if declared_writes else None}
-    workspace = base.get('checkout_path') or cwd or entry.get('cwd') or str(Path.cwd())
-    base['source_revision'] = _source_revision(workspace, env) if entry['kind'] != 'claude-remote' else None
+    source_workspace = (base.get('checkout_path') or cwd or entry.get('cwd')
+                        if entry['kind'] != 'claude-remote' else None)
+    workspace = source_workspace or str(Path.cwd())
     with write_ownership.checkout_writer(workspace) if declared_writes else nullcontext() as bind:
+        base['source_revision'] = _source_revision(source_workspace, env)
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
             if outcome['status'] == 'completed':
                 outcome = {**outcome, 'completed_at': _now(),
-                           'source_revision': _source_revision(workspace, env)
-                           if entry['kind'] != 'claude-remote' else None}
+                           'source_revision': _source_revision(source_workspace, env)}
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
                     or 'selected model is at capacity' not in outcome.get('detail', '').lower()):
