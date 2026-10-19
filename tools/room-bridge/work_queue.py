@@ -213,7 +213,7 @@ class WorkQueue:
             'AND started_at IS NOT NULL AND finished_at IS NULL', (card,)).fetchone() is not None
 
     def _stage(self, card, stage, ready):
-        if self._item(card)['stage'] != 'merging' or not self._merge_active(card) or stage == 'done':
+        if self._item(card)['stage'] != 'merging' or not self._merge_active(card):
             self._end_stage(card)
         self.db.execute('UPDATE items SET stage=?,ready=? WHERE card_id=?', (stage, ready, card))
         at = timestamp()
@@ -288,8 +288,10 @@ class WorkQueue:
             self._event(card, self._state(old), self._state(self._item(card)), actor,
                         f'executor {status}', 'stage')
 
-    def begin_merge(self, card, *, actor, reason, pin=None):
+    def begin_merge(self, card, *, actor, reason, pin=None, expected_order=None):
         with self.transaction():
+            if expected_order is not None and self._merge_entries() != expected_order:
+                raise QueueChanged('merge order changed before ownership')
             row = self._item(card)
             if pin is not None and pin not in json.loads(row['data'])['prs']:
                 raise ValueError('merge head differs from pinned work card')
@@ -335,7 +337,7 @@ class WorkQueue:
                    'building': {'review', 'blocked', 'failed', 'parked'},
                    'review': {'fixing', 'merging', 'blocked', 'failed', 'parked'},
                    'fixing': {'review', 'blocked', 'failed', 'parked'},
-                   'merging': {'done', 'blocked', 'failed', 'parked'}}
+                   'merging': {'blocked', 'failed', 'parked'}}
         with self.transaction():
             old = self._item(card)
             if old['claim']:
@@ -420,13 +422,23 @@ class WorkQueue:
         if not data['prs'] or any(not re.fullmatch(r'[0-9a-f]{40}', pr.get('head') or '') for pr in data['prs']):
             raise ValueError('merge stage requires PRs with pinned 40-character heads')
 
+    def _merge_entries(self):
+        entries, position = [], 0
+        for row in self.db.execute('SELECT * FROM items ORDER BY position'):
+            if row['stage'] != 'merging' and not self._merge_active(row['card_id']):
+                continue
+            position += 1
+            entries.extend(dict(card_id=row['card_id'], position=position,
+                                repo=pr['repo'], pr=pr['number'], head=pr.get('head'))
+                           for pr in json.loads(row['data'])['prs'])
+        return entries
+
     def merge_order(self):
-        snapshot = self.export()
-        return {'schema': 'room-work-queue-merges/v1', 'revision': snapshot['revision'],
-                'entries': [dict(card_id=i['card_id'], position=i['merge_position'],
-                                 repo=pr['repo'], pr=pr['number'], head=pr.get('head'))
-                            for i in snapshot['items'] if i['merge_position'] is not None
-                            for pr in i['prs']]}
+        with self.transaction():
+            return {'schema': 'room-work-queue-merges/v1',
+                    'revision': self.db.execute('SELECT COALESCE(MAX(id),0) FROM events').fetchone()[0],
+                    'entries': self._merge_entries()}
+
     def publication(self):
         return dict(self.db.execute('SELECT * FROM publication WHERE id=1').fetchone())
 

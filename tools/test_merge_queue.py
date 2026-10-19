@@ -669,6 +669,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_cancelled_after_bridge_preflight_never_spawns(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief = self.root / 'cancelled.txt'; brief.write_text('task')
         registry = self.root / 'desks.json'
         registry.write_text(json.dumps({'desks': {'sol': {
@@ -1304,6 +1305,7 @@ class QueueTests(unittest.TestCase):
 
     def test_partial_dispatch_receipt_does_not_block_other_briefs(self):
         self.pr(1);self.pr(2)
+        self.q.enqueue(module.REPOS[0], 2, self.approved)
         registry=self.root/'desks.json';registry.write_text(json.dumps({'desks':{}}));os.environ['CARR_HERMES_DESKS']=str(registry)
         for n,phase in ((1,'issued'),(2,'planned')):
             brief=self.root/f'conflict{n}.txt';brief.write_text('task')
@@ -1325,6 +1327,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_waits_for_free_sol_desk_then_records_result(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief=self.root/'conflict.txt';brief.write_text('bounded task')
         with self.q.db:
             self.q.db.execute('INSERT INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',('test','dispatch',module.REPOS[0],1,self.approved,str(brief)))
@@ -1340,7 +1343,7 @@ class QueueTests(unittest.TestCase):
             "from work_queue import WorkQueue\n"
             "with WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as q:\n"
             " card=a[a.index('--card-id')+1]\n"
-            " q.enqueue(card, desk='free-sol', task='synthetic', actor='test')\n"
+            " q.requeue(card, stage='fixing', desk='free-sol', actor='test', reason='authorized revision')\n"
             " claim=q.claim(eligible_desks={'free-sol'}, actor='test', owner={})\n"
             " q.finish(card, claim['claim'], {'status':'completed','msg_id':'verified'}, actor='test')\n"
             "Path(a[a.index('--results')+1]).write_text(json.dumps({'desk':'free-sol','kind':'codex-session','status':'completed','thread_id':'new-thread','result':'fixed'})+'\\n')\n")
@@ -1404,6 +1407,8 @@ class QueueTests(unittest.TestCase):
         self.data['prs'][module.REPOS[0]+'#1'].update(merged=True,state='closed',merge_commit_sha=self.merge_sha);self.save()
         self.git('update-ref','refs/heads/main',self.merge_sha)
         self.q.enqueue(module.REPOS[0],1,self.approved);self.q.enqueue(module.REPOS[0],2,self.approved)
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
         self.q.tick()
         self.assertEqual(self.calls('merge')[0][2],'2')
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=1').fetchone()[0],'done')

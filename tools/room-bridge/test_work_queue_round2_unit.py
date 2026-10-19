@@ -43,6 +43,8 @@ class Round2(unittest.TestCase):
             sender.return_value.pid=12345
             daemon._dispatch_conflicts()
         sender.assert_not_called()
+        self.assertEqual(self.q.export()['items'], [])
+        self.assertIsNotNone(daemon.db.execute("SELECT 1 FROM events WHERE outcome='dispatch_unbound'").fetchone())
 
     def test_merge_revalidates_priority_before_provider_effect(self):
         self.merge_card('A',1)
@@ -64,6 +66,9 @@ class Round2(unittest.TestCase):
              patch.object(daemon,'prepare',return_value=False), patch.object(daemon,'green',side_effect=green), \
              patch.object(daemon,'gh',side_effect=merge):
             daemon.tick()
+            self.assertEqual(effects, [])
+            daemon.tick()
+        self.assertEqual(effects, [2])
         self.assertNotIn(1,effects, 'stale selection merged after priority changed before begin_merge')
 
 if __name__=='__main__':

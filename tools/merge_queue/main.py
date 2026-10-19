@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ops'))
 sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
-from work_queue import WorkQueue, default_path
+from work_queue import WorkQueue, QueueChanged, default_path
 from git_env import scrubbed_env
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
@@ -766,6 +766,19 @@ class Queue:
                     self.db.execute("UPDATE actions SET phase='uncertain',desk=NULL WHERE key=?", (a['key'],))
                     self.event(a['repo'], a['pr'], 'dispatch_uncertain', f'Dispatcher absent without a valid receipt {results}; desk {a["desk"]} released; inspect before retry')
         for a in bounded_items('snapshot', self.db.execute("SELECT * FROM actions WHERE kind='dispatch' AND phase='planned' ORDER BY rowid").fetchall()):
+            with WorkQueue(default_path(), read_only=True) as work:
+                snapshot = work.export()
+                cards = [c for c in snapshot['items'] if
+                         {'repo': a['repo'], 'number': a['pr'], 'head': a['head']} in c['prs']
+                         and c['stage'] not in ('done', 'failed', 'parked')]
+            if len(cards) > 1:
+                raise ValueError('multiple work cards own this pinned conflict; reconcile before dispatch')
+            if not cards:
+                with self.db:
+                    self.event(a['repo'], a['pr'], 'dispatch_unbound',
+                               'No authoritative work card owns this pinned conflict; explicitly reconcile into the work queue before dispatch')
+                continue
+            work_card = cards[0]['card_id']
             if self.expire_dispatch(a):
                 continue
             if self.stopped:
@@ -803,18 +816,9 @@ class Queue:
                         self.event(a['repo'], a['pr'], 'dispatch_waiting', 'No free authenticated Codex Sol high desk; brief remains queued')
                 continue
             results = Path(a['payload']).with_suffix('.dispatch.jsonl')
-            with WorkQueue(default_path(), read_only=True) as work:
-                snapshot = work.export()
-                cards = [c for c in snapshot['items'] if
-                         {'repo': a['repo'], 'number': a['pr'], 'head': a['head']} in c['prs']
-                         and c['stage'] not in ('done', 'failed', 'parked')]
-            if len(cards) > 1:
-                raise ValueError('multiple work cards own this pinned conflict; reconcile before dispatch')
-            work_card = cards[0]['card_id'] if cards else 'merge-fix:' + hashlib.sha256(a['key'].encode()).hexdigest()
             argv = [sys.executable, str(bridge), '--registry', str(registry_path), '--results', str(results), 'send', free,
                     Path(a['payload']).read_text(), '--fresh', '--card-id', work_card]
-            if cards:
-                argv += ['--stage', 'fixing']
+            argv += ['--stage', 'fixing']
             if '--family' in command([sys.executable, str(bridge), 'send', '--help']):
                 argv += ['--family', 'sol']
             if self.stopped:
@@ -966,7 +970,7 @@ class Queue:
                 e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
                 if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
                     continue
-                if self._tick_entry(e, pin['card_id']):
+                if self._tick_entry(e, pin['card_id'], order):
                     waiting.add(repo)
 
     def complete_work_merge(self, e, card_id, *, merged):
@@ -975,7 +979,7 @@ class Queue:
                               merged=merged, actor='merge-daemon',
                               reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
 
-    def _tick_entry(self, e, card_id):
+    def _tick_entry(self, e, card_id, expected_order):
         repo, n = e['repo'], e['pr']
         self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
         try:
@@ -1095,7 +1099,7 @@ class Queue:
             with WorkQueue(default_path()) as work:
                 work.begin_merge(card_id, actor='merge-daemon',
                                  reason=f'journal entry {e["id"]}: merge pinned at {head}',
-                                 pin={'repo': repo, 'number': n, 'head': head})
+                                 pin={'repo': repo, 'number': n, 'head': head}, expected_order=expected_order)
             with self.db:
                 self.db.execute("UPDATE entries SET phase='merging',tested=?,merge_attempts=merge_attempts+1 WHERE id=?", (head, e['id']))
             try:
@@ -1112,6 +1116,9 @@ class Queue:
             with self.db:
                 self.db.execute("DELETE FROM waits WHERE owner=? AND kind='github_retry'", (f'entry:{e["id"]}',))
             self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
+            return True
+        except QueueChanged as exc:
+            self.report(e, 'selection_changed', str(exc))
             return True
         except GitHubReadPaused as exc:
             self.report(e, 'github_paused', str(exc))

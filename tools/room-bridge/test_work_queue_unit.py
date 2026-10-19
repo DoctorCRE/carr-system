@@ -226,7 +226,8 @@ with WorkQueue(Path(sys.argv[2])) as q:
         with self.assertRaisesRegex(ValueError, 'completion receipt'):
             self.q.requeue('A', stage='fixing', actor='test', reason='cannot preempt merge')
         self.assertIsNotNone(self.q.get('A')['stages'][-1]['started_at'])
-        self.q.transition('A', 'done', actor='merge-daemon', reason='provider receipt')
+        self.q.finish_merge('A', repo='jbookout/carr-system', pr=1960, head='a' * 40,
+                            merged=True, actor='merge-daemon', reason='provider receipt')
         merged = self.q.get('A')['stages'][-2]
         self.assertIsNotNone(merged['finished_at'])
         self.assertGreaterEqual(merged['elapsed'], 0)
