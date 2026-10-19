@@ -2392,6 +2392,12 @@ class Pipeline:
             staging = {"live_release_url": APP_STAGING_RELEASE_URL}
             live = self.staging_identity(self.http(APP_STAGING_RELEASE_URL))
             prior_sha = self.store.load().get("app", {}).get("last_released_sha")
+            if (journal and journal["prior"]["source_commit"] != prior_sha
+                    and live["source_commit"] == prior_sha):
+                journal_store.state_path.unlink()
+                journal = {}
+                if command == "restore-candidate":
+                    return 0
             prior = journal["prior"] if journal and (command == "restore-candidate" or journal["status"] != "restored") else live
             if not isinstance(prior_sha, str) or prior["source_commit"] != prior_sha:
                 raise Blocked("candidate_prior", "restore target must equal the last released app main SHA in pipeline state")
