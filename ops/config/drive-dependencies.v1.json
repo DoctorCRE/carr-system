@@ -412,23 +412,6 @@
       }
     },
     {
-      "id": "projection-rule-render-verifiers",
-      "class": "projection",
-      "sources": [
-        "ops/rule-render-markup-check.py"
-      ],
-      "path_pattern": "{{VAULT}}/**",
-      "producer": "compiled-rule verification gates",
-      "consumers": [
-        "rule refresh acceptance"
-      ],
-      "canonicality": "projection",
-      "replacement": {
-        "status": "unrepointed",
-        "target": "record-layer render verification"
-      }
-    },
-    {
       "id": "normal-front-door-launch-links",
       "class": "normal_runtime",
       "sources": [

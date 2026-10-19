@@ -131,7 +131,7 @@ def compare(root):
         'nightly-record-layer': ['db.env', 'tokens.env', 'healthchecks.env', 'age-key.txt'],
         'nightly-exports-daytime-retry': ['db.env', 'tokens.env'],
         'partner-ping': ['db.env'], 'release-pipeline': ['db.env', 'tokens.env'],
-        'control-plane-tick': ['db.env', 'engineering-controller.env'], 'rules-refresh': ['db.env'],
+        'control-plane-tick': ['db.env', 'engineering-controller.env'],
         'job-watchdog': ['db.env', 'mcp-tokens.env'], 'cutover-watch': ['mcp-tokens.env'],
         'delivery-cadence-a05-sweep': ['mcp-tokens.env']}
     states = {'room-bridge': ['~/.config/carr/room-bridge-state.json', '~/.config/carr/hermes-dispatch-results.jsonl'],

@@ -403,8 +403,17 @@ def sync_control_plane(owner: SecretDsn, *, run: Run,
                   run=run, env=bootstrap_env, timeout=900), "control-plane sync")
     readback_env = safe_environment(environ)
     readback_env["DATABASE_URL"] = owner.value
-    _success(_run([str(REPO / ".venv/bin/python"), str(REPO / "ops/control-plane-registry-gate.py")],
-                  run=run, env=readback_env, timeout=900), "control-plane readback")
+    result = _run([str(REPO / ".venv/bin/python"), str(REPO / "ops/control-plane-registry-gate.py")],
+                  run=run, env=readback_env, timeout=900)
+    label = "control-plane readback"
+    if result.returncode:
+        # The gate names only manifest workflow keys and field names; keep that line, nothing else.
+        gate = re.findall(r"^control-plane-registry-gate FAILED: (.*)$", str(result.stderr or ""), re.M)
+        detail = re.sub(r"[^A-Za-z0-9_.:;=,'()\[\] -]", "", gate[-1])[:600] if gate else ""
+        secrets = (owner.value, unquote(urlsplit(owner.value).password or ""), owner.scope.endpoint_host)
+        label += f"; detail={detail}" if detail and not any(v and v in detail for v in secrets) \
+            else "; detail=unavailable"
+    _success(result, label)
 
 
 def candidate_reconstruction_state(owner: SecretDsn, source: SourceContract, *, connect: Any) -> str:
