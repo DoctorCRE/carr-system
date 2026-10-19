@@ -16,6 +16,29 @@ spec.loader.exec_module(runner)
 from lib.disposable_pg_fixture import postgres_fixture_group
 
 class Isolation(unittest.TestCase):
+    def test_staging_authority_fixture_finishes_beside_isolated_gates(self):
+        gate = ROOT / 'ops/staging-authority-rollback-local-pg-gate.py'
+        isolated = Path('synthetic-isolated.py')
+        original_run = subprocess.run
+
+        def bounded_run(*args, **kwargs):
+            kwargs['timeout'] = 8
+            return original_run(*args, **kwargs)
+
+        def proof(gate, image, log, env):
+            log.write_text('')
+            return gate, 0, 0, log
+
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(runner, 'snapshot', return_value=(None, Mock(), None)), \
+                patch.object(runner, 'run_isolated', side_effect=proof), \
+                patch.object(runner.subprocess, 'run', side_effect=bounded_run):
+            logs = Path(directory)
+            self.assertEqual(runner.run_gates('postgres://owner@127.0.0.1:9/carr_ci',
+                [gate, isolated], logs, rollback_only={isolated.name}), 0)
+            self.assertIn('PASS: real PostgreSQL',
+                          (logs / f'db-gate-{gate.name}.log').read_text())
+
     def test_snapshots_complete_before_private_clusters_start(self):
         completed=0
         started=threading.Event()
