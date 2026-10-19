@@ -4,16 +4,28 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 from lib.claude_scheduler_native import discover_snapshot
 from lib.control_plane_scheduler_cutover import CutoverRefusal
-from lib.headless_tasks import config, install_main as headless_install
+from lib.headless_tasks import install_main as headless_install
+
+
+def read_json(path: Path) -> Any:
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise CutoverRefusal('scheduler inventory has duplicate object keys')
+            result[key] = value
+        return result
+    return json.loads(path.read_text(), object_pairs_hook=unique_object)
 
 
 def native_tasks(home: Path) -> dict[str, dict[str, Any]]:
     try:
-        document = json.loads(discover_snapshot(home).read_text())
+        document = read_json(discover_snapshot(home))
         rows = document['scheduledTasks']
         if not isinstance(rows, list):
             raise ValueError('task list')
@@ -30,7 +42,7 @@ def native_tasks(home: Path) -> dict[str, dict[str, Any]]:
 
 
 def workflows(repo: Path) -> dict[str, dict[str, Any]]:
-    document = json.loads((repo / 'ops/config/control-plane-workflows.v1.json').read_text())
+    document = read_json(repo / 'ops/config/control-plane-workflows.v1.json')
     rows = document['workflows']
     if not isinstance(rows, list):
         raise CutoverRefusal('workflow inventory is unavailable')
@@ -69,7 +81,7 @@ def install_main(argv: list[str] | None = None) -> int:
         home = Path.home()
         repo = home / 'carr-system'
         try:
-            settings = config(repo)
+            settings = read_json(repo / 'ops/headless-tasks/tasks.json')
             selected = args.task_ids or sorted(settings['tasks'])
             if set(selected) - set(settings['tasks']):
                 raise CutoverRefusal('unknown task id')
@@ -84,7 +96,7 @@ def install_main(argv: list[str] | None = None) -> int:
 
 
 def ephemeral_one_shot(home: Path, task_id: str, row: dict) -> bool:
-    if (row.get('cronExpression') is not None or row['enabled']
+    if ('cronExpression' not in row or row['cronExpression'] is not None or row['enabled']
             or not row.get('lastRunAt') or row.get('lastRunStatus') != 'succeeded'):
         return False
     if Path(task_id).name != task_id or task_id in {'.', '..'}:
@@ -99,13 +111,20 @@ def ephemeral_one_shot(home: Path, task_id: str, row: dict) -> bool:
         end = lines.index('---', 1)
     except ValueError:
         return False
-    markers = [line.partition(':')[2].strip().lower() for line in lines[1:end]
-               if line.startswith('ephemeral:')]
-    return markers == ['true']
+    metadata = {}
+    for line in lines[1:end]:
+        if not line.strip():
+            continue
+        field = re.fullmatch(r'([a-z][a-z0-9_-]*):[ \t]+([A-Za-z0-9].*)', line)
+        if not field or field[1] in metadata or re.search(r':[ \t]', field[2]):
+            return False
+        metadata[field[1]] = field[2].rstrip()
+    return metadata.get('ephemeral') == 'true'
 
 
 def report(repo: Path, home: Path) -> dict:
-    settings, registered, native = config(repo), workflows(repo), native_tasks(home)
+    settings = read_json(repo / 'ops/headless-tasks/tasks.json')
+    registered, native = workflows(repo), native_tasks(home)
     rows = []
     installed_ids = {path.name.removeprefix('com.carr.headless.').removesuffix('.plist')
                      for path in (home / 'Library/LaunchAgents').glob('com.carr.headless.*.plist')
