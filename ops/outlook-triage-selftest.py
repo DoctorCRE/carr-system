@@ -248,7 +248,8 @@ elif tool in ('click', 'type_text'):
         else:
             fail('not a text field')
     elif kind and kind[0] == 'row':
-        select(kind[1])
+        if not (state.get('search') and state.get('search_click_ignored')):
+            select(kind[1])
     elif kind and kind[0] == 'folder_row':
         state['presses'].append('folder:' + kind[1])
         if not state.get('inbox_click_ignored'):
@@ -551,7 +552,38 @@ class OutlookTriageTest(FakeOutlookCase):
                                          else EVENING)
         self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
         self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertEqual(state['selections'], [FILE_A['label']])
         self.assertTrue(state['sidebar'], 'folder pane restored')
+
+    def test_a_folder_search_that_crosses_the_close_does_not_move(self):
+        self.given([FILE_A, VENDOR])
+        def clock():
+            state = json.loads(self.state.read_text())
+            return EVENING.replace(hour=21, minute=15) if state.get('picker') else EVENING
+        outcome, state = self.run_triage(clock=clock)
+        self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
+        self.assertEqual(state['selections'], [FILE_A['label']])
+        self.assertEqual(state['moved'], [])
+        self.assertIsNone(state['picker'])
+        self.assertTrue(state['sidebar'])
+
+    def test_a_direct_run_outside_the_window_touches_nothing(self):
+        self.given([FILE_A, VENDOR])
+        morning = EVENING.replace(hour=10, minute=0)
+        outcome, state = self.run_triage(morning)
+        self.assertEqual((outcome.state, outcome.reason), ('skipped', 'outside_window'))
+        self.assertEqual(triage.EXIT[outcome.state], 78)
+        self.assertEqual(self.called('cua-driver') + self.called('pgrep') + self.called('ioreg'), [])
+        self.assertEqual(state['moved'], [])
+        self.assertFalse(self.settled().exists())
+
+    def test_a_run_already_at_the_hard_stop_touches_nothing(self):
+        self.given([FILE_A, VENDOR])
+        outcome, state = self.run_triage(clock=lambda: EVENING.replace(hour=21, minute=15))
+        self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
+        self.assertEqual(self.called('cua-driver') + self.called('pgrep') + self.called('ioreg'), [])
+        self.assertEqual((state['selections'], state['moved']), ([], []))
+        self.assertFalse(self.settled().exists())
 
     def test_output_carries_counts_not_names(self):
         self.given([FILE_A, VENDOR, NEWS, UNREAD])
@@ -615,6 +647,27 @@ class RefreshTest(FakeOutlookCase):
         self.assertIn('unread_skipped: 1', self.report())
         self.assertNotIn('opened_at', json.loads(path.read_text())[0])
         self.assertEqual([m[0] for m in state['moved']], [FILE_A['label']])
+
+    def test_a_search_that_crosses_the_close_opens_nothing(self):
+        self.given([FILE_A, self.READ_BODY])
+        path = self.refresh_list([listed('m5', self.READ_BODY, 'news@news.test')])
+        closed = EVENING.replace(hour=21, minute=16)
+        outcome, state = self.run_triage(
+            clock=lambda: closed if json.loads(self.state.read_text()).get('search_typed') else EVENING)
+        self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
+        self.assertEqual(state['selections'], [])
+        self.assertEqual(state['moved'], [])
+        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
+
+    def test_an_ignored_click_is_not_counted_as_opened(self):
+        self.given([FILE_A, self.READ_BODY], search_click_ignored=True)
+        path = self.refresh_list([listed('m6', self.READ_BODY, 'news@news.test')])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertNotIn(self.READ_BODY['label'], state['selections'])
+        self.assertIn('  not_opened: 1', self.report())
+        self.assertNotRegex(self.report(), r'(?m)^  opened: ')
+        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
 
     def test_unmatched_entries_are_counted_and_left_alone(self):
         self.given([FILE_A, self.READ_BODY])

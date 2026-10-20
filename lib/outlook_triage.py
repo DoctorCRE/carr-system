@@ -1,13 +1,14 @@
 """Nightly Inbox triage: file Joe's already-read Inbox email into Outlook folders.
 
 Code only: no agent session and no model. launchd fires `fire()` every 15
-minutes from 19:15 to 21:00, and `fire()` itself refuses any other time. Once a
+minutes from 19:15 to 21:00, and both `fire()` and `run()` refuse any other time. Once a
 day is settled (a run that succeeded, or whatever the 21:00 fire ends with) the
 remaining fires exit at once without a run row; a skipped or failed earlier run
 leaves the later fires to retry. Otherwise `fire()` hands over to
 bin/run-scheduled.sh, which runs `main()` and turns its exit code into the run
-row (0 succeeded, 78 skipped, 124 timed out, anything else failed). A run stops
-moving at 21:15, so the 21:00 fire gets a quarter hour. The row carries no names.
+row (0 succeeded, 78 skipped, 124 timed out, anything else failed). From 21:15 a
+run selects nothing more: the clock is checked right before every row it would
+select, so the 21:00 fire gets a quarter hour. The row carries no names.
 
 The Inbox is selected from the folder pane and confirmed by the window title
 before anything is read, and every move re-checks that title. Unread email is
@@ -23,7 +24,8 @@ moved row's label, never a sender, subject or folder.
 Before filing, up to 50 already-read emails the intake job lists as missing
 their full body are opened so Outlook downloads them: found by searching the
 sender address and matching the subject's sha256, selected, and given time to
-render. A listed email that is still unread is skipped until Joe reads it. The
+render; it counts as opened only when a fresh read shows it selected. A listed
+email that is still unread is skipped until Joe reads it. The
 intake job owns that list; triage only adds opened_at. REFRESH_LIST's path and
 the hash are a provisional contract until the intake job publishes its own.
 """
@@ -324,9 +326,11 @@ def refresh_all(window: Window, path: Path, limits: Limits, report: Report,
                 report.refreshed['ambiguous' if matches else Refreshed.NOT_FOUND.value] += 1
                 window.end_search()
                 continue
-            result = window.refresh(matches[0].key)
+            result = window.refresh(matches[0].key, lambda: not closed())
             window.end_search()
             report.refreshed[result.value] += 1
+            if result is Refreshed.WINDOW_CLOSED:
+                return Outcome('timed_out', 'window_closed')
             if result is Refreshed.OPENED:
                 opened[entry['message_id']] = datetime.now(timezone.utc).isoformat()
     finally:
@@ -352,9 +356,9 @@ def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGu
             if len(report.moved) >= limits.max_moves:
                 report.left['move_cap_reached'] += 1
                 continue
-            if closed():
+            result = window.move(row.label, guide.leaf(decision.path), lambda: not closed())
+            if result is Moved.WINDOW_CLOSED:
                 return Outcome('timed_out', 'window_closed')
-            result = window.move(row.label, guide.leaf(decision.path))
             if result is Moved.MOVED:
                 in_a_row = 0
                 report.moved.append((short_hash(row.label), decision.rule))
@@ -423,9 +427,15 @@ def _minute(moment: datetime) -> clock:
 
 def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
         now_fn: Callable[[], datetime] = lambda: datetime.now(ZONE)) -> Outcome:
-    """One triage run; it stops before the next move or refresh once now_fn() reaches 21:15."""
+    """One triage run, only from 19:15 to 21:00; it selects nothing once now_fn() reaches 21:15."""
     os.umask(0o077)
+    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+        print('outlook-triage skipped outside_window moved=0 left=0')
+        return Outcome('skipped', 'outside_window')
     close = datetime.combine(now.astimezone(ZONE).date(), WINDOW_CLOSE, ZONE)
+    if now_fn() >= close:
+        print('outlook-triage timed_out window_closed moved=0 left=0')
+        return Outcome('timed_out', 'window_closed')
     folder = repo / OUT
     folder.mkdir(parents=True, exist_ok=True)
     folder.chmod(0o700)

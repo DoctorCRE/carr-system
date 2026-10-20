@@ -26,6 +26,7 @@ from pathlib import Path
 import re
 import subprocess
 import time
+from typing import Callable
 
 APP = 'Microsoft Outlook'
 MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
@@ -71,11 +72,14 @@ class Moved(Enum):
     FAILED = 'failed'
     GONE = 'gone'
     NEXT_TO_UNREAD = 'next_to_unread'
+    WINDOW_CLOSED = 'window_closed'
 
 
 class Refreshed(Enum):
     OPENED = 'opened'
+    NOT_OPENED = 'not_opened'
     UNREAD_SKIPPED = 'unread_skipped'
+    WINDOW_CLOSED = 'window_closed'
     NOT_FOUND = 'not_found'
     UNCERTAIN = 'uncertain'
 
@@ -328,12 +332,13 @@ class Window:
         if self.rows()[0] != tab:
             raise UiError('tab_switch_failed')
 
-    def move(self, label: str, leaf: str) -> Moved:
+    def move(self, label: str, leaf: str, allowed: Callable[[], bool]) -> Moved:
         """Move the read row with this label to the folder named leaf, then confirm it left the list.
 
         The caller guarantees the leaf names exactly one folder. Outlook may open
         the next or previous message after a move, so a row is only selected when
-        both its neighbours are read too. The only toolbar button pressed is Move.
+        both its neighbours are read too, and only while allowed() still holds.
+        The only toolbar button pressed is Move.
         """
         rows = self.rows()[1]
         before = Counter(r.label for r in rows)
@@ -343,6 +348,8 @@ class Window:
             return Moved.GONE
         if any(r.read_state is not ReadState.READ for r in rows[max(0, index - 1):index + 2]):
             return Moved.NEXT_TO_UNREAD
+        if not allowed():
+            return Moved.WINDOW_CLOSED
         cua('click', {'pid': self.pid, 'element_token': rows[index].token})
         time.sleep(self.waits.settle_seconds)
         selected = [r for r in self.rows()[1] if r.selected]
@@ -367,6 +374,8 @@ class Window:
                    if e.get('role') in ENTRIES and (e.get('label') or '').strip() == leaf]
         if len(entries) != 1:
             return self._abandon()
+        if not allowed():
+            return self._abandon(Moved.WINDOW_CLOSED)
         cua('click', {'pid': self.pid, 'element_token': entries[0]['element_token']})
         deadline = time.monotonic() + self.waits.move_seconds
         while True:
@@ -392,11 +401,12 @@ class Window:
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
         time.sleep(self.waits.settle_seconds)
 
-    def refresh(self, key: str) -> Refreshed:
+    def refresh(self, key: str, allowed: Callable[[], bool]) -> Refreshed:
         """Open one listed, already-read email so Outlook downloads its full body.
 
         An unread email is never selected: it is skipped and refreshed on a later
-        night, once Joe has read it.
+        night, once Joe has read it. The row is selected only while allowed() still
+        holds, and counts as opened only when a fresh read shows it alone selected.
         """
         rows = self.rows(require_inbox=False)[1]
         index = next((i for i, r in enumerate(rows) if r.key == key), None)
@@ -406,14 +416,17 @@ class Window:
             return Refreshed.UNREAD_SKIPPED
         if rows[index].read_state is ReadState.UNCERTAIN:
             return Refreshed.UNCERTAIN
+        if not allowed():
+            return Refreshed.WINDOW_CLOSED
         cua('click', {'pid': self.pid, 'element_token': rows[index].token})
         time.sleep(self.waits.render_seconds)
-        return Refreshed.OPENED
+        selected = [r.label for r in self.rows(require_inbox=False)[1] if r.selected]
+        return Refreshed.OPENED if selected == [rows[index].label] else Refreshed.NOT_OPENED
 
-    def _abandon(self) -> Moved:
+    def _abandon(self, result: Moved = Moved.FAILED) -> Moved:
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
         time.sleep(self.waits.settle_seconds)
-        return Moved.FAILED
+        return result
 
 
 FIELDS = ('AXTextField', 'AXSearchField')
