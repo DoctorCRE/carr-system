@@ -730,6 +730,35 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_vanished_temp_is_removed_and_run_completes(self):
+        import machine_cleanup as cleanup
+        for stage in ('listed', 'before_move'):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                candidate = scratch / 'carr-ci-test-vanished'
+                candidate.mkdir()
+                os.utime(candidate, (0, 0))
+                calls = []
+                def probe(paths):
+                    calls.append(paths)
+                    if len(calls) == (1 if stage == 'listed' else 2):
+                        candidate.rmdir()
+                    return set()
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                report = cleanup.run(root, config, hook=None, tmp_root=clones,
+                    user_tmp_root=scratch, roots={}, dispatch_path=root / 'absent',
+                    provider=object(), process_probe=probe, archive_thread=lambda *a, **k: None)
+                self.assertEqual(report['status'], 'completed', report)
+                self.assertEqual(report['errors'], [])
+                self.assertEqual([(row['path'], row['status']) for row in report['removed']],
+                    [(str(candidate), 'removed')])
+                self.assertNotIn('pending', report)
+                self.assertEqual(report['temp_freed_bytes'], 0)
+                self.assertEqual(json.loads((root / 'out/machine-cleanup.json').read_text()), report)
+
     def test_slow_test_temp_discovery_uses_shared_run_deadline(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
