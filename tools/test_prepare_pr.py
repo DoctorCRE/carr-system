@@ -10,7 +10,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 from git_env import fixture_env
 import prepare_pr
-from prepare_pr import prepare
+from prepare_pr import prepare, regen_env
 
 
 class PrepareTests(unittest.TestCase):
@@ -70,6 +70,10 @@ class PrepareTests(unittest.TestCase):
         sha = prepare(str(self.remote), 'feature', self.git('rev-parse', 'feature', repo=self.remote),
                       self.main, self.receipt, lambda repo: None, reference=self.root / 'missing')
         self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), sha)
+
+    def test_regeneration_keeps_the_stored_gh_login(self):
+        env = regen_env({'PATH': '/bin', 'HOME': '/Users/x', 'GIT_DIR': '/elsewhere', 'SECRET_NOT_NEEDED': 'v'})
+        self.assertEqual(env, {'PATH': '/bin', 'HOME': '/Users/x'})
 
     def test_failed_generator_never_pushes(self):
         def fail(_):
