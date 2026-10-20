@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import subprocess
 from pathlib import Path
@@ -9,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_receipts
 import dispatch
+from desks import Registry
 from ops.git_env import fixture_env
 
 
@@ -157,6 +160,35 @@ class SkillReceiptTests(unittest.TestCase):
                 dispatch.dispatch('builder', 'Skills: grill-with-docs', registry=Registry(),
                                   results_path=Path(directory) / 'results.jsonl')
         execute.assert_not_called()
+
+    def test_api_cli_send_without_inventory_executes_with_unverified_skills(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry_path = root / 'registry.json'
+            Registry(registry_path).register('api-build', 'claude-api', effort='high')
+            results = root / 'results.jsonl'
+            prepared = {'checkout_path': str(root), 'checkout_workspace': str(root)}
+            out, err = io.StringIO(), io.StringIO()
+            with patch.object(dispatch.seat_gate, 'check', return_value=None), \
+                 patch.object(dispatch.codex_checkout, 'prepare', return_value=prepared), \
+                 patch.object(dispatch.write_ownership, 'checkout_writer',
+                              return_value=contextlib.nullcontext(lambda identity: None)), \
+                 patch.object(dispatch, '_execute', return_value={
+                     'status': 'completed', 'result': 'fixture complete'}) as execute, \
+                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = dispatch.main([
+                    '--registry', str(registry_path), '--results', str(results),
+                    'send', 'api-build', 'Inspect fixture behavior', '--checkout', 'fixture-branch'])
+            self.assertEqual(code, 0, err.getvalue())
+            self.assertEqual(execute.call_count, 1)
+            row = json.loads(out.getvalue())
+            self.assertEqual(row['status'], 'completed')
+            self.assertEqual(row['result'], 'fixture complete')
+            self.assertEqual(row['skill_receipt_status'], 'unverified')
+            self.assertEqual(row['skill_receipt_error'],
+                             'API skill inventory unavailable to local observer')
+            self.assertNotIn('skill_receipt', row)
+            self.assertEqual(json.loads(results.read_text()), row)
 
     def test_prior_job_reads_and_unfinished_calls_do_not_count(self):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md'),
