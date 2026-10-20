@@ -572,6 +572,25 @@ class QueueTests(unittest.TestCase):
                 self.assertEqual(len(calls), 2)
                 self.assertEqual(self.calls('merge'), [])
 
+    def test_timeout_stops_writes_and_entry_owned_reads_after_cooldown(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        cases = ((False, 'automatic', None), (True, 'automatic', entry),
+                 (True, f'post-merge:{entry}', None))
+        for read, scope, owner in cases:
+            with self.subTest(read=read, scope=scope, entry=owner), \
+                    self.q.github_scope(scope), \
+                    patch.object(module.time, 'time', return_value=10000) as clock, \
+                    patch.object(module, 'command', side_effect=module.WaitExpired('deadline')) as command:
+                self.q._github_entry = owner
+                args = ('api', f'repos/{module.REPOS[0]}/pulls/1') + (() if read else ('-X', 'PATCH'))
+                with self.assertRaises(module.WaitExpired):
+                    self.q.gh(*args)
+                clock.return_value += module.BOUNDS['github_retry']['seconds'] + 1
+                with self.assertRaisesRegex(module.WaitExpired, 'stopped; reconcile'):
+                    self.q.gh(*args)
+                self.assertEqual(command.call_count, 1, 'Stopped operation was replayed')
+
     def test_daemon_updated_head_is_discovered_and_waits_for_its_checks(self):
         self.pr(state='behind')
         self.q.enqueue(module.REPOS[0], 1, self.approved)

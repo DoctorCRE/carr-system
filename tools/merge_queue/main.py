@@ -302,7 +302,8 @@ class Queue:
             raise WaitExpired(f'{stopped["detail"]}; stopped; reconcile before retry')
         failure = self.db.execute('SELECT * FROM github_failures WHERE scope=? AND key=?',
                                   (scope, key)).fetchone()
-        if (failure and read and entry is None and not failure['stopped']
+        if (failure and read and entry is None
+                and (not failure['stopped'] or (scope == 'automatic' and failure['entry_id'] is None))
                 and time.time() >= failure['failed_at'] + BOUNDS['github_retry']['seconds']):
             with self.db:
                 self.db.execute('DELETE FROM github_failures WHERE scope=? AND key=?', (scope, key))
@@ -498,9 +499,10 @@ class Queue:
                     stream.write(f'{repo} {result}\n')
 
     def event(self, repo, n, outcome, detail, entry_id=None):
-        prev = self.db.execute('SELECT outcome,detail FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
-        if prev and tuple(prev) == (outcome, detail):
-            return
+        prev = self.db.execute('SELECT outcome,detail,created FROM events WHERE repo=? AND pr=? ORDER BY id DESC LIMIT 1', (repo, n)).fetchone()
+        if prev and tuple(prev)[:2] == (outcome, detail):
+            if outcome != 'discovery_unreadable' or time.time() < prev['created'] + BOUNDS['discovery']['seconds']:
+                return
         self.db.execute('INSERT INTO events(entry_id,repo,pr,outcome,detail,created) VALUES(?,?,?,?,?,?)',
                         (entry_id, repo, n, outcome, detail, time.time()))
 
