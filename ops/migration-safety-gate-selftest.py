@@ -281,6 +281,14 @@ with tempfile.TemporaryDirectory() as tmp:
     r = run_gate(repo, "--base", "main")
     check("a run on main itself passes", r.returncode == 0, r.stdout + r.stderr)
 
+    git(repo, "checkout", "-q", "-b", "deal-status-next-step")
+    migration = "0917_deal_status_next_step.sql"
+    commit_migration(repo, migration, (REPO / "migrations" / migration).read_text())
+    r = run_gate(repo, "--base", "main")
+    check("deal status next step migration declares its rollback procedure",
+          r.returncode == 0, r.stdout + r.stderr)
+    git(repo, "checkout", "-q", "main")
+
     # Removing covered SQL must preserve its full ledger identity and history.
     source = git(repo, "rev-parse", "HEAD").strip()
     snapshot_text = (repo / "db/schema.sql").read_text()
