@@ -587,6 +587,49 @@ class ThreadArchiveTests(unittest.TestCase):
 
 
 class CleanupHealthTests(unittest.TestCase):
+    def test_disappearing_temp_is_already_removed_and_run_continues(self):
+        import machine_cleanup as cleanup
+        import storage_hygiene
+        for phase in ('listed', 'final_probe', 'rename'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                vanished = scratch / 'carr-ci-test-a'
+                following = scratch / 'carr-ci-test-b'
+                for path in (vanished, following):
+                    path.mkdir()
+                    os.utime(path, (0, 0))
+                probes = []
+                def probe(paths):
+                    probes.append(paths)
+                    if vanished.exists() and (phase == 'listed' or phase == 'final_probe' and len(probes) == 2):
+                        vanished.rmdir()
+                    return set()
+                rename = os.rename
+                def remove_before_rename(source, destination, **kwargs):
+                    if phase == 'rename' and source == vanished.name:
+                        vanished.rmdir()
+                    return rename(source, destination, **kwargs)
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                with patch.object(storage_hygiene.os, 'rename', side_effect=remove_before_rename):
+                    report = cleanup.run(root, config, hook=None, tmp_root=clones, user_tmp_root=scratch,
+                        roots={}, dispatch_path=root / 'absent', provider=object(), process_probe=probe,
+                        archive_thread=lambda *a, **k: None)
+                self.assertEqual(report['status'], 'completed', report)
+                self.assertFalse(report['errors'], report)
+                self.assertNotIn('pending', report)
+                missing = next(row for row in report['removed'] if row['path'] == str(vanished))
+                self.assertEqual(missing['status'], 'removed')
+                self.assertIn('already removed', missing['reason'])
+                self.assertTrue(any(row['path'] == str(following) and row['status'] == 'staged'
+                                    for row in report['removed']), report)
+                self.assertEqual(report['temp_staged_allocated_bytes'],
+                    sum(row['allocated_bytes'] for row in report['removed'] if row['status'] == 'staged'))
+                for manifest in (scratch / '_to_delete').glob('*/manifest.json'):
+                    self.assertNotEqual(json.loads(manifest.read_text())['status'], 'intent')
+
     def test_receipt_reports_partial_temp_batch_and_resumes_backlog(self):
         import machine_cleanup as cleanup
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
@@ -730,6 +773,52 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_clone_timeout_is_deferred_next_clone_completes_and_backlog_retries(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        clones.mkdir()
+        workspaces = [clones / ('room-codex-' + name) for name in ('a-slow', 'b-next')]
+        dispatches = []
+        for workspace in workspaces:
+            workspace.mkdir()
+            clone = workspace / 'checkout'
+            fixture.git('clone', str(fixture.remote), str(clone))
+            fixture.git('switch', 'main', cwd=clone)
+            dispatches.append({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})
+        ledger = fixture.base / 'dispatch.jsonl'
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        options = dict(hook=fixtures.hook, tmp_root=clones, dispatch_path=ledger, roots={},
+            provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+            archive_thread=lambda *a, **k: self.fail('no thread'))
+        run_command = subprocess.run
+        def timeout_first_clone(args, **kwargs):
+            if str(workspaces[0] / 'checkout') in args and 'fetch' in args:
+                raise subprocess.TimeoutExpired(args, 120, output='private output', stderr='private error')
+            return run_command(args, **kwargs)
+        with patch.object(subprocess, 'run', side_effect=timeout_first_clone):
+            first = cleanup.run(fixture.repo, config, **options)
+        self.assertEqual(first['status'], 'completed', first)
+        self.assertFalse(first['errors'], first)
+        self.assertNotIn('pending', first)
+        self.assertIsNotNone(first['last_success_at'])
+        deferred = next(row for row in first['deferred'] if row['path'] == str(workspaces[0]))
+        self.assertEqual(deferred['status'], 'deferred')
+        self.assertIn('time budget', deferred['reason'])
+        self.assertNotIn('private', json.dumps(first))
+        self.assertEqual((workspaces[0] / 'checkout/file').read_text(), 'initial\n')
+        self.assertFalse(workspaces[1].exists(), first)
+        self.assertEqual([row['path'] for row in first['removed']], [str(workspaces[1])])
+        saved = json.loads((fixture.repo / 'out/machine-cleanup.json').read_text())
+        self.assertEqual(saved, first)
+        second = cleanup.run(fixture.repo, config, **options)
+        self.assertEqual(second['status'], 'completed', second)
+        self.assertFalse(second['errors'], second)
+        self.assertFalse(second['deferred'], second)
+        self.assertEqual([row['path'] for row in second['removed']], [str(workspaces[0])])
+
     def test_slow_test_temp_discovery_uses_shared_run_deadline(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
