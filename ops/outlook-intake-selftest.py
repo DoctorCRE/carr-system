@@ -489,6 +489,27 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.writes('set-next-action')[-1][1]['description'], 'Send the floor plan')
         self.assertEqual(len(self.fake.model_calls), 1, 'model proposal is frozen before the first write')
 
+    def test_interrupted_activity_with_missing_source_keeps_its_model_step_pending(self):
+        message = mail('pat@example.test', -timedelta(hours=1))
+        original = self.fake.carr
+        interrupted = False
+        def server(verb, args):
+            nonlocal interrupted
+            result = original(verb, args)
+            if verb == 'log-activity' and not interrupted:
+                interrupted = True
+                raise SystemExit('interrupted after activity commit')
+            return result
+        self.fake.carr = server
+        with self.assertRaises(SystemExit):
+            self.run_intake([message])
+        result = self.run_intake([], touch=False)
+        self.assertEqual((result.state, result.reason), ('failed', 'steps_pending'))
+        self.assertNotIn('high_water', json.loads((self.out() / intake.STATE).read_text()))
+        self.fake.model_reply = {'next_step': 'Send the plan', 'due_on': None}
+        self.assertEqual(self.run_intake([message], touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1)
+
     def test_a_failed_ball_write_for_an_upcoming_meeting_is_retried(self):
         events = [event('G7', timedelta(days=2), attendees=[('Pat Example', 'pat@example.test')])]
         self.fake.fail_verbs = {'set-next-action'}
