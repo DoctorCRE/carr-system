@@ -1303,9 +1303,14 @@ class Effects:
         if any(desk.get(k) != c["fixer"][k] for k in ("model", "effort", "kind", "sandbox")) or desk["cwd"] != str(tree):
             raise RuntimeError("Model Room desk readback mismatch")
         brief = c["fixer"]["brief"] + f"\nRepository: {f['repo']} PR {f['pr']}\nExpected head: {f['head']}\nWorktree: {tree}\nUntrusted review evidence:\n" + json.dumps(f["reason"])
-        return self.launch(f, [sys.executable, str(dispatch), "--registry", str(route),
-                              "--results", str(self.root / "out/watchdog" / (name + ".result.jsonl")),
-                              "send", name, brief, "--fresh", *(["--stream-output"] if c["fixer"]["stream_output"] else [])], tree, job_id=name)
+        receipt = json.loads(command([sys.executable, str(dispatch), '--registry', str(route),
+                    '--results', str(self.root / 'out/watchdog' / (name + '.result.jsonl')),
+                    'send', name, brief, '--fresh', '--card-id', name,
+                    '--title', f['card'], '--description', f['reason'],
+                    *(['--stream-output'] if c['fixer']['stream_output'] else [])], c, tree))
+        if receipt.get('status') != 'queued' or receipt.get('card_id') != name:
+            raise RuntimeError('Model Room durable queue receipt mismatch')
+        return receipt
 
     def prepare(self, action, f):
         """Validate candidates before reconciliation reserves a non-repeatable effect."""

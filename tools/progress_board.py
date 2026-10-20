@@ -2333,6 +2333,14 @@ def snapshot_linkage_metadata(task: dict[str, Any]) -> dict[str, Any]:
     return metadata
 
 
+@functools.lru_cache(maxsize=1)
+def work_queue_module():
+    spec = importlib.util.spec_from_file_location('carr_work_queue', REPO_ROOT / 'tools/room-bridge/work_queue.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     """The versioned data contract the app page renders, including fresh local
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
@@ -2372,6 +2380,8 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         for qid, q in (state.get("questions") or {}).items() if q.get("answer")
     ]
     return fit_snapshot({
+        **({'work_queue': work_queue_module().board_projection()}
+           if state['project'] == 'carr-v5' else {}),
         "schema": SNAPSHOT_SCHEMA,
         "kind": state.get("kind") or "project",
         "project": state["project"],

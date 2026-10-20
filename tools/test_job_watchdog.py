@@ -17,8 +17,10 @@ FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 
 def setUpModule():
     from unittest.mock import patch
-    global board_publication, scheduled_machine, vendor_sources
-    board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1"})
+    global board_publication, scheduled_machine, vendor_sources, queue_home
+    queue_home = tempfile.TemporaryDirectory(prefix='watchdog-queue-fixture-')
+    board_publication = patch.dict(os.environ, {"PROGRESS_BOARD_LOCAL_ONLY": "1",
+        'CARR_WORK_QUEUE_DB': str(Path(queue_home.name) / 'queue.sqlite3')})
     board_publication.start()
     scheduled_machine = patch("scheduled_jobs.check", return_value=[])
     scheduled_machine.start()
@@ -30,6 +32,7 @@ def tearDownModule():
     board_publication.stop()
     scheduled_machine.stop()
     vendor_sources.stop()
+    queue_home.cleanup()
 
 
 class ReplayTests(unittest.TestCase):
@@ -1082,9 +1085,12 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(registration.returncode, 0, registration.stderr)
             log = root / "log"
             with log.open("w") as output:
-                proc = subprocess.Popen([sys.executable, str(dispatch), "--registry", str(registry),
-                                         "--results", str(root / "results.jsonl"), "send", "fixture", "fixture",
-                                         "--fresh", "--stream-output"], env=env, stdin=subprocess.DEVNULL,
+                script = ("import sys,json; from pathlib import Path; sys.path.insert(0,sys.argv[1]); "
+                          "import dispatch; from desks import Registry; "
+                          "row=dispatch.dispatch('fixture','fixture',registry=Registry(Path(sys.argv[2])),"
+                          "results_path=Path(sys.argv[3]),fresh=True,stream_output=True); print(json.dumps(row))")
+                proc = subprocess.Popen([sys.executable, '-c', script, str(dispatch.parent), str(registry),
+                                         str(root / 'results.jsonl')], env=env, stdin=subprocess.DEVNULL,
                                         stdout=output, stderr=subprocess.STDOUT)
                 try:
                     deadline = time.monotonic() + 3
@@ -1613,6 +1619,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             # git worktree add reserves its branch before writing the files. A failed
             # write can leave this ref after Git rolls back the worktree directory.
             git("branch", abandoned, head)
+            enqueued = []
             real_command = w.command
             def command(argv, config, cwd=None):
                 if "register" in argv:
@@ -1620,12 +1627,16 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                     Path(argv[argv.index("--registry") + 1]).write_text(json.dumps({"desks": {name: {
                         **c["fixer"], "cwd": argv[argv.index("--cwd") + 1]}}}))
                     return ""
+                if 'send' in argv:
+                    enqueued.append(Path(cwd))
+                    return json.dumps({'status': 'queued', 'card_id': argv[argv.index('--card-id') + 1]})
                 return real_command(argv, config, cwd)
             effects = w.Effects(root, c)
             with patch.object(w, "command", side_effect=command), \
                  patch.object(effects, "launch", return_value={"ok": True}) as launch:
                 effects.fix(f)
-            tree = Path(launch.call_args.args[2])
+            launch.assert_not_called()
+            tree = enqueued[0]
             sys.path.insert(0, str(ROOT / "tools/room-bridge"))
             import desks
             self.assertIsNotNone(desks.NAME_OK.fullmatch(tree.name))
@@ -1635,7 +1646,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
             self.assertEqual(git("rev-parse", abandoned), head)
             self.assertFalse((repository / ".claude/worktrees" / abandoned).exists())
 
-    def test_fixer_uses_verified_model_room_desk_and_agent_runner(self):
+    def test_fixer_enqueues_verified_desk_without_a_sender_job_wrapper(self):
         import job_watchdog as w
         from unittest.mock import patch
         c = w.load_config(ROOT / "ops/config/job-watchdog.json")
@@ -1657,14 +1668,18 @@ runpy.run_path(sys.argv[0], run_name='__main__')
                     name = argv[argv.index("register") + 1]
                     Path(argv[argv.index("--registry") + 1]).write_text(json.dumps({"desks": {name: {
                         **c["fixer"], "cwd": argv[argv.index("--cwd") + 1]}}}))
+                if 'send' in argv:
+                    return json.dumps({'status': 'queued', 'card_id': argv[argv.index('--card-id') + 1]})
                 return ""
             effects = w.Effects(root, c)
             with patch.object(w, "command", side_effect=fake_command), patch.object(effects, "launch", return_value={"ok": True}) as launch:
-                effects.fix(f)
+                receipt = effects.fix(f)
+            self.assertEqual(receipt['status'], 'queued')
+            launch.assert_not_called()
             register = next(argv for argv in calls if "register" in argv)
             self.assertEqual(register[register.index("--model") + 1], "gpt-6.1-sol")
             self.assertEqual(register[register.index("--effort") + 1], "high")
-            dispatch = launch.call_args.args[1]
+            dispatch = next(argv for argv in calls if 'send' in argv)
             self.assertIn("send", dispatch)
             self.assertIn("--fresh", dispatch)
             self.assertIn("REVIEW: BLOCKED", dispatch[dispatch.index("send") + 2])
