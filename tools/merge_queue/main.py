@@ -474,15 +474,20 @@ class Queue:
                                 (repo, n, head)).fetchone()
             if cur.rowcount:
                 self.event(repo, n, 'queued', f'Queued head {head}', e['id'])
-            elif rearm and e['phase'] == 'exhausted':
+            elif rearm and e['outcome'] not in ('head_moved', 'held') and (e['phase'] == 'exhausted' or (
+                    e['phase'] == 'blocked' and e['tested'] is None
+                    and e['outcome'] in ('github_exhausted', 'discovery_exhausted'))):
                 with self.github_scope(f'enqueue:{e["id"]}'):
                     current = self.pr(repo, n)
                 if current['head']['sha'] != e['approved']:
                     self.report(e, 'head_moved', 'Live head differs from the approved SHA; exhausted entry retained')
                     return e['id']
+                if self.held(current):
+                    self.report(e, 'held', 'do_not_merge label present; entry retained')
+                    return e['id']
                 self._clear_reads(e['id'])
                 self.db.execute("UPDATE entries SET phase='pending',outcome='requeued',note=? WHERE id=?", (note, e['id']))
-                self.event(repo, n, 'requeued', f'Rearmed exhausted head {head}; merge and CI caps retained', e['id'])
+                self.event(repo, n, 'requeued', f'Rearmed {e["phase"]} head {head}; merge and CI caps retained', e['id'])
         return e['id']
 
     def submit(self, repo, numbers, log=None):
@@ -490,7 +495,7 @@ class Queue:
             raise ValueError('expected authorized repo and positive PR numbers')
         for n in bounded_items('snapshot', numbers):
             p = self.pr(repo, n)
-            entry = self.enqueue(repo, n, p['head']['sha'], 'submitted through mq.sh', rearm=False)
+            entry = self.enqueue(repo, n, p['head']['sha'], 'submitted through mq.sh')
             result = f'ENQUEUED {n} {p["head"]["sha"]} entry={entry}'
             print(result, flush=True)
             if log is not None:

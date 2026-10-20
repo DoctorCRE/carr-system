@@ -1291,6 +1291,38 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
 
+    def test_submit_retries_same_head_after_premerge_github_exhaustion(self):
+        self.pr()
+        entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
+        with self.q.db:
+            self.q.db.execute('UPDATE entries SET github_attempts=? WHERE id=?', (module.MAX_ATTEMPTS, entry))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome'], row['tested']), ('blocked', 'github_exhausted', None))
+        result = self.cli('submit', '1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=?', (entry,)).fetchone()[0], 'pending')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.approved)
+
+    def test_enqueue_never_rearms_held_or_head_moved_entries(self):
+        n = 0
+        for phase in ('blocked', 'exhausted'):
+            for outcome, held in (('head_moved', False), ('held', False), ('github_exhausted', True)):
+                n += 1
+                with self.subTest(phase=phase, outcome=outcome, held=held):
+                    self.pr(n, held=held)
+                    entry = self.q.enqueue(module.REPOS[0], n, self.approved)
+                    with self.q.db:
+                        self.q.db.execute('UPDATE entries SET phase=?,outcome=?,github_attempts=4 WHERE id=?',
+                                          (phase, outcome, entry))
+                    self.q.enqueue(module.REPOS[0], n, self.approved)
+                    row = self.q.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    self.assertEqual((row['phase'], row['github_attempts']), (phase, 4))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_enqueue_rearms_exhausted_entry_without_resetting_merge_or_ci_caps(self):
         self.pr()
         entry = self.q.enqueue(module.REPOS[0], 1, self.approved)
