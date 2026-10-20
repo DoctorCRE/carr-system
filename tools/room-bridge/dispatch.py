@@ -783,6 +783,14 @@ def dispatch(
     with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
          (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+            if entry.get('posture') == 'record-layer':
+                try:
+                    reason = business_routing.unavailable(
+                        entry, results_path, business_routing.limit_states(results_path))
+                except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                    reason = f'execution unavailable: {type(exc).__name__}'
+                if reason:
+                    raise DeskError('business_desk_unavailable', reason)
             outcome = _execute(request, on_executor=bind)
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
