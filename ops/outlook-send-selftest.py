@@ -642,7 +642,8 @@ class SendTests(unittest.TestCase):
     def test_front_fallback_rechecks_idle_after_background_refusal(self):
         h = Harness(self.out)
         h.front_idle = 10
-        self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+        self.assertEqual(h.send().state, State.NOT_IDLE)
+        self.assertEqual(h.fake.forms, {})
         self.assertEqual(h.fake.presses(), 0)
         self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
 

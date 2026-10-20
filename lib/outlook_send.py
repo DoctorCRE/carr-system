@@ -164,6 +164,10 @@ class UiFailure(Exception):
     """The window did not show the shape this module relies on; the message is a short code."""
 
 
+class UserActive(UiFailure):
+    """Foreground fallback stopped before dispatch because input resumed."""
+
+
 def _transport_failure(exc: Exception) -> UiFailure:
     digest = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
     return UiFailure(f'transport_{type(exc).__name__}_{digest}')
@@ -336,6 +340,8 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     pressed_at = ports.now()
     try:
         mode = form.press()
+    except UserActive:
+        return _discard(form, Result(State.NOT_IDLE, 'user_active'))
     except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
         mode = None
         reason = str(exc) if isinstance(exc, UiFailure) else str(_transport_failure(exc))
@@ -549,17 +555,26 @@ class Window:
             raise UiFailure('press_refused')
         idle = _idle_seconds()
         if idle is None or idle < IDLE_SECONDS:
-            raise UiFailure('user_active_before_front')
+            raise UserActive('user_active')
         previous = _frontmost()
         if previous is None:
             raise UiFailure('frontmost_unreadable')
+        idle = _idle_seconds()
+        if idle is None or idle < IDLE_SECONDS:
+            raise UserActive('user_active')
         try:
             _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
             if isinstance(self, ComposeWindow):
+                idle = _idle_seconds()
+                if idle is None or idle < IDLE_SECONDS:
+                    raise UserActive('user_active')
                 _cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': ['Draft', 'Send']})
             else:
                 target = self._button(self.elements(), self.commit_label)
+                idle = _idle_seconds()
+                if idle is None or idle < IDLE_SECONDS:
+                    raise UserActive('user_active')
                 _cua('click', {'pid': self.pid, 'element_token': target['element_token']})
         finally:
             if previous and previous != BUNDLE:
