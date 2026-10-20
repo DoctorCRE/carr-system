@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -146,7 +147,7 @@ class IntakeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
         self.home = self.tmp / 'home'
-        self.store = self.home / intake.STORE
+        self.store = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'Nostromo-fixture')
         live = self.store.parent / 'Files' / 'S0' / '845' / 'EFMData'
@@ -627,6 +628,28 @@ class ModelCallTest(unittest.TestCase):
                     {'is_error': False}):
             with self.assertRaises(ValueError):
                 intake.parse_reply(bad)
+
+
+class StoreResolverTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.profiles = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
+        self.env = patch.dict(os.environ, {}, clear=False)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        os.environ.pop('CARR_OUTLOOK_STORE', None)
+
+    def store(self, profile):
+        path = self.profiles / profile / 'HxStore.hxd'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'synthetic-store')
+        return path
+
+    def test_main_identity_profile(self):
+        expected = self.store('Main Identity')
+        self.assertEqual(intake.resolve_store(self.home), expected)
 
 
 if __name__ == '__main__':
