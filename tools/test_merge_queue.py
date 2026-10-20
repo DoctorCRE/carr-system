@@ -755,6 +755,33 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_lost_regeneration_response_stays_recoverable_until_reconciled(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        self.q.tick()
+        self.restart()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('pending', 'action_uncertain'))
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'action_uncertain_exhausted'))
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+        key = self.q.db.execute("SELECT key FROM actions WHERE kind='regen'").fetchone()[0]
+        self.q.reconcile_action(key, retry=True)
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.assertEqual(self.calls('merge'), [])
+
     def test_foreign_push_after_regeneration_does_not_advance_pin(self):
         card_id = self.prepare_pinned_head()
         self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
