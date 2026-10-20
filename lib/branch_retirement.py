@@ -49,7 +49,8 @@ def fetch_remote_refs(root):
 
 def remote_preserves(root, head="HEAD"):
     return bool(git(root, "--no-replace-objects", "for-each-ref", "--contains=" + head,
-                    "--count=1", "--format=%(refname)", REMOTE_REFS))
+                    "--count=1", "--format=%(refname)", REMOTE_REFS,
+                    environment={"GIT_GRAFT_FILE": os.devnull}))
 
 
 def git_records(root, *args, separator=b"\0"):

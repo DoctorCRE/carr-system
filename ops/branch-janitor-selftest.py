@@ -1004,22 +1004,33 @@ class RemotePreservationTests(unittest.TestCase):
         self.assertTrue(tree.exists())
 
     def test_remote_tag_deleted_during_final_pr_lookup_preserves_worktree(self):
-        fixture, tree, head, tag = self.archived_tree()
-        provider = FakeProvider()
-        reaper = fixture.reaper(provider=provider)
-        row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
-            if r.get('path') == str(tree))
-        self.assertEqual(row['action'], 'stage_worktree', row)
+        for phase in ('pr-lookup', 'final-process-probe'):
+            with self.subTest(phase=phase):
+                fixture, tree, head, tag = self.archived_tree()
+                provider = FakeProvider()
+                reaper = fixture.reaper(provider=provider)
+                row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+                    if r.get('path') == str(tree))
+                self.assertEqual(row['action'], 'stage_worktree', row)
 
-        def delete_tag(repo, branch):
-            fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
-            return []
+                def delete_tag(*args):
+                    fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
+                    return []
 
-        provider.open_pulls = delete_tag
-        result = reaper.apply('fixture/repo', fixture.repo, row, ())
-        self.assertEqual(result['status'], 'preserved', result)
-        self.assertTrue(tree.exists())
-        self.assertEqual((tree / 'file').read_text(), 'archived payload\n')
+                if phase == 'pr-lookup':
+                    provider.open_pulls = delete_tag
+                else:
+                    probes = []
+                    def probe(paths):
+                        probes.append(paths)
+                        if len(probes) == 2:
+                            delete_tag()
+                        return set()
+                    reaper.process_probe = probe
+                result = reaper.apply('fixture/repo', fixture.repo, row, ())
+                self.assertEqual(result['status'], 'preserved', result)
+                self.assertTrue(tree.exists())
+                self.assertEqual((tree / 'file').read_text(), 'archived payload\n')
 
     def test_failed_remote_refresh_preserves_cached_candidate(self):
         fixture, tree, head, tag = self.archived_tree()
