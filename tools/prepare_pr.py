@@ -15,21 +15,28 @@ from git_env import scrubbed_env
 from regen import OUTPUTS
 
 
-def git(repo: Path, *args: str, check: bool = True) -> str:
+CANONICAL = Path(__file__).resolve().parents[1]
+
+
+def git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
     result = subprocess.run(['git', *args], cwd=repo, env=scrubbed_env(),
-                            capture_output=True, text=True, timeout=120)
+                            capture_output=True, text=True, timeout=timeout)
     if check and result.returncode:
         raise ValueError(f'git {args[0]} failed: {result.stderr.strip()}')
     return result.stdout.strip()
 
 
 def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
-            regenerate: Callable[[Path], None], before_push: Callable[[], None] = lambda: None) -> str:
+            regenerate: Callable[[Path], None], before_push: Callable[[], None] = lambda: None,
+            reference: Path = CANONICAL) -> str:
     if branch == 'main' or not branch or branch.startswith('-'):
         raise ValueError('preparation requires an ordinary PR branch')
     with tempfile.TemporaryDirectory(prefix='carr-prepare-pr.') as temp:
         repo = Path(temp)
-        git(repo, 'clone', '--quiet', '--no-checkout', '--', remote, str(repo))
+        # Borrow local objects so only new commits come from origin; --dissociate
+        # copies them in, so no link to the reference checkout remains.
+        git(repo, 'clone', '--quiet', '--no-checkout', '--reference-if-able', str(reference),
+            '--dissociate', '--', remote, str(repo), timeout=600)
         git(repo, 'check-ref-format', f'refs/heads/{branch}')
         git(repo, 'checkout', '-q', '-b', 'prepare', f'origin/{branch}')
         if git(repo, 'rev-parse', 'HEAD') != head or git(repo, 'rev-parse', 'origin/main') != main:
