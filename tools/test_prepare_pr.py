@@ -1,5 +1,7 @@
 """Preparation must push a descendant and preserve source conflicts."""
 import json
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -53,6 +55,25 @@ class PrepareTests(unittest.TestCase):
         self.git('merge-base', '--is-ancestor', self.main, sha, repo=self.remote)
         self.assertEqual(self.git('show', f'{sha}:generated.txt', repo=self.remote), 'fresh')
         self.assertEqual(json.loads(self.receipt.read_text())['prepared'], sha)
+
+    def test_slow_disposable_receive_obeys_push_deadline_and_logs_elapsed(self):
+        hook = self.remote / 'hooks/pre-receive'
+        hook.write_text('#!/bin/sh\nsleep 2\nexit 1\n')
+        hook.chmod(0o755)
+        diagnostics = io.StringIO()
+        with patch.dict(os.environ, {'CARR_PREPARE_PUSH_TIMEOUT_SECONDS': '0.1'}):
+            with contextlib.redirect_stderr(diagnostics):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
+        self.assertRegex(diagnostics.getvalue(), r'push result=timeout elapsed_seconds=[0-9.]+ timeout_seconds=0.1')
+        hook.unlink()
+        diagnostics = io.StringIO()
+        with patch.dict(os.environ, {'CARR_PREPARE_PUSH_TIMEOUT_SECONDS': '5'}):
+            with contextlib.redirect_stderr(diagnostics):
+                prepared = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), prepared)
+        self.assertRegex(diagnostics.getvalue(), r'push result=success elapsed_seconds=[0-9.]+ timeout_seconds=5')
 
     def test_clone_borrows_reference_objects_and_survives_a_missing_reference(self):
         clones = []
