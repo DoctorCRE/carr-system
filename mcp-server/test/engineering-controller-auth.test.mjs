@@ -30,7 +30,7 @@ test("the controller has a closed issuer-only lifecycle boundary", () => {
 });
 
 test("the dispatcher does not fall back to the regular read-permissive tool list", () => {
-  const block = source.slice(source.indexOf("export async function dispatchEngineeringController"), source.indexOf("export const FOUNDATION_ASSURANCE_RUNTIME_BINDING_SCHEMA"));
+  const block = source.slice(source.indexOf("export async function dispatchEngineeringController"), source.indexOf("const CANONICAL_OWNERSHIP_HOST_VERSION"));
   assert.match(block, /controllerToolList\(\)/);
   assert.match(block, /controllerOperationInput/);
   assert.doesNotMatch(block, /return dispatch\(/);
