@@ -238,7 +238,7 @@ def skill_observation(row, *, since=None, until=None):
 
 def desk_skill_inventory(name, entry, results_path):
     observation = skill_observation(entry)
-    if observation is not None:
+    if observation is not None and observation['listed']:
         return observation
     if entry.get('kind') == 'claude-session':
         listing = skill_receipts.claude_listing(DESK_STATE / f'{name}.log')
@@ -258,7 +258,7 @@ def desk_skill_inventory(name, entry, results_path):
                     candidates.append(row)
         for row in reversed(candidates):
             observation = skill_observation(row)
-            if observation is not None:
+            if observation is not None and observation['listed']:
                 return observation
     return None
 

@@ -127,7 +127,7 @@ def validate_window(since, until):
 
 
 def scan(path, *, since=None, until=None):
-    available, opened, pending = set(), set(), {}
+    available, opened, pending, listed = set(), set(), {}, False
     cutoff, end = validate_window(since, until)
     with Path(path).open(encoding='utf-8') as handle:
         for line in handle:
@@ -147,8 +147,10 @@ def scan(path, *, since=None, until=None):
                 for block in content:
                     text = block.get('text', '') if isinstance(block, dict) else ''
                     if 'Available skills' in text or '<available_skills>' in text:
+                        listed = True
                         available.update(canonical(name) for name in re.findall(r'^- ([\w:.-]+):', text, re.M))
                 if row.get('subtype') == 'init':
+                    listed = True
                     available.update(canonical(item) for item in row.get('skills', []) if isinstance(item, str))
             stamp = _stamp(row.get('timestamp'))
             current = ((cutoff is None and end is None) or stamp is not None
@@ -174,7 +176,7 @@ def scan(path, *, since=None, until=None):
                     paths, direct = pending.pop(block.get('tool_use_id'), ([], False))
                     if current and not block.get('is_error') and (direct or _success(block.get('content'))):
                         opened.update(paths)
-    return {'available': sorted(available), 'opened': sorted(opened)}
+    return {'available': sorted(available), 'opened': sorted(opened), 'listed': listed}
 
 
 def completion_time(path, *, since, result):
