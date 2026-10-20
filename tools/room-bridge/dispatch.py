@@ -238,11 +238,11 @@ def skill_observation(row, *, since=None, until=None):
 
 def desk_skill_inventory(name, entry, results_path):
     observation = skill_observation(entry)
-    if observation and observation['available']:
+    if observation is not None:
         return observation
     if entry.get('kind') == 'claude-session':
         listing = skill_receipts.claude_listing(DESK_STATE / f'{name}.log')
-        if listing and listing['available']:
+        if listing is not None:
             return listing
     for path in (Path(results_path), _skill_ledger(results_path)):
         if not path.exists():
@@ -258,7 +258,7 @@ def desk_skill_inventory(name, entry, results_path):
                     candidates.append(row)
         for row in reversed(candidates):
             observation = skill_observation(row)
-            if observation and observation['available']:
+            if observation is not None:
                 return observation
     return None
 
