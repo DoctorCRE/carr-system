@@ -20,7 +20,7 @@ from typing import Callable, Literal
 import uuid
 
 DISPATCH = Path(__file__).resolve().parents[1] / 'tools' / 'room-bridge' / 'dispatch.py'
-DESK = 'biz-desk'
+DESK = 'business'
 ACTIONS = {
     'draft_reply': 'Draft reply',
     'pull_comps': 'Pull comps',
@@ -71,6 +71,8 @@ class Run:
         if proc.returncode == 0:
             self.queued.append(card)
             return Receipt('queued', card)
+        if 'refused (no_record_layer_desk)' in proc.stderr:
+            return Receipt('refused', card, 'no_record_layer_desk')
         if 'card already exists' in proc.stderr:
             return Receipt('duplicate', card)
         return Receipt('refused', card, proc.stderr.strip()[-500:])

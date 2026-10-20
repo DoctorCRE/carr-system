@@ -44,6 +44,10 @@ class BusinessDispatchTests(unittest.TestCase):
         self.db = self.root / 'queue.sqlite3'
         for p in (patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(self.db)}),
                   patch.object(work_runner, 'kick'),
+                  patch.object(dispatch.claude_api_wire.Ledger, 'read', return_value={
+                      'spent_usd': '0', 'reserved_usd': '0', 'budget_usd': '200', 'stop': None}),
+                  patch.object(dispatch.nous_budget.Ledger, 'read', return_value={
+                      'spent_usd': '0', 'reserved_usd': '0', 'budget_usd': '22', 'stop': None}),
                   patch.object(dispatch.seat_gate, 'check', return_value=None)):
             p.start()
             self.addCleanup(p.stop)
@@ -92,10 +96,109 @@ class BusinessDispatchTests(unittest.TestCase):
     def test_business_footer_passes_the_phrasing_lint(self):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
 
-    def test_record_layer_posture_belongs_to_claude_desktop_only(self):
-        with self.assertRaises(desks.DeskError) as caught:
-            self.reg.register('nope', 'grok-cli', posture='record-layer')
-        self.assertEqual(caught.exception.code, 'bad_posture')
+    def test_record_layer_posture_is_stored_for_every_business_runtime(self):
+        for kind in ('codex-session', 'grok-cli', 'hermes-nous', 'flash-local', 'claude-desktop'):
+            with self.subTest(kind=kind):
+                options = {'model': 'claude-sonnet-5-5', 'effort': 'medium'} if kind == 'claude-desktop' else {}
+                entry = self.reg.register('record-' + kind, kind, posture='record-layer', **options)
+                self.assertEqual(entry['posture'], 'record-layer')
+                self.assertEqual(self.reg.resolve('record-' + kind)['posture'], 'record-layer')
+        with self.assertRaises(desks.DeskError):
+            self.reg.register('nope', 'claude-api', posture='record-layer')
+
+    def add_business_desks(self):
+        for name, kind in [('nous', 'hermes-nous'), ('grok', 'grok-cli'), ('codex', 'codex-session'), ('flash', 'flash-local')]:
+            self.reg.register(name, kind, posture='record-layer')
+
+    def route(self, card):
+        with WorkQueue(self.db) as q:
+            return json.loads(q.get(card)['description'].split('Business routing: ')[1])
+
+    def test_business_fallback_order_and_skips_are_on_the_card(self):
+        self.add_business_desks()
+        order = ['nous', 'grok', 'codex', 'biz-desk']
+        for index, expected in enumerate(order):
+            blocked = set(order[:index])
+            with patch.dict(dispatch.record_layer.REFUSALS, {}, clear=True), patch.object(
+                    dispatch.seat_gate, 'check', side_effect=lambda e: ('provider_capped', 'provider capped')
+                    if e['name'] in blocked else None):
+                result = self.send(['send', 'business', 'Read the record.', '--brief', 'business',
+                                    '--card-id', f'order-{index}'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            route = self.route(f'order-{index}')
+            self.assertEqual(route['chosen'], expected)
+            self.assertEqual(route['skips'], [{'desk': name, 'reason': 'provider_capped: provider capped'}
+                                             for name in order[:index]])
+
+    def test_flash_is_excluded_by_default_and_requires_both_switches(self):
+        self.add_business_desks()
+        for flag, off, expected in [('0', False, 'codex'), ('1', True, 'codex'), ('1', False, 'flash')]:
+            card = f'flash-{flag}-{off}'
+            with patch.dict(os.environ, {'CARR_BUSINESS_FLASH_ENABLED': flag}), patch.dict(
+                    dispatch.record_layer.REFUSALS, {}, clear=True), patch.object(
+                    dispatch.business_routing.flashlib, 'is_switched_off', return_value=off), patch.object(
+                    dispatch.seat_gate, 'check', side_effect=lambda e: ('provider_capped', 'cap')
+                    if e['name'] in ('nous', 'grok') else None):
+                result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', card])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.route(card)['chosen'], expected)
+
+    def test_nous_budget_stop_is_recorded_and_claude_is_selected(self):
+        self.reg.register('nous', 'hermes-nous', posture='record-layer')
+        with patch.object(dispatch.nous_budget.Ledger, 'read', return_value={
+                'spent_usd': '0', 'reserved_usd': '0', 'budget_usd': '22', 'stop': 'nous credits exhausted'}):
+            result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', 'cap'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.route('cap')['chosen'], 'biz-desk')
+        self.assertIn({'desk': 'nous', 'reason': 'nous credits exhausted'}, self.route('cap')['skips'])
+
+    def test_every_desk_unavailable_returns_the_named_refusal_and_keeps_evidence(self):
+        self.add_business_desks()
+        with patch.object(dispatch.seat_gate, 'check', return_value=('provider_capped', 'cap')):
+            receipt = business_dispatch.Run(run=self.in_process).enqueue('party:7', 'draft_reply', 'Draft.', 'mail:1')
+        self.assertEqual((receipt.status, receipt.detail), ('refused', 'no_record_layer_desk'))
+        self.assertEqual(self.route(receipt.card_id), {'chosen': None, 'skips': [
+            {'desk': name, 'reason': 'provider_capped: cap'} for name in ('nous', 'grok', 'codex', 'biz-desk')]})
+        with WorkQueue(self.db) as q:
+            self.assertEqual(q.get(receipt.card_id)['stage'], 'failed')
+
+    def test_budget_reservations_sticky_stop_and_provider_limit_state(self):
+        self.add_business_desks()
+        states = [
+            ('nous-reserved', 'hermes-nous', {'spent_usd': '20', 'reserved_usd': '2', 'budget_usd': '22', 'stop': None}, 'provider budget spent or reserved'),
+            ('claude-stopped', 'claude-desktop', {'spent_usd': '0', 'reserved_usd': '0', 'budget_usd': '200', 'stop': 'billing_error'}, 'billing_error')]
+        for card, kind, state, reason in states:
+            target = dispatch.nous_budget.Ledger if kind == 'hermes-nous' else dispatch.claude_api_wire.Ledger
+            with patch.object(target, 'read', return_value=state), patch.object(
+                    dispatch.seat_gate, 'check', side_effect=lambda e: ('cap', 'cap')
+                    if kind == 'claude-desktop' and e['name'] == 'nous' else None):
+                result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', card])
+            route = self.route(card)
+            if kind == 'hermes-nous':
+                self.assertEqual(route['chosen'], 'biz-desk')
+            else:
+                self.assertEqual((result.returncode, route['chosen']), (2, None))
+            self.assertIn({'desk': 'nous' if kind == 'hermes-nous' else 'biz-desk', 'reason': reason}, route['skips'])
+        self.results.write_text(json.dumps({'kind': 'hermes-nous', 'status': 'quota_exhausted'}) + '\n')
+        result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', 'limited'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn({'desk': 'nous', 'reason': 'quota_exhausted'}, self.route('limited')['skips'])
+
+    def test_nous_accepts_exact_remaining_reservation_and_codex_limits_cover_live_kind(self):
+        self.reg.register('nous', 'hermes-nous', posture='record-layer')
+        with patch.object(dispatch.nous_budget.Ledger, 'read', return_value={
+                'spent_usd': '20', 'reserved_usd': '1', 'budget_usd': '22', 'stop': None}):
+            result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', 'exact'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.route('exact')['chosen'], 'nous')
+        self.reg.forget('nous')
+        self.reg.register('codex', 'codex-session', posture='record-layer')
+        self.results.write_text(json.dumps({'kind': 'codex-live', 'status': 'quota_exhausted'}) + '\n')
+        with patch.dict(dispatch.record_layer.REFUSALS, {}, clear=True):
+            result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', 'codex-limit'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.route('codex-limit')['chosen'], 'biz-desk')
+        self.assertIn({'desk': 'codex', 'reason': 'quota_exhausted'}, self.route('codex-limit')['skips'])
 
     def test_card_id_is_deterministic_per_action_record_and_source(self):
         one = business_dispatch.card_id('draft_reply', 'party:7', 'mail:1')
@@ -157,7 +260,9 @@ class BusinessDispatchTests(unittest.TestCase):
         for block in blocks('brief-footer.md'):
             self.assertNotIn(block, prompt)
         posture = argv[argv.index('--tools'):argv.index('--permission-mode')]
-        self.assertEqual(posture, claude_desktop_wire.TOOL_POSTURES['record-layer'])
+        self.assertEqual(posture, ['--tools', '', '--strict-mcp-config', '--mcp-config',
+            json.dumps({'mcpServers': {'carr': {'type': 'http', 'url': claude_desktop_wire.CARR_MCP_URL}}}),
+            '--allowedTools', 'mcp__carr'])
         self.assertEqual(posture[1], '')
         servers = json.loads(posture[posture.index('--mcp-config') + 1])['mcpServers']
         self.assertEqual(list(servers), ['carr'])

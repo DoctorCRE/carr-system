@@ -64,13 +64,13 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
-Business work for Joe goes to the one record-layer desk with `--brief business`,
+Business work for Joe goes to the first available record-layer desk with `--brief business`,
 which swaps the engineering footer for business-brief-footer.md. That desk runs
 with no built-in tools (no shell, no file edits) and only the CARR verbs.
 Scheduled jobs reach it through lib/business_dispatch.py.
 
-    dispatch.py register biz-desk --kind claude-desktop --model claude-sonnet-5-5 --effort medium --cwd ~/carr-system --posture record-layer
-    dispatch.py send biz-desk - --brief business --card-id biz:<uuid5> --actor outlook-intake
+    dispatch.py register biz-nous --kind hermes-nous --family glm --effort medium --posture record-layer
+    dispatch.py send business - --brief business --card-id biz:<uuid5> --actor outlook-intake
 
 """
 
@@ -113,6 +113,8 @@ import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the m
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import hermes_wire
 import nous_budget
+import record_layer
+import business_routing
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
@@ -403,6 +405,7 @@ def _to_codex(
     timeout_s lets a caller with its own authority window (the Engineering
     controller's 930 s lease) pin a shorter limit than the router default.
     """
+    record_layer.enforce(entry, kind='codex-session')
     limit_s = CODEX_TIMEOUT_S if timeout_s is None else float(timeout_s)
     task = desks.desk_prompt(task)
     thread = None if fresh else entry.get("thread_id")
@@ -623,7 +626,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli,
                                       results_path=request['budget_results_path'], run_id=msg_id)
     elif entry["kind"] == "flash-local":
-        outcome = flash_wire.run_task(task)
+        outcome = flash_wire.run_task(task, **({'posture': entry['posture']} if entry.get('posture') else {}))
     elif entry["kind"] == "codex-live":
         outcome = codex_wire.run_turn(
             entry["socket"], task,
@@ -692,6 +695,7 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    record_layer.enforce(entry)
     if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
         raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
@@ -1102,7 +1106,7 @@ def main(argv: list[str]) -> int:
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
     r.add_argument('--posture', choices=desks.POSTURES,
-                   help='claude-desktop only: record-layer gives CARR verbs and no built-in tools')
+                   help='record-layer gives only CARR tools; unsupported wires refuse before launch')
     r.add_argument("--network-access", action="store_true",
                    help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
@@ -1237,12 +1241,16 @@ def main(argv: list[str]) -> int:
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
-        _check_brief_desk(a.brief, desk_entry)
-        if isinstance(desk_entry, dict):
-            blocked = seat_gate.check({**desk_entry, "name": a.name})
-            if blocked:
-                raise DeskError(*blocked)
-        row = work_cli.send(a, task, reg, results)
+        if a.brief != 'business' or a.name != 'business':
+            _check_brief_desk(a.brief, desk_entry)
+        if a.brief == 'business':
+            row = work_cli.send_business(a, task, reg, results)
+        else:
+            if isinstance(desk_entry, dict):
+                blocked = seat_gate.check({**desk_entry, "name": a.name})
+                if blocked:
+                    raise DeskError(*blocked)
+            row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
         return 0
 

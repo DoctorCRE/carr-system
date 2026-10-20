@@ -24,7 +24,7 @@ DESK KINDS:
   flash-local      the local Flash model itself, answering direct questions (flash_wire.py)
   claude-api       a fresh API-key coding agent in a retained job checkout
 
-A claude-desktop desk registered with posture record-layer is the business
+A desk registered with posture record-layer is a business
 desk: it gets the CARR verbs and nothing else, and takes only business briefs.
 
 BOTH KINDS KEEP THEIR CONTEXT, and that is the whole point. Joe, 2026-08-20:
@@ -55,9 +55,9 @@ KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "
 KIND_ALIASES = {"codex-exec": "codex-session"}
 AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
-# record-layer: a claude-desktop desk with no built-in tools and only CARR verbs
-# (claude_desktop_wire.TOOL_POSTURES). It is the business desk: no repo write.
+# Record-layer is independent of provider. Each wire enforces or refuses it.
 POSTURES = ("record-layer",)
+RECORD_LAYER_KINDS = ("hermes-nous", "grok-cli", "flash-local", "codex-session", "claude-desktop")
 
 DESK_INSTRUCTION = (
     "Model Room desk instruction: If you need approvals, permissions, or decisions, "
@@ -148,8 +148,8 @@ def _normalize_effort(kind: str, effort: str | None) -> str | None:
 
 
 def tool_posture(kind: str, posture: object) -> None:
-    if posture is not None and (kind != "claude-desktop" or posture not in POSTURES):
-        raise DeskError("bad_posture", "posture record-layer is supported only by claude-desktop desks")
+    if posture is not None and (kind not in RECORD_LAYER_KINDS or posture not in POSTURES):
+        raise DeskError("bad_posture", "record-layer requires a Nous, Grok, Flash, Codex session, or Claude Desktop desk")
 
 
 def remote_posture(entry: dict) -> None:
@@ -297,8 +297,6 @@ class Registry:
                 "cwd": str(cwd or Path.cwd()),
                 "permission_mode": dispatched_permission_mode(permission_mode),
             }
-            if posture:
-                entry["posture"] = posture
         elif kind == "claude-api":
             entry = {'kind': kind, 'model': model or claude_api_config.MODEL,
                      'effort': effort, 'timeout_s': timeout_s,
@@ -342,6 +340,8 @@ class Registry:
             if add_dirs:
                 entry["add_dirs"] = [str(x) for x in add_dirs]
 
+        if posture:
+            entry["posture"] = posture
         entry["registered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with self._locked():
             data = self._load_locked()
