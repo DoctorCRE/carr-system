@@ -1,0 +1,16 @@
+▶ Local Deals PostgreSQL caller and evidence regressions
+  ✔ protected lead {"stage":"archived","suppressed":false} (5.835875ms)
+  ✔ protected lead {"stage":"do_not_contact","suppressed":true} (1.704041ms)
+  ✔ protected lead {"stage":"nurture_drip","suppressed":true} (1.624791ms)
+  ✔ existing prospect survives migration with active default and unchanged version (10.188208ms)
+  ✔ real PostgreSQL rendered round trip 390 (1126.0035ms)
+  ✔ real PostgreSQL rendered round trip 1280 (1115.629375ms)
+✔ Local Deals PostgreSQL caller and evidence regressions (4767.838625ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4936.074625

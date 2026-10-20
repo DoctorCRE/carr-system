@@ -1,0 +1,8 @@
+
+> doctorcre-app@0.2.0 check
+> tsc --noEmit -p tsconfig.json && node scripts/check-repository.mjs && npm run copy:check
+
+repository check passed: 11 synthetic deals, 106 pinned MCP operations, V2 tells absent from 279 first-party files
+
+> doctorcre-app@0.2.0 copy:check
+> node scripts/check-ui-copy.mjs *.html js src/ui css data public-shell reports tours test/fixtures tests/fixtures

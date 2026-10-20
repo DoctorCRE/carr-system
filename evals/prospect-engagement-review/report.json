@@ -1,0 +1,140 @@
+{
+  "schema": "independent-prospect-review.v1",
+  "reviewed_heads": {
+    "jbookout/carr-system#2011": "ef358927bb02cafaebfa7fbeb2e87973c074b5c7",
+    "jbookout/doctorcre-app#323": "e8b25d459f570729b3bdc6303ec2efcebf1fa890"
+  },
+  "observed_newer_heads_not_approved": {
+    "jbookout/carr-system#2011": "0f766513b7d3536a82e326ef9d955aa5773002e0",
+    "jbookout/doctorcre-app#323": "307b5266f75959fb9d35894f581e467da9612a1b"
+  },
+  "verdicts": {
+    "jbookout/carr-system#2011": "CHANGES",
+    "jbookout/doctorcre-app#323": "CHANGES"
+  },
+  "standards_findings": [
+    {
+      "pr": "doctorcre-app#323",
+      "priority": "P1",
+      "location": "js/live-client.js:650; js/pipeline.js:1028",
+      "finding": "Network, unreadable JSON and HTTP 503 mutation outcomes have no unknown_outcome code. The UI clears its retained request identity.",
+      "evidence": "adapter-probe.json",
+      "required_change": "Classify all unconfirmed mutation outcomes and retain the original request for reconciliation."
+    },
+    {
+      "pr": "doctorcre-app#323",
+      "priority": "P2",
+      "location": "js/client.js:98; js/fixture-client.js; test/client-interface.test.mjs",
+      "finding": "The fixture adapter lacks setProspectEngagementStatus and the shared parity test omits it. The live and fixture implementations do not satisfy the same documented DealRoomClient interface.",
+      "required_change": "Implement the synthetic transition and require the method in the shared interface test."
+    }
+  ],
+  "spec_findings": [
+    {
+      "pr": "carr-system#2011",
+      "priority": "P2",
+      "location": "migrations/0915_prospect_engagement_status.sql:1",
+      "finding": "The migration declares forward-only and provides no tested data-preserving reverse procedure. Forward upgrade succeeds; the task-required reversibility is unproven.",
+      "required_change": "Supply and rehearse a reverse procedure that restores view dependencies and preserves recorded engagement decisions."
+    },
+    {
+      "pr": "doctorcre-app#323",
+      "priority": "P1",
+      "location": "js/live-client.js:47-50,650; js/pipeline.js:1028",
+      "finding": "Unconfirmed transport failures discard the pending request identity.",
+      "evidence": "adapter-probe.json"
+    },
+    {
+      "pr": "doctorcre-app#323",
+      "priority": "P2",
+      "location": "js/pipeline.js:1013-1035",
+      "finding": "A committed transition with a missing-content response leaves prospectWrite pending. The fresh board removes the original card and every different prospect is blocked until reload.",
+      "evidence": [
+        "390-pending-defect.json",
+        "1280-pending-defect.json",
+        "390-stuck-pending.png",
+        "1280-stuck-pending.png"
+      ],
+      "required_change": "Reconcile the retained request against fresh authoritative state and clear or expose it without needing the removed card."
+    }
+  ],
+  "tests": {
+    "carr_targeted": {
+      "tests": 170,
+      "passed": 170,
+      "failed": 0,
+      "skipped": 0
+    },
+    "app_full": {
+      "tests": 2920,
+      "passed": 2906,
+      "failed": 0,
+      "skipped": 14,
+      "skip_reason": "Existing WebKit cases skip on this macOS host."
+    },
+    "review_harness": {
+      "tests": 7,
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "note": "Includes parent test. Pending-defect assertions prove observed broken behavior, not a fix."
+    },
+    "app_check": "passed",
+    "app_build": "passed",
+    "app_artifact_verify": "passed",
+    "postgresql18_migration_shadow": "passed"
+  },
+  "rendered_workflows": {
+    "widths": [
+      390,
+      1280
+    ],
+    "directions": [
+      "board to Leads",
+      "Leads to original board deal"
+    ],
+    "backend": "Actual reviewed executeRegisteredTool handlers with disposable PostgreSQL; loopback browser routing only. No production writes.",
+    "verified": [
+      "Original deal and deal-note rows unchanged",
+      "Lead ID, client link, party link, plans and score preserved",
+      "Fresh client versions 2 and 3 used with distinct request keys",
+      "No Inactive group",
+      "No horizontal page overflow",
+      "No browser page errors",
+      "Suppressed and archived leads not revived",
+      "Existing prospect defaults active without a version change"
+    ]
+  },
+  "decisions": [
+    "Review exact supplied heads despite newer live PR commits.",
+    "Use the real registered mutation and read interfaces over disposable PostgreSQL, paired with the exact app source.",
+    "Treat the task reversibility requirement as stricter than repository forward-only permission.",
+    "Preserve findings and synthetic evidence on a separate review branch. Do not modify, push to, merge or deploy either implementation branch."
+  ],
+  "limits": [
+    "No production read or write was used for product behavior.",
+    "No reverse migration was supplied or run.",
+    "Hosted CI for newer heads does not validate the exact reviewed revisions.",
+    "Full CARR repository suite was not run; six PR-relevant suites were run."
+  ],
+  "replay": {
+    "command": "node --test evals/prospect-engagement-review/workflow.mjs",
+    "requirements": [
+      "CARR checkout at reviewed source plus this evidence directory",
+      "Sibling ../doctorcre-app checkout at the reviewed app SHA",
+      "npm ci in both package directories",
+      "Local PostgreSQL server binaries and Playwright Chromium"
+    ]
+  },
+  "skills_used": [
+    "poteto-mode",
+    "code-review",
+    "Prove It Works",
+    "grill-with-docs with autonomous decisions",
+    "codebase-design",
+    "zero-tech-debt",
+    "technical-writing",
+    "unslop"
+  ],
+  "tdd": "Read as requested; no implementation behavior was changed. Review probes reproduce defects without fixing them."
+}

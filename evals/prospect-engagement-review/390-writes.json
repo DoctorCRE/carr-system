@@ -1,0 +1,28 @@
+{
+  "writes": [
+    {
+      "client_id": "aa000000-0000-4000-8000-000000000003",
+      "base_version": 2,
+      "status": "inactive",
+      "reason": "Synthetic deferred project",
+      "human_quote": "Synthetic deferred project",
+      "expected_actor": "joe",
+      "idempotency_key": "<redacted-1>"
+    },
+    {
+      "client_id": "aa000000-0000-4000-8000-000000000003",
+      "base_version": 3,
+      "status": "active",
+      "reason": "Synthetic renewed interest",
+      "human_quote": "Synthetic renewed interest",
+      "expected_actor": "joe",
+      "idempotency_key": "<redacted-2>"
+    }
+  ],
+  "errors": [],
+  "deal_preserved": true,
+  "note_preserved": true,
+  "score": "72.00",
+  "distinct_idempotency_keys_verified": true,
+  "redaction_reason": "Synthetic request UUIDs omitted from publication after scanner refusal."
+}

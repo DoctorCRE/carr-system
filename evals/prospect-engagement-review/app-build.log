@@ -1,0 +1,9 @@
+
+> doctorcre-app@0.2.0 prebuild
+> node scripts/prepare-offline-tour.mjs
+
+
+> doctorcre-app@0.2.0 build
+> node scripts/build-artifact.mjs build
+
+built doctorcre-app.tar: 269 files, sha256:b46b1122dd99cea5c9eb7103216d49f106150072efac8c95fbe7621d064a93f2

@@ -1,0 +1,2 @@
+migration-shadow: 1 pending migration(s) applied cleanly on PostgreSQL 18 over origin/main:db/schema.sql: 0915_prospect_engagement_status.sql
+migration-shadow: OK — committed db/schema.sql is exactly what the migrations produce
