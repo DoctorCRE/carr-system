@@ -22,7 +22,7 @@ from lib.secret_redaction import redacted_tail, sensitive_env_values
 CANONICAL = Path(__file__).resolve().parents[1]
 
 
-def git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
+def git(repo: Path, *args: str, check: bool = True, timeout: float = 120) -> str:
     result = subprocess.run(['git', *args], cwd=repo, env=scrubbed_env(),
                             capture_output=True, text=True, timeout=timeout)
     if check and result.returncode:
