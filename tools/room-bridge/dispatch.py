@@ -14,9 +14,16 @@ to route costs the tokens the routing was supposed to save.
     dispatch.py register codex-desk --family sol --effort high --cwd ~/carr-system
     dispatch.py where            # how to find THIS session's socket
 
-Codex desks preserve their thread context. The registry names a default family,
-never a model version. Each send resolves Sol or Luna from the current local
-Codex catalog, prints the executor slug and effort, and records them in its row.
+`send` saves a card in the durable work queue and returns its queued receipt.
+The detached runner claims cards in the current global order when their desk
+and a Codex slot are free. `prioritize`, `requeue`, `show`, `history`, `export`
+and `merge-order` all use that same store.
+
+The worker resolves the current Codex family at execution time and records the
+executor model and effort on the card. The `dispatch()` function is the
+synchronous executor used by workers and existing bounded adapters. Execution
+receipts still append to the requested NDJSON results file. Asynchronous desks
+report delivery there and retain their queue reservation until completion.
 
 Grok desks default to full workspace tools and select the newest standard model
 from `grok models`. Only `send --retrieve` runs read-only source retrieval.
@@ -57,11 +64,6 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
-EVERY DISPATCH LEAVES A LINE in the results file, NDJSON, one object per
-dispatch. That file is how Hermes learns what happened without holding a
-connection open — a claude-session answers in its own window on its own time,
-so the line records that the turn was DELIVERED, not what the session decided.
-A headless Codex run is synchronous, so its line carries the actual result.
 """
 
 from __future__ import annotations
@@ -124,15 +126,6 @@ CODEX_TIMEOUT_S = float(os.environ.get("CARR_HERMES_CODEX_TIMEOUT", "5400"))
 CODEX_CAPACITY_ATTEMPTS = 6
 CODEX_CAPACITY_BACKOFF_S = 300
 
-# WR-000356: five or more concurrent Codex jobs died mid-run with "exceeded
-# retry limit, last status: 429"; four ran clean. A job past its start may
-# already have committed or pushed, so retrying it is not safe. Instead every
-# Codex job sent through `dispatch.py send` holds one of a few machine-wide
-# slots for its whole run and extra jobs wait for one. flock slots free
-# themselves when a process dies, so a killed job never leaves one held.
-CODEX_MAX_CONCURRENT = 4
-CODEX_SLOT_DIR = Path.home() / ".config" / "carr" / "codex-slots"
-CODEX_SLOT_POLL_S = 5.0
 HERMES_SLOT_DIR = Path.home() / '.config' / 'carr' / 'hermes-slots'
 HERMES_SLOT_POLL_S = 1.0
 
@@ -161,12 +154,6 @@ def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
         hint = _phrasing_hint(task)
         if hint:
             raise DeskError('brief_phrasing', hint)
-
-
-def _codex_slot(env):
-    limit = max(1, int(env.get("CARR_CODEX_MAX_CONCURRENT") or CODEX_MAX_CONCURRENT))
-    slot_dir = Path(env.get("CARR_CODEX_SLOT_DIR") or CODEX_SLOT_DIR)
-    return _slot(limit, slot_dir, 'Codex', CODEX_SLOT_POLL_S)
 
 
 def _hermes_slot(env):
@@ -649,6 +636,7 @@ def dispatch(
     effort: str | None = None,
     writes: list[str] | None = None,
     checkout: str | None = None,
+    on_started=None,
     allow_phrasing: bool = False,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
@@ -729,6 +717,9 @@ def dispatch(
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
               file=sys.stderr, flush=True)
+
+    if on_started is not None:
+        on_started(entry)
 
     if checkout is not None:
         prepared = codex_checkout.prepare(checkout, env)
@@ -1058,6 +1049,8 @@ def main(argv: list[str]) -> int:
     p.add_argument("--registry", default=None, help="desk registry file")
     p.add_argument("--results", default=None, help="NDJSON results file")
     sub = p.add_subparsers(dest="cmd", required=True)
+    import work_cli
+    work_cli.add_commands(sub)
 
     spend = sub.add_parser('claude-api-spend', help='read monthly API spend and sticky stop')
     spend.add_argument('--clear-stop', action='store_true',
@@ -1096,7 +1089,15 @@ def main(argv: list[str]) -> int:
     sp = sub.add_parser("stop", help="take a desk down")
     sp.add_argument("name")
     sub.add_parser("where", help="print how to find and name THIS session's socket")
-    s = sub.add_parser("send", help="dispatch one task to one desk")
+    s = sub.add_parser("send", help="enqueue one task; return a durable receipt immediately")
+    s.add_argument('--card-id')
+    s.add_argument('--wr')
+    s.add_argument('--slice')
+    s.add_argument('--title')
+    s.add_argument('--description')
+    s.add_argument('--actor', default='orchestrator')
+    s.add_argument('--stage', choices=('building', 'review', 'fixing'),
+                   help='requeue a stage of an existing --card-id at the tail')
     s.add_argument("name")
     s.add_argument("task")
     s.add_argument('--allow-phrasing', action='store_true',
@@ -1122,6 +1123,9 @@ def main(argv: list[str]) -> int:
     results = Path(a.results) if a.results else DEFAULT_RESULTS
 
     try:
+        handled = work_cli.handle(a, reg, results)
+        if handled is not None:
+            return handled
         if a.cmd == 'claude-api-spend':
             ledger = claude_api_wire.Ledger()
             if a.clear_stop:
@@ -1206,14 +1210,13 @@ def main(argv: list[str]) -> int:
             blocked = seat_gate.check({**desk_entry, "name": a.name})
             if blocked:
                 raise DeskError(*blocked)
-        codex_job = isinstance(desk_entry, dict) and desk_entry.get("kind") in codex_models.CODEX_KINDS
-        with _codex_slot(os.environ) if codex_job else nullcontext():
-            row = dispatch(a.name, task, registry=reg, results_path=results,
-                           fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
-                           retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                           checkout=a.checkout, allow_phrasing=a.allow_phrasing)
+        row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
-        return 0 if row["status"] in ("delivered", "completed") else 1
+        return 0
+
+    except (ValueError, OSError) as e:
+        print(f'refused: {e}', file=sys.stderr)
+        return 2
 
     except DeskError as e:
         print(f"refused ({e.code}): {e}", file=sys.stderr)

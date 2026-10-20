@@ -1345,7 +1345,7 @@ PROVISIONING_PENDING = {
 }
 
 
-def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False):
+def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False, status=None):
     print(f"  CANONICAL_FINDING {key} — {detail}")
     for row in _FINDINGS:
         if row["key"] == key and row["subject"] == subject:
@@ -1357,6 +1357,8 @@ def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, ti
             # later merged calls — a reader trusts the printed detail to
             # match the count it sits next to.
             row["detail"] = detail
+            if status is not None:
+                row["status"] = status
             # hard_error merges with OR (point 4 of the THIRD round of
             # review, correcting the second round's overcorrection): a
             # (key, subject) that had EVEN ONE hard_error contributor this
@@ -1372,7 +1374,8 @@ def _canonical_finding(key, detail, *, subject="", count=1, hard_error=False, ti
             row["time_rolling"] = row["time_rolling"] and bool(time_rolling)
             return
     _FINDINGS.append({"key": key, "subject": subject, "detail": detail, "count": count,
-                      "hard_error": bool(hard_error), "time_rolling": bool(time_rolling)})
+                      "hard_error": bool(hard_error), "time_rolling": bool(time_rolling),
+                      **({"status": status} if status is not None else {})})
 
 
 def _write_findings_json(path):
@@ -1390,7 +1393,7 @@ def _write_findings_json(path):
         fh.write("\n")
 
 
-def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False):
+def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=False, status=None):
     """Record a CANONICAL_FINDING and return 1, so every `rc = 1` path inside
     `_canonical_health()` is intrinsically self-recording (round 8 of an
     independent review of PR #1237, replacing the per-section runtime guard
@@ -1404,7 +1407,7 @@ def _red(key, detail, *, subject="", count=1, hard_error=False, time_rolling=Fal
     real run, rather than depending on a runtime check to catch it after the
     fact."""
     _canonical_finding(key, detail, subject=subject, count=count,
-                        hard_error=hard_error, time_rolling=time_rolling)
+                        hard_error=hard_error, time_rolling=time_rolling, status=status)
     return 1
 
 
@@ -1922,7 +1925,8 @@ def _canonical_health():
                 if token_row["status"] == "ok":
                     _GREEN_EVIDENCE["cloudflare_token"].add(token_row["subject"])
                 else:
-                    rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"])
+                    rc = _red("cloudflare_token", token_row["line"], subject=token_row["subject"],
+                              status=token_row["status"])
         # The source log is canonical across worktrees. The row carries its
         # response action on both OK and WARN, and the helper owns one loop.
         try:

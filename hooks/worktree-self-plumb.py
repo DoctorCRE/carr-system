@@ -77,6 +77,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.hook_runtime import decision, run, Event
+from lib.cleanup_budget import BudgetExhausted, check, walk
 import time
 
 # __file__ resolves through the absolute canonical path this hook is always
@@ -249,7 +250,7 @@ def index_age_s(wt):
 TREE_SCAN_MAX_ENTRIES = 20000  # past this the tree is too big to judge cheaply
 
 
-def tree_age_s(wt):
+def tree_age_s(wt, *, deadline=None):
     """Seconds since ANY file inside the worktree moved; None when unknowable.
 
     Complements index_age_s, which only sees git operations. This sees the
@@ -266,9 +267,11 @@ def tree_age_s(wt):
     seen = 0
     skip = {".git", "node_modules", ".venv", "__pycache__"}
     try:
-        for root, dirs, files in os.walk(wt, followlinks=False):
+        traversal = os.walk(wt, followlinks=False) if deadline is None else walk(wt, deadline)
+        for root, dirs, files in traversal:
             dirs[:] = [d for d in dirs if d not in skip]
             for name in files + dirs:
+                check(deadline)
                 seen += 1
                 if seen > TREE_SCAN_MAX_ENTRIES:
                     return None
@@ -279,6 +282,8 @@ def tree_age_s(wt):
                     continue
                 if st.st_mtime > newest:
                     newest = st.st_mtime
+    except BudgetExhausted:
+        raise
     except Exception:
         return None
     if not newest:

@@ -15,6 +15,7 @@ from ops.git_env import fixture_env
 import claude_api_wire as wire
 import desks
 import dispatch
+from work_runner import Resources
 import codex_checkout
 from claude_api_transport import Transport
 from test_claude_api_transport_unit import Response
@@ -350,8 +351,14 @@ async def query(*, prompt, options):
     yield SimpleNamespace(model=options.model)""")
         (self.sdk / '__init__.py').write_text(code)
         busy_env = {'CARR_CODEX_MAX_CONCURRENT': '1', 'CARR_CODEX_SLOT_DIR': str(self.root / 'codex-slots')}
-        with dispatch._codex_slot(busy_env), ThreadPoolExecutor(max_workers=3) as pool:
-            rows = list(pool.map(lambda _: self.run_task(), range(3)))
+        resources = Resources(self.root / 'desk-locks', slots=busy_env['CARR_CODEX_SLOT_DIR'], limit=1)
+        handles = resources.acquire('codex', codex=True)
+        try:
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                rows = list(pool.map(lambda _: self.run_task(), range(3)))
+        finally:
+            for handle in handles:
+                handle.close()
         self.assertEqual([r['status'] for r in rows], ['completed'] * 3)
         active = peak = 0
         for _, change in sorted(json.loads(x) for x in (self.root / 'activity.jsonl').read_text().splitlines()):
@@ -402,7 +409,7 @@ async def query(*, prompt, options):
                 patch.object(codex_checkout, 'CHECKOUT_ROOT', self.root), \
                 patch.object(wire.config, 'LEDGER_PATH', self.ledger.path), \
                 patch.object(wire.subprocess, 'run', side_effect=fake_keychain), \
-                patch.object(dispatch, '_codex_slot', side_effect=AssertionError('Codex slot used')):
+                patch.object(Resources, 'acquire', side_effect=AssertionError('Codex slot used')):
             row = dispatch.dispatch('api-build', 'Build done.txt', registry=registry,
                                     results_path=results, env=self.env,
                                     checkout='new:api-job', writes=['done.txt'])

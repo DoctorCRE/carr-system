@@ -2544,6 +2544,24 @@ def scheduled_job_findings(snapshot):
             for row, line in zip(rows, scheduled_jobs.render(rows))]
 
 
+def cloudflare_findings(machine, status):
+    """Exercise the shipped token rows and health adapter with an offline transport."""
+    from lib import cloudflare_tokens as cf
+    tree = ast.parse((HERE.parent / 'tools/health-check.py').read_text())
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name in ('_canonical_finding', '_red')]
+    loop = next(node for node in ast.walk(tree) if isinstance(node, ast.For)
+                and isinstance(node.target, ast.Name) and node.target.id == 'token_row')
+    def transport(target, payload):
+        return dict.fromkeys(cf.TOKEN_NAMES, status if target == machine else 'ok')
+    rows = cf.health_rows(transport=transport)
+    ns = {'_FINDINGS': [], '_GREEN_EVIDENCE': {'cloudflare_token': set()},
+          '_cloudflare_rows': lambda: rows, 'print': lambda *args: None, 'rc': 0}
+    exec(compile(ast.Module(body=functions + [loop], type_ignores=[]),
+                 'health Cloudflare adapter', 'exec'), ns)
+    return ns['_FINDINGS']
+
+
 class HealthCompleteMarkerDoesNotDrift(unittest.TestCase):
     """Point 3 of the third round of an independent review of PR #1237: a
     REAL run of health-preflight showed `complete=False` on every single
@@ -2585,6 +2603,59 @@ class HealthGate(Base):
     fails on a new pair, a risen count, or any hard_error — never on a
     standing finding unchanged since the baseline. Findings A-G below track
     the points of an independent review of PR #1237 by letter."""
+
+    def test_cloudflare_offline_macbook_does_not_fail_worker_promotion(self):
+        target = self.fx.commit({'mcp-server/src/a.js': '1'})
+        findings = cloudflare_findings('macbook', 'unreachable')
+        self.assertEqual(len(findings), 2, 'offline warnings remain canonical watchdog findings')
+        runner = FakeRunner(live={'sha': self.fx.base}, health_findings=findings)
+        pipe = self.fx.pipeline(runner, live=runner.live)
+        self.assertEqual(pipe.tick(['worker']), 0, self.fx.records()[-1])
+        self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
+        self.assertEqual(runner.live['sha'], target)
+        self.assertFalse(self.fx.state()['worker'].get('failed_sha'))
+
+    def test_cloudflare_unknown_states_remain_warnings_on_every_machine(self):
+        for machine in ('studio', 'macbook', 'dell'):
+            for status in ('unreachable', 'unverifiable', 'unknown'):
+                with self.subTest(machine=machine, status=status):
+                    findings = cloudflare_findings(machine, status)
+                    self.assertEqual(len(findings), 2)
+                    self.assertEqual([row['status'] for row in findings], [status, status])
+                    self.assertTrue(all('WARN Cloudflare' in row['detail'] for row in findings))
+                    self.assertEqual(rp.health_regression([], findings), ([], []))
+                    self.assertEqual(rp.health_regression([], [{**r, 'count': 10} for r in findings]),
+                                     ([], []))
+
+    def test_cloudflare_verified_bad_states_block_after_unknown_baseline(self):
+        for machine in ('studio', 'macbook', 'dell'):
+            for status in ('failed', 'missing', 'unreadable', 'unsafe_file',
+                           'insecure_permissions', 'expiring_soon'):
+                with self.subTest(machine=machine, status=status):
+                    findings = cloudflare_findings(machine, status)
+                    for prior in ([], cloudflare_findings(machine, 'unreachable'),
+                                  cloudflare_findings(machine, 'unverifiable')):
+                        bad, excused = rp.health_regression(prior, findings)
+                        self.assertEqual(len(bad), 2)
+                        self.assertIn(machine + ':CLOUDFLARE_API_TOKEN', bad[0])
+                        self.assertEqual(excused, [])
+                    self.assertEqual(rp.health_regression(findings, findings), ([], []))
+
+    def test_cloudflare_unverifiable_studio_does_not_fail_worker_promotion(self):
+        self.fx.commit({'mcp-server/src/a.js': '1'})
+        runner = FakeRunner(live={'sha': self.fx.base},
+                            health_findings=cloudflare_findings('studio', 'unverifiable'))
+        pipe = self.fx.pipeline(runner, live=runner.live)
+        self.assertEqual(pipe.tick(['worker']), 0, self.fx.records()[-1])
+        self.assertEqual(self.fx.records()[-1]['status'], 'shipped')
+
+    def test_cloudflare_hard_error_is_never_excused_by_unknown_status(self):
+        findings = [{**row, 'hard_error': True}
+                    for row in cloudflare_findings('studio', 'unverifiable')]
+        bad, excused = rp.health_regression(findings, findings)
+        self.assertEqual(len(bad), 2)
+        self.assertTrue(all('hard_error' in message for message in bad))
+        self.assertEqual(excused, [])
 
     def main_advances_during_release(self, *, fetch):
         target = self.fx.commit({"mcp-server/src/a.js": "1"})
