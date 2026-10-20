@@ -531,6 +531,28 @@ class IntakeTest(unittest.TestCase):
         self.run_intake(events=events, touch=False)
         self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['meeting'])
 
+    def test_unchanged_calendar_gets_a_ball_when_a_distant_meeting_enters_the_horizon(self):
+        events = [event('horizon', timedelta(days=8), attendees=[('Pat Example', 'pat@example.test')])]
+        self.assertEqual(self.run_intake(events=events).state, 'succeeded')
+        self.assertEqual(self.fake.writes(), [])
+        self.fake.now = NOW + timedelta(hours=1)
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+        self.fake.now = NOW + timedelta(days=1)
+        result = self.run_intake(events=events, touch=False)
+        self.assertEqual(result.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1)
+        self.assertEqual(self.fake.writes('set-next-action')[0][1]['due_on'], '2026-10-28')
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+
+    def test_unchanged_calendar_logs_a_meeting_first_seen_in_progress_at_its_end(self):
+        events = [event('in-progress', -timedelta(minutes=30), attendees=[('Pat Example', 'pat@example.test')])]
+        self.assertEqual(self.run_intake(events=events).state, 'succeeded')
+        self.assertEqual(self.fake.writes(), [])
+        self.fake.now = NOW + timedelta(minutes=30)
+        self.assertEqual(self.run_intake(events=events, touch=False).state, 'succeeded')
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['meeting'])
+        self.assertEqual(self.run_intake(events=events, touch=False).reason, 'store_unchanged')
+
     def test_a_failed_cleanup_fails_the_run_loudly(self):
         def jam(work):
             locked = work / 'locked'
