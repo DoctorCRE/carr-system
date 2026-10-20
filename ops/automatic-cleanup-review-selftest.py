@@ -21,6 +21,43 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_source_substitution_at_rename_is_not_successful_or_recoverable(self):
+        from unittest.mock import patch
+        for replaced in ('workspace', 'checkout'):
+            for interrupted in (False, True):
+                with self.subTest(replaced=replaced, interrupted=interrupted):
+                    fixture = fixtures.Fixture()
+                    workspace = fixture.base / 'room-codex-source-race'
+                    clone = workspace / 'checkout'
+                    fixture.git('clone', str(fixture.remote), str(clone))
+                    fixture.git('switch', 'main', cwd=clone)
+                    original = os.rename
+
+                    def substitute(source, destination, *args, **kwargs):
+                        if source == workspace.name and destination == 'workspace':
+                            directory = workspace if replaced == 'workspace' else clone
+                            protected = fixture.base / 'protected-original'
+                            original(directory, protected)
+                            shutil.copytree(protected, directory)
+                            (clone / 'file').write_text('unpublished replacement bytes\n')
+                            original(source, destination, *args, **kwargs)
+                            if interrupted:
+                                raise RuntimeError('fixture interruption after move')
+                        else:
+                            original(source, destination, *args, **kwargs)
+
+                    with patch.object(machine_cleanup.os, 'rename', side_effect=substitute):
+                        result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                            'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                            process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+                    self.assertEqual(result['status'], 'kept', result)
+                    self.assertIn('error', result)
+                    with self.assertRaises(RuntimeError):
+                        machine_cleanup.recover_clone(workspace)
+                    staged = next((fixture.base / '_to_delete').glob('*/workspace/checkout/file'))
+                    self.assertEqual(staged.read_text(), 'unpublished replacement bytes\n')
+
     def test_staging_directory_replacement_during_intent_keeps_clone(self):
         from unittest.mock import patch
         for replaced in ('_to_delete', 'target', 'staging-directory', 'target-directory', 'workspace', 'checkout'):
