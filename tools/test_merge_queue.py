@@ -539,6 +539,39 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()[0], self.updated)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_timed_out_discovery_read_recovers_after_cooldown_across_restart(self):
+        errors = (module.GitHubBudgetLockTimeout('budget lock deadline'),
+                  subprocess.TimeoutExpired('gh', 120), module.WaitExpired('read deadline'))
+        command = module.command
+        listing = ['gh', 'api', f'repos/{module.REPOS[0]}/pulls?state=open&per_page=100&page=1']
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                self.pr(head=self.updated)
+                with self.q.db:
+                    self.q.db.execute('DELETE FROM entries')
+                    self.q.db.execute('DELETE FROM github_failures')
+                calls = []
+                def request(argv, **kwargs):
+                    if argv[:3] == listing:
+                        calls.append(clock.return_value)
+                        if len(calls) == 1:
+                            raise error
+                    return command(argv, **kwargs)
+                with patch.object(module.time, 'time', return_value=10000) as clock, \
+                        patch.object(module, 'command', side_effect=request):
+                    self.q.discover()
+                    self.restart()
+                    clock.return_value += module.BOUNDS['github_retry']['seconds'] - 1
+                    self.q.discover()
+                    self.assertEqual(len(calls), 1, 'Discovery retried before its cooldown')
+                    clock.return_value += 1
+                    self.q.discover()
+                row = self.q.db.execute('SELECT approved FROM entries WHERE pr=1').fetchone()
+                self.assertIsNotNone(row, 'Discovery remained stopped after its cooldown')
+                self.assertEqual(row['approved'], self.updated)
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(self.calls('merge'), [])
+
     def test_daemon_updated_head_is_discovered_and_waits_for_its_checks(self):
         self.pr(state='behind')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
