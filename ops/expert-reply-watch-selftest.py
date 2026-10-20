@@ -139,15 +139,70 @@ class WatchTests(unittest.TestCase):
             calls = []
             def execute(args, **kwargs):
                 calls.append((args, kwargs))
-                return ''
+                return json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False,
+                                   'structured_output': {'ok': True, 'replies': []}})
             watch.grok_replies(ENTRY, TODAY, Path(d), execute=execute)
             args, kwargs = calls[0]
             self.assertEqual(args[0:2], ['grok', '-p'])
             self.assertIn('from:ihurricanez filter:replies', args[2])
             self.assertIn('since:2026-09-30 until:2026-10-07', args[2])
             self.assertIn('ONLY', args[2])
-            self.assertEqual(args[3:], ['-m', 'grok-4.5', '--reasoning-effort', 'high', '--sandbox', 'workspace', '--cwd', d])
+            self.assertEqual(args[3:11], ['-m', 'grok-4.5', '--reasoning-effort', 'high', '--sandbox', 'workspace', '--cwd', d])
+            self.assertEqual(args[args.index('--output-format') + 1], 'streaming-messages-json')
+            schema = json.loads(args[args.index('--json-schema') + 1])
+            self.assertEqual(schema['required'], ['ok', 'replies'])
+            self.assertEqual(set(schema['properties']['replies']['items']['required']), watch.FIELDS)
             self.assertGreater(kwargs['timeout'], 0)
+
+    def test_cli_empty_search_ignores_progress_and_uses_structured_result(self):
+        commentary = "I'll search X for those replies and keep only concrete technique matches."
+        frames = [
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": commentary}]}},
+            {"type": "result", "subtype": "success", "is_error": False,
+             "result": commentary, "structured_output": {"ok": True, "replies": []}},
+        ]
+        def cli(args, **kwargs):
+            if '--output-format' not in args:
+                return commentary
+            return '\n'.join(json.dumps(frame) for frame in frames)
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            record = Mock()
+            def retrieve(entry, today, scratch):
+                return watch.grok_replies(entry, today, scratch, execute=cli)
+
+            self.assertEqual(watch.run([ENTRY], root, retrieve, record, today=TODAY), 0)
+            self.assertEqual(watch.load_ledger(root)['runs'][-1]['status'], 'ok')
+            record.assert_not_called()
+
+    def test_cli_structured_replies_reach_capture_and_repeat_without_duplicates(self):
+        frame = {'type': 'result', 'subtype': 'success', 'is_error': False,
+                 'result': 'Found one match.', 'structured_output': {'ok': True, 'replies': [NUGGET]}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            record = Mock(return_value={'ok': True, 'capture_id': 'capture-123'})
+            def retrieve(entry, today, scratch):
+                return watch.grok_replies(entry, today, scratch,
+                                          execute=Mock(return_value=json.dumps(frame)))
+
+            self.assertEqual(watch.run([ENTRY], root, retrieve, record, today=TODAY), 1)
+            self.assertEqual(watch.run([ENTRY], root, retrieve, record, today=TODAY), 0)
+            self.assertEqual(record.call_count, 1)
+            self.assertEqual(record.call_args.args[1]['source_url'], NUGGET['reply_url'])
+
+    def test_cli_incomplete_or_failed_retrieval_never_becomes_empty_success(self):
+        valid = {'type': 'result', 'subtype': 'success', 'is_error': False,
+                 'structured_output': {'ok': True, 'replies': []}}
+        for output in ('prose', '', '{}', json.dumps({'type': 'assistant'}),
+                       json.dumps({**valid, 'subtype': 'error_max_turns'}),
+                       json.dumps({**valid, 'is_error': True}),
+                       json.dumps({**valid, 'structured_output': {'ok': False, 'replies': []}}),
+                       json.dumps({**valid, 'structured_output': {'ok': True, 'replies': None}}),
+                       json.dumps({key: value for key, value in valid.items() if key != 'structured_output'}),
+                       '\n'.join([json.dumps(valid)] * 2)):
+            with self.subTest(output=output), self.assertRaises(watch.WatchError):
+                watch.grok_replies(ENTRY, TODAY, Path('/tmp'), execute=Mock(return_value=output))
 
     def test_schedule_and_installer_registration(self):
         plist = plistlib.loads((ROOT / 'ops/launchd/com.carr.expert-reply-watch.plist').read_bytes())

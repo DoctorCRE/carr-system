@@ -40,6 +40,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (sql.includes("from v_claim_card")) return { rows: [
         { display_name: "Candidate Safe", city: "Mobile", has_channel: true, pool_id: "opaque-handler-id" },
       ] };
+      if (sql.includes("dealroom:closed-deals")) return { rows: [] };
       if (sql.includes("from v_deal_room_board")) return { rows: [
         { name: "Example Deal", owner: "joe", attention: true },
       ] };
