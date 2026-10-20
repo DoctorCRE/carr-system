@@ -45,7 +45,8 @@
       "hooks/session-presence-hook.py",
       "hooks/worktree-self-plumb.py",
       "ops/claude-continuity-hook.py",
-      "ops/codex-continuity-hook.py"
+      "ops/codex-continuity-hook.py",
+      "hooks/rule-claim-gate.py"
     ],
     "safety_stop_failure_limit": 1
   }
