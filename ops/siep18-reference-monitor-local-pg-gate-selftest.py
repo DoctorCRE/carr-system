@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location(
     "siep18_gate", ROOT / "ops/siep18-reference-monitor-local-pg-gate.py"
 )
+assert spec is not None and spec.loader is not None
 gate = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gate)
 

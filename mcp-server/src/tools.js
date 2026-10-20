@@ -1,4 +1,4 @@
-import { DEAL_ASSIGNMENTS_SCHEMA, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
+import { DEAL_ASSIGNMENTS_SCHEMA, lockDealAssignments, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
@@ -3824,6 +3824,7 @@ export const TOOLS = {
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
           throw new ToolError({error:'deal_assignment_invalid'});
+        await lockDealAssignments(c,args.vendor_assignments);
         const seen = new Set(), versions = new Map(), states = new Map();
         for (const assignment of args.vendor_assignments) {
           const {vendor_id,base_version,assignment_base_version,...entry} = assignment || {};
@@ -4960,6 +4961,11 @@ export const TOOLS = {
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-vendor", args, async () => {
       const s = await resolveSubject(c, args.vendor);
       if (s.type !== "vendor") throw new ToolError({ error: "not_a_vendor", resolved: s });
+      if (Object.hasOwn(args.fields,'deal_assignments')) {
+        if (!Array.isArray(args.fields.deal_assignments) || !args.fields.deal_assignments.length || args.fields.deal_assignments.length>30)
+          throw new ToolError({error:'deal_assignment_invalid'});
+        await lockDealAssignments(c,args.fields.deal_assignments.map(entry=>({...entry,vendor_id:s.id})));
+      }
       await versionGuard(c, "vendor", s.id, args.base_version);
       // [0069] category_slug + verticals joined the list — the columns existed since
       // 0001/0050 but no verb could reach them, which left the 63 null-category

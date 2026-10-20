@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import statistics
 import uuid
 
@@ -34,7 +35,7 @@ SEALED_PREDECESSOR_ORDINAL = 117
 SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
 SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
 SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
-LIVE_REGISTRY_MIGRATION = 'migrations/0890_retire_heavy_build_runtime.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0918_deal_vendor_assignments.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
@@ -98,21 +99,24 @@ UNNARROWED_ROLE_AUTHORITY_SCOPE = (
 
 
 def current_function_sql(source: str, version: int) -> str:
-    """Extract the exact, currently-installed SCAC catalog current function
-    definition from a migration file's text, start marker through its closing $fn$;."""
+    """Extract the exact SCAC current definition through its dollar terminator."""
     start_marker = f"create or replace function ops.scac_mutation_catalog_v{version}_current()"
-    end_marker = "end $fn$;"
-    start = source.index(start_marker)
-    end = source.index(end_marker, start) + len(end_marker)
+    start = source.lower().index(start_marker)
+    quoted = re.search(r"\bas\s+(\$(?:[a-z_][a-z_0-9]*)?\$)", source[start:], re.I)
+    if quoted is None:
+        raise ValueError("catalog function has no dollar-quoted body")
+    end_marker = quoted[1] + ";"
+    end = source.index(end_marker, start + quoted.end()) + len(end_marker)
     return source[start:end]
 
 
 def function_body(source: str) -> str:
-    """Return the body stored by PostgreSQL for a generated $fn$ function."""
-    start_marker = "as $fn$"
-    end_marker = "$fn$;"
-    start = source.index(start_marker) + len(start_marker)
-    end = source.rindex(end_marker)
+    """Return the body stored by PostgreSQL for a dollar-quoted function."""
+    quoted = re.search(r"\bas\s+(\$(?:[a-z_][a-z_0-9]*)?\$)", source, re.I)
+    if quoted is None:
+        raise ValueError("function has no dollar-quoted body")
+    start = quoted.end()
+    end = source.index(quoted[1], start)
     return source[start:end].strip()
 
 

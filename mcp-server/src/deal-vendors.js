@@ -10,6 +10,22 @@ export const DEAL_ASSIGNMENTS_SCHEMA = { type: 'array', minItems: 1, maxItems: 3
     active: { type: 'boolean' }, note: { type: 'string', maxLength: 2000 },
   }, required: ['deal_id','role','company_party_id','contact_party_id'] } };
 
+export async function lockDealAssignments(c, assignments) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const vendors = [], parties = [];
+  for (const entry of assignments) {
+    if (![entry?.vendor_id,entry?.company_party_id,entry?.contact_party_id].every(id => typeof id === 'string' && uuid.test(id)))
+      throw new ToolError({error:'deal_assignment_invalid'});
+    vendors.push(entry.vendor_id);
+    parties.push(entry.company_party_id,entry.contact_party_id);
+  }
+  // Company/contact checks also lock parties. Take their strongest locks before any vendor row.
+  await c.query(`select id from public.party where id in (
+    select party_id from public.vendor where id=any($1::uuid[]) union select unnest($2::uuid[])
+  ) order by id for update`, [vendors,parties]);
+  await c.query('select id from public.vendor where id=any($1::uuid[]) order by id for update',[vendors]);
+}
+
 export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb, baseVersion, states = new Map()) {
   const refuse = () => { throw new ToolError({error:'deal_assignment_invalid'}); };
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,7 +42,7 @@ export async function writeDealAssignments(c, actor, vendorId, entries, recordEv
     seen.add(identity);
   }
   const vendor = (await c.query(`select v.party_id,p.vendor_assignment_version from public.vendor v join public.party p on p.id=v.party_id
-    where v.id=$1 and v.merged_into is null and p.merged_into is null and p.deleted_at is null for update of p`, [vendorId])).rows[0];
+    where v.id=$1 and v.merged_into is null and p.merged_into is null and p.deleted_at is null`, [vendorId])).rows[0];
   if (!vendor) refuse();
   let state = states.get(vendor.party_id);
   const expected = state?.version ?? vendor.vendor_assignment_version;
