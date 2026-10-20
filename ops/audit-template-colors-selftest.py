@@ -11,12 +11,14 @@ import os
 import sys
 import tempfile
 import unittest
+from typing import Any
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 spec = importlib.util.spec_from_file_location(
     "audit_template_colors", os.path.join(REPO, "fill-engine", "audit_template_colors.py"))
-atc = importlib.util.module_from_spec(spec)
+assert spec is not None and spec.loader is not None
+atc: Any = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(atc)
 
 LEGACY = "Naming a sendable format is not permission to send: Joe sends, and no verb can."
