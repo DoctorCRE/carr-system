@@ -85,8 +85,9 @@ SNAPSHOT_TASK_FIELDS = frozenset("""
     pr_phase pr_head merge_sha pr_checks pr_links question review_verdict summary blocked_reason next_action evidence
     release_wait created_at updated_at completed_at merged_at manual_stage
     stage_entered_at stage_history question_ids human_ref kind related
-    work_request work_request_ref plan_ref plan_id slice_ref slice_id task_ref task_id job_ref job_id
-    milestone milestone_source slice
+    work_request work_request_ref work_request_id canonical_work_ref plan_ref plan_id plan slice_ref slice_id task_ref task_id job_ref job_id
+    parent_ref parent_id parent linkage_metadata_unavailable
+    milestone milestone_source slice blocked_by_task_ids parent_task_id
     delivery_target delivery_workflow delivery_source_sha consumer_proof
 """.split())
 BLOCKER_EXCERPT_LIMIT = 192
@@ -2335,6 +2336,13 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
+        card["linkage_metadata_version"] = 1
+        unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
+                               "blocker_task_id", "parent_refs", "related_refs", "dependencies")
+        held = task.get("held")
+        if (any(task.get(key) is not None for key in unsupported_linkage)
+                or isinstance(held, dict) and held.get("blocker") is not None):
+            card["linkage_metadata_unavailable"] = True
         for key, value in card.items():
             if key.endswith("_at") and isinstance(value, str) and value.endswith("+00:00"):
                 card[key] = value[:-6] + "Z"
