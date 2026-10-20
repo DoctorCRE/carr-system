@@ -54,9 +54,10 @@ _ASSIGNED_SECRET = re.compile(
 # public identifier. Shape alone is insufficient: a password may be a SHA or UUID.
 _PUBLIC_IDENTIFIER_LABEL = re.compile(
     r"(?:^|[\n;,])\s*(?:(?P<sha>(?:source[ _-])?sha(?: mismatch)?)"
-    r"|(?P<receipt>receipt[ _-]id))\s*[:=]$", re.IGNORECASE)
+    r"|(?P<uuid>receipt[ _-]id))\s*[:=]$"
+    r"|(?:^|\n)[ \t]*(?P<provider>provider version):$", re.IGNORECASE)
 _SHA_IDENTIFIER = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", re.IGNORECASE)
-_RECEIPT_IDENTIFIER = re.compile(
+_UUID_IDENTIFIER = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     re.IGNORECASE)
 
@@ -64,8 +65,9 @@ _RECEIPT_IDENTIFIER = re.compile(
 def _redact_assigned_value(match: re.Match[str]) -> str:
     label = _PUBLIC_IDENTIFIER_LABEL.search(match.string[:match.start()])
     if label:
-        shape = _SHA_IDENTIFIER if label.group("sha") else _RECEIPT_IDENTIFIER
-        if shape.fullmatch(match.group().strip()):
+        shape = _SHA_IDENTIFIER if label.group("sha") else _UUID_IDENTIFIER
+        value = match.group().strip(" \t") if label.group("provider") else match.group().strip()
+        if shape.fullmatch(value):
             return match.group()
     return MASK
 
