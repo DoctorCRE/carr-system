@@ -2413,14 +2413,22 @@ def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
                    **snapshot_linkage_metadata(card)}
              for key, card in projection.pop("cards").items()}
     aliases = projection["aliases"]
+
+    def resolve_alias(ref: str) -> str:
+        seen: set[str] = set()
+        while ref not in cards and ref in aliases and ref not in seen:
+            seen.add(ref)
+            ref = aliases[ref]
+        return ref
+
     for card in cards.values():
         if isinstance(card.get("blocked_by_task_ids"), list):
             card["blocked_by_task_ids"] = [
-                aliases.get(ref, ref) if isinstance(ref, str) and ref not in cards else ref
+                resolve_alias(ref) if isinstance(ref, str) else ref
                 for ref in card["blocked_by_task_ids"]]
         parent = card.get("parent_task_id")
-        if isinstance(parent, str) and parent not in cards:
-            card["parent_task_id"] = aliases.get(parent, parent)
+        if isinstance(parent, str):
+            card["parent_task_id"] = resolve_alias(parent)
     snapshot = {"schema": "carr-progress-board.v4", "project": state["project"],
         "title": state.get("title") or "Work Requests", "kind": state.get("kind", "project"),
         "tasks": cards, "hierarchy": projection, "task_counts": activity_counts(state.get("tasks", {}), now_utc()),
