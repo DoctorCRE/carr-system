@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import { readSystemWorkCensus } from '../src/system-work-census.v5.js';
 
 const actor = { slug: 'joe', human: true };
@@ -137,4 +138,26 @@ test('empty legacy publications cannot certify absence of metadata omitted by an
  const snapshot=await boardRead({legacy:{title:'Previously compacted work'}});
  assert.equal(snapshot.snapshot_json.tasks.legacy.linkage.state,'unavailable');
  assert.equal(snapshot.snapshot_json.tasks.legacy.linkage.reason,'source_linkage_not_observed');
+});
+
+function hierarchyPublication(tasks, extra = {}) {
+ return JSON.parse(execFileSync('python3', ['-c', `import importlib.util,json,sys
+spec=importlib.util.spec_from_file_location("board","tools/progress_board.py")
+board=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(board)
+print(json.dumps(board.board_snapshot(json.load(sys.stdin),costs={})))
+`], {cwd:new URL('../..',import.meta.url),encoding:'utf8',input:JSON.stringify({
+  project:'test',work_requests:{'WR-000014':{title:'Queue ordering',description:'Keep ordering safe.'}},
+  tasks:Object.fromEntries(Object.entries(tasks).map(([id,task])=>[id,{title:'Queue ordering',work_request:'WR-000014',status:'running',...task}])),...extra
+ })}));
+}
+
+test('hierarchy publication keeps blocker and task parent references resolving after cards are rekeyed',async()=>{
+ const publication=hierarchyPublication({one:{},two:{title:'Review checks',status:'blocked',blocked_by_task_ids:['one'],parent_task_id:'one'}});
+ const read=await boardRead(publication.tasks);
+ const refs=read.snapshot_json.tasks['WR14.S1.J2'].linkage.references.filter(ref=>ref.relation==='blocked_by'||ref.ref==='WR14.S1.J1'||ref.ref==='one');
+ assert.deepEqual(refs.map(ref=>[ref.relation,ref.ref,ref.state,ref.target]),[
+  ['blocked_by','WR14.S1.J1','resolved',{board_id:'demo-project',task_id:'WR14.S1.J1'}],
+  ['parent','WR14.S1.J1','resolved',{board_id:'demo-project',task_id:'WR14.S1.J1'}]
+ ]);
 });
