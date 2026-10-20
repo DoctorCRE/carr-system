@@ -152,13 +152,15 @@ class SkillReceiptTests(unittest.TestCase):
     def test_inventory_error_prevents_executor_launch(self):
         class Registry:
             def resolve(self, name):
-                return {'kind': 'codex-session', 'thread_id': None}
+                return {'kind': kind, 'thread_id': None}
         with tempfile.TemporaryDirectory() as directory, \
              patch.object(dispatch, 'desk_skill_inventory', return_value={'available': ['tdd']}), \
              patch.object(dispatch, '_execute') as execute:
-            with self.assertRaisesRegex(dispatch.DeskError, 'not available.*grill-with-docs'):
-                dispatch.dispatch('builder', 'Skills: grill-with-docs', registry=Registry(),
-                                  results_path=Path(directory) / 'results.jsonl')
+            for kind in ('codex-session', 'claude-api'):
+                with self.subTest(kind=kind), \
+                     self.assertRaisesRegex(dispatch.DeskError, 'not available.*grill-with-docs'):
+                    dispatch.dispatch('builder', 'Skills: grill-with-docs', registry=Registry(),
+                                      results_path=Path(directory) / 'results.jsonl')
         execute.assert_not_called()
 
     def test_api_cli_send_without_inventory_executes_with_unverified_skills(self):
@@ -244,6 +246,38 @@ class SkillReceiptTests(unittest.TestCase):
         locate.assert_called_once_with('own-session', 'codex')
         scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'], until=row['completed_at'])
         self.assertFalse(value['skills'][0]['opened'])
+
+    def test_api_job_with_observed_inventory_publishes_its_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', str(root)], env=fixture_env(), check=True)
+            registry = Registry(root / 'registry.json')
+            registry.register('api-build', 'claude-api', effort='high')
+            session = 'a' * 36
+            transcript = root / 'session.jsonl'
+            transcript.write_text(json.dumps({'type': 'system', 'subtype': 'init',
+                                             'skills': ['tdd']}) + '\n')
+            prepared = {'checkout_path': str(root), 'checkout_workspace': str(root)}
+            pr = 'https://github.com/jbookout/carr-system/pull/2000'
+            with patch.object(skill_receipts, 'session_path', return_value=transcript), \
+                 patch.object(dispatch.codex_checkout, 'prepare', return_value=prepared), \
+                 patch.object(dispatch, '_source_revision', return_value='a' * 40), \
+                 patch.object(dispatch, '_execute', return_value={
+                     'status': 'completed', 'session_id': session, 'result': pr}), \
+                 patch.object(dispatch, '_skill_gh', side_effect=[
+                     {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
+                     {'html_url': pr + '#issuecomment-1'}, {}]) as gh:
+                row = dispatch.dispatch('api-build', 'Skills: tdd', registry=registry,
+                                        results_path=root / 'results.jsonl', checkout='fixture-branch')
+            self.assertEqual(row['status'], 'completed')
+            self.assertEqual(row['skill_inventory'], ['tdd'])
+            self.assertNotIn('skill_receipt_status', row)
+            self.assertNotIn('skill_receipt_error', row)
+            self.assertEqual(row['skill_receipt']['session_id'], session)
+            self.assertEqual(row['skill_receipt']['head'], 'a' * 40)
+            self.assertEqual(row['skill_receipt']['skills'],
+                             [{'skill': 'tdd', 'opened': False, 'paths': []}])
+            self.assertEqual(gh.call_args_list[2].kwargs['method'], 'POST')
 
     def test_job_revision_is_saved_before_publication_and_cannot_follow_a_new_head(self):
         class Registry:

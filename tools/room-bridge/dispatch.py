@@ -829,8 +829,9 @@ def dispatch(
     if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
         raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     inventory = desk_skill_inventory(name, entry, results_path)
+    api_without_inventory = entry['kind'] == 'claude-api' and inventory is None
     try:
-        if entry['kind'] != 'claude-remote':
+        if entry['kind'] != 'claude-remote' and not api_without_inventory:
             skill_receipts.require_skills(task, inventory)
     except ValueError as exc:
         raise DeskError('skill_unavailable', str(exc)) from exc
@@ -884,6 +885,9 @@ def dispatch(
     if entry['kind'] == 'claude-remote':
         base.update(skill_receipt_status='unverified',
                     skill_receipt_error='remote skill inventory and transcript unavailable to local observer')
+    if api_without_inventory:
+        base.update(skill_receipt_status='unverified',
+                    skill_receipt_error='API skill inventory unavailable to local observer')
     declared_writes = write_ownership.declaration(original_task, writes)
     if declared_writes and provider_run is not None:
         raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
