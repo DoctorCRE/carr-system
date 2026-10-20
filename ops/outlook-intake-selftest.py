@@ -32,8 +32,8 @@ CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTE
 CREATE TABLE event_attendees (event_id INTEGER NOT NULL, name TEXT, email TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 """
-CLIENT = intake.Contact(email='pat@example.com', ref='C-901', name='Pat Example')
-LEAD = intake.Contact(email='lee@example.org', ref='L-902', name='Lee Sample')
+CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example')
+LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
 OWNER = 'owner@' + intake.INTERNAL_DOMAIN
 PARTNER = 'partner@' + intake.INTERNAL_DOMAIN
 
@@ -171,7 +171,7 @@ class IntakeTest(unittest.TestCase):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
 
     def test_inbound_mail_from_a_known_address_logs_email_in_with_a_uuid5_key(self):
-        m = mail('pat@example.com', -timedelta(hours=1), name='Pat Example')
+        m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')
         result = self.run_intake([m])
         self.assertEqual(result.state, 'succeeded')
         [(verb, args)] = self.fake.writes('log-activity')
@@ -185,7 +185,7 @@ class IntakeTest(unittest.TestCase):
                          str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|{ident(m)}')))
 
     def test_mail_sent_from_the_internal_domain_is_email_out(self):
-        self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='lee@example.org')])
+        self.run_intake([mail(OWNER, -timedelta(hours=1), recipients='lee@example.test')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual((args['ref'], args['kind']), ('L-902', 'email_out'))
 
@@ -196,7 +196,7 @@ class IntakeTest(unittest.TestCase):
         self.assertNotIn('carr.us', self.report_text().split('## Unmatched', 1)[-1])
 
     def test_a_second_run_over_the_same_mail_writes_nothing(self):
-        mails = [mail('pat@example.com', -timedelta(hours=1))]
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
         self.run_intake(mails)
         before = len(self.fake.writes())
         result = self.run_intake(mails)
@@ -204,7 +204,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes()), before, 'each email is handled once')
 
     def test_an_unchanged_store_is_neither_copied_nor_decoded_and_calls_nothing(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         calls, decodes, models = len(self.fake.calls), self.fake.decodes, len(self.fake.model_calls)
         result = self.run_intake(touch=False)
         self.assertEqual((result.state, result.reason), ('succeeded', 'store_unchanged'))
@@ -213,21 +213,21 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.model_calls), models, 'no model call')
 
     def test_a_changed_store_with_nothing_new_is_a_quiet_success_with_no_calls(self):
-        result = self.run_intake([mail('pat@example.com', -timedelta(days=5))])
+        result = self.run_intake([mail('pat@example.test', -timedelta(days=5))])
         self.assertEqual((result.state, result.reason), ('succeeded', 'nothing_new'))
         self.assertEqual(self.fake.calls, [])
         self.assertEqual(self.fake.model_calls, [])
 
     def test_first_run_backfills_48_hours_only(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=47)),
-                         mail('lee@example.org', -timedelta(hours=49), subject='Older')])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=47)),
+                         mail('lee@example.test', -timedelta(hours=49), subject='Older')])
         self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901'])
 
     def test_late_synced_mail_inside_the_lookback_is_still_handled(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.fake.now = NOW + timedelta(minutes=30)
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1)),
-                         mail('lee@example.org', -timedelta(hours=2), subject='Delivered late')])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
+                         mail('lee@example.test', -timedelta(hours=2), subject='Delivered late')])
         self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-902'])
 
     def test_unmatched_people_are_reported_by_name_and_domain_only(self):
@@ -239,14 +239,14 @@ class IntakeTest(unittest.TestCase):
         self.assertNotIn('stranger@unknown.example', text)
 
     def test_report_and_state_are_private(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(stat.S_IMODE(self.out().stat().st_mode), 0o700)
         for path in self.out().iterdir():
             if path.is_file():
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
 
     def test_the_store_copy_and_decoded_database_are_deleted_after_a_run(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(sorted(p.name for p in self.out().iterdir() if p.is_dir()), [])
         self.assertEqual([p for p in self.out().rglob('*') if p.suffix in ('.hxd', '.db')], [])
 
@@ -272,35 +272,35 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.writes(), [])
 
     def test_an_address_shared_by_two_records_is_ambiguous(self):
-        self.fake.contacts_rows.append(intake.Contact('pat@example.com', 'L-907', 'Pat Example'))
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.fake.contacts_rows.append(intake.Contact('pat@example.test', 'L-907', 'Pat Example'))
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes(), [])
 
     def test_duplicate_copies_collapse_and_the_full_body_wins(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1), body='the whole', kind='preview',
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), body='the whole', kind='preview',
                               copy_key='k1'),
-                         mail('pat@example.com', -timedelta(hours=1) + timedelta(seconds=20),
+                         mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=20),
                               body='the whole message body', copy_key='k1')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], 'the whole message body')
 
     def test_a_sender_name_that_is_really_the_subject_or_a_file_is_dropped(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=2), name='Suite question'),
-                         mail('pat@example.com', -timedelta(hours=1), subject='Plans', name='floorplan.pdf')])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=2), name='Suite question'),
+                         mail('pat@example.test', -timedelta(hours=1), subject='Plans', name='floorplan.pdf')])
         summaries = [a['summary'] for _, a in self.fake.writes('log-activity')]
         self.assertEqual(len(summaries), 2)
         for s in summaries:
-            self.assertIn('pat@example.com', s)
+            self.assertIn('pat@example.test', s)
             self.assertNotIn('floorplan.pdf', s)
 
     def test_the_full_body_is_logged_untruncated(self):
         body = 'Paragraph one.\n\n' + 'x' * 20000
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1), body=body)])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), body=body)])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], body)
 
     def test_a_preview_only_email_logs_the_preview_and_is_listed_for_refresh(self):
-        m = mail('pat@example.com', -timedelta(hours=1), body='Can we meet Thursday at ten', kind='preview')
+        m = mail('pat@example.test', -timedelta(hours=1), body='Can we meet Thursday at ten', kind='preview')
         result = self.run_intake([m])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['detail'], 'Can we meet Thursday at ten')
@@ -311,16 +311,16 @@ class IntakeTest(unittest.TestCase):
         [entry] = json.loads(path.read_text())
         self.assertEqual(entry, {'message_id': ident(m), 'sent_utc': (NOW - timedelta(hours=1)).isoformat(),
                                  'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
-                                 'sender_email': 'pat@example.com'})
+                                 'sender_email': 'pat@example.test'})
 
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
-        preview = mail('pat@example.com', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
         self.run_intake([preview])
         path = self.out() / intake.REFRESH_LIST
         entries = json.loads(path.read_text())
         entries[0]['opened_at'] = NOW.isoformat()
         path.write_text(json.dumps(entries))
-        self.run_intake([preview, mail('pat@example.com', -timedelta(hours=1) + timedelta(seconds=5),
+        self.run_intake([preview, mail('pat@example.test', -timedelta(hours=1) + timedelta(seconds=5),
                                        body='Can we meet Thursday? Full text.', copy_key='k2')])
         self.assertEqual(json.loads(path.read_text()), [], 'refreshed email leaves the list')
         notes = [a for _, a in self.fake.writes('log-activity') if a['kind'] == 'note']
@@ -329,27 +329,58 @@ class IntakeTest(unittest.TestCase):
                          str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|C-901|fullbody|{ident(preview)}')))
         self.assertEqual(len(self.fake.writes('log-activity')), 2, 'the email itself is not logged twice')
 
+    def test_lost_preview_ack_replays_original_payload_after_full_body_arrives(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Preview', kind='preview', copy_key='lost-ack')
+        full = {**preview, 'body': 'Full body after download', 'body_kind': 'full'}
+        accepted = {}
+        original = self.fake.carr
+
+        def server(verb, args):
+            if verb not in intake.WRITE_VERBS:
+                return original(verb, args)
+            payload = json.dumps(args)
+            request_key = args['idempotency_key']
+            if request_key in accepted:
+                self.assertEqual(payload, accepted[request_key], 'same key must replay byte-identical arguments')
+                return original(verb, args)
+            accepted[request_key] = payload
+            result = original(verb, args)
+            if args.get('kind') == 'email_in':
+                raise intake.CarrError('committed, acknowledgement lost')
+            return result
+
+        self.fake.carr = server
+        self.assertEqual(self.run_intake([preview]).state, 'failed')
+        self.fake.now += timedelta(minutes=30)
+        result = self.run_intake([full])
+        self.assertEqual(result.state, 'succeeded')
+        activities = [a for _, a in self.fake.writes('log-activity')]
+        self.assertEqual([(a['kind'], a['detail']) for a in activities],
+                         [('email_in', 'Preview'), ('email_in', 'Preview'), ('note', 'Full body after download')])
+        self.assertNotEqual(activities[0]['idempotency_key'], activities[2]['idempotency_key'])
+        self.assertEqual(json.loads((self.out() / intake.REFRESH_LIST).read_text()), [])
+
     def test_triage_opened_at_survives_a_rewrite(self):
-        first = mail('pat@example.com', -timedelta(hours=2), body='Can we meet', kind='preview', copy_key='k3')
+        first = mail('pat@example.test', -timedelta(hours=2), body='Can we meet', kind='preview', copy_key='k3')
         self.run_intake([first])
         path = self.out() / intake.REFRESH_LIST
         entries = json.loads(path.read_text())
         entries[0]['opened_at'] = NOW.isoformat()
         path.write_text(json.dumps(entries))
-        self.run_intake([first, mail('lee@example.org', -timedelta(hours=1), body='Hello there', kind='preview',
+        self.run_intake([first, mail('lee@example.test', -timedelta(hours=1), body='Hello there', kind='preview',
                                      subject='Other')])
         opened = {e['message_id']: e.get('opened_at') for e in json.loads(path.read_text())}
         self.assertEqual(opened[ident(first)], NOW.isoformat())
         self.assertEqual(len(opened), 2)
 
     def test_one_model_call_per_new_matched_email_and_none_for_unmatched(self):
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1)),
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
                          mail('stranger@unknown.example', -timedelta(hours=1), subject='Spam')])
         self.assertEqual(len(self.fake.model_calls), 1)
 
     def test_a_next_step_sets_a_ball_when_none_exists(self):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': '2026-10-22'}
-        m = mail('pat@example.com', -timedelta(hours=1))
+        m = mail('pat@example.test', -timedelta(hours=1))
         self.run_intake([m])
         [(_, args)] = self.fake.writes('set-next-action')
         self.assertEqual((args['ref'], args['description'], args['due_on']),
@@ -362,7 +393,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
         self.fake.timeline['C-901'] = [{'verb': 'set-next-action', 'summary': 'ball → joe-local: call back',
                                         'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes('set-next-action'), [])
         self.assertIn('kept newer ball', self.report_text())
 
@@ -370,7 +401,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
         self.fake.timeline['C-901'] = [{'verb': 'set-next-action', 'summary': 'ball → joe: call back',
                                         'occurred_at': (NOW - timedelta(days=3)).isoformat()}]
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         [(_, args)] = self.fake.writes('set-next-action')
         self.assertEqual(args['due_on'], '2026-10-20', 'an undated step is due today, so it shows today')
         self.assertIn('replaced ball', self.report_text())
@@ -381,18 +412,18 @@ class IntakeTest(unittest.TestCase):
             {'verb': 'complete-action', 'summary': 'done', 'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
             {'verb': 'set-next-action', 'summary': 'ball → joe: call back',
              'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(len(self.fake.writes('set-next-action')), 1)
 
     def test_the_later_of_two_emails_in_one_run_owns_the_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
-        second = mail('pat@example.com', -timedelta(hours=1), subject='Second')
-        self.run_intake([mail('pat@example.com', -timedelta(hours=2), subject='First'), second])
+        second = mail('pat@example.test', -timedelta(hours=1), subject='Second')
+        self.run_intake([mail('pat@example.test', -timedelta(hours=2), subject='First'), second])
         keys = [a['idempotency_key'] for _, a in self.fake.writes('set-next-action')]
         self.assertEqual(keys[-1], str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|next|{ident(second)}')))
 
     def test_a_model_failure_logs_the_activity_fails_the_run_and_retries_the_step(self):
-        mails = [mail('pat@example.com', -timedelta(hours=1))]
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
         self.fake.model_reply = RuntimeError('model down')
         result = self.run_intake(mails)
         self.assertEqual((result.state, result.reason), ('failed', 'model_failed'))
@@ -406,7 +437,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes('set-next-action')), 1, 'the step is retried')
 
     def test_a_failed_ball_write_for_an_email_is_retried(self):
-        mails = [mail('pat@example.com', -timedelta(hours=1))]
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
         self.fake.fail_verbs = {'set-next-action'}
         first = self.run_intake(mails)
@@ -421,7 +452,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
     def test_a_failed_ball_write_for_an_upcoming_meeting_is_retried(self):
-        events = [event('G7', timedelta(days=2), attendees=[('Pat Example', 'pat@example.com')])]
+        events = [event('G7', timedelta(days=2), attendees=[('Pat Example', 'pat@example.test')])]
         self.fake.fail_verbs = {'set-next-action'}
         first = self.run_intake(events=events)
         self.assertEqual(first.state, 'failed')
@@ -436,24 +467,24 @@ class IntakeTest(unittest.TestCase):
         for when in (datetime(2026, 10, 20, 0, 0, tzinfo=local), datetime(2026, 10, 20, 6, 59, tzinfo=local),
                      datetime(2026, 10, 20, 19, 31, tzinfo=local)):
             self.fake.now = when
-            result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+            result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
             self.assertEqual((result.state, result.reason), ('skipped', 'outside_window'), when)
             self.assertEqual(intake.EXIT[result.state], 78)
         self.assertEqual((self.fake.decodes, self.fake.calls), (0, []))
         self.assertFalse((self.out() / intake.STATE).exists())
         self.fake.now = datetime(2026, 10, 20, 7, 0, tzinfo=local)
-        self.assertEqual(self.run_intake([mail('pat@example.com', -timedelta(hours=1))]).state, 'succeeded')
+        self.assertEqual(self.run_intake([mail('pat@example.test', -timedelta(hours=1))]).state, 'succeeded')
         self.fake.now = datetime(2026, 10, 20, 19, 0, 30, tzinfo=local)
-        self.assertNotEqual(self.run_intake([mail('lee@example.org', -timedelta(hours=1))]).reason, 'outside_window')
+        self.assertNotEqual(self.run_intake([mail('lee@example.test', -timedelta(hours=1))]).reason, 'outside_window')
 
     def test_calendar_objects_with_no_decoded_event_fail_without_advancing(self):
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))], identities=5, decoded=0)
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], identities=5, decoded=0)
         self.assertEqual((result.state, result.reason), ('failed', 'calendar_decode_empty'))
         self.assertEqual(self.fake.calls, [])
         self.assertFalse((self.out() / intake.STATE).exists(), 'the watermark does not move')
 
     def test_an_upcoming_meeting_is_logged_once_over_even_when_the_store_is_unchanged(self):
-        events = [event('G8', timedelta(hours=1), attendees=[('Pat Example', 'pat@example.com')])]
+        events = [event('G8', timedelta(hours=1), attendees=[('Pat Example', 'pat@example.test')])]
         self.run_intake(events=events)
         self.fake.now = NOW + timedelta(minutes=30)
         quiet = self.run_intake(events=events, touch=False)
@@ -470,7 +501,7 @@ class IntakeTest(unittest.TestCase):
             os.chmod(locked, 0o500)
             self.addCleanup(os.chmod, locked, 0o700)
         self.fake.on_decode = jam
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual((result.state, result.reason), ('failed', 'cleanup_failed'))
         self.assertEqual(self.fake.calls, [])
 
@@ -480,27 +511,27 @@ class IntakeTest(unittest.TestCase):
             path = self.out() / name
             path.write_text('[]' if name == intake.REFRESH_LIST else '{}')
             os.chmod(path, 0o644)
-        self.run_intake([mail('pat@example.com', -timedelta(hours=1), kind='preview', body='Can we meet')])
+        self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', body='Can we meet')])
         for path in self.out().iterdir():
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
 
     def test_a_malformed_model_reply_sets_no_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': 'next tuesday'}
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(self.fake.writes('set-next-action'), [])
         self.assertEqual(result.counts['model_failed'], 1)
 
     def test_a_past_meeting_logs_a_meeting_and_a_tour_title_logs_a_tour(self):
         self.run_intake(events=[
-            event('G1', -timedelta(hours=3), attendees=[('Pat Example', 'pat@example.com')]),
-            event('G2', -timedelta(hours=6), subject='Tour of Elm suite', attendees=[('Lee Sample', 'lee@example.org')])])
+            event('G1', -timedelta(hours=3), attendees=[('Pat Example', 'pat@example.test')]),
+            event('G2', -timedelta(hours=6), subject='Tour of Elm suite', attendees=[('Lee Sample', 'lee@example.test')])])
         kinds = {a['ref']: a['kind'] for _, a in self.fake.writes('log-activity')}
         self.assertEqual(kinds, {'C-901': 'meeting', 'L-902': 'tour'})
         key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"log-activity|C-901|G1|{ts(-timedelta(hours=3))}"))
         self.assertIn(key, [a['idempotency_key'] for _, a in self.fake.writes('log-activity')])
 
     def test_an_upcoming_meeting_sets_a_dated_ball(self):
-        self.run_intake(events=[event('G3', timedelta(days=2), attendees=[('Pat Example', 'pat@example.com')])])
+        self.run_intake(events=[event('G3', timedelta(days=2), attendees=[('Pat Example', 'pat@example.test')])])
         [(_, args)] = self.fake.writes('set-next-action')
         self.assertEqual(args['due_on'], '2026-10-22')
         self.assertIn('Pat Example', args['description'])
@@ -508,14 +539,14 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.fake.writes('log-activity'), [])
 
     def test_meetings_beyond_seven_days_are_skipped_and_an_outside_organizer_counts(self):
-        self.run_intake(events=[event('G4', timedelta(days=9), attendees=[('Pat Example', 'pat@example.com')]),
-                                event('G5', timedelta(days=1), organizer=('Pat Example', 'pat@example.com'))])
+        self.run_intake(events=[event('G4', timedelta(days=9), attendees=[('Pat Example', 'pat@example.test')]),
+                                event('G5', timedelta(days=1), organizer=('Pat Example', 'pat@example.test'))])
         [(_, args)] = self.fake.writes('set-next-action')
         self.assertIn('Site visit', args['description'])
         self.assertEqual(args['ref'], 'C-901')
 
     def test_an_upcoming_meeting_becomes_an_activity_once_it_is_over(self):
-        events = [event('G6', timedelta(hours=1), attendees=[('Pat Example', 'pat@example.com')])]
+        events = [event('G6', timedelta(hours=1), attendees=[('Pat Example', 'pat@example.test')])]
         self.run_intake(events=events)
         self.fake.now = NOW + timedelta(hours=3)
         self.run_intake(events=events)
@@ -526,7 +557,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(len(self.fake.writes('log-activity')), 1, 'once only')
 
     def test_low_verification_fails_without_calling_the_record_layer(self):
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))], found=1000, verified=900)
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1))], found=1000, verified=900)
         self.assertEqual((result.state, result.reason), ('failed', 'store_verification_low'))
         self.assertEqual(self.fake.calls, [])
 
@@ -550,17 +581,17 @@ class IntakeTest(unittest.TestCase):
             raise intake.CarrError('views unreachable')
         ports = self.fake.ports()
         ports.contacts = down
-        write_db(self.fake.fixture, [mail('pat@example.com', -timedelta(hours=1))])
+        write_db(self.fake.fixture, [mail('pat@example.test', -timedelta(hours=1))])
         result = intake.run(self.repo, self.home, ports)
         self.assertEqual((result.state, result.reason), ('failed', 'carr_unreachable'))
 
     def test_a_failed_write_fails_the_run_and_is_retried_next_time(self):
         self.fake.fail_verbs = {'log-activity'}
-        first = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        first = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual((first.state, first.reason), ('failed', 'writes_failed'))
         self.fake.fail_verbs = set()
         self.fake.now = NOW + timedelta(minutes=30)
-        second = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        second = self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(second.state, 'succeeded')
         keys = [a['idempotency_key'] for v, a in self.fake.calls if v == 'log-activity']
         self.assertEqual(len(keys), 2)
@@ -575,9 +606,9 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(intake.EXIT[result.state], 78)
 
     def test_the_status_line_carries_no_mail_content(self):
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1), name='Pat Example')])
+        result = self.run_intake([mail('pat@example.test', -timedelta(hours=1), name='Pat Example')])
         line = intake.status_line(result)
-        for secret in ('pat@example.com', 'Pat Example', 'Suite question', 'C-901'):
+        for secret in ('pat@example.test', 'Pat Example', 'Suite question', 'C-901'):
             self.assertNotIn(secret, line)
         self.assertTrue(line.startswith('outlook-intake succeeded'))
 
