@@ -4851,7 +4851,7 @@ export const TOOLS = {
   },
 
   "set-prospect-engagement-status": {
-    write: true,
+    write: true, humanOnly: true,
     description: "Move a prospect between the deal board and the existing Leads pipeline atomically. Inactive uses nurture_drip; active uses opportunity. Preserves deals, suppression, history and audit. Requires a fresh client version from deal-room-board or the Leads workspace.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, client_id: { type: "string" },
@@ -4860,6 +4860,7 @@ export const TOOLS = {
       required: ["idempotency_key","client_id","base_version","status","reason"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-prospect-engagement-status", args, async () => {
       if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_confirmation_required" });
       if (!["active","inactive"].includes(args.status))
         throw new ToolError({ error: "invalid_engagement_status", allowed: ["active","inactive"] });
       if (typeof args.reason !== "string" || !args.reason.trim())

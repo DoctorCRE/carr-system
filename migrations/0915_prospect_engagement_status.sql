@@ -4,6 +4,19 @@ ALTER TABLE public.client ADD COLUMN prospect_engagement_status text NOT NULL DE
   CHECK (prospect_engagement_status IN ('active','inactive'));
 COMMENT ON COLUMN public.client.prospect_engagement_status IS
   'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
+
+-- The constant default backfills existing rows without changing their versions.
+-- Record each live prospect's initialization separately from partner choices.
+INSERT INTO public.event (occurred_at,actor_id,verb,subject_type,subject_id,
+                          field,old_value,new_value,cause,agent_rationale,idempotency_key)
+SELECT now(),(SELECT id FROM public.actor WHERE slug='system'),
+       'backfill-prospect-engagement-status','client',c.id,
+       'prospect_engagement_status',NULL,
+       jsonb_build_object('prospect_engagement_status',c.prospect_engagement_status),
+       'import_migration','0915: preserve existing prospects until an explicit partner engagement choice',
+       '0915:prospect-engagement:' || c.id::text
+FROM public.client c WHERE c.status='prospect' AND c.merged_into IS NULL;
+
 CREATE VIEW public.v_client_engagement_status AS
 SELECT id AS client_id, status AS client_status, version AS client_version,
        prospect_engagement_status

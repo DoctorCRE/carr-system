@@ -69,7 +69,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role carr_writer; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move']) {
+    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
@@ -79,6 +79,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('create trigger client_touch before update on client for each row execute function trg_touch_row()');
     await c.query('create trigger lead_touch before update on lead for each row execute function trg_touch_row()');
     await c.query('create sequence ref_lead_seq start 900000');
+    await c.query('create sequence ref_client_seq start 900000');
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
     for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail']) {
@@ -110,6 +111,31 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
+      await c.query("update client set status='prospect'");
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values($1,$2,'Synthetic Parked Assignment','renewal','research','parked','other','Synthetic hold',now(),$3,$3,$3)",[id(31),id(3),actor.id]);
+      await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
+      await c.query('alter table client drop column prospect_engagement_status cascade');
+      const previousBoard = readFileSync(path.join(root,'migrations/0782_deal_invoice_read_fields.sql'),'utf8')
+        .match(/create or replace view v_deal_room_board as[\s\S]*?;/)[0];
+      await c.query(previousBoard);
+      const before = (await c.query('select * from v_deal_room_board order by id')).rows;
+      assert.deepEqual(before.map(d=>d.id),[id(4),id(31)]);
+      const clientsBefore = (await c.query('select id,status,version,updated_by from client order by id')).rows;
+      await c.query(readFileSync(path.join(root,'migrations/0915_prospect_engagement_status.sql'),'utf8'));
+      assert.deepEqual((await c.query('select * from v_deal_room_board order by id')).rows,before);
+      assert.deepEqual((await c.query('select id,status,version,updated_by from client order by id')).rows,clientsBefore);
+      assert.deepEqual((await c.query('select prospect_engagement_status from client order by id')).rows,
+        [{prospect_engagement_status:'active'},{prospect_engagement_status:'active'}]);
+      assert.deepEqual((await c.query(`select subject_id,actor_id,cause,field,old_value,new_value,idempotency_key
+        from event where verb='backfill-prospect-engagement-status' order by subject_id`)).rows,
+        [id(3),id(6)].map(subject_id=>({subject_id,actor_id:id(99),cause:'import_migration',
+          field:'prospect_engagement_status',old_value:null,new_value:{prospect_engagement_status:'active'},
+          idempotency_key:`0915:prospect-engagement:${subject_id}`})));
+    }));
+
     await t.test('pending migration installs active-only board membership and reader grants on the previous schema', async () => transaction(async () => {
       await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
       await c.query('alter table client drop column prospect_engagement_status cascade');
@@ -122,6 +148,31 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals,[]);
       await c.query('set local role carr_reader');
       assert.deepEqual((await c.query('select * from v_lead_prospect_engagement')).rows,[]);
+    }));
+
+    await t.test('a new prospect created over a lead starts active and appears on the board', async () => transaction(async () => {
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Intake',$2,$2)",[id(2),actor.id]);
+      const lead = await executeRegisteredTool(c,actor,'new-lead',{
+        party_id:id(2),stage:'opportunity',idempotency_key:'synthetic-intake-lead'});
+      const client = await executeRegisteredTool(c,actor,'new-client',{
+        party_id:id(2),status:'prospect',acquisition_source:'other',idempotency_key:'synthetic-intake-client',
+        research_evidence:{sources:[{url:'https://example.com/synthetic',observed_at:'2026-01-01T00:00:00Z'}],
+          field_evidence:{practice_name:[0],address:[0],phone:[0],specialty:[0],practitioners:[0],hours:[0]},discrepancies:[]}});
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Synthetic Intake Assignment','renewal','research','joe',$3,$3)",[id(4),client.client_id,actor.id]);
+      const board = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals;
+      assert.deepEqual(board.map(d=>[d.id,d.client_id,d.prospect_engagement_status]),[[id(4),client.client_id,'active']]);
+      assert.equal((await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads[0].id,lead.lead_id);
+    }));
+
+    await t.test('automation cannot mark a prospect inactive without partner authority', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      await assert.rejects(TOOLS['set-prospect-engagement-status'].handler(c,{...actor,human:false,slug:'automation'}, {
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic automated inference',idempotency_key:'synthetic-automation'
+      }),e=>e.payload?.error==='human_confirmation_required');
+      assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.length,1);
+      assert.deepEqual((await c.query('select * from lead')).rows,[]);
+      assert.deepEqual((await c.query('select * from event')).rows,[]);
     }));
 
     await t.test('inactive prospects return to Leads and active prospects return to their existing deals', async () => transaction(async () => {
