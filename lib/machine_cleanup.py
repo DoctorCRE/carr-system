@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import uuid
 
-from branch_retirement import GitHub, git, command, process_paths, save
+from branch_retirement import GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
 from job_watchdog import epoch
 
 
@@ -33,12 +33,12 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
             provider.verify_repository(repo, clone)
         except RuntimeError:
             return keep('repository identity unavailable or outside authorized cleanup scope')
-        git(clone, 'fetch', '--prune', 'origin')
+        fetch_remote_refs(clone)
         head = git(clone, 'rev-parse', 'HEAD')
         branch = git(clone, 'symbolic-ref', '--quiet', '--short', 'HEAD', allowed=(0, 1))
         if git(clone, 'status', '--porcelain=v1', '--untracked-files=all'):
             return keep('uncommitted work')
-        if git(clone, 'rev-list', '-1', 'HEAD', '--not', '--remotes=origin'):
+        if not remote_preserves(clone):
             return keep('unpushed work')
         busy = process_probe([str(workspace)])
         if busy is None or busy:
@@ -62,12 +62,13 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         if (evidence_branch and provider.open_pulls(repo, evidence_branch) or
                 not branch and any(p['state'] == 'open' for p in provider.commit_pulls(repo, head))):
             return keep('open PR appeared before staging')
+        fetch_remote_refs(clone)
         busy = process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
                 identity != (workspace.stat().st_ino, clone.stat().st_ino) or
                 git(clone, 'rev-parse', 'HEAD') != head or
                 git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
-                git(clone, 'rev-list', '-1', 'HEAD', '--not', '--remotes=origin')):
+                not remote_preserves(clone)):
             return keep('checkout became live or changed before staging')
         reason = 'merged branch' if merged else 'closed PR' if closed else 'old clean pushed checkout'
         if dry_run:

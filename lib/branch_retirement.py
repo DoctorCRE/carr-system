@@ -38,6 +38,20 @@ def git(root, *args, **kwargs):
     return command(["git", "-C", str(root), *args], **kwargs).stdout.strip()
 
 
+REMOTE_REFS = "refs/carr-cleanup/origin/"
+
+
+def fetch_remote_refs(root):
+    # Keep remote evidence separate from unpublished or stale local tags.
+    git(root, "--no-replace-objects", "fetch", "--prune", "--no-tags", "origin",
+        "+refs/heads/*:refs/remotes/origin/*", "+refs/*:" + REMOTE_REFS + "*")
+
+
+def remote_preserves(root, head="HEAD"):
+    return bool(git(root, "--no-replace-objects", "for-each-ref", "--contains=" + head,
+                    "--count=1", "--format=%(refname)", REMOTE_REFS))
+
+
 def git_records(root, *args, separator=b"\0"):
     with tempfile.TemporaryFile() as errors:
         proc = subprocess.Popen(["git", "-C", str(root), *args], stdout=subprocess.PIPE,
@@ -373,7 +387,7 @@ class FleetReaper:
     def snapshot(self, repo, root, skip=(), after=""):
         root = Path(root).resolve()
         self.provider.verify_repository(repo, root)
-        git(root, "fetch", "--prune", "origin")
+        fetch_remote_refs(root)
         main = git(root, "rev-parse", "refs/remotes/origin/main")
         pulls = self.provider.pulls(repo)
         merged = [p for p in pulls if p.get("merged_at") and p["base"]["ref"] == "main"
@@ -420,7 +434,7 @@ class FleetReaper:
     def iter_tree_snapshot(self, repo, root, skip=(), after=""):
         root = Path(root).resolve()
         self.provider.verify_repository(repo, root)
-        git(root, "fetch", "--prune", "origin")
+        fetch_remote_refs(root)
         main = git(root, "rev-parse", "refs/remotes/origin/main")
         yield from self.tree_rows(repo, root, main, None, skip, after)
 
@@ -480,7 +494,7 @@ class FleetReaper:
                                   "merged" if self.ancestor(root, entry.get("head", ""), main) else "abandoned")
             if status:
                 reasons.append("uncommitted work")
-            elif git(path, "rev-list", "-1", "HEAD", "--not", "--remotes=origin"):
+            elif not remote_preserves(path):
                 reasons.append("unpushed work")
             elif index_age is None or tree_age is None or min(index_age, tree_age) < self.tree_idle:
                 reasons.append("recent writes or unknown age")
@@ -626,6 +640,8 @@ class FleetReaper:
 
     def _apply(self, repo, root, row, skip):
         self.provider.verify_repository(repo, root)
+        if row["action"] == "stage_worktree":
+            fetch_remote_refs(root)
         advertised = git(root, "ls-remote", "--heads", "origin", "refs/heads/main").split()
         if not advertised or advertised[0] != row["main"]:
             if advertised and row["action"] == "delete_remote":
