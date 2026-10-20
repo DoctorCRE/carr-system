@@ -65,7 +65,7 @@ def unavailable(entry, results, limits):
 def select(registry, results):
     order = list(ORDER)
     if os.environ.get('CARR_BUSINESS_FLASH_ENABLED', '0') == '1' and not flashlib.is_switched_off():
-        order.insert(2, 'flash-local')
+        order.append('flash-local')
     route = {'chosen': None, 'skips': []}
     entries = registry.entries()
     try:
