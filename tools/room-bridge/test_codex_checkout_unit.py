@@ -147,6 +147,24 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertEqual(self.git('log', '-1', '--format=%s', cwd=row['checkout_path']), 'fix')
         self.assertFalse((self.source / 'fixed.py').exists())
 
+    def test_grok_checkout_job_gets_the_job_deadline_not_the_reply_deadline(self):
+        # 2026-10-20: Grok reviews dispatched with a checkout died at the
+        # 180-second room-reply limit (grok_cli_timeout).
+        self.reg.register('grok-reviewer', 'grok-cli', model='grok-9.2', cwd=str(self.source))
+        seen = {}
+        def provider(argv, **options):
+            seen.update(options)
+            end = {'type': 'end', 'stopReason': 'end_turn', 'requestId': 'r', 'sessionId': 's',
+                   'modelUsage': {'grok-9.2-build': {'modelCalls': 1}}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps({'type': 'text', 'data': 'Reviewed'})
+                + '\n' + json.dumps(end), '')
+        row = dispatch.dispatch('grok-reviewer', 'review it', registry=self.reg,
+            results_path=self.results, env=self.env, checkout='new:grok-review',
+            provider_run=provider, codex_timeout_s=7200)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        self.assertEqual(row['status'], 'completed')
+        self.assertEqual(seen['timeout'], 7200)
+
     def test_resumed_thread_keeps_cwd_and_names_checkout(self):
         self.reg.remember_thread('cx', 'old-thread')
         row = self.send(checkout='repair')
