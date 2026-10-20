@@ -40,6 +40,11 @@ class CaptureFake {
   async query(text, params = []) {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql === "select next_date::text as next_date from deal where id=$1")
+      return { rows: [{ next_date: this.nextDate ?? null }] };
+    if (sql.includes("dealroom:set-next-date")) { this.nextDate = params[1]; return { rows: [] }; }
+
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))

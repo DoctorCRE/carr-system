@@ -126,6 +126,13 @@ class FakeDB {
   }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql === "select next_date::text as next_date from deal where id=$1")
+      return { rows: [{ next_date: this.nextDate ?? null }] };
+    if (sql.includes("dealroom:set-next-date")) {
+      this.nextDate = params[1];
+      return { rows: [] };
+    }
     if (sql.startsWith("select request_hash, response")) {
       const prior = this.calls.get(params[0]);
       return { rows: prior ? [prior] : [] };

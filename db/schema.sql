@@ -89470,7 +89470,10 @@ CREATE VIEW public.v_deal_room_board AS
           ORDER BY n.updated_at DESC, n.id DESC
          LIMIT 1), ( SELECT n.text
            FROM public.deal_note n
-          WHERE ((n.deal_id = d.id) AND (n.kind = 'next_step'::text))
+          WHERE ((n.deal_id = d.id) AND (n.kind = 'next_step'::text) AND NOT EXISTS (
+            SELECT 1 FROM public.event e
+             WHERE e.subject_type='deal' AND e.subject_id=d.id AND e.field='next_step'
+               AND e.new_value ? 'superseded_action_ids' AND e.recorded_at >= n.created_at))
           ORDER BY n.created_at DESC, n.id DESC
          LIMIT 1)) AS next_step,
     d.city AS market,
@@ -122903,6 +122906,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
+0915_deal_status_next_step.sql	cfc5a3df1c8ef5ffb2ba88a7a79cb5f31bfe4f7e043e41a3afd6b622f55cf69e	2026-10-20 17:17:31+00
 \.
 
 

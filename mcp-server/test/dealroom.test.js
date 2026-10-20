@@ -97,6 +97,15 @@ class FakeClient {
       return { rows };
     }
     if (sql.includes("dealroom:field-lock")) return { rows: [{}] };
+    if (sql.includes("dealroom:status-plan")) {
+      const deal = this.deals.get(params[0]);
+      const action = this.nextActions.filter(a => a.status === "open" && a.subject_id === params[0])
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id))[0];
+      return { rows: [{ next_date: deal.next_date, overdue: !!deal.next_date && deal.next_date < this.now.toISOString().slice(0,10),
+        owner: deal.owner, action_id: action?.id ?? null, next_step: action?.description ?? null }] };
+    }
+    if (sql.includes("dealroom:supersede-overdue")) return { rows: [] };
+
     if (sql.includes("dealroom:close-lead") || sql.includes("dealroom:open-lead")) return { rows: [] };
     if (sql === "select id from actor where slug=$1")
       return { rows: [{ id: actors[params[0]].id }] };
@@ -831,7 +840,8 @@ test("reconciliation reads provide a guarded Salesforce key and verify a closed 
     idempotency_key: "close-from-sf", deal: "Deal Alpha", base_version: before.base_version,
     fields: { phase: "closed", outcome: "won", closed_on: "2026-07-30" },
   });
-  assert.deepEqual(updated, { ok: true, updated: ["phase", "outcome", "closed_on"] });
+  assert.deepEqual(updated, { ok: true, updated: ["phase", "outcome", "closed_on"], next_step_required: true,
+    prompt: "Doc needs the new next step and date for this deal. Use set-next-step to record both." });
 
   const after = await call("read-deal-reconciliation", db, actors.joe, { deal: "Deal Alpha" });
   assert.deepEqual(after, { id: ids.deal, name: "Deal Alpha", salesforce_id: "006PQ00000hXMNaYAO",
