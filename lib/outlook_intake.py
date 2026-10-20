@@ -461,6 +461,9 @@ class Run:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
                                                 'subject_hash': _hash(m['subject'] or '')})
+            steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
+                                           'who': who, 'outbound': outbound,
+                                           'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
             ok = all([self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
@@ -471,8 +474,6 @@ class Run:
             done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
-            steps[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0], 'who': who,
-                                 'outbound': outbound}
 
     def next_steps(self, mails: list[dict]) -> None:
         """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
@@ -481,6 +482,9 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            if not all(self.state['requests'].get(k, {}).get('acknowledged') for k in s.get('activity_keys', [])):
+                self.counts['steps_pending'] += 1
+                continue
             if 'reply' not in s:
                 found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
                 if not found:
