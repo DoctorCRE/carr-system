@@ -26,7 +26,7 @@ spec.loader.exec_module(fixture)
 class GrokBootTests(unittest.TestCase):
     def test_desk_boot_uses_job_state_with_read_only_live_checkout(self):
         with tempfile.TemporaryDirectory() as tmp:
-            live, job = Path(tmp) / 'live', Path(tmp) / 'job'
+            live, job = Path(tmp).resolve() / 'live', Path(tmp).resolve() / 'job'
             job.mkdir()
             for name in ('hooks/rule-boot-gate.py', 'hooks/grok_invocation.py',
                          'lib/rule_boot_gate.py', 'lib/hook_runtime.py'):
