@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Capacity retry receipts through dispatch, without a live model."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -63,6 +64,28 @@ class CapacityTests(unittest.TestCase):
         self.assertFalse(row['termination_confirmed'])
         self.assertEqual(len(calls), 1)
         sleep.assert_not_called()
+
+    def test_revision_child_exit_does_not_add_capacity_backoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = Path(tmp) / 'git'
+            git.write_text(f'#!{sys.executable}\n'
+                           'import os, time\n'
+                           f'os.write(1, {("a" * 40 + chr(10)).encode()!r})\n'
+                           'os.close(1)\nos.close(2)\ntime.sleep(0.02)\n')
+            git.chmod(0o755)
+            cases = [
+                (2, 'Selected model is at capacity', True, [(300,), (300,)]),
+                (10, 'Selected model is at capacity', True, [(300,)] * 5),
+                (10, 'connection lost after starting work', True, []),
+                (10, 'Selected model is at capacity', False, []),
+            ]
+            for failures, detail, terminated, waits in cases:
+                with self.subTest(detail=detail, terminated=terminated, failures=failures), \
+                     patch.dict(os.environ, {'PATH': tmp + os.pathsep + os.environ['PATH']}):
+                    row, calls, sleep = self.send(failures, detail, terminated)
+                    self.assertEqual(row['source_revision'], 'a' * 40)
+                    self.assertEqual(len(calls), len(waits) + 1)
+                    self.assertEqual([call.args for call in sleep.call_args_list], waits)
 
 
 if __name__ == '__main__':
