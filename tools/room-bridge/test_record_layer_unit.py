@@ -70,6 +70,48 @@ class WireTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertFalse(Path(calls[0][1]['env']['HOME']).exists())
 
+    def test_codex_failed_or_unproven_canaries_refuse_before_the_brief(self):
+        for output, failed in [
+                ('{"file_write":"allowed","network":"denied"}', 'file_write'),
+                ('{"file_write":"denied","network":"allowed"}', 'network'),
+                ('{"file_write":"denied","network":"inconclusive"}', 'network'),
+                ('{}', 'file_write'), ('[]', 'file_write'), ('not json', 'file_write'),
+                (subprocess.TimeoutExpired('codex sandbox', 2), 'file_write/network')]:
+            with self.subTest(output=output):
+                run = Mock(side_effect=output if isinstance(output, Exception) else None,
+                           return_value=subprocess.CompletedProcess([], 0, output, ''))
+                with self.assertRaises(desks.DeskError) as refused:
+                    dispatch._to_codex({'posture': 'record-layer'},
+                        'Draft for someone@example.test.', env={
+                            'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic'}, provider_run=run)
+                self.assertEqual(refused.exception.code, 'record_layer_canary_failed')
+                self.assertIn(failed, str(refused.exception))
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[0][1], 'sandbox')
+
+    def test_codex_requires_explicit_auth_and_exact_endpoint_without_retry(self):
+        for env, code in [({}, 'record_layer_auth_missing'),
+                ({'CODEX_API_KEY': 'synthetic'}, 'record_layer_auth_missing'),
+                ({'CARR_MCP_TOKEN': 'synthetic'}, 'record_layer_auth_missing'),
+                *[({'CARR_MCP_URL': url}, 'untrusted_carr_endpoint') for url in (
+                    'https://other.example.test/mcp', 'https://api.doctorcre.com.example.test/mcp',
+                    'http://api.doctorcre.com/mcp', 'https://api.doctorcre.com:8443/mcp',
+                    'https://api.doctorcre.com/other')]]:
+            with self.subTest(env=env):
+                run = Mock()
+                with self.assertRaises(desks.DeskError) as refused:
+                    dispatch._to_codex({'posture': 'record-layer'}, 'Synthetic.', env=env, provider_run=run)
+                self.assertEqual(refused.exception.code, code)
+                run.assert_not_called()
+
+    def test_codex_business_profile_rejects_caller_config_overrides(self):
+        run = Mock()
+        with self.assertRaises(desks.DeskError) as refused:
+            dispatch._to_codex({'posture': 'record-layer'}, 'Synthetic.', env={}, provider_run=run,
+                              config_overrides=('sandbox_mode="danger-full-access"',))
+        self.assertEqual(refused.exception.code, 'bad_codex_config')
+        run.assert_not_called()
+
     def test_grok_refuses_before_catalog_or_model_launch(self):
         run = Mock(return_value=subprocess.CompletedProcess([], 1, '', ''))
         with self.assertRaisesRegex(desks.DeskError, 'Grok.*MCP'):
