@@ -1454,7 +1454,7 @@ class Queue:
             with self.db:
                 self.db.execute('UPDATE actions SET phase=? WHERE key=?',
                                 ('exhausted' if a['attempts'] >= MAX_ATTEMPTS else 'planned', key))
-                self.event(a['repo'], a['pr'], 'action_reconciled', 'Verified retry after current head/base/label and regeneration remote readback; next effect remains expected-head guarded')
+                self.event(a['repo'], a['pr'], 'action_reconciled', 'Verified retry after current action readback; next effect remains expected-head guarded')
             if a['attempts'] < MAX_ATTEMPTS:
                 self.resume_action_entries(a)
 
