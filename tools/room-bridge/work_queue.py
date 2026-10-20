@@ -212,6 +212,10 @@ class WorkQueue:
             "SELECT 1 FROM stage_runs WHERE card_id=? AND stage='merging' "
             'AND started_at IS NOT NULL AND finished_at IS NULL', (card,)).fetchone() is not None
 
+    def _merge_inflight(self, card, data):
+        # Older active runs did not record pins, so retain ownership conservatively.
+        return data.get('merge_inflight', data['prs'] if self._merge_active(card) else [])
+
     def _stage(self, card, stage, ready):
         if self._item(card)['stage'] != 'merging' or not self._merge_active(card):
             self._end_stage(card)
@@ -297,6 +301,13 @@ class WorkQueue:
                 raise ValueError('merge head differs from pinned work card')
             if row['stage'] != 'merging':
                 raise ValueError('merge executor can start only a merging-stage card')
+            data = json.loads(row['data'])
+            inflight = self._merge_inflight(card, data)
+            owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
+            if owned != data.get('merge_inflight'):
+                data['merge_inflight'] = owned
+                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+                self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
             run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
             if run['started_at'] is None:
                 at = timestamp()
@@ -312,10 +323,10 @@ class WorkQueue:
             if self._merge_entries() != expected_order:
                 raise QueueChanged('merge order changed before pin advancement')
             row = self._item(card)
-            if row['claim'] or row['stage'] != 'merging' or self._merge_active(card):
-                raise QueueChanged('pin advancement requires an unstarted merging-stage card')
             data = json.loads(row['data'])
             pin = {'repo': repo, 'number': pr, 'head': head}
+            if row['claim'] or row['stage'] != 'merging' or pin in self._merge_inflight(card, data):
+                raise QueueChanged('pin advancement requires a merging-stage pin without an in-flight merge')
             if pin not in data['prs'] or pin in data.get('merge_receipts', []) or pin in data.get('merge_stopped', []):
                 raise QueueChanged('regeneration no longer matches an unfinished pinned PR')
             replacement = {**pin, 'head': prepared}
@@ -334,6 +345,7 @@ class WorkQueue:
             pin = {'repo': repo, 'number': pr, 'head': head}
             if pin not in data['prs']:
                 raise ValueError('merge receipt does not match a pinned PR')
+            data['merge_inflight'] = [p for p in self._merge_inflight(card, data) if p != pin]
             receipts = data.setdefault('merge_receipts', [])
             if merged and pin not in receipts:
                 receipts.append(pin)
@@ -368,6 +380,7 @@ class WorkQueue:
                 self._validate_merge(data)
                 data.pop('merge_receipts', None)
                 data.pop('merge_stopped', None)
+                data.pop('merge_inflight', None)
                 self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
             self._stage(card, stage, False)
             self._event(card, self._state(old), self._state(self._item(card)), actor, reason, 'stage')
