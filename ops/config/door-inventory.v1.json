@@ -39,6 +39,12 @@
       "evidence": "ops/accept-doctorcre-bundle.sh header (added 7c75c878, #853)"
     },
     {
+      "path": "ops/audit-pr-skills.mjs",
+      "class": "hand_tool",
+      "reason": "A person runs this offline audit on a saved GitHub PR export and local repository histories to compare skill declarations and evidence across CARR and DoctorCRE PRs.",
+      "evidence": "ops/audit-pr-skills.mjs CLI takes SOURCE CARR_GIT APP_GIT OUTPUT; ops/fixtures/skill-audit-1915-1957.json records the audit results."
+    },
+    {
       "path": "ops/atomic-rule-approval-authority-probe.py",
       "class": "one_shot",
       "reason": "Disposable-local rollback proof that enforced-only human rule approval is atomic, run once when that approval path landed.",
