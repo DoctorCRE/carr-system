@@ -261,13 +261,19 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                         # The interrupted effect did not happen. Revisit dispatch evidence normally.
                         recovered = {**recovered, 'status': 'verified_no_effect',
                                      'reason': 'interrupted thread archive had no effect'}
+                    if recovered.get('status') == 'archived' and 'thread_offset' in pending:
+                        cursor['thread_offset'] = pending['thread_offset']
                     if recovered.get('error'):
                         raise RuntimeError('interrupted thread archive readback failed')
                 else:
                     raise RuntimeError('unknown pending cleanup kind')
+                if recovered and recovered.get('budget_exhausted'):
+                    report.update(budget_exhausted=True, pending=pending)
+                    report['deferred'].append(recovered)
+                    return finish()
                 append(root / 'out/machine-cleanup-recovery.jsonl',
                        {'previous': previous, 'resolution': recovered, 'at': now})
-            except BudgetExhausted:
+            except (TimeoutError, subprocess.TimeoutExpired):
                 report.update(budget_exhausted=True, pending=pending)
                 return finish()
             except Exception as exc:
@@ -279,6 +285,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         save(receipt_path, report)
 
         def record(row):
+            report['budget_exhausted'] |= row.get('budget_exhausted', False)
             if row.get('kind') == 'test_temp' and row.get('status') == 'staged':
                 report['temp_staged_allocated_bytes'] += row['allocated_bytes']
             collection = ('deferred' if row.get('status') == 'deferred' else
@@ -366,7 +373,6 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             if not row.get('error') and not row.get('budget_exhausted'):
                 cursor['clone'] = workspace.name
             record(row)
-            report['budget_exhausted'] |= row.get('budget_exhausted', False)
             if row.get('error') or row.get('budget_exhausted'):
                 break
         else:
@@ -406,7 +412,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                             result = {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'reason': 'recent dispatch'}
                         else:
                             report['pending'] = {'kind': 'thread', 'thread_id': tid,
-                                                 'before': now - policy['thread_age_seconds']}
+                                                 'before': now - policy['thread_age_seconds'],
+                                                 'thread_offset': stream.tell()}
                             save(receipt_path, report)
                             if time.monotonic() >= deadline:
                                 report.pop('pending', None)
@@ -415,12 +422,13 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                             result = archive_thread(tid, before=now - policy['thread_age_seconds'],
                                 process_probe=process_probe, timeout=min(30, max(.1, deadline - time.monotonic())),
                                 dry_run=dry_run)
-                        if not result.get('error'):
+                        if not result.get('error') and not result.get('budget_exhausted'):
                             cursor['thread_offset'] = stream.tell()
                         record(result)
-                        if result.get('error'):
+                        if result.get('error') or result.get('budget_exhausted'):
                             break
                     else:
                         cursor['thread_offset'] = stream.tell()
                         save(cursor_path, cursor)
+                report['budget_exhausted'] |= processed >= policy['max_items']
         return finish()
