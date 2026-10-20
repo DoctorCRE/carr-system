@@ -67,7 +67,7 @@ class PrepareTests(unittest.TestCase):
                     prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
         self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
         self.assertRegex(diagnostics.getvalue(), r'push result=timeout elapsed_seconds=[0-9.]+ timeout_seconds=0.1')
-        self.assertIn('seeded-receive-wait', diagnostics.getvalue())
+        self.assertIn('prepare-pr: push stderr:', diagnostics.getvalue())
         hook.unlink()
         diagnostics = io.StringIO()
         with patch.dict(os.environ, {'CARR_PREPARE_PUSH_TIMEOUT_SECONDS': '5'}):
@@ -75,6 +75,22 @@ class PrepareTests(unittest.TestCase):
                 prepared = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
         self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), prepared)
         self.assertRegex(diagnostics.getvalue(), r'push result=success elapsed_seconds=[0-9.]+ timeout_seconds=5')
+
+    def test_timeout_keeps_redacted_partial_stderr(self):
+        real_git = prepare_pr.git
+        def interrupted(repo, *args, **kwargs):
+            if args[0] == 'push':
+                raise subprocess.TimeoutExpired(['git', 'push'], 300,
+                    stderr=b'seeded receive phase opaque-fixture-value')
+            return real_git(repo, *args, **kwargs)
+        diagnostics = io.StringIO()
+        with patch.dict(os.environ, {'GH_TOKEN': 'opaque-fixture-value'}):
+            with patch.object(prepare_pr, 'git', interrupted), contextlib.redirect_stderr(diagnostics):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
+        self.assertIn('seeded receive phase', diagnostics.getvalue())
+        self.assertNotIn('opaque-fixture-value', diagnostics.getvalue())
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
 
     def test_clone_borrows_reference_objects_and_survives_a_missing_reference(self):
         clones = []
