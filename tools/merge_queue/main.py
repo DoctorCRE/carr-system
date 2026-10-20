@@ -567,6 +567,11 @@ class Queue:
         action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
         if action['phase'] == 'done':
             return False
+        if action['phase'] == 'issued':
+            self._reconcile_action(key, retry=True)
+            action = self.db.execute('SELECT * FROM actions WHERE key=?', (key,)).fetchone()
+        if action['phase'] == 'exhausted':
+            raise ActionExhausted(f'regeneration exhausted {action["attempts"]} attempts at {head}')
         if action['phase'] != 'planned':
             raise ActionUncertain(f'regeneration at {head}; inspect {receipt} and provider head before reconcile-action')
         if self.stopped or self.held(p):
@@ -1429,11 +1434,18 @@ class Queue:
             raise RuntimeError('retarget source base changed or is unknown; no retry')
         if a['kind'] == 'update' and (not self.behind(a['repo'], p) or p.get('mergeable') is not True):
             raise RuntimeError('action no longer has a clean BEHIND head')
+        if a['kind'] == 'regen':
+            if p['base']['ref'] != 'main' or p.get('draft'):
+                raise ActionUncertain('regeneration base changed or PR is draft; no retry')
+            ref = f'refs/heads/{p["head"]["ref"]}'
+            observed = self.git(a['repo'], 'ls-remote', 'origin', ref).strip()
+            if observed != f'{a["head"]}\t{ref}':
+                raise ActionUncertain('regeneration remote does not prove the approved head; no retry')
         if retry:
             with self.db:
                 self.db.execute('UPDATE actions SET phase=? WHERE key=?',
                                 ('exhausted' if a['attempts'] >= MAX_ATTEMPTS else 'planned', key))
-                self.event(a['repo'], a['pr'], 'action_reconciled', 'Explicit retry after current head/base/label readback; next effect remains expected-head guarded')
+                self.event(a['repo'], a['pr'], 'action_reconciled', 'Verified retry after current head/base/label and regeneration remote readback; next effect remains expected-head guarded')
             if a['attempts'] < MAX_ATTEMPTS:
                 self.resume_action_entries(a)
 
