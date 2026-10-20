@@ -1345,6 +1345,63 @@ class Batching(Base):
 
 
 class StopOnFailure(Base):
+    def test_transient_worker_readback_timeout_after_promotion_finishes_without_repromoting(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        original = pipe.http
+        errors = []
+
+        def read(url):
+            if "promote" in runner.names() and not errors:
+                errors.append("timeout")
+                raise TimeoutError("The read operation timed out")
+            return original(url)
+
+        pipe.http = read
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.names().count("promote"), 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], sha)
+        self.assertTrue(any(row["status"] == "shipped" for row in self.fx.records()))
+        reads = [json.loads(line) for line in (pipe.run_dir / "worker-verify-live.jsonl").read_text().splitlines()]
+        self.assertEqual(len(reads), 2)
+        self.assertEqual(reads[0]["error"], "TimeoutError: The read operation timed out")
+        self.assertEqual(reads[1]["response"]["worker_version"]["id"], VERSION)
+
+    def test_exhausted_worker_readback_timeouts_have_a_named_failure_and_no_shipped_proof(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        original = pipe.http
+
+        def read(url):
+            if "promote" in runner.names():
+                raise TimeoutError("The read operation timed out")
+            return original(url)
+
+        pipe.http = read
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        failure = self.fx.records()[-1]
+        self.assertEqual(failure["step"], "verify-live")
+        self.assertIn("last_read_error=TimeoutError", failure["detail"])
+        reads = Path(failure["log"]).read_text().splitlines()
+        self.assertEqual(len(reads), 12)
+        self.assertEqual(runner.names().count("promote"), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
+        self.assertFalse(any(row["status"] in {"release_verified", "shipped"} for row in self.fx.records()))
+
+    def test_worker_readback_rejects_same_sha_with_a_different_provider_version(self):
+        self.fx.commit({"mcp-server/src/a.js": "1"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.http = lambda _url: {"git_sha": {"value": live["sha"]}, "worker_version": {"id": PRIOR}}
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(self.fx.records()[-1]["step"], "verify-live")
+        self.assertFalse(any(row["status"] == "shipped" for row in self.fx.records()))
+
     def test_failure_stops_records_dispatches_and_is_never_retried(self):
         sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         runner, verbs = FakeRunner(fail_at="staging-prepare"), []
