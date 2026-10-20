@@ -14,7 +14,9 @@ import uuid
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "ops"))
+sys.path.insert(0, str(SOURCE))
 from git_env import scrubbed_env
+from lib.cleanup_budget import BudgetExhausted, bounded, check
 import job_watchdog
 from job_watchdog import protected_branch, repository_roots
 
@@ -289,6 +291,7 @@ class FleetReaper:
         self.clock = clock
         self.branch_idle = self.config["thresholds"]["branch_idle_seconds"]
         self.tree_idle = hook.REAP_MIN_IDLE_S
+        self.deadline = None
         self.patches = {}
         self.ancestors = {}
 
@@ -428,7 +431,7 @@ class FleetReaper:
         protected_paths = {str(root), *(str(Path(p).resolve()) for p in skip)}
         from itertools import islice
         def pending_entries():
-            for entry in iter_worktrees(root):
+            for entry in bounded(iter_worktrees(root), self.deadline):
                 if "_to_delete" in Path(entry["path"]).parts:
                     continue
                 key = "worktree:" + ("0:" if Path(entry["path"]).resolve() == root else "1:") + entry["path"]
@@ -436,10 +439,11 @@ class FleetReaper:
                     yield entry
         entries = pending_entries()
         while batch := list(islice(entries, 20)):
+            check(self.deadline)
             busy = self.process_probe([entry["path"] for entry in batch])
             if busy is None:
                 raise RuntimeError("process evidence unavailable; preserve repository candidates")
-            for entry in batch:
+            for entry in bounded(batch, self.deadline):
                 path = Path(entry["path"])
                 if str(path.resolve()) in protected_paths or "_to_delete" in path.parts or entry.get("locked"):
                     yield self.worktree_row(repo, root, entry, main, {}, busy, protected_paths)
@@ -461,7 +465,7 @@ class FleetReaper:
         elif busy is None or str(path) in busy:
             reasons.append("process uses tree or process evidence unavailable")
         else:
-            index_age, tree_age = self.hook.index_age_s(str(path)), self.hook.tree_age_s(str(path))
+            index_age, tree_age = self.hook.index_age_s(str(path)), self.hook.tree_age_s(str(path), deadline=self.deadline)
             status = git(path, "status", "--porcelain=v1", "--untracked-files=all")
             row["status"] = status
             row["ownership"] = self.ownership_probe(path)
@@ -495,18 +499,21 @@ class FleetReaper:
                 elif entry.get("detached") and classification != "merged":
                     reasons.append("detached work without a surviving branch")
                 else:
-                    row["content"] = self.work_content(path)
+                    row["content"] = self.work_content(path, deadline=self.deadline)
                     row.update({"class": classification, "action": "stage_worktree"})
         row["reason"] = "; ".join(reasons) or "idle with recoverable branch and no live owner"
         return row
 
-    def work_content(self, path):
+    def work_content(self, path, *, deadline=None):
         digest = hashlib.sha256()
         def frame(value):
             digest.update(len(value).to_bytes(8, "big"))
             digest.update(value)
+        check(deadline)
         frame(git(path, "-c", "diff.autoRefreshIndex=false", "diff", "HEAD", "--binary").encode())
-        for name in git(path, "ls-files", "--others", "--exclude-standard", "-z").split("\0"):
+        check(deadline)
+        names = git(path, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+        for name in bounded(names, deadline):
             if not name:
                 continue
             item = path / name
@@ -518,7 +525,7 @@ class FleetReaper:
                 frame(b"file")
                 content = hashlib.sha256()
                 with item.open("rb") as stream:
-                    for chunk in iter(lambda: stream.read(65536), b""):
+                    for chunk in bounded(iter(lambda: stream.read(65536), b""), deadline):
                         content.update(chunk)
                 frame(content.digest())
             else:
@@ -539,10 +546,11 @@ class FleetReaper:
 
     def tree_fresh(self, path):
         # Startup touches the index; read that signal after the longer tree scan.
-        ages = (self.hook.tree_age_s(str(path)), self.hook.index_age_s(str(path)))
+        ages = (self.hook.tree_age_s(str(path), deadline=self.deadline), self.hook.index_age_s(str(path)))
         return any(age is None or age < self.tree_idle for age in ages)
 
     def stage(self, root, row):
+        check(self.deadline)
         path = Path(row["path"])
         token = hashlib.sha256((str(path) + row["head"]).encode()).hexdigest()[:16]
         target = root.parent / "_to_delete" / root.name / token
@@ -557,12 +565,18 @@ class FleetReaper:
         save(target / "manifest.json", manifest)
         # Hashing large orphan files can take time. Probe again immediately
         # before the move so a session starting during verification wins.
-        busy = self.process_probe([str(path)])
-        if busy is None or str(path) in busy or self.ownership_probe(path) != row["ownership"] or \
-                git(path, "status", "--porcelain=v1", "--untracked-files=all") != row["status"] or \
-                self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
-                self.tree_fresh(path):
-            raise RuntimeError("worktree became live before move; preserve it")
+        try:
+            busy = self.process_probe([str(path)])
+            if busy is None or str(path) in busy or self.ownership_probe(path) != row["ownership"] or \
+                    git(path, "status", "--porcelain=v1", "--untracked-files=all") != row["status"] or \
+                    self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
+                    self.tree_fresh(path):
+                raise RuntimeError("worktree became live before move; preserve it")
+            check(self.deadline)
+        except BudgetExhausted:
+            manifest["state"] = "verified_no_effect"
+            save(target / "manifest.json", manifest)
+            raise
         git(root, "worktree", "move", str(path), str(target / "worktree"))
         if self.tree_identity(root, target / "worktree") != {k: row[k] for k in ("head", "branch", "detached")} or \
                 self.work_content(target / "worktree") != row["content"]:
@@ -576,7 +590,7 @@ class FleetReaper:
         latest, recovered = {}, []
         if ledger.exists():
             with ledger.open() as stream:
-                for line in stream:
+                for line in bounded(stream, self.deadline):
                     event = json.loads(line)
                     row = event["candidate"]
                     key = (row["repo"], row["kind"], row.get("path"), row.get("ref"), row.get("number"), row["head"])
@@ -584,7 +598,7 @@ class FleetReaper:
                         latest[key] = event
                     else:
                         latest.pop(key, None)
-        for event in latest.values():
+        for event in bounded(latest.values(), self.deadline):
             row = event["candidate"]
             if row["repo"] != repo or event["status"] != "intent":
                 continue
@@ -594,10 +608,11 @@ class FleetReaper:
                 target = root.parent / "_to_delete" / root.name / token
                 staged = target / "worktree"
                 if staged.exists() and not Path(row["path"]).exists():
-                    if self.tree_identity(root, staged) != {k: row[k] for k in ("head", "branch", "detached")} or self.work_content(staged) != row["content"]:
+                    if self.tree_identity(root, staged) != {k: row[k] for k in ("head", "branch", "detached")} or self.work_content(staged, deadline=self.deadline) != row["content"]:
                         raise RuntimeError("pending staged effect has changed; preserve it")
                     manifest = json.loads((target / "manifest.json").read_text())
                     manifest["state"] = "staged"
+                    check(self.deadline)
                     save(target / "manifest.json", manifest)
                     status = "observed_staged"
                 elif staged.exists() or not Path(row["path"]).exists():
@@ -611,6 +626,7 @@ class FleetReaper:
                     raise RuntimeError("pending PR identity changed; preserve it")
                 status = "observed_closed" if observed["state"] != "open" else "verified_no_effect"
             receipt = {**event, "status": status, "observed_at": self.clock()}
+            check(self.deadline)
             append(ledger, receipt)
             recovered.append(receipt)
         return recovered
@@ -666,6 +682,7 @@ class FleetReaper:
             if not advertised or advertised[0] != row["main"] or current["state"] != "open" or \
                     self.pr_identity(current) != row["identity"]:
                 return {"status": "preserved", "reason": "source identity changed at close"}
+            check(self.deadline)
             self.provider.close(repo, row["number"], successor["number"])
             observed = self.provider.pull(repo, row["number"])
             if observed["state"] != "closed" or self.pr_identity(observed) != row["identity"]:
@@ -692,9 +709,11 @@ class FleetReaper:
         if advertised[0] != row["main"]:
             raise MainAdvanced
         backup = "refs/retired-branches/" + row["head"] + "-" + hashlib.sha256(ref.encode()).hexdigest()[:16]
+        check(self.deadline)
         git(root, "update-ref", backup, row["head"])
         if git(root, "rev-parse", backup) != row["head"]:
             raise RuntimeError("branch backup readback failed")
+        check(self.deadline)
         command(["git", "-C", str(root), "-c",
                  "core.hooksPath=" + str(SOURCE / "ops/branch-janitor-hooks"),
                  "push", "origin", ":" + ref],
@@ -711,11 +730,16 @@ class FleetReaper:
             ("local-" if local_only else "") + ("cursor.json" if execute else "dry-cursor.json"))
         cursors = json.loads(cursor_path.read_text()) if cursor_path.exists() else {}
         deadline = time.monotonic() + max_seconds
+        self.deadline = lambda: time.monotonic() >= deadline
         try:
             with maintenance(self.root, deadline=deadline if local_only else None):
                 for repo, path in roots.items():
+                    if self.deadline():
+                        report["budget_exhausted"] = True
+                        break
                     root = Path(path).expanduser().resolve()
                     try:
+                        check(self.deadline)
                         with nullcontext() if root == self.root else maintenance(root, deadline=deadline if local_only else None):
                             if execute:
                                 report["recovered"].extend(self.recover_pending(repo, root))
@@ -724,14 +748,21 @@ class FleetReaper:
                             scan = self.iter_tree_snapshot if local_only else self.snapshot
                             rows = scan(repo, root, skip, cursors.get(repo, ""))
                             try:
-                                for row in rows:
+                                for row in bounded(rows, self.deadline):
                                     report["rows"].append(row)
                                     report["counts"][repo][row["kind"]][row["class"]] += 1
                                     if execute and row["action"]:
                                         intent = {"at": self.clock(), "status": "intent", "candidate": row}
                                         ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
                                         append(ledger, intent)
-                                        result = self.apply(repo, root, row, skip)
+                                        try:
+                                            check(self.deadline)
+                                            result = self.apply(repo, root, row, skip)
+                                        except BudgetExhausted:
+                                            append(ledger, {**intent, "status": "verified_no_effect",
+                                                "reason": "cleanup time budget exhausted before effect"})
+                                            report["budget_exhausted"] = True
+                                            break
                                         append(ledger, {**intent, **result})
                                         report["actions"].append({**intent, **result})
                                     cursors[repo] = row_key(row)
@@ -746,6 +777,9 @@ class FleetReaper:
                                 rows.close()
                             if report["budget_exhausted"]:
                                 break
+                    except BudgetExhausted:
+                        report["budget_exhausted"] = True
+                        break
                     except MaintenanceDeferred as exc:
                         report["deferred"].append({"repo": repo, "reason": str(exc)})
                     except Exception as exc:
@@ -753,10 +787,14 @@ class FleetReaper:
                 save(self.root / "out/orch/branch-janitor-report.json", report)
                 append(self.root / "out/orch/branch-janitor-runs.jsonl",
                        {k: v for k, v in report.items() if k != "rows"})
+        except BudgetExhausted:
+            report["budget_exhausted"] = True
         except MaintenanceDeferred as exc:
             report["deferred"].append({"repo": "fleet", "reason": str(exc)})
         except Exception as exc:
             report["errors"].append({"repo": "fleet", "error": str(exc)})
+        finally:
+            self.deadline = None
         return report
 
 
