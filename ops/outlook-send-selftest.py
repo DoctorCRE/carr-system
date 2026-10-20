@@ -25,7 +25,7 @@ from lib import outlook_send as send_mod
 from lib import outlook_ui as ui
 from lib.outlook_send import EventRow, Ports, SentRow, Snapshot, State
 
-ACCOUNT = send_mod.ACCOUNT
+ACCOUNT = 'sender@example.test'
 NOW = 1_800_000_000.0
 MAIN = {'window_id': 1, 'title': f'Inbox • {ACCOUNT}', 'on_current_space': True,
         'bounds': {'x': 0, 'y': 33, 'width': 1230, 'height': 768}}
@@ -62,6 +62,9 @@ class FakeOutlook:
         self.forms: dict[int, dict] = {}
         self.calls: list[tuple] = []
         self.next_id = 100
+        self.front = False
+        self.background = False
+        self.press_count = 0
 
     def open_url(self, url: str) -> None:
         parts = urlsplit(url)
@@ -80,7 +83,9 @@ class FakeOutlook:
 
     def elements(self, wid: int) -> list[dict]:
         if wid == 1:
-            return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0}]
+            return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
+                    {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
+                     'element_token': '1:1'}]
         form, out = self.forms[wid], []
 
         def add(role, label, value=None, parent=None, depth=1):
@@ -89,6 +94,12 @@ class FakeOutlook:
             return len(out) - 1
 
         root = add('AXWindow', self.windows[wid]['title'], depth=0)
+        if 'start' in form:
+            add('AXButton', 'Send' if form['attendees'] else 'Save', parent=root)
+            add('AXButton', 'Discard', parent=root)
+            for key, label in {'subject': 'Subject', 'start': 'Start', 'end': 'End', 'location': 'Location', 'body': 'Message body', 'attendees': 'Required attendees'}.items():
+                add('AXTextField', label, form[key], root, 2)
+            return out
         add('AXButton', 'Send', parent=root)
         add('AXButton', 'Discard', parent=root)
         for field, label in (('to', 'To Recipients'), ('cc', 'Cc Recipients'), ('bcc', 'Bcc Recipients')):
@@ -109,14 +120,46 @@ class FakeOutlook:
         if tool == 'click':
             wid, index = map(int, args['element_token'].split(':'))
             label = self.elements(wid)[index]['label']
+            if label == 'New Mail':
+                self.open_url('mailto:?subject=&body=')
+                return {'ok': True}
+            if label in ('Save', 'Send'):
+                if not self.front and not self.background:
+                    return {'status': 'refused', 'refusal': {'code': 'background_unavailable'}}
+                self.press(wid)
+                return {'ok': True}
             if label == 'Discard':
                 self.windows.pop(wid)
                 self.forms.pop(wid)
                 return {'ok': True}
             raise AssertionError(f'unexpected click on {label}')
+        if tool == 'set_value':
+            wid, index = map(int, args['element_token'].split(':'))
+            label = self.elements(wid)[index]['label']
+            if 'start' in self.forms[wid]:
+                key = {'Subject': 'subject', 'Start': 'start', 'End': 'end', 'Location': 'location',
+                       'Message body': 'body', 'Required attendees': 'attendees'}[label]
+                self.forms[wid][key] = args['value']
+            else:
+                key = {'To Recipients': 'to', 'Cc Recipients': 'cc', 'Bcc Recipients': 'bcc',
+                       'Subject': 'subject', 'Message body': 'body'}[label]
+                self.forms[wid][key] = args['value'].split('; ') if key in ('to', 'cc', 'bcc') and args['value'] else ([] if key in ('to', 'cc', 'bcc') else args['value'])
+            if self.corrupt and self.corrupt[0] == key:
+                self.forms[wid][key] = self.corrupt[1]
+            return {'ok': True}
+        if tool == 'press_key' and args['key'] == 'tab':
+            return {'ok': True}
         if tool == 'bring_to_front':
+            self.front = True
             return {'ok': True}
         if tool == 'invoke_menu':
+            if args['path'] == ['File', 'New', 'Event']:
+                wid = self.next_id
+                self.next_id += 1
+                self.forms[wid] = {k: '' for k in ('subject', 'start', 'end', 'location', 'body', 'attendees')}
+                self.windows[wid] = {'window_id': wid, 'title': f'New Event • {ACCOUNT}',
+                                    'on_current_space': True, 'bounds': {'width': 900, 'height': 800}}
+                return {'ok': True}
             if args['path'] == ['Draft', 'Send']:
                 self.press(args['window_id'])
                 return {'ok': True}
@@ -124,16 +167,19 @@ class FakeOutlook:
         raise AssertionError(f'unexpected tool {tool}')
 
     def press(self, wid: int) -> None:
+        self.press_count += 1
         form = self.forms[wid]
         if self.on_send == 'stays_open':
             return
         self.windows.pop(wid)
-        if self.on_send == 'sends':
+        if self.on_send == 'sends' and 'start' in form:
+            self.mailbox.events.append(EventRow(form['subject'], int(datetime.fromisoformat(form['start']).timestamp())))
+        elif self.on_send == 'sends':
             self.mailbox.sent.append(SentRow(ACCOUNT, ', '.join(form['to'] + form['cc']), form['subject'],
                                              int(self.clock.t) + 30))
 
     def presses(self) -> int:
-        return sum(1 for tool, args in self.calls if tool == 'invoke_menu' and args['path'] == ['Draft', 'Send'])
+        return self.press_count
 
 
 MAIL = dict(to=['person-a@example.test'], cc=['person-b@example.test'], bcc=['person-c@example.test'],
@@ -146,6 +192,7 @@ class Harness:
         self.mailbox = FakeMailbox(sent, events)
         self.fake = FakeOutlook(self.clock, self.mailbox, on_send, corrupt)
         self.idle = [idle]
+        self.handler = send_mod.BUNDLE.lower()
         self.carr_calls: list[tuple[str, dict]] = []
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
@@ -162,13 +209,28 @@ class Harness:
 
     def send(self, key='key-1', record=None, **overrides):
         spec = {**MAIL, **overrides}
-        with patch.object(ui, 'cua', self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
+        with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
+                patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
                 patch.object(send_mod, '_open_url', self.fake.open_url), \
-                patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
+                patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
                                  idempotency_key=key, record=record, ports=self.ports)
+
+
+EVENT = dict(subject='event-001', start=datetime(2030, 1, 2, 15, tzinfo=timezone.utc),
+             end=datetime(2030, 1, 2, 16, tzinfo=timezone.utc), location='Room 1', body='Event details.',
+             attendees=['person-a@example.test'])
+
+
+def event(h, key='event-key', **overrides):
+    with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', h.fake), \
+            patch.object(ui, 'outlook_pid', lambda: 42), patch.object(send_mod.time, 'sleep', lambda _: None), \
+            patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
+            patch.object(send_mod, '_activate', lambda _: None):
+        return send_mod.create_event(**{**EVENT, **overrides}, idempotency_key=key,
+                                     record='client-001', ports=h.ports)
 
 
 class SendTests(unittest.TestCase):
@@ -182,6 +244,15 @@ class SendTests(unittest.TestCase):
     def ledger(self) -> list[dict]:
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_account_comes_from_private_config(self):
+        config = Path(self.tmp.name) / 'account'
+        config.write_text('sender@example.test\n')
+        config.chmod(0o600)
+        self.assertEqual(send_mod.account(config), ACCOUNT)
+        config.chmod(0o644)
+        with self.assertRaises(ValueError):
+            send_mod.account(config)
 
     def test_sends_once_and_confirms_from_sent_items(self):
         h = Harness(self.out)
@@ -217,6 +288,12 @@ class SendTests(unittest.TestCase):
         again = h.send(subject='subject-002')
         self.assertEqual(again.state, State.DUPLICATE_KEY)
         self.assertEqual(len(h.fake.calls), calls)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_uncertain_send_with_new_key_is_still_refused(self):
+        h = Harness(self.out, on_send='closes_without_sending')
+        self.assertEqual(h.send().state, State.PRESSED_UNCONFIRMED)
+        self.assertEqual(h.send(key='new-key', body='changed body').state, State.DUPLICATE_KEY)
         self.assertEqual(h.fake.presses(), 1)
 
     def test_message_already_in_sent_items_is_refused(self):
@@ -303,6 +380,121 @@ class SendTests(unittest.TestCase):
         h.ports.carr = h.carr
         result = h.send(record='client-404')
         self.assertEqual((result.state, result.logged), (State.DONE, ('record_not_matched',)))
+
+    def test_default_adapter_does_not_require_intake_module(self):
+        ports = send_mod.default_ports(ROOT)
+        self.assertTrue(callable(ports.carr))
+        self.assertTrue(callable(ports.mailbox.snapshot))
+
+    def test_cua_refusal_is_a_failure_before_press(self):
+        h = Harness(self.out)
+        original = h.fake.__call__
+        def refused(tool, args):
+            if tool == 'get_window_state' and args['window_id'] != 1:
+                return {'status': 'refused', 'refusal': {'code': 'window_unavailable'}}
+            return original(tool, args)
+        with patch.object(ui, 'cua', refused), patch.object(send_mod, 'account', lambda: ACCOUNT):
+            with self.assertRaises(send_mod.UiFailure):
+                send_mod.ComposeWindow(42, 100, ui.Waits()).elements()
+
+    def test_event_with_attendees_is_saved_once_and_logged(self):
+        h = Harness(self.out)
+        result = event(h)
+        self.assertEqual(result.state, State.DONE)
+        logs = [args for verb, args in h.carr_calls if verb == 'log-activity']
+        self.assertEqual(len(logs), 1)
+        self.assertEqual(logs[0]['kind'], 'meeting')
+        self.assertIn(EVENT['body'], logs[0]['detail'])
+        self.assertEqual(event(h).state, State.DUPLICATE_KEY)
+        self.assertEqual(len(h.mailbox.events), 1)
+
+    def test_event_without_attendees_saves_without_invitations(self):
+        h = Harness(self.out)
+        self.assertEqual(event(h, attendees=[]).state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+        labels = [h.fake.calls[i][1] for i in range(len(h.fake.calls)) if h.fake.calls[i][0] == 'click']
+        self.assertTrue(labels)
+
+    def test_existing_calendar_event_prevents_opening_form(self):
+        h = Harness(self.out, events=[EventRow(EVENT['subject'], int(EVENT['start'].timestamp()))])
+        self.assertEqual(event(h).state, State.ALREADY_IN_MAILBOX)
+        self.assertEqual(h.fake.calls, [])
+
+    def test_event_mismatch_discards_without_inviting(self):
+        h = Harness(self.out, corrupt=('location', 'wrong room'))
+        result = event(h)
+        self.assertEqual((result.state, result.reason), (State.FAILED, 'event_field_mismatch:location'))
+        self.assertEqual((h.fake.presses(), h.fake.forms, self.ledger()), (0, {}, []))
+
+    def test_event_unconfirmed_is_never_repeated_under_another_key(self):
+        h = Harness(self.out, on_send='closes_without_sending')
+        self.assertEqual(event(h).state, State.PRESSED_UNCONFIRMED)
+        self.assertEqual(event(h, key='other', body='changed').state, State.DUPLICATE_KEY)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_background_send_does_not_front_the_app(self):
+        h = Harness(self.out)
+        h.fake.background = True
+        self.assertEqual(h.send().mode, 'background')
+        self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_accepted_background_noop_never_falls_back_to_another_press(self):
+        h = Harness(self.out, on_send='stays_open')
+        h.fake.background = True
+        self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+        self.assertEqual(h.fake.presses(), 1)
+        self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
+
+    def test_invalid_event_times_do_not_open_a_form(self):
+        h = Harness(self.out)
+        for overrides in ({'end': EVENT['start']}, {'start': EVENT['start'].replace(tzinfo=None)}):
+            with self.assertRaises(ValueError):
+                event(h, **overrides)
+        self.assertEqual(h.fake.calls, [])
+
+    def test_cli_refuses_a_public_message_file(self):
+        path = Path(self.tmp.name) / 'message.json'
+        path.write_text(json.dumps({**MAIL, 'idempotency_key': 'cli-key'}))
+        path.chmod(0o644)
+        with patch.object(send_mod, 'send') as sender:
+            self.assertEqual(send_mod.main(['send', '--json', str(path)]), 1)
+            sender.assert_not_called()
+
+    def test_empty_idempotency_key_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Harness(self.out).send(key='')
+
+    def test_send_finds_the_exact_recipient_record_when_not_supplied(self):
+        h = Harness(self.out)
+        h.ports.contacts = lambda: [('person-a@example.test', 'client-001', 'C-1')]
+        result = h.send()
+        self.assertEqual(result.logged, ('C-1',))
+        self.assertTrue(any(verb == 'find' for verb, _ in h.carr_calls))
+
+    def test_non_outlook_handler_uses_new_mail_button(self):
+        h = Harness(self.out)
+        h.handler = 'com.example.browser'
+        self.assertEqual(h.send().state, State.DONE)
+        self.assertEqual(h.fake.presses(), 1)
+
+    def test_existing_compose_is_left_untouched(self):
+        h = Harness(self.out)
+        h.fake.open_url('mailto:person-z@example.test?subject=other-draft&body=leave-alone')
+        result = h.send()
+        self.assertEqual((result.state, result.reason), (State.FAILED, 'compose_window_open'))
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(len(h.fake.forms), 1)
+
+    def test_failed_discard_is_reported(self):
+        h = Harness(self.out, corrupt=('subject', 'changed'))
+        with patch.object(send_mod.ComposeWindow, 'discard', lambda _: None):
+            self.assertEqual(h.send().reason, 'discard_failed:mismatch:subject')
+        self.assertEqual(h.fake.presses(), 0)
+
+    def test_vendor_reference_is_accepted(self):
+        h = Harness(self.out)
+        self.assertEqual(h.send(record='V-CPA-001').logged, ('V-CPA-001',))
 
     def test_status_line_carries_no_address_or_subject(self):
         result = Harness(self.out).send(record='client-001')

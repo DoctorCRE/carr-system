@@ -21,16 +21,21 @@ launchd log; the ledger holds keys, states and a fingerprint only.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 import fcntl
+import ctypes
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+import stat
+import shutil
+import sqlite3
+import tempfile
 import time
 from typing import Callable, Protocol
 from urllib.parse import quote
@@ -38,13 +43,13 @@ import uuid
 
 from lib import outlook_ui as ui
 
-ACCOUNT = 'sender@example.test'
+ACCOUNT_CONFIG = Path.home() / '.config/carr/outlook-account'
 OUT = Path('out/outlook-send')
 LEDGER = 'ledger.jsonl'
 IDLE_SECONDS = 300
 DUPLICATE_WINDOW = 24 * 3600
 CLOCK_SKEW = 5
-RECORD_REF = re.compile(r'^[CLV]-\d')
+RECORD_REF = re.compile(r'^(?:[CL]-\d+|V-[A-Z0-9]+(?:-[A-Z0-9]+)*)$')
 ADDRESS = re.compile(r"^[\w.+'-]+@[\w-]+(?:\.[\w-]+)+$")
 BUNDLE = 'com.microsoft.Outlook'
 FORM_WALK = 600
@@ -148,6 +153,7 @@ class Ports:
     now: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
     out: Path = OUT
+    contacts: Callable[[], list[tuple[str, str, str]]] = lambda: []
     close_seconds: float = 30
     confirm_seconds: float = 300
     poll_seconds: float = 20
@@ -155,6 +161,17 @@ class Ports:
 
 class UiFailure(Exception):
     """The window did not show the shape this module relies on; the message is a short code."""
+
+
+def account(path: Path = ACCOUNT_CONFIG) -> str:
+    """Read the local account identity; never put a real address in source."""
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
+        raise ValueError('account config must be an owned 0600 regular file')
+    value = path.read_text().strip().lower()
+    if not ADDRESS.fullmatch(value):
+        raise ValueError('account config must contain one address')
+    return value
 
 
 def _norm(text: str) -> str:
@@ -181,7 +198,9 @@ def fields(item: Mail | Event) -> dict[str, str]:
 
 
 def fingerprint(item: Mail | Event) -> str:
-    return hashlib.sha256(json.dumps(fields(item), sort_keys=True).encode()).hexdigest()
+    identity = (['send', account(), _norm(item.subject), sorted(item.recipients)] if isinstance(item, Mail)
+                else ['event', account(), _norm(item.subject), int(item.start.timestamp())])
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
 
 
 # ---- ledger ------------------------------------------------------------------
@@ -198,6 +217,12 @@ class Ledger:
         except FileNotFoundError:
             return []
         return [row['state'] for row in map(json.loads, lines) if row.get('key') == key]
+
+    def contains_item(self, print_: str, since: float) -> bool:
+        if not self.path.exists():
+            return False
+        return any(row.get('fingerprint') == print_ and row['at'] >= since
+                   for row in map(json.loads, self.path.read_text().splitlines()))
 
     def append(self, key: str, kind: str, state: str, print_: str, at: float) -> None:
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -221,7 +246,7 @@ def mail_in_mailbox(snapshot: Snapshot, mail: Mail, since: float) -> bool:
     """
     wanted = set(mail.recipients)
     for row in snapshot.sent:
-        if row.sender.lower() != ACCOUNT or row.sent_unix < since or _norm(row.subject) != _norm(mail.subject):
+        if row.sender.lower() != account() or row.sent_unix < since or _norm(row.subject) != _norm(mail.subject):
             continue
         listed = set(re.findall(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+", (row.recipients or '').lower()))
         if not listed or listed & wanted:
@@ -246,6 +271,8 @@ def _kind(item: Mail | Event) -> str:
 
 def write(item: Mail | Event, key: str, ports: Ports, record: str | None = None) -> Result:
     """Send one mail or save one event, at most once per key and per mailbox match."""
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError('idempotency_key is required')
     out = ports.out
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -256,13 +283,14 @@ def write(item: Mail | Event, key: str, ports: Ports, record: str | None = None)
         except OSError:
             return Result(State.FAILED, 'another_write_running')
         result = _write(item, key, ports, Ledger(out / LEDGER))
-    if result.ok and record:
-        result = replace(result, logged=_log(item, key, record, ports))
+    if result.ok:
+        result = replace(result, logged=_log_matches(item, key, record, ports))
     return result
 
 
 def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result:
-    if ledger.states(key):
+    if ledger.states(key) or ledger.contains_item(fingerprint(item),
+            ports.now() - DUPLICATE_WINDOW if isinstance(item, Mail) else 0):
         return Result(State.DUPLICATE_KEY, 'key_already_pressed')
     try:
         before = ports.mailbox.snapshot()
@@ -282,16 +310,13 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     try:
         shown = form.read()
     except UiFailure as exc:
-        form.discard()
-        return Result(State.FAILED, str(exc))
+        return _discard(form, Result(State.FAILED, str(exc)))
     if shown != fields(item):
-        form.discard()
         wrong = ','.join(sorted(k for k in fields(item) if shown.get(k) != fields(item)[k]))
-        return Result(State.FIELD_MISMATCH, f'mismatch:{wrong}')
+        return _discard(form, Result(State.FIELD_MISMATCH, f'mismatch:{wrong}'))
     idle = ports.idle_seconds()
     if idle is None or idle < IDLE_SECONDS:
-        form.discard()
-        return Result(State.NOT_IDLE, 'user_active')
+        return _discard(form, Result(State.NOT_IDLE, 'user_active'))
 
     kind, print_ = _kind(item), fingerprint(item)
     ledger.append(key, kind, 'pressing', print_, ports.now())
@@ -320,6 +345,16 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     return Result(State.DONE, 'confirmed_in_mailbox', mode)
 
 
+def _discard(form: Form, result: Result) -> Result:
+    try:
+        form.discard()
+        if form.closed():
+            return result
+    except (UiFailure, ui.CuaError):
+        pass
+    return Result(State.FAILED, 'discard_failed:' + result.reason)
+
+
 def _wait(check: Callable[[], bool], seconds: float, ports: Ports) -> bool:
     deadline = ports.now() + seconds
     while True:
@@ -341,6 +376,28 @@ def resolve_record(record: str, carr: Callable[[str, dict], dict]) -> str | None
     return hits.pop() if len(hits) == 1 else None
 
 
+def _log_matches(item: Mail | Event, key: str, record: str | None, ports: Ports) -> tuple[str, ...]:
+    if record:
+        return _log(item, key, record, ports)
+    addresses = set(item.recipients if isinstance(item, Mail) else item.attendees)
+    try:
+        matched: dict[str, set[tuple[str, str]]] = {}
+        for email, name, ref in ports.contacts():
+            if email in addresses:
+                matched.setdefault(email, set()).add((name, ref))
+        records = set()
+        for matches in matched.values():
+            if len(matches) == 1:
+                name, expected_ref = next(iter(matches))
+                if resolve_record(name, ports.carr) == expected_ref:
+                    records.add(expected_ref)
+    except (Exception, SystemExit):
+        return ('record_lookup_failed',)
+    if not records:
+        return ('record_not_matched',)
+    return tuple(value for ref in sorted(records) for value in _log(item, key, ref, ports))
+
+
 def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, ...]:
     try:
         ref = resolve_record(record, ports.carr)
@@ -353,9 +410,8 @@ def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, 
         detail, occurred = item.body, datetime.fromtimestamp(ports.now(), timezone.utc)
     else:
         kind, summary = 'meeting', f'Calendar event: {item.subject}'
-        detail, occurred = item.body, item.start
-        if item.location:
-            detail = f'Location: {item.location}\n\n{detail}'
+        detail, occurred = (f'Start: {item.start.isoformat()}\nEnd: {item.end.isoformat()}\n'
+                            f'Location: {item.location}\nAttendees: {", ".join(item.attendees)}\n\n{item.body}'), item.start
     args = {'idempotency_key': str(uuid.uuid5(uuid.NAMESPACE_URL, f'log-activity|{ref}|outlook-{_kind(item)}|{key}')),
             'ref': ref, 'kind': kind, 'summary': summary, 'detail': detail,
             'occurred_at': occurred.isoformat()}
@@ -367,6 +423,16 @@ def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, 
 
 
 # ---- the Outlook window ------------------------------------------------------
+
+def _cua(tool: str, args: dict) -> dict:
+    try:
+        result = ui.cua(tool, args)
+    except ui.CuaError:
+        raise UiFailure('cua_driver_unavailable') from None
+    if result.get('status') in ('refused', 'failed', 'error') or result.get('refusal') or result.get('error'):
+        raise UiFailure('cua_action_refused')
+    return result
+
 
 def _frontmost() -> str | None:
     done = subprocess.run(['osascript', '-e', 'tell application "System Events" to get bundle identifier '
@@ -386,9 +452,30 @@ def mailto(mail: Mail) -> str:
     return f'mailto:{quote(",".join(mail.to), safe="@,")}?{query}'
 
 
+def _mailto_handler() -> str:
+    """Read LaunchServices without changing the registered handler."""
+    core = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    services = ctypes.CDLL('/System/Library/Frameworks/CoreServices.framework/CoreServices')
+    core.CFStringCreateWithCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint32]
+    core.CFStringCreateWithCString.restype = ctypes.c_void_p
+    core.CFStringGetCString.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_uint32]
+    core.CFRelease.argtypes = [ctypes.c_void_p]
+    services.LSCopyDefaultHandlerForURLScheme.argtypes = [ctypes.c_void_p]
+    services.LSCopyDefaultHandlerForURLScheme.restype = ctypes.c_void_p
+    scheme = core.CFStringCreateWithCString(None, b'mailto', 0x08000100)
+    handler = None
+    try:
+        handler = services.LSCopyDefaultHandlerForURLScheme(scheme)
+        buffer = ctypes.create_string_buffer(1024)
+        return buffer.value.decode().lower() if handler and core.CFStringGetCString(handler, buffer, 1024, 0x08000100) else ''
+    finally:
+        if handler:
+            core.CFRelease(handler)
+        core.CFRelease(scheme)
+
+
 def _open_url(url: str) -> None:
-    """Hand a URL to Outlook itself; the system mailto handler is never consulted or changed."""
-    done = subprocess.run(['open', '-g', '-a', ui.APP, url], capture_output=True, timeout=60)
+    done = subprocess.run(['open', '-g', url], capture_output=True, timeout=60)
     if done.returncode:
         raise UiFailure('open_failed')
 
@@ -400,7 +487,7 @@ class Window:
         self.pid, self.window_id, self.waits = pid, window_id, waits
 
     def elements(self) -> list[dict]:
-        state = ui.cua('get_window_state', {'pid': self.pid, 'window_id': self.window_id,
+        state = _cua('get_window_state', {'pid': self.pid, 'window_id': self.window_id,
                                             'include_screenshot': False, 'max_elements': FORM_WALK})
         if str(state.get('degraded_reason') or '').startswith('ax_window_unresolved'):
             raise UiFailure('ax_window_unresolved')
@@ -408,7 +495,7 @@ class Window:
 
     def closed(self) -> bool:
         try:
-            return all(w['window_id'] != self.window_id for w in ui.cua('list_windows', {'pid': self.pid})
+            return all(w['window_id'] != self.window_id for w in _cua('list_windows', {'pid': self.pid})
                        .get('windows') or [])
         except ui.CuaError:
             return False
@@ -422,30 +509,47 @@ class Window:
     def discard(self) -> None:
         """Press Discard and confirm the window went; a draft left behind is a failure to report."""
         try:
-            ui.cua('click', {'pid': self.pid, 'element_token': self._button(self.elements(), 'Discard')['element_token']})
+            _cua('click', {'pid': self.pid, 'element_token': self._button(self.elements(), 'Discard')['element_token']})
             time.sleep(self.waits.settle_seconds)
             if not self.closed():
                 confirm = [e for e in self.elements() if e.get('role') == 'AXButton' and e.get('label') == 'Discard'
                            and e.get('depth', 0) > 1]
                 if len(confirm) == 1:
-                    ui.cua('click', {'pid': self.pid, 'element_token': confirm[0]['element_token']})
+                    _cua('click', {'pid': self.pid, 'element_token': confirm[0]['element_token']})
                     time.sleep(self.waits.settle_seconds)
         except (ui.CuaError, UiFailure):
             pass
 
     def press(self) -> str:
-        """Press the form's one commit item with the window in front, then give the front back."""
+        """One accepted press. Only an explicit pre-dispatch refusal allows front fallback."""
+        target = self._button(self.elements(), self.commit_label)
+        result = ui.cua('click', {'pid': self.pid, 'element_token': target['element_token']})
+        refusal = result.get('refusal') or {}
+        if not refusal and result.get('status') not in ('refused', 'failed', 'error') and not result.get('error'):
+            return 'background'
+        if refusal.get('code') != 'background_unavailable':
+            raise UiFailure('press_refused')
+        idle = _idle_seconds()
+        if idle is None or idle < IDLE_SECONDS:
+            raise UiFailure('user_active_before_front')
         previous = _frontmost()
         try:
-            ui.cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
+            _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
-            ui.cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': self.COMMIT})
-        except ui.CuaError as exc:
-            raise UiFailure('press_failed') from exc
+            if isinstance(self, ComposeWindow):
+                _cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': ['Draft', 'Send']})
+            else:
+                target = self._button(self.elements(), self.commit_label)
+                _cua('click', {'pid': self.pid, 'element_token': target['element_token']})
         finally:
             if previous and previous != BUNDLE:
                 _activate(previous)
         return 'front'
+
+
+def _idle_seconds() -> float | None:
+    from lib.outlook_triage import hid_idle_seconds
+    return hid_idle_seconds()
 
 
 def _recipients(elements: list[dict], label: str) -> str:
@@ -463,17 +567,71 @@ def _value(elements: list[dict], role: str, label: str) -> str:
 
 
 class ComposeWindow(Window):
-    COMMIT = ['Draft', 'Send']
+    commit_label = 'Send'
+
+    def fill(self, item: Mail) -> None:
+        for key, value in fields(item).items():
+            label = {'to': 'To Recipients', 'cc': 'Cc Recipients', 'bcc': 'Bcc Recipients',
+                     'subject': 'Subject', 'body': BODY_LABEL}[key]
+            hits = [e for e in self.elements() if e.get('label') == label
+                    and e.get('role') in ('AXTextField', 'AXTextArea')]
+            if not hits and key in ('cc', 'bcc'):
+                toggles = [e for e in self.elements() if e.get('label') == key.capitalize()
+                           and e.get('role') == 'AXButton']
+                if len(toggles) == 1:
+                    _cua('click', {'pid': self.pid, 'element_token': toggles[0]['element_token']})
+                    hits = [e for e in self.elements() if e.get('label') == label and e.get('role') == 'AXTextField']
+            if len(hits) != 1:
+                raise UiFailure('compose_field_not_found:' + key)
+            _cua('set_value', {'pid': self.pid, 'element_token': hits[0]['element_token'], 'value': value})
+            if key in ('to', 'cc', 'bcc') and value:
+                _cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'tab'})
 
     def read(self) -> dict[str, str]:
         elements = self.elements()
         title = next((e.get('label') or '' for e in elements if e.get('role') == 'AXWindow'), '')
-        if not title.endswith(f' • {ACCOUNT}'):
+        if not title.endswith(f' • {account()}'):
             raise UiFailure('wrong_account')
         return {'to': _recipients(elements, 'To Recipients'), 'cc': _recipients(elements, 'Cc Recipients'),
                 'bcc': _recipients(elements, 'Bcc Recipients'),
                 'subject': _value(elements, 'AXTextField', 'Subject'),
-                'body': _value(elements, BODY_ROLE, BODY_LABEL).rstrip('\n')}
+                'body': _value(elements, BODY_ROLE, BODY_LABEL)}
+
+
+class EventWindow(Window):
+    """AX event form. Unknown/ambiguous fields fail closed before Save or invitations.
+
+    This field contract still requires a discard-only live verification on the
+    installed Outlook version; offline fixtures do not establish native labels.
+    """
+    LABELS = {'subject': 'Subject', 'start': 'Start', 'end': 'End', 'location': 'Location',
+              'body': 'Message body', 'attendees': 'Required attendees'}
+
+    def __init__(self, pid: int, window_id: int, waits: ui.Waits, item: Event):
+        super().__init__(pid, window_id, waits)
+        self.item = item
+        self.commit_label = 'Send' if item.attendees else 'Save'
+
+    def _field(self, elements: list[dict], key: str) -> dict:
+        hits = [e for e in elements if e.get('label') == self.LABELS[key]
+                and e.get('role') in ('AXTextField', 'AXTextArea', 'AXDateTimeArea')]
+        if len(hits) != 1:
+            raise UiFailure('event_field_not_found:' + key)
+        return hits[0]
+
+    def fill(self) -> None:
+        for key, value in fields(self.item).items():
+            target = self._field(self.elements(), key)
+            _cua('set_value', {'pid': self.pid, 'element_token': target['element_token'], 'value': value})
+            if self._field(self.elements(), key).get('value', '') != value:
+                raise UiFailure('event_field_mismatch:' + key)
+
+    def read(self) -> dict[str, str]:
+        elements = self.elements()
+        title = next((e.get('label', '') for e in elements if e.get('role') == 'AXWindow'), '')
+        if not title.endswith(f' • {account()}'):
+            raise UiFailure('wrong_account')
+        return {key: self._field(elements, key).get('value') or '' for key in self.LABELS}
 
 
 def _main_window(waits: ui.Waits) -> tuple[int, dict]:
@@ -493,7 +651,7 @@ def _main_window(waits: ui.Waits) -> tuple[int, dict]:
 def _new_window(pid: int, before: set[int], waits: ui.Waits) -> int:
     deadline = time.monotonic() + waits.new_window_seconds
     while True:
-        fresh = [w for w in ui.cua('list_windows', {'pid': pid}).get('windows') or []
+        fresh = [w for w in _cua('list_windows', {'pid': pid}).get('windows') or []
                  if w['window_id'] not in before and w.get('on_current_space')
                  and min((w.get('bounds') or {}).get(k, 0) for k in ('width', 'height')) >= 400]
         if len(fresh) == 1:
@@ -506,14 +664,35 @@ def _new_window(pid: int, before: set[int], waits: ui.Waits) -> int:
 def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> Window:
     try:
         pid, main = _main_window(waits)
-        before = {w['window_id'] for w in ui.cua('list_windows', {'pid': pid}).get('windows') or []}
+        windows = _cua('list_windows', {'pid': pid}).get('windows') or []
+        if any(w['window_id'] != main['window_id']
+               and min((w.get('bounds') or {}).get(k, 0) for k in ('width', 'height')) >= 400
+               for w in windows):
+            raise UiFailure('compose_window_open')
+        before = {w['window_id'] for w in windows}
         if isinstance(item, Mail):
-            _open_url(mailto(item))
-            window: Window = ComposeWindow(pid, _new_window(pid, before, waits), waits)
+            handler = _mailto_handler()
+            if handler == BUNDLE.lower():
+                _open_url(mailto(item))
+                window: Window = ComposeWindow(pid, _new_window(pid, before, waits), waits)
+            else:
+                main_form = Window(pid, main['window_id'], waits)
+                target = main_form._button(main_form.elements(), 'New Mail')
+                _cua('click', {'pid': pid, 'element_token': target['element_token']})
+                window = ComposeWindow(pid, _new_window(pid, before, waits), waits)
+                try:
+                    window.fill(item)
+                except UiFailure as exc:
+                    failure = _discard(window, Result(State.FAILED, str(exc)))
+                    raise UiFailure(failure.reason) from None
         else:
-            ui.cua('invoke_menu', {'pid': pid, 'window_id': main['window_id'], 'path': ['File', 'New', 'Event']})
+            _cua('invoke_menu', {'pid': pid, 'window_id': main['window_id'], 'path': ['File', 'New', 'Event']})
             window = EventWindow(pid, _new_window(pid, before, waits), waits, item)
-            window.fill()
+            try:
+                window.fill()
+            except UiFailure as exc:
+                failure = _discard(window, Result(State.FAILED, str(exc)))
+                raise UiFailure(failure.reason) from None
         time.sleep(waits.settle_seconds)
         return window
     except ui.CuaError as exc:
@@ -521,26 +700,78 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> Window:
 
 
 class DecodedMailbox:
-    """A fresh hxprobe decode of a private copy of HxStore.hxd, through the intake job's decoder."""
+    """Read metadata from a private snapshot using PR #2023's pinned calendar decoder.
+
+    No body sidecars are needed for duplicate/confirmation checks. The temporary
+    store and SQLite output are removed even when decoding or schema checks fail.
+    """
+    PIN = ('191b54e42757687806202f8f696e9066f0514e11 '
+           '2f09252e1336f17e374a4c1fd8d112bcc44d3af185a9daa283c0c9fba20471f0')
+    STORE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/HxStore.hxd')
 
     def __init__(self, repo: Path, home: Path):
         self.repo, self.home = repo, home
 
     def snapshot(self) -> Snapshot:
-        from lib import outlook_intake as intake
+        vendor = self.home / 'carr-local/hxstore-reverse-engineering'
+        if (vendor / '.carr-pin').read_text().strip() != self.PIN:
+            raise UiFailure('decoder_pin_mismatch')
         out = self.repo / OUT
-        _, mails, events = intake._decode(self.home / intake.STORE, out, intake._decoder(self.home))
-        return Snapshot(
-            tuple(SentRow(m['sender'] or '', m['recipients'], m['subject'] or '', m['sent_unix']) for m in mails),
-            tuple(EventRow(e['subject'] or '', e['start_unix']) for e in events))
+        out.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(out, 0o700)
+        with tempfile.TemporaryDirectory(prefix='decode-', dir=out) as folder:
+            work = Path(folder)
+            copy, db = work / 'store.hxd', work / 'store.db'
+            fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'wb') as writer, (self.home / self.STORE).open('rb') as reader:
+                shutil.copyfileobj(reader, writer)
+            done = subprocess.run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
+                                  capture_output=True, timeout=900)
+            if done.returncode:
+                raise UiFailure('decoder_failed')
+            os.chmod(db, 0o600)
+            con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+            try:
+                sent = tuple(SentRow(*row) for row in con.execute(
+                    'SELECT DISTINCT m.sender, m.recipients, m.subject, m.sent_unix FROM messages m '
+                    'JOIN message_folders mf ON mf.message_id=m.id JOIN folders f ON f.id=mf.folder_id '
+                    "WHERE lower(f.name) IN ('sent', 'sent items') AND m.sender IS NOT NULL "
+                    'AND m.subject IS NOT NULL AND m.sent_unix IS NOT NULL'))
+                events = tuple(EventRow(*row) for row in con.execute(
+                    'SELECT subject, start_unix FROM events WHERE subject IS NOT NULL'))
+                return Snapshot(sent, events)
+            finally:
+                con.close()
 
 
 def default_ports(repo: Path | None = None) -> Ports:
-    from lib import outlook_intake, outlook_triage
+    from lib import outlook_triage
     repo = repo or Path(__file__).resolve().parents[1]
+
+    def carr(verb: str, args: dict) -> dict:
+        # stdin keeps message text and addresses out of argv/process listings.
+        done = subprocess.run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args),
+                              cwd=repo, capture_output=True, text=True, timeout=120)
+        if done.returncode:
+            raise UiFailure('record_call_failed')
+        return json.loads(done.stdout)
+
+    def contacts() -> list[tuple[str, str, str]]:
+        from lib.loadpy import load_module_from_path
+        matcher = load_module_from_path('outlook_send_contacts', str(repo / 'tools/calendar-touch-matcher.py'))
+        rows = []
+        for view, id_col, name_col, org_col in matcher.RECORD_VIEWS:
+            _, found = matcher.read_view(view)
+            for row in found:
+                if not row.get('_out_of_market'):
+                    rows.append((str(row.get('Email') or '').strip().lower(),
+                                 str(row.get(name_col) or row.get(org_col) or '').strip(),
+                                 str(row.get(id_col) or '').strip()))
+        return rows
+
     return Ports(open_form=open_form, mailbox=DecodedMailbox(repo, Path.home()),
-                 idle_seconds=outlook_triage.hid_idle_seconds, carr=outlook_intake._carr(repo),
-                 out=repo / OUT)
+                 idle_seconds=outlook_triage.hid_idle_seconds, carr=carr, contacts=contacts,
+                 out=Path.home() / '.local/state/carr/outlook-send')
 
 
 # ---- public interface --------------------------------------------------------
@@ -575,6 +806,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument('kind', choices=('send', 'event'))
     parser.add_argument('--json', required=True, type=Path)
     args = parser.parse_args(argv)
+    info = args.json.lstat()
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
+        print('outlook-' + args.kind + ' failed input_must_be_owned_0600_file')
+        return 1
     spec = json.loads(args.json.read_text())
     key, record = spec.pop('idempotency_key'), spec.pop('record', None)
     if args.kind == 'send':
