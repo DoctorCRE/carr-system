@@ -26,11 +26,15 @@ class WireTests(unittest.TestCase):
 
     def test_codex_refuses_before_desktop_resume_or_exec(self):
         with patch.object(dispatch.subprocess, 'run') as run, patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
-            with self.assertRaisesRegex(desks.DeskError, 'Codex.*tool'):
+            with self.assertRaisesRegex(desks.DeskError, 'Codex.*tool') as refused:
                 dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old'}, 'Read the record.',
                                    env={}, live_desktop=True)
         run.assert_not_called()
         owner.assert_not_called()
+        self.assertEqual(refused.exception.code, 'record_layer_unsupported')
+        self.assertIn('CARR-only tool allowlist', str(refused.exception))
+        self.assertIn('apply_patch', str(refused.exception))
+        self.assertIn('Code Mode', str(refused.exception))
 
     def test_grok_refuses_before_catalog_or_model_launch(self):
         run = Mock(return_value=subprocess.CompletedProcess([], 1, '', ''))
