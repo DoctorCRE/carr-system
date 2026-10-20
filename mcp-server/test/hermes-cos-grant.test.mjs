@@ -19,13 +19,13 @@ import {
   PROFILES, allowedIn, profileForActor, hermesCosDealFieldRefusal,
   hermesCosPremisesRefusal, HERMES_COS_DEAL_FIELDS,
 } from "../src/mcp.js";
-import { TOOLS, ToolError } from "../src/tools.js";
+import { TOOLS, ToolError, executeRegisteredTool } from "../src/tools.js";
 
 const PLAIN = JSON.stringify({ "hermes-pilot": "plain-secret" });
 const COS = JSON.stringify({ "hermes-pilot": "cos-secret" });
 const PROJECTOR = JSON.stringify({ "hermes-pilot": "projector-secret" });
 const WRITE = { write: true };
-const HALBERD = "Halberd Tire — Pensacola distribution warehouse";
+const EXAMPLE = "example.test — example deal";
 const IDS = Object.freeze({ joe: "10000000-0000-0000-0000-000000000002",
   dell: "10000000-0000-0000-0000-000000000003",
   hermes: "10000000-0000-0000-0000-000000000009",
@@ -129,12 +129,16 @@ class FakeDB {
   }
   async query(text, params = []) {
     const sql = text.replace(/\s+/g, " ").trim();
+    if (sql.includes("from v_today_triage")) return { rows: this.inserted ? [{
+      item_kind: "next_action", owner: this.inserted.owner_id === IDS.joe ? "joe" : "dell",
+      what: this.inserted.description, created_by: this.inserted.created_by,
+    }] : [] };
     if (sql.startsWith("select request_hash, response")) {
       const prior = this.calls.get(params[0]);
       return { rows: prior ? [prior] : [] };
     }
     if (sql.includes("from v_ref_index where subject_type='deal'"))
-      return { rows: [{ subject_id: IDS.deal, display_name: HALBERD, status: "site_selection", client_ref: "C-127" }] };
+      return { rows: [{ subject_id: IDS.deal, display_name: EXAMPLE, status: "site_selection", client_ref: "C-127" }] };
     if (sql.startsWith("select id from actor where slug=$1")) {
       const id = { joe: IDS.joe, dell: IDS.dell, "hermes-pilot": IDS.hermes }[params[0]];
       return { rows: id ? [{ id }] : [] };
@@ -164,10 +168,10 @@ class FakeDB {
   }
 }
 
-test("Halberd CoS handoff selects Joe, replaces Joe's ball, and keeps runtime provenance", async () => {
+test("Example CoS handoff selects Joe, replaces Joe's ball, and keeps runtime provenance", async () => {
   const db = new FakeDB();
   const result = await TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-halberd", ref: HALBERD, owner: "joe",
+    idempotency_key: "cos-459-example", ref: EXAMPLE, owner: "joe",
     description: "Confirm lease-vs-purchase preference before the tour", due_on: "2026-08-27",
   });
   assert.equal(result.owner, "joe");
@@ -186,12 +190,15 @@ for (const [label, seat] of [["CoS", cos], ["plain Hermes", plain],
     test(`${label} seat sets a ${partner} to-do; created_by stays the real runtime`, async () => {
       const db = new FakeDB();
       const result = await TOOLS["set-next-action"].handler(db, seat(), {
-        idempotency_key: `seat-${label}-${partner}`, ref: HALBERD, owner: partner, description: "Agent-assigned to-do",
+        idempotency_key: `seat-${label}-${partner}`, ref: EXAMPLE, owner: partner, description: "Agent-assigned to-do",
       });
       assert.equal(result.owner, partner);
       assert.equal(db.inserted.owner_id, IDS[partner]);
       assert.equal(db.inserted.created_by, IDS.hermes);
       assert.equal(db.events[0].new_value.owner, partner);
+      const brief = await executeRegisteredTool(db, joe(), "morning-brief", {});
+      assert.equal(brief.sections.today.items[0]?.owner_partner, partner);
+      assert.equal(brief.sections.today.items[0]?.created_by, IDS.hermes);
     });
   }
 }
@@ -199,7 +206,7 @@ for (const [label, seat] of [["CoS", cos], ["plain Hermes", plain],
 test("a seat still cannot name an owner outside itself, Joe, and Dell", async () => {
   const db = new FakeDB();
   await assert.rejects(() => TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-codex", ref: HALBERD, owner: "codex", description: "forbidden",
+    idempotency_key: "cos-459-codex", ref: EXAMPLE, owner: "codex", description: "forbidden",
   }), (e) => e instanceof ToolError && e.payload.error === "owner_not_permitted");
   assert.equal(db.inserted, undefined);
   assert.equal(db.events.length, 0);
@@ -208,7 +215,7 @@ test("a seat still cannot name an owner outside itself, Joe, and Dell", async ()
 test("CoS defaults to its own ball when owner is omitted", async () => {
   const db = new FakeDB();
   const result = await TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-default", ref: HALBERD, description: "Doc keeps this one",
+    idempotency_key: "fixture", ref: EXAMPLE, description: "Doc keeps this one",
   });
   assert.equal(result.owner, "hermes-pilot");
   assert.equal(db.inserted.owner_id, IDS.hermes);
@@ -227,7 +234,7 @@ test("update-deal CoS field lock is exact and whole-call", () => {
 
 test("add-premises CoS payload lock refuses new_party but allows party_ref", () => {
   assert.equal(hermesCosPremisesRefusal("hermes-cos", "add-premises",
-    { ownership: [{ kind: "owner", new_party: { name: "Halberd Holdings" } }] }), true);
+    { ownership: [{ kind: "owner", new_party: { name: "Example Holdings" } }] }), true);
   assert.equal(hermesCosPremisesRefusal("hermes-cos", "add-premises",
     { ownership: [{ kind: "owner", party_ref: "P-0948" }] }), false);
   assert.equal(hermesCosPremisesRefusal("hermes", "add-premises",

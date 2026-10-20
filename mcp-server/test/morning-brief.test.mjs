@@ -131,6 +131,7 @@ const BOTH_TODOS = [
   { item_kind: "next_action", owner: "dell-local", what: "Dell's machine seat ball" },
   { item_kind: "next_action", owner: "claude", what: "The drain queue's ball" },
   { item_kind: "next_action", owner: "hermes-pilot", what: "The pilot's ball" },
+  { item_kind: "next_action", owner: "constructor", what: "An unknown seat ball" },
   { item_kind: "critical_date", owner: null, what: "msa: renewal notice" },
 ];
 const view = (result) => result.sections.today.items.map((row) => [row.what, row.owner_partner]);
