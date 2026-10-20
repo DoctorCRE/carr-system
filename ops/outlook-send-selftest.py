@@ -199,8 +199,10 @@ class Harness:
         self.fake = FakeOutlook(self.clock, self.mailbox, on_send, corrupt)
         self.idle = [idle]
         self.handler = send_mod.BUNDLE.lower()
+        self.transport = None
         self.previous = 'com.example.editor'
         self.front_idle = 600
+        self.frontmost = lambda: self.previous
         self.carr_calls: list[tuple[str, dict]] = []
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
@@ -217,10 +219,10 @@ class Harness:
 
     def send(self, key='key-1', record=None, **overrides):
         spec = {**MAIL, **overrides}
-        with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
+        with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.transport or self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
                 patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
                 patch.object(send_mod, '_open_url', self.fake.open_url), \
-                patch.object(send_mod, '_idle_seconds', lambda: self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.previous), \
+                patch.object(send_mod, '_idle_seconds', lambda: self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.frontmost()), \
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
@@ -587,6 +589,48 @@ class SendTests(unittest.TestCase):
         with patch.object(send_mod.ComposeWindow, 'press', side_effect=ui.CuaError('lost reply')):
             self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
         self.assertEqual(h.send().state, State.DUPLICATE_KEY)
+
+    def test_typing_during_foreground_lookup_discards_without_taking_focus(self):
+        h = Harness(self.out)
+        def resumed_typing():
+            h.front_idle = 0
+            return h.previous
+        h.frontmost = resumed_typing
+        result = h.send()
+        self.assertEqual(result.state, State.NOT_IDLE)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(h.fake.forms, {})
+        self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
+
+    def test_typing_after_taking_focus_discards_and_restores_previous_app(self):
+        h = Harness(self.out)
+        original = h.fake.__call__
+        def resumed_typing(tool, args):
+            result = original(tool, args)
+            if tool == 'bring_to_front':
+                h.front_idle = 0
+            return result
+        h.transport = resumed_typing
+        result = h.send()
+        self.assertEqual(result.state, State.NOT_IDLE)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertEqual(h.fake.forms, {})
+        self.assertIn(('activate', h.previous), h.fake.calls)
+
+    def test_foreground_failures_always_restore_previous_app(self):
+        for failed_tool in ('bring_to_front', 'invoke_menu'):
+            with self.subTest(tool=failed_tool):
+                h = Harness(self.out / failed_tool)
+                original = h.fake.__call__
+                def failure(tool, args):
+                    result = original(tool, args) if tool != failed_tool else None
+                    if tool == failed_tool:
+                        raise subprocess.TimeoutExpired(['synthetic-transport'], 1)
+                    return result
+                h.transport = failure
+                self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+                self.assertEqual(h.fake.presses(), 0)
+                self.assertIn(('activate', h.previous), h.fake.calls)
 
     def test_front_fallback_requires_readable_previous_app(self):
         h = Harness(self.out)
