@@ -164,6 +164,18 @@ class UiFailure(Exception):
     """The window did not show the shape this module relies on; the message is a short code."""
 
 
+def _transport_failure(exc: Exception) -> UiFailure:
+    digest = hashlib.sha256(str(exc).encode()).hexdigest()[:12]
+    return UiFailure(f'transport_{type(exc).__name__}_{digest}')
+
+
+def _run(command: list[str], **kwargs) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(command, check=True, **kwargs)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _transport_failure(exc) from None
+
+
 def account(path: Path = ACCOUNT_CONFIG) -> str:
     """Read the local account identity; never put a real address in source."""
     info = path.lstat()
@@ -324,9 +336,9 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     pressed_at = ports.now()
     try:
         mode = form.press()
-    except (UiFailure, ui.CuaError, OSError, subprocess.TimeoutExpired):
+    except (UiFailure, ui.CuaError, OSError, subprocess.SubprocessError) as exc:
         mode = None
-        reason = 'press_outcome_unknown'
+        reason = str(exc) if isinstance(exc, UiFailure) else str(_transport_failure(exc))
     else:
         reason = 'pressed'
     if not _wait(form.closed, ports.close_seconds, ports):
@@ -428,21 +440,21 @@ def _log(item: Mail | Event, key: str, record: str, ports: Ports) -> tuple[str, 
 def _cua(tool: str, args: dict) -> dict:
     try:
         result = ui.cua(tool, args)
-    except ui.CuaError:
-        raise UiFailure('cua_driver_unavailable') from None
+    except (ui.CuaError, OSError, subprocess.SubprocessError) as exc:
+        raise _transport_failure(exc) from None
     if result.get('status') in ('refused', 'failed', 'error') or result.get('refusal') or result.get('error'):
         raise UiFailure('cua_action_refused')
     return result
 
 
 def _frontmost() -> str | None:
-    done = subprocess.run(['osascript', '-e', 'tell application "System Events" to get bundle identifier '
+    done = _run(['osascript', '-e', 'tell application "System Events" to get bundle identifier '
                            'of first process whose frontmost is true'], capture_output=True, text=True, timeout=30)
     return done.stdout.strip() or None if done.returncode == 0 else None
 
 
 def _activate(bundle: str) -> None:
-    subprocess.run(['osascript', '-e', f'tell application id "{bundle}" to activate'],
+    _run(['osascript', '-e', f'tell application id "{bundle}" to activate'],
                    capture_output=True, timeout=30)
 
 
@@ -476,7 +488,7 @@ def _mailto_handler() -> str:
 
 
 def _open_url(url: str) -> None:
-    done = subprocess.run(['open', '-g', url], capture_output=True, timeout=60)
+    done = _run(['open', '-g', url], capture_output=True, timeout=60)
     if done.returncode:
         raise UiFailure('open_failed')
 
@@ -526,7 +538,10 @@ class Window:
     def press(self) -> str:
         """One accepted press. Only an explicit pre-dispatch refusal allows front fallback."""
         target = self._button(self.elements(), self.commit_label)
-        result = ui.cua('click', {'pid': self.pid, 'element_token': target['element_token']})
+        try:
+            result = ui.cua('click', {'pid': self.pid, 'element_token': target['element_token']})
+        except (ui.CuaError, OSError, subprocess.SubprocessError) as exc:
+            raise _transport_failure(exc) from None
         refusal = result.get('refusal') or {}
         if not refusal and result.get('status') not in ('refused', 'failed', 'error') and not result.get('error'):
             return 'background'
@@ -701,8 +716,8 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
                 raise UiFailure(failure.reason) from None
         time.sleep(waits.settle_seconds)
         return window
-    except ui.CuaError as exc:
-        raise UiFailure('cua_driver_unavailable') from exc
+    except (ui.CuaError, OSError, subprocess.SubprocessError) as exc:
+        raise _transport_failure(exc) from None
 
 
 class DecodedMailbox:
@@ -731,7 +746,7 @@ class DecodedMailbox:
             fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as writer, (self.home / self.STORE).open('rb') as reader:
                 shutil.copyfileobj(reader, writer)
-            done = subprocess.run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
+            done = _run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
                                   capture_output=True, timeout=900)
             if done.returncode:
                 raise UiFailure('decoder_failed')
@@ -756,7 +771,7 @@ def default_ports(repo: Path | None = None) -> Ports:
 
     def carr(verb: str, args: dict) -> dict:
         # stdin keeps message text and addresses out of argv/process listings.
-        done = subprocess.run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args),
+        done = _run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args),
                               cwd=repo, capture_output=True, text=True, timeout=120)
         if done.returncode:
             raise UiFailure('record_call_failed')
