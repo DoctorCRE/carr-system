@@ -12,6 +12,57 @@ from work_runner import Runner, Resources
 
 
 class RunnerTests(unittest.TestCase):
+    def test_publication_acknowledges_reader_linkage_and_still_detects_changed_data(self):
+        import copy
+        import subprocess
+        from unittest.mock import patch
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import progress_board
+        repo = Path(__file__).resolve().parents[2]
+        remote = None
+        writes = []
+        corrupt = False
+
+        def call(verb, args):
+            nonlocal remote
+            if verb == 'publish-board-snapshot':
+                writes.append(args)
+                remote = {'board_id': args['board_id'], 'version': len(writes),
+                          'snapshot_json': copy.deepcopy(args['snapshot'])}
+                return {'ok': True, 'snapshot': remote}
+            self.assertEqual(verb, 'read-progress-board')
+            if remote is None:
+                return {'ok': True, 'snapshot': None, 'questions': []}
+            script = """
+import {projectBoardLinkage} from './mcp-server/src/work-linkage.js';
+let input = ''; for await (const part of process.stdin) input += part;
+console.log(JSON.stringify(projectBoardLinkage(JSON.parse(input))));
+"""
+            row = json.loads(subprocess.run(['node', '--input-type=module', '-e', script],
+                input=json.dumps(remote), text=True, capture_output=True, check=True, cwd=repo).stdout)
+            if corrupt:
+                row['snapshot_json']['tasks']['job']['title'] = 'Wrong title'
+            return {'ok': True, 'snapshot': row, 'questions': []}
+
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / 'queue.sqlite3'
+            state = {'project': 'carr-v5', 'tasks': {'job': {'title': 'Synthetic job', 'status': 'queued'}}}
+            with WorkQueue(db) as queue, \
+                 patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(db)}), \
+                 patch.object(progress_board, 'read_state', return_value=state), \
+                 patch.object(progress_board, 'call_verb', side_effect=call):
+                queue.enqueue('A', desk='sol', task='synthetic', actor='test')
+                publish = lambda: progress_board.publish_board('carr-v5', costs={}, refresh_inventory=False)
+                self.assertTrue(queue.publish(publish, now=10), queue.publication()['error'])
+                self.assertEqual(queue.publication()['published'], queue.export()['revision'])
+                publish()
+                self.assertEqual(len(writes), 1, 'reader enrichment must not trigger another write')
+                queue.enqueue('B', desk='luna', task='synthetic', actor='test')
+                corrupt = True
+                self.assertFalse(queue.publish(publish, now=12))
+                self.assertIn('did not read back', queue.publication()['error'])
+                self.assertLess(queue.publication()['published'], queue.publication()['dirty'])
+
     def test_busy_slots_do_not_block_sender_or_reorder_other_desks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
