@@ -2490,6 +2490,16 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
             'schema': 'system-work-external.v2', 'pages': pages, 'item_count': len(cache['items'])}
 
 
+def published_snapshot_data(snapshot):
+    """Compare persisted fields without the reader's derived task linkage."""
+    data = copy.deepcopy(snapshot)
+    if isinstance(data, dict) and isinstance(data.get('tasks'), dict):
+        for task in data['tasks'].values():
+            if isinstance(task, dict):
+                task.pop('linkage', None)
+    return data
+
+
 def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
@@ -2505,7 +2515,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
         if inventory is not None:
             snapshot["external_inventory"] = inventory
     snapshot = fit_snapshot(snapshot)
-    if remote_snapshot is None or remote_snapshot.get("snapshot_json") != snapshot:
+    if remote_snapshot is None or published_snapshot_data(remote_snapshot.get("snapshot_json")) != snapshot:
         args = {"board_id": board, "base_version": int(remote_snapshot["version"]) if remote_snapshot else 0,
                 "snapshot": snapshot}
         call_verb("publish-board-snapshot", {**args, "idempotency_key": stable_key("publish-board-snapshot", args)})
@@ -2534,7 +2544,7 @@ def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -
 
     after = call_verb("read-progress-board", {"board_id": board})
     sealed = after.get("snapshot") or {}
-    if sealed.get("snapshot_json") != snapshot:
+    if published_snapshot_data(sealed.get("snapshot_json")) != snapshot:
         raise RuntimeError("published board snapshot did not read back")
     after_questions = {q["question_id"]: q for q in after.get("questions", [])}
     for qid, q in state.get("questions", {}).items():

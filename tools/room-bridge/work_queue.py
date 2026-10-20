@@ -33,6 +33,8 @@ import os
 import re
 from pathlib import Path
 import sqlite3
+import sys
+import tempfile
 import time
 
 STAGES = ('queued', 'building', 'review', 'fixing', 'merging', 'done', 'failed', 'blocked', 'parked')
@@ -42,9 +44,22 @@ FIELDS = {'wr', 'slice', 'title', 'description', 'agent', 'family', 'model', 'ef
           'prs', 'ci_state', 'findings'}
 
 
+def _guard_test_store(path=None):
+    entry = Path(sys.argv[0]).name
+    testing = ('unittest' in sys.modules or 'pytest' in sys.modules
+               or os.environ.get('CARR_HOOK_FIXTURE') == '1'
+               or entry.startswith(('test_', 'test-')) or 'selftest' in entry)
+    if testing and (path is None or not Path(path).expanduser().resolve().is_relative_to(
+            Path(tempfile.gettempdir()).resolve())):
+        raise RuntimeError('tests require an isolated temporary CARR_WORK_QUEUE_DB')
+
+
 def default_path() -> Path:
     if os.environ.get('CARR_WORK_QUEUE_DB'):
-        return Path(os.environ['CARR_WORK_QUEUE_DB']).expanduser().resolve()
+        path = Path(os.environ['CARR_WORK_QUEUE_DB']).expanduser().resolve()
+        _guard_test_store(path)
+        return path
+    _guard_test_store()
     results = Path(os.environ.get('CARR_HERMES_RESULTS', Path.home() / '.config/carr/hermes-dispatch-results.jsonl'))
     return results.expanduser().resolve().with_name('work-queue.sqlite3')
 
@@ -59,6 +74,7 @@ class QueueChanged(ValueError):
 
 class WorkQueue:
     def __init__(self, path: Path, *, read_only=False):
+        _guard_test_store(path)
         self.path = Path(path)
         self.read_only = read_only
         if read_only:
@@ -514,6 +530,7 @@ def board_projection(path=None):
     """Optional local projection; absence leaves existing boards unchanged."""
     if path is None:
         path = default_path()
+    _guard_test_store(path)
     if not Path(path).exists():
         return None
     with WorkQueue(path, read_only=True) as queue:

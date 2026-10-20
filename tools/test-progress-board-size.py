@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import unittest
 import json
+import os
 import tempfile
 from datetime import datetime, timezone
 from unittest.mock import patch
@@ -66,6 +67,13 @@ class CostSnapshotTests(unittest.TestCase):
 
 
 class SnapshotSizeTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        environment = patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(Path(directory.name) / 'queue.sqlite3')})
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def test_trimming_removes_defaults_no_remaining_card_inherits(self):
         for field, value in (("title", "X" * 240000),
                              ("stage_history", [{"stage": "merged", "entered_at": "2026-10-18T12:00:00Z"}] * 5000)):

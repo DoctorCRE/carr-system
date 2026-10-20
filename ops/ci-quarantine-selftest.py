@@ -16,6 +16,20 @@ RUNNER = REPO / 'ops' / 'ci-quarantine.py'
 
 
 class QuarantineTests(unittest.TestCase):
+    def test_queue_writes_are_isolated_and_removed_before_leak_detection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            command = ("import os, sqlite3; from pathlib import Path; "
+                       "p=Path(os.environ['CARR_WORK_QUEUE_DB']); "
+                       "assert p.is_relative_to(Path(os.environ['TMPDIR'])); "
+                       "c=sqlite3.connect(p); c.execute('create table fixture(id int)'); c.close()")
+            with mock.patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': '/non-temporary/forbidden.sqlite3'}):
+                result = self.invoke(root, command)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            receipt = json.loads((root / 'test.log.result.json').read_text())
+            self.assertEqual(receipt['status'], 'passed')
+            self.assertNotIn('temp_leaks', receipt)
+
     def test_temp_leaks_fail_without_rerun_or_quarantine(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

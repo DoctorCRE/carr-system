@@ -54,6 +54,26 @@ def test_clean_set_stays_green():
     assert "1/1 suites passed" in out.getvalue()
 
 
+def test_each_suite_gets_a_disposable_store_even_with_an_inherited_override():
+    from pathlib import Path
+    from unittest.mock import patch
+    stores = []
+
+    def runner(argv, **kwargs):
+        path = Path(kwargs['env']['CARR_WORK_QUEUE_DB'])
+        assert path.parent.is_dir()
+        assert not path.exists()
+        path.touch()
+        stores.append(path)
+        return SimpleNamespace(returncode=0, stdout='passed\n', stderr='')
+
+    with patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': '/non-temporary/forbidden.sqlite3'}):
+        assert mod.main(suites=('tools/room-bridge/test_queue_unit.py',) * 2, runner=runner) == 0
+    assert len(set(stores)) == 2
+    assert all(not path.parent.exists() for path in stores)
+
+
 test_timeout_is_visible_and_later_suites_run()
 test_clean_set_stays_green()
-print("room-bridge-selftest harness: 2/2 passed")
+test_each_suite_gets_a_disposable_store_even_with_an_inherited_override()
+print("room-bridge-selftest harness: 3/3 passed")

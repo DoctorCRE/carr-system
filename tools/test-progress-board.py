@@ -176,6 +176,10 @@ class BoardCase(unittest.TestCase):
         self.env["PROGRESS_BOARD_SKIP_GH"] = "1"
         self.env["PROGRESS_BOARD_SKIP_PROBE"] = "1"
         self.env["PROGRESS_BOARD_RELEASES"] = str(self.root / "releases.jsonl")
+        self.env['CARR_WORK_QUEUE_DB'] = str(self.root / 'work-queue.sqlite3')
+        queue_env = patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': self.env['CARR_WORK_QUEUE_DB']})
+        queue_env.start()
+        self.addCleanup(queue_env.stop)
         # Mutations publish to the app board; unit tests stay local unless a
         # test spies on the publication itself.
         self.env["PROGRESS_BOARD_LOCAL_ONLY"] = "1"
