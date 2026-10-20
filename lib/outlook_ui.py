@@ -53,6 +53,7 @@ class Waits:
     poll_seconds: float = 1
     settle_seconds: float = 2
     move_seconds: float = 10
+    render_seconds: float = 8
 
 
 class CuaError(Exception):
@@ -68,6 +69,14 @@ class Moved(Enum):
     FAILED = 'failed'
     GONE = 'gone'
     NEXT_TO_UNREAD = 'next_to_unread'
+
+
+class Refreshed(Enum):
+    OPENED = 'opened'
+    RESTORED = 'restored_unread'
+    NOT_RESTORED = 'unread_not_restored'
+    NOT_FOUND = 'not_found'
+    UNCERTAIN = 'uncertain'
 
 
 class ReadState(Enum):
@@ -92,6 +101,19 @@ class Row:
         if re.search(r'\bunread\b', self.label, re.I):
             return ReadState.UNREAD
         return ReadState.READ if self.sender else ReadState.UNCERTAIN
+
+    @property
+    def key(self) -> str:
+        """The label with any unread marker removed: the same email read or unread."""
+        return re.sub(r'\s+', ' ', re.sub(r'\bunread\b,?', '', self.label, flags=re.I)).strip()
+
+    @property
+    def subject(self) -> str | None:
+        """The subject as listed; fields after it are separated by a comma and a run of spaces."""
+        if re.search(r'Sender: .*?, No subject,', self.label):
+            return ''
+        match = re.search(r'Subject: (.*?),\s{2,}', self.label)
+        return match.group(1) if match else None
 
     @property
     def headline(self) -> str:
@@ -325,6 +347,60 @@ class Window:
                 return Moved.MOVED
             if time.monotonic() >= deadline:
                 return self._abandon()
+
+    def search(self, query: str) -> list[Row]:
+        """Type into Outlook's search box and return the result rows."""
+        fields = sorted((e for e in self._walk(max_elements=LIST_WALK)
+                         if e.get('role') == 'AXTextField' and e.get('label') == 'Search'),
+                        key=lambda e: e.get('depth', 0))
+        if not fields:
+            raise UiError('search_field_not_found')
+        cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': query})
+        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'return'})
+        time.sleep(self.waits.settle_seconds)
+        return self.rows()[1]
+
+    def end_search(self) -> None:
+        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
+        time.sleep(self.waits.settle_seconds)
+
+    def refresh(self, key: str) -> Refreshed:
+        """Open one listed email so Outlook downloads its full body, leaving its read state as found.
+
+        A read email is selected and left. An unread one is selected, marked unread
+        again while still selected, and the selection moves to a read neighbour (or
+        is dropped) before the unread marker is checked.
+        """
+        rows = self.rows()[1]
+        index = next((i for i, r in enumerate(rows) if r.key == key), None)
+        if index is None:
+            return Refreshed.NOT_FOUND
+        was = rows[index].read_state
+        if was is ReadState.UNCERTAIN:
+            return Refreshed.UNCERTAIN
+        cua('click', {'pid': self.pid, 'element_token': rows[index].token})
+        time.sleep(self.waits.render_seconds)
+        if was is ReadState.READ:
+            return Refreshed.OPENED
+        rows = self.rows()[1]
+        buttons = [e for e in self._walk(max_elements=LIST_WALK) if e.get('role') == 'AXButton'
+                   and e.get('label') == 'Mark Unread' and e.get('depth') == 1]
+        if [r.key for r in rows if r.selected] != [key] or len(buttons) != 1:
+            return Refreshed.NOT_RESTORED
+        cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token']})
+        time.sleep(self.waits.settle_seconds)
+        rows = self.rows()[1]
+        index = next(i for i, r in enumerate(rows) if r.key == key)
+        neighbour = next((r for r in (rows[index + 1:index + 2] + rows[max(0, index - 1):index])
+                          if r.read_state is ReadState.READ), None)
+        if neighbour:
+            cua('click', {'pid': self.pid, 'element_token': neighbour.token})
+        else:
+            cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
+        time.sleep(self.waits.settle_seconds)
+        after = [r for r in self.rows()[1] if r.key == key]
+        restored = len(after) == 1 and after[0].read_state is ReadState.UNREAD
+        return Refreshed.RESTORED if restored else Refreshed.NOT_RESTORED
 
     def _abandon(self) -> Moved:
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})

@@ -11,6 +11,7 @@ Every name here is invented.
 """
 from contextlib import redirect_stdout
 from datetime import datetime
+import hashlib
 import io
 import json
 import os
@@ -72,9 +73,9 @@ ORDINARY = window(13, MAILBOX, 1230, 768)
 COMPOSE = window(14, 'Re: example subject', 917, 911)
 
 
-def msg(sender, subject, when='10:02 AM', unread=False):
+def msg(sender, subject, when='10:02 AM', unread=False, email=None):
     return {'label': f'Sender: {sender}, Subject: {subject},      {when},        '
-                     f'Message preview: invented preview text', 'unread': unread}
+                     f'Message preview: invented preview text', 'unread': unread, 'email': email}
 
 
 QUILL = msg('Quillfeather, Pat', 'Lease draft')
@@ -108,6 +109,8 @@ def save():
 def lists():
     return state['lists']
 def current():
+    if state.get('search'):
+        return [r for rows in lists().values() for r in rows if r.get('email') == state['search']]
     return lists()[state['tab'] or 'only']
 def mark_read(label):
     for rows in lists().values():
@@ -116,8 +119,9 @@ def mark_read(label):
                 r['unread'] = False
 def select(label):
     previous = state.get('selected')
-    if previous:
+    if previous and previous != state.get('marked_unread'):
         mark_read(previous)
+    state['marked_unread'] = None
     state['selected'] = label
     state['selections'].append(label)
     if label:
@@ -171,8 +175,8 @@ elif tool == 'get_window_state':
     top = add('AXWindow', MAILBOX, 0)
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
-    for _ in range(3):
-        add('AXTextField', 'Search', 1, top)
+    for depth in (1, 2, 3):
+        add('AXTextField', 'Search', depth, top, ['search_field'])
     if state['sidebar']:
         outline = add('AXOutline', '', 2, top)
         for folder in ['Favorites', 'Inbox'] + state['folder_rows']:
@@ -225,11 +229,22 @@ elif tool in ('click', 'type_text'):
         fail('stale element_token')
     kind = state['tokens']['map'].get(index)
     if tool == 'type_text':
-        if kind != ['picker_field']:
+        if kind == ['search_field']:
+            state['search_typed'] = payload['text']
+        elif kind == ['picker_field']:
+            state['picker'] = payload['text']
+        else:
             fail('not a text field')
-        state['picker'] = payload['text']
     elif kind and kind[0] == 'row':
         select(kind[1])
+    elif kind == ['button', 'Mark Unread']:
+        state['presses'].append('Mark Unread')
+        if state.get('selected') and not state.get('mark_unread_lost'):
+            for rows in lists().values():
+                for r in rows:
+                    if r['label'] == state['selected']:
+                        r['unread'] = True
+            state['marked_unread'] = state['selected']
     elif kind == ['button', 'Move']:
         state['presses'].append('Move')
         if state.get('selected'):
@@ -252,7 +267,13 @@ elif tool in ('click', 'type_text'):
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 elif tool == 'press_key':
-    state['picker'] = None
+    if payload['key'] == 'return':
+        state['search'] = state.get('search_typed')
+    else:
+        state['picker'] = None
+        state['search'] = None
+        select(None)
+        state['selections'].pop()
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 else:
@@ -261,7 +282,7 @@ sys.exit(0)
 '''.replace('MAILBOX', repr(MAILBOX))
 
 
-class OutlookTriageTest(unittest.TestCase):
+class FakeOutlookCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix='outlook-triage-selftest-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -287,12 +308,12 @@ class OutlookTriageTest(unittest.TestCase):
             'lists': lists, 'folder_rows': ['Deals', 'Active Deals', 'Quillfeather'],
             'picker_folders': ['Quillfeather', 'Vera Example', 'Company Wide', 'Ambrose', 'Lark',
                                'Brightwater Dental', 'Zephyrologie', 'Connor.Kevin'],
-            'move_works': True, 'snapshot': 0, 'selections': [], 'presses': [], 'moved': [],
+            'move_works': True, 'snapshot': 0, 'search': None, 'selections': [], 'presses': [], 'moved': [],
             'find': FIND, **state}))
 
-    def run_triage(self, now=EVENING):
+    def run_triage(self, now=EVENING, limits=triage.Limits()):
         with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()):
-            outcome = triage.run(self.repo, self.home, now, Waits(0, 0, 0, 0, 0, 0))
+            outcome = triage.run(self.repo, self.home, now, Waits(0, 0, 0, 0, 0, 0, 0), limits)
         return outcome, json.loads(self.state.read_text())
 
     def called(self, name):
@@ -300,6 +321,12 @@ class OutlookTriageTest(unittest.TestCase):
             return []
         rows = [json.loads(line) for line in self.calls.read_text().splitlines()]
         return [row[1:] for row in rows if row[0] == name]
+
+    def refresh_list(self, entries):
+        path = self.repo / triage.REFRESH_LIST
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(entries))
+        return path
 
     def report(self):
         return (self.repo / triage.OUT / '2026-10-20.report.md').read_text()
@@ -310,6 +337,7 @@ class OutlookTriageTest(unittest.TestCase):
     def unread_labels(self, state):
         return {r['label'] for rows in state['lists'].values() for r in rows if r['unread']}
 
+class OutlookTriageTest(FakeOutlookCase):
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
         self.given([QUILL, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
         outcome, state = self.run_triage()
@@ -432,7 +460,7 @@ class OutlookTriageTest(unittest.TestCase):
     def test_output_carries_counts_not_names(self):
         self.given([QUILL, VENDOR, NEWS, UNREAD])
         with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as out:
-            triage.run(self.repo, self.home, EVENING, Waits(0, 0, 0, 0, 0, 0))
+            triage.run(self.repo, self.home, EVENING, Waits(0, 0, 0, 0, 0, 0, 0))
         printed = out.getvalue()
         self.assertRegex(printed, r'^outlook-triage succeeded filed moved=2 left=2\s*$')
 
@@ -448,6 +476,76 @@ class OutlookTriageTest(unittest.TestCase):
             execv.reset_mock()
             self.assertEqual(triage.fire(self.repo, LAST), 0)
             execv.assert_not_called()
+
+
+def listed(message_id, row, sender_email, **extra):
+    subject = Row(row['label'], '', False).subject
+    return {'message_id': message_id, 'subject_hash': hashlib.sha256(subject.encode()).hexdigest(),
+            'sent_utc': '2026-10-20T15:02:00Z', 'sender_email': sender_email, 'intake_note': 'kept', **extra}
+
+
+class RefreshTest(FakeOutlookCase):
+    READ_BODY = msg('Weekly Digest', 'Body pending', email='digest@news.test')
+    UNREAD_BODY = msg('Quillfeather, Pat', 'Big attachment', '8:15 AM', unread=True, email='pat@client.test')
+
+    def test_read_email_is_opened_unchanged_and_stamped(self):
+        self.given([QUILL, self.READ_BODY, NEWS])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'digest@news.test')])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertIn(self.READ_BODY['label'], state['selections'])
+        self.assertNotIn('Mark Unread', state['presses'])
+        entry = json.loads(path.read_text())[0]
+        self.assertEqual(entry['intake_note'], 'kept')
+        self.assertRegex(entry['opened_at'], r'^2\d{3}-')
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertIn('opened: 1', self.report())
+
+    def test_unread_email_is_opened_marked_unread_and_still_unread_at_the_end(self):
+        self.given([QUILL, NEWS, self.UNREAD_BODY])
+        self.refresh_list([listed('m2', self.UNREAD_BODY, 'pat@client.test')])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
+        self.assertIn(self.UNREAD_BODY['label'], state['selections'])
+        self.assertEqual(state['presses'].count('Mark Unread'), 1)
+        self.assertEqual(self.unread_labels(state), {self.UNREAD_BODY['label']})
+        self.assertIn('restored_unread: 1', self.report())
+        self.assertEqual([m[0] for m in state['moved']], [QUILL['label']])
+
+    def test_unread_marker_that_does_not_come_back_fails_and_names_the_email(self):
+        self.given([QUILL, NEWS, self.UNREAD_BODY], mark_unread_lost=True)
+        self.refresh_list([listed('m2', self.UNREAD_BODY, 'pat@client.test')])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
+        self.assertIn('unread_not_restored: 1', self.report())
+        self.assertIn('Sender: Quillfeather, Pat, Subject: Big attachment, 8:15 AM', self.report())
+        self.assertEqual(state['moved'], [])
+
+    def test_unmatched_entries_are_counted_and_left_alone(self):
+        self.given([QUILL, self.READ_BODY])
+        path = self.refresh_list([listed('m3', self.READ_BODY, 'nobody@example.com')])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertIn('not_found: 1', self.report())
+        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
+
+    def test_capped_per_night_never_opened_first_then_least_recently_opened(self):
+        self.assertEqual(triage.Limits().max_refreshes, 50)
+        self.given([self.READ_BODY])
+        self.refresh_list([listed('a', self.READ_BODY, 'a@example.com', opened_at='2026-10-19T01:00:00Z'),
+                           listed('b', self.READ_BODY, 'b@example.com'),
+                           listed('c', self.READ_BODY, 'c@example.com', opened_at='2026-10-10T01:00:00Z'),
+                           listed('d', self.READ_BODY, 'd@example.com')])
+        self.run_triage(limits=triage.Limits(max_refreshes=3))
+        searched = [json.loads(c[2])['text'] for c in self.called('cua-driver') if c[1] == 'type_text']
+        self.assertEqual(searched, ['b@example.com', 'd@example.com', 'c@example.com'])
+
+    def test_malformed_list_fails_loudly(self):
+        self.given([QUILL])
+        self.refresh_list([{'message_id': 'm4'}])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'refresh_list_invalid'))
+        self.assertEqual(state['moved'], [])
 
 
 class DecideTest(unittest.TestCase):

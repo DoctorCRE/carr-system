@@ -12,12 +12,20 @@ the list first and must add up to the Inbox unread badge before anything is
 touched, and after the moves the same rows must still be unread. The folder tree
 and the sender table come from Joe's private ~/.config/carr folder guide; the
 moves report (sender, subject, folder) stays in out/outlook-triage/ (0700/0600).
+
+Before filing, up to 50 emails the intake job lists as missing their full body
+are opened so Outlook downloads them: found by searching the sender address and
+matching the subject's sha256, selected, given time to render, and, when they
+were unread, marked unread again before the selection moves on. The intake job
+owns that list; triage only adds opened_at. REFRESH_LIST's path and the hash
+are a provisional contract until the intake job publishes its own.
 """
 from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, time as clock
+from datetime import datetime, time as clock, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,11 +35,13 @@ import sys
 import time
 from zoneinfo import ZoneInfo
 
-from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Row, UiError, Waits, Window,
-                            outlook_pid, prepare_outlook, private_file, usable_window)
+from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Refreshed, Row, UiError, Waits,
+                            Window, outlook_pid, prepare_outlook, private_file, usable_window)
 
 GUIDE = Path('.config/carr/outlook-nightly-sweep.folders.md')
 OUT = Path('out/outlook-triage')
+REFRESH_LIST = Path('out/outlook-intake/needs-refresh.json')
+REFRESH_FIELDS = ('message_id', 'subject_hash', 'sent_utc', 'sender_email')
 ZONE = ZoneInfo('America/Chicago')
 LAST_FIRE = clock(21, 0)
 IDLE_SECONDS = 600
@@ -45,6 +55,7 @@ ENTRY = 'from lib.outlook_triage import main; raise SystemExit(main())'
 
 @dataclass(frozen=True)
 class Limits:
+    max_refreshes: int = 50
     max_moves: int = 150
     deadline_seconds: float = 6000
     failures_in_a_row: int = 2
@@ -180,10 +191,13 @@ def decide(row: Row, guide: FolderGuide, find) -> Move | Leave:
 class Report:
     moved: list[tuple[str, str, str]] = field(default_factory=list)
     left: Counter = field(default_factory=Counter)
+    refreshed: Counter = field(default_factory=Counter)
     unread_changed: list[str] = field(default_factory=list)
 
     def text(self, outcome: Outcome) -> str:
-        lines = [f'outcome: {outcome.state} {outcome.reason}', f'moved: {len(self.moved)}']
+        lines = [f'outcome: {outcome.state} {outcome.reason}']
+        lines += ['opened for a full download:'] + [f'  {r}: {n}' for r, n in sorted(self.refreshed.items())]
+        lines += [f'moved: {len(self.moved)}']
         lines += [f'  {headline} -> {path} ({rule})' for headline, path, rule in self.moved]
         lines += ['left in Inbox:'] + [f'  {reason}: {n}' for reason, n in sorted(self.left.items())]
         if self.unread_changed:
@@ -221,7 +235,8 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
     return Counter(r.label for rows in tabs.values() for r in rows if r.read_state is ReadState.UNREAD)
 
 
-def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report) -> Outcome:
+def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
+               refresh_list: Path) -> Outcome:
     badge, tabs = _inbox(window)
     unread = _unread(tabs)
     if any(r.selected and r.read_state is not ReadState.READ for rows in tabs.values() for r in rows):
@@ -230,7 +245,10 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
         report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
         return Outcome('failed', 'unread_set_unverified')
     try:
-        outcome = _move_all(window, tabs, guide, find, limits, report)
+        outcome = (refresh_all(window, refresh_list, limits, report)
+                   or _move_all(window, tabs, guide, find, limits, report))
+    except ValueError:
+        outcome = Outcome('failed', 'refresh_list_invalid')
     except UiError as exc:
         outcome = Outcome('failed', str(exc))
     except CuaError:
@@ -238,9 +256,69 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
     end_badge, end_tabs = _inbox(window)
     end_unread = _unread(end_tabs)
     lost = unread - end_unread
-    report.unread_changed = sorted(Row(label, '', False).headline for label in lost.elements())
+    report.unread_changed = sorted(set(report.unread_changed)
+                                   | {Row(label, '', False).headline for label in lost.elements()})
     if lost or end_badge != sum(end_unread.values()):
         return Outcome('failed', 'unread_set_changed')
+    return outcome
+
+
+def _subject_hash(subject: str) -> str:
+    return hashlib.sha256(subject.encode('utf-8')).hexdigest()
+
+
+def read_refresh_list(path: Path) -> list[dict]:
+    """The intake job's list of email whose full body is not on disk yet; missing means empty."""
+    try:
+        entries = json.loads(path.read_text())
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        raise ValueError('refresh list unreadable') from None
+    if not isinstance(entries, list) or not all(
+            isinstance(e, dict) and all(isinstance(e.get(k), str) and e[k] for k in REFRESH_FIELDS)
+            for e in entries):
+        raise ValueError('refresh list malformed')
+    return entries
+
+
+def _record_opened(path: Path, opened: dict[str, str]) -> None:
+    """Append opened_at to the entries opened; the intake job owns everything else in the file."""
+    entries = read_refresh_list(path)
+    for entry in entries:
+        if entry['message_id'] in opened:
+            entry['opened_at'] = opened[entry['message_id']]
+    temp = path.with_name(path.name + '.triage-tmp')
+    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+        handle.write(json.dumps(entries, indent=2) + '\n')
+    os.replace(temp, path)
+
+
+def refresh_all(window: Window, path: Path, limits: Limits, report: Report) -> Outcome | None:
+    """Open up to max_refreshes listed emails, least recently opened first; None means no failure."""
+    entries = sorted(read_refresh_list(path), key=lambda e: e.get('opened_at') or '')[:limits.max_refreshes]
+    opened: dict[str, str] = {}
+    outcome = None
+    try:
+        for entry in entries:
+            matches = [r for r in window.search(entry['sender_email'])
+                       if r.subject is not None and _subject_hash(r.subject) == entry['subject_hash']]
+            if len({r.key for r in matches}) != 1:
+                report.refreshed['ambiguous' if matches else Refreshed.NOT_FOUND.value] += 1
+                window.end_search()
+                continue
+            result = window.refresh(matches[0].key)
+            window.end_search()
+            report.refreshed[result.value] += 1
+            if result in (Refreshed.OPENED, Refreshed.RESTORED):
+                opened[entry['message_id']] = datetime.now(timezone.utc).isoformat()
+            if result is Refreshed.NOT_RESTORED:
+                report.unread_changed.append(matches[0].headline)
+                outcome = Outcome('failed', 'unread_set_changed')
+                break
+    finally:
+        if opened:
+            _record_opened(path, opened)
     return outcome
 
 
@@ -303,7 +381,7 @@ def triage(repo: Path, home: Path, waits: Waits = Waits(), limits: Limits = Limi
     window = Window(pid, found['window_id'], waits)
     try:
         window.front()
-        outcome = file_inbox(window, guide, CarrFinder(repo), limits, report)
+        outcome = file_inbox(window, guide, CarrFinder(repo), limits, report, repo / REFRESH_LIST)
     except UiError as exc:
         outcome = Outcome('failed', str(exc))
     except CuaError:
