@@ -63,8 +63,12 @@ def run_codex(entry, task, *, env, run, timeout_s):
         options = dict(env=isolated, cwd=str(work), capture_output=True, text=True,
                        timeout=timeout_s, stdin=subprocess.DEVNULL)
         try:
-            probe = run(['codex', 'sandbox', *CODEX_SANDBOX, '--',
-                         sys.executable, '-I', '-c', CANARY, str(work / 'canary')], **options)
+            try:
+                probe = run(['codex', 'sandbox', *CODEX_SANDBOX, '--',
+                             sys.executable, '-I', '-c', CANARY, str(work / 'canary')], **options)
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise DeskError('record_layer_canary_failed',
+                                'file_write/network canaries unavailable: ' + type(exc).__name__) from exc
             try:
                 canaries = json.loads(probe.stdout)
             except (TypeError, ValueError):
