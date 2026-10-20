@@ -1183,10 +1183,6 @@ class Queue:
                     return False
                 self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
                 return True
-            if self.behind(repo, p) and p.get('mergeable') is True:
-                self.action('update', repo, n, head, 'main')
-                self.report(e, 'updating', f'Waiting for clean update of {head}')
-                return True
             if p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
                 if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
                     return True
@@ -1195,6 +1191,10 @@ class Queue:
                 current = self.pr(repo, n)
                 if not self.advance_regenerated_pin(e, card_id, current, expected_order):
                     self.report(e, 'regenerated', f'Prepared from {head}; waiting for matching regeneration receipt and provider head')
+                return True
+            if self.behind(repo, p) and p.get('mergeable') is True:
+                self.action('update', repo, n, head, 'main')
+                self.report(e, 'updating', f'Waiting for clean update of {head}')
                 return True
             if not self.green(repo, n, head):
                 since = e['ci_since'] if e['ci_head'] == head and e['ci_since'] is not None else time.time()
