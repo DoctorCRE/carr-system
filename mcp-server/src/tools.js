@@ -8998,9 +8998,10 @@ registerTools({
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
-                r.salesforce_id, r.base_version
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where b.id=$1`, [s.id]);
       if (!deal.rows.length) deal = await c.query(
         `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
@@ -9008,9 +9009,10 @@ registerTools({
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
-                r.salesforce_id, r.base_version
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_board b
            join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
            left join v_client_account a on a.client_id=b.client_id
           where b.id=$1 /* dealroom:archived-detail */`, [s.id]);
       if (!deal.rows.length) throw new ToolError({ error: "not_found", table: "deal", id: s.id });

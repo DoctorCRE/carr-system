@@ -1,6 +1,6 @@
--- rollback: forward-only. Remove consumers before dropping the status column and read view.
+-- rollback: ops/sql/reverse-0915-prospect-engagement.sql restores prior reads and retains engagement data.
 -- lock-review: constant default and two-value check on the small client table.
-ALTER TABLE public.client ADD COLUMN prospect_engagement_status text NOT NULL DEFAULT 'active'
+ALTER TABLE public.client ADD COLUMN IF NOT EXISTS prospect_engagement_status text NOT NULL DEFAULT 'active'
   CHECK (prospect_engagement_status IN ('active','inactive'));
 COMMENT ON COLUMN public.client.prospect_engagement_status IS
   'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
@@ -15,15 +15,17 @@ SELECT now(),(SELECT id FROM public.actor WHERE slug='system'),
        jsonb_build_object('prospect_engagement_status',c.prospect_engagement_status),
        'import_migration','0915: preserve existing prospects until an explicit partner engagement choice',
        '0915:prospect-engagement:' || c.id::text
-FROM public.client c WHERE c.status='prospect' AND c.merged_into IS NULL;
+FROM public.client c WHERE c.status='prospect' AND c.merged_into IS NULL
+  AND NOT EXISTS (SELECT 1 FROM public.event e
+    WHERE e.idempotency_key = '0915:prospect-engagement:' || c.id::text);
 
-CREATE VIEW public.v_client_engagement_status AS
+CREATE OR REPLACE VIEW public.v_client_engagement_status AS
 SELECT id AS client_id, status AS client_status, version AS client_version,
        prospect_engagement_status
 FROM public.client WHERE merged_into IS NULL;
 GRANT SELECT ON public.v_client_engagement_status TO carr_reader,carr_writer;
 
-CREATE VIEW public.v_lead_prospect_engagement AS
+CREATE OR REPLACE VIEW public.v_lead_prospect_engagement AS
  SELECT l.id AS lead_id, c.id AS prospect_client_id,
     c.version AS prospect_client_version, c.prospect_engagement_status
  FROM public.lead l JOIN public.client c ON c.id=l.client_id
