@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import sys
 import time
 import uuid
@@ -35,6 +36,55 @@ def command(argv, cwd=None, *, input=None, allowed=(0,), timeout=120, environmen
 
 def git(root, *args, **kwargs):
     return command(["git", "-C", str(root), *args], **kwargs).stdout.strip()
+
+
+def git_records(root, *args, separator=b"\0"):
+    with tempfile.TemporaryFile() as errors:
+        proc = subprocess.Popen(["git", "-C", str(root), *args], stdout=subprocess.PIPE,
+                                stderr=errors, env=scrubbed_env())
+        try:
+            pending = b""
+            while chunk := proc.stdout.read(65536):
+                pending += chunk
+                while separator in pending:
+                    record, pending = pending.split(separator, 1)
+                    yield record.decode("utf-8", "surrogateescape")
+            if pending:
+                yield pending.decode("utf-8", "surrogateescape")
+            if proc.wait(timeout=30):
+                raise RuntimeError("git evidence collection failed")
+        finally:
+            proc.stdout.close()
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=5)
+
+
+def iter_worktrees(root):
+    entry = {}
+    for record in git_records(root, "worktree", "list", "--porcelain", "-z"):
+        if not record:
+            if entry:
+                yield entry
+                entry = {}
+        elif record.startswith("worktree "):
+            entry["path"] = record[9:]
+        elif record.startswith("HEAD "):
+            entry["head"] = record[5:]
+        elif record.startswith("branch refs/heads/"):
+            entry["branch"] = record[18:]
+        elif record.split(" ")[0] in {"locked", "bare", "detached", "prunable"}:
+            entry[record.split(" ")[0]] = True
+    if entry:
+        yield entry
+
+
+def row_key(row):
+    if row["kind"] == "pr":
+        return "pr:" + str(row["number"]).zfill(12)
+    if row["kind"] == "branch":
+        return "branch:" + row["ref"]
+    return "worktree:" + ("0:" if row.get("canonical") else "1:") + row["path"]
 
 
 def branch_verdict(*, merged, successor, open_pr, idle):
@@ -74,6 +124,10 @@ class GitHub:
         for key, value in variables.items():
             if value is not None:
                 argv.extend(["-F" if isinstance(value, int) else "-f", f"{key}={value}"])
+        delay = 2 - (time.monotonic() - getattr(self, "last_query", 0))
+        if delay > 0:
+            time.sleep(delay)
+        self.last_query = time.monotonic()
         body = json.loads(command(argv).stdout)
         if body.get("errors"):
             raise RuntimeError("GitHub GraphQL evidence refused")
@@ -110,10 +164,10 @@ class GitHub:
             repository(owner:$owner,name:$name) { pullRequest(number:$number) { """ + self.fields + " } } }"
         return self.normalize(self.query(repo, query, number=number)["pullRequest"])
 
-    def open_pulls(self, repo, branch):
+    def branch_pulls(self, repo, branch):
         cursor, rows = None, []
         query = """query($owner:String!,$name:String!,$branch:String!,$cursor:String) {
-            repository(owner:$owner,name:$name) { pullRequests(first:100,states:[OPEN],headRefName:$branch,after:$cursor) {
+            repository(owner:$owner,name:$name) { pullRequests(first:100,headRefName:$branch,after:$cursor) {
             nodes { """ + self.fields + " } pageInfo { hasNextPage endCursor } } } }"
         while True:
             connection = self.query(repo, query, branch=branch, cursor=cursor)["pullRequests"]
@@ -122,6 +176,19 @@ class GitHub:
                 return [r for r in rows if (r["head"]["repo"] or {}).get("full_name") == repo]
             cursor = connection["pageInfo"]["endCursor"]
 
+    def commit_pulls(self, repo, head):
+        query = """query($owner:String!,$name:String!,$head:GitObjectID!) {
+            repository(owner:$owner,name:$name) { object(oid:$head) { ... on Commit {
+            associatedPullRequests(first:100) { nodes { """ + self.fields + """ }
+            pageInfo { hasNextPage } } } } } }"""
+        connection = self.query(repo, query, head=head)['object']['associatedPullRequests']
+        if connection['pageInfo']['hasNextPage']:
+            raise RuntimeError('commit PR evidence exceeds inspection budget')
+        return [self.normalize(row) for row in connection['nodes']]
+
+    def open_pulls(self, repo, branch):
+        return [row for row in self.branch_pulls(repo, branch) if row["state"] == "open"]
+
     def close(self, repo, number, successor):
         message = (f"Superseded by merged PR https://github.com/{repo}/pull/{successor}. "
                    "The branch janitor verified the successor before closing this PR.")
@@ -129,16 +196,29 @@ class GitHub:
 
 
 def process_paths(paths):
-    """Observe cwd and open files, plus paths named by running commands."""
+    """Unknown or partial process evidence always preserves candidates."""
     paths = {str(Path(p).resolve()) for p in paths}
-    result = command(["lsof", "-n", "-P", "-Fpn"], allowed=(0, 1), timeout=30)
-    # A partial or denied collection cannot establish that any tree is unused.
-    if result.stderr.strip() or not result.stdout.strip():
-        return None
-    names = [line[1:] for line in result.stdout.splitlines() if line.startswith("n")]
-    commands = command(["ps", "-axo", "command="], timeout=30).stdout
-    return {p for p in paths if any(n == p or n.startswith(p + "/") for n in names)
-            or p in commands}
+    busy = set()
+    for argv in (["lsof", "-n", "-P", "-Fpn"], ["ps", "-axo", "command="]):
+        try:
+            with tempfile.TemporaryFile(mode="w+") as output, tempfile.TemporaryFile(mode="w+") as errors:
+                result = subprocess.run(argv, stdout=output, stderr=errors, text=True, timeout=30)
+                errors.seek(0)
+                if result.returncode not in (0, 1) or errors.read(1):
+                    return None
+                output.seek(0)
+                observed = False
+                for line in output:
+                    observed = True
+                    for path in paths:
+                        name = line[1:].rstrip("\n") if argv[0] == "lsof" else ""
+                        if name == path or name.startswith(path + "/") or argv[0] == "ps" and path in line:
+                            busy.add(path)
+                if not observed:
+                    return None
+        except (OSError, subprocess.SubprocessError):
+            return None
+    return busy
 
 
 def ownership(root, path):
@@ -154,9 +234,11 @@ def ownership(root, path):
                     return "owned"
         latest = {}
         if registry.exists():
-            for line in registry.read_text().splitlines():
-                row = json.loads(line)
-                latest.setdefault(row["id"], {}).update(row)
+            with registry.open() as stream:
+                for line in stream:
+                    row = json.loads(line)
+                    if row["id"] in latest or row.get("cwd") and Path(row["cwd"]).resolve().is_relative_to(path):
+                        latest.setdefault(row["id"], {}).update(row)
         matches = [r for r in latest.values() if r.get("cwd") and
                    Path(r["cwd"]).resolve().is_relative_to(path)]
         if matches and all("exit_code" in r for r in matches):
@@ -175,16 +257,21 @@ class MainAdvanced(RuntimeError):
 
 
 @contextmanager
-def maintenance(root):
+def maintenance(root, *, deadline=None):
     lock = root / "out/worktree-reap.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     # Keep this inode permanently. Renaming or unlinking an acquired flock
     # would allow a second caller to lock a different inode at the same path.
     with lock.open("a+") as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise MaintenanceDeferred("repository maintenance lock held; preserve pending run") from exc
+        while True:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                remaining = 0 if deadline is None else deadline - time.monotonic()
+                if remaining <= 0:
+                    raise MaintenanceDeferred("repository maintenance lock held; preserve pending run") from exc
+                time.sleep(min(.1, remaining))
         try:
             yield
         finally:
@@ -207,6 +294,8 @@ class FleetReaper:
 
     def ancestor(self, root, head, base):
         key = (str(root), head, base)
+        if len(self.ancestors) >= 128:
+            self.ancestors.clear()
         if key not in self.ancestors:
             self.ancestors[key] = command(["git", "-C", str(root), "merge-base", "--is-ancestor", head, base],
                                           allowed=(0, 1, 128)).returncode == 0
@@ -214,17 +303,23 @@ class FleetReaper:
 
     def patch(self, root, base, head):
         key = (str(root), base, head)
+        if len(self.patches) >= 128:
+            self.patches.clear()
         if key not in self.patches:
             try:
-                diff = git(root, "diff", "--binary", base, head)
-                result = command(["git", "patch-id", "--stable"], input=diff + "\n").stdout.split()
-                changes = []
-                for line in git(root, "diff", "--raw", "--no-abbrev", base, head).splitlines():
+                with tempfile.TemporaryFile() as diff:
+                    subprocess.run(["git", "-C", str(root), "diff", "--binary", base, head],
+                                   stdout=diff, stderr=subprocess.DEVNULL, check=True,
+                                   timeout=120, env=scrubbed_env())
+                    diff.seek(0)
+                    result = subprocess.run(["git", "patch-id", "--stable"], stdin=diff,
+                        capture_output=True, text=True, check=True, timeout=120, env=scrubbed_env()).stdout.split()
+                digest = hashlib.sha256()
+                for line in git_records(root, "diff", "--raw", "--no-abbrev", base, head, separator=b"\n"):
                     fields = line.split(" ", 4)
-                    changes.append(" ".join([fields[0], fields[1], fields[3], fields[4]]))
-                content = hashlib.sha256("\n".join(changes).encode()).hexdigest()
-                self.patches[key] = result[0] + ":" + content if result else None
-            except RuntimeError:
+                    digest.update((" ".join([fields[0], fields[1], fields[3], fields[4]]) + "\n").encode())
+                self.patches[key] = result[0] + ":" + digest.hexdigest() if result else None
+            except (RuntimeError, subprocess.SubprocessError):
                 self.patches[key] = None
         return self.patches[key]
 
@@ -275,7 +370,7 @@ class FleetReaper:
                             "url": f"https://github.com/{repo}/pull/{candidate['number']}"}
         return None
 
-    def snapshot(self, repo, root, skip=()):
+    def snapshot(self, repo, root, skip=(), after=""):
         root = Path(root).resolve()
         self.provider.verify_repository(repo, root)
         git(root, "fetch", "--prune", "origin")
@@ -284,20 +379,16 @@ class FleetReaper:
         merged = [p for p in pulls if p.get("merged_at") and p["base"]["ref"] == "main"
                   and p["base"]["repo"]["full_name"] == repo]
         opens = [p for p in pulls if p["state"] == "open"]
-        successors = {p["number"]: self.successor(root, repo, p, merged, main) for p in opens}
-        rows = []
-        by_branch = {}
-        for line in git(root, "for-each-ref", "--format=%(refname)%09%(objectname)%09%(committerdate:unix)",
-                        "refs/heads", "refs/remotes/origin").splitlines():
+        for line in git_records(root, "for-each-ref", "--format=%(refname)%09%(objectname)%09%(committerdate:unix)",
+                                "refs/heads", "refs/remotes/origin", separator=b"\n"):
             ref, head, updated = line.split("\t")
-            if ref.endswith("/HEAD"):
+            if ref.endswith("/HEAD") or "branch:" + ref <= after:
                 continue
             name = ref.removeprefix("refs/heads/").removeprefix("refs/remotes/origin/")
             related = [p for p in pulls if p["head"]["ref"] == name and
                        (p["head"].get("repo") or {}).get("full_name") == repo]
             active = [p for p in related if p["state"] == "open"]
-            successor = next((successors[p["number"]] for p in active
-                              if p["head"]["sha"] == head and successors[p["number"]]), None)
+            successor = None
             merge_pr = next((p for p in related if
                 p["head"]["sha"] == head and p in merged and p.get("merge_commit_sha")
                 and self.ancestor(root, p["merge_commit_sha"], main)), None)
@@ -315,32 +406,65 @@ class FleetReaper:
                    "action": "delete_remote" if (classification == "merged" or
                    classification == "abandoned" and retire_pr) and
                    ref.startswith("refs/remotes/origin/") and not protected else None}
-            rows.append(row)
-            by_branch.setdefault(name, []).append(row)
-        for pr in opens:
-            successor = successors[pr["number"]]
-            rows.append({"kind": "pr", "repo": repo, "number": pr["number"],
+            yield row
+        for pr in sorted(opens, key=lambda p: p["number"]):
+            if "pr:" + str(pr["number"]).zfill(12) <= after:
+                continue
+            successor = self.successor(root, repo, pr, merged, main)
+            yield {"kind": "pr", "repo": repo, "number": pr["number"],
                 "head": pr["head"]["sha"], "identity": self.pr_identity(pr), "main": main, "successor": successor,
                 "class": "superseded" if successor else "live",
-                "action": "close_pr" if successor else None})
-        entries = self.hook.worktree_entries(str(root))
-        if not entries:
-            raise RuntimeError("worktree collection unreadable")
-        busy = self.process_probe([e["path"] for e in entries])
-        if busy is None:
-            raise RuntimeError("process evidence unavailable; preserve repository candidates")
+                "action": "close_pr" if successor else None}
+        yield from self.tree_rows(repo, root, main, pulls, skip, after)
+
+    def iter_tree_snapshot(self, repo, root, skip=(), after=""):
+        root = Path(root).resolve()
+        self.provider.verify_repository(repo, root)
+        git(root, "fetch", "--prune", "origin")
+        main = git(root, "rev-parse", "refs/remotes/origin/main")
+        yield from self.tree_rows(repo, root, main, None, skip, after)
+
+    def tree_rows(self, repo, root, main, pulls, skip, after):
         protected_paths = {str(root), *(str(Path(p).resolve()) for p in skip)}
-        for entry in entries:
-            rows.append(self.worktree_row(repo, root, entry, main, by_branch, busy, protected_paths))
-        return rows
+        from itertools import islice
+        def pending_entries():
+            for entry in iter_worktrees(root):
+                if "_to_delete" in Path(entry["path"]).parts:
+                    continue
+                key = "worktree:" + ("0:" if Path(entry["path"]).resolve() == root else "1:") + entry["path"]
+                if key > after:
+                    yield entry
+        entries = pending_entries()
+        while batch := list(islice(entries, 20)):
+            busy = self.process_probe([entry["path"] for entry in batch])
+            if busy is None:
+                raise RuntimeError("process evidence unavailable; preserve repository candidates")
+            for entry in batch:
+                path = Path(entry["path"])
+                if str(path.resolve()) in protected_paths or "_to_delete" in path.parts or entry.get("locked"):
+                    yield self.worktree_row(repo, root, entry, main, {}, busy, protected_paths)
+                    continue
+                branch_pulls = pulls if pulls is not None else self.provider.branch_pulls(repo, entry.get("branch", ""))
+                related = [p for p in branch_pulls if p["head"]["ref"] == entry.get("branch") and
+                           (p["head"].get("repo") or {}).get("full_name") == repo]
+                classification = branch_verdict(
+                    merged=self.ancestor(root, entry.get("head", ""), main), successor=None,
+                    open_pr=any(p["state"] == "open" for p in related), idle=True)
+                associated = {entry.get("branch"): [{"head": entry.get("head"), "class": classification,
+                    "retire_pr": next((p["number"] for p in related if p["state"] == "closed" and
+                                       p["head"]["sha"] == entry.get("head")), None)}]}
+                yield self.worktree_row(repo, root, entry, main, associated, busy, protected_paths)
 
     def worktree_row(self, repo, root, entry, main, by_branch, busy, protected_paths):
         path = Path(entry["path"]).resolve()
         row = {"kind": "worktree", "repo": repo, "path": str(path), "head": entry.get("head"),
-               "branch": entry.get("branch"), "detached": bool(entry.get("detached")), "main": main, "class": "live", "action": None}
+               "branch": entry.get("branch"), "detached": bool(entry.get("detached")), "canonical": path == root,
+               "main": main, "class": "live", "action": None}
         reasons = []
         if str(path) in protected_paths or "_to_delete" in path.parts:
             reasons.append("canonical, invoking or staged tree")
+        elif protected_branch(self.config, entry.get("branch")):
+            reasons.append("protected branch")
         elif entry.get("locked") or entry.get("bare") or not path.is_dir():
             reasons.append("locked, bare or missing tree")
         elif busy is None or str(path) in busy:
@@ -351,14 +475,21 @@ class FleetReaper:
             row["status"] = status
             row["ownership"] = self.ownership_probe(path)
             associated = by_branch.get(entry.get("branch"), [])
+            row["retire_pr"] = next((r.get("retire_pr") for r in associated if r.get("retire_pr")), None)
             classification = next((r["class"] for r in associated if r["head"] == entry.get("head")),
                                   "merged" if self.ancestor(root, entry.get("head", ""), main) else "abandoned")
-            if index_age is None or tree_age is None or min(index_age, tree_age) < self.tree_idle:
+            if status:
+                reasons.append("uncommitted work")
+            elif git(path, "rev-list", "-1", "HEAD", "--not", "--remotes=origin"):
+                reasons.append("unpushed work")
+            elif index_age is None or tree_age is None or min(index_age, tree_age) < self.tree_idle:
                 reasons.append("recent writes or unknown age")
             elif classification == "live":
                 reasons.append("open PR or recent commits")
-            elif row["ownership"] != "orphaned":
-                reasons.append("session owns work or ownership unknown")
+            elif row["ownership"] == "owned":
+                reasons.append("session owns work")
+            elif classification != "merged" and not any(r.get("retire_pr") for r in associated) and min(index_age, tree_age) < self.config.get("machine_cleanup", {}).get("checkout_age_seconds", 7 * 86400):
+                reasons.append("clean abandoned tree younger than seven days")
             elif entry.get("detached") and classification != "merged":
                 reasons.append("detached work without a surviving branch")
             else:
@@ -438,11 +569,15 @@ class FleetReaper:
         ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
         latest, recovered = {}, []
         if ledger.exists():
-            for line in ledger.read_text().splitlines():
-                event = json.loads(line)
-                row = event["candidate"]
-                key = (row["repo"], row["kind"], row.get("path"), row.get("ref"), row.get("number"), row["head"])
-                latest[key] = event
+            with ledger.open() as stream:
+                for line in stream:
+                    event = json.loads(line)
+                    row = event["candidate"]
+                    key = (row["repo"], row["kind"], row.get("path"), row.get("ref"), row.get("number"), row["head"])
+                    if event["status"] == "intent":
+                        latest[key] = event
+                    else:
+                        latest.pop(key, None)
         for event in latest.values():
             row = event["candidate"]
             if row["repo"] != repo or event["status"] != "intent":
@@ -506,7 +641,7 @@ class FleetReaper:
                 return {"status": "preserved", "reason": "open PR protects tree"}
             # The previously proved class can only grant staging after the same
             # liveness, ownership and content tests pass at the mutation seam.
-            by_branch = {row["branch"]: [{"head": row["head"], "class": row["class"]}]}
+            by_branch = {row["branch"]: [{"head": row["head"], "class": row["class"], "retire_pr": row.get("retire_pr")}]}
             current = self.worktree_row(repo, root, entry, row["main"], by_branch,
                 self.process_probe([row["path"]]), {str(root), *(str(Path(p).resolve()) for p in skip)})
             if any(current.get(k) != row.get(k) for k in ("action", "status", "ownership", "content", "branch", "detached", "head")):
@@ -563,31 +698,49 @@ class FleetReaper:
             raise RuntimeError("remote branch deletion readback failed")
         return {"status": "retired", "backup_ref": backup}
 
-    def run(self, roots, *, execute=False, skip=()):
+    def run(self, roots, *, execute=False, skip=(), max_items=50, max_seconds=240, local_only=False):
         report = {"schema": "branch-retirement/v1", "at": self.clock(), "execute": execute,
                   "rows": [], "counts": {}, "errors": [], "deferred": [], "actions": [], "recovered": []}
+        report["budget_exhausted"] = False
+        cursor_path = self.root / ("out/orch/branch-janitor-" +
+            ("local-" if local_only else "") + ("cursor.json" if execute else "dry-cursor.json"))
+        cursors = json.loads(cursor_path.read_text()) if cursor_path.exists() else {}
+        deadline = time.monotonic() + max_seconds
         try:
-            with maintenance(self.root):
+            with maintenance(self.root, deadline=deadline if local_only else None):
                 for repo, path in roots.items():
                     root = Path(path).expanduser().resolve()
                     try:
-                        with nullcontext() if root == self.root else maintenance(root):
+                        with nullcontext() if root == self.root else maintenance(root, deadline=deadline if local_only else None):
                             if execute:
                                 report["recovered"].extend(self.recover_pending(repo, root))
-                            rows = self.snapshot(repo, root, skip)
-                            report["rows"].extend(rows)
-                            report["counts"][repo] = {kind: {c: sum(r["kind"] == kind and r["class"] == c
-                                for r in rows) for c in CLASSES} for kind in ("branch", "worktree", "pr")}
-                            if execute:
+                            report["counts"][repo] = {kind: {c: 0 for c in CLASSES}
+                                for kind in ("branch", "worktree", "pr")}
+                            scan = self.iter_tree_snapshot if local_only else self.snapshot
+                            rows = scan(repo, root, skip, cursors.get(repo, ""))
+                            try:
                                 for row in rows:
-                                    if not row["action"]:
-                                        continue
-                                    intent = {"at": self.clock(), "status": "intent", "candidate": row}
-                                    ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
-                                    append(ledger, intent)
-                                    result = self.apply(repo, root, row, skip)
-                                    append(ledger, {**intent, **result})
-                                    report["actions"].append({**intent, **result})
+                                    report["rows"].append(row)
+                                    report["counts"][repo][row["kind"]][row["class"]] += 1
+                                    if execute and row["action"]:
+                                        intent = {"at": self.clock(), "status": "intent", "candidate": row}
+                                        ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
+                                        append(ledger, intent)
+                                        result = self.apply(repo, root, row, skip)
+                                        append(ledger, {**intent, **result})
+                                        report["actions"].append({**intent, **result})
+                                    cursors[repo] = row_key(row)
+                                    save(cursor_path, cursors)
+                                    if len(report["rows"]) >= max_items or time.monotonic() >= deadline:
+                                        report["budget_exhausted"] = True
+                                        break
+                                else:
+                                    cursors.pop(repo, None)
+                                    save(cursor_path, cursors)
+                            finally:
+                                rows.close()
+                            if report["budget_exhausted"]:
+                                break
                     except MaintenanceDeferred as exc:
                         report["deferred"].append({"repo": repo, "reason": str(exc)})
                     except Exception as exc:

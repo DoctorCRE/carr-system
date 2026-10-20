@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 spec = importlib.util.spec_from_file_location("flash_script", os.path.join(HERE, "flash-script.py"))
@@ -389,6 +390,9 @@ def test_preview_skips_a_subfolder_listed_first():
 
 
 def main():
+    directory = tmpdir("flash-grant-")
+    TEMP_STACK.enter_context(patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": directory}))
+    fs.flashlib.grant_path().write_text(json.dumps({"issued_at": 0, "expires_at": 4e9}))
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
             if getattr(fn, "needs_sandbox", False) and not SANDBOXED:

@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Run only for a direct human request to activate Flash."""
+import argparse
+import math
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+import flashlib
+parser = argparse.ArgumentParser(description="Explicitly start Flash with an expiring grant (default 2 hours).")
+parser.add_argument("--hours", type=float, default=2)
+args = parser.parse_args()
+if not math.isfinite(args.hours) or args.hours <= 0:
+    parser.error("hours must be positive and finite")
+raise SystemExit(flashlib.main("on", seconds=args.hours * 3600))

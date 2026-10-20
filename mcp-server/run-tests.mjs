@@ -1,4 +1,4 @@
-import { readdir, mkdir, writeFile } from "node:fs/promises";
+import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,11 +14,12 @@ const PRIVATE_POSTGRES_SUITES = new Set([
   "self-closing-records-sql.test.mjs",
 ]);
 
-export function suiteBatches(files) {
+export function suiteBatches(files, browserFiles = []) {
   const suites = files.filter((file) => /\.test\.(?:js|mjs)$/.test(file)).sort();
   if (!suites.includes(BROWSER_SHIM)) throw new Error("Chrome browser shim is missing from the Node suites");
-  const browsers = suites.filter((file) => file !== BROWSER_SHIM && /-browser\.test\.(?:js|mjs)$/.test(file));
-  const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file));
+  const browsers = suites.filter((file) => ![BROWSER_SHIM, LAUNCH_REGRESSIONS].includes(file)
+    && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs)$/.test(file)));
+  const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file) && !browsers.includes(file));
   return [[BROWSER_SHIM], suites.filter((file) => file === LAUNCH_REGRESSIONS),
     ...browsers.map((file) => [file]),
     ...postgres.map((file) => [file]),
@@ -46,7 +47,12 @@ async function main() {
   // Private PostgreSQL clusters also run alone: parallel postmasters can
   // exhaust the host's shared-memory IDs even with unique database paths.
   // Keep the serial batches; the bulk pool gives each suite its own result.
-  for (const batch of suiteBatches(await readdir(path.join(ROOT, "test")))) {
+  const files = await readdir(path.join(ROOT, "test"));
+  const browserFiles = [];
+  for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
+    if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
+  }
+  for (const batch of suiteBatches(files, browserFiles)) {
     if (!batch.length) continue;
     let cursor = 0;
     const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));

@@ -198,6 +198,7 @@ def sandbox_profile(work):
     if sys.platform == "darwin" and os.path.isfile(framework_python):
         interpreter_execs.add(os.path.realpath(framework_python))
     execs = sorted(interpreter_execs)
+    controls = [os.path.realpath(p) for p in (flashlib.grant_path(), flashlib.off_switch_path())]
     # Homebrew's var/etc hold the local Postgres cluster (data files, pg_hba.conf) and service configs.
     # The sandbox matches resolved paths, so each is resolved first: /etc is a link to /private/etc on macOS, and an
     # unresolved "/etc/ssh" rule matched nothing.
@@ -211,7 +212,7 @@ def sandbox_profile(work):
                       if os.path.isfile(p) for path in (p, os.path.realpath(p))})
     openssl_read = ("(allow file-read* " + " ".join(f'(literal "{p}")' for p in openssl) + ")"
                     if openssl else "")
-    if any('"' in p or "\\" in p for p in [*private, *reads, *openssl, *execs]):
+    if any('"' in p or "\\" in p for p in [*private, *reads, *openssl, *execs, *controls]):
         raise ValueError("path not expressible in a sandbox profile")
     port = flash_port()
     net = f'(allow network-outbound (remote ip "localhost:{port}"))' if port else ""
@@ -219,7 +220,7 @@ def sandbox_profile(work):
             f"(deny network*){net}"
             "(deny file-read* " + " ".join(f'(subpath "{p}")' for p in private) + ")"
             "(allow file-read* " + " ".join(f'(subpath "{p}")' for p in reads) + ")"
-            + openssl_read +
+            + openssl_read + "(allow file-read* " + " ".join(f'(literal "{p}")' for p in controls) + ")" +
             # path lookups (stat) must work to start the interpreter; contents and listings stay denied
             "(allow file-read-metadata)"
             "(deny file-write*)"
@@ -253,7 +254,7 @@ def run_code(code, work, n, *, sandbox=True):
         argv = [SANDBOX_EXEC, "-p", sandbox_profile(work), *argv]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONPATH": work, "LANG": "C.UTF-8",
            "PYTHONDONTWRITEBYTECODE": "1", "CARR_FLASH_URL": FLASH_URL, "CARR_FLASH_MODEL": FLASH_MODEL,
-           "CARR_FLASH_PREPARED": "1"}
+           "CARR_FLASH_PREPARED": "1", "CARR_FLASH_STATE_DIR": str(flashlib.grant_path().parent)}
     out_path, err_path = os.path.join(work, f".flash_out_{n}"), os.path.join(work, f".flash_err_{n}")
     t = time.monotonic()
     with flashlib.activity_scope():

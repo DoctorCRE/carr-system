@@ -3,9 +3,9 @@
 grok_session(): any Grok CLI process owns this hook through shell transports.
 Joe 2026-10-06: "there is no reason to block any of my subscriptions from doing
 real work. the model router is our protection from unqualified work." Grok
-imports Claude's user-level hooks but has no CARR session lifecycle, so the
-rule boot is never armed for it and every tool call was refused. Context
-delivery hooks skip Grok sessions in every mode; effect guards stay on.
+imports Claude's user-level hooks and emits a native session lifecycle.
+The boot gate consumes that lifecycle; other context adapters use this owner
+check to avoid duplicating delivery. Effect guards stay on.
 
 bounded_grok_read_only(): the runner's bounded read-only child, not an
 interactive session (kept for the lifecycle hooks that only skip that case).
@@ -61,7 +61,7 @@ def _grok_owner_command() -> str | None:
             binary = os.path.basename(_process_image(pid))
             if time.monotonic() >= deadline:
                 return None
-            if re.fullmatch(r"grok(?:-\d+\.\d+\.\d+)?", binary):
+            if re.fullmatch(r"grok(?:-native|-\d+\.\d+\.\d+)?", binary):
                 return command
             if binary not in TRANSPARENT_SHELLS:
                 return None
@@ -84,8 +84,8 @@ def bounded_grok_read_only() -> bool:
     command = _grok_owner_command()
     if command is None:
         return False
-    # Inspect options before --print, never tokens from the prompt.
-    print_flag = re.search(r" --print(?:\s|$)", command)
+    # Inspect options before the one-shot flag, never tokens from the prompt.
+    print_flag = re.search(r" --(?:print|single)(?:\s|$)", command)
     if not print_flag:
         return False
     argv = command[:print_flag.start()].split()

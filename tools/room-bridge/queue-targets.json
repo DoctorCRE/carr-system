@@ -1,6 +1,14 @@
 {
   "v": 1,
   "targets": {
+    "luna": {
+      "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:luna-desk",
+      "desk": "luna-desk",
+      "effective_model": "luna (Codex subscription)",
+      "capabilities": ["read", "repo-write", "record-write"]
+    },
     "sol": {
       "enabled": true,
       "adapter": "desk",
@@ -9,8 +17,17 @@
       "effective_model": "gpt-6.1-sol",
       "capabilities": ["read"]
     },
-    "flash": {
+    "sol-fixer": {
       "enabled": true,
+      "adapter": "desk",
+      "assignee": "desk:sol-fixer",
+      "desk": "sol-fixer",
+      "effective_model": "sol (Codex subscription)",
+      "capabilities": ["read", "repo-write"]
+    },
+    "flash": {
+      "enabled": false,
+      "unavailable_reason": "Flash is explicit-only. Use bin/flash-on on a direct human request, then dispatch directly.",
       "adapter": "desk",
       "assignee": "desk:flash-model",
       "desk": "flash-model",
