@@ -216,6 +216,28 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(update.next_step_required, true);
     }));
 
+    await t.test('Deal Room phase patches supersede overdue actions once with attributed history', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Complete terms review', next_date: past,
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'legal', base_event_id: null};
+      const update = await TOOLS['patch-deal-field'].handler(c, actor, args);
+      const replay = await TOOLS['patch-deal-field'].handler(c, actor, args);
+      assert.equal(replay.replayed, true);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, null, 'phase patches must clear the expired displayed date');
+      assert.equal(room.next_step, null);
+      assert.equal(update.next_step_required, true);
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      const events = room.events.filter(e => e.verb === 'patch-deal-field' && e.field === 'next_date');
+      assert.equal(events.length, 1);
+      assert.equal(events[0].actor, 'joe');
+      assert.ok(events[0].recorded_at);
+      assert.deepEqual(events[0].new_value.superseded_action_ids, [prior.next_action_id]);
+    }));
+
     await t.test('a verified native partner update supersedes the sponsor action with runtime attribution', async () => transaction(async () => {
       await fixture(false);
       const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
