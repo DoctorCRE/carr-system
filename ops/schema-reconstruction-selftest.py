@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Rebuild the checked-in snapshot through the exact source migration prefix."""
+import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -70,6 +72,27 @@ class ReconstructionTests(unittest.TestCase):
             with psycopg.connect(dsn) as conn:
                 actual = dict(conn.execute('select filename, sha256 from schema_migrations').fetchall())
             self.assertEqual(actual, expected)
+
+            captured = subprocess.run(['node', '--input-type=module', '-e', """
+                import { TOOLS } from './mcp-server/src/tools.js';
+                const queries = [];
+                await TOOLS['deal-room-board'].handler({query: async (sql, params = []) => {
+                    queries.push({sql, params});
+                    return {rows: []};
+                }}, {slug: 'joe'}, {});
+                console.log(JSON.stringify(queries));
+                """], cwd=ROOT, capture_output=True, text=True, timeout=60)
+            self.assertEqual(captured.returncode, 0, captured.stderr)
+            queries = [query for query in json.loads(captured.stdout)
+                       if '/* dealroom:closed-deals */' in query['sql']]
+            self.assertTrue(queries, 'board handler must exercise its closed-deal read')
+            for role in ('carr_reader', 'carr_writer'):
+                with self.subTest(board_role=role), psycopg.connect(dsn) as conn:
+                    conn.execute(f'SET LOCAL ROLE {role}')
+                    for query in queries:
+                        positions = re.findall(r'\$(\d+)', query['sql'])
+                        sql = re.sub(r'\$\d+', '%s', query['sql'])
+                        conn.execute(sql, [query['params'][int(n) - 1] for n in positions]).fetchall()
 
             # Replay only the correction: later DDL is already in this snapshot.
             correction = '0897_national_account_classification_correction.sql'
