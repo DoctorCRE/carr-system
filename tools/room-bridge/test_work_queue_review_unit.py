@@ -166,7 +166,7 @@ class Probes(unittest.TestCase):
              patch.object(daemon, 'prepare', return_value=False), \
              patch.object(daemon, 'green', return_value=True), \
              patch.object(daemon, 'gh', side_effect=merge), \
-             patch.object(daemon, 'fetch'), patch.object(daemon, 'git') as ancestry, \
+             patch.object(daemon, 'fetch'), patch.object(daemon, 'git', return_value='c'*40), \
              patch.object(daemon, 'refresh', return_value=True):
             handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
             try:
@@ -180,7 +180,7 @@ class Probes(unittest.TestCase):
             daemon.stopped = False
             state.update(merged=True, merge_commit_sha='b'*40, state='closed')
             daemon.tick()
-            ancestry.assert_called_once_with(mq.REPOS[0], 'merge-base', '--is-ancestor', 'b'*40, 'origin/main')
+            self.assertEqual(daemon.db.execute('SELECT merged_commit FROM entries').fetchone()[0], 'b'*40)
         self.assertEqual(self.q.get('M')['stage'], 'done')
         self.assertFalse(self.q.get('M')['active'])
         self.assertEqual(len([e for e in self.q.export()['history'] if e['kind'] == 'merge_started']), 1)
