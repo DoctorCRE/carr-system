@@ -77,7 +77,9 @@ class FindError(Exception):
 
 
 def _same(a: str | None, b: str | None) -> bool:
-    return bool(a and b) and ' '.join(a.split()).casefold() == ' '.join(b.split()).casefold()
+    if not a or not b:
+        return False
+    return ' '.join(a.split()).casefold() == ' '.join(b.split()).casefold()
 
 
 def person_name(display: str) -> str:
@@ -125,7 +127,8 @@ class CarrFinder:
     """Exact-name lookups through the record layer's `find` verb, cached per run."""
 
     def __init__(self, repo: Path):
-        self.repo, self.cache = repo, {}
+        self.repo = repo
+        self.cache: dict[str, dict] = {}
 
     def __call__(self, name: str) -> dict:
         if name not in self.cache:
@@ -173,10 +176,11 @@ RULES = (('deal', _deal_rule), ('vendor', _vendor_rule), ('map', _map_rule))
 
 def decide(row: Row, guide: FolderGuide, find) -> Move | Leave:
     """First rule with exactly one folder wins; an ambiguous rule leaves the email where it is."""
-    if row.read_state is not ReadState.READ:
+    sender = row.sender
+    if row.read_state is not ReadState.READ or sender is None:
         return Leave(row.read_state.value)
     for rule, match in RULES:
-        hits = match(row.sender, guide, find)
+        hits = match(sender, guide, find)
         if hits is None or not hits:
             continue
         if len(set(hits)) > 1:
@@ -224,7 +228,7 @@ def _inbox(window: Window) -> tuple[int, dict[str | None, list[Row]]]:
     tab, rows = window.rows()
     if tab is None:
         return badge, {None: rows}
-    tabs = {tab: rows}
+    tabs: dict[str | None, list[Row]] = {tab: rows}
     other = 'other' if tab == 'focused' else 'focused'
     window.switch_tab(other)
     tabs[other] = window.rows()[1]
@@ -376,7 +380,7 @@ def triage(repo: Path, home: Path, waits: Waits = Waits(), limits: Limits = Limi
         found = usable_window(pid) if pid else None
     except CuaError:
         found = None
-    if not found:
+    if not found or pid is None:
         return Outcome('failed', 'no_usable_main_window'), report
     window = Window(pid, found['window_id'], waits)
     try:

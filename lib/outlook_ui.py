@@ -261,7 +261,7 @@ class Window:
     def inbox_badge(self) -> int:
         """Unread count on the Inbox folder row; needs the folder pane showing."""
         elements = self._walk(max_elements=BADGE_WALK)
-        children: dict[int, list[dict]] = {}
+        children: dict[int | None, list[dict]] = {}
         for e in elements:
             children.setdefault(e.get('parent_index'), []).append(e)
         for row in (e for e in elements if e.get('role') == 'AXRow'):
