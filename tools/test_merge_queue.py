@@ -972,6 +972,24 @@ class QueueTests(unittest.TestCase):
         self.assertEqual([row[0] for row in events],
             ['prepare-pr: push result=success elapsed_seconds=1.234 timeout_seconds=300'])
 
+    def test_blocked_unchanged_regeneration_recovers_without_manual_command(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        original = script.read_text()
+        script.write_text('raise SystemExit("interrupted push")\n')
+        self.q.tick()
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='blocked', outcome='action_uncertain_exhausted', transient_attempts=4")
+        self.git('branch', 'branch-1', self.approved)
+        script.write_text(original)
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+        action = self.q.db.execute("SELECT phase,attempts FROM actions WHERE kind='regen'").fetchone()
+        self.assertEqual(tuple(action), ('done', 2))
+        self.assertEqual(self.calls('merge'), [])
+
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
         marker = self.root / 'preparation-calls'
