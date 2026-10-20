@@ -556,8 +556,8 @@ class SendTests(unittest.TestCase):
         def decode(command, **kwargs):
             work = Path(command[2]).parent
             workspaces.append(work)
-            self.assertFalse(work.is_relative_to(repo))
-            self.assertTrue(work.is_relative_to(home / 'carr-local'))
+            self.assertFalse(work.is_relative_to(repo.resolve()))
+            self.assertTrue(work.is_relative_to((home / 'carr-local').resolve()))
             self.assertEqual(stat.S_IMODE(work.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE(Path(command[3]).stat().st_mode), 0o600)
             self.assertEqual(kwargs['umask'], 0o077)

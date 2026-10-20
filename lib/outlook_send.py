@@ -752,7 +752,9 @@ class DecodedMailbox:
         vendor = self.home / 'carr-local/hxstore-reverse-engineering'
         if (vendor / '.carr-pin').read_text().strip() != self.PIN:
             raise UiFailure('decoder_pin_mismatch')
-        out = self.repo / OUT
+        out = (self.home / 'carr-local/outlook-send').resolve()
+        if any((parent / '.git').exists() for parent in (out, *out.parents)):
+            raise UiFailure('decode_workspace_in_git_tree')
         out.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(out, 0o700)
         with tempfile.TemporaryDirectory(prefix='decode-', dir=out) as folder:
@@ -761,8 +763,10 @@ class DecodedMailbox:
             fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as writer, (self.home / self.STORE).open('rb') as reader:
                 shutil.copyfileobj(reader, writer)
+            fd = os.open(db, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(fd)
             done = _run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
-                                  capture_output=True, timeout=900)
+                                  capture_output=True, timeout=900, umask=0o077)
             if done.returncode:
                 raise UiFailure('decoder_failed')
             os.chmod(db, 0o600)
