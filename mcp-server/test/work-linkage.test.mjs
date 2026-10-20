@@ -140,7 +140,7 @@ test('empty legacy publications cannot certify absence of metadata omitted by an
  assert.equal(snapshot.snapshot_json.tasks.legacy.linkage.reason,'source_linkage_not_observed');
 });
 
-function hierarchyPublication(tasks, extra = {}) {
+function hierarchyPublication(tasks) {
  return JSON.parse(execFileSync('python3', ['-c', `import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location("board","tools/progress_board.py")
 board=importlib.util.module_from_spec(spec)
@@ -148,7 +148,7 @@ spec.loader.exec_module(board)
 print(json.dumps(board.board_snapshot(json.load(sys.stdin),costs={})))
 `], {cwd:new URL('../..',import.meta.url),encoding:'utf8',input:JSON.stringify({
   project:'test',work_requests:{'WR-000014':{title:'Queue ordering',description:'Keep ordering safe.'}},
-  tasks:Object.fromEntries(Object.entries(tasks).map(([id,task])=>[id,{title:'Queue ordering',work_request:'WR-000014',status:'running',...task}])),...extra
+  tasks:Object.fromEntries(Object.entries(tasks).map(([id,task])=>[id,{title:'Queue ordering',work_request:'WR-000014',status:'running',...task}]))
  })}));
 }
 
@@ -175,4 +175,19 @@ test('hierarchy publication retains unsupported linkage markers and never certif
   assert.equal(read.snapshot_json.tasks[key].linkage.reason,'unsupported_recorded_association',id);
   assert.equal(publication.tasks[key].held,undefined);
  }
+});
+
+test('hierarchy linkage preserves aliases, duplicate blockers, canonical keys, and unresolved diagnostics',async()=>{
+ const publication=hierarchyPublication({
+  one:{card_id:'WR14.S9.J9'},
+  two:{blocked_by_task_ids:['one','WR14.S9.J9','WR14.S1.J1','missing','two'],parent_task_id:'WR14.S9.J9'},
+  'z-invalid':{blocked_by_task_ids:[42],parent_task_id:{invalid:true}}
+ });
+ const tasks=(await boardRead(publication.tasks)).snapshot_json.tasks;
+ const refs=tasks[publication.hierarchy.aliases.two].linkage.references;
+ assert.deepEqual(refs.filter(ref=>ref.relation==='blocked_by').map(ref=>[ref.ref,ref.state]),[
+  ['WR14.S1.J1','resolved'],['missing','unresolved'],['WR14.S1.J2','unresolved']
+ ]);
+ assert.equal(refs.find(ref=>ref.relation==='parent'&&ref.ref==='WR14.S1.J1').state,'resolved');
+ assert.equal(tasks[publication.hierarchy.aliases['z-invalid']].linkage.reason,'reference_structure_invalid');
 });
