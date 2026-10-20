@@ -18,6 +18,19 @@ sys.path.insert(0, str(ROOT))
 
 
 class TokenTests(unittest.TestCase):
+    def test_local_machine_check_does_not_require_ssh(self):
+        from lib import cloudflare_tokens as cf
+        for machine, hostname in (('studio', 'Mac'), ('studio', 'Mac.local'),
+                                  ('macbook', 'MacBookPro'), ('dell', 'dell')):
+            with self.subTest(machine=machine, hostname=hostname):
+                states = {cf.TOKEN_NAMES[0]: 'ok', cf.TOKEN_NAMES[1]: 'missing'}
+                with patch('socket.gethostname', return_value=hostname), \
+                     patch.object(cf, 'check_file', return_value=states) as check:
+                    def offline(*args, **kwargs):
+                        raise subprocess.TimeoutExpired('ssh', 40)
+                    self.assertEqual(cf.on_machine(machine, {'operation': 'check'}, runner=offline), states)
+                    check.assert_called_once_with(Path.home() / '.config/carr/tokens.env')
+
     def test_nightly_issuer_failed_readback_restores_original(self):
         self._nightly_issuer_rollback('failed')
 
