@@ -89586,6 +89586,18 @@ CREATE VIEW public.v_deal_room_activity AS
 
 
 --
+-- Name: v_deal_room_commission; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_commission AS
+ SELECT deal_id,
+    id AS commission_id,
+    status,
+    received_on
+   FROM public.commission;
+
+
+--
 -- Name: v_deal_room_critical_date; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -120386,6 +120398,9 @@ grant select on table public.v_deal_room_activity to dot_reader;
 grant select on table public.v_deal_room_board to carr_reader;
 grant select on table public.v_deal_room_board to carr_writer;
 grant select on table public.v_deal_room_board to dot_reader;
+grant select on table public.v_deal_room_commission to carr_reader;
+grant select on table public.v_deal_room_commission to carr_writer;
+grant select on table public.v_deal_room_commission to dot_reader;
 grant select on table public.v_deal_room_critical_date to carr_reader;
 grant select on table public.v_deal_room_critical_date to dot_reader;
 grant select on table public.v_deal_room_current_lease to carr_reader;
@@ -122903,6 +122918,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
+0915_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	2026-10-20 22:52:39.789255+00
 \.
 
 
