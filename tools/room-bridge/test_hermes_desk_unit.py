@@ -293,7 +293,19 @@ print(json.dumps({'paidRecommendedModels': [
     def test_timeout_kills_the_entire_process_group_and_records_once(self):
         self.register(timeout_s=0.3)
         self.env['FAKE_MODE'] = 'timeout'
-        row = self.send()
+        killpg = os.killpg
+        killed, settling = set(), set()
+
+        def delayed_reaping(pgid, sig):
+            if sig == signal.SIGKILL:
+                killed.add(pgid)
+            elif pgid in killed and pgid not in settling:
+                settling.add(pgid)
+                return
+            return killpg(pgid, sig)
+
+        with patch.object(os, 'killpg', side_effect=delayed_reaping):
+            row = self.send()
         self.assertEqual(row['status'], 'timed_out')
         self.assertTrue(row['termination_confirmed'])
         time.sleep(0.6)
@@ -333,6 +345,22 @@ print(json.dumps({'paidRecommendedModels': [
         row = self.send()
         self.assertEqual(row['status'], 'timed_out')
         self.assertLess(time.monotonic() - started, 1)
+
+    def test_timeout_leaves_a_persistent_group_unconfirmed(self):
+        self.register(timeout_s=0.1)
+        self.env['FAKE_MODE'] = 'slow-auth'
+        killpg = os.killpg
+
+        def persistent_group(pgid, sig):
+            if sig:
+                return killpg(pgid, sig)
+
+        started = time.monotonic()
+        with patch.object(os, 'killpg', side_effect=persistent_group):
+            row = self.send()
+        self.assertEqual(row['status'], 'timed_out')
+        self.assertFalse(row['termination_confirmed'])
+        self.assertLess(time.monotonic() - started, 3)
 
     def test_hermes_queues_after_two_jobs_without_consuming_codex_slots(self):
         self.register()

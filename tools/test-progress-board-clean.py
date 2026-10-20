@@ -196,7 +196,8 @@ class CleanupTests(unittest.TestCase):
             "old": {**exercise_fields(), "status": "done", "title": "x" * 4000},
         }}
         with patch.object(board, "SNAPSHOT_BUDGET", 3000):
-            snapshot = board.board_snapshot(state)
+            snapshot = board.board_snapshot(state, costs={})
+        self.assertLessEqual(board.snapshot_size(snapshot), 3000)
         self.assertEqual(set(snapshot["tasks"]), {"v1"})
         self.assertEqual(snapshot["milestones"]["V1"]["tasks"], ["v1"])
         self.assertEqual(snapshot["omitted"]["live"], 1)

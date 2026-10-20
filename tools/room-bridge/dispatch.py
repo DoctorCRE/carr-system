@@ -139,6 +139,28 @@ HERMES_SLOT_POLL_S = 1.0
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
+SAFETY_REFUSAL = re.compile(
+    r'safety[ _-](?:classifier|refusal|system)|content_policy_violation', re.I)
+
+
+def _phrasing_hint(task: str, *, examples_on_miss: bool = False) -> str:
+    rules = json.loads((HERE / 'dispatch-phrasing.json').read_text(encoding='utf-8'))
+    matches = [rule for rule in rules if re.search(
+        r'(?<!\w)' + r'\s+'.join(re.escape(word) for word in rule['phrase'].split())
+        + r'(?!\w)', task, re.I)]
+    if not matches and not examples_on_miss:
+        return ''
+    examples = matches or rules
+    return ('Describe checks as properties to confirm. '
+            + '; '.join(f"{rule['phrase']!r} -> {rule['suggestion']!r}" for rule in examples)
+            + '. Use --allow-phrasing to override the local phrasing lint.')
+
+
+def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
+    if not allow_phrasing:
+        hint = _phrasing_hint(task)
+        if hint:
+            raise DeskError('brief_phrasing', hint)
 
 
 def _codex_slot(env):
@@ -308,6 +330,7 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
         else:
             stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as exc:
+        cleanup_deadline = time.monotonic() + 2
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -323,7 +346,11 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
             if reader is not None:
                 reader.join(timeout=2)
                 exc.output = ''.join(chunks)
-            exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
+            while not (confirmed := write_ownership.process_terminated(identity, group=True)):
+                if time.monotonic() >= cleanup_deadline:
+                    break
+                time.sleep(0.01)
+            exc.termination_confirmed = confirmed
         raise
     finally:
         if reader is None or not reader.is_alive():
@@ -619,6 +646,7 @@ def dispatch(
     effort: str | None = None,
     writes: list[str] | None = None,
     checkout: str | None = None,
+    allow_phrasing: bool = False,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -633,6 +661,7 @@ def dispatch(
     `provider_run` lets a bounded adapter confine the Codex/Grok child while
     retaining this module's dispatch and result contract. Ordinary callers
     keep the default runner."""
+    _lint_phrasing(task, allow_phrasing)
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
     if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
@@ -740,6 +769,9 @@ def dispatch(
         'status': outcome['status'],
         **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
+    if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
+        print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
+              file=sys.stderr, flush=True)
     _record(results_path, row)
     return row
 
@@ -1064,6 +1096,8 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--allow-phrasing', action='store_true',
+                   help='override the local brief phrasing lint; provider policy still applies')
     s.add_argument("--family", choices=codex_models.FAMILIES)
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
@@ -1161,6 +1195,7 @@ def main(argv: list[str]) -> int:
                 continue
             if block not in task:
                 task += '\n\n' + block
+        _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
@@ -1173,7 +1208,7 @@ def main(argv: list[str]) -> int:
             row = dispatch(a.name, task, registry=reg, results_path=results,
                            fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
                            retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                           checkout=a.checkout)
+                           checkout=a.checkout, allow_phrasing=a.allow_phrasing)
         print(json.dumps(row, indent=2))
         return 0 if row["status"] in ("delivered", "completed") else 1
 
