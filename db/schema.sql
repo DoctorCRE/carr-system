@@ -84901,6 +84901,24 @@ COMMENT ON TABLE public.deal_type_ref IS 'Deal transaction types (amendment 1). 
 
 
 --
+-- Name: deal_vendor_assignment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deal_vendor_assignment (
+    deal_id uuid NOT NULL,
+    party_id uuid NOT NULL,
+    role text NOT NULL,
+    company_party_id uuid NOT NULL,
+    contact_party_id uuid NOT NULL,
+    active boolean DEFAULT true NOT NULL,
+    note text,
+    updated_by uuid NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT deal_vendor_assignment_role_check CHECK (((role ~ '^[a-z][a-z0-9_]{1,49}$'::text) AND (role <> ALL (ARRAY['vendor'::text, 'worked'::text, 'referred'::text, 'other'::text, 'unknown'::text]))))
+);
+
+
+--
 -- Name: defect; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -89805,6 +89823,27 @@ SELECT
 
 
 --
+-- Name: v_deal_room_vendor; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_vendor AS
+ SELECT a.deal_id,
+    a.party_id,
+    a.role,
+    jsonb_build_object('id', company.id, 'name', company.name) AS company,
+    jsonb_build_object('id', contact.id, 'name', contact.name, 'email', contact.email, 'phone', contact.phone) AS contact,
+    a.note,
+    (to_jsonb(a.updated_at) #>> '{}'::text[]) AS updated_at
+   FROM (((public.deal_vendor_assignment a
+     JOIN public.party p ON (((p.id = a.party_id) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))))
+     JOIN public.party company ON (((company.id = a.company_party_id) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+     JOIN public.party contact ON (((contact.id = a.contact_party_id) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL))))
+  WHERE (a.active AND (EXISTS ( SELECT 1
+           FROM public.vendor v
+          WHERE ((v.party_id = a.party_id) AND (v.merged_into IS NULL)))));
+
+
+--
 -- Name: v_defect; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -91992,6 +92031,77 @@ UNION ALL
     e.subject_type
    FROM (public.event e
      JOIN public.actor act ON ((act.id = e.actor_id)));
+
+
+--
+-- Name: v_vendor_assignment_context; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_assignment_context AS
+ SELECT v.id,
+    v.vendor_ref AS ref,
+    v.version AS base_version,
+    v.party_id,
+        CASE
+            WHEN (company.id IS NOT NULL) THEN jsonb_build_object('id', company.id, 'name', company.name)
+            ELSE NULL::jsonb
+        END AS company,
+    COALESCE(( SELECT jsonb_agg(jsonb_build_object('id', contact.id, 'name', contact.name) ORDER BY contact.name, contact.id) AS jsonb_agg
+           FROM public.party contact
+          WHERE ((contact.kind = 'person'::text) AND (contact.merged_into IS NULL) AND (contact.deleted_at IS NULL) AND (((p.kind = 'person'::text) AND (contact.id = p.id)) OR ((p.kind = 'org'::text) AND (contact.org_id = p.id))))), '[]'::jsonb) AS contacts
+   FROM ((public.vendor v
+     JOIN public.party p ON ((p.id = v.party_id)))
+     LEFT JOIN public.party company ON (((company.id =
+        CASE
+            WHEN (p.kind = 'org'::text) THEN p.id
+            ELSE p.org_id
+        END) AND (company.kind = 'org'::text) AND (company.merged_into IS NULL) AND (company.deleted_at IS NULL))))
+  WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL));
+
+
+--
+-- Name: v_vendor_duplicate_report; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_vendor_duplicate_report AS
+ WITH live AS (
+         SELECT v.id,
+            v.party_id,
+            p.org_id,
+            NULLIF(lower(btrim(p.email)), ''::text) AS email,
+            NULLIF(lower(regexp_replace(btrim(p.name), '\s+'::text, ' '::text, 'g'::text)), ''::text) AS name
+           FROM (public.vendor v
+             JOIN public.party p ON ((p.id = v.party_id)))
+          WHERE ((v.merged_into IS NULL) AND (p.merged_into IS NULL) AND (p.deleted_at IS NULL))
+        ), same_party AS (
+         SELECT count(*) AS n
+           FROM live
+          GROUP BY live.party_id
+         HAVING (count(*) > 1)
+        ), email_match AS (
+         SELECT live.email
+           FROM live
+          WHERE (live.email IS NOT NULL)
+          GROUP BY live.email
+         HAVING (count(DISTINCT live.party_id) > 1)
+        ), name_company_match AS (
+         SELECT live.name,
+            live.org_id
+           FROM live
+          WHERE ((live.name IS NOT NULL) AND (live.org_id IS NOT NULL))
+          GROUP BY live.name, live.org_id
+         HAVING (count(DISTINCT live.party_id) > 1)
+        )
+ SELECT ( SELECT (count(*))::integer AS count
+           FROM live) AS live_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM same_party) AS same_party_groups,
+    ( SELECT (COALESCE(sum((same_party.n - 1)), (0)::numeric))::integer AS "coalesce"
+           FROM same_party) AS extra_vendor_rows,
+    ( SELECT (count(*))::integer AS count
+           FROM email_match) AS email_match_groups,
+    ( SELECT (count(*))::integer AS count
+           FROM name_company_match) AS name_company_match_groups;
 
 
 --
@@ -99898,6 +100008,22 @@ ALTER TABLE ONLY public.deal
 
 ALTER TABLE ONLY public.deal_type_ref
     ADD CONSTRAINT deal_type_ref_pkey PRIMARY KEY (slug);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_role_contact_party_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_deal_id_role_contact_party_id_key UNIQUE (deal_id, role, contact_party_id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_pkey PRIMARY KEY (deal_id, party_id, role);
 
 
 --
@@ -115736,6 +115862,46 @@ ALTER TABLE ONLY public.deal
 
 
 --
+-- Name: deal_vendor_assignment deal_vendor_assignment_company_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_company_party_id_fkey FOREIGN KEY (company_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_contact_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_contact_party_id_fkey FOREIGN KEY (contact_party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_deal_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_deal_id_fkey FOREIGN KEY (deal_id) REFERENCES public.deal(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_party_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_party_id_fkey FOREIGN KEY (party_id) REFERENCES public.party(id);
+
+
+--
+-- Name: deal_vendor_assignment deal_vendor_assignment_updated_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deal_vendor_assignment
+    ADD CONSTRAINT deal_vendor_assignment_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.actor(id);
+
+
+--
 -- Name: defect defect_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -120033,6 +120199,8 @@ grant select on table public.deal_review_item to dot_reader;
 grant insert, select, update on table public.deal_review_session to carr_writer;
 grant select on table public.deal_review_session to dot_reader;
 grant select on table public.deal_type_ref to dot_reader;
+grant insert, select, update on table public.deal_vendor_assignment to carr_writer;
+grant select on table public.deal_vendor_assignment to dot_reader;
 grant select on table public.defect to carr_exporter;
 grant select on table public.defect to carr_reader;
 grant insert, select on table public.defect to carr_writer;
@@ -120418,6 +120586,9 @@ grant select on table public.v_deal_room_presence to dot_reader;
 grant select on table public.v_deal_room_session to carr_reader;
 grant select on table public.v_deal_room_session to carr_writer;
 grant select on table public.v_deal_room_session to dot_reader;
+grant select on table public.v_deal_room_vendor to carr_reader;
+grant select on table public.v_deal_room_vendor to carr_writer;
+grant select on table public.v_deal_room_vendor to dot_reader;
 grant select on table public.v_decision_entry to carr_exporter;
 grant select on table public.v_decision_entry to carr_reader;
 grant select on table public.v_decision_entry to carr_writer;
@@ -120611,6 +120782,12 @@ grant select on table public.v_subject_timeline to carr_writer;
 grant select on table public.v_subject_timeline to dot_reader;
 grant select on table public.v_today_triage to carr_reader;
 grant select on table public.v_today_triage to dot_reader;
+grant select on table public.v_vendor_assignment_context to carr_reader;
+grant select on table public.v_vendor_assignment_context to carr_writer;
+grant select on table public.v_vendor_assignment_context to dot_reader;
+grant select on table public.v_vendor_duplicate_report to carr_reader;
+grant select on table public.v_vendor_duplicate_report to carr_writer;
+grant select on table public.v_vendor_duplicate_report to dot_reader;
 grant select on table public.v_vendor_level_suggestion to carr_reader;
 grant select on table public.v_vendor_level_suggestion to dot_reader;
 grant select on table public.v_vendor_needs_type to carr_reader;
@@ -122903,6 +123080,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
+0915_deal_vendor_assignments.sql	8dfd4799e511c4ff532e8db4cc7b3fbdfae501a9ac1cbc0d8f12b9b0081b5690	2026-10-20 16:57:03.57357+00
 \.
 
 
