@@ -543,7 +543,10 @@ class SendTests(unittest.TestCase):
         self.assertEqual(h.send(record='V-CPA-001').logged, ('V-CPA-001',))
 
     def test_decoder_reads_only_sent_items_and_removes_private_copy(self):
-        home = Path(self.tmp.name)
+        home = Path(self.tmp.name) / 'home'
+        repo = Path(self.tmp.name) / 'checkout'
+        (repo / '.git').mkdir(parents=True)
+        workspaces = []
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
         (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
@@ -551,6 +554,13 @@ class SendTests(unittest.TestCase):
         store.parent.mkdir(parents=True)
         store.write_bytes(b'fixture-store')
         def decode(command, **kwargs):
+            work = Path(command[2]).parent
+            workspaces.append(work)
+            self.assertFalse(work.is_relative_to(repo))
+            self.assertTrue(work.is_relative_to(home / 'carr-local'))
+            self.assertEqual(stat.S_IMODE(work.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(Path(command[3]).stat().st_mode), 0o600)
+            self.assertEqual(kwargs['umask'], 0o077)
             self.assertEqual(Path(command[2]).read_bytes(), b'fixture-store')
             self.assertEqual(stat.S_IMODE(Path(command[2]).stat().st_mode), 0o600)
             con = sqlite3.connect(command[3])
@@ -568,11 +578,49 @@ class SendTests(unittest.TestCase):
             con.close()
             return subprocess.CompletedProcess(command, 0)
         with patch.object(send_mod.subprocess, 'run', decode):
-            snap = send_mod.DecodedMailbox(home, home).snapshot()
+            snap = send_mod.DecodedMailbox(repo, home).snapshot()
         self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
-        self.assertEqual(list((home / send_mod.OUT).iterdir()), [])
+        self.assertFalse(any(work.exists() for work in workspaces))
+        self.assertEqual(list(repo.rglob('*')), [repo / '.git'])
         self.assertEqual(store.read_bytes(), b'fixture-store')
+
+    def test_decoder_failure_removes_copies_outside_git(self):
+        home = Path(self.tmp.name) / 'home'
+        repo = Path(self.tmp.name) / 'checkout'
+        repo.mkdir()
+        vendor = home / 'carr-local/hxstore-reverse-engineering'
+        vendor.mkdir(parents=True)
+        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
+        store = home / send_mod.DecodedMailbox.STORE
+        store.parent.mkdir(parents=True)
+        store.write_bytes(b'synthetic-mailbox')
+        workspaces = []
+        def timeout(command, **kwargs):
+            workspaces.append(Path(command[2]).parent)
+            raise subprocess.TimeoutExpired(command, 1)
+        with patch.object(send_mod.subprocess, 'run', timeout):
+            with self.assertRaises(send_mod.UiFailure):
+                send_mod.DecodedMailbox(repo, home).snapshot()
+        self.assertTrue(workspaces)
+        self.assertFalse(any(work.exists() for work in workspaces))
+        self.assertEqual(list(repo.rglob('*')), [])
+
+    def test_decoder_refuses_a_local_cache_inside_any_git_tree(self):
+        home = Path(self.tmp.name) / 'home'
+        vendor = home / 'carr-local/hxstore-reverse-engineering'
+        vendor.mkdir(parents=True)
+        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
+        (home / '.git').write_text('gitdir: synthetic-worktree')
+        store = home / send_mod.DecodedMailbox.STORE
+        store.parent.mkdir(parents=True)
+        store.write_bytes(b'synthetic-mailbox')
+        repo = Path(self.tmp.name) / 'checkout'
+        with patch.object(send_mod.subprocess, 'run') as decoder:
+            with self.assertRaisesRegex(send_mod.UiFailure, 'decode_workspace_in_git_tree'):
+                send_mod.DecodedMailbox(repo, home).snapshot()
+            decoder.assert_not_called()
+        self.assertFalse((home / 'carr-local/outlook-send').exists())
 
     def test_decoder_refuses_an_unpinned_build(self):
         home = Path(self.tmp.name)
