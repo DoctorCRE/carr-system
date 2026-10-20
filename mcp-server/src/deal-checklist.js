@@ -107,7 +107,7 @@ export async function readDealChecklist(client, record, now = new Date()) {
     [CHECKLIST_SOURCES.map(source => source.section_id)]);
   const commissions = await client.query(
     `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
-       from v_invoice_tracker where deal_id=$1 and commission_id is not null /* checklist:commissions */`, [record.id]);
+       from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   return deriveDealChecklist({ ...record, commissions: commissions.rows }, sources.rows, today);
 }
