@@ -904,6 +904,33 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_unchanged_remote_retries_interrupted_regeneration_after_restart(self):
+        card_id = self.prepare_pinned_head()
+        self.git('branch', 'branch-1', self.approved)
+        script = self.root / 'tools/prepare_pr.py'
+        original = script.read_text()
+        marker = self.root / 'preparation-calls'
+        script.write_text(
+            'from pathlib import Path\n'
+            + 'marker = Path(' + repr(str(marker)) + ')\n'
+            + 'previous = marker.exists()\n'
+            + 'with marker.open("a") as f: f.write("call\\n")\n'
+            + 'if not previous: raise SystemExit("push did not land")\n'
+            + original.replace('state.write_text(json.dumps(data))',
+                'import subprocess\nsubprocess.run(["git", "-C", data["remote"], '
+                '"update-ref", "refs/heads/branch-1", prepared, args["--head"]], check=True)\n'
+                'state.write_text(json.dumps(data))'))
+        self.q.tick()
+        self.assertEqual(self.git('rev-parse', 'branch-1').strip(), self.approved)
+        self.restart()
+        self.q.tick()
+        self.assertEqual(marker.read_text().splitlines(), ['call', 'call'])
+        self.assertEqual(self.git('rev-parse', 'branch-1').strip(), self.updated)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 2)
+        self.assertEqual(self.calls('merge'), [])
+
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
         marker = self.root / 'preparation-calls'
