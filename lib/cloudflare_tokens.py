@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import shlex
+import socket
 import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -92,17 +93,30 @@ def remote_source(*, export=False):
                           'if any(state != "ok" for state in check_values(selected).values()): sys.exit(1)\n'
                           'print(json.dumps(selected))\n')
     return (program + 'payload = json.load(sys.stdin)\n'
-            + 'path = Path.home() / ".config/carr/tokens.env"\n'
-            + 'try:\n'
-            + ' result = check_file(path) if payload["operation"] == "check" else {payload["name"]: install(path, payload["name"], payload["value"])}\n'
-            + 'except Exception:\n result = dict.fromkeys(TOKEN_NAMES, "unverifiable")\n'
-            + 'print(json.dumps(result))\n')
+            + 'print(json.dumps(local_operation(payload)))\n')
+
+
+def local_operation(payload):
+    path = Path.home() / '.config/carr/tokens.env'
+    try:
+        return (check_file(path) if payload['operation'] == 'check'
+                else {payload['name']: install(path, payload['name'], payload['value'])})
+    except Exception:
+        return dict.fromkeys(TOKEN_NAMES, 'unverifiable')
 
 
 def on_machine(machine, payload, *, runner=subprocess.run):
     if machine not in MACHINES:
         raise ValueError('unknown machine')
     try:
+        config = json.loads((Path(__file__).resolve().parents[1]
+                             / 'ops/config/studio-failover.v1.json').read_text())
+        host = config['hosts'].get(machine, {})
+        local = socket.gethostname().split('.')[0].casefold()
+        names = {machine, host.get('hostname', '').casefold(),
+                 host.get('ssh', '').rsplit('@', 1)[-1].split('.')[0].casefold()}
+        if local in names:
+            return local_operation(payload)
         result = runner(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', machine,
                          'python3 -c ' + shlex.quote(remote_source())],
                         input=json.dumps(payload), capture_output=True, text=True, timeout=40)
