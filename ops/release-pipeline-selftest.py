@@ -4859,6 +4859,21 @@ class CapabilityRecovery(Base):
         self.assertNotIn("~/.config/carr/tokens.env", body)
 
 
+class RunnerUploadOutput(unittest.TestCase):
+    def test_redacted_upload_output_retains_the_provider_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "upload.log"
+            output = f"Worker Version ID: {VERSION}\n  provider version: {VERSION}\n{CF_TOKEN}\n"
+            completed = subprocess.CompletedProcess([], 0, stdout=output)
+            with mock.patch.object(rp.subprocess, "run", return_value=completed):
+                result = rp.Runner().run(["synthetic-upload"], cwd=Path(tmp), log=log,
+                                         env={"CLOUDFLARE_API_TOKEN": CF_TOKEN})
+            self.assertEqual(rp.parse_provider_version(result), VERSION)
+            self.assertIn(f"  provider version: {VERSION}", log.read_text())
+            self.assertNotIn(CF_TOKEN, result.out)
+            self.assertNotIn(CF_TOKEN, log.read_text())
+
+
 class DeployCredential(unittest.TestCase):
     """CLOUDFLARE_API_TOKEN comes from $HOME/.config/carr/tokens.env into the
     wrangler-running steps' env only. Every case runs under a temporary HOME,
