@@ -1057,6 +1057,10 @@ class Queue:
             self.report(e, 'regenerated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
                         'superseded')
             return True
+        if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase='issued' "
+                           'AND repo=? AND pr=? AND head=?',
+                           (e['repo'], e['pr'], e['approved'])).fetchone():
+            raise ActionUncertain('Regeneration may have pushed; reconcile-action before advancing the pin')
         return False
 
     def _tick_entry(self, e, card_id, expected_order):

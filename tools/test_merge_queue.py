@@ -764,7 +764,8 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
         self.assertEqual((row['phase'], row['outcome']), ('pending', 'action_uncertain'))
-        self.q.tick()
+        for _ in range(module.MAX_ATTEMPTS):
+            self.q.tick()
         row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
         self.assertEqual((row['phase'], row['outcome']), ('blocked', 'action_uncertain_exhausted'))
         with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
