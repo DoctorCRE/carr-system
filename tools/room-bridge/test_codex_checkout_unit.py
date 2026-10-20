@@ -102,6 +102,27 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertEqual(self.git('config', '--local', 'user.email'),
                          '123+author@users.noreply.github.com')
 
+    def test_clone_is_seeded_from_canonical_objects_then_dissociated(self):
+        # Five parallel 226 MB network clones overran the clone deadline
+        # (2026-10-20). The job clone borrows the canonical object store and
+        # then copies it in, so it never keeps a link to the live checkout.
+        calls = []
+        def record(argv, **kwargs):
+            calls.append(argv)
+            return self.execute(argv, **kwargs)
+        with patch.object(dispatch.subprocess, 'run', side_effect=record), \
+             patch('codex_checkout.subprocess.run', side_effect=record):
+            row = dispatch.dispatch('cx', 'repair it', registry=self.reg,
+                                    results_path=self.results, env=self.env,
+                                    checkout='repair', fresh=True)
+        self.addCleanup(lambda: shutil.rmtree(row['checkout_workspace'], ignore_errors=True))
+        clone = next(argv for argv in calls if argv[:2] == ['git', 'clone'])
+        self.assertIn('--dissociate', clone)
+        self.assertEqual(clone[clone.index('--reference-if-able') + 1], str(self.source))
+        repo = Path(row['checkout_path'])
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+        self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
+
     def test_new_branch_uses_origin_default_head(self):
         row = self.send(checkout='new:job-repair')
         repo = Path(row['checkout_path'])

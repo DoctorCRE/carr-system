@@ -58,10 +58,12 @@ def prepare(target: str, env: dict | None = None) -> dict[str, str]:
         raise DeskError('codex_checkout_failed', 'checkout refused: job workspace unavailable') from None
     repo = workspace / 'checkout'
     try:
-        args = ['clone', '--no-local']
+        # Borrow the canonical objects so parallel jobs fetch only what is new
+        # from origin, then copy them in: no link to the live checkout remains.
+        args = ['clone', '--no-local', '--reference-if-able', canonical, '--dissociate']
         if not new_branch:
             args += ['--branch', branch]
-        git([*args, '--', origin, str(repo)], canonical, 'origin clone', timeout=180)
+        git([*args, '--', origin, str(repo)], canonical, 'origin clone', timeout=600)
         if new_branch:
             git(['switch', '-c', branch], str(repo), 'new branch creation')
         git(['config', '--local', 'user.name', author], str(repo), 'author configuration')
