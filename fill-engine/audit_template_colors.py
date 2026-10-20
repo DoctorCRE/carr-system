@@ -66,20 +66,34 @@ def sendable_note(slug: str) -> str:
             "Naming a sendable format is not itself an ask to send: it goes out when Joe asks (decision 41906a30).")
 
 
+SEND_SENTENCE_LEGACY = (
+    "Naming a sendable format is not permission to send: Joe sends, and no verb in this system can.",
+    "Naming a sendable format is not permission to send: Joe sends, and no verb can.",
+)
+SEND_SENTENCE = "Naming a sendable format is not itself an ask to send: it goes out when Joe asks (decision 41906a30)."
+
+
 def apply_sendable_note(slug: str) -> str:
+    """Make the map's review_note carry the current send sentence, and persist it.
+
+    Edits the raw file text so a map that already carries the note changes only
+    its send sentence (the hand-formatted JSON and any later amendment paragraph
+    stay byte-identical). Only a map with no SENDABLE FORMAT note at all gets the
+    full note appended."""
     path = os.path.join(MAPS, f"{slug}.json")
     with open(path) as fh:
-        m = json.load(fh)
-    note = sendable_note(slug)
-    current = m.get("review_note") or ""
-    if "SENDABLE FORMAT" in current:
-        head = current.split("SENDABLE FORMAT", 1)[0].rstrip()
-        m["review_note"] = (head + "\n\n" if head else "") + note
-    else:
-        m["review_note"] = (current + "\n\n" if current else "") + note
+        raw = fh.read()
+    updated = raw
+    for legacy in SEND_SENTENCE_LEGACY:
+        updated = updated.replace(legacy, SEND_SENTENCE)
+    if "SENDABLE FORMAT" not in updated:
+        m = json.loads(updated)
+        current = m.get("review_note") or ""
+        m["review_note"] = (current + "\n\n" if current else "") + sendable_note(slug)
+        updated = json.dumps(m, indent=2) + "\n"
+    if updated != raw:
         with open(path, "w") as fh:
-            json.dump(m, fh, indent=2)
-            fh.write("\n")
+            fh.write(updated)
     return path
 
 
@@ -188,12 +202,13 @@ def main() -> int:
                 + (", ".join(r["mapped_uncolored"]) or "none")
                 + ". NOTHING WAS ADDED TO THIS MAP: the map is reviewed territory, and a slot found "
                   "by colour is a candidate for the human reading it, not a change made on its behalf."
-                + "\n\n" + sendable_note(r["slug"]))
+            )
             m["review_note"] = (m.get("review_note", "") + ("\n\n" if m.get("review_note") else "")
                                 + note) if note not in (m.get("review_note") or "") else m["review_note"]
             with open(r["map_path"], "w") as fh:
                 json.dump(m, fh, indent=2)
                 fh.write("\n")
+            apply_sendable_note(r["slug"])
             print(f"    review_note updated: {r['map_path']}")
 
     if a.write:

@@ -35,7 +35,7 @@ And the discipline every seat carries, also verbatim:
 > of truth the moment it reaches a session, never "I'll note it"; (2) staleness sweep at the top of
 > any touching session — cross-check the component's records and fix drift before waiting for
 > instructions; (3) widen the intake so signals land regardless of which session Joe used; (4) act,
-> don't ask — stop only for money, the human gate, or a genuine scope call. No seat overrides:
+> don't ask — stop only for money, a ruling only Joe can make, or a genuine scope call. No seat overrides:
 > Sending follows Joe's ask (decision 41906a30), default is a draft; no credentials; no fabricated data; two-writer discipline; CARR
 > routing.
 
