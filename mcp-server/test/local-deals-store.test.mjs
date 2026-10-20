@@ -104,6 +104,31 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
+      await fixture(true);
+      const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: yesterday,
+      });
+      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received for review',
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace: 'all'});
+      assert.equal(board.deals[0].next_date, null, 'the superseded date must stop driving overdue');
+      assert.equal(board.deals[0].next_step, null, 'the prior step belongs only in history');
+      assert.equal(board.deals[0].next_step_required, true);
+      assert.equal(board.deals[0].attention, true, 'manual attention survives');
+      assert.equal(Number(board.accounts[0].overdue_deals), 0);
+      assert.equal(update.next_step_required, true);
+      assert.match(update.prompt, /next step.*date/i);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.ok(room.thread.some(n => n.id === prior.next_step_id && n.text === 'Request revised terms'));
+      assert.ok(room.thread.some(n => n.id === update.note_id));
+      assert.ok(room.events.some(e => e.verb === 'add-deal-note' && e.field === 'next_date' &&
+        e.old_value.next_date === yesterday && e.new_value.next_date === null));
+    }));
+
     await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
       await fixture(true);
       await c.query("update deal set phase='closed',outcome='lost' where id=$1", [id(4)]);
