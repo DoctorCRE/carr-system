@@ -677,12 +677,41 @@ class QueueTests(unittest.TestCase):
 
     def test_preparation_push_waits_for_checks_on_the_new_head(self):
         self.pr()
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
         (self.root / 'tools/prepare_pr.py').write_text(
-            'import json\nprint(json.dumps({"head":"' + self.changed + '","changed":True}))\n')
+            'import json,os,sys\nfrom pathlib import Path\n'
+            'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
+            'prepared = ' + repr(self.updated) + '\n'
+            'receipt = Path(args["--receipt"])\nreceipt.parent.mkdir(parents=True, exist_ok=True)\n'
+            'receipt.write_text(json.dumps(dict(head=args["--head"], main=args["--main"], '
+            'prepared=prepared, branch=args["--branch"])))\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
+            'data["prs"]["jbookout/carr-system#1"]["head"]["sha"] = prepared\n'
+            'state.write_text(json.dumps(data))\n'
+            'print(json.dumps(dict(head=prepared, changed=True)))\n')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
+        card_id = f'{module.REPOS[0]}#1@{self.approved}'
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
-        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries').fetchone()[0], 'regenerated')
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            event = work.get(card_id)['last_event']
+            self.assertEqual(event['kind'], 'pin_regenerated')
+            self.assertEqual(event['actor'], 'merge-daemon')
+            self.assertEqual(event['from']['head'], self.approved)
+            self.assertEqual(event['to']['head'], self.updated)
+            self.assertEqual(event['to']['main'], self.main)
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.calls('merge')[0][-1], self.updated)
 
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
@@ -741,6 +770,10 @@ class QueueTests(unittest.TestCase):
         row = self.q.db.execute('SELECT * FROM entries').fetchone()
         self.assertEqual((row['approved'], row['tested'], row['outcome']),
                          (self.approved, None, 'head_moved'))
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(f'{module.REPOS[0]}#1@{self.approved}')
+            self.assertEqual(card['prs'], [dict(repo=module.REPOS[0], number=1, head=self.approved)])
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
 
     def test_legacy_review_entry_preserves_approved_head_on_restart(self):
         self.pr(head=self.changed)
