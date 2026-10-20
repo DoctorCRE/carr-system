@@ -361,14 +361,15 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
     return {**outcome, "receipt": receipt}
 
 
-def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run, env=None) -> dict:
+def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run, env=None,
+             timeout_seconds=TIMEOUT_S) -> dict:
     validate_entry(entry)
     try:
         model = resolve_model(run=run, env=env) if entry['model'] == 'grok' else entry['model']
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {"status": "failed", "code": 4, "detail": "grok_model_catalog_unavailable"}
     return run_request(task, retrieval=retrieval, cwd=entry.get("cwd"),
-        model=model, effort=entry['effort'], writable=not retrieval,
+        model=model, effort=entry['effort'], writable=not retrieval, timeout_seconds=timeout_seconds,
         prefix=("Read-only retrieval or explanation only. Do not call CARR or MCP tools, "
                 "read credential/config files, write files, or delegate. Return a bounded "
                 "answer with public source URLs when retrieving.") if retrieval else "",
