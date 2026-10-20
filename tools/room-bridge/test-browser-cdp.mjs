@@ -1,4 +1,4 @@
-import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { launchChrome } from "../../mcp-server/test/helpers/chrome-launch.mjs";
 
 const disconnected = new Promise(resolve => {
   process.stdin.resume();

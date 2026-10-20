@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 
 const root = new URL("../../", import.meta.url);
-const launchers = new Set(["dealroom/test/chrome-launch.mjs", "practice-plugin/test/browser.mjs"]);
+const launchers = new Set(["mcp-server/test/helpers/chrome-launch.mjs", "practice-plugin/test/browser.mjs"]);
 const ignored = new Set([".git", "node_modules", ".venv", "__pycache__", "out"]);
 
 async function* sources(directory = "") {

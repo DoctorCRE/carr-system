@@ -22,6 +22,7 @@ sys.path.insert(0, str(HERE))
 
 import browser_visual_gate_capture as capture  # noqa: E402
 import design_kernel  # noqa: E402
+import model_room_preview_server  # noqa: E402
 
 KERNEL = ROOT / "design" / "carr-design-kernel.v1.json"
 DIGEST = "sha256:7ef1df546040c0aa000a437902fdc4d83decaf1960f63001790b11a422b5dfb9"
@@ -46,12 +47,25 @@ def refused(url: str) -> bool:
 
 
 def test_model_room_mode_serves_the_real_bundle_and_the_wire_turn():
+    assert model_room_preview_server.PreviewHandler.assets == ROOT / "out/doctorcre-artifacts/current"
+    with tempfile.TemporaryDirectory() as directory:
+        fixture = Path(directory)
+        (fixture / "room.html").write_text("<!doctype html><title>Preview fixture</title>")
+        original = model_room_preview_server.PreviewHandler.assets
+        model_room_preview_server.PreviewHandler.assets = fixture
+        try:
+            check_model_room_bundle()
+        finally:
+            model_room_preview_server.PreviewHandler.assets = original
+
+
+def check_model_room_bundle():
     with capture.serving_target(args(model_room=True)) as url:
         match = re.fullmatch(r"http://127\.0\.0\.1:(\d+)/room\.html", url)
         assert match, url
         assert int(match.group(1)) not in (0, 8765), url
         page = urlopen(url, timeout=5).read().decode()
-        assert "<title>Observatory · The Deal Room</title>" in page
+        assert page == "<!doctype html><title>Preview fixture</title>"
         wire = json.loads(urlopen(url.replace("/room.html", "/api/room/turns"), timeout=30).read())
     assert wire["latest_seq"] == "1"
     assert [turn["kind"] for turn in wire["turns"]] == ["receipt"]

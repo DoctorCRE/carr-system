@@ -15,10 +15,6 @@
       "reason": "versioned font binaries"
     },
     {
-      "path": "dealroom/public-shell/icons/*.png",
-      "reason": "versioned application icons"
-    },
-    {
       "path": "deliverables/instagram-grid-reset-2026-08-11/rendered/*.png",
       "reason": "versioned rendered deliverables"
     },
