@@ -161,3 +161,18 @@ test('hierarchy publication keeps blocker and task parent references resolving a
   ['parent','WR14.S1.J1','resolved',{board_id:'demo-project',task_id:'WR14.S1.J1'}]
  ]);
 });
+
+test('hierarchy publication retains unsupported linkage markers and never certifies complete linkage',async()=>{
+ const unsupported=['dependency_refs','depends_on','blocked_by','blocker_ref','blocker_task_id','parent_refs','related_refs','dependencies'];
+ const tasks=Object.fromEntries(unsupported.map(field=>[field,{[field]:['one']}]));
+ tasks.held={held:{blocker:{task_id:'one'},private_diagnostic:'Do not publish'}};
+ const publication=hierarchyPublication({one:{},...tasks});
+ const read=await boardRead(publication.tasks);
+ for(const id of Object.keys(tasks)) {
+  const key=publication.hierarchy.aliases[id];
+  assert.equal(publication.tasks[key].linkage_metadata_unavailable,true,id);
+  assert.equal(read.snapshot_json.tasks[key].linkage.state,'unavailable',id);
+  assert.equal(read.snapshot_json.tasks[key].linkage.reason,'unsupported_recorded_association',id);
+  assert.equal(publication.tasks[key].held,undefined);
+ }
+});
