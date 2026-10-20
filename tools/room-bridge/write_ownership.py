@@ -73,9 +73,24 @@ def process_terminated(identity: dict, *, group: bool = False) -> bool:
         os.killpg(pgid, 0)
     except ProcessLookupError:
         return True
-    except OSError:
+    except PermissionError:
         pass
-    return False
+    except OSError:
+        return False
+    # A reaped leader can leave zombies that still make killpg report a group.
+    try:
+        inventory = subprocess.run(['/bin/ps', '-axo', 'pgid=,stat='], check=True,
+                                   capture_output=True, text=True, timeout=2)
+        found = False
+        for line in inventory.stdout.splitlines():
+            group_id, state = line.split()
+            if int(group_id) == pgid:
+                found = True
+                if not state.startswith('Z'):
+                    return False
+        return found
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
 
 
 def termination_evidence(row: dict) -> str | None:
