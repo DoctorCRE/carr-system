@@ -730,6 +730,50 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_temp_budget_resumes_unfinished_fixture_before_or_after_move(self):
+        import machine_cleanup as cleanup
+        for moved in (False, True):
+            with self.subTest(moved=moved), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                candidate = scratch / 'carr-ci-test-budget'
+                candidate.mkdir()
+                (candidate / 'payload').write_text('preserve complete fixture')
+                for path in (candidate / 'payload', candidate):
+                    os.utime(path, (0, 0))
+                elapsed, calls = [0.0], []
+                def probe(paths):
+                    calls.append(paths)
+                    if not moved and len(calls) == 2:
+                        elapsed[0] = 240
+                    return set()
+                lstat = Path.lstat
+                def slow_stat(path, *args, **kwargs):
+                    result = lstat(path, *args, **kwargs)
+                    if moved and path.name == 'fixture' and '_to_delete' in path.parts:
+                        elapsed[0] = 240
+                    return result
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
+                    dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                     patch.object(Path, 'lstat', slow_stat):
+                    first = cleanup.run(root, config, **options, process_probe=probe)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertFalse(first['errors'], first)
+                self.assertIsNone(first['last_success_at'])
+                self.assertEqual(candidate.exists(), not moved)
+                second = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertFalse(second['errors'], second)
+                self.assertNotIn('pending', second)
+                self.assertFalse(candidate.exists())
+                self.assertEqual(len(second['removed']), 1, second)
+                self.assertEqual((Path(second['removed'][0]['staged_path']) / 'payload').read_text(),
+                    'preserve complete fixture')
+
     def test_thread_timeout_defers_and_reads_back_before_retry(self):
         import machine_cleanup as cleanup
         sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
