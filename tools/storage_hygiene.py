@@ -532,10 +532,20 @@ def recover_test_temp(pending, *, deadline):
     if (row['path'] != str(source) or staged != manifest.parent / 'fixture' or
             staged.resolve() != staged or row['status'] not in {'intent', 'staged', 'verified_no_effect'}):
         raise RuntimeError('interrupted fixture manifest mismatch')
-    if source.exists() == staged.exists():
+    present = {}
+    for path in (source, staged):
+        try:
+            present[path] = path.lstat()
+        except FileNotFoundError:
+            pass
+    if not present:
+        check(deadline)
+        row.update(status='removed', reason='fixture already absent; no move performed', allocated_bytes=0)
+        save(manifest, {**row, 'status': 'verified_no_effect'})
+        return row
+    if len(present) != 1:
         raise RuntimeError('interrupted fixture move is ambiguous')
-    actual = staged if staged.exists() else source
-    info = actual.lstat()
+    actual, info = next(iter(present.items()))
     if (info.st_dev, info.st_ino) != tuple(row['identity']):
         raise RuntimeError('interrupted fixture directory changed')
     if actual == staged and _temp_activity(staged, deadline)[0] != row['activity']:
