@@ -7,6 +7,7 @@ select e.subject_id as deal_id,
   from event e
  where e.subject_type='deal' and e.field='phase'
    and nullif(e.new_value->>'phase','') is not null
+   and e.old_value->>'phase' is distinct from e.new_value->>'phase'
  group by e.subject_id, e.new_value->>'phase';
 
 grant select on v_deal_room_phase_start to carr_reader, carr_writer;
