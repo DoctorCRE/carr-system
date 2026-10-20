@@ -240,7 +240,7 @@ export function governedCorrespondenceStoreTools({ withEnvelope, writeEvent, Too
   return {
     "correspondence-readiness": {
       write: false,
-      description: "What DoctorCRE's governed correspondence (V5-J103) can do right now, from the record layer: per partner, how many mailbox consents are in force or revoked, how many adapter read receipts and CARR-written drafts exist, whether any runtime role may write read receipts, and every step still owed before a mailbox is read — the partner's own consent, the F10 adapter and its seat, the kernel's receipt binding, F01's reconciliation store, and the independent receipt the 2026-09-20 amendment requires before any automatic internal update. Counts only; no correspondence content. This store has no send tool; sends go through Joe's own accounts when he asks (decision 41906a30).",
+      description: "What DoctorCRE's governed correspondence (V5-J103) can do right now, from the record layer: per partner, how many mailbox consents are in force or revoked, how many adapter read receipts and CARR-written drafts exist, whether any runtime role may write read receipts, and every step still owed before a mailbox is read — the partner's own consent, the F10 adapter and its seat, the kernel's receipt binding, F01's reconciliation store, and the independent receipt the 2026-09-20 amendment requires before any automatic internal update. Counts only; no correspondence content. There is no send tool anywhere in CARR: drafts are for a human to send.",
       inputSchema: { type: "object", additionalProperties: false, properties: {} },
       handler: async (c, _actor, args) => {
         check(() => assertClosedArgs(args ?? {}, []));
