@@ -608,7 +608,7 @@ class SendTests(unittest.TestCase):
             con.close()
             return subprocess.CompletedProcess(command, 0)
         with patch.object(send_mod.subprocess, 'run', decode):
-            snap = send_mod.DecodedMailbox(repo, home).snapshot()
+            snap = send_mod.DecodedMailbox(home).snapshot()
         self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
         self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
         self.assertFalse(any(work.exists() for work in workspaces))
@@ -631,7 +631,7 @@ class SendTests(unittest.TestCase):
             raise subprocess.TimeoutExpired(command, 1)
         with patch.object(send_mod.subprocess, 'run', timeout):
             with self.assertRaises(send_mod.UiFailure):
-                send_mod.DecodedMailbox(repo, home).snapshot()
+                send_mod.DecodedMailbox(home).snapshot()
         self.assertTrue(workspaces)
         self.assertFalse(any(work.exists() for work in workspaces))
         self.assertEqual(list(repo.rglob('*')), [])
@@ -648,7 +648,7 @@ class SendTests(unittest.TestCase):
         repo = Path(self.tmp.name) / 'checkout'
         with patch.object(send_mod.subprocess, 'run') as decoder:
             with self.assertRaisesRegex(send_mod.UiFailure, 'decode_workspace_in_git_tree'):
-                send_mod.DecodedMailbox(repo, home).snapshot()
+                send_mod.DecodedMailbox(home).snapshot()
             decoder.assert_not_called()
         self.assertFalse((home / 'carr-local/outlook-send').exists())
 
@@ -659,7 +659,7 @@ class SendTests(unittest.TestCase):
         (vendor / '.carr-pin').write_text('wrong-pin')
         with patch.object(send_mod.subprocess, 'run') as decoder:
             with self.assertRaises(send_mod.UiFailure):
-                send_mod.DecodedMailbox(home, home).snapshot()
+                send_mod.DecodedMailbox(home).snapshot()
             decoder.assert_not_called()
 
     def test_transport_exception_after_latching_key_is_not_retried(self):

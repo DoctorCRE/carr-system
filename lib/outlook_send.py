@@ -459,7 +459,7 @@ def _cua(tool: str, args: dict) -> dict:
 def _frontmost() -> str | None:
     done = _run(['osascript', '-e', 'tell application "System Events" to get bundle identifier '
                            'of first process whose frontmost is true'], capture_output=True, text=True, timeout=30)
-    return done.stdout.strip() or None if done.returncode == 0 else None
+    return done.stdout.strip() or None
 
 
 def _activate(bundle: str) -> None:
@@ -497,9 +497,7 @@ def _mailto_handler() -> str:
 
 
 def _open_url(url: str) -> None:
-    done = _run(['open', '-g', url], capture_output=True, timeout=60)
-    if done.returncode:
-        raise UiFailure('open_failed')
+    _run(['open', '-g', url], capture_output=True, timeout=60)
 
 
 class Window:
@@ -568,16 +566,14 @@ class Window:
         try:
             _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
+            if not isinstance(self, ComposeWindow):
+                target = self._button(self.elements(), self.commit_label)
+            idle = _idle_seconds()
+            if idle is None or idle < IDLE_SECONDS:
+                raise UserActive('user_active')
             if isinstance(self, ComposeWindow):
-                idle = _idle_seconds()
-                if idle is None or idle < IDLE_SECONDS:
-                    raise UserActive('user_active')
                 _cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': ['Draft', 'Send']})
             else:
-                target = self._button(self.elements(), self.commit_label)
-                idle = _idle_seconds()
-                if idle is None or idle < IDLE_SECONDS:
-                    raise UserActive('user_active')
                 _cua('click', {'pid': self.pid, 'element_token': target['element_token']})
         finally:
             if previous and previous != BUNDLE:
@@ -748,8 +744,8 @@ class DecodedMailbox:
            '2f09252e1336f17e374a4c1fd8d112bcc44d3af185a9daa283c0c9fba20471f0')
     STORE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/HxStore.hxd')
 
-    def __init__(self, repo: Path, home: Path):
-        self.repo, self.home = repo, home
+    def __init__(self, home: Path):
+        self.home = home
 
     def snapshot(self) -> Snapshot:
         vendor = self.home / 'carr-local/hxstore-reverse-engineering'
@@ -768,10 +764,8 @@ class DecodedMailbox:
                 shutil.copyfileobj(reader, writer)
             fd = os.open(db, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             os.close(fd)
-            done = _run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
+            _run([str(vendor / 'hxprobe/target/release/hxprobe'), 'db', str(copy), str(db)],
                                   capture_output=True, timeout=900, umask=0o077)
-            if done.returncode:
-                raise UiFailure('decoder_failed')
             os.chmod(db, 0o600)
             con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
             try:
@@ -795,8 +789,6 @@ def default_ports(repo: Path | None = None) -> Ports:
         # stdin keeps message text and addresses out of argv/process listings.
         done = _run([str(repo / 'run.sh'), 'call', verb, '-'], input=json.dumps(args),
                               cwd=repo, capture_output=True, text=True, timeout=120)
-        if done.returncode:
-            raise UiFailure('record_call_failed')
         return json.loads(done.stdout)
 
     def contacts() -> list[tuple[str, str, str]]:
@@ -812,7 +804,7 @@ def default_ports(repo: Path | None = None) -> Ports:
                                  str(row.get(id_col) or '').strip()))
         return rows
 
-    return Ports(open_form=open_form, mailbox=DecodedMailbox(repo, Path.home()),
+    return Ports(open_form=open_form, mailbox=DecodedMailbox(Path.home()),
                  idle_seconds=outlook_triage.hid_idle_seconds, carr=carr, contacts=contacts,
                  out=Path.home() / '.local/state/carr/outlook-send')
 
