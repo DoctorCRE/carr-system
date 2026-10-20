@@ -636,9 +636,15 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                             save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
                     report['budget_exhausted'] = deadline()
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-                    row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
-                    report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
-                report['removed' if row['status'] == 'staged' else 'kept'].append(row)
+                    if (isinstance(exc, FileNotFoundError) and not path.exists() and not path.is_symlink()
+                            and (target is None or not (target / 'fixture').exists())):
+                        row.update(status='removed', reason='fixture already absent; no move performed')
+                        if target is not None:
+                            save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
+                    else:
+                        row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
+                        report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
+                report['removed' if row['status'] in {'staged', 'removed'} else 'kept'].append(row)
                 report['cursor'] = name
                 record(row)
                 if row.get('error'):
