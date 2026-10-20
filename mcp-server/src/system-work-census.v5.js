@@ -1,3 +1,4 @@
+import { observeBoardLinkage, unavailableLinkage } from './work-linkage.js';
 // System design/build projection of the existing work inventory federation.
 import { readableWorkRequestSql } from './work-request-read.js';
 import { canonicalJson } from './artifact-trust.js';
@@ -168,7 +169,8 @@ const normalized=(row,leg,now)=>{
  const version=leg.kind==='progress_task'?safeInteger(row.version,'board_version_invalid'):row.version;
  const item={...row,version,id:String(row.id),source:leg.source,kind:leg.kind,opened_at:opened,last_activity_at:activity,
    age:Math.max(0,Math.floor((+now-Date.parse(opened))/86400000)),link:navigation.link,navigation,
-   status:row.state,updated_at:activity,source_ref:leg.source,open:navigation.link,related:[],unlinked:true};
+   status:row.state,updated_at:activity,source_ref:leg.source,open:navigation.link,related:[],linkage:unavailableLinkage({board_id:row.identity?.board_id??null,task_id:row.identity?.task_id??null,version:version??null})};
+ delete item.unlinked;
  item.source_workflow=leg.kind==='incident'?{read:{verb:'get-incident',args:item.identity}}:
   leg.kind==='work_request'?{read:{verb:'work-request-card',args:{work_request:item.identity.human_ref}}}:null;
  item.available_triage_actions=systemWorkActions(item);return item;
@@ -282,6 +284,21 @@ export async function readSystemWorkCensus({client,actor,correlationId,now=()=>n
  }
  items.sort((a,b)=>cmp(a,b,live));const page=items.slice(0,limit);
  for(const c of coverage){c.count_returned=page.filter(r=>r.kind===c.kind).length;if(!Number.isFinite(c.count_total)){c.count_total=null;if(c.state==='complete'){c.state='partial';c.reason='count_unavailable';}}}
+ const progress=page.filter(item=>item.kind==='progress_task');
+ if(progress.length) {
+  const boardIds=[...new Set(progress.map(item=>item.identity?.board_id).filter(id=>typeof id==='string'))];
+  const stored=await client.query(`select board_id,version,snapshot_json from public.board_snapshot
+   where organization_tenant_id=$1 and sponsoring_human_slug=$2 and board_id=any($3::text[])`,[tenant,sponsor,boardIds]).catch(()=>({rows:[]}));
+  const boards=new Map((await observeBoardLinkage(client,stored.rows,tenant,sponsor)).map(row=>[row.board_id,row]));
+  for(const item of progress) {
+   const board=boards.get(item.identity?.board_id);
+   const linkage=board?.snapshot_json?.tasks?.[item.identity?.task_id]?.linkage;
+   if(linkage && Number(board.version)===item.version) {
+    item.linkage=linkage;
+    if(linkage.state==='complete') item.unlinked=linkage.references.length===0;
+   }
+  }
+ }
  const last=page.at(-1),complete=coverage.every(c=>c.state==='complete');
  return {ok:true,schema:'unfinished-work.v1',viewer:sponsor,tenant,items:page,coverage,census_complete:complete,limit,
   next_cursor:items.length>limit?Buffer.from(JSON.stringify({signature,date:live?last.last_activity_at:last.opened_at,kind:last.kind,id:last.id})).toString('base64url'):null,

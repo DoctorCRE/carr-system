@@ -40,6 +40,21 @@ def git(root, *args, **kwargs):
     return command(["git", "-C", str(root), *args], **kwargs).stdout.strip()
 
 
+REMOTE_REFS = "refs/carr-cleanup/origin/"
+
+
+def fetch_remote_refs(root):
+    # Keep remote evidence separate from unpublished or stale local tags.
+    git(root, "--no-replace-objects", "fetch", "--prune", "--no-tags", "origin",
+        "+refs/heads/*:refs/remotes/origin/*", "+refs/*:" + REMOTE_REFS + "*")
+
+
+def remote_preserves(root, head="HEAD"):
+    return bool(git(root, "--no-replace-objects", "for-each-ref", "--contains=" + head,
+                    "--count=1", "--format=%(refname)", REMOTE_REFS,
+                    environment={"GIT_GRAFT_FILE": os.devnull}))
+
+
 def git_records(root, *args, separator=b"\0"):
     with tempfile.TemporaryFile() as errors:
         proc = subprocess.Popen(["git", "-C", str(root), *args], stdout=subprocess.PIPE,
@@ -376,7 +391,7 @@ class FleetReaper:
     def snapshot(self, repo, root, skip=(), after=""):
         root = Path(root).resolve()
         self.provider.verify_repository(repo, root)
-        git(root, "fetch", "--prune", "origin")
+        fetch_remote_refs(root)
         main = git(root, "rev-parse", "refs/remotes/origin/main")
         pulls = self.provider.pulls(repo)
         merged = [p for p in pulls if p.get("merged_at") and p["base"]["ref"] == "main"
@@ -423,7 +438,7 @@ class FleetReaper:
     def iter_tree_snapshot(self, repo, root, skip=(), after=""):
         root = Path(root).resolve()
         self.provider.verify_repository(repo, root)
-        git(root, "fetch", "--prune", "origin")
+        fetch_remote_refs(root)
         main = git(root, "rev-parse", "refs/remotes/origin/main")
         yield from self.tree_rows(repo, root, main, None, skip, after)
 
@@ -471,7 +486,7 @@ class FleetReaper:
             row["ownership"] = self.ownership_probe(path)
             if status:
                 reasons.append("uncommitted work")
-            elif git(path, "rev-list", "-1", "HEAD", "--not", "--remotes=origin"):
+            elif not remote_preserves(path):
                 reasons.append("unpushed work")
             elif index_age is None or tree_age is None or min(index_age, tree_age) < self.tree_idle:
                 reasons.append("recent writes or unknown age")
@@ -565,13 +580,20 @@ class FleetReaper:
         save(target / "manifest.json", manifest)
         # Hashing large orphan files can take time. Probe again immediately
         # before the move so a session starting during verification wins.
-        try:
+        def verify_idle():
             busy = self.process_probe([str(path)])
             if busy is None or str(path) in busy or self.ownership_probe(path) != row["ownership"] or \
                     git(path, "status", "--porcelain=v1", "--untracked-files=all") != row["status"] or \
                     self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
                     self.tree_fresh(path):
                 raise RuntimeError("worktree became live before move; preserve it")
+        try:
+            verify_idle()
+            check(self.deadline)
+            fetch_remote_refs(root)
+            verify_idle()
+            if not remote_preserves(path, row["head"]):
+                return {"status": "preserved", "reason": "remote preservation changed before staging"}
             check(self.deadline)
         except BudgetExhausted:
             manifest["state"] = "verified_no_effect"
@@ -583,7 +605,7 @@ class FleetReaper:
             raise RuntimeError("staged worktree HEAD readback mismatch")
         manifest["state"] = "staged"
         save(target / "manifest.json", manifest)
-        return {"staged_path": str(target / "worktree"), "manifest": str(target / "manifest.json")}
+        return {"status": "staged", "staged_path": str(target / "worktree"), "manifest": str(target / "manifest.json")}
 
     def recover_pending(self, repo, root):
         ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
@@ -667,7 +689,7 @@ class FleetReaper:
                 self.process_probe([row["path"]]), {str(root), *(str(Path(p).resolve()) for p in skip)})
             if any(current.get(k) != row.get(k) for k in ("action", "status", "ownership", "content", "branch", "detached", "head")):
                 return {"status": "preserved", "reason": "worktree became live or content changed"}
-            return {"status": "staged", **self.stage(root, row)}
+            return self.stage(root, row)
         if row["action"] == "close_pr":
             successor = row["successor"]
             landed = self.provider.pull(repo, successor["number"])

@@ -877,6 +877,209 @@ def pull(number, head, base, *, body="", merged=None):
             "base": {"sha": base, "ref": "main", "repo": {"full_name": "fixture/repo"}}}
 
 
+class RemotePreservationTests(unittest.TestCase):
+    def archived_tree(self):
+        fixture = Fixture()
+        tree = fixture.tree('archived')
+        head = fixture.commit('archived payload', cwd=tree)
+        fixture.age(tree)
+        tag = 'archive/worktree/archived-2026-10-19'
+        fixture.git('tag', '-a', tag, head, '-m', 'preserved fixture')
+        fixture.git('push', 'origin', 'refs/tags/' + tag)
+        fixture.git('update-ref', '-d', 'refs/tags/' + tag)
+        return fixture, tree, head, tag
+
+    def test_archive_tag_only_stages_complete_worktree(self):
+        fixture, tree, head, tag = self.archived_tree()
+        self.assertFalse(fixture.git('for-each-ref', 'refs/tags'))
+        report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True, local_only=True)
+        self.assertFalse(report['errors'], report)
+        row = next(r for r in report['rows'] if r.get('path') == str(tree))
+        self.assertEqual(row['action'], 'stage_worktree', row)
+        action = next(a for a in report['actions'] if a['candidate'].get('path') == str(tree))
+        self.assertEqual(action['status'], 'staged', report)
+        self.assertFalse(tree.exists())
+        staged = Path(action['staged_path'])
+        self.assertIn('_to_delete', staged.parts)
+        self.assertEqual((staged / 'file').read_text(), 'archived payload\n')
+        self.assertEqual(fixture.git('rev-parse', 'HEAD', cwd=staged), head)
+
+    def test_head_reachable_from_remote_descendant_is_preserved(self):
+        for ref in ('refs/tags/release-fixture', 'refs/pull/7/head'):
+            with self.subTest(ref=ref):
+                fixture = Fixture()
+                tree = fixture.tree('ancestor')
+                head = fixture.commit('ancestor payload', cwd=tree)
+                descendant = fixture.git('commit-tree', 'HEAD^{tree}', '-p', head, '-m', 'remote descendant', cwd=tree)
+                fixture.git('push', 'origin', descendant + ':' + ref)
+                fixture.age(tree)
+                row = next(r for r in fixture.reaper().iter_tree_snapshot('fixture/repo', fixture.repo)
+                    if r.get('path') == str(tree))
+                self.assertEqual(row['action'], 'stage_worktree', row)
+
+    def test_noncommit_remote_tag_does_not_preserve_unpushed_head(self):
+        fixture = Fixture()
+        tree = fixture.tree('unreachable')
+        fixture.commit('unpublished payload', cwd=tree)
+        blob = fixture.git('hash-object', '-w', 'file', cwd=tree)
+        fixture.git('tag', 'data', blob)
+        fixture.git('push', 'origin', 'refs/tags/data')
+        fixture.age(tree)
+        row = next(r for r in fixture.reaper().iter_tree_snapshot('fixture/repo', fixture.repo)
+            if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+
+    def test_local_replace_ref_cannot_invent_remote_preservation(self):
+        fixture = Fixture()
+        tree = fixture.tree('unpublished')
+        head = fixture.commit('unpublished payload', cwd=tree)
+        replacement = fixture.git('commit-tree', 'HEAD^{tree}', '-p', head,
+            '-m', 'local history replacement', cwd=tree)
+        fixture.git('replace', fixture.git('rev-parse', 'main'), replacement)
+        fixture.age(tree)
+        row = next(r for r in fixture.reaper().iter_tree_snapshot('fixture/repo', fixture.repo)
+            if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+
+    def test_local_graft_cannot_invent_remote_archive_preservation(self):
+        fixture = Fixture()
+        tree = fixture.tree('unpublished')
+        head = fixture.commit('unpublished payload', cwd=tree)
+        archived = fixture.git('commit-tree', 'main^{tree}', '-p', fixture.git('rev-parse', 'main'),
+            '-m', 'unrelated remote archive')
+        fixture.git('push', 'origin', archived + ':refs/tags/archive/unrelated')
+        (fixture.repo / '.git/info/grafts').write_text(archived + ' ' + head + '\n')
+        fixture.age(tree)
+        report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True, local_only=True)
+        self.assertFalse(report['errors'], report)
+        row = next(r for r in report['rows'] if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+        self.assertFalse(report['actions'], report)
+        self.assertTrue(tree.exists())
+        self.assertEqual((tree / 'file').read_text(), 'unpublished payload\n')
+
+    def test_local_tag_only_does_not_preserve_unpushed_work(self):
+        fixture = Fixture()
+        tree = fixture.tree('local-only')
+        head = fixture.commit('unpublished payload', cwd=tree)
+        fixture.git('tag', '-a', 'archive/worktree/local-only', head, '-m', 'not pushed')
+        fixture.age(tree)
+        report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True, local_only=True)
+        row = next(r for r in report['rows'] if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+        self.assertTrue(tree.exists())
+
+    def test_archived_worktree_keeps_dirty_and_open_pr_guards(self):
+        for guard in ('dirty', 'open-pr'):
+            with self.subTest(guard=guard):
+                fixture, tree, head, tag = self.archived_tree()
+                provider = FakeProvider()
+                if guard == 'dirty':
+                    (tree / 'file').write_text('keep uncommitted payload')
+                else:
+                    opened = pull(1, head, fixture.git('rev-parse', 'main'))
+                    opened['head']['ref'] = 'archived'
+                    provider.rows.append(opened)
+                report = fixture.reaper(provider=provider).run({'fixture/repo': fixture.repo},
+                    execute=True, local_only=True)
+                self.assertFalse(report['errors'], report)
+                self.assertFalse(report['actions'], report)
+                self.assertTrue(tree.exists())
+                row = next(r for r in report['rows'] if r.get('path') == str(tree))
+                self.assertIn('uncommitted' if guard == 'dirty' else 'open PR', row['reason'])
+
+    def test_remote_tag_deleted_after_plan_preserves_worktree(self):
+        fixture, tree, head, tag = self.archived_tree()
+        reaper = fixture.reaper()
+        row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+            if r.get('path') == str(tree))
+        self.assertEqual(row['action'], 'stage_worktree', row)
+        fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
+        result = reaper.apply('fixture/repo', fixture.repo, row, ())
+        self.assertEqual(result['status'], 'preserved', result)
+        self.assertTrue(tree.exists())
+
+    def test_remote_tag_deleted_during_final_pr_lookup_preserves_worktree(self):
+        for phase in ('pr-lookup', 'final-process-probe'):
+            with self.subTest(phase=phase):
+                fixture, tree, head, tag = self.archived_tree()
+                provider = FakeProvider()
+                reaper = fixture.reaper(provider=provider)
+                row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+                    if r.get('path') == str(tree))
+                self.assertEqual(row['action'], 'stage_worktree', row)
+
+                def delete_tag(*args):
+                    fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
+                    return []
+
+                if phase == 'pr-lookup':
+                    provider.open_pulls = delete_tag
+                else:
+                    probes = []
+                    def probe(paths):
+                        probes.append(paths)
+                        if len(probes) == 2:
+                            delete_tag()
+                        return set()
+                    reaper.process_probe = probe
+                result = reaper.apply('fixture/repo', fixture.repo, row, ())
+                self.assertEqual(result['status'], 'preserved', result)
+                self.assertTrue(tree.exists())
+                self.assertEqual((tree / 'file').read_text(), 'archived payload\n')
+
+    def test_failed_remote_refresh_preserves_cached_candidate(self):
+        fixture, tree, head, tag = self.archived_tree()
+        reaper = fixture.reaper()
+        row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+            if r.get('path') == str(tree))
+        self.assertEqual(row['action'], 'stage_worktree', row)
+        with patch('branch_retirement.fetch_remote_refs', side_effect=RuntimeError('fixture fetch refused')):
+            with self.assertRaisesRegex(RuntimeError, 'fixture fetch refused'):
+                reaper.apply('fixture/repo', fixture.repo, row, ())
+        self.assertTrue(tree.exists())
+        self.assertEqual((tree / 'file').read_text(), 'archived payload\n')
+
+    def test_worktree_becoming_live_during_final_refresh_is_kept(self):
+        from branch_retirement import fetch_remote_refs
+        for change in ('process', 'write'):
+            with self.subTest(change=change):
+                fixture, tree, head, tag = self.archived_tree()
+                reaper = fixture.reaper()
+                row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+                    if r.get('path') == str(tree))
+
+                def refresh(root):
+                    fetch_remote_refs(root)
+                    if change == 'process':
+                        reaper.process_probe = lambda paths: {str(tree)}
+                    else:
+                        (tree / 'file').write_text('new work during fetch\n')
+
+                with patch('branch_retirement.fetch_remote_refs', side_effect=refresh):
+                    with self.assertRaisesRegex(RuntimeError, 'became live'):
+                        reaper.apply('fixture/repo', fixture.repo, row, ())
+                self.assertTrue(tree.exists())
+                self.assertEqual((tree / 'file').read_text(),
+                    'archived payload\n' if change == 'process' else 'new work during fetch\n')
+
+    def test_local_shadow_of_deleted_remote_tag_is_not_evidence(self):
+        fixture, tree, head, tag = self.archived_tree()
+        reaper = fixture.reaper()
+        list(reaper.iter_tree_snapshot('fixture/repo', fixture.repo))
+        fixture.git('update-ref', 'refs/tags/' + tag, head)
+        fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
+        row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+            if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+        self.assertEqual(fixture.git('rev-parse', tag), head, 'local tag must remain untouched')
+
+
 class Fixture:
     def __init__(self):
         self.base = Path(temporary_directory(prefix="branch-janitor-fixture-")).resolve()
