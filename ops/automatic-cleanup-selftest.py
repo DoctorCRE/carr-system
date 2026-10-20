@@ -227,6 +227,23 @@ class RetirementKeepTests(unittest.TestCase):
                 self.assertTrue(tree.exists())
                 self.assertFalse(report['actions'], report)
                 queries.assert_not_called()
+    def test_prunable_worktree_with_surviving_directory_keeps_contents_and_scan_continues(self):
+        fixture = fixtures.Fixture()
+        broken = fixture.tree('aaa-broken')
+        healthy = fixture.tree('zzz-healthy')
+        (broken / '.git').unlink()
+        (broken / 'recovery-notes').write_text('keep this work')
+        report = fixture.reaper().run({'fixture/repo': fixture.repo}, local_only=True)
+        self.assertFalse(report['errors'], report)
+        row = next(r for r in report['rows'] if r.get('path') == str(broken))
+        self.assertIsNone(row['action'])
+        self.assertIn('prunable', row['reason'])
+        self.assertEqual((broken / 'recovery-notes').read_text(), 'keep this work')
+        good = next(r for r in report['rows'] if r.get('path') == str(healthy))
+        self.assertEqual(good['action'], 'stage_worktree')
+        self.assertTrue(healthy.exists())
+        self.assertEqual(len(list(__import__('branch_retirement').iter_worktrees(fixture.repo))), 3)
+        self.assertFalse((fixture.base / '_to_delete').exists())
 
     def test_local_reaper_waits_for_competing_maintenance_then_makes_progress(self):
         import fcntl

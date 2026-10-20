@@ -93,6 +93,8 @@ name: CI
 # ready_for_review runs every class; historical draft retries stay isolated.
 # After a base retarget, reopen the PR to test its new merge ref.
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   schedule:

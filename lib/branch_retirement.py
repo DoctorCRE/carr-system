@@ -473,6 +473,8 @@ class FleetReaper:
         reasons = []
         if str(path) in protected_paths or "_to_delete" in path.parts:
             reasons.append("canonical, invoking or staged tree")
+        elif entry.get("prunable"):
+            reasons.append("prunable worktree registration; preserve surviving contents")
         elif protected_branch(self.config, entry.get("branch")):
             reasons.append("protected branch")
         elif entry.get("locked") or entry.get("bare") or not path.is_dir():
