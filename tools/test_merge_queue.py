@@ -69,7 +69,8 @@ if a[0]=='api':
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
   sys.exit()
-if a[:2]==['pr','checks']: emit(d.get('required_by_pr',{}).get(a[2],d.get('required',[{'bucket':'pass'}]))); sys.exit()
+if a[:2]==['pr','checks'] and a[2] in d.get('required_by_pr',{}): emit(d['required_by_pr'][a[2]]); sys.exit()
+if a[:2]==['pr','checks']: emit(d.get('required',[{'bucket':'pass'}])); sys.exit()
 if a[:2]==['pr','ready']:
  repo=a[a.index('-R')+1];d['prs'][repo+'#'+a[2]]['draft']=False; save();sys.exit()
 if a[:2]==['pr','edit']:
@@ -1626,8 +1627,8 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT phase,desk FROM actions').fetchone()[:], ('uncertain', None))
 
     def test_cancellation_while_waiting_for_call_slot_leaves_update_unissued(self):
-        self.pr(state='behind')
-        self.q.enqueue(module.REPOS[0], 1, self.approved)
+        self.pr(repo=module.REPOS[1], state='behind')
+        self.q.enqueue(module.REPOS[1], 1, self.approved)
         original_sleep = module.time.sleep
         waiting_on_update = []
         def cancel(seconds):
@@ -2216,8 +2217,8 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(len(self.calls('merge')),1)
 
     def test_operator_can_reconcile_interrupted_update(self):
-        self.pr(state='behind');self.data['update_async']=True;self.save()
-        self.q.enqueue(module.REPOS[0],1,self.approved);self.q.tick()
+        self.pr(repo=module.REPOS[1],state='behind');self.data['update_async']=True;self.save()
+        self.q.enqueue(module.REPOS[1],1,self.approved);self.q.tick()
         key=self.q.db.execute("SELECT key FROM actions WHERE kind='update'").fetchone()[0]
         self.q.reconcile_action(key,retry=False)
         self.assertEqual(self.q.db.execute('SELECT phase FROM actions').fetchone()[0],'issued')
