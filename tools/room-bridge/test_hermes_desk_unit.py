@@ -319,6 +319,22 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertEqual(row['status'], 'timed_out')
         self.assertLess(time.monotonic() - started, 1)
 
+    def test_timeout_leaves_a_persistent_group_unconfirmed(self):
+        self.register(timeout_s=0.1)
+        self.env['FAKE_MODE'] = 'slow-auth'
+        killpg = os.killpg
+
+        def persistent_group(pgid, sig):
+            if sig:
+                return killpg(pgid, sig)
+
+        started = time.monotonic()
+        with patch.object(os, 'killpg', side_effect=persistent_group):
+            row = self.send()
+        self.assertEqual(row['status'], 'timed_out')
+        self.assertFalse(row['termination_confirmed'])
+        self.assertLess(time.monotonic() - started, 3)
+
     def test_hermes_queues_after_two_jobs_without_consuming_codex_slots(self):
         self.register()
         slots = {**self.env, 'CARR_CODEX_MAX_CONCURRENT': '1',
