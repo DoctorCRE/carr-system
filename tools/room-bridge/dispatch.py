@@ -97,6 +97,7 @@ from desks import AUTOMATIC_CODEX_DESKS, DeskError, Registry  # noqa: E402
 import claude_wire as inject_mod  # noqa: E402  — the Idea 78 wire, see the module
 import claude_desktop_wire  # noqa: E402 — background supervisor + supported /desktop
 import claude_remote_wire
+import claude_api_wire
 import codex_wire  # noqa: E402  — Codex worked out this protocol, see the module
 import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the module
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
@@ -139,6 +140,28 @@ HERMES_SLOT_POLL_S = 1.0
 # Codex prints this on STDOUT and still exits 0, so the exit code lies.
 QUOTA_HINT = re.compile(r"hit your usage limit", re.I)
 RETRY_AT = re.compile(r"try again at ([0-9:]+ ?[AP]M)", re.I)
+SAFETY_REFUSAL = re.compile(
+    r'safety[ _-](?:classifier|refusal|system)|content_policy_violation', re.I)
+
+
+def _phrasing_hint(task: str, *, examples_on_miss: bool = False) -> str:
+    rules = json.loads((HERE / 'dispatch-phrasing.json').read_text(encoding='utf-8'))
+    matches = [rule for rule in rules if re.search(
+        r'(?<!\w)' + r'\s+'.join(re.escape(word) for word in rule['phrase'].split())
+        + r'(?!\w)', task, re.I)]
+    if not matches and not examples_on_miss:
+        return ''
+    examples = matches or rules
+    return ('Describe checks as properties to confirm. '
+            + '; '.join(f"{rule['phrase']!r} -> {rule['suggestion']!r}" for rule in examples)
+            + '. Use --allow-phrasing to override the local phrasing lint.')
+
+
+def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
+    if not allow_phrasing:
+        hint = _phrasing_hint(task)
+        if hint:
+            raise DeskError('brief_phrasing', hint)
 
 
 def _codex_slot(env):
@@ -715,6 +738,11 @@ def _execute(request: dict, *, on_executor=None) -> dict:
             outcome = _to_claude(entry, task, msg_id)
     elif entry["kind"] == "claude-desktop":
         outcome = _to_claude_desktop(entry, task)
+    elif entry["kind"] == "claude-api":
+        api_entry = dict(entry)
+        if codex_timeout_s is not None:
+            api_entry['timeout_s'] = min(entry['timeout_s'], codex_timeout_s)
+        outcome = claude_api_wire.run_task(api_entry, task, env=env, **executor_options)
     elif entry["kind"] == "claude-remote":
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
@@ -774,6 +802,7 @@ def dispatch(
     effort: str | None = None,
     writes: list[str] | None = None,
     checkout: str | None = None,
+    allow_phrasing: bool = False,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -788,6 +817,7 @@ def dispatch(
     `provider_run` lets a bounded adapter confine the Codex/Grok child while
     retaining this module's dispatch and result contract. Ordinary callers
     keep the default runner."""
+    _lint_phrasing(task, allow_phrasing)
     registry = registry or Registry()
     results_path = Path(results_path or DEFAULT_RESULTS)
     if name == "flash" and registry.entries().get(name, {}).get("kind") == "claude-session":
@@ -808,9 +838,11 @@ def dispatch(
     if network_access and not fresh:
         raise DeskError('network_access_requires_fresh_thread',
                         'network_access desks require --fresh for every dispatched turn')
-    checkout_kinds = (*codex_models.CODEX_KINDS, 'grok-cli', 'hermes-nous')
+    if entry['kind'] == 'claude-api' and checkout is None:
+        raise DeskError('api_checkout_required', 'Claude API jobs require --checkout new:<name> or an existing branch')
+    checkout_kinds = (*codex_models.CODEX_KINDS, 'grok-cli', 'hermes-nous', 'claude-api')
     if checkout is not None and entry['kind'] not in checkout_kinds:
-        raise DeskError('unsupported_checkout', '--checkout requires a Codex, Grok or Hermes desk')
+        raise DeskError('unsupported_checkout', '--checkout requires a coding desk')
     if entry["kind"] in codex_models.CODEX_KINDS:
         entry = {**entry, "family": codex_models.family_default(family or entry.get("family"), entry.get("model")),
                  "effort": desks._normalize_effort(entry["kind"], effort or entry.get("effort"))}
@@ -827,7 +859,7 @@ def dispatch(
     if entry["kind"] != "claude-desktop":
         task = desks.desk_prompt(task)
     msg_id = str(uuid.uuid4())
-    if entry["kind"] in ("claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli"):
+    if entry["kind"] in ("claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "claude-api"):
         if not entry.get("model") or not str(entry.get("model")).strip():
             raise DeskError(
                 "unnamed_model_or_effort",
@@ -856,7 +888,7 @@ def dispatch(
     if declared_writes and provider_run is not None:
         raise DeskError('unsupported_owned_runner', 'a confined custom runner cannot own writes')
     if declared_writes and entry['kind'] not in checkout_kinds:
-        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a Codex, Grok or Hermes adapter')
+        raise DeskError('unsupported_owned_adapter', 'writing dispatch requires a coding adapter')
 
     if entry["kind"] in codex_models.CODEX_KINDS:
         print(f"executor: {entry['model']} / {entry['effort']} (family {entry['family']}, desk {name})",
@@ -883,7 +915,7 @@ def dispatch(
                         if entry['kind'] != 'claude-remote' else None)
     workspace = source_workspace or str(Path.cwd())
     with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
-         (write_ownership.checkout_writer(workspace) if declared_writes else nullcontext()) as bind:
+         (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
         base['source_revision'] = _source_revision(source_workspace, env)
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
             outcome = _execute(request, on_executor=bind)
@@ -910,6 +942,9 @@ def dispatch(
         'status': outcome['status'],
         **({'ephemeral_thread': True, 'thread_resumable': False} if network_access else {}),
     }
+    if row['status'] == 'failed' and SAFETY_REFUSAL.search(row.get('detail', '')):
+        print('Provider safety refusal. ' + _phrasing_hint(original_task, examples_on_miss=True),
+              file=sys.stderr, flush=True)
     _record(results_path, row)
     if row['status'] == 'completed' and (row.get('thread_id') or row.get('session_id')):
         try:
@@ -1191,10 +1226,18 @@ def _cmd_where() -> int:
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(description=__doc__,
+                                epilog=('Claude API uses macOS Keychain item '
+                                        + claude_api_wire.config.KEYCHAIN_SERVICE + ' (account '
+                                        + claude_api_wire.config.KEYCHAIN_ACCOUNT + '). Setup: '
+                                        + claude_api_wire.config.KEY_SETUP),
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--registry", default=None, help="desk registry file")
     p.add_argument("--results", default=None, help="NDJSON results file")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    spend = sub.add_parser('claude-api-spend', help='read monthly API spend and sticky stop')
+    spend.add_argument('--clear-stop', action='store_true',
+                       help='human recovery after billing is fixed; preserves spend and reservations')
 
     r = sub.add_parser("register", help="name a desk")
     r.add_argument("name")
@@ -1206,7 +1249,7 @@ def main(argv: list[str]) -> int:
     r.add_argument("--effort", default=None, choices=[*desks.EFFORT_CHOICES, "max"])
     r.add_argument("--cwd", default=None)
     r.add_argument("--host", default=None, help="SSH destination for a claude-remote desk")
-    r.add_argument("--timeout", type=float, default=900, help="remote or Hermes whole-job deadline in seconds")
+    r.add_argument("--timeout", type=float, default=900, help="remote, Hermes or Claude API execution deadline in seconds")
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
@@ -1239,6 +1282,8 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("send", help="dispatch one task to one desk")
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--allow-phrasing', action='store_true',
+                   help='override the local brief phrasing lint; provider policy still applies')
     s.add_argument("--family", choices=codex_models.FAMILIES)
     s.add_argument("--effort", choices=desks.EFFORT_CHOICES)
     s.add_argument("--writes", action="append", help="repository-relative write glob (repeatable)")
@@ -1288,6 +1333,12 @@ def main(argv: list[str]) -> int:
                 raise DeskError('skill_receipt_unavailable', 'completed session transcript unavailable')
             _record(_skill_ledger(results), {**row, 'record_kind': 'skill-receipt', 'skill_receipt': value})
             print(json.dumps(value))
+            return 0
+        if a.cmd == 'claude-api-spend':
+            ledger = claude_api_wire.Ledger()
+            if a.clear_stop:
+                ledger.clear_stop()
+            print(json.dumps(ledger.read(), indent=2))
             return 0
         if a.cmd == 'nous-budget':
             try:
@@ -1361,6 +1412,7 @@ def main(argv: list[str]) -> int:
                 continue
             if block not in task:
                 task += '\n\n' + block
+        _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
@@ -1373,7 +1425,7 @@ def main(argv: list[str]) -> int:
             row = dispatch(a.name, task, registry=reg, results_path=results,
                            fresh=getattr(a, "fresh", False), stream_output=a.stream_output,
                            retrieval=a.retrieve, family=a.family, effort=a.effort, writes=a.writes,
-                           checkout=a.checkout)
+                           checkout=a.checkout, allow_phrasing=a.allow_phrasing)
         print(json.dumps(row, indent=2))
         return 0 if row["status"] in ("delivered", "completed") else 1
 

@@ -192,6 +192,30 @@
       "reason": "Inspected screenshot of the synthetic V2 slice 11 board fixture. All cards and shell examples are synthetic; no client data. Exception binds only this path and these exact image bytes."
     },
     {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "15946b9193562e81d294a7c8b58a816a54cd68b9d4403ed94045f259b6afd285",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "3dc7c54a7fd5750ebb588830076c67d49023985c806f60690174e5f65e674bab",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "d350ba2f6421a0409db41c56cd78215dc13381cf0b5a081bcd21348e0ee99954",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
+      "path": "ops/rule-claim-gate-selftest.py",
+      "sha256": "3699f73795a4272ff04c5f3ef40bc273736723927cf186599059b8b08b4c69c7",
+      "rule": "pii-email",
+      "reason": "Exact rule-claim Git fixture revision. The email-shaped strings are GitHub SSH transport endpoints using the public git service account, not personal contact data."
+    },
+    {
       "path": "ops/release-pipeline-selftest.py",
       "sha256": "15a57161129168a52c1af01af1274e9f14d84f705a29c2e2406efa07d160a322",
       "rule": "pii-email",
