@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import desks
 import dispatch
+from work_runner import Resources
 import write_ownership
 from ops.git_env import fixture_env
 
@@ -366,8 +367,11 @@ print(json.dumps({'paidRecommendedModels': [
         self.register()
         slots = {**self.env, 'CARR_CODEX_MAX_CONCURRENT': '1',
                  'CARR_CODEX_SLOT_DIR': str(self.root / 'codex-slots')}
-        with dispatch._codex_slot(slots), dispatch._hermes_slot(slots), dispatch._hermes_slot(slots), \
+        resources = Resources(self.root / 'desk-locks', slots=slots['CARR_CODEX_SLOT_DIR'], limit=1)
+        with contextlib.ExitStack() as held, dispatch._hermes_slot(slots), dispatch._hermes_slot(slots), \
              patch.object(dispatch, 'HERMES_SLOT_POLL_S', 0.01):
+            for handle in resources.acquire('codex', codex=True):
+                held.enter_context(handle)
             completed = []
             job = threading.Thread(target=lambda: completed.append(self.send()))
             job.start()
@@ -376,7 +380,9 @@ print(json.dumps({'paidRecommendedModels': [
         job.join(5)
         self.assertFalse(job.is_alive())
         self.assertEqual(completed[0]['status'], 'completed')
-        with dispatch._codex_slot(slots):
+        with contextlib.ExitStack() as held:
+            for handle in resources.acquire('codex', codex=True):
+                held.enter_context(handle)
             self.assertEqual(self.send()['status'], 'completed')
 
     def test_write_job_commits_pushes_and_opens_pr_from_its_checkout(self):

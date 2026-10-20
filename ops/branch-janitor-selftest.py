@@ -246,8 +246,8 @@ class ReaperTest(unittest.TestCase):
         scan = hook.tree_age_s
         calls = []
 
-        def scan_then_start(path):
-            age = scan(path)
+        def scan_then_start(path, **kwargs):
+            age = scan(path, **kwargs)
             calls.append(path)
             if len(calls) == 3:
                 hook.mark_alive(path)

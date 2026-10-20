@@ -37,7 +37,7 @@ EFFECTS = (
     Effect('required_checks', (('green', 'gh'),)),
     Effect('update', (('action', 'api'),), 'behind'),
     Effect('retarget', (('action', 'gh'),), 'retarget'),
-    Effect('merge', (('_tick_repo', 'gh'),)),
+    Effect('merge', (('_tick_entry', 'gh'),)),
     Effect('merge_intent', (('merge_pending', 'api'),), 'rejected'),
     Effect('open_prs', (('discover', 'pages'), ('refresh', 'pages'), ('migrate_holds', 'pages'))),
     Effect('files', (('migrate_holds', 'pages'),), 'migration'),
@@ -629,6 +629,9 @@ class LivenessTests(unittest.TestCase):
                     else:
                         p['head']['sha']=f.updated
                         with f.q.db: f.q.db.execute('UPDATE entries SET approved=? WHERE id=?', (f.updated,entry))
+                        with mq.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+                            work.update(f'{mq.REPOS[0]}#1@{f.approved}', actor='test', reason='fixture repin',
+                                        prs=[{'repo': mq.REPOS[0], 'number': 1, 'head': f.updated}])
                     if route in ('git_init','git_remote'):
                         shutil.rmtree(f.state/'repos/carr-system.git')
                     original=subprocess.run; faults=[]

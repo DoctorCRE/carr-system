@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -45,16 +46,21 @@ print(json.dumps({{"status":"completed", "result":"synthetic answer", "actual_mo
         fake.chmod(0o755)
         self.env = {"HOME": str(self.home), "PATH": str(self.home) + os.pathsep + os.environ["PATH"],
                     "CARR_HERMES_DESKS": str(self.registry), "CARR_HERMES_RESULTS": str(self.results),
-                    "SSH_TRACE": str(self.trace)}
+                    "SSH_TRACE": str(self.trace), "PROGRESS_BOARD_LOCAL_ONLY": "1"}
 
     def run_wrapper(self, desk="dell-desk", *args):
         return subprocess.run(["bash", str(WRAPPER), desk, *args], input="synthetic task ' $(true)\nnext line",
                               text=True, capture_output=True, env=self.env, timeout=15)
 
-    def test_wrapper_records_named_desk_model_and_result(self):
+    def test_wrapper_enqueues_named_desk_and_worker_records_result(self):
         proc = self.run_wrapper()
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(self.results.exists(), "Model Room dispatch receipt missing")
+        queued = json.loads(proc.stdout)
+        self.assertEqual(queued['status'], 'queued')
+        deadline = time.monotonic() + 5
+        while not self.results.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(self.results.exists(), "Model Room worker receipt missing")
         row = json.loads(self.results.read_text())
         self.assertEqual(row["desk"], "dell-desk")
         self.assertEqual(row["status"], "completed")

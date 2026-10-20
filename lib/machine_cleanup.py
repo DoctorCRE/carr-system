@@ -9,17 +9,20 @@ import uuid
 
 from branch_retirement import GitHub, git, command, process_paths, save, fetch_remote_refs, remote_preserves
 from job_watchdog import epoch
+from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
 
 
-def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run):
+def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run, deadline=None):
     workspace = Path(workspace)
     clone = workspace / 'checkout'
     result = {'kind': 'job_clone', 'path': str(workspace), 'status': 'kept'}
+    receipt = None
 
     def keep(reason):
         return {**result, 'reason': reason}
 
     try:
+        check(deadline)
         if workspace.resolve() != workspace or clone.resolve() != clone or not (clone / '.git').is_dir() or (clone / '.git').is_symlink():
             return keep('symlink or unrecognized standalone checkout')
         if not dispatch or dispatch.get('status') != 'completed' or dispatch.get('termination_confirmed') is False:
@@ -33,13 +36,16 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
             provider.verify_repository(repo, clone)
         except RuntimeError:
             return keep('repository identity unavailable or outside authorized cleanup scope')
+        check(deadline)
         fetch_remote_refs(clone)
+        check(deadline)
         head = git(clone, 'rev-parse', 'HEAD')
         branch = git(clone, 'symbolic-ref', '--quiet', '--short', 'HEAD', allowed=(0, 1))
         if git(clone, 'status', '--porcelain=v1', '--untracked-files=all'):
             return keep('uncommitted work')
         if not remote_preserves(clone):
             return keep('unpushed work')
+        check(deadline)
         busy = process_probe([str(workspace)])
         if busy is None or busy:
             return keep('live process or process evidence unavailable')
@@ -70,6 +76,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                 git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
                 not remote_preserves(clone)):
             return keep('checkout became live or changed before staging')
+        check(deadline)
         reason = 'merged branch' if merged else 'closed PR' if closed else 'old clean pushed checkout'
         if dry_run:
             return {**result, 'status': 'would_stage', 'reason': reason}
@@ -82,12 +89,17 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         receipt = {**result, 'status': 'intent', 'reason': reason, 'head': head,
                    'staged_path': str(target / 'workspace'), 'at': now}
         save(target / 'manifest.json', receipt)
+        check(deadline)
         os.rename(workspace, target / 'workspace')
         if git(target / 'workspace/checkout', 'rev-parse', 'HEAD') != head:
             raise RuntimeError('staged checkout readback mismatch')
         receipt['status'] = 'staged'
         save(target / 'manifest.json', receipt)
         return receipt
+    except BudgetExhausted:
+        if receipt is not None:
+            save(target / 'manifest.json', {**receipt, 'status': 'verified_no_effect'})
+        return {**keep('cleanup time budget exhausted before move'), 'budget_exhausted': True}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
@@ -141,12 +153,12 @@ def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
     return rows
 
 
-def latest_dispatch(path, *, workspace=None, thread_id=None):
+def latest_dispatch(path, *, workspace=None, thread_id=None, deadline=None):
     latest = None
     if not Path(path).exists():
         return None
     with Path(path).open() as stream:
-        for line in stream:
+        for line in bounded(stream, deadline):
             row = json.loads(line)
             if (workspace is not None and row.get('checkout_workspace') == str(workspace) or
                     thread_id is not None and row.get('thread_id') == thread_id):
@@ -154,22 +166,33 @@ def latest_dispatch(path, *, workspace=None, thread_id=None):
     return latest
 
 
-def recover_clone(workspace):
+def recover_clone(workspace, *, deadline=None):
     workspace = Path(workspace)
     observed = None
-    for manifest in (workspace.parent / '_to_delete').glob(workspace.name + '-*/manifest.json'):
+    staging = workspace.parent / '_to_delete'
+    candidates = entries(staging, deadline) if staging.is_dir() else ()
+    for entry in candidates:
+        if not entry.name.startswith(workspace.name + '-'):
+            continue
+        manifest = Path(entry.path) / 'manifest.json'
+        check(deadline)
+        if not manifest.is_file():
+            continue
         row = json.loads(manifest.read_text())
+        check(deadline)
         if row.get('path') != str(workspace) or row.get('status') not in {'intent', 'staged'}:
             continue
         staged = Path(row['staged_path'])
         if workspace.exists() and not staged.exists():
             if git(workspace / 'checkout', 'rev-parse', 'HEAD') != row['head']:
                 raise RuntimeError('interrupted clone candidate changed')
+            check(deadline)
             save(manifest, {**row, 'status': 'verified_no_effect'})
             continue
         if observed or workspace.exists() or not staged.exists() or git(staged / 'checkout', 'rev-parse', 'HEAD') != row['head']:
             raise RuntimeError('interrupted clone move is ambiguous')
         observed = {**row, 'status': 'staged', 'reason': 'interrupted clone move read back before retry'}
+        check(deadline)
         save(manifest, observed)
     if not workspace.exists() and observed is None:
         raise RuntimeError('interrupted clone destination unavailable')
@@ -203,9 +226,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         recovered = None
         if pending:
             try:
+                check(lambda: time.monotonic() >= deadline)
                 kind = pending['kind']
                 if kind == 'job_clone':
-                    recovered = recover_clone(pending['path'])
+                    recovered = recover_clone(pending['path'], deadline=lambda: time.monotonic() >= deadline)
                     cursor['clone'] = Path(pending['path']).name
                 elif kind == 'test_temp':
                     sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -227,6 +251,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     raise RuntimeError('unknown pending cleanup kind')
                 append(root / 'out/machine-cleanup-recovery.jsonl',
                        {'previous': previous, 'resolution': recovered, 'at': now})
+            except BudgetExhausted:
+                report.update(status='completed', budget_exhausted=True, pending=pending)
+                save(receipt_path, report)
+                return report
             except Exception as exc:
                 error = {'kind': pending.get('kind'), 'error': type(exc).__name__, 'reason': str(exc)}
                 errors = previous.get('errors', [])
@@ -253,7 +281,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         if existing:
             reaper = FleetReaper(root, hook, provider=provider, process_probe=process_probe, config=config)
             trees = reaper.run(existing, execute=not dry_run, local_only=True,
-                               max_items=policy['max_items'], max_seconds=policy['max_seconds'] / 3)
+                               max_items=policy['max_items'], max_seconds=min(policy['max_seconds'] / 3, max(0, deadline - time.monotonic())))
             report['errors'].extend(trees['errors'])
             report['deferred'].extend(trees['deferred'])
             report['budget_exhausted'] |= trees['budget_exhausted']
@@ -292,24 +320,40 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     return report
         remaining = max(0, deadline - time.monotonic())
         clone_deadline = time.monotonic() + remaining / 2
-        candidates = heapq.nsmallest(policy['max_items'],
-            (p for p in tmp_root.glob('room-codex-*') if p.is_dir() and p.name > cursor.get('clone', '')),
-            key=lambda p: p.name)
+        def clone_candidates():
+            for entry in entries(tmp_root, lambda: time.monotonic() >= clone_deadline):
+                if entry.name.startswith('room-codex-') and entry.name > cursor.get('clone', '') and entry.is_dir():
+                    yield Path(entry.path)
+        try:
+            candidates = heapq.nsmallest(policy['max_items'], clone_candidates(), key=lambda p: p.name)
+        except BudgetExhausted:
+            candidates = []
+            report['budget_exhausted'] = True
         for workspace in candidates:
             if time.monotonic() >= clone_deadline:
+                report['budget_exhausted'] = True
                 break
             report['pending'] = {'kind': 'job_clone', 'path': str(workspace)}
             save(receipt_path, report)
-            row = clean_clone(workspace, latest_dispatch(dispatch_path, workspace=workspace),
+            try:
+                dispatch = latest_dispatch(dispatch_path, workspace=workspace,
+                    deadline=lambda: time.monotonic() >= clone_deadline)
+            except BudgetExhausted:
+                report.pop('pending', None)
+                report['budget_exhausted'] = True
+                break
+            row = clean_clone(workspace, dispatch,
                 provider=provider, process_probe=process_probe, now=now,
-                older_than=policy['checkout_age_seconds'], dry_run=dry_run)
-            if not row.get('error'):
+                older_than=policy['checkout_age_seconds'], dry_run=dry_run,
+                deadline=lambda: time.monotonic() >= clone_deadline)
+            if not row.get('error') and not row.get('budget_exhausted'):
                 cursor['clone'] = workspace.name
             record(row)
-            if row.get('error'):
+            report['budget_exhausted'] |= row.get('budget_exhausted', False)
+            if row.get('error') or row.get('budget_exhausted'):
                 break
         else:
-            if len(candidates) < policy['max_items']:
+            if len(candidates) < policy['max_items'] and not report['budget_exhausted']:
                 cursor.pop('clone', None)
                 save(cursor_path, cursor)
         if not report.get('pending') and Path(dispatch_path).exists():
@@ -331,7 +375,13 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     tid = row.get('thread_id')
                     if tid:
                         processed += 1
-                        latest = latest_dispatch(dispatch_path, thread_id=tid)
+                        try:
+                            latest = latest_dispatch(dispatch_path, thread_id=tid,
+                                deadline=lambda: time.monotonic() >= deadline)
+                            check(lambda: time.monotonic() >= deadline)
+                        except BudgetExhausted:
+                            report['budget_exhausted'] = True
+                            break
                         if latest.get('status') != 'completed' or latest.get('termination_confirmed') is False:
                             result = {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'reason': 'finished dispatch not proven'}
                         elif now - epoch(latest['dispatched_at']) < policy['thread_age_seconds']:
@@ -340,6 +390,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                             report['pending'] = {'kind': 'thread', 'thread_id': tid,
                                                  'before': now - policy['thread_age_seconds']}
                             save(receipt_path, report)
+                            if time.monotonic() >= deadline:
+                                report.pop('pending', None)
+                                report['budget_exhausted'] = True
+                                break
                             result = archive_thread(tid, before=now - policy['thread_age_seconds'],
                                 process_probe=process_probe, timeout=min(30, max(.1, deadline - time.monotonic())),
                                 dry_run=dry_run)

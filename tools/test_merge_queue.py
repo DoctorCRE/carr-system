@@ -91,6 +91,50 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class QueueTests(unittest.TestCase):
+    def test_work_card_consumes_verified_merge_after_lost_response(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        command = module.command
+        def lost_response(argv, **kwargs):
+            result = command(argv, **kwargs)
+            if argv[:3] == ['gh', 'pr', 'merge']:
+                raise module.CommandFailed('lost response')
+            return result
+        with patch.object(module, 'command', side_effect=lost_response):
+            self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome,merged_commit FROM entries').fetchone()[:],
+                         ('merged', self.merge_sha))
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(f'{module.REPOS[0]}#1@{self.updated}')
+            self.assertEqual(card['stage'], 'done')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            self.assertEqual(work.merge_order()['entries'], [])
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_work_card_records_each_verified_pin_once_while_other_pin_waits(self):
+        self.pr(1, head=self.updated)
+        self.pr(2, head=self.updated, draft=True)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.enqueue('multi', desk='multi', task='synthetic merge', actor='test')
+            claim = work.claim(eligible_desks={'multi'}, actor='test', owner={})
+            work.finish('multi', claim['claim'], {'status': 'completed'}, actor='test')
+            work.update('multi', actor='test', reason='fixture pins', prs=[
+                dict(repo=module.REPOS[0], number=n, head=self.updated) for n in (1, 2)])
+            work.transition('multi', 'merging', actor='test', reason='fixture reviewed')
+        self.q.tick()
+        self.q.tick()
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get('multi')
+            self.assertEqual(card['stage'], 'merging')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=1, head=self.updated)])
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'merge_completed']), 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+
     def test_verified_merge_survives_later_provider_read_failure(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
@@ -315,6 +359,20 @@ class QueueTests(unittest.TestCase):
         self.restart()
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
+    def test_submitter_preserves_work_card_priority_without_authorizing_unbound_pr(self):
+        for number in (1, 2, 3):
+            self.pr(number, head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.enqueue(module.REPOS[0], 2, self.updated)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.prioritize(f'{module.REPOS[0]}#2@{self.updated}', actor='test', reason='reviewed priority')
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        self.q.submit(module.REPOS[0], [1, 2, 3])
+        self.q.tick()
+        self.assertEqual([call[2] for call in self.calls('merge')], ['2'])
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual([pin['pr'] for pin in work.merge_order()['entries']], [2, 1])
+        self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE pr=3').fetchone()[0], 'pending')
 
     def test_pending_checks_exit_eight_waits_without_spending_retries(self):
         self.pr(head=self.updated)
@@ -569,6 +627,8 @@ class QueueTests(unittest.TestCase):
         ps.write_text('#!/bin/sh\nexit 0\n')
         ps.chmod(0o755)
         self.env = os.environ.copy()
+        self.env['CARR_WORK_QUEUE_DB'] = str(self.root / 'work.sqlite3')
+        self.env['PROGRESS_BOARD_LOCAL_ONLY'] = '1'
         self.env['FAKE_GH_STATE'] = str(self.fake_state)
         self.env['PATH'] = str(bin_dir) + os.pathsep + self.env['PATH']
         self.env['CARR_GITHUB_READ_BUDGET'] = str(self.root / 'github-budget.json')
@@ -577,6 +637,7 @@ class QueueTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
         self.addCleanup(lambda: [child.wait(timeout=5) for child in self.q.children.values()])
         for repo in module.REPOS:
@@ -593,6 +654,26 @@ class QueueTests(unittest.TestCase):
 
         (self.root / 'tools/prepare_pr.py').write_text(
             'import json,sys\nprint(json.dumps({"head":sys.argv[sys.argv.index("--head")+1],"changed":False}))\n')
+
+    def bind_work_queue(self):
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])):
+            pass
+        enqueue = self.q.enqueue
+        def projected_enqueue(repo, n, head, note='', *, rearm=True):
+            entry = enqueue(repo, n, head, note, rearm=rearm)
+            if note == 'work queue projection':
+                return entry
+            card_id = f'{repo}#{n}@{head}'
+            with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+                if not any(c['card_id'] == card_id for c in work.export()['items']):
+                    work.enqueue(card_id, desk=card_id, task='synthetic merge', actor='test')
+                    claim = work.claim(eligible_desks={card_id}, card_id=card_id, actor='test', owner={})
+                    work.finish(card_id, claim['claim'], {'status': 'completed'}, actor='test')
+                    work.update(card_id, actor='test', reason='fixture pin', prs=[
+                        {'repo': repo, 'number': n, 'head': head}])
+                    work.transition(card_id, 'merging', actor='test', reason='fixture reviewed')
+            return entry
+        self.q.enqueue = projected_enqueue
 
     def test_preparation_push_waits_for_checks_on_the_new_head(self):
         self.pr()
@@ -646,6 +727,7 @@ class QueueTests(unittest.TestCase):
     def restart(self):
         self.q.db.close()
         self.q = module.Queue(self.state, self.root, gap=0)
+        self.bind_work_queue()
         self.addCleanup(self.q.db.close)
 
 
@@ -1067,6 +1149,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_cancelled_after_bridge_preflight_never_spawns(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief = self.root / 'cancelled.txt'; brief.write_text('task')
         registry = self.root / 'desks.json'
         registry.write_text(json.dumps({'desks': {'sol': {
@@ -1704,6 +1787,7 @@ class QueueTests(unittest.TestCase):
 
     def test_partial_dispatch_receipt_does_not_block_other_briefs(self):
         self.pr(1);self.pr(2)
+        self.q.enqueue(module.REPOS[0], 2, self.approved)
         registry=self.root/'desks.json';registry.write_text(json.dumps({'desks':{}}));os.environ['CARR_HERMES_DESKS']=str(registry)
         for n,phase in ((1,'issued'),(2,'planned')):
             brief=self.root/f'conflict{n}.txt';brief.write_text('task')
@@ -1725,6 +1809,7 @@ class QueueTests(unittest.TestCase):
 
     def test_dispatch_waits_for_free_sol_desk_then_records_result(self):
         self.pr()
+        self.q.enqueue(module.REPOS[0], 1, self.approved)
         brief=self.root/'conflict.txt';brief.write_text('bounded task')
         with self.q.db:
             self.q.db.execute('INSERT INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',('test','dispatch',module.REPOS[0],1,self.approved,str(brief)))
@@ -1735,6 +1820,14 @@ class QueueTests(unittest.TestCase):
         (bridge/'dispatch.py').write_text("import json,sys\nfrom pathlib import Path\n"
             "a=sys.argv[1:]\nif '--help' in a: print('send --fresh');sys.exit()\n"
             "assert '--family' not in a\n"
+            "import os\n"
+            + "sys.path.insert(0, " + repr(str(ROOT/'tools/room-bridge')) + ")\n"
+            "from work_queue import WorkQueue\n"
+            "with WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as q:\n"
+            " card=a[a.index('--card-id')+1]\n"
+            " q.requeue(card, stage='fixing', desk='free-sol', actor='test', reason='authorized revision')\n"
+            " claim=q.claim(eligible_desks={'free-sol'}, actor='test', owner={})\n"
+            " q.finish(card, claim['claim'], {'status':'completed','msg_id':'verified'}, actor='test')\n"
             "Path(a[a.index('--results')+1]).write_text(json.dumps({'desk':'free-sol','kind':'codex-session','status':'completed','thread_id':'new-thread','result':'fixed'})+'\\n')\n")
         self.q.dispatch_conflicts()
         self.assertEqual(self.q.db.execute('SELECT phase FROM actions').fetchone()[0],'planned')
@@ -1796,6 +1889,8 @@ class QueueTests(unittest.TestCase):
         self.data['prs'][module.REPOS[0]+'#1'].update(merged=True,state='closed',merge_commit_sha=self.merge_sha);self.save()
         self.git('update-ref','refs/heads/main',self.merge_sha)
         self.q.enqueue(module.REPOS[0],1,self.approved);self.q.enqueue(module.REPOS[0],2,self.approved)
+        self.q.tick()
+        self.assertEqual(self.calls('merge'), [])
         self.q.tick()
         self.assertEqual(self.calls('merge')[0][2],'2')
         self.assertEqual(self.q.db.execute('SELECT phase FROM entries WHERE id=1').fetchone()[0],'done')

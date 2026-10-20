@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -13,6 +14,8 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import desks
 import dispatch
+import work_runner
+from work_queue import WorkQueue
 from test_codex_models_unit import catalog_fixture
 
 
@@ -73,21 +76,31 @@ class PhrasingTests(unittest.TestCase):
 
     def test_cli_override_reaches_dispatch(self):
         stdout, stderr = io.StringIO(), io.StringIO()
-        with patch.object(dispatch.subprocess, 'run', self.runner), \
-                patch.object(dispatch, '_codex_slot', return_value=contextlib.nullcontext()), \
+        db = self.root / 'queue.sqlite3'
+        with patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(db)}), \
+                patch.object(dispatch.subprocess, 'run', self.runner), \
+                patch.object(work_runner, 'kick') as kick, \
                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = dispatch.main(['--registry', str(self.registry.path),
                                   '--results', str(self.results), 'send', 'cx',
                                   'try to break it', '--allow-phrasing'])
-        self.assertEqual(code, 0, stderr.getvalue())
-        self.assertEqual(json.loads(stdout.getvalue())['status'], 'completed')
+            self.assertEqual(code, 0, stderr.getvalue())
+            row = json.loads(stdout.getvalue())
+            self.assertEqual(row['status'], 'queued')
+            self.assertEqual(self.runner.call_count, 0)
+            kick.assert_called_once()
+            with WorkQueue(db) as queue:
+                claim = queue.claim(eligible_desks={'cx'}, actor='test', owner={})
+                work_runner.worker(queue, row['card_id'], claim['claim'],
+                                   self.registry.path, self.results)
+                self.assertEqual(queue.get(row['card_id'])['stage'], 'review')
         self.assertEqual(self.runner.call_count, 1)
 
     def test_cli_rejects_stdin_brief_before_waiting_for_a_slot(self):
         stderr = io.StringIO()
         with patch.object(dispatch.sys, 'stdin', io.StringIO('try to break it')), \
-                patch.object(dispatch, '_codex_slot') as slot, \
+                patch.object(work_runner, 'kick') as slot, \
                 contextlib.redirect_stderr(stderr):
             code = dispatch.main(['--registry', str(self.registry.path),
                                   '--results', str(self.results), 'send', 'cx', '-'])
