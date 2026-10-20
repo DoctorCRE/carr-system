@@ -225,6 +225,23 @@ class CheckoutDispatchTests(unittest.TestCase):
             self.assertEqual(json.loads(queue.candidates()[0]['options'])['checkout'], 'repair')
         self.assertEqual(self.codex_calls, [])
 
+    def test_cli_refuses_local_only_checkout_before_queueing(self):
+        import work_runner
+        from work_queue import WorkQueue, default_path
+        self.git('branch', 'local-only')
+        err = io.StringIO()
+        with patch.object(work_runner, 'kick') as kick, \
+             patch.object(dispatch.seat_gate, 'check', return_value=None), \
+             contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
+                                  'send', 'cx', 'repair', '--checkout', 'local-only'])
+        self.assertEqual(code, 2)
+        self.assertIn('does not exist on origin', err.getvalue())
+        self.assertIn('new:local-only', err.getvalue())
+        kick.assert_not_called()
+        with WorkQueue(default_path()) as queue:
+            self.assertEqual(queue.candidates(), [])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
