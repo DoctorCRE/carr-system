@@ -36,8 +36,8 @@ blanket "clients get PDFs, never working files"): a LETTER goes to the listing
 agent as the working .docx, because the counterparty edits and revises it and
 that editing IS the negotiation; the PDF is the record and preview copy. A
 SPREADSHEET goes out as the PDF so the formulas stay ours, and the working
-workbook never leaves. Naming a sendable format is not permission to send:
-Joe sends, and no verb in this system can.
+workbook never leaves. Naming a sendable format is not itself an ask to send:
+it goes out when Joe asks (decision 41906a30).
 
 THE FINISH RULES (ORDER 22, from Joe's correction that every LOI term is
 negotiable and a template value is a placeholder holding the most common case,
@@ -370,7 +370,7 @@ def build_client_copy(working: str, plan: dict, fmap: dict, prior_drops: list[st
     for one reason: nothing named for the client can be handed to a counterparty
     by accident, and a name is the only thing that survives being dragged into an
     email. The listing-agent working copy keeps every row; the record PDF is the
-    full version. This changes no send semantics — Joe sends, nothing here can.
+    full version. This changes no send semantics.
 
     The label check is the safety rail. A row is only deleted after this function
     has read that row's own label cell and found the slot's label in it, so an
@@ -578,7 +578,7 @@ def main() -> int:
                      if sendable_role == "working" else
                      "Spreadsheets go out as the PDF so the formulas stay ours; the working "
                      "workbook never leaves."),
-            "human_gate": "Sendable names the format, not permission. Joe sends; no verb can."},
+            "human_gate": "Sendable names the format, not an ask to send; it goes out when Joe asks (decision 41906a30)."},
         "scrub": scrub,
         "color_finish": color_finish,
         "unresolved_options": options,

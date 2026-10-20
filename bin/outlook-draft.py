@@ -29,8 +29,8 @@ THREE THINGS THAT ARE NOT GUESSABLE AND COST AN AFTERNOON TO FIND:
    content change is zero. Verified: draft persisted, typed character absent.
 
 WHAT IT WILL NOT DO: send. There is no send path in this file or the AppleScript.
-It writes a draft and stops. Joe opens Drafts, reads it, presses Send — the one
-human gate that everything else in this system is built around.
+It writes a draft and stops. Sending is a separate step that happens when Joe
+asks (decision 41906a30); with no ask, Joe opens Drafts, reads it, presses Send.
 
 USAGE
   echo '{"to":"a@b.com","subject":"Hi","body":"line one\\nline two"}' | bin/outlook-draft.py

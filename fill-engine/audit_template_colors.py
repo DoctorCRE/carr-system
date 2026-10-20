@@ -55,15 +55,15 @@ def sendable_note(slug: str) -> str:
         return ("SENDABLE FORMAT (Joe's doctrine, 2026-07-31, superseding the old blanket 'clients "
                 "get PDFs, never working files'): this is a SPREADSHEET template, so the PDF is the "
                 "sendable artifact and the working workbook never leaves. Concealing the formulas "
-                "is the whole point. Naming a sendable format is not permission to send: Joe sends, "
-                "and no verb in this system can.")
+                "is the whole point. Naming a sendable format is not itself an ask to send: it goes out "
+                "when Joe asks (decision 41906a30).")
     return ("SENDABLE FORMAT (Joe's doctrine, 2026-07-31, superseding the old blanket 'clients get "
             "PDFs, never working files'): this is a LETTER template, so the WORKING .docx is what "
             "goes to the listing agent. They edit and revise it, and that revision IS the "
             "negotiation; the PDF is the record and preview copy. Because the .docx is outbound it "
             "is SCRUBBED before it routes, of comments, tracked changes, comment authors, custom "
             "properties and the authorship metadata inherited from CARR's corporate letterhead. "
-            "Naming a sendable format is not permission to send: Joe sends, and no verb can.")
+            "Naming a sendable format is not itself an ask to send: it goes out when Joe asks (decision 41906a30).")
 
 
 def apply_sendable_note(slug: str) -> str:

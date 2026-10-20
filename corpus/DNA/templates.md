@@ -47,7 +47,7 @@ We can now produce an "animated static": a CARR card rebuilt as a ~6-second stop
 
 **Where it does earn its place:** nurture and follow-up touches where the relationship already exists, a landing page, or any send whose job is to DELIVER information rather than to make an introduction. The test is the same one that governs the format on social — if the card would communicate identically as a still image, send the still.
 
-The animated card is not a substitute for the plain, specific, personal email that this file exists to protect. It is an occasional supplement to a warm thread, and the human gate is unchanged: Claude drafts, Joe sends. [stamp: Joe's brain, Claude Code, 2026-07-25]
+The animated card is not a substitute for the plain, specific, personal email that this file exists to protect. It is an occasional supplement to a warm thread, and sending follows Joe's ask: Claude sends when Joe asks, otherwise drafts (decision 41906a30). [stamp: Joe's brain, Claude Code, 2026-07-25]
 
 ---
 

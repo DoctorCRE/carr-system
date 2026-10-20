@@ -36,7 +36,7 @@ And the discipline every seat carries, also verbatim:
 > any touching session — cross-check the component's records and fix drift before waiting for
 > instructions; (3) widen the intake so signals land regardless of which session Joe used; (4) act,
 > don't ask — stop only for money, the human gate, or a genuine scope call. No seat overrides:
-> Claude drafts and Joe sends; no credentials; no fabricated data; two-writer discipline; CARR
+> Sending follows Joe's ask (decision 41906a30), default is a draft; no credentials; no fabricated data; two-writer discipline; CARR
 > routing.
 
 Those two blocks are the job. Everything below is how to execute them.

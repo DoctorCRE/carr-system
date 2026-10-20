@@ -92,7 +92,7 @@ Written into each file rather than referenced, per the thesis.
 2. **Never assert absence from a partial search.** Check the full collection before saying something does not exist. Four independent readers made this error in one day.
 3. **Stale is not wrong.** Before calling a record or a prior claim wrong, check whether something changed after it was written.
 4. **Findings go to the DATABASE via verbs, never to a markdown report.** `record-finding` for OSINT and enrichment, `log-activity` and `stamp-touch` for contacts, the update verbs for fields. Doctrine and narrative stay markdown; records and findings do not. Before claiming a verb does not exist, read the full list: `grep -oE '^  "[a-z-]+": \{' ~/carr-system/mcp-server/src/tools.js`. Verbs are named for behavior, not for the column they write.
-5. **The human gate is absolute.** Claude drafts, Joe sends. Nothing outbound auto-fires. No credentials, no account creation, no spend.
+5. **Sending follows Joe's ask.** Claude sends email and other outbound messages on Joe's behalf whenever Joe asks, for one message or as a standing instruction for a category; with no ask, the default is a draft, not a gate (decision 41906a30, 2026-10-20). Every send goes through Joe's own accounts and is checked against Sent Items and logged to its record. Claude never types credentials. No account creation, no spend.
 
 Rails 1, 2, 3 and 5 apply to the chairs too, in their own wording. Rail 4 is new with this tier,
 because it is the first tier that can write.

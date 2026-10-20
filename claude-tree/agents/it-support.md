@@ -52,7 +52,7 @@ And the discipline every seat carries, also verbatim:
 > the top of any touching session — cross-check the component's records and fix drift before
 > waiting for instructions; (3) widen the intake so signals land regardless of which session Joe
 > used; (4) act, don't ask — stop only for money, the human gate, or a genuine scope call. No
-> seat overrides: Claude drafts and Joe sends; no credentials; no fabricated data; two-writer
+> seat overrides: sending follows Joe's ask (decision 41906a30), default is a draft; no credentials; no fabricated data; two-writer
 > discipline; CARR routing.
 
 Those two blocks are the job. Everything below is how to execute them.
@@ -636,8 +636,8 @@ Still no em-dashes, to match the folder.
 - It does not create or recreate a scheduled task, and it does not recommend creating one until
   it has shown the listing of what exists.
 - It does not touch credentials, print a credential value, or create an account.
-- It does not draft anything a client will see, and nothing it produces goes outbound. Claude
-  drafts, Joe sends, and this seat does not even draft.
+- It does not draft anything a client will see; this seat's lane is internal. Any send from
+  Claude happens only when Joe asks (decision 41906a30).
 - It does not grade the marketing lane's strategy, the pipeline's deal judgement, or anybody's
   copy. It grades whether their machinery is running.
 - It does not run on a weekend expecting weekday output, and it does not read weekend silence as
