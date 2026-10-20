@@ -91,6 +91,22 @@ assert spec is not None and spec.loader is not None
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
+class RequiredChecksPendingTests(unittest.TestCase):
+    def run_checks(self, returncode, stdout, stderr):
+        done = subprocess.CompletedProcess([], returncode, stdout=stdout, stderr=stderr)
+        with patch.object(module.subprocess, 'run', return_value=done):
+            return module.command(['gh', 'pr', 'checks', '7', '-R', 'o/r', '--required', '--json', 'bucket'])
+
+    def test_unreported_required_checks_read_as_none_yet(self):
+        # The required aggregate check reports only when CI finishes; until then gh exits 1 with no output.
+        out = self.run_checks(1, '', "no required checks reported on the 'feature' branch\n")
+        self.assertEqual(json.loads(out), [])
+
+    def test_other_checks_failures_still_raise(self):
+        with self.assertRaises(module.CommandFailed):
+            self.run_checks(1, '', 'some other failure\n')
+
+
 class QueueTests(unittest.TestCase):
     def test_work_card_consumes_verified_merge_after_lost_response(self):
         self.pr(head=self.updated)
