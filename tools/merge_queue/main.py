@@ -178,6 +178,7 @@ class Queue:
             self.db.execute('BEGIN IMMEDIATE')
             additions = {
                 'entries': {'merge_attempts': 'INTEGER NOT NULL DEFAULT 0',
+                            'merged_commit': 'TEXT',
                             'transient_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'read_attempts': 'INTEGER NOT NULL DEFAULT 0',
                             'github_attempts': 'INTEGER NOT NULL DEFAULT 0',
@@ -1004,9 +1005,16 @@ class Queue:
                         continue
                     entry = self.enqueue(repo, pin['pr'], pin['head'], 'work queue projection', rearm=False)
                     e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    if e['phase'] == 'done' and e['merged_commit']:
+                        self.complete_work_merge(e, pin['card_id'], merged=True)
+                        continue
                     if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
                         continue
-                    if self._tick_entry(e, pin['card_id'], order):
+                    wait = self._tick_entry(e, pin['card_id'], order)
+                    current = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    if current['phase'] == 'done' and current['merged_commit']:
+                        self.complete_work_merge(current, pin['card_id'], merged=True)
+                    if wait:
                         waiting.add(repo)
             finally:
                 with self.db:
@@ -1018,6 +1026,10 @@ class Queue:
 
     def complete_work_merge(self, e, card_id, *, merged):
         with WorkQueue(default_path()) as work:
+            pin = dict(repo=e['repo'], number=e['pr'], head=e['approved'])
+            receipts = work.get(card_id).get('merge_receipts' if merged else 'merge_stopped', [])
+            if pin in receipts:
+                return
             work.finish_merge(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
                               merged=merged, actor='merge-daemon',
                               reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
@@ -1026,6 +1038,12 @@ class Queue:
         repo, n = e['repo'], e['pr']
         self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
         try:
+            p = None
+            if e['tested']:
+                p = self.observe_merge(e)
+                if p.get('merged') is True:
+                    self.finish_merge(e, p)
+                    return True
             retry_deadline = self.db.execute('SELECT deadline FROM waits WHERE owner=? AND kind=?',
                                              (f'entry:{e["id"]}', 'github_retry')).fetchone()
             if retry_deadline and time.time() >= retry_deadline[0]:
@@ -1033,28 +1051,11 @@ class Queue:
                 return False
             if time.time() < e['retry_at']:
                 return True
-            p = self.pr(repo, n)
-            if p.get('merged') and p['head']['sha'] != e['approved']:
-                self.report(e, 'head_moved', 'Merged head differs from the pinned work card')
-                return False
+            p = p or self.pr(repo, n)
             if p.get('merged'):
-                mc = p.get('merge_commit_sha')
-                if not mc or not SHA.fullmatch(mc):
-                    raise RuntimeError('merge commit not available yet')
-                self.fetch(repo, mc)
-                self.git(repo, 'merge-base', '--is-ancestor', mc, 'origin/main')
-                if e['tested'] is None:
-                    self.complete_work_merge(e, card_id, merged=True)
-                    self.report(e, 'already_merged', f'Imported intent reconciled: {mc} on origin/main', 'done')
-                    return False
-                self.report(e, 'merged', f'Merge commit {mc} confirmed on origin/main', 'refreshing')
-                if not self.refresh(repo, p['head']['ref']):
-                    if self.wait(e, 'refresh', 'refresh_waiting', 'Post-merge provider computation remains incomplete'):
-                        return True
-                    return False
-                self.complete_work_merge(e, card_id, merged=True)
-                self.report(e, 'merged', f'Merge commit {mc} confirmed; post-merge refresh complete', 'done')
-                return True
+                mc = self.confirmed_merge(e, p)
+                self.report(e, 'already_merged', f'Imported intent reconciled: {mc} on origin/main', 'done')
+                return False
             if p['state'] != 'open':
                 if p['head']['sha'] != e['approved']:
                     self.report(e, 'head_moved', 'Closed head differs from pinned work card')
@@ -1168,45 +1169,45 @@ class Queue:
         except QueueChanged as exc:
             self.report(e, 'selection_changed', str(exc))
             return True
-        except GitHubReadPaused as exc:
-            self._observing_entries.add(e['id'])
-            self.wait(e, 'entry', 'github_paused', str(exc))
-            return False
-        except MergeRejected as exc:
-            self.report(e, 'merge_rejected', str(exc), 'merge_rejected')
-            return True
-        except ActionUncertain as exc:
-            if self.failure(e, str(exc), 'transient_attempts', 'action_uncertain', 'action_uncertain_exhausted', 'blocked'):
-                return False
-            return True
-        except ActionExhausted as exc:
-            self.report(e, 'action_exhausted', str(exc), 'exhausted')
-            return False
-        except WaitExpired as exc:
-            self.report(e, 'wait_exhausted', str(exc), 'blocked')
-            return False
-        except subprocess.TimeoutExpired:
-            self.report(e, 'wait_exhausted', 'Ancestry or conflict transport deadline expired; reconcile before retry', 'blocked')
-            return False
-        except GitHubExhausted as exc:
-            self.report(e, 'github_exhausted', str(exc), 'blocked')
-            return False
-        except ReadRejected as exc:
-            if self.failure(e, str(exc), 'read_attempts', 'read_rejected', 'read_exhausted', 'blocked', exc):
-                return False
-            return True
-        except ActionRejected as exc:
-            if self.failure(e, str(exc), 'transient_attempts', 'action_rejected', 'action_exhausted', 'blocked', exc):
-                return False
-            return True
         except Cancelled:
             return True
         except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
-            if self.retry(e, str(exc), exc):
-                return False
-            return True
+            return not self.entry_failed(e, exc)
         finally:
             self._github_entry = None
+
+    def entry_failed(self, e, exc):
+        current = self.db.execute('SELECT * FROM entries WHERE id=?', (e['id'],)).fetchone()
+        if current['tested'] and self.reconcile_merged(current):
+            return False
+        if current['merged_commit']:
+            terminal = isinstance(exc, (GitHubExhausted, WaitExpired, ActionExhausted)) or getattr(exc, 'github_attempts', 0) >= MAX_ATTEMPTS
+            terminal = terminal or time.time() >= self.deadline(f'entry:{e["id"]}', 'refresh')
+            self.report(e, 'merged', f'Merge commit {current["merged_commit"]} previously verified; post-merge observation failed: {exc}',
+                        'done' if terminal else 'refreshing')
+            return terminal
+        if isinstance(exc, GitHubReadPaused):
+            self._observing_entries.add(e['id'])
+            self.wait(e, 'entry', 'github_paused', str(exc))
+            return True
+        if isinstance(exc, MergeRejected):
+            self.report(e, 'merge_rejected', str(exc), 'merge_rejected')
+            return False
+        if isinstance(exc, ActionUncertain):
+            return self.failure(e, str(exc), 'transient_attempts', 'action_uncertain', 'action_uncertain_exhausted', 'blocked')
+        if isinstance(exc, ActionExhausted):
+            self.report(e, 'action_exhausted', str(exc), 'exhausted')
+        elif isinstance(exc, (WaitExpired, subprocess.TimeoutExpired)):
+            self.report(e, 'wait_exhausted', str(exc), 'blocked')
+        elif isinstance(exc, GitHubExhausted):
+            self.report(e, 'github_exhausted', str(exc), 'blocked')
+        elif isinstance(exc, ReadRejected):
+            return self.failure(e, str(exc), 'read_attempts', 'read_rejected', 'read_exhausted', 'blocked', exc)
+        elif isinstance(exc, ActionRejected):
+            return self.failure(e, str(exc), 'transient_attempts', 'action_rejected', 'action_exhausted', 'blocked', exc)
+        else:
+            return self.retry(e, str(exc), exc)
+        return True
 
     def failure(self, e, detail, counter, pending, exhausted_outcome, phase, exc=None):
         with self.db:
@@ -1243,6 +1244,83 @@ class Queue:
         p = data['data']['repository']['pullRequest']
         return p['autoMergeRequest'] is not None or p['mergeQueueEntry'] is not None
 
+    def confirmed_merge(self, e, p):
+        if p.get('merged') is not True:
+            return None
+        if p['state'] != 'closed':
+            raise RuntimeError('GitHub merge state is inconsistent')
+        if (p['base']['ref'] != 'main' or p['head']['sha'] != e['approved']
+                or e['tested'] is not None and e['tested'] != e['approved']):
+            raise RuntimeError('Merged PR does not match the approved head and main base')
+        repo, head, mc = e['repo'], e['approved'], p.get('merge_commit_sha')
+        if not isinstance(mc, str) or not SHA.fullmatch(mc):
+            raise RuntimeError('merge commit not available yet')
+        def verify():
+            self.fetch(repo, mc, head)
+            self.git(repo, 'merge-base', '--is-ancestor', mc, 'origin/main')
+            tree = self.git(repo, 'rev-parse', mc + '^{tree}').strip()
+            if self.git(repo, 'rev-parse', head + '^{tree}').strip() != tree:
+                parent = self.git(repo, 'rev-parse', mc + '^1').strip()
+                expected = self.git(repo, 'merge-tree', '--write-tree', parent, head).strip()
+                if expected != tree:
+                    raise RuntimeError('Merge commit content differs from the approved head')
+        self.bounded_operation(['git', 'confirm-merge', repo, mc, head], True, verify,
+                               'Git merge confirmation failed')
+        with self.db:
+            self.db.execute('UPDATE entries SET merged_commit=? WHERE id=?', (mc, e['id']))
+        return mc
+
+    def observe_merge(self, e):
+        scope = f'merge-truth:{e["id"]}'
+        with self.db:
+            self.db.execute('DELETE FROM github_failures WHERE scope=? AND is_read=1 AND failed_at<=?',
+                            (scope, time.time() - BOUNDS['github_retry']['seconds']))
+        with self.github_scope(scope):
+            p = self.pr(e['repo'], e['pr'])
+            if e['merged_commit'] and p.get('merged') is not True:
+                raise ReadRejected('GitHub readback contradicts the verified merge; merge cannot be replayed')
+            self.confirmed_merge(e, p)
+        return p
+
+    def reconcile_merged(self, e):
+        e = self.db.execute('SELECT * FROM entries WHERE id=?', (e['id'],)).fetchone()
+        try:
+            p = self.observe_merge(e)
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+            return False
+        if p.get('merged') is not True:
+            return False
+        self.report(e, 'merged', f'Merge commit {p["merge_commit_sha"]} confirmed on origin/main against approved head',
+                    'refreshing' if e['tested'] else 'done')
+        return p
+
+    def finish_merge(self, e, p):
+        detail = f'Merge commit {p["merge_commit_sha"]} confirmed on origin/main'
+        self.report(e, 'merged', detail, 'refreshing')
+        deadline = self.deadline(f'entry:{e["id"]}', 'refresh')
+        try:
+            with self.github_scope(f'post-merge:{e["id"]}'):
+                complete = self.refresh(e['repo'], p['head']['ref'])
+            if complete:
+                self.report(e, 'merged', detail + '; post-merge refresh complete', 'done')
+                return
+            reason = 'Post-merge provider computation remains incomplete'
+            terminal = False
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            reason = str(exc)
+            terminal = isinstance(exc, (GitHubExhausted, WaitExpired, ActionExhausted)) or getattr(exc, 'github_attempts', 0) >= MAX_ATTEMPTS
+        terminal = terminal or time.time() >= deadline
+        self.report(e, 'merged', detail + '; post-merge refresh incomplete: ' + reason,
+                    'done' if terminal else 'refreshing')
+        with self.db:
+            self.event(e['repo'], e['pr'], 'refresh_exhausted' if terminal else 'refresh_waiting', reason, e['id'])
+
+    def status(self):
+        for e in bounded_items('snapshot', self.db.execute(
+                "SELECT * FROM entries WHERE phase IN ('blocked','exhausted') ORDER BY id").fetchall()):
+            self.reconcile_merged(e)
+        return [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
+
     def reconcile(self, entry, retry=False):
         with self.runner_lock(), self.github_scope(f'reconcile:{entry}'):
             self._reconcile(entry, retry)
@@ -1253,6 +1331,7 @@ class Queue:
             raise RuntimeError('reconciliation requires a persisted merge intent')
         p = self.pr(e['repo'], e['pr'])
         if p.get('merged'):
+            self.confirmed_merge(e, p)
             if retry:
                 self.rearm_reads(entry)
                 self.report(e, 'reconciled', 'Provider reports merged; resume commit confirmation and post-merge refresh', 'merging')
@@ -1276,6 +1355,7 @@ class Queue:
 
     def _clear_reads(self, entry):
         self.db.execute('UPDATE entries SET transient_attempts=0,read_attempts=0,github_attempts=0,retry_at=0 WHERE id=?', (entry,))
+        self.db.execute('DELETE FROM github_failures WHERE scope=? AND is_read=1', (f'merge-truth:{entry}',))
         self.db.execute("DELETE FROM github_failures WHERE (scope='automatic' OR scope=?) AND is_read=1 AND entry_id=?",
                         (f'automatic:entry:{entry}', entry))
         self.db.execute('DELETE FROM github_failures WHERE scope=? AND stopped=1', (f'automatic:entry:{entry}',))
@@ -1563,7 +1643,7 @@ def main():
     elif a.cmd == 'reconcile-action':
         q.reconcile_action(a.key, a.retry)
     else:
-        print(json.dumps([dict(r) for r in bounded_items('snapshot', q.db.execute('SELECT * FROM entries ORDER BY id'))], indent=2))
+        print(json.dumps(q.status(), indent=2))
 
 if __name__ == '__main__':
     main()
