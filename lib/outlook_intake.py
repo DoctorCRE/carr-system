@@ -354,8 +354,8 @@ def ask_model(mail: dict, today: date) -> dict:
 # ---- one run -----------------------------------------------------------------
 
 class Run:
-    def __init__(self, ports: Ports, state: dict, now: datetime):
-        self.ports, self.state, self.now = ports, state, now
+    def __init__(self, ports: Ports, state: dict, now: datetime, out: Path):
+        self.ports, self.state, self.now, self.out = ports, state, now, out
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
@@ -365,11 +365,21 @@ class Run:
         self.balls: dict[str, int] = {}
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
-        try:
-            self.ports.carr(verb, args)
-        except CarrError:
-            self.counts['writes_failed'] += 1
-            return False
+        requests = self.state.setdefault('requests', {})
+        request = requests.setdefault(args['idempotency_key'], {
+            'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
+            'created_at': int(self.now.timestamp())})
+        _save(self.out, self.state)
+        if not request['acknowledged']:
+            try:
+                reply = self.ports.carr(request['verb'], json.loads(request['payload']))
+                if reply.get('ok') is not True:
+                    raise CarrError('write not acknowledged')
+            except CarrError:
+                self.counts['writes_failed'] += 1
+                return False
+            request['acknowledged'] = True
+            _save(self.out, self.state)
         self.written.append((who, args['ref'], verb, note))
         return True
 
@@ -436,6 +446,10 @@ class Run:
             who = _clean_name(m['sender_name'], m['subject']) or m['sender'].lower()
             kind = 'email_out' if outbound else 'email_in'
             label = f'Email to {", ".join(a for a, _ in parties)}' if outbound else f'Email from {who}'
+            if not m['full']:
+                pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
+                                                'sender_email': m['sender'].lower(),
+                                                'subject_hash': _hash(m['subject'] or '')})
             ok = all([self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
@@ -446,9 +460,6 @@ class Run:
             done.setdefault(m['ck'], []).append(m['sent_unix'])
             if not m['full']:
                 self.counts['preview_only'] += 1
-                pending[m['ident']] = {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
-                                       'sender_email': m['sender'].lower(),
-                                       'subject_hash': _hash(m['subject'] or '')}
             steps[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0], 'who': who,
                                  'outbound': outbound, 'attempts': 0}
 
@@ -645,11 +656,11 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     mails = _best_copies(mails)
-    work = Run(ports, state, now)
+    work = Run(ports, state, now, out)
     try:
         matcher = Matcher(ports.contacts(), ports.carr)
-        work.full_text(mails)
         work.emails(mails, matcher, since)
+        work.full_text(mails)
         work.next_steps(mails)
         work.events(events, matcher, since)
     except CarrError:
