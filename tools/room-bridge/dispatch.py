@@ -64,6 +64,14 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
+Business work for Joe goes to the one record-layer desk with `--brief business`,
+which swaps the engineering footer for business-brief-footer.md. That desk runs
+with no built-in tools (no shell, no file edits) and only the CARR verbs.
+Scheduled jobs reach it through lib/business_dispatch.py.
+
+    dispatch.py register biz-desk --kind claude-desktop --model claude-sonnet-5-5 --effort medium --cwd ~/carr-system --posture record-layer
+    dispatch.py send biz-desk - --brief business --card-id biz:<uuid5> --actor outlook-intake
+
 """
 
 from __future__ import annotations
@@ -147,6 +155,29 @@ def _phrasing_hint(task: str, *, examples_on_miss: bool = False) -> str:
     return ('Describe checks as properties to confirm. '
             + '; '.join(f"{rule['phrase']!r} -> {rule['suggestion']!r}" for rule in examples)
             + '. Use --allow-phrasing to override the local phrasing lint.')
+
+
+# A brief profile names the footer every task of that profile carries. The
+# business profile belongs only to record-layer desks, and those desks take
+# nothing else: a client task never reaches a coding seat with repo write.
+BRIEF_FOOTERS = {'engineering': 'brief-footer.md', 'business': 'business-brief-footer.md'}
+
+
+def _with_footer(task: str, brief: str) -> str:
+    for block in (HERE / BRIEF_FOOTERS[brief]).read_text(encoding='utf-8').strip().split('\n\n'):
+        if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
+            continue
+        if block not in task:
+            task += '\n\n' + block
+    return task
+
+
+def _check_brief_desk(brief: str, desk_entry) -> None:
+    record_layer = isinstance(desk_entry, dict) and desk_entry.get('posture') == 'record-layer'
+    if (brief == 'business') != record_layer:
+        raise DeskError('brief_desk_mismatch',
+                        'a business brief goes only to a record-layer desk, and a record-layer '
+                        'desk takes only business briefs')
 
 
 def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
@@ -1070,6 +1101,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
+    r.add_argument('--posture', choices=desks.POSTURES,
+                   help='claude-desktop only: record-layer gives CARR verbs and no built-in tools')
     r.add_argument("--network-access", action="store_true",
                    help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
@@ -1100,6 +1133,8 @@ def main(argv: list[str]) -> int:
                    help='requeue a stage of an existing --card-id at the tail')
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--brief', choices=tuple(BRIEF_FOOTERS), default='engineering',
+                   help='footer profile; business goes only to a record-layer desk')
     s.add_argument('--allow-phrasing', action='store_true',
                    help='override the local brief phrasing lint; provider policy still applies')
     s.add_argument("--family", choices=codex_models.FAMILIES)
@@ -1164,7 +1199,7 @@ def main(argv: list[str]) -> int:
                                  sandbox=getattr(a, "sandbox", None),
                                  network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout,
-                                 provider=a.provider)
+                                 provider=a.provider, posture=a.posture)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
 
@@ -1197,15 +1232,12 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
-        for block in (HERE / 'brief-footer.md').read_text(encoding='utf-8').strip().split('\n\n'):
-            if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
-                continue
-            if block not in task:
-                task += '\n\n' + block
+        task = _with_footer(task, a.brief)
         _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
+        _check_brief_desk(a.brief, desk_entry)
         if isinstance(desk_entry, dict):
             blocked = seat_gate.check({**desk_entry, "name": a.name})
             if blocked:

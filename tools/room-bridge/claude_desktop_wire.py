@@ -41,6 +41,18 @@ ACTIVE_STATES = {"starting", "running", "working", "idle"}
 COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
+CARR_MCP_URL = os.environ.get("CARR_MCP_URL", "https://api.doctorcre.com/mcp")
+# record-layer: no built-in tools, and the CARR server is the only MCP server
+# loaded, so no other connector (mail, browser, desktop) is even visible.
+# The user-config `carr` login carries over to the same name and URL.
+TOOL_POSTURES = {
+    "record-layer": [
+        "--tools", "",
+        "--strict-mcp-config",
+        "--mcp-config", json.dumps({"mcpServers": {"carr": {"type": "http", "url": CARR_MCP_URL}}}),
+        "--allowedTools", "mcp__carr",
+    ],
+}
 
 
 class ClaudeDesktopError(RuntimeError):
@@ -85,6 +97,7 @@ def launch_background(
         "--name", f"model-room-{request[:8]}",
         "--model", model,
         "--effort", effort,
+        *TOOL_POSTURES.get(str(entry.get("posture")), []),
         "--permission-mode", permission_mode,
         desk_prompt(task),
     ]
