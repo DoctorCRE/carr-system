@@ -527,16 +527,17 @@ class Run:
     def events(self, events: list[dict], matcher: Matcher, since: int) -> None:
         logged = self.state.setdefault('events_logged', {})
         balled = self.state.setdefault('events_balled', {})
-        upcoming = self.state.setdefault('upcoming', {})
+        transitions: list[int] = []
         now = int(self.now.timestamp())
-        present = set()
         for e in sorted(events, key=lambda e: e['start_unix']):
             source = f'{e["goid"]}|{e["start_unix"]}'
-            present.add(source)
+            if e['end_unix'] > now:
+                transitions.append(e['end_unix'])
+            enters = e['start_unix'] - int(UPCOMING.total_seconds())
+            if enters > now:
+                transitions.append(enters)
             past = since <= e['end_unix'] <= now
             soon = now < e['start_unix'] <= now + UPCOMING.total_seconds()
-            if soon:
-                upcoming[source] = e['end_unix']
             if not (past and source not in logged) and not (soon and source not in balled):
                 continue
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email)]
@@ -559,7 +560,6 @@ class Run:
                         'summary': f'{kind.capitalize()}: {subject}', 'detail': e['body'] or '',
                         'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]):
                     logged[source] = e['end_unix']
-                    upcoming.pop(source, None)
             else:
                 self.counts['events_upcoming'] += 1
                 start = datetime.fromtimestamp(e['start_unix'], LOCAL)
@@ -567,8 +567,8 @@ class Run:
                                   start.date().isoformat(), now, f'event|{source}', only_if_none=True)
                         for ref, name in refs]):
                     balled[source] = e['start_unix']
-        for source in [s for s, end in upcoming.items() if s not in present and int(s.rsplit('|', 1)[1]) > now]:
-            del upcoming[source]
+        self.state['calendar_due_at'] = min(transitions, default=None)
+        self.state.pop('upcoming', None)
 
     def report(self, out: Path, refresh_count: int) -> None:
         lines = [f'# Outlook intake {self.now.astimezone(LOCAL):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
@@ -609,10 +609,11 @@ def _prune(state: dict, now: datetime) -> None:
 
 
 def _calendar_due(state: dict, now: datetime) -> bool:
-    """A meeting seen as upcoming has ended and is not logged yet: needs a run even on an unchanged store."""
-    logged = state.get('events_logged', {})
-    return any(end <= now.timestamp() and source not in logged
-               for source, end in state.get('upcoming', {}).items())
+    """Recheck when a meeting enters the horizon or ends; seed older state once."""
+    if 'calendar_due_at' not in state:
+        return True
+    due = state['calendar_due_at']
+    return due is not None and due <= now.timestamp()
 
 
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
