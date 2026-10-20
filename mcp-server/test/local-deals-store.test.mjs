@@ -84,7 +84,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(view);
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
-    await c.query(readFileSync(path.join(root, 'migrations/0915_deal_checklist_commissions.sql'), 'utf8'));
+    await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8'));
     await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal;");
