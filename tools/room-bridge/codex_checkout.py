@@ -15,6 +15,28 @@ CANONICAL_REPO = Path.home() / 'carr-system'
 CHECKOUT_ROOT = Path('/private/tmp')
 
 
+def validate(target: str, env: dict | None = None) -> None:
+    """Refuse existing-branch jobs that origin cannot supply before queueing."""
+    if target.startswith('new:'):
+        return
+    ref = f'refs/heads/{target}'
+    try:
+        result = subprocess.run(['git', 'ls-remote', '--exit-code', '--heads', 'origin', ref],
+                                cwd=CANONICAL_REPO, env=scrubbed_env(env),
+                                stdin=subprocess.DEVNULL, capture_output=True,
+                                text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        raise DeskError('codex_checkout_failed',
+                        'checkout refused: origin branch lookup unavailable or timed out') from None
+    if result.returncode not in (0, 2):
+        raise DeskError('codex_checkout_failed',
+                        f'checkout refused: origin branch lookup failed (git exit {result.returncode})')
+    if not any(line.split()[1:] == [ref] for line in result.stdout.splitlines()):
+        raise DeskError('bad_checkout',
+                        f'checkout branch {target!r} does not exist on origin; '
+                        f'use new:{target} to create a branch from origin default HEAD')
+
+
 def prepare(target: str, env: dict | None = None) -> dict[str, str]:
     """Return a retained parent workspace and nested clone; clean failed clones.
 

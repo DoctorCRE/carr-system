@@ -5,6 +5,7 @@ import re
 import uuid
 
 import codex_models
+import codex_checkout
 from work_queue import WorkQueue, STAGES, EXECUTABLE, default_path
 import work_runner
 
@@ -40,6 +41,8 @@ def add_commands(sub):
 
 def send(args, task, registry, results):
     entry = registry.resolve(args.name)
+    if args.checkout is not None:
+        codex_checkout.validate(args.checkout)
     codex = entry['kind'] in codex_models.CODEX_KINDS
     options = dict(fresh=args.fresh, stream_output=args.stream_output, retrieval=args.retrieve,
                    family=args.family, effort=args.effort, writes=args.writes, checkout=args.checkout,
