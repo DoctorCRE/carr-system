@@ -64,7 +64,7 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
-Business work for Joe goes to the first available record-layer desk with `--brief business`,
+Business work for the partner goes to the first available record-layer desk with `--brief business`,
 which swaps the engineering footer for business-brief-footer.md. That desk runs
 with no built-in tools (no shell, no file edits) and only the CARR verbs.
 Scheduled jobs reach it through lib/business_dispatch.py.
