@@ -62,6 +62,7 @@ class Recovery(unittest.TestCase):
         self.patch("bulk_worker_database_secrets", self.bulk)
         self.patch("apply_login_profile", self.apply)
         self.patch("validate_profile_login", self.validate)
+        self.patch("rollback_authority_grants", lambda _cur: ())
         self.patch("profile", self.file_profile, provision.credential)
         self.patch("derive_dsn", lambda *_a, **_kw: SimpleNamespace(value=self.owner_uri), provision.replacement)
         self.patch("connect", lambda _dsn: self.Owner(self), provision.psycopg)
@@ -96,7 +97,7 @@ class Recovery(unittest.TestCase):
             elif "exists" in str(statement):
                 self.row = (params[0] in self.fixture.passwords,)
             elif "pg_authid" in str(statement):
-                self.row = (False,)
+                self.row = (False,) if params[0] in self.fixture.passwords else None
 
         def fetchone(self):
             return self.row
@@ -118,9 +119,11 @@ class Recovery(unittest.TestCase):
             self.rollback()
 
     def apply(self, owner, profile, _grants, password, *, rotate=False, commit=True, **_kwargs):
-        self.assertTrue(rotate)
         self.assertFalse(commit)
-        self.assertIn(profile.login_role, self.passwords)
+        if rotate:
+            self.assertIn(profile.login_role, self.passwords)
+        else:
+            self.assertEqual(profile.label, "authority_joe")
         owner.pending[profile.login_role] = password
         self.changes.append((profile.login_role, password))
 
@@ -255,8 +258,78 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.changes, [])
         self.assertEqual(self.bulk_calls, [])
 
-    def test_missing_database_role_still_refuses_instead_of_deleting_binding(self):
+    def test_missing_old_authority_is_provisioned_before_candidate_cutover(self):
         del self.passwords["carr_authority_joe"]
+        values, outcomes = self.prepare()
+        authority = values["CARR_DB_AUTHORITY_JOE_URL"]
+        self.assertIsNotNone(authority)
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], authority)
+        self.assertEqual(urlsplit(authority).password, self.passwords["carr_authority_joe"])
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual(self.prepare()[0], values)
+        self.assertEqual(len(self.changes), 1)
+
+    def test_old_authority_uses_its_installed_schema_plan(self):
+        expected = ("grant usage on schema public to carr_authority;",)
+        def apply(owner, profile, grants, password, **kwargs):
+            self.assertEqual(grants, expected)
+            self.apply(owner, profile, grants, password, **kwargs)
+        with mock.patch.object(provision, "rollback_authority_grants", return_value=expected, create=True), \
+                mock.patch.object(provision, "apply_login_profile", side_effect=apply):
+            self.prepare()
+
+    def test_missing_old_authority_resumes_after_intent_before_pending_value(self):
+        del self.passwords["carr_authority_joe"]
+        original = provision.credential.prepare_pending
+        with mock.patch.object(provision.credential, "prepare_pending", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        with mock.patch.object(provision.credential, "prepare_pending", original):
+            values, outcomes = self.prepare()
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual(self.live["CARR_DB_AUTHORITY_JOE_URL"], values["CARR_DB_AUTHORITY_JOE_URL"])
+
+    def test_missing_old_authority_resumes_after_publication_before_commit(self):
+        del self.passwords["carr_authority_joe"]
+        self.fail_commit = True
+        with self.assertRaises(ProcessDeath):
+            self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+        self.assertEqual({password for _role, password in self.changes}, {urlsplit(published).password})
+
+    def test_missing_old_authority_resumes_after_commit_before_final_publication(self):
+        del self.passwords["carr_authority_joe"]
+        with mock.patch.object(provision.credential, "promote_pending", side_effect=ProcessDeath):
+            with self.assertRaises(ProcessDeath):
+                self.prepare()
+        published = self.live["CARR_DB_AUTHORITY_JOE_URL"]
+        values, outcomes = self.prepare()
+        self.assertEqual(values["CARR_DB_AUTHORITY_JOE_URL"], published)
+        self.assertEqual(outcomes[0]["outcome"], "created")
+
+    def test_creation_receipt_cannot_create_a_missing_reader(self):
+        profile = next(p for p in provision.PROFILES if p.label == "reader")
+        paths = self.file_profile("reader").paths
+        paths.final.rename(paths.pending)
+        del self.passwords["app_reader"]
+        provision.save_private_json(self.operation / "prior-worker-credential-recovery.json", {
+            "identity": provision.prior_worker_identity(self.binding),
+            "protected_names": sorted(self.live),
+            "profiles": {"reader": {
+                "profile": "reader", "role": profile.login_role,
+                "worker_secret": profile.secret_name, "project_id": self.binding.old.project_id,
+                "reason": "live staging rollback credential missing; recover canonical binding",
+                "outcome": "creating"}}})
+        with self.assertRaises(provision.ProvisioningRefusal):
+            self.prepare()
+        self.assertEqual(self.bulk_calls, [])
+
+    def test_missing_reader_role_still_refuses_instead_of_deleting_binding(self):
+        del self.passwords["app_reader"]
+        self.file_profile("reader").paths.final.unlink()
         with self.assertRaises(provision.ProvisioningRefusal):
             self.prepare()
         self.assertEqual(self.bulk_calls, [])

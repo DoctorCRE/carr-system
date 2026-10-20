@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+	</dict>
+	<key>Label</key>
+	<string>com.carr.headless.cc-update-audit</string>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{REPO}}/bin/headless-task</string>
+		<string>cc-update-audit</string>
+	</array>
+	<key>StandardErrorPath</key>
+	<string>{{REPO}}/out/headless/cc-update-audit/launchd.log</string>
+	<key>StandardOutPath</key>
+	<string>{{REPO}}/out/headless/cc-update-audit/launchd.log</string>
+	<key>StartCalendarInterval</key>
+	<array>
+		<dict>
+			<key>Hour</key>
+			<integer>9</integer>
+			<key>Minute</key>
+			<integer>45</integer>
+			<key>Weekday</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>WorkingDirectory</key>
+	<string>{{REPO}}</string>
+</dict>
+</plist>

@@ -151,6 +151,70 @@ class ReviewProbes(unittest.TestCase):
             for key in ('pending', 'removed', 'last_success_at'):
                 self.assertEqual(report[key], previous[key])
 
+    def test_fixture_inspection_supplies_bytes_without_a_second_unbounded_du(self):
+        from unittest.mock import patch
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-owned'
+            candidate.mkdir()
+            (candidate / 'payload').write_bytes(b'x' * 8192)
+            for path in (candidate / 'payload', candidate):
+                os.utime(path, (0, 0))
+            with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('du', 3)):
+                report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                    max_items=100, cursor='', process_probe=lambda paths: set(),
+                    deadline=lambda: False, dry_run=False)
+            self.assertFalse(report['errors'], report)
+            self.assertEqual(len(report['removed']), 1)
+            self.assertGreaterEqual(report['staged_allocated_bytes'], 8192)
+
+    def test_lane_expiring_after_rename_still_verifies_the_completed_move(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-owned'
+            candidate.mkdir()
+            os.utime(candidate, (0, 0))
+            expired = False
+            calls = 0
+            def probe(paths):
+                nonlocal calls, expired
+                calls += 1
+                expired = calls >= 3
+                return set()
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=probe, deadline=lambda: expired,
+                dry_run=False)
+            self.assertFalse(report['errors'], report)
+            self.assertEqual(len(report['removed']), 1)
+            self.assertEqual(report['removed'][0]['status'], 'staged')
+            self.assertTrue(report['budget_exhausted'])
+
+    def test_inspection_budget_after_intent_keeps_fixture_without_failed_pending_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-owned'
+            candidate.mkdir()
+            os.utime(candidate, (0, 0))
+            expired = False
+            calls = 0
+            def probe(paths):
+                nonlocal calls, expired
+                calls += 1
+                expired = calls >= 2
+                return set()
+            rows = []
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=probe, deadline=lambda: expired,
+                dry_run=False, record=rows.append)
+            self.assertTrue(candidate.exists())
+            self.assertFalse(report['errors'], report)
+            self.assertNotIn('error', rows[-1])
+            self.assertIn('budget', rows[-1]['reason'])
+            manifest = json.loads(Path(rows[0]['manifest_path']).read_text())
+            self.assertEqual(manifest['status'], 'verified_no_effect')
+            self.assertTrue(report['budget_exhausted'])
+
     def test_process_opening_during_staging_restores_the_fixture(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

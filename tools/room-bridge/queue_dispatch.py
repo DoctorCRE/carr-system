@@ -406,6 +406,9 @@ class QueueDeskExecutor:
                 },
             }
         if status != "completed":
+            if isinstance(row, dict) and row.get("code") == "nous_spend_stop":
+                self.adapter.block(task_id, "nous_spend_stop")
+                return {"outcome": "blocked", "task_id": task_id, "code": "nous_spend_stop"}
             detail = row.get("detail") if isinstance(row, dict) else None
             code = "no_answer" if detail == "no_answer" else _dispatch_failure_code(status)
             return self._retry_or_block(task_id, code, now=now)

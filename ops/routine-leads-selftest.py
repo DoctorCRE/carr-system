@@ -164,6 +164,30 @@ class LeadTests(unittest.TestCase):
         with self.assertRaises(zipfile.BadZipFile):
             leads.parse_weekly_zip(b"not-a-zip", as_of=NOW.date(), source=leads.INDEX_URL)
 
+    def test_weekly_archive_ignores_unnamed_outside_territory_provider(self):
+        local = copy.deepcopy(FIXTURE["nppes_rows"][0])
+        outside = {**local, "NPI": "1999999999", "Provider Organization Name (Legal Business Name)": "",
+                   "Provider Other Organization Name": "Synthetic outside organization"}
+        for prefix in ("Provider Business Practice Location Address", "Provider Business Mailing Address"):
+            outside.update({prefix + " City Name": "Seattle", prefix + " State Name": "WA",
+                            prefix + " Postal Code": "98101"})
+        text = io.StringIO()
+        writer = csv.DictWriter(text, fieldnames=list(outside))
+        writer.writeheader()
+        writer.writerows([outside, local])
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("npidata_pfile_weekly.csv", text.getvalue())
+
+        rows = leads.parse_weekly_zip(output.getvalue(), as_of=NOW.date(), source=leads.INDEX_URL)
+
+        self.assertEqual([row["npi"] for row in rows], [local["NPI"]])
+        outside["Provider Business Practice Location Address City Name"] = "Pensacola"
+        outside["Provider Business Practice Location Address State Name"] = "FL"
+        outside["Provider Business Practice Location Address Postal Code"] = "32501"
+        with self.assertRaisesRegex(ValueError, "NPPES provider name missing"):
+            leads.parse_nppes([outside], as_of=NOW.date(), source=leads.INDEX_URL)
+
     def test_mailing_only_is_visible_with_lower_estimate(self):
         raw = copy.deepcopy(FIXTURE["nppes_rows"][2])
         raw.update({"Provider Business Mailing Address Postal Code": "32501", "Provider Business Mailing Address State Name": "FL"})
