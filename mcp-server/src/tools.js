@@ -336,7 +336,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -4851,21 +4851,52 @@ export const TOOLS = {
 
   "set-prospect-engagement-status": {
     write: true,
-    description: "Set a client's explicit prospect engagement status independently of lifecycle and deal parking. Requires the client version from deal-room-board. Records old/new status and the stated reason in the client event history.",
+    description: "Move a prospect between the deal board and the existing Leads pipeline atomically. Inactive uses nurture_drip; active uses opportunity. Preserves deals, suppression, history and audit. Requires a fresh client version from deal-room-board or the Leads workspace.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, client_id: { type: "string" },
       base_version: { type: "integer" }, status: { type: "string", enum: ["active","inactive"] },
-      reason: { type: "string" }, human_quote: { type: "string" } },
+      reason: { type: "string" }, human_quote: { type: "string" }, expected_actor: { type: "string", minLength: 1 } },
       required: ["idempotency_key","client_id","base_version","status","reason"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-prospect-engagement-status", args, async () => {
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
       if (!["active","inactive"].includes(args.status))
         throw new ToolError({ error: "invalid_engagement_status", allowed: ["active","inactive"] });
       if (typeof args.reason !== "string" || !args.reason.trim())
         throw new ToolError({ error: "engagement_reason_required" });
       await versionGuard(c, "client", args.client_id, args.base_version);
       const current = (await c.query(
-        "select prospect_engagement_status,merged_into from client where id=$1", [args.client_id])).rows[0];
+        "select prospect_engagement_status,status,party_id,merged_into from client where id=$1", [args.client_id])).rows[0];
       if (current.merged_into) throw new ToolError({ error: "client_merged_away", merged_into: current.merged_into });
+      if (current.status !== "prospect") throw new ToolError({ error: "not_a_prospect" });
+      const party = (await c.query("select merged_into,deleted_at,contact_state from party where id=$1 for share",[current.party_id])).rows[0];
+      if (!party || party.merged_into || party.deleted_at || args.status === "active" && party.contact_state === "do_not_contact")
+        throw new ToolError({ error: "prospect_party_protected" });
+      let leads = (await c.query(`select id,client_id,stage,suppressed,version from lead
+        where client_id=$1 or (party_id=$2 and client_id is null) order by id for update`,
+        [args.client_id,current.party_id])).rows;
+      const protectedLead = lead => lead.suppressed || ["archived","do_not_contact"].includes(lead.stage);
+      if (args.status === "active" && leads.some(protectedLead))
+        throw new ToolError({ error: "prospect_lead_protected" });
+      const stage = args.status === "inactive" ? "nurture_drip" : "opportunity";
+      if (!leads.length) {
+        const created = await TOOLS["new-lead"].handler(c,actor,{
+          idempotency_key: `${args.idempotency_key}:lead`,party_id:current.party_id,stage });
+        leads = [{id:created.lead_id,client_id:null,stage,suppressed:false,version:1}];
+      }
+      for (const lead of leads) {
+        if (!lead.client_id) {
+          await c.query("update lead set client_id=$1,updated_by=$2 where id=$3",[args.client_id,actor.id,lead.id]);
+          await writeEvent(c,actor,"link-lead-client","lead",lead.id,{
+            field:"client_id",old:{client_id:null},new:{client_id:args.client_id},
+            agent_rationale:args.reason.trim(),idempotency_key:args.idempotency_key });
+        }
+        if (!protectedLead(lead) && lead.stage !== stage) {
+          const version = (await c.query("select version from lead where id=$1",[lead.id])).rows[0].version;
+          await TOOLS["update-lead"].handler(c,actor,{
+            idempotency_key:`${args.idempotency_key}:stage:${lead.id}`,lead:lead.id,base_version:version,
+            fields:{stage},stage_review:{reason:args.reason.trim(),evidence_ids:[],human_quote:args.human_quote} });
+        }
+      }
       const updated = (await c.query(
         "update client set prospect_engagement_status=$2,updated_by=$3 where id=$1 returning version",
         [args.client_id, args.status, actor.id])).rows[0];
@@ -4876,7 +4907,7 @@ export const TOOLS = {
         agent_rationale: args.reason.trim(), human_quote: args.human_quote || null,
         idempotency_key: args.idempotency_key });
       return { ok: true, client_id: args.client_id, prospect_engagement_status: args.status,
-        client_version: updated.version };
+        client_version: updated.version, lead_id: leads[0].id };
     }),
   },
 

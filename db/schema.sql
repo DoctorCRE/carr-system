@@ -84334,7 +84334,7 @@ CREATE TABLE public.client (
     possible_duplicate_label text,
     notes text,
     specialty_type_label text,
-    prospect_engagement_status text DEFAULT 'inactive'::text NOT NULL,
+    prospect_engagement_status text DEFAULT 'active'::text NOT NULL,
     CONSTRAINT client_prospect_engagement_status_check CHECK ((prospect_engagement_status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
 
@@ -84343,7 +84343,7 @@ CREATE TABLE public.client (
 -- Name: COLUMN client.prospect_engagement_status; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Inactive until deliberately activated.';
+COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
 
 
 --
@@ -89533,7 +89533,7 @@ CREATE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE (d.invoiced_on IS NULL);
+  WHERE ((d.invoiced_on IS NULL) AND (c.status <> 'prospect'::text OR c.prospect_engagement_status = 'active'::text));
 
 
 --
@@ -90882,6 +90882,16 @@ CREATE VIEW public.v_lead_stage_transition AS
    FROM public.event e
   WHERE ((subject_type = 'lead'::text) AND ((new_value ->> 'stage'::text) IS NOT NULL));
 
+
+--
+-- Name: v_lead_prospect_engagement; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_prospect_engagement AS
+ SELECT l.id AS lead_id, c.id AS prospect_client_id,
+    c.version AS prospect_client_version, c.prospect_engagement_status
+ FROM public.lead l JOIN public.client c ON c.id=l.client_id
+ WHERE c.status='prospect' AND c.merged_into IS NULL;
 
 --
 -- Name: v_lead_workspace_lifecycle; Type: VIEW; Schema: public; Owner: -
@@ -120344,6 +120354,8 @@ grant select on table public.v_claim_card to dot_reader;
 grant select on table public.v_client_account to carr_reader;
 grant select on table public.v_client_account to carr_writer;
 grant select on table public.v_client_account to dot_reader;
+grant select on table public.v_lead_prospect_engagement to carr_reader;
+grant select on table public.v_lead_prospect_engagement to carr_writer;
 grant select on table public.v_client_engagement_status to carr_reader;
 grant select on table public.v_client_engagement_status to carr_writer;
 grant select on table public.v_client_engagement_status to dot_reader;
@@ -122928,7 +122940,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
-0915_prospect_engagement_status.sql	93a60ff66099b0c6a60cba3a84a7cc1041fafd1ad5ca01a795ca779bb293780a	2026-10-20 16:39:13.065469+00
+0915_prospect_engagement_status.sql	7cfa1c53585b46f41a735a8c5a42afe4f76c2cb9d0c61f30ee77f1f2bf6e2db4	2026-10-20 16:39:13.065469+00
 \.
 
 
