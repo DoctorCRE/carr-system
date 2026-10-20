@@ -227,6 +227,22 @@ class SkillReceiptTests(unittest.TestCase):
                         self.assertEqual(refused.exception.code, 'skill_unavailable')
                         execute.assert_not_called()
 
+    def test_session_without_a_listing_falls_back_to_an_older_observed_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            results = root / 'results.jsonl'
+            listed, unlisted = root / 'listed.jsonl', root / 'unlisted.jsonl'
+            listed.write_text(json.dumps({'type': 'system', 'subtype': 'init',
+                'skills': ['grill-with-docs']}) + '\n')
+            unlisted.write_text(json.dumps({'type': 'user', 'message': {'content': []}}) + '\n')
+            results.write_text(''.join(json.dumps({'desk': 'builder', 'kind': 'claude-api',
+                'session_id': sid}) + '\n' for sid in ('listed', 'unlisted')))
+            paths = {'listed': listed, 'unlisted': unlisted}
+            with patch.object(skill_receipts, 'session_path',
+                              side_effect=lambda sid, runtime: paths.get(sid)):
+                value = dispatch.desk_skill_inventory('builder', {'kind': 'claude-api'}, results)
+            self.assertEqual(value['available'], ['grill-with-docs'])
+
     def test_prior_job_reads_and_unfinished_calls_do_not_count(self):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md'),
             since='2026-10-19T16:00:00Z')['opened'], [])
