@@ -252,7 +252,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     from storage_hygiene import recover_test_temp
                     recovered = recover_test_temp(pending, deadline=lambda: time.monotonic() >= deadline)
                     slot = 'test_temp:' + str(Path(pending['path']).parent)
-                    cursor[slot] = Path(pending['path']).name
+                    if recovered['status'] == 'staged':
+                        cursor[slot] = Path(pending['path']).name
                 elif kind == 'thread':
                     before = pending.get('before', previous['at'] - policy['thread_age_seconds'])
                     recovered = archive_thread(pending['thread_id'], before=before,
@@ -328,7 +329,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                         report['pending'] = row
                         save(receipt_path, report)
                     else:
-                        cursor[slot] = Path(row['path']).name
+                        if not row.get('error') and row['status'] != 'deferred':
+                            cursor[slot] = Path(row['path']).name
                         record(row)
                 temps = cleanup_test_temps(temp_root, now=now, min_age=policy['test_temp_age_seconds'],
                     max_items=policy['test_temp_max_items'], cursor=cursor.get(slot, ''),
@@ -339,9 +341,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 save(cursor_path, cursor)
                 save(receipt_path, report)
                 if report.get('pending'):
-                    report['status'] = 'failed'
-                    save(receipt_path, report)
-                    return report
+                    return finish()
         remaining = max(0, deadline - time.monotonic())
         clone_deadline = time.monotonic() + remaining / 2
         def clone_candidates():

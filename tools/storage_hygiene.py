@@ -552,7 +552,7 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
     import heapq
     from branch_retirement import save
     root = Path(root)
-    report = {'removed': [], 'kept': [], 'cursor': cursor, 'staged_allocated_bytes': 0,
+    report = {'removed': [], 'kept': [], 'deferred': [], 'cursor': cursor, 'staged_allocated_bytes': 0,
               'freed_bytes': 0, 'budget_exhausted': False, 'errors': []}
     descriptor = _open_root(root)
     identity = os.fstat(descriptor)
@@ -628,13 +628,13 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                     'status': 'staged' if row['status'] == 'staged' else 'verified_no_effect'})
                 except TimeoutError:
                     if target is not None and (target / 'fixture').exists():
-                        row.update(error='TimeoutError', reason='staged fixture inspection incomplete')
-                        report['errors'].append({'kind': 'test_temp', 'error': 'TimeoutError'})
+                        row.update(status='deferred', reason='staged fixture inspection timed out; read back before retry')
                     else:
-                        row.update(status='kept', reason='fixture inspection budget exhausted; no move performed')
+                        row.update(status='deferred' if deadline() else 'kept',
+                                   reason='fixture inspection budget exhausted; no move performed')
                         if target is not None:
                             save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
-                    report['budget_exhausted'] = deadline()
+                    report['budget_exhausted'] |= row['status'] == 'deferred'
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
                     if (isinstance(exc, FileNotFoundError) and not path.exists() and not path.is_symlink()
                             and (target is None or not (target / 'fixture').exists())):
@@ -644,10 +644,13 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                     else:
                         row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
                         report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
-                report['removed' if row['status'] in {'staged', 'removed'} else 'kept'].append(row)
-                report['cursor'] = name
+                collection = ('deferred' if row['status'] == 'deferred' else
+                              'removed' if row['status'] in {'staged', 'removed'} else 'kept')
+                report[collection].append(row)
+                if not row.get('error') and row['status'] != 'deferred':
+                    report['cursor'] = name
                 record(row)
-                if row.get('error'):
+                if row.get('error') or row['status'] == 'deferred':
                     return report
             if report['budget_exhausted']:
                 break
