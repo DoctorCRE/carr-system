@@ -137,6 +137,19 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'})).deals[0].phase_started_on,{});
     }));
 
+    await t.test('repeating the current phase through the handler does not create a phase start', async () => transaction(async () => {
+      await fixture(false);
+      const written = await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: id(34), deal: id(4), field: 'phase', value: 'research', base_event_id: null,
+      });
+      assert.equal(written.ok, true);
+      await c.query('set local role carr_reader');
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+      assert.deepEqual(board.deals[0].phase_started_on, {});
+      assert.deepEqual(detail.phase_started_on, {});
+    }));
+
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
     const readInvoiceDeals = async () => ({
       'deal-board': await TOOLS['deal-board'].handler(c),
