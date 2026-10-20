@@ -277,6 +277,12 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
       "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+    },
+    {
+      "path": "tools/room-bridge/probe_codex_record_layer.py",
+      "class": "hand_tool",
+      "reason": "A maintainer runs the installed Codex CLI against a credential-free loopback transport to check native tool declarations before qualifying record-layer isolation. It never calls CARR or a real model.",
+      "evidence": "PR #2035; probe_codex_record_layer.py module docstring and synthetic example.test CLI probe"
     }
   ]
 }
