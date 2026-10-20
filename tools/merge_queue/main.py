@@ -1037,7 +1037,13 @@ class Queue:
     def advance_regenerated_pin(self, e, card_id, p, expected_order):
         head = p['head']['sha']
         if (e['tested'] is not None or head == e['approved'] or p['state'] != 'open'
-                or p.get('draft') or self.held(p) or p['base']['ref'] != 'main'):
+                or p.get('draft') or p['base']['ref'] != 'main'):
+            return False
+        if self.held(p):
+            if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
+                               'AND repo=? AND pr=? AND head=?',
+                               (e['repo'], e['pr'], e['approved'])).fetchone():
+                raise QueueChanged('held_during_regeneration')
             return False
         actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase='done' "
                                   'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
@@ -1200,7 +1206,10 @@ class Queue:
             self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
             return True
         except QueueChanged as exc:
-            self.report(e, 'selection_changed', str(exc))
+            if str(exc) in ('held_during_regeneration', 'legacy_ownership'):
+                self.report(e, 'needs_repin', str(exc), 'blocked')
+            else:
+                self.report(e, 'selection_changed', str(exc))
             return True
         except Cancelled:
             return True
