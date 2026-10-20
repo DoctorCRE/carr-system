@@ -1,0 +1,344 @@
+"""Drive the New Outlook for Mac window through the cua-driver CLI (accessibility).
+
+The preflight half restarts Outlook into one ordinary, readable mailbox window;
+it was lifted from the cancelled agent-based sweep (commit 5f5d83ac5). The
+message-list half reads Inbox rows and moves one already-read row to a folder.
+
+Shapes confirmed against Joe's live Outlook on 2026-10-20 (read-only probe):
+the folder pane is an AXOutline of every folder, and with it showing a walk deep
+enough to reach the message list exceeds cua-driver's 20 s AX timeout, so the
+pane is hidden (View > Sidebar) while rows are read. invoke_menu reports
+"unverifiable", so every view change is confirmed by a fresh walk. The message
+list is an AXTable labelled "Message List"; each message is an AXRow whose
+AXCell label reads "Sender: NAME, Subject: SUBJECT, ..., DATE, Message preview:
+TEXT". Not yet seen live: an unread row's label, the Inbox unread badge, and the
+Move folder picker; those paths fail closed.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass
+from enum import Enum
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+APP = 'Microsoft Outlook'
+MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
+FULL_SCREEN_HEIGHT = 949
+EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
+SIDEBAR = ['View', 'Sidebar']
+QUIT = ['Outlook', 'Quit Outlook']
+TABS = re.compile(r'Focused Inbox (Selected|Unselected);\s*Other Inbox (Selected|Unselected)')
+SWITCH = {'focused': ['View', 'Switch to Focused'], 'other': ['View', 'Switch to Other']}
+LIST_WALK = 1500
+PANE_WALK = {'max_elements': 1500, 'max_depth': 3}
+BADGE_WALK = 120
+
+
+@dataclass(frozen=True)
+class Outcome:
+    state: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class Waits:
+    quit_seconds: float = 60
+    sync_seconds: float = 90
+    new_window_seconds: float = 15
+    poll_seconds: float = 1
+    settle_seconds: float = 2
+    move_seconds: float = 10
+
+
+class CuaError(Exception):
+    pass
+
+
+class UiError(Exception):
+    """The window did not show the shape this module relies on; the reason is a short code."""
+
+
+class Moved(Enum):
+    MOVED = 'moved'
+    FAILED = 'failed'
+    GONE = 'gone'
+    NEXT_TO_UNREAD = 'next_to_unread'
+
+
+class ReadState(Enum):
+    READ = 'read'
+    UNREAD = 'unread'
+    UNCERTAIN = 'uncertain'
+
+
+@dataclass(frozen=True)
+class Row:
+    label: str
+    token: str
+    selected: bool
+
+    @property
+    def sender(self) -> str | None:
+        match = re.search(r'Sender: (.*?), (?:Subject: |No subject)', self.label)
+        return match.group(1).strip() if match else None
+
+    @property
+    def read_state(self) -> ReadState:
+        if re.search(r'\bunread\b', self.label, re.I):
+            return ReadState.UNREAD
+        return ReadState.READ if self.sender else ReadState.UNCERTAIN
+
+    @property
+    def headline(self) -> str:
+        """Sender, subject and time: the label without its message preview."""
+        return re.sub(r'\s+', ' ', re.split(r',\s*Message preview:', self.label)[0]).strip()
+
+
+def is_main_window(window: dict) -> bool:
+    return bool(MAILBOX_TITLE.search(window.get('title') or ''))
+
+
+def is_compose_window(window: dict) -> bool:
+    """Any sizeable Outlook window that is not a mailbox window may hold a draft.
+
+    Toolbar and full-screen helper surfaces are a few dozen points tall and
+    untitled; a compose window is roughly 917x911 and titled by its subject.
+    """
+    bounds = window.get('bounds') or {}
+    return (not is_main_window(window) and bounds.get('width', 0) >= 400
+            and bounds.get('height', 0) >= 400)
+
+
+def is_ordinary_main_window(window: dict) -> bool:
+    return (is_main_window(window) and window.get('on_current_space') is True
+            and (window.get('bounds') or {}).get('height', FULL_SCREEN_HEIGHT) < FULL_SCREEN_HEIGHT)
+
+
+def cua(tool: str, arguments: dict) -> dict:
+    try:
+        result = subprocess.run(['cua-driver', 'call', tool, json.dumps(arguments)],
+                                capture_output=True, text=True, timeout=120)
+        value = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        raise CuaError(f'{tool}: {type(exc).__name__}') from None
+    if result.returncode or not isinstance(value, dict):
+        raise CuaError(f'{tool}: exit {result.returncode}')
+    return value
+
+
+def outlook_pid() -> int | None:
+    found = subprocess.run(['pgrep', '-x', APP], capture_output=True, text=True)
+    pids = found.stdout.split()
+    return int(pids[0]) if found.returncode == 0 and pids else None
+
+
+def _windows(pid: int) -> list[dict]:
+    return cua('list_windows', {'pid': pid}).get('windows') or []
+
+
+def _readable(pid: int, window: dict) -> bool:
+    state = cua('get_window_state', {'pid': pid, 'window_id': window['window_id'],
+                                     'include_screenshot': False, 'max_elements': 20})
+    return not str(state.get('degraded_reason') or '').startswith('ax_window_unresolved')
+
+
+def usable_window(pid: int) -> dict | None:
+    return next((w for w in _windows(pid) if is_ordinary_main_window(w) and _readable(pid, w)), None)
+
+
+def _quit(pid: int, windows: list[dict], waits: Waits) -> bool:
+    try:
+        cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'], 'path': QUIT})
+    except (CuaError, IndexError, KeyError):
+        subprocess.run(['osascript', '-e', f'tell application "{APP}" to quit'],
+                       capture_output=True, timeout=30)
+    deadline = time.monotonic() + waits.quit_seconds
+    while outlook_pid() is not None:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(waits.poll_seconds)
+    return True
+
+
+def prepare_outlook(waits: Waits) -> Outcome | None:
+    """Restart Outlook into one ordinary readable main window; None means ready."""
+    try:
+        pid = outlook_pid()
+        if pid is not None:
+            windows = _windows(pid)
+            if any(is_compose_window(w) for w in windows):
+                return Outcome('skipped', 'compose_window_open')
+            if not _quit(pid, windows, waits):
+                return Outcome('failed', 'outlook_quit_timeout')
+        launched = subprocess.run(['open', '-g', '-a', APP, '--args',
+                                   '-ApplePersistenceIgnoreState', 'YES'],
+                                  capture_output=True, timeout=60)
+        if launched.returncode:
+            return Outcome('failed', 'outlook_launch_failed')
+        time.sleep(waits.sync_seconds)
+        pid = outlook_pid()
+        if pid is None:
+            return Outcome('failed', 'outlook_not_running_after_launch')
+        if usable_window(pid):
+            return None
+        windows = _windows(pid)
+        if windows:
+            try:
+                cua('invoke_menu', {'pid': pid, 'window_id': windows[0]['window_id'],
+                                    'path': ['File', 'New', 'Main Window']})
+            except CuaError:
+                pass
+            time.sleep(waits.new_window_seconds)
+        return None if usable_window(pid) else Outcome('failed', 'no_usable_main_window')
+    except CuaError:
+        return Outcome('failed', 'cua_driver_unavailable')
+    except subprocess.TimeoutExpired:
+        return Outcome('failed', 'preflight_command_timeout')
+
+
+def private_file(path: Path):
+    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'a')
+
+
+class Window:
+    """One ordinary Outlook mailbox window; every read is a fresh accessibility walk."""
+
+    def __init__(self, pid: int, window_id: int, waits: Waits):
+        self.pid, self.window_id, self.waits = pid, window_id, waits
+
+    def _walk(self, **bounds) -> list[dict]:
+        state = cua('get_window_state', {'pid': self.pid, 'window_id': self.window_id,
+                                         'include_screenshot': False, **bounds})
+        if str(state.get('degraded_reason') or '').startswith('ax_window_unresolved'):
+            raise UiError('ax_window_unresolved')
+        return state.get('elements') or []
+
+    def _menu(self, path: list[str]) -> None:
+        cua('invoke_menu', {'pid': self.pid, 'window_id': self.window_id, 'path': path})
+        time.sleep(self.waits.settle_seconds)
+
+    def front(self) -> None:
+        cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
+
+    def _folder_pane_visible(self) -> bool:
+        return any(e.get('role') == 'AXOutline' for e in self._walk(**PANE_WALK))
+
+    def show_folder_pane(self, visible: bool) -> None:
+        for _ in range(2):
+            if self._folder_pane_visible() == visible:
+                return
+            self._menu(SIDEBAR)
+        if self._folder_pane_visible() != visible:
+            raise UiError('folder_pane_toggle_failed')
+
+    def inbox_badge(self) -> int:
+        """Unread count on the Inbox folder row; needs the folder pane showing."""
+        elements = self._walk(max_elements=BADGE_WALK)
+        children: dict[int, list[dict]] = {}
+        for e in elements:
+            children.setdefault(e.get('parent_index'), []).append(e)
+        for row in (e for e in elements if e.get('role') == 'AXRow'):
+            texts = [(c.get('label') or c.get('value') or '').strip()
+                     for c in children.get(row['element_index'], [])]
+            if 'Inbox' in texts:
+                counts = [int(m.group(1)) for t in texts if (m := re.fullmatch(r'(\d+)(?: unread)?', t))]
+                if len(counts) > 1:
+                    raise UiError('inbox_badge_ambiguous')
+                return counts[0] if counts else 0
+        raise UiError('inbox_row_not_found')
+
+    def rows(self) -> tuple[str | None, list[Row]]:
+        """(current Focused/Other tab or None, every message row the list exposes)."""
+        elements = self._walk(max_elements=LIST_WALK)
+        tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
+        if len(tables) != 1:
+            raise UiError('message_list_not_found')
+        table = tables[0]['element_index']
+        cells: dict[int, dict] = {}
+        for e in elements:
+            if e.get('role') == 'AXCell' and e.get('parent_index') is not None:
+                cells.setdefault(e['parent_index'], e)
+        rows = []
+        for e in elements:
+            if e.get('role') == 'AXRow' and e.get('parent_index') == table:
+                cell = cells.get(e['element_index'], {})
+                rows.append(Row(label=cell.get('label') or '', token=cell.get('element_token') or '',
+                                selected=bool(cell.get('selected') or e.get('selected'))))
+        return _tab(elements), rows
+
+    def switch_tab(self, tab: str) -> None:
+        if self.rows()[0] == tab:
+            return
+        self._menu(SWITCH[tab])
+        if self.rows()[0] != tab:
+            raise UiError('tab_switch_failed')
+
+    def move(self, label: str, leaf: str) -> Moved:
+        """Move the read row with this label to the folder named leaf, then confirm it left the list.
+
+        The caller guarantees the leaf names exactly one folder. Outlook may open
+        the next or previous message after a move, so a row is only selected when
+        both its neighbours are read too. The only toolbar button pressed is Move.
+        """
+        rows = self.rows()[1]
+        before = Counter(r.label for r in rows)
+        index = next((i for i, r in enumerate(rows)
+                      if r.label == label and r.read_state is ReadState.READ), None)
+        if index is None:
+            return Moved.GONE
+        if any(r.read_state is not ReadState.READ for r in rows[max(0, index - 1):index + 2]):
+            return Moved.NEXT_TO_UNREAD
+        cua('click', {'pid': self.pid, 'element_token': rows[index].token})
+        time.sleep(self.waits.settle_seconds)
+        selected = [r for r in self.rows()[1] if r.selected]
+        if [r.label for r in selected] != [label]:
+            return Moved.FAILED
+        elements = self._walk(max_elements=LIST_WALK)
+        moves = [e for e in elements if e.get('role') == 'AXButton' and e.get('label') == 'Move'
+                 and e.get('depth') == 1]
+        if len(moves) != 1:
+            return Moved.FAILED
+        fields_before = {(e.get('role'), e.get('label')) for e in elements if e.get('role') in FIELDS}
+        cua('click', {'pid': self.pid, 'element_token': moves[0]['element_token']})
+        time.sleep(self.waits.settle_seconds)
+        picker = self._walk(max_elements=LIST_WALK)
+        fields = [e for e in picker if e.get('role') in FIELDS
+                  and (e.get('role'), e.get('label')) not in fields_before]
+        if len(fields) != 1:
+            return self._abandon()
+        cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': leaf})
+        time.sleep(self.waits.settle_seconds)
+        entries = [e for e in self._walk(max_elements=LIST_WALK)
+                   if e.get('role') in ENTRIES and (e.get('label') or '').strip() == leaf]
+        if len(entries) != 1:
+            return self._abandon()
+        cua('click', {'pid': self.pid, 'element_token': entries[0]['element_token']})
+        deadline = time.monotonic() + self.waits.move_seconds
+        while True:
+            time.sleep(self.waits.settle_seconds)
+            if Counter(r.label for r in self.rows()[1])[label] < before[label]:
+                return Moved.MOVED
+            if time.monotonic() >= deadline:
+                return self._abandon()
+
+    def _abandon(self) -> Moved:
+        cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
+        time.sleep(self.waits.settle_seconds)
+        return Moved.FAILED
+
+
+FIELDS = ('AXTextField', 'AXSearchField')
+ENTRIES = ('AXRow', 'AXCell', 'AXMenuItem', 'AXButton', 'AXStaticText')
+
+
+def _tab(elements: list[dict]) -> str | None:
+    for e in elements:
+        match = TABS.search(e.get('label') or '')
+        if e.get('role') == 'AXCheckBox' and match:
+            return 'focused' if match.group(1) == 'Selected' else 'other'
+    return None

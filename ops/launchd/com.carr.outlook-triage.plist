@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Evening Inbox triage. Fires every 15 minutes from 19:15 to 21:00 local;
+    lib/outlook_triage.fire() exits at once when today is already settled and
+    otherwise runs the triage under bin/run-scheduled.sh. It skips while Joe has
+    used the Mac in the last 10 minutes or has a draft open. No RunAtLoad:
+    loading this agent at login must never restart Outlook. The calendar is
+    calendar_for_window((19, 15), (21, 0), 15) from lib/launchd_calendar.py.
+  -->
+  <key>Label</key><string>com.carr.outlook-triage</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{REPO}}/.venv/bin/python</string>
+    <string>-c</string>
+    <string>from lib.outlook_triage import fire; raise SystemExit(fire())</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>19</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>15</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>30</integer></dict>
+    <dict><key>Hour</key><integer>20</integer><key>Minute</key><integer>45</integer></dict>
+    <dict><key>Hour</key><integer>21</integer><key>Minute</key><integer>0</integer></dict>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>StandardOutPath</key><string>{{REPO}}/out/outlook-triage-launchd.log</string>
+  <key>StandardErrorPath</key><string>{{REPO}}/out/outlook-triage-launchd.log</string>
+</dict>
+</plist>
