@@ -951,6 +951,10 @@ class QueueTests(unittest.TestCase):
             self.restart()
             self.q.tick()
             self.assertEqual(repairs(), [2, 4])
+        self.load()['prs'][module.REPOS[0]+'#2'].update(mergeable=True, mergeable_state='clean')
+        self.save()
+        self.q.tick()
+        self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
         self.load()['prs'][module.REPOS[0]+'#2']['labels'] = [{'name': module.HOLD}]
         self.save()
         self.q.tick()
