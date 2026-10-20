@@ -29,7 +29,8 @@ import tempfile as _sem_tmp
 from unittest.mock import patch as _sem_patch
 class SemanticTestCase(unittest.TestCase):
     def run(self, result=None):
-        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"):
+        with _sem_tmp.TemporaryDirectory() as root, _sem_patch.dict(_sem_os.environ, CARR_JEV_SEMANTIC_CACHE=root+"/cache"), \
+             _sem_patch.object(sc.flashlib, "is_switched_off", return_value=False):
             return super().run(result)
 
 

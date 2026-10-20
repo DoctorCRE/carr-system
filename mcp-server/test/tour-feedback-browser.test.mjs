@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
+import { launchTestChrome } from "../../dealroom/test/chrome-launch.mjs";
 import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
 
 const projection = "10000000-0000-4000-8000-000000000001";
@@ -35,7 +35,7 @@ async function browserFixture(t) {
   });
   await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
   t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
-  const browser = await launchChrome(chrome); t.after(()=>browser.close());
+  const browser = await launchTestChrome(t, chrome);
   const cdp = new DevTools(browser.pageWsUrl); t.after(()=>cdp.socket.close());
   await cdp.call("Page.navigate",{url:`http://127.0.0.1:${server.address().port}/`});
   for(let i=0;i<200;i++){if(await cdp.evaluate('!!document.querySelector(".tour-button")'))break;await new Promise(resolve=>setTimeout(resolve,10));}

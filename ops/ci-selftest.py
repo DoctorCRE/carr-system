@@ -140,7 +140,9 @@ def run(args, env=None, shell_cmd=None, timeout=600):
     if env:
         e.update(env)
     cmd = shell_cmd if shell_cmd else [str(CI), *args]
-    p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
+    with tempfile.TemporaryDirectory(prefix="carr-ci-test-", dir="/tmp") as directory:
+        e.update(TMPDIR=directory, TMP=directory, TEMP=directory)
+        p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
 def test_freshness_requires_main_without_a_second_config_checker():

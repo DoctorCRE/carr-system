@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { launchChrome, CHROME_STARTUP_TIMEOUT_MS, CHROME_STOP_TIMEOUT_MS } from "./chrome-launch.mjs";
+import { launchTestChrome, CHROME_STARTUP_TIMEOUT_MS, CHROME_STOP_TIMEOUT_MS } from "./chrome-launch.mjs";
 import { findDisposableChromium } from "./chromium-binary.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -165,10 +165,10 @@ async function launchBrowser(t) {
   const chrome = await findDisposableChromium();
   if (!chrome) return { unavailableReason: "Chrome for Testing/Playwright Chromium was not found; real V5-J101 browser evidence was not run" };
   let browser;
-  try { browser = await launchChrome(chrome); }
+  try { browser = await launchTestChrome(t, chrome); }
   catch (error) { return { unavailableReason: error.message }; }
   const cdp = new DevTools(browser.pageWsUrl);
-  t.after(async () => { cdp.close(); await browser.close(); });
+  t.after(() => cdp.close());
   t.diagnostic(`[chrome-startup] ${JSON.stringify({ startupMs: browser.startupMs, attempts: browser.attempts })}`);
   await cdp.call("Page.enable");
   await cdp.call("Runtime.enable");
