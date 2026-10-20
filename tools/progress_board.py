@@ -2406,6 +2406,15 @@ def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         "id", "parent_id", "done", "archived", "legacy_disposition", "card_title", "card_description", "branch", "reason"}
     cards = {key: {field: value for field, value in card.items() if field in fields and value is not None}
              for key, card in projection.pop("cards").items()}
+    aliases = projection["aliases"]
+    for card in cards.values():
+        if isinstance(card.get("blocked_by_task_ids"), list):
+            card["blocked_by_task_ids"] = [
+                aliases.get(ref, ref) if isinstance(ref, str) and ref not in cards else ref
+                for ref in card["blocked_by_task_ids"]]
+        parent = card.get("parent_task_id")
+        if isinstance(parent, str) and parent not in cards:
+            card["parent_task_id"] = aliases.get(parent, parent)
     snapshot = {"schema": "carr-progress-board.v4", "project": state["project"],
         "title": state.get("title") or "Work Requests", "kind": state.get("kind", "project"),
         "tasks": cards, "hierarchy": projection, "task_counts": activity_counts(state.get("tasks", {}), now_utc()),
