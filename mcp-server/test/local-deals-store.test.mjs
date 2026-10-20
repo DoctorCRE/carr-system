@@ -111,6 +111,66 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    const assignmentFixture = async () => {
+      await fixture(false);
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(20), actor.id]);
+      await c.query("insert into party(id,kind,name,org_id,created_by,updated_by) values($1,'person','Synthetic Banker',$2,$3,$3)", [id(21), id(20), actor.id]);
+      await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3),($4,$2,'banker',$3,$3)", [id(22),id(21),actor.id,id(23)]);
+      return {deal_id:id(4),role:'lender',company_party_id:id(20),contact_party_id:id(21)};
+    };
+    await t.test('stale duplicate vendor rows cannot overwrite shared party assignments', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      const update = (vendor, note) => TOOLS['update-vendor'].handler(c,actor,{
+        vendor,base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,note}]},
+      });
+      await update(id(22),'New assignment');
+      await c.query('savepoint stale_duplicate');
+      await assert.rejects(update(id(23),'Stale overwrite'),e=>e.payload?.error==='version_conflict');
+      await c.query('rollback to savepoint stale_duplicate');
+      const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(23)});
+      assert.equal(context.vendor.assignment_version,2);
+      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors[0].note,'New assignment');
+    }));
+
+    await t.test('one call assigns multiple roles using one observed vendor and party version', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const call = {ref:deal_id,kind:'call',summary:'Synthetic multiple roles',idempotency_key:randomUUID(),vendor_assignments:
+        ['lender','attorney'].map(role=>({...entry,role,vendor_id:id(22),base_version:1,assignment_base_version:1}))};
+      const result = await TOOLS['log-activity'].handler(c,actor,call);
+      assert.equal(result.vendor_assignments.length,2);
+      const context = await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor:id(22)});
+      assert.equal(context.vendor.base_version,2);
+      assert.equal(context.vendor.assignment_version,2);
+      assert.deepEqual((await TOOLS['get-deal-room'].handler(c,actor,{deal:deal_id})).vendors.map(v=>v.role),['attorney','lender']);
+      assert.equal((await TOOLS['log-activity'].handler(c,actor,call)).replayed,true);
+    }));
+
+    await t.test('duplicate vendor rows share one version in a call and cannot repeat the same party role', async () => transaction(async () => {
+      const {deal_id,...entry} = await assignmentFixture();
+      const call = roles => ({ref:deal_id,kind:'call',summary:'Synthetic duplicate rows',idempotency_key:randomUUID(),vendor_assignments:
+        roles.map((role,index)=>({...entry,role,vendor_id:id(22+index),base_version:1,assignment_base_version:1}))});
+      await c.query('savepoint repeated_role');
+      await assert.rejects(TOOLS['log-activity'].handler(c,actor,call(['lender','lender'])),e=>e.payload?.error==='deal_assignment_invalid');
+      await c.query('rollback to savepoint repeated_role');
+      await TOOLS['log-activity'].handler(c,actor,call(['lender','attorney']));
+      for (const vendor of [id(22),id(23)]) {
+        const context = (await TOOLS['vendor-assignment-context'].handler(c,actor,{vendor})).vendor;
+        assert.equal(context.base_version,2);
+        assert.equal(context.assignment_version,2);
+      }
+    }));
+
+    await t.test('assignment roles reject generic professional and accept the seven specific responsibilities', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      const request = role => ({vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,role}]}});
+      await assert.rejects(TOOLS['update-vendor'].handler(c,actor,request('professional')),e=>e.payload?.error==='deal_assignment_invalid');
+      for (const role of ['lender','contractor','architect','attorney','title','inspector','landlord_rep']) {
+        await c.query('savepoint specific_role');
+        assert.equal((await TOOLS['update-vendor'].handler(c,actor,request(role))).ok,true);
+        await c.query('rollback to savepoint specific_role');
+      }
+    }));
+
     await t.test('vendor assignments survive duplicate vendor rows and show role, company and contact on both deal reads', async () => transaction(async () => {
       await fixture(false);
       await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Bank',$2,$2)", [id(20), actor.id]);

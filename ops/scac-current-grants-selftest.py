@@ -67,6 +67,17 @@ class CurrentGrants(unittest.TestCase):
         contract = {**CONTRACT, 'retired_secdef_execute': [first, last]}
         validate_registered_grants({**BASE, 'secdef_execute': [GRANT, live]}, baseline, contract)
 
+    def test_reviewed_relation_grants_require_exact_live_entries(self):
+        grant = {'ingress_key':'db-relation-acl:public.deal_vendor_assignment:carr_writer:insert',
+                 'ingress_kind':'db_relation_acl','relation':'public.deal_vendor_assignment',
+                 'relation_kind':'r','grantee':'carr_writer','privilege':'insert','grantable':False}
+        contract = {**CONTRACT,'relation_dml':[grant]}
+        projection = {**self.projection(),'relation_dml':[grant]}
+        validate_registered_grants(projection,BASELINE,contract)
+        for rows in ([],[{**grant,'grantable':True}],[grant,{**grant,'privilege':'delete','ingress_key':'rogue:delete'}]):
+            with self.subTest(rows=rows), self.assertRaises(RuntimeError):
+                validate_registered_grants({**projection,'relation_dml':rows},BASELINE,contract)
+
     def test_unrelated_relation_grant_refuses(self):
         projection = self.projection()
         projection['relation_dml'] = [{'ingress_key': 'rogue:insert'}]
