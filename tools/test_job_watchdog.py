@@ -1027,17 +1027,29 @@ class RunnerTests(unittest.TestCase):
             registry = root / "desk.json"
             (root / "models_cache.json").write_text(json.dumps({"models": [
                 {"slug": "gpt-6.1-sol", "display_name": "GPT-6.1-Sol"}]}))
-            env = dict(os.environ, CODEX_HOME=str(root), CARR_CODEX_SLOT_DIR=str(root / 'slots'),
+            env = dict(os.environ, HOME=str(root), CODEX_HOME=str(root), CARR_CODEX_SLOT_DIR=str(root / 'slots'),
                        PATH=str(root) + os.pathsep + os.environ["PATH"])
             registration = subprocess.run([sys.executable, str(dispatch), "--registry", str(registry),
                                            "register", "fixture", "--kind", "codex-session", "--family", "sol",
                                            "--effort", "high", "--sandbox", "workspace-write", "--cwd", directory],
                                           env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
             self.assertEqual(registration.returncode, 0, registration.stderr)
+            session_id = "00000000-0000-0000-0000-000000000001"
+            transcript = root / ".codex/sessions/2000/01/01" / f"rollout-fixture-{session_id}.jsonl"
+            transcript.parent.mkdir(parents=True)
+            transcript.write_text(json.dumps({'type': 'response_item', 'payload': {
+                'role': 'developer', 'content': [{'type': 'input_text', 'text':
+                    '### Available skills\n- tdd: Testing\n- poteto-mode: Style\n'
+                    '- prove-it-works: Verification\n- grill-with-docs: Design'}]}}) + '\n')
+            results = root / "results.jsonl"
+            inventory = subprocess.run([sys.executable, str(dispatch), "--registry", str(registry),
+                                        "--results", str(results), "skills", "fixture", "--session", session_id],
+                                       env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            self.assertEqual(inventory.returncode, 0, inventory.stderr)
             log = root / "log"
             with log.open("w") as output:
                 proc = subprocess.Popen([sys.executable, str(dispatch), "--registry", str(registry),
-                                         "--results", str(root / "results.jsonl"), "send", "fixture", "fixture",
+                                         "--results", str(results), "send", "fixture", "fixture",
                                          "--fresh", "--stream-output"], env=env, stdin=subprocess.DEVNULL,
                                         stdout=output, stderr=subprocess.STDOUT)
                 try:
@@ -1051,7 +1063,7 @@ class RunnerTests(unittest.TestCase):
                     if proc.poll() is None:
                         proc.kill()
                     proc.wait()
-            self.assertEqual(json.loads((root / "results.jsonl").read_text())["status"], "completed")
+            self.assertEqual(json.loads(results.read_text())["status"], "completed")
 
     def test_clean_scan_cli_completes_without_effects(self):
         with tempfile.TemporaryDirectory() as directory:
