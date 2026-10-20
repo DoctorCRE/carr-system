@@ -924,10 +924,14 @@ class Queue:
                     with self.db:
                         self.event(repo, n, 'stacked', f'Waiting for base {p["base"]["ref"]}')
                     continue
+                if n in queued:
+                    with self.db:
+                        self.event(repo, n, 'refresh_deferred', 'Queued head preparation waits for its selected turn')
+                    continue
                 if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
                     if not self.conflict(repo, p):
                         complete = False
-                elif n not in queued and self.behind(repo, p) and p.get('mergeable') is True:
+                elif self.behind(repo, p) and p.get('mergeable') is True:
                     self.action('update', repo, n, p['head']['sha'], 'main')
                 elif p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
                     complete = False
@@ -1015,7 +1019,10 @@ class Queue:
                     if e['phase'] == 'done' and e['merged_commit']:
                         self.complete_work_merge(e, pin['card_id'], merged=True)
                         continue
-                    if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
+                    repairing = e['phase'] == 'conflict' and self.db.execute(
+                        "SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') "
+                        'AND repo=? AND pr=? AND head=?', (repo, pin['pr'], pin['head'])).fetchone()
+                    if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing') and not repairing:
                         continue
                     wait = self._tick_entry(e, pin['card_id'], order)
                     current = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
@@ -1150,7 +1157,7 @@ class Queue:
                         return True
                     return False
                 self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
-                return False
+                return True
             if self.behind(repo, p) and p.get('mergeable') is True:
                 self.action('update', repo, n, head, 'main')
                 self.report(e, 'updating', f'Waiting for clean update of {head}')
