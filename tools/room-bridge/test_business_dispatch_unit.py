@@ -137,6 +137,35 @@ class BusinessDispatchTests(unittest.TestCase):
                         self.assertIn(reason, json.dumps(item))
                         execute.assert_not_called()
 
+    def test_codex_isolation_refusal_is_preserved_on_the_business_routing_receipt(self):
+        self.reg.register('codex', 'codex-session', posture='record-layer')
+        result = self.send(['send', 'business', 'Draft for someone@example.test.',
+                            '--brief', 'business', '--card-id', 'codex-isolation'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        route = self.route('codex-isolation')
+        self.assertEqual(route['chosen'], 'biz-desk')
+        refusal = next(row['reason'] for row in route['skips'] if row['desk'] == 'codex')
+        self.assertIn('record_layer_unsupported', refusal)
+        self.assertIn('CARR-only tool allowlist', refusal)
+        self.assertIn('apply_patch', refusal)
+
+    def test_queued_codex_business_job_fails_closed_without_launch_or_retry(self):
+        result = self.send(['send', 'business', 'Draft for someone@example.test.',
+                            '--brief', 'business', '--card-id', 'codex-worker'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.reg.register('biz-desk', 'codex-session', posture='record-layer')
+        with WorkQueue(self.db) as q, patch.object(dispatch.subprocess, 'run') as run, \
+                patch.object(dispatch.subprocess, 'Popen') as popen:
+            claim = q.claim(eligible_desks={'biz-desk'}, actor='runner', owner={})
+            work_runner.worker(q, 'codex-worker', claim['claim'], self.reg.path, self.results)
+            item = q.get('codex-worker')
+            self.assertEqual(item['stage'], 'failed')
+            self.assertIn('record_layer_unsupported', json.dumps(item))
+            self.assertIn('apply_patch', json.dumps(item))
+            self.assertIsNone(q.claim(eligible_desks={'biz-desk'}, actor='runner', owner={}))
+            run.assert_not_called()
+            popen.assert_not_called()
+
     def test_business_footer_passes_the_phrasing_lint(self):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
 

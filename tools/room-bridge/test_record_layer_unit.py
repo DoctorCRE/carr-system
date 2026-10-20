@@ -36,6 +36,29 @@ class WireTests(unittest.TestCase):
         self.assertIn('apply_patch', str(refused.exception))
         self.assertIn('Code Mode', str(refused.exception))
 
+    def test_codex_launch_options_cannot_bypass_record_layer_refusal(self):
+        for options in ({'fresh': True}, {'live_desktop': True},
+                        {'config_overrides': ('features.shell_tool=false',)},
+                        {'provider_run': Mock()}, {'stream_output': True}):
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                with patch.object(dispatch.subprocess, 'run') as run, \
+                        patch.object(dispatch.subprocess, 'Popen') as popen, \
+                        patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
+                    with self.assertRaises(desks.DeskError) as refused:
+                        dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old',
+                                            'sandbox': 'danger-full-access', 'add_dirs': [tmp]},
+                            'Draft for someone@example.test.',
+                            env={'HOME': tmp, 'CODEX_HOME': tmp,
+                                 'CARR_MCP_URL': 'https://other.example.test/mcp'}, **options)
+                    self.assertEqual(refused.exception.code, 'record_layer_unsupported')
+                run.assert_not_called()
+                popen.assert_not_called()
+                owner.assert_not_called()
+                if 'provider_run' in options:
+                    options['provider_run'].assert_not_called()
+                self.assertEqual(list(root.iterdir()), [])
+
     def test_grok_refuses_before_catalog_or_model_launch(self):
         run = Mock(return_value=subprocess.CompletedProcess([], 1, '', ''))
         with self.assertRaisesRegex(desks.DeskError, 'Grok.*MCP'):

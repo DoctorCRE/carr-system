@@ -3,7 +3,7 @@ from desks import DeskError, tool_posture
 
 REFUSALS = {
     'hermes-nous': 'Hermes configuration still merges inherited settings; hooks and plugins have no verified isolation profile',
-    'codex-session': 'Codex has no verified complete tool allowlist in this adapter; read-only still exposes non-CARR tools',
+    'codex-session': 'Codex has no verified CARR-only tool allowlist in this adapter; native apply_patch remains exposed through Code Mode with shell tools disabled and read-only sandboxing',
     'grok-cli': 'Grok has no verified strict MCP config override; --tools alone cannot exclude inherited MCP servers',
     'flash-local': 'Flash has no CARR MCP tool loop; its script and code routes cannot take record-layer work',
 }
