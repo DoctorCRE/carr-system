@@ -3043,6 +3043,11 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     only before promotion: the candidate source registers the required verb,
     so its continued absence after promotion always fails.
 
+    Cloudflare token rows block only for observed bad token or file states.
+    Unreachable and unverifiable rows stay in canonical health for watchdog
+    loops, including on Studio. They cannot excuse a later verified failure
+    through a matching baseline. Explicit hard_error rows still always fail.
+
     `excused` is every live finding whose key is on `HEALTH_REGRESSION_
     FIRST_APPEARANCE_ALLOWLIST` (`export_receipt`'s STALE variant,
     `job_missing_due`, `doctrine_stale`, and the two canonical main-lag
@@ -3098,8 +3103,13 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
     # PRIOR of the same rolling-ness, so a STALE->FAILED transition (or the
     # reverse) is a genuinely absent baseline entry for that row's own
     # (key, subject, time_rolling) identity, not a false match.
+    def cloudflare_warning(row: dict) -> bool:
+        return (row['key'] == 'cloudflare_token' and not row.get('hard_error')
+                and row.get('status') not in {'failed', 'missing', 'unreadable', 'expiring_soon',
+                                              'unsafe_file', 'insecure_permissions'})
+
     baseline_by_key_subject = {(row["key"], row["subject"], bool(row.get("time_rolling"))): row
-                               for row in baseline}
+                               for row in baseline if not cloudflare_warning(row)}
     bad: list[str] = []
     excused: list[str] = []
     for row in live:
@@ -3108,6 +3118,8 @@ def health_regression(baseline: list[dict], live: list[dict]) -> tuple[list[str]
         detail = row.get("detail", "")
         if row.get("hard_error"):
             bad.append(f"{row['key']}[{row['subject']}]: hard_error — {detail}")
+            continue
+        if cloudflare_warning(row):
             continue
         if row["key"] == "feature_switch_pending_deploy":
             bad.append(f"{row['key']}[{row['subject']}]: required verb still pending deploy after promotion — {detail}")
