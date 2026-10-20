@@ -186,6 +186,24 @@ class CheckoutDispatchTests(unittest.TestCase):
                                       results_path=self.results, env=self.env, checkout=target)
                 self.assertEqual(self.codex_calls, [])
 
+    def test_checkout_failure_records_one_result_before_raising(self):
+        with patch.object(dispatch.subprocess, 'run', side_effect=self.execute):
+            with self.assertRaisesRegex(desks.DeskError, 'origin clone failed') as error:
+                dispatch.dispatch('cx', 'repair', registry=self.reg,
+                                  results_path=self.results, env=self.env, checkout='missing-branch')
+        self.assertTrue(self.results.exists(), 'checkout failure must reach the sender results file')
+        rows = [json.loads(line) for line in self.results.read_text().splitlines()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['status'], 'failed')
+        self.assertEqual(rows[0]['code'], 'codex_checkout_failed')
+        self.assertEqual(rows[0]['detail'], str(error.exception))
+        self.assertEqual(rows[0]['desk'], 'cx')
+        self.assertEqual(rows[0]['task'], 'repair')
+        self.assertTrue(rows[0]['msg_id'])
+        self.assertTrue(rows[0]['termination_confirmed'])
+        self.assertEqual(self.codex_calls, [])
+        self.assertEqual(list(self.root.glob('room-codex-*')), [])
+
     def test_checkout_clones_canonical_origin_whatever_the_desk_cwd(self):
         # WR-000356: cx-app/cx-app2 sit in another repository (clone exit 128),
         # sol-fixer in a plain folder (origin lookup exit 128), and retired
