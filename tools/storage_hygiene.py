@@ -530,8 +530,10 @@ def recover_test_temp(pending, *, deadline):
     row = json.loads(manifest.read_text())
     staged = Path(row['staged_path'])
     if (row['path'] != str(source) or staged != manifest.parent / 'fixture' or
-            staged.resolve() != staged or row['status'] not in {'intent', 'staged', 'verified_no_effect'}):
+            staged.resolve() != staged or row['status'] not in {'intent', 'staged', 'verified_no_effect', 'removed'}):
         raise RuntimeError('interrupted fixture manifest mismatch')
+    if row['status'] == 'removed' and not os.path.lexists(source) and not os.path.lexists(staged):
+        return row
     if source.exists() == staged.exists():
         raise RuntimeError('interrupted fixture move is ambiguous')
     actual = staged if staged.exists() else source
@@ -636,9 +638,15 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                             save(target / 'manifest.json', {**row, 'status': 'verified_no_effect'})
                     report['budget_exhausted'] = deadline()
                 except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-                    row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
-                    report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
-                report['removed' if row['status'] == 'staged' else 'kept'].append(row)
+                    if (isinstance(exc, FileNotFoundError) and not os.path.lexists(path) and
+                            (target is None or not os.path.lexists(target / 'fixture'))):
+                        row.update(status='removed', reason='fixture already removed', allocated_bytes=0)
+                        if target is not None:
+                            save(target / 'manifest.json', row)
+                    else:
+                        row.update(status='kept', reason='fixture evidence or staging failed', error=type(exc).__name__)
+                        report['errors'].append({'kind': 'test_temp', 'error': type(exc).__name__})
+                report['removed' if row['status'] in {'staged', 'removed'} else 'kept'].append(row)
                 report['cursor'] = name
                 record(row)
                 if row.get('error'):

@@ -20,6 +20,103 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_already_removed_temp_receipt_recovers_after_interruption(self):
+        from unittest.mock import patch
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch = root / 'scratch'
+            scratch.mkdir()
+            candidate = scratch / 'carr-ci-test-race'
+            candidate.mkdir()
+            os.utime(candidate, (0, 0))
+            config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            def probe(paths):
+                if paths == [str(candidate)] and (scratch / '_to_delete').exists() and candidate.exists():
+                    candidate.rmdir()
+                return set()
+            options = dict(hook=None, tmp_root=root, user_tmp_root=scratch, roots={},
+                dispatch_path=root / 'absent', provider=object(), process_probe=probe,
+                archive_thread=lambda *a, **k: None)
+            import branch_retirement
+            save = branch_retirement.save
+            def interrupt(path, row):
+                save(path, row)
+                if path.name == 'manifest.json' and row.get('status') == 'removed':
+                    raise KeyboardInterrupt('fixture vanished receipt persisted')
+            with patch.object(branch_retirement, 'save', side_effect=interrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    machine_cleanup.run(root, config, **options)
+            self.assertIn('pending', json.loads((root / 'out/machine-cleanup.json').read_text()))
+            report = machine_cleanup.run(root, config, **options)
+            self.assertEqual(report['status'], 'completed', report)
+            self.assertFalse(report['errors'], report)
+            self.assertNotIn('pending', report)
+            self.assertTrue(any(row['status'] == 'removed' for row in report['removed']), report)
+
+    def test_missing_child_during_staged_verification_stays_failed_and_recoverable(self):
+        from unittest.mock import patch
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-preserve'
+            candidate.mkdir()
+            (candidate / 'payload').write_text('retained bytes')
+            for path in (candidate / 'payload', candidate):
+                os.utime(path, (0, 0))
+            lstat = Path.lstat
+            def missing_child(path, *args, **kwargs):
+                if path.name == 'payload' and '_to_delete' in path.parts:
+                    raise FileNotFoundError('fixture child evidence unavailable')
+                return lstat(path, *args, **kwargs)
+            config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            with patch.object(Path, 'lstat', missing_child):
+                report = machine_cleanup.run(root, config, hook=None, tmp_root=root, user_tmp_root=root,
+                    roots={}, dispatch_path=root / 'absent', provider=object(),
+                    process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+            self.assertEqual(report['status'], 'failed', report)
+            self.assertEqual(report['errors'][0]['error'], 'FileNotFoundError')
+            self.assertIn('pending', report)
+            staged = Path(report['pending']['staged_path'])
+            self.assertEqual((staged / 'payload').read_text(), 'retained bytes')
+
+    def test_clone_readback_timeout_reconciles_move_or_preserves_pending(self):
+        from unittest.mock import patch
+        import job_watchdog
+        import subprocess
+        for persistent in (False, True):
+            with self.subTest(persistent=persistent):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-readback'
+                workspace.mkdir()
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', 'main', cwd=clone)
+                ledger = fixture.base / 'dispatch.jsonl'
+                ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                    'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+                run_command, attempts = subprocess.run, []
+                def timeout(args, **kwargs):
+                    if 'rev-parse' in args and any('/workspace/checkout' in str(arg) for arg in args):
+                        attempts.append(args)
+                        if persistent or len(attempts) == 1:
+                            raise subprocess.TimeoutExpired(args, 120)
+                    return run_command(args, **kwargs)
+                config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                with patch.object(subprocess, 'run', side_effect=timeout):
+                    report = machine_cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=fixture.base,
+                        dispatch_path=ledger, roots={}, provider=fixtures.FakeProvider(),
+                        process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+                self.assertFalse(workspace.exists())
+                manifests = list((fixture.base / '_to_delete').glob('*/manifest.json'))
+                self.assertEqual(len(manifests), 1)
+                manifest = json.loads(manifests[0].read_text())
+                self.assertEqual((Path(manifest['staged_path']) / 'checkout/file').read_text(), 'initial\n')
+                self.assertEqual(report['status'], 'failed' if persistent else 'completed', report)
+                self.assertEqual('pending' in report, persistent)
+                self.assertEqual(bool(report['errors']), persistent)
+                self.assertEqual(manifest['status'], 'intent' if persistent else 'staged')
+
     def test_interrupted_temp_effect_is_reconciled_in_next_receipt(self):
         from unittest.mock import patch
         import job_watchdog

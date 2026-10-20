@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 import uuid
 
@@ -100,6 +101,15 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         if receipt is not None:
             save(target / 'manifest.json', {**receipt, 'status': 'verified_no_effect'})
         return {**keep('cleanup time budget exhausted before move'), 'budget_exhausted': True}
+    except subprocess.TimeoutExpired:
+        if receipt is not None:
+            try:
+                recovered = recover_clone(workspace, deadline=deadline)
+            except Exception as exc:
+                return {**keep('timed out staging requires recovery'), 'error': type(exc).__name__}
+            if recovered:
+                return recovered
+        return {**result, 'status': 'deferred', 'reason': 'clone command time budget exhausted; retry next pass'}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
@@ -266,7 +276,9 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         def record(row):
             if row.get('kind') == 'test_temp' and row.get('status') == 'staged':
                 report['temp_staged_allocated_bytes'] += row['allocated_bytes']
-            report['removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept'].append(row)
+            slot = ('deferred' if row.get('status') == 'deferred' else
+                    'removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept')
+            report[slot].append(row)
             if row.get('error'):
                 report['errors'].append({'kind': row['kind'], 'error': row['error']})
             if not row.get('error'):
@@ -405,7 +417,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     else:
                         cursor['thread_offset'] = stream.tell()
                         save(cursor_path, cursor)
-        report['status'] = 'failed' if report['errors'] else 'deferred' if report['deferred'] else 'completed'
+        incomplete_worktrees = any(row.get('kind') != 'job_clone' for row in report['deferred'])
+        report['status'] = 'failed' if report['errors'] else 'deferred' if incomplete_worktrees else 'completed'
         report['budget_exhausted'] |= time.monotonic() >= deadline
         if report['status'] == 'completed' and not dry_run:
             report['last_success_at'] = now
