@@ -47,11 +47,6 @@ export function installReleaseReceiptSnapshot(entries) {
   return SNAPSHOT.size;
 }
 
-/** How many receipts the snapshot holds. A proof that nothing was installed. */
-export function releaseReceiptSnapshotSize() {
-  return SNAPSHOT.size;
-}
-
 function deepFreeze(value) {
   if (Array.isArray(value)) { value.forEach(deepFreeze); return Object.freeze(value); }
   if (value !== null && typeof value === "object") {

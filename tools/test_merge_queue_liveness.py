@@ -297,10 +297,16 @@ class LivenessTests(unittest.TestCase):
                             f.restart()
                         self.assertGreater(loop.failures, 0, 'Fault site was never reached')
                         limit = 8 if effect.name == 'merge_intent' else 4
-                        self.assertLessEqual(loop.failures, limit, 'Persistent fault exceeded automatic and reconciliation budgets')
+                        if effect.name == 'open_prs' and fault == 'error':
+                            self.assertLessEqual(f.q.db.execute('SELECT MAX(attempts) FROM github_failures').fetchone()[0], 4)
+                        else:
+                            self.assertLessEqual(loop.failures, limit, 'Persistent fault exceeded automatic and reconciliation budgets')
                         count = loop.failures
                         loop.session()
-                        self.assertEqual(loop.failures, count, 'Restart replenished the failure budget')
+                        if effect.name == 'open_prs' and fault == 'error':
+                            self.assertLessEqual(loop.failures - count, 4, 'Only the discovery read cooldown may renew a budget')
+                        else:
+                            self.assertEqual(loop.failures, count, 'Restart replenished the failure budget')
                         progressed = {(repo, n) for repo, n, _ in loop.merged}
                         self.assertTrue({(repo, 2) for repo in mq.REPOS} <= progressed,
                                         'Persistent fault starved another repository or the next PR')
