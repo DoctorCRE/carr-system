@@ -329,6 +329,7 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
         else:
             stdout, stderr = proc.communicate(timeout=timeout)
     except BaseException as exc:
+        cleanup_deadline = time.monotonic() + 2
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -344,7 +345,11 @@ def _run_headless_process(argv, env, timeout, on_executor, stream_output, **opti
             if reader is not None:
                 reader.join(timeout=2)
                 exc.output = ''.join(chunks)
-            exc.termination_confirmed = write_ownership.process_terminated(identity, group=True)
+            while not (confirmed := write_ownership.process_terminated(identity, group=True)):
+                if time.monotonic() >= cleanup_deadline:
+                    break
+                time.sleep(0.01)
+            exc.termination_confirmed = confirmed
         raise
     finally:
         if reader is None or not reader.is_alive():
