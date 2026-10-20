@@ -639,7 +639,7 @@ test("undo waits for a same-field writer and refuses its newer committed edit", 
   let signalLockQueued;
   const lockQueued = new Promise(resolve => { signalLockQueued = resolve; });
   db.query = async (sql, params = []) => {
-    if (sql.includes("dealroom:field-lock")) {
+    if (sql.includes("dealroom:field-lock") && params[1] === "phase") {
       if (fieldLocked) {
         signalLockQueued();
         await new Promise(resolve => { nextLock = resolve; });
@@ -687,7 +687,7 @@ test("undo follows a stale patch that records a conflict against its target even
   const lockQueued = new Promise(resolve => { signalLockQueued = resolve; });
   let fieldLocked = false;
   db.query = async (sql, params = []) => {
-    if (sql.includes("dealroom:field-lock")) {
+    if (sql.includes("dealroom:field-lock") && params[1] === "phase") {
       if (fieldLocked) {
         signalLockQueued();
         await new Promise(resolve => { releaseLock = resolve; });
