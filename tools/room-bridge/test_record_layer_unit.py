@@ -24,40 +24,51 @@ class WireTests(unittest.TestCase):
                     'Read the record.', env={}, run=run, results_path='unused', run_id='unused')
         self.assertEqual((run.call_args_list, ledger.call_args_list), ([], []))
 
-    def test_codex_refuses_before_desktop_resume_or_exec(self):
-        with patch.object(dispatch.subprocess, 'run') as run, patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
-            with self.assertRaisesRegex(desks.DeskError, 'Codex.*tool') as refused:
-                dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old'}, 'Read the record.',
-                                   env={}, live_desktop=True)
-        run.assert_not_called()
+    def test_codex_executes_a_fresh_confined_business_run(self):
+        calls = []
+        def run(argv, **options):
+            calls.append((argv, options))
+            home = Path(options['env']['HOME'])
+            codex_home = Path(options['env']['CODEX_HOME'])
+            self.assertTrue(home.is_dir() and codex_home.is_dir())
+            self.assertNotEqual(home, codex_home)
+            self.assertEqual(list(codex_home.iterdir()), [])
+            self.assertNotIn('UNRELATED_SECRET', options['env'])
+            if argv[1] == 'sandbox':
+                self.assertNotIn('someone@example.test', ' '.join(argv))
+                return subprocess.CompletedProcess(argv, 0,
+                    '{"file_write":"denied","network":"denied"}', '')
+            self.assertEqual(argv[:2], ['codex', 'exec'])
+            for flag in ('--ignore-user-config', '--ignore-rules', '--ephemeral', '--skip-git-repo-check'):
+                self.assertIn(flag, argv)
+            self.assertEqual(argv[argv.index('--sandbox') + 1], 'read-only')
+            self.assertNotIn('resume', argv)
+            self.assertNotIn('--add-dir', argv)
+            self.assertEqual(list(Path(options['cwd']).iterdir()), [])
+            self.assertEqual(options['cwd'], argv[argv.index('-C') + 1])
+            config = dict(arg.split('=', 1) for arg in argv if '=' in arg)
+            self.assertEqual(config['sandbox_workspace_write.network_access'], 'false')
+            self.assertEqual(json.loads(config['approval_policy']), 'never')
+            mcp = json.loads(config['mcp_servers.carr.url'])
+            self.assertEqual(mcp, dispatch.claude_desktop_wire.CARR_MCP_URL)
+            self.assertIn('mcp_servers.carr.required=true', argv)
+            self.assertIn('Draft for someone@example.test.', argv[-1])
+            events = [{'type': 'item.completed', 'item': {
+                'type': 'agent_message', 'text': 'Synthetic business reply.'}}, {'type': 'turn.completed'}]
+            return subprocess.CompletedProcess(argv, 0, '\n'.join(map(json.dumps, events)), '')
+        with patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
+            result = dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old',
+                'model': 'gpt-6.1-sol', 'effort': 'medium', 'cwd': '/ignored',
+                'sandbox': 'danger-full-access', 'add_dirs': ['/ignored']},
+                'Draft for someone@example.test.', env={'PATH': '/usr/bin',
+                    'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic',
+                    'UNRELATED_SECRET': 'must-not-inherit'}, live_desktop=True, provider_run=run)
         owner.assert_not_called()
-        self.assertEqual(refused.exception.code, 'record_layer_unsupported')
-        self.assertIn('CARR-only tool allowlist', str(refused.exception))
-        self.assertIn('apply_patch', str(refused.exception))
-        self.assertIn('Code Mode', str(refused.exception))
-
-    def test_codex_launch_options_cannot_bypass_record_layer_refusal(self):
-        for options in ({'fresh': True}, {'live_desktop': True},
-                        {'config_overrides': ('features.shell_tool=false',)},
-                        {'provider_run': Mock()}, {'stream_output': True}):
-            with self.subTest(options=options), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                with patch.object(dispatch.subprocess, 'run') as run, \
-                        patch.object(dispatch.subprocess, 'Popen') as popen, \
-                        patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
-                    with self.assertRaises(desks.DeskError) as refused:
-                        dispatch._to_codex({'posture': 'record-layer', 'thread_id': 'old',
-                                            'sandbox': 'danger-full-access', 'add_dirs': [tmp]},
-                            'Draft for someone@example.test.',
-                            env={'HOME': tmp, 'CODEX_HOME': tmp,
-                                 'CARR_MCP_URL': 'https://other.example.test/mcp'}, **options)
-                    self.assertEqual(refused.exception.code, 'record_layer_unsupported')
-                run.assert_not_called()
-                popen.assert_not_called()
-                owner.assert_not_called()
-                if 'provider_run' in options:
-                    options['provider_run'].assert_not_called()
-                self.assertEqual(list(root.iterdir()), [])
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['result'], 'Synthetic business reply.')
+        self.assertEqual(result['canaries'], {'file_write': 'denied', 'network': 'denied'})
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(Path(calls[0][1]['env']['HOME']).exists())
 
     def test_grok_refuses_before_catalog_or_model_launch(self):
         run = Mock(return_value=subprocess.CompletedProcess([], 1, '', ''))
