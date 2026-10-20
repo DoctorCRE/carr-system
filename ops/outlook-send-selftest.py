@@ -479,6 +479,8 @@ class SendTests(unittest.TestCase):
         h.handler = 'com.example.browser'
         self.assertEqual(h.send().state, State.DONE)
         self.assertEqual(h.fake.presses(), 1)
+        self.assertTrue(any(tool == 'click' and args.get('element_token') == '1:1'
+                            for tool, args in h.fake.calls))
 
     def test_existing_compose_is_left_untouched(self):
         h = Harness(self.out)
