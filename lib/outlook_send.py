@@ -9,12 +9,13 @@ cua-driver accessibility CLI (lib/outlook_ui.py). One call is one item:
    the last 24 hours; same subject and start for an event).
 2. Open the compose or event form, fill it, and read every field back. Any
    mismatch discards the form.
-3. Write the key to the ledger as "pressing", then press Send or Save exactly
-   once. The press needs the window in front, so it waits for Joe to have been
-   idle for five minutes and gives the front back to the app that had it.
+3. Write the key to the ledger as "pressing", then press Send or Save once.
+   Try background AX first. Only an explicit pre-dispatch background refusal
+   permits front fallback, after a fresh five-minute idle check. Restore focus.
 4. Confirm the window closed, then confirm the item in a fresh decode of the
    mailbox. Anything short of that is a distinct result that is never retried.
-5. Log the item to the named CARR record with log-activity.
+5. Log to the named or exact-recipient-matched CARR records with log-activity.
+   Report unmatched records and failed logs separately from mailbox confirmation.
 
 Nothing with an address, a subject or a body reaches stdout, the run row or a
 launchd log; the ledger holds keys, states and a fingerprint only.
@@ -323,9 +324,9 @@ def _write(item: Mail | Event, key: str, ports: Ports, ledger: Ledger) -> Result
     pressed_at = ports.now()
     try:
         mode = form.press()
-    except UiFailure as exc:
+    except (UiFailure, ui.CuaError, OSError, subprocess.TimeoutExpired):
         mode = None
-        reason = str(exc)
+        reason = 'press_outcome_unknown'
     else:
         reason = 'pressed'
     if not _wait(form.closed, ports.close_seconds, ports):

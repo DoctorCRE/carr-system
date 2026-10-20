@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 import stat
+import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -495,6 +497,54 @@ class SendTests(unittest.TestCase):
     def test_vendor_reference_is_accepted(self):
         h = Harness(self.out)
         self.assertEqual(h.send(record='V-CPA-001').logged, ('V-CPA-001',))
+
+    def test_decoder_reads_only_sent_items_and_removes_private_copy(self):
+        home = Path(self.tmp.name)
+        vendor = home / 'carr-local/hxstore-reverse-engineering'
+        vendor.mkdir(parents=True)
+        (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
+        store = home / send_mod.DecodedMailbox.STORE
+        store.parent.mkdir(parents=True)
+        store.write_bytes(b'fixture-store')
+        def decode(command, **kwargs):
+            self.assertEqual(Path(command[2]).read_bytes(), b'fixture-store')
+            self.assertEqual(stat.S_IMODE(Path(command[2]).stat().st_mode), 0o600)
+            con = sqlite3.connect(command[3])
+            con.executescript("""
+                CREATE TABLE messages(id, sender, recipients, subject, sent_unix);
+                CREATE TABLE message_folders(message_id, folder_id);
+                CREATE TABLE folders(id, name);
+                CREATE TABLE events(subject, start_unix);
+                INSERT INTO folders VALUES(1, 'Sent Items'), (2, 'Drafts');
+                INSERT INTO messages VALUES(1, 'sender@example.test', 'person-a@example.test', 'sent-001', 1800000000),
+                    (2, 'sender@example.test', 'person-a@example.test', 'draft-001', 1800000000);
+                INSERT INTO message_folders VALUES(1, 1), (2, 2);
+                INSERT INTO events VALUES('event-001', 1893596400);
+            """)
+            con.close()
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(send_mod.subprocess, 'run', decode):
+            snap = send_mod.DecodedMailbox(home, home).snapshot()
+        self.assertEqual([m.subject for m in snap.sent], ['sent-001'])
+        self.assertEqual(snap.events, (EventRow('event-001', 1893596400),))
+        self.assertEqual(list((home / send_mod.OUT).iterdir()), [])
+        self.assertEqual(store.read_bytes(), b'fixture-store')
+
+    def test_decoder_refuses_an_unpinned_build(self):
+        home = Path(self.tmp.name)
+        vendor = home / 'carr-local/hxstore-reverse-engineering'
+        vendor.mkdir(parents=True)
+        (vendor / '.carr-pin').write_text('wrong-pin')
+        with patch.object(send_mod.subprocess, 'run') as decoder:
+            with self.assertRaises(send_mod.UiFailure):
+                send_mod.DecodedMailbox(home, home).snapshot()
+            decoder.assert_not_called()
+
+    def test_transport_exception_after_latching_key_is_not_retried(self):
+        h = Harness(self.out)
+        with patch.object(send_mod.ComposeWindow, 'press', side_effect=ui.CuaError('lost reply')):
+            self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+        self.assertEqual(h.send().state, State.DUPLICATE_KEY)
 
     def test_status_line_carries_no_address_or_subject(self):
         result = Harness(self.out).send(record='client-001')
