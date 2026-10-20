@@ -783,6 +783,39 @@ class QueueTests(unittest.TestCase):
                                          (self.updated,)).fetchone()[0], 'waiting_ci')
         self.assertEqual(self.calls('merge'), [])
 
+    def test_hold_after_lost_regeneration_response_requires_manual_repin(self):
+        card_id = self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text() + 'raise SystemExit("response lost after push")\n')
+        self.q.tick()
+        action = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen'").fetchone())
+        receipt = Path(action['receipt']).read_text()
+        self.load()
+        self.pr(head=self.updated, held=True)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'needs_repin'))
+        event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC',
+                                  (row['id'],)).fetchone()
+        self.assertIn('held_during_regeneration', event['detail'])
+        self.load()
+        self.pr(head=self.updated)
+        self.q.reconcile_action(action['key'], retry=True)
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+            work.update(card_id, actor='human', reason='verified prepared head; manual re-pin', prs=[
+                dict(repo=module.REPOS[0], number=1, head=self.updated)])
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        retained = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen'").fetchone())
+        self.assertEqual((retained['phase'], retained['attempts']), ('done', 1))
+        self.assertEqual(Path(retained['receipt']).read_text(), receipt)
+        self.assertEqual(self.calls('merge'), [])
+
     def test_foreign_push_after_regeneration_does_not_advance_pin(self):
         card_id = self.prepare_pinned_head()
         self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
