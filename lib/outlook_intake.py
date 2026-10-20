@@ -77,7 +77,6 @@ UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
-MODEL_ATTEMPTS = 3
 MODEL_BODY_CHARS = 12_000
 BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
 
@@ -359,10 +358,11 @@ class Run:
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'steps_abandoned', 'writes_failed')}
+                                      'model_failed', 'steps_pending', 'writes_failed')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str]] = set()
         self.balls: dict[str, int] = {}
+        self.attempted: set[str] = set()
 
     def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
         requests = self.state.setdefault('requests', {})
@@ -371,6 +371,9 @@ class Run:
             'created_at': int(self.now.timestamp())})
         _save(self.out, self.state)
         if not request['acknowledged']:
+            if args['idempotency_key'] in self.attempted:
+                return False
+            self.attempted.add(args['idempotency_key'])
             try:
                 reply = self.ports.carr(request['verb'], json.loads(request['payload']))
                 if reply.get('ok') is not True:
@@ -461,7 +464,7 @@ class Run:
             if not m['full']:
                 self.counts['preview_only'] += 1
             steps[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0], 'who': who,
-                                 'outbound': outbound, 'attempts': 0}
+                                 'outbound': outbound}
 
     def next_steps(self, mails: list[dict]) -> None:
         """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
@@ -470,21 +473,20 @@ class Run:
         for m in mails:
             by_ck.setdefault(m['ck'], []).append(m)
         for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
-            found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
-            if not found:
-                del steps[ident]
-                self.counts['steps_abandoned'] += 1
-                continue
-            m = {**found[0], 'outbound': s['outbound']}
-            s['attempts'] += 1
-            try:
-                reply = parse_reply({'is_error': False, 'structured_output': self.ports.next_step(m, self.today)})
-            except Exception:
-                self.counts['model_failed'] += 1
-                if s['attempts'] >= MODEL_ATTEMPTS:
-                    del steps[ident]
-                    self.counts['steps_abandoned'] += 1
-                continue
+            if 'reply' not in s:
+                found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
+                if not found:
+                    self.counts['steps_pending'] += 1
+                    continue
+                m = {**found[0], 'outbound': s['outbound']}
+                try:
+                    reply = parse_reply({'is_error': False, 'structured_output': self.ports.next_step(m, self.today)})
+                except Exception:
+                    self.counts['model_failed'] += 1
+                    continue
+                s['reply'] = {**reply, 'due_on': reply['due_on'] or self.today.isoformat()}
+                _save(self.out, self.state)
+            reply = s['reply']
             if not reply['next_step'] or self.ball(
                     s['ref'], s['who'], reply['next_step'], reply['due_on'] or self.today.isoformat(),
                     s['sent'], f'next|{ident}'):
@@ -592,6 +594,8 @@ def _prune(state: dict, now: datetime) -> None:
     horizon = now.timestamp() - (BACKFILL + UPCOMING).total_seconds() - 2 * COPY_WINDOW
     state['mail_done'] = {ck: ts for ck, ts in ((ck, [t for t in v if t >= horizon])
                                                  for ck, v in state.get('mail_done', {}).items()) if ts}
+    state['requests'] = {k: r for k, r in state.get('requests', {}).items()
+                         if not r['acknowledged'] or r['created_at'] >= horizon}
     for name in ('events_logged', 'events_balled'):
         state[name] = {k: t for k, t in state.get(name, {}).items() if t >= horizon}
 
@@ -641,7 +645,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     info = store.stat()
     signature = [info.st_mtime_ns, info.st_size]
     now = ports.now()
-    if state.get('store') == signature and not _calendar_due(state, now):
+    pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
+    if state.get('store') == signature and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
         return Outcome('succeeded', 'store_unchanged')
     try:
         meta, mails, events = _decode(store, out, ports.decode)
@@ -658,6 +663,9 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     mails = _best_copies(mails)
     work = Run(ports, state, now, out)
     try:
+        for request in list(state.get('requests', {}).values()):
+            if not request['acknowledged']:
+                work.write(request['verb'], json.loads(request['payload']), 'pending write')
         matcher = Matcher(ports.contacts(), ports.carr)
         work.emails(mails, matcher, since)
         work.full_text(mails)
@@ -670,7 +678,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if any(work.counts.values()) or work.written:
         work.report(out, refresh)
     counts = {**work.counts, 'needs_refresh_listed': refresh}
-    failed = 'writes_failed' if work.counts['writes_failed'] else 'model_failed' if work.counts['model_failed'] else None
+    failed = 'writes_failed' if work.counts['writes_failed'] else 'model_failed' if work.counts['model_failed'] else 'steps_pending' if state.get('steps') else None
     if failed:
         _save(out, state)
         return Outcome('failed', failed, counts)
