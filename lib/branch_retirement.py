@@ -566,13 +566,16 @@ class FleetReaper:
         save(target / "manifest.json", manifest)
         # Hashing large orphan files can take time. Probe again immediately
         # before the move so a session starting during verification wins.
-        busy = self.process_probe([str(path)])
-        if busy is None or str(path) in busy or self.ownership_probe(path) != row["ownership"] or \
-                git(path, "status", "--porcelain=v1", "--untracked-files=all") != row["status"] or \
-                self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
-                self.tree_fresh(path):
-            raise RuntimeError("worktree became live before move; preserve it")
+        def verify_idle():
+            busy = self.process_probe([str(path)])
+            if busy is None or str(path) in busy or self.ownership_probe(path) != row["ownership"] or \
+                    git(path, "status", "--porcelain=v1", "--untracked-files=all") != row["status"] or \
+                    self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
+                    self.tree_fresh(path):
+                raise RuntimeError("worktree became live before move; preserve it")
+        verify_idle()
         fetch_remote_refs(root)
+        verify_idle()
         if not remote_preserves(path, row["head"]):
             return {"status": "preserved", "reason": "remote preservation changed before staging"}
         git(root, "worktree", "move", str(path), str(target / "worktree"))
