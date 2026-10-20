@@ -137,6 +137,63 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal((await c.query('select active from deal_vendor_assignment where party_id=$1',[id(20)])).rows[0].active,false);
     }));
 
+    for (const scenario of ['duplicate vendor calls','company and contact vendor writes']) {
+      await t.test(`concurrent ${scenario} finish without a database deadlock`, {timeout:10000}, async () => {
+        const entry = await assignmentFixture();
+        await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)", [id(24),id(20),actor.id]);
+        const peers = [new pg.Client(connection),new pg.Client(connection)];
+        let release;
+        const paused = new Promise(resolve => { release=resolve; });
+        let reached;
+        const ready = new Promise(resolve => { reached=resolve; });
+        try {
+          await Promise.all(peers.map(peer=>peer.connect()));
+          for (const peer of peers) await peer.query("begin; set local deadlock_timeout='50ms'; set local statement_timeout='5s'");
+          const query = peers[0].query.bind(peers[0]);
+          let held = false;
+          peers[0].query = async (sql,values) => {
+            const result = await query(sql,values);
+            const pause = scenario==='duplicate vendor calls' ? /for update/i : /for update of p|select id from public.party/i;
+            if (!held && pause.test(sql)) { held=true; reached(); await paused; }
+            return result;
+          };
+          const run = async (peer,index) => {
+            try {
+              let result;
+              if (scenario==='duplicate vendor calls') {
+                const {deal_id,...fields} = entry;
+                result = await TOOLS['log-activity'].handler(peer,actor,{ref:deal_id,kind:'call',summary:'Synthetic concurrent assignment',idempotency_key:randomUUID(),
+                  vendor_assignments:[22+index,23-index].map((n,i)=>({...fields,role:i?'attorney':'lender',vendor_id:id(n),base_version:1,assignment_base_version:1}))});
+              } else {
+                result = await TOOLS['update-vendor'].handler(peer,actor,{vendor:id(index?22:24),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),
+                  fields:{deal_assignments:[{...entry,role:index?'attorney':'lender'}]}});
+              }
+              await peer.query('commit');
+              return result;
+            } catch (error) { await peer.query('rollback'); return {error}; }
+          };
+          const first = run(peers[0],0);
+          await ready;
+          const second = run(peers[1],1);
+          let blocked=false;
+          for (let attempt=0;attempt<200;attempt++) {
+            blocked=(await c.query('select cardinality(pg_blocking_pids($1))>0 blocked',[peers[1].processID])).rows[0].blocked;
+            if(blocked) break;
+            await new Promise(resolve=>setTimeout(resolve,5));
+          }
+          release();
+          const results = await Promise.all([first,second]);
+          assert.equal(blocked,true,'second writer reaches the contested database locks');
+          assert.ok(results.some(result=>result.ok),'one concurrent writer succeeds');
+          for (const result of results) if(result.error) assert.equal(result.error.payload?.error,'version_conflict',result.error.code || result.error.message);
+        } finally {
+          release?.();
+          await Promise.all(peers.map(peer=>peer.end()));
+          await c.query('truncate deal_vendor_assignment,activity,event,tool_call,vendor,deal,client,party');
+        }
+      });
+    }
+
     await t.test('stale duplicate vendor rows cannot overwrite shared party assignments', async () => transaction(async () => {
       const entry = await assignmentFixture();
       const update = (vendor, note) => TOOLS['update-vendor'].handler(c,actor,{
