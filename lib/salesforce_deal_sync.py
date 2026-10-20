@@ -4,6 +4,8 @@ import csv
 import argparse
 import datetime as dt
 from collections import Counter
+from collections.abc import Callable
+from typing import Any
 import hashlib
 import io
 import json
@@ -33,7 +35,7 @@ def sfid(value):
     return value[:15] if value else None
 
 
-def fingerprint(value):
+def fingerprint(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -82,7 +84,8 @@ def read_report(report, expected_count):
     return rows
 
 
-def build_plan(report, *, deals, clients, as_of, expected_count):
+def build_plan(report: str, *, deals: list[dict[str, Any]], clients: list[dict[str, Any]],
+               as_of: dt.date, expected_count: int) -> dict[str, Any]:
     rows = read_report(report, expected_count)
     items = []
     for row in rows:
@@ -97,10 +100,7 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
         if (stage.startswith("closed") or stage == "fully closed out") and row["close_date"] and dt.date.fromisoformat(row["close_date"]) < as_of - dt.timedelta(days=90):
             item.update(kind="out_of_scope", reason="closed_before_window")
             continue
-        if stage == "closed lost":
-            item.update(kind="held", reason="lost_status_contract_required")
-            continue
-        if stage not in STAGES or owner is None or (stage.startswith("closed") and (stage == "closed" or not row["close_date"])):
+        if (stage not in STAGES and stage != "closed lost") or owner is None or (stage.startswith("closed") and (stage == "closed" or not row["close_date"])):
             item.update(kind="held", reason="unmapped_stage_owner_or_close_date")
             continue
         matches = [d for d in deals if sfid(d.get("salesforce_id")) == sfid(sid)]
@@ -123,13 +123,19 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
             if client_name != norm(row["client"]):
                 item.update(kind="held", reason="client_conflict")
                 continue
-        fields = {"phase": STAGES[stage], "salesforce_id": sid}
+        fields = {"salesforce_id": sid}
+        if stage != "closed lost":
+            fields["phase"] = STAGES[stage]
+        elif match is None:
+            fields["phase"] = "pending"
         if row["close_date"]:
             fields["sf_close_date_placeholder"] = row["close_date"]
-        if stage in ("closed won", "fully closed out"):
-            fields["outcome"] = "won"
+        if stage in ("closed won", "fully closed out", "closed lost"):
+            fields["outcome"] = "lost" if stage == "closed lost" else "won"
         if match and (match.get("phase") == "closed" or match.get("outcome") in ("won", "lost")):
-            if fields["phase"] != "closed" or (match.get("outcome") in ("won", "lost") and fields.get("outcome") != match["outcome"]):
+            if ((stage == "closed lost" and match.get("outcome") != "lost") or
+                    (stage != "closed lost" and (fields.get("phase") != "closed" or
+                     (match.get("outcome") in ("won", "lost") and fields.get("outcome") != match["outcome"])))):
                 item.update(kind="held", reason="closed_state_conflict")
                 continue
         item.update(kind="update" if match else "create", owner=owner, fields=fields)
@@ -161,14 +167,15 @@ def build_plan(report, *, deals, clients, as_of, expected_count):
     return result
 
 
-def read_snapshot(call_verb):
+def read_snapshot(call_verb: Callable[[str, dict[str, Any]], dict[str, Any]]) -> list[dict[str, Any]]:
     result = call_verb("read-deal-reconciliation", {"all": True})
     if not isinstance(result, dict) or not isinstance(result.get("deals"), list):
         raise ValueError("sync_snapshot_contract_unavailable")
     return result["deals"]
 
 
-def apply_plan(plan, call_verb, journal_path):
+def apply_plan(plan: dict[str, Any], call_verb: Callable[[str, dict[str, Any]], dict[str, Any]],
+               journal_path: Path) -> dict[str, Any]:
     if plan.get("schema") != "salesforce-deal-sync.v3" or plan.get("plan_digest") != fingerprint({k: v for k, v in plan.items() if k != "plan_digest"}):
         raise ValueError("plan_changed_run_dry_run_again")
     current = read_snapshot(call_verb)
@@ -204,7 +211,7 @@ def apply_plan(plan, call_verb, journal_path):
         verified = 0
         for item in work:
             prior = next((d for d in current if d["id"] == item.get("deal")), None)
-            if item["kind"] == "update" and prior != original[item["deal"]]:
+            if item["kind"] == "update" and (prior is None or prior != original[item["deal"]]):
                 raise ValueError("deal_changed_during_apply_check_receipts")
             if item["kind"] == "create":
                 fields = {k: v for k, v in item["fields"].items() if k != "outcome"}
@@ -212,6 +219,7 @@ def apply_plan(plan, call_verb, journal_path):
                                  "deal_type": "other", **fields, "reason": "Salesforce report reconciliation"})
                 deal_id = response["deal_id"]
             else:
+                assert prior is not None
                 deal_id = item["deal"]
                 if item["fields"]:
                     write("update-deal", {"deal": deal_id, "base_version": prior["base_version"],

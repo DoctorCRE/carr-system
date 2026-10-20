@@ -72,6 +72,161 @@ spec.loader.exec_module(fixtures)
 
 
 class RetirementKeepTests(unittest.TestCase):
+    def test_slow_recovery_ledger_stops_without_effects(self):
+        import branch_retirement as retirement
+        fixture = fixtures.Fixture()
+        ledger = fixture.repo / 'out/orch/branch-janitor-actions.jsonl'
+        ledger.parent.mkdir(parents=True)
+        event = {'candidate': {'repo': 'fixture/repo', 'kind': 'worktree',
+            'path': 'untouched', 'head': 'abc'}, 'status': 'verified_no_effect'}
+        ledger.write_text((json.dumps(event) + '\n') * 5)
+        before = ledger.read_bytes()
+        elapsed = [0.0]
+        loads = json.loads
+        def slow_loads(value, *args, **kwargs):
+            row = loads(value, *args, **kwargs)
+            if isinstance(row, dict) and 'candidate' in row:
+                elapsed[0] += 60
+            return row
+        with patch.object(retirement.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(retirement.json, 'loads', side_effect=slow_loads):
+            report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True,
+                local_only=True, max_seconds=240)
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['actions'], report)
+        self.assertEqual(ledger.read_bytes(), before)
+
+    def test_slow_untracked_content_stops_before_next_read(self):
+        import branch_retirement as retirement
+        from lib.cleanup_budget import BudgetExhausted
+        fixture = fixtures.Fixture()
+        tree = fixture.tree('slow-content')
+        payload = tree / 'orphan'
+        payload.write_bytes(b'x' * 65536 * 5)
+        before = payload.read_bytes()
+        elapsed = [0.0]
+        real_open = Path.open
+        class SlowRead:
+            def __init__(self, stream):
+                self.stream = stream
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.stream.close()
+            def read(self, size):
+                elapsed[0] += 60
+                return self.stream.read(size)
+        def open_file(path, *args, **kwargs):
+            stream = real_open(path, *args, **kwargs)
+            return SlowRead(stream) if path == payload and args == ('rb',) else stream
+        reaper = fixture.reaper()
+        reaper.deadline = lambda: elapsed[0] >= 240
+        with patch.object(Path, 'open', open_file):
+            with self.assertRaises(BudgetExhausted):
+                reaper.work_content(tree, deadline=reaper.deadline)
+        self.assertLessEqual(elapsed[0], 240)
+        self.assertEqual(payload.read_bytes(), before)
+
+    def test_expiry_at_final_worktree_probe_performs_no_move(self):
+        import branch_retirement as retirement
+        fixture = fixtures.Fixture()
+        tree = fixture.tree('before-move')
+        elapsed, reads = [0.0], [0]
+        real_age = fixtures.hook.index_age_s
+        def final_read(path):
+            age = real_age(path)
+            if path == str(tree):
+                reads[0] += 1
+                if reads[0] == 3:
+                    elapsed[0] = 240
+            return age
+        with patch.object(retirement.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(fixtures.hook, 'index_age_s', side_effect=final_read):
+            report = fixture.reaper().run({'fixture/repo': fixture.repo},
+                execute=True, local_only=True, max_seconds=240)
+        self.assertTrue(tree.exists(), report)
+        self.assertEqual((tree / 'file').read_text(), 'initial\n')
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['actions'], report)
+        ledger = fixture.repo / 'out/orch/branch-janitor-actions.jsonl'
+        self.assertEqual(json.loads(ledger.read_text().splitlines()[-1])['status'], 'verified_no_effect')
+
+    def test_slow_nested_tree_reads_stop_at_deadline(self):
+        import branch_retirement as retirement
+        fixture = fixtures.Fixture()
+        tree = fixture.tree('nested')
+        for index in range(5):
+            (tree / f'directory-{index}').mkdir()
+        elapsed = [0.0]
+        real_scandir = os.scandir
+        def scan(path):
+            if not isinstance(path, int) and Path(path).is_relative_to(tree):
+                elapsed[0] += 60
+            return real_scandir(path)
+        with patch.object(retirement.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(os, 'scandir', side_effect=scan):
+            report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True,
+                local_only=True, max_seconds=240)
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['actions'], report)
+        self.assertEqual((tree / 'file').read_text(), 'initial\n')
+
+    def test_slow_worktree_discovery_stops_before_another_row(self):
+        import branch_retirement as retirement
+        fixture = fixtures.Fixture()
+        trees = [fixture.tree(f'slow-{index}') for index in range(4)]
+        elapsed = [0.0]
+        real_entries = retirement.iter_worktrees
+        def slow_entries(root):
+            for entry in real_entries(root):
+                elapsed[0] += 60
+                yield entry
+        with patch.object(retirement.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(retirement, 'iter_worktrees', side_effect=slow_entries):
+            report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True,
+                local_only=True, max_seconds=240)
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['actions'], report)
+        for tree in trees:
+            self.assertEqual((tree / 'file').read_text(), 'initial\n')
+
+    def test_identity_readback_does_not_resolve_other_worktree_paths(self):
+        fixture = fixtures.Fixture()
+        tree = fixture.tree('target')
+        reaper = fixture.reaper()
+        entries = [{'path': str(fixture.base / f'unrelated-{index}')} for index in range(400)]
+        entries.append({'path': str(tree), 'head': 'a' * 40, 'branch': 'target'})
+        with patch.object(fixtures.hook, 'worktree_entries', return_value=entries), \
+             patch.object(Path, 'resolve', autospec=True, side_effect=Path.resolve) as resolve:
+            identity = reaper.tree_identity(fixture.repo, tree)
+        self.assertEqual(identity, {'head': 'a' * 40, 'branch': 'target', 'detached': False})
+        self.assertLessEqual(resolve.call_count, 1, 'unrelated paths must not spend the staging budget')
+
+    def test_local_keep_guards_do_not_spend_the_remote_pr_budget(self):
+        for condition in ('dirty', 'unpushed'):
+            with self.subTest(condition=condition):
+                fixture = fixtures.Fixture()
+                tree = fixture.tree('guarded')
+                if condition == 'dirty':
+                    (tree / 'file').write_text('keep these bytes')
+                else:
+                    fixture.commit('local only', cwd=tree)
+                fixture.age(tree)
+                provider = fixtures.FakeProvider()
+                with patch.object(provider, 'branch_pulls', wraps=provider.branch_pulls) as queries:
+                    report = fixture.reaper(provider=provider).run({'fixture/repo': fixture.repo},
+                        execute=True, local_only=True)
+                self.assertFalse(report['errors'], report)
+                self.assertTrue(tree.exists())
+                self.assertFalse(report['actions'], report)
+                queries.assert_not_called()
     def test_prunable_worktree_with_surviving_directory_keeps_contents_and_scan_continues(self):
         fixture = fixtures.Fixture()
         broken = fixture.tree('aaa-broken')
@@ -575,6 +730,216 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_slow_test_temp_discovery_uses_shared_run_deadline(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        scratch, clones = fixture.base / 'scratch', fixture.base / 'clones'
+        scratch.mkdir()
+        clones.mkdir()
+        for index in range(5):
+            path = scratch / f'carr-ci-test-{index}'
+            path.mkdir()
+            (path / 'payload').write_text('whole fixture')
+        elapsed = [0.0]
+        real_scandir = os.scandir
+        identity = scratch.stat().st_ino
+        class SlowEntries:
+            def __init__(self, path):
+                self.stream = real_scandir(path)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.close()
+            def close(self):
+                self.stream.close()
+            def __iter__(self):
+                return self
+            def __next__(self):
+                entry = next(self.stream)
+                elapsed[0] += 60
+                return entry
+        def scan(path):
+            slow = os.fstat(path).st_ino == identity if isinstance(path, int) else Path(path) == scratch
+            return SlowEntries(path) if slow else real_scandir(path)
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(os, 'scandir', side_effect=scan):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
+                user_tmp_root=scratch, dispatch_path=fixture.base / 'absent.jsonl', roots={},
+                provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+                archive_thread=lambda *a, **k: self.fail('no thread'))
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertNotIn('pending', report)
+        for path in scratch.glob('carr-ci-test-*'):
+            self.assertEqual((path / 'payload').read_text(), 'whole fixture')
+        self.assertEqual(len(list(scratch.glob('carr-ci-test-*'))), 5)
+
+    def test_clone_expiry_before_move_keeps_complete_workspace(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        workspace = clones / 'room-codex-expiry'
+        workspace.mkdir(parents=True)
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        ledger = fixture.base / 'dispatch.jsonl'
+        ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+            'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+        elapsed = [0.0]
+        provider = fixtures.FakeProvider()
+        def expire(*args):
+            elapsed[0] = 240
+            return []
+        provider.open_pulls = expire
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
+                dispatch_path=ledger, roots={}, provider=provider, process_probe=lambda paths: set(),
+                archive_thread=lambda *a, **k: self.fail('no thread'))
+        self.assertTrue(workspace.exists(), report)
+        self.assertEqual((clone / 'file').read_text(), 'initial\n')
+        self.assertLessEqual(elapsed[0], 240)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['removed'], report)
+        self.assertNotIn('pending', report)
+
+    def test_temp_recovery_expiry_preserves_pending_without_failure(self):
+        import machine_cleanup as cleanup
+        import storage_hygiene
+        for moved in (True, False):
+            with self.subTest(moved=moved), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                scratch, clones = root / 'scratch', root / 'clones'
+                scratch.mkdir()
+                clones.mkdir()
+                candidate = scratch / 'carr-ci-test-recovery'
+                candidate.mkdir()
+                (candidate / 'payload').write_text('keep complete staged bytes')
+                for path in (candidate / 'payload', candidate):
+                    os.utime(path, (0, 0))
+                staged = storage_hygiene.cleanup_test_temps(scratch, now=time.time(), min_age=21600,
+                    max_items=10, cursor='', process_probe=lambda paths: set(), deadline=lambda: False,
+                    dry_run=False)['removed'][0]
+                actual = Path(staged['staged_path']) if moved else candidate
+                if not moved:
+                    os.rename(staged['staged_path'], candidate)
+                pending = {**staged, 'status': 'intent'}
+                receipt = root / 'out/machine-cleanup.json'
+                receipt.parent.mkdir()
+                receipt.write_text(json.dumps({'pending': pending, 'at': 0}))
+                elapsed = [0.0]
+                real_lstat = Path.lstat
+                def expire(path, *args, **kwargs):
+                    result = real_lstat(path, *args, **kwargs)
+                    if path == actual:
+                        elapsed[0] = 240
+                    return result
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                     patch.object(Path, 'lstat', expire):
+                    report = cleanup.run(root, config, hook=None, tmp_root=clones, roots={},
+                        dispatch_path=root / 'absent.jsonl', provider=object(),
+                        process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+                self.assertTrue(report.get('budget_exhausted'), report)
+                self.assertFalse(report['errors'], report)
+                self.assertEqual(report.get('pending'), pending)
+                self.assertEqual(candidate.exists(), not moved)
+                self.assertEqual((actual / 'payload').read_text(), 'keep complete staged bytes')
+
+    def test_slow_clone_recovery_preserves_pending_for_retry(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        clones.mkdir()
+        workspace = clones / 'room-codex-recovery'
+        workspace.mkdir()
+        (workspace / 'payload').write_text('preserve complete item')
+        staging = clones / '_to_delete'
+        staging.mkdir()
+        for index in range(5):
+            target = staging / (workspace.name + '-' + str(index))
+            target.mkdir()
+            (target / 'manifest.json').write_text(json.dumps({
+                'path': str(workspace), 'status': 'verified_no_effect'}))
+        receipt = fixture.repo / 'out/machine-cleanup.json'
+        receipt.parent.mkdir(exist_ok=True)
+        pending = {'kind': 'job_clone', 'path': str(workspace)}
+        receipt.write_text(json.dumps({'pending': pending, 'at': 0}))
+        elapsed = [0.0]
+        real_scandir = os.scandir
+        class SlowEntries:
+            def __init__(self):
+                self.stream = real_scandir(staging)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.stream.close()
+            def __iter__(self):
+                return self
+            def __next__(self):
+                entry = next(self.stream)
+                elapsed[0] += 60
+                return entry
+        def scan(path):
+            return SlowEntries() if Path(path) == staging else real_scandir(path)
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(os, 'scandir', side_effect=scan):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
+                dispatch_path=fixture.base / 'absent.jsonl', roots={}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: self.fail('no thread'))
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertEqual(report['pending'], pending)
+        self.assertEqual(json.loads(receipt.read_text())['pending'], pending)
+        self.assertEqual((workspace / 'payload').read_text(), 'preserve complete item')
+
+    def test_slow_clone_discovery_stops_within_cleanup_budget(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        clones.mkdir()
+        for index in range(5):
+            workspace = clones / f'room-codex-{index}'
+            workspace.mkdir()
+            (workspace / 'payload').write_text('preserve complete item')
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        elapsed = [0.0]
+        real_scandir = os.scandir
+        class SlowEntries:
+            def __init__(self, path):
+                self.entries = real_scandir(path)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                self.entries.close()
+            def __iter__(self):
+                return self
+            def __next__(self):
+                entry = next(self.entries)
+                elapsed[0] += 60
+                return entry
+        def scan(path):
+            return SlowEntries(path) if Path(path) == clones else real_scandir(path)
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(os, 'scandir', side_effect=scan):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
+                dispatch_path=fixture.base / 'absent.jsonl', roots={}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: self.fail('no thread'))
+        self.assertLessEqual(elapsed[0], 240, report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertNotIn('pending', report)
+        for workspace in clones.glob('room-codex-*'):
+            self.assertEqual((workspace / 'payload').read_text(), 'preserve complete item')
+        self.assertEqual(len(list(clones.glob('room-codex-*'))), 5)
+        self.assertFalse((clones / '_to_delete').exists())
+
     def test_persistent_lock_defers_only_worktrees_without_claiming_success(self):
         import fcntl
         import machine_cleanup as cleanup

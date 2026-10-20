@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -11,6 +12,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import skill_receipts
 import dispatch
+import work_runner
+from work_queue import WorkQueue
 from desks import Registry
 from ops.git_env import fixture_env
 
@@ -171,7 +174,9 @@ class SkillReceiptTests(unittest.TestCase):
             results = root / 'results.jsonl'
             prepared = {'checkout_path': str(root), 'checkout_workspace': str(root)}
             out, err = io.StringIO(), io.StringIO()
-            with patch.object(dispatch.seat_gate, 'check', return_value=None), \
+            with patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(root / 'queue.sqlite3')}), \
+                 patch.object(work_runner, 'kick') as kick, \
+                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
                  patch.object(dispatch.codex_checkout, 'prepare', return_value=prepared), \
                  patch.object(dispatch.write_ownership, 'checkout_writer',
                               return_value=contextlib.nullcontext(lambda identity: None)), \
@@ -181,9 +186,17 @@ class SkillReceiptTests(unittest.TestCase):
                 code = dispatch.main([
                     '--registry', str(registry_path), '--results', str(results),
                     'send', 'api-build', 'Inspect fixture behavior', '--checkout', 'fixture-branch'])
-            self.assertEqual(code, 0, err.getvalue())
+                self.assertEqual(code, 0, err.getvalue())
+                queued = json.loads(out.getvalue())
+                self.assertEqual(queued['status'], 'queued')
+                execute.assert_not_called()
+                kick.assert_called_once()
+                with WorkQueue(root / 'queue.sqlite3') as queue:
+                    claim = queue.claim(eligible_desks={'api-build'}, actor='test', owner={})
+                    work_runner.worker(queue, queued['card_id'], claim['claim'], registry_path, results)
+                    self.assertEqual(queue.get(queued['card_id'])['stage'], 'review')
             self.assertEqual(execute.call_count, 1)
-            row = json.loads(out.getvalue())
+            row = json.loads(results.read_text())
             self.assertEqual(row['status'], 'completed')
             self.assertEqual(row['result'], 'fixture complete')
             self.assertEqual(row['skill_receipt_status'], 'unverified')
@@ -298,7 +311,7 @@ class SkillReceiptTests(unittest.TestCase):
         scan.assert_called_once_with(Path('/own-log'), since=row['dispatched_at'], until=row['completed_at'])
         self.assertFalse(value['skills'][0]['opened'])
 
-    def test_api_job_with_observed_inventory_publishes_its_receipt(self):
+    def test_queued_api_job_with_observed_inventory_publishes_its_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             subprocess.run(['git', 'init', '-q', str(root)], env=fixture_env(), check=True)
@@ -318,8 +331,16 @@ class SkillReceiptTests(unittest.TestCase):
                  patch.object(dispatch, '_skill_gh', side_effect=[
                      {'head': {'sha': 'a' * 40}, 'body': 'Skills used: tdd'}, [],
                      {'html_url': pr + '#issuecomment-1'}, {}]) as gh:
-                row = dispatch.dispatch('api-build', 'Skills: tdd', registry=registry,
-                                        results_path=root / 'results.jsonl', checkout='fixture-branch')
+                with WorkQueue(root / 'queue.sqlite3') as queue:
+                    queue.enqueue('receipt-job', desk='api-build', task='Skills: tdd', actor='test',
+                                  options={'checkout': 'fixture-branch'})
+                    claim = queue.claim(eligible_desks={'api-build'}, actor='test', owner={})
+                    work_runner.worker(queue, 'receipt-job', claim['claim'],
+                                       registry.path, root / 'results.jsonl')
+                    card = queue.get('receipt-job')
+                    self.assertEqual(card['stage'], 'review')
+                    row = dispatch._receipt_job(root / 'results.jsonl', card['dispatch_ref'])
+                self.assertEqual(row['msg_id'], card['dispatch_ref'])
             self.assertEqual(row['status'], 'completed')
             self.assertEqual(row['skill_inventory'], ['tdd'])
             self.assertNotIn('skill_receipt_status', row)
