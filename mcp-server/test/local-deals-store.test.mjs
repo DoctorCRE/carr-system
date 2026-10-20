@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { TOOLS } from '../src/tools.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -75,9 +75,11 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(table);
     }
     await restoreEventIdentity(c, schema);
+    await c.query(schema.match(/CREATE FUNCTION public\.trg_touch_row\(\)[\s\S]*?\$\$;/)[0]);
+    await c.query('create trigger client_touch before update on client for each row execute function trg_touch_row()');
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_client_engagement_status']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
@@ -103,6 +105,48 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('begin');
       try { await fn(); } finally { await c.query('rollback'); }
     };
+
+    await t.test('board distinguishes prospect engagement from deal operating state', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1", [id(3)]);
+      const before = (await TOOLS['deal-room-board'].handler(c, actor, {})).deals[0];
+      assert.equal(before.prospect_engagement_status, 'inactive');
+      assert.equal(before.client_status, 'prospect');
+      assert.equal(before.client_version, 2);
+    }));
+
+    await t.test('engagement status writes are audited, replayable and shared across a client’s deals', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Synthetic Second Assignment','renewal','pending','joe',$3,$3)", [id(8),id(3),actor.id]);
+      const before = (await TOOLS['deal-room-board'].handler(c, actor, {})).deals[0];
+      const args = {client_id: id(3), status: 'active', base_version: before.client_version,
+        reason: 'Synthetic pipeline review', idempotency_key: 'synthetic-engagement-active'};
+      const result = await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', args);
+      assert.equal(result.prospect_engagement_status, 'active');
+      assert.deepEqual(await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', args), {replayed:true,...result});
+      const rows = (await TOOLS['deal-room-board'].handler(c, actor, {})).deals;
+      assert.deepEqual(rows.map(row=>row.prospect_engagement_status), ['active','active']);
+      const after = rows[0];
+      assert.equal(after.prospect_engagement_status, 'active');
+      assert.equal(after.client_version, before.client_version + 1);
+      assert.equal(after.operating_state, 'active');
+      const events = (await c.query("select field,old_value,new_value,agent_rationale from event where subject_type='client' and subject_id=$1", [id(3)])).rows;
+      assert.deepEqual(events, [{field:'prospect_engagement_status', old_value:{prospect_engagement_status:'inactive'},
+        new_value:{prospect_engagement_status:'active'}, agent_rationale:'Synthetic pipeline review'}]);
+      await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,status:'inactive',base_version:after.client_version,idempotency_key:'synthetic-engagement-inactive'});
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.map(row=>row.prospect_engagement_status),['inactive','inactive']);
+    }));
+
+    await t.test('engagement updates reject stale versions, invalid status, empty reasons and merged clients', async () => transaction(async () => {
+      await fixture(true);
+      const args = {client_id:id(3),status:'active',base_version:1,reason:'Synthetic review',idempotency_key:'synthetic-invalid'};
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,status:'parked'}), error=>error.payload?.error==='value_not_in_declared_vocabulary');
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,reason:' '}), error=>error.payload?.error==='engagement_reason_required');
+      await c.query('update client set merged_into=$2 where id=$1',[id(3),id(6)]);
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',args), error=>error.payload?.error==='version_conflict');
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,base_version:2}), error=>error.payload?.error==='client_merged_away');
+      assert.equal((await c.query("select count(*)::int count from event where subject_type='client'")).rows[0].count,0);
+    }));
 
     await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
       await fixture(true);
@@ -148,6 +192,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.lease;
           }
           const oldRows = rowsOf(baseline[name]);
+          rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
           rowsOf(prior).forEach((row, index) => invoiceFields.forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));

@@ -3383,7 +3383,8 @@ export const TOOLS = {
       const deals = await c.query(
         `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.market, b.segment,
-                b.client_id, b.client_ref, b.client_name, b.account_client_id, b.account_client_ref,
+                b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
+                ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
                 b.account_name, b.account_owner, b.market_agent,
                 to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -3403,6 +3404,7 @@ export const TOOLS = {
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
            from v_deal_room_board b
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
             and ($2::uuid is null or b.account_client_id = $2::uuid)
           order by b.attention desc, b.next_date nulls last, b.name
@@ -3424,10 +3426,13 @@ export const TOOLS = {
           /* dealroom:closed-deals */`,
         [workspace, args.account_client_id || null]);
       const accounts = await c.query(
-        `select account_client_id, account_client_ref, account_name, account_owner,
-                open_deals, attention_deals, overdue_deals, stale_deals,
-                to_jsonb(last_review_at)#>>'{}' as last_review_at, parked_deals
-           from v_deal_room_account order by account_name`);
+        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner,
+                a.open_deals, a.attention_deals, a.overdue_deals, a.stale_deals,
+                to_jsonb(a.last_review_at)#>>'{}' as last_review_at, a.parked_deals,
+                ce.client_status, ce.client_version, ce.prospect_engagement_status
+           from v_deal_room_account a
+           join v_client_engagement_status ce on ce.client_id=a.account_client_id
+          order by a.account_name`);
       const session = await c.query(
         `select session_id, workspace_kind, account_client_id,
                 to_jsonb(started_at)#>>'{}' as started_at
@@ -4841,6 +4846,37 @@ export const TOOLS = {
                note: completedActions.length
                  ? "your open ball on this subject was completed, which is what feeds the follow-up cadence"
                  : "no open ball of yours existed on this subject; nothing to complete" };
+    }),
+  },
+
+  "set-prospect-engagement-status": {
+    write: true,
+    description: "Set a client's explicit prospect engagement status independently of lifecycle and deal parking. Requires the client version from deal-room-board. Records old/new status and the stated reason in the client event history.",
+    inputSchema: { type: "object", properties: {
+      idempotency_key: { type: "string" }, client_id: { type: "string" },
+      base_version: { type: "integer" }, status: { type: "string", enum: ["active","inactive"] },
+      reason: { type: "string" }, human_quote: { type: "string" } },
+      required: ["idempotency_key","client_id","base_version","status","reason"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "set-prospect-engagement-status", args, async () => {
+      if (!["active","inactive"].includes(args.status))
+        throw new ToolError({ error: "invalid_engagement_status", allowed: ["active","inactive"] });
+      if (typeof args.reason !== "string" || !args.reason.trim())
+        throw new ToolError({ error: "engagement_reason_required" });
+      await versionGuard(c, "client", args.client_id, args.base_version);
+      const current = (await c.query(
+        "select prospect_engagement_status,merged_into from client where id=$1", [args.client_id])).rows[0];
+      if (current.merged_into) throw new ToolError({ error: "client_merged_away", merged_into: current.merged_into });
+      const updated = (await c.query(
+        "update client set prospect_engagement_status=$2,updated_by=$3 where id=$1 returning version",
+        [args.client_id, args.status, actor.id])).rows[0];
+      await writeEvent(c, actor, "set-prospect-engagement-status", "client", args.client_id, {
+        field: "prospect_engagement_status",
+        old: { prospect_engagement_status: current.prospect_engagement_status },
+        new: { prospect_engagement_status: args.status },
+        agent_rationale: args.reason.trim(), human_quote: args.human_quote || null,
+        idempotency_key: args.idempotency_key });
+      return { ok: true, client_id: args.client_id, prospect_engagement_status: args.status,
+        client_version: updated.version };
     }),
   },
 

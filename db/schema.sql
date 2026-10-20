@@ -84333,8 +84333,17 @@ CREATE TABLE public.client (
     deal_type_label text,
     possible_duplicate_label text,
     notes text,
-    specialty_type_label text
+    specialty_type_label text,
+    prospect_engagement_status text DEFAULT 'inactive'::text NOT NULL,
+    CONSTRAINT client_prospect_engagement_status_check CHECK ((prospect_engagement_status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
+
+
+--
+-- Name: COLUMN client.prospect_engagement_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Inactive until deliberately activated.';
 
 
 --
@@ -87749,6 +87758,19 @@ CREATE VIEW public.v_client_account AS
 --
 
 COMMENT ON VIEW public.v_client_account IS 'Every live client with the national account it sits under, if any (0061). The parent link is NOT a column: it resolves client -> party -> party.org_id -> the org''s client_type=''national_account'' client row, which is the chain 0059 already populated and every other consumer already uses to reach an org. Deliberately no client.parent_client_id — a second representation of the same fact has to be kept in agreement forever, and on the day the two disagree there is no way to tell which is right. is_sub_client is the test Joe''s ruling turns on: a franchisee is its OWN client under the account, never a line item on it, and deals hang off the sub-client. Reopen the column question if an account ever spans two org parties, or a client needs a parent that is not its employer.';
+
+
+--
+-- Name: v_client_engagement_status; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_client_engagement_status AS
+ SELECT id AS client_id,
+    status AS client_status,
+    version AS client_version,
+    prospect_engagement_status
+   FROM public.client
+  WHERE (merged_into IS NULL);
 
 
 --
@@ -120322,6 +120344,9 @@ grant select on table public.v_claim_card to dot_reader;
 grant select on table public.v_client_account to carr_reader;
 grant select on table public.v_client_account to carr_writer;
 grant select on table public.v_client_account to dot_reader;
+grant select on table public.v_client_engagement_status to carr_reader;
+grant select on table public.v_client_engagement_status to carr_writer;
+grant select on table public.v_client_engagement_status to dot_reader;
 grant select on table public.v_client_lease_radar to carr_reader;
 grant select on table public.v_client_lease_radar to dot_reader;
 grant select on table public.v_code_finding to carr_exporter;
@@ -122903,6 +122928,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
+0915_prospect_engagement_status.sql	93a60ff66099b0c6a60cba3a84a7cc1041fafd1ad5ca01a795ca779bb293780a	2026-10-20 16:39:13.065469+00
 \.
 
 
