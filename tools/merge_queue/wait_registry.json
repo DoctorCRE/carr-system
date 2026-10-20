@@ -68,6 +68,9 @@
     },
     "regeneration": {
       "seconds": 1500
+    },
+    "refresh": {
+      "seconds": 900
     }
   }
 }
