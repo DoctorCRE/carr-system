@@ -55,6 +55,15 @@ def save_clone_manifest(directory_fd, row):
     os.replace(temporary, 'manifest.json', src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
 
 
+def clone_directory_identity(workspace, *, dir_fd=None):
+    fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        return [[entry.st_dev, entry.st_ino] for entry in
+                (os.fstat(fd), os.stat('checkout', dir_fd=fd, follow_symlinks=False))]
+    finally:
+        os.close(fd)
+
+
 class CloneEvidence:
     def __init__(self, provider, process_probe, workspaces, roots=None):
         self.provider = provider
@@ -133,7 +142,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
             return keep('dispatch checkout identity mismatch')
         result['dispatch_status'] = dispatch['status']
         parent_fd = hold_directory(workspace.parent)
-        identity = workspace.stat(), clone.stat()
+        identity = clone_directory_identity(workspace.name, dir_fd=parent_fd)
         for repo in repository_roots():
             try:
                 provider.verify_repository(repo, clone)
@@ -207,8 +216,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         refs = evidence.remote(repo, clone) if dry_run and evidence else remote_refs(clone)
         busy = evidence.processes(workspace) if dry_run and evidence else process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
-                not all(os.path.samestat(before, after) for before, after in
-                        zip(identity, (workspace.stat(), clone.stat()))) or
+                identity != clone_directory_identity(workspace.name, dir_fd=parent_fd) or
                 git(clone, 'rev-parse', 'HEAD') != head or
                 clone_has_protected_work(clone) or
                 not clone_preserved(clone, refs, environment)):
@@ -227,17 +235,17 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         os.mkdir(target.name, dir_fd=staging_fd)
         target_fd = hold_directory(target.name, dir_fd=staging_fd)
         receipt = {**result, 'status': 'intent', 'reason': reason, 'head': head,
-                   'staged_path': str(target / 'workspace'), 'at': now}
+                   'staged_path': str(target / 'workspace'), 'at': now, 'directory_identity': identity}
         save_clone_manifest(target_fd, receipt)
         check(deadline)
-        if (not staging_matches() or
-                not os.path.samestat(identity[0], os.stat(workspace.name, dir_fd=parent_fd, follow_symlinks=False)) or
-                not os.path.samestat(identity[1], clone.stat(follow_symlinks=False))):
+        if not staging_matches() or identity != clone_directory_identity(workspace.name, dir_fd=parent_fd):
             return keep('checkout or staging directory changed before move')
         os.rename(workspace.name, 'workspace', src_dir_fd=parent_fd, dst_dir_fd=target_fd)
         if (not staging_matches() or
+                identity != clone_directory_identity('workspace', dir_fd=target_fd) or
                 git(target / 'workspace/checkout', 'rev-parse', 'HEAD') != head or
-                not staging_matches()):
+                not staging_matches() or
+                identity != clone_directory_identity('workspace', dir_fd=target_fd)):
             raise RuntimeError('staged checkout readback mismatch')
         receipt['status'] = 'staged'
         save_clone_manifest(target_fd, receipt)
@@ -334,12 +342,17 @@ def recover_clone(workspace, *, deadline=None):
             continue
         staged = Path(row['staged_path'])
         if workspace.exists() and not staged.exists():
-            if git(workspace / 'checkout', 'rev-parse', 'HEAD') != row['head']:
+            if (row.get('directory_identity') is not None and
+                    clone_directory_identity(workspace) != row['directory_identity'] or
+                    git(workspace / 'checkout', 'rev-parse', 'HEAD') != row['head']):
                 raise RuntimeError('interrupted clone candidate changed')
             check(deadline)
             save(manifest, {**row, 'status': 'verified_no_effect'})
             continue
-        if observed or workspace.exists() or not staged.exists() or git(staged / 'checkout', 'rev-parse', 'HEAD') != row['head']:
+        if (observed or workspace.exists() or not staged.exists() or
+                row.get('directory_identity') is not None and
+                clone_directory_identity(staged) != row['directory_identity'] or
+                git(staged / 'checkout', 'rev-parse', 'HEAD') != row['head']):
             raise RuntimeError('interrupted clone move is ambiguous')
         observed = {**row, 'status': 'staged', 'reason': 'interrupted clone move read back before retry'}
         check(deadline)
