@@ -1,3 +1,4 @@
+-- rollback: remove the phase_started_on projections, then drop v_deal_room_phase_start.
 -- First observed entry into each phase, using the evidence clock in the team's timezone.
 create or replace view v_deal_room_phase_start as
 select e.subject_id as deal_id,
