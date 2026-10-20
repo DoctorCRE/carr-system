@@ -21,7 +21,9 @@ class TokenTests(unittest.TestCase):
     def test_local_machine_check_does_not_require_ssh(self):
         from lib import cloudflare_tokens as cf
         for machine, hostname in (('studio', 'Mac'), ('studio', 'Mac.local'),
-                                  ('macbook', 'MacBookPro'), ('dell', 'dell')):
+                                  ('studio', 'mac-studio.tailc8cc93.ts.net'),
+                                  ('macbook', 'MacBookPro'), ('macbook', 'MACBOOKPRO.local'),
+                                  ('dell', 'dell')):
             with self.subTest(machine=machine, hostname=hostname):
                 states = {cf.TOKEN_NAMES[0]: 'ok', cf.TOKEN_NAMES[1]: 'missing'}
                 with patch('socket.gethostname', return_value=hostname), \
@@ -30,6 +32,26 @@ class TokenTests(unittest.TestCase):
                         raise subprocess.TimeoutExpired('ssh', 40)
                     self.assertEqual(cf.on_machine(machine, {'operation': 'check'}, runner=offline), states)
                     check.assert_called_once_with(Path.home() / '.config/carr/tokens.env')
+
+    def test_other_machine_checks_use_remote_transport(self):
+        from lib import cloudflare_tokens as cf
+        states = {cf.TOKEN_NAMES[0]: 'ok', cf.TOKEN_NAMES[1]: 'failed'}
+        def remote(command, **kwargs):
+            self.assertEqual(command[0], 'ssh')
+            self.assertEqual(command[-2], 'macbook')
+            return subprocess.CompletedProcess(command, 0, json.dumps(states), '')
+        with patch('socket.gethostname', return_value='Mac'), \
+             patch.object(cf, 'check_file', side_effect=AssertionError('local read forbidden')):
+            self.assertEqual(cf.on_machine('macbook', {'operation': 'check'}, runner=remote), states)
+
+    def test_local_check_failure_is_unverifiable_not_transport_failure(self):
+        from lib import cloudflare_tokens as cf
+        with patch('socket.gethostname', return_value='Mac'), \
+             patch.object(cf, 'check_file', side_effect=OSError('fixture failure')):
+            def forbidden(*args, **kwargs):
+                self.fail('local check attempted SSH')
+            self.assertEqual(cf.on_machine('studio', {'operation': 'check'}, runner=forbidden),
+                             dict.fromkeys(cf.TOKEN_NAMES, 'unverifiable'))
 
     def test_nightly_issuer_failed_readback_restores_original(self):
         self._nightly_issuer_rollback('failed')
@@ -217,7 +239,8 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
         thread.start()
         try:
             endpoint = f'http://127.0.0.1:{server.server_port}/verify'
-            with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory() as directory, \
+                 patch('socket.gethostname', return_value='unrelated-host'):
                 path = Path(directory) / '.config/carr/tokens.env'
                 def runner(command, **kwargs):
                     self.assertNotIn('fake-active', ' '.join(command))
@@ -278,7 +301,7 @@ cf.install(sys.argv[1], cf.TOKEN_NAMES[0], 'fake-new')
         harness = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(harness)
         door = harness.FakeDoor()
-        rows = cf.health_rows(transport=lambda machine, payload: dict.fromkeys(cf.TOKEN_NAMES, 'failed' if machine == 'studio' else 'ok'))
+        rows = cf.health_rows(transport=lambda machine, payload: dict.fromkeys(cf.TOKEN_NAMES, 'unreachable' if machine == 'studio' else 'ok'))
         findings = [{'key': 'cloudflare_token', 'subject': row['subject'], 'detail': row['line']} for row in rows if row['status'] != 'ok']
         with tempfile.TemporaryDirectory() as directory:
             receipts = Path(directory) / 'receipts.jsonl'
