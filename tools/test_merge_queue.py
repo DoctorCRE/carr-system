@@ -931,6 +931,37 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 2)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_foreign_remote_without_receipt_cannot_be_reconciled(self):
+        self.prepare_pinned_head()
+        (self.root / 'tools/prepare_pr.py').write_text('raise SystemExit("no receipt")\n')
+        with self.assertRaises(module.ActionUncertain):
+            self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        self.pr(head=self.changed)
+        key = self.q.db.execute("SELECT key FROM actions WHERE kind='regen'").fetchone()[0]
+        with self.assertRaises(module.ActionUncertain):
+            self.q.reconcile_action(key, retry=True)
+        self.assertEqual(self.q.db.execute("SELECT phase FROM actions WHERE kind='regen'").fetchone()[0], 'issued')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_unchanged_remote_regeneration_stops_at_effect_attempt_cap(self):
+        self.prepare_pinned_head()
+        self.git('branch', 'branch-1', self.approved)
+        marker = self.root / 'preparation-calls'
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'from pathlib import Path\n'
+            + 'with Path(' + repr(str(marker)) + ').open("a") as f: f.write("call\\n")\n'
+            + 'raise SystemExit("push did not land")\n')
+        p = self.data['prs'][f'{module.REPOS[0]}#1']
+        for _ in range(module.MAX_ATTEMPTS):
+            with self.assertRaises(module.ActionUncertain):
+                self.q.prepare(module.REPOS[0], p)
+            self.restart()
+        with self.assertRaises(module.ActionExhausted):
+            self.q.prepare(module.REPOS[0], p)
+        self.assertEqual(marker.read_text().splitlines(), ['call'] * module.MAX_ATTEMPTS)
+        self.assertEqual(self.git('rev-parse', 'branch-1').strip(), self.approved)
+        self.assertEqual(self.calls('merge'), [])
+
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
         marker = self.root / 'preparation-calls'
