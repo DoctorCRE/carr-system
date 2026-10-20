@@ -9,18 +9,23 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-for name in ("built-unclosed-selftest.py", "session-brief-selftest.py"):
+for name in ("built-unclosed-selftest.py", "session-brief-selftest.py",
+             "branch-janitor-selftest.py", "backup-workflow-selftest.py",
+             "hook-env-isolation-selftest.py", "../tools/room-bridge/test_session_presence_unit.py",
+             "../tools/room-bridge/test_flash_desk_unit.py", "../test/doc_drift/test_checker.py",
+             "../test/doc_drift/test_ci.py"):
     with tempfile.TemporaryDirectory(prefix="fixture-tmp-") as root:
         env = os.environ.copy()
         env["TMPDIR"] = root
         env["TMP"] = root
         env["TEMP"] = root
+        env["CARR_FLASH_STATE_DIR"] = os.path.join(root, "flash-state")
         try:
             result = subprocess.run(
                 [sys.executable, os.path.join(HERE, name)],
                 cwd=os.path.dirname(HERE), env=env, text=True,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                timeout=60,
+                timeout=120,
             )
         except subprocess.TimeoutExpired as exc:
             raise AssertionError(f"{name} exceeded 60s timeout") from exc

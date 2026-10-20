@@ -1484,7 +1484,7 @@ def _storage_hygiene_row():
         return ("SKIP storage hygiene — Studio Data volume check not applicable "
                 "outside macOS", False)
     import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene._defaults()
+    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
     used, clones = storage_hygiene.storage_snapshot(
         Path("/System/Volumes/Data"), clone_root)
     return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),
@@ -1653,7 +1653,8 @@ def _canonical_health():
                     rc = _red("scheduled_jobs_" + _job_row["code"], _line,
                               subject=_job_row["label"],
                               hard_error=_job_row["code"] == "evidence_unavailable",
-                              time_rolling=_job_row["code"] == "stale_log")
+                              time_rolling=_job_row["code"] in {
+                                  "stale_log", "behind_main", "remote_ref_stale"})
                 if not _scheduled_rows:
                     print("  OK scheduled jobs match manifest; canonical main is current")
             except Exception as exc:

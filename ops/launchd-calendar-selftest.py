@@ -193,6 +193,15 @@ for path in templates:
     found = lc.audit_template(path.read_text(encoding="utf-8"))
     check(f"{rel} carries no StartInterval and matches the converter", found == [], found)
 
+fleet = plistlib.loads((REPO / "ops/launchd/com.carr.fleet-sync.plist").read_bytes())
+check("fleet-sync catches merged main within five minutes while the Mac is awake",
+      fleet["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)],
+      fleet["StartCalendarInterval"])
+check("fleet-sync still catches up at login through the scheduled receipt wrapper",
+      fleet.get("RunAtLoad") is True and fleet["ProgramArguments"] == [
+          "/bin/zsh", "{{REPO}}/bin/run-scheduled.sh", "fleet-sync", "fleet.sync",
+          "/bin/zsh", "{{REPO}}/bin/fleet-sync.sh"])
+
 # The dictation-rig keeps its own copies of three agents. Their bodies differ
 # on purpose (different prose), but a schedule that differs between the twins
 # would mean one installer path brings back a cadence the other retired.

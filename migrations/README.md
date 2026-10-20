@@ -5,6 +5,35 @@
 binding stress-test addendum). STATUS: schema v2 pending Joe's grain review
 (blueprint §11) — nothing here has been applied to any database yet.*
 
+## Rebuild contract (WR-000385)
+
+`db/schema.sql` is the only supported base for rebuilding an empty database.
+Load it with `psql -X -v ON_ERROR_STOP=1 -d "$DATABASE_URL" -f db/schema.sql`,
+then run `tools/migrate.py` for any pending migrations. The snapshot includes
+the applied migration ledger and reviewed seeds. Migrations are forward
+upgrades of that base, not an alternative way to bootstrap from empty.
+The runner refuses both a missing ledger and an empty ledger before writes,
+including during a dry run. Do not invent ledger rows to bypass the refusal.
+
+Replaying history from empty fails in `0017_vocab_ref_tables.sql`. Its `DO`
+statement at lines 67–93 updates `deal.deal_type` from imported
+`deal.source_row->>'txn'` values and checks `ROW_COUNT`. At line 91 it executes:
+
+```sql
+raise exception 'deal_type backfill remapped ZERO deals — stop and report, do not force';
+```
+
+An empty database has no imported deals, so the update remaps zero rows and
+raises `P0001` (`RaiseException`). This is a deliberate data-dependent stop
+condition, not missing DDL or a PostgreSQL version error. Preserve the
+checksummed historical migration; removing its guard would not establish
+that the rest of history can rebuild without business data.
+
+The migration CI class runs `ops/schema-reconstruction-selftest.py --postgres`
+on disposable PostgreSQL. It requires empty-database refusal without writes,
+then loads the snapshot, applies pending migrations, and compares the exact
+filename/checksum ledger with the source. A regression in either side fails CI.
+
 ## Rules
 
 - **Forward-only, numbered.** `NNNN_name.sql`, applied in filename order by
@@ -93,8 +122,9 @@ different `0169` files merging in sequence:
 The Control Plane file was applied and read back in isolated staging before the
 other two merged. **All three filenames and contents are now immutable.** An
 environment with the Control Plane filename already in its ledger correctly sees
-only the Hermes and Program 5 filenames as pending. A fresh environment applies
-all three in lexical filename order. Renaming, deleting, consolidating, or editing
+only the Hermes and Program 5 filenames as pending. An existing environment
+with none of these files applied sees all three pending in lexical filename
+order. Renaming, deleting, consolidating, or editing
 any of them would turn a harmless numeric ambiguity into a new pending migration
 or an applied-file SHA mismatch.
 

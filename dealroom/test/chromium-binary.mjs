@@ -12,11 +12,15 @@ const CI_LINUX_CHROMIUM = [
   "/usr/bin/chromium-browser",
 ];
 
-function accepted(candidate, exists, realpath) {
+function accepted(candidate, exists, realpath, platform) {
   if (!candidate) return false;
   const normalized = path.normalize(candidate);
   if (!exists(normalized)) return false;
-  try { return path.normalize(realpath(normalized)) !== SYSTEM_CHROME; }
+  try {
+    const resolved = path.normalize(realpath(normalized));
+    return resolved !== SYSTEM_CHROME
+      && (platform !== "darwin" || !/headless[_-]shell/i.test(resolved));
+  }
   catch { return false; }
 }
 
@@ -31,12 +35,12 @@ export async function findDisposableChromium({
 } = {}) {
   for (const candidate of [env.CHROME_FOR_TESTING_PATH,
     env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH]) {
-    if (accepted(candidate, exists, realpath)) return path.normalize(candidate);
+    if (accepted(candidate, exists, realpath, platform)) return path.normalize(candidate);
   }
 
   if (platform === "linux" && env.GITHUB_ACTIONS === "true") {
     for (const candidate of CI_LINUX_CHROMIUM) {
-      if (accepted(candidate, exists, realpath)) return path.normalize(candidate);
+      if (accepted(candidate, exists, realpath, platform)) return path.normalize(candidate);
     }
   }
 
@@ -55,7 +59,7 @@ export async function findDisposableChromium({
         path.join(base, "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
         path.join(base, "chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
       ] : [path.join(base, "chrome-linux/chrome"), path.join(base, "chrome-linux64/chrome")];
-      for (const candidate of candidates) if (accepted(candidate, exists, realpath)) return candidate;
+      for (const candidate of candidates) if (accepted(candidate, exists, realpath, platform)) return candidate;
     }
   }
   return null;

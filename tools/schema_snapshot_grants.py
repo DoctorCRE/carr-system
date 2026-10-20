@@ -546,17 +546,18 @@ def _migration_acl_statements(sql: str, role: str) -> list[str]:
 
 
 def compose_grants_to_role(
-    schema_text: str, migrations: Iterable[tuple[str, str]], role: str
+    schema_text: str | None, migrations: Iterable[tuple[str, str]], role: str
 ) -> list[str]:
     """Compose snapshot ACLs plus post-snapshot migration ACL operations.
 
     This is the current rebuilt-schema authority source. It follows the same
     filename ordering and embedded ledger boundary as ``tools/migrate.py`` and
     derives facts from committed SQL; it does not maintain a second ACL list.
+    With no snapshot, replay only the caller's verified installed migrations.
     """
     if not re.fullmatch(r"[a-z][a-z0-9_]*", role):
         raise SnapshotGrantError(f"unsafe role name {role!r}")
-    applied = snapshot_applied_migrations(schema_text)
+    applied = snapshot_applied_migrations(schema_text) if schema_text is not None else {}
     ordered = sorted(migrations, key=lambda item: item[0])
     if len({name for name, _sql in ordered}) != len(ordered):
         raise SnapshotGrantError("duplicate migration filename in authority plan")
@@ -580,7 +581,7 @@ def compose_grants_to_role(
     # typo, not a pending bundle. (2026-09-14, carr_gate_zero_producer, the
     # first role introduced by a migration pending at composition time.)
     try:
-        facts = set(acl_facts(grants_to_role(schema_text, role)))
+        facts = set(acl_facts(grants_to_role(schema_text, role))) if schema_text is not None else set()
     except SnapshotGrantError as exc:
         if f"CARR GRANTS contains no statements for {role}" != str(exc):
             raise
@@ -648,6 +649,22 @@ def load_current_grants_to_role(
     return compose_grants_to_role(
         schema_path.read_text(encoding="utf-8"), migrations, role
     )
+
+
+def load_applied_grants_to_role(
+    migrations_dir: Path, ledger: dict[str, str], role: str
+) -> list[str]:
+    """Compose only installed, digest-verified SQL without a newer snapshot."""
+    names = migration_names(migrations_dir.parent)
+    if not ledger or not set(ledger) <= names:
+        raise SnapshotGrantError("rollback migration ledger is empty or names unknown source")
+    migrations = []
+    for name, digest in sorted(ledger.items()):
+        text = read_migration(migrations_dir.parent, name)
+        if hashlib.sha256(text.encode()).hexdigest() != digest:
+            raise SnapshotGrantError(f"rollback migration digest differs from source: {name}")
+        migrations.append((name, text))
+    return compose_grants_to_role(None, migrations, role)
 
 
 def render_statements(statements: Iterable[str]) -> str:
