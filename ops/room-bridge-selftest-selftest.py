@@ -61,6 +61,7 @@ def test_each_suite_gets_a_disposable_store_even_with_an_inherited_override():
 
     def runner(argv, **kwargs):
         path = Path(kwargs['env']['CARR_WORK_QUEUE_DB'])
+        assert kwargs['env'].get('CARR_WORK_QUEUE_TEST') == '1'
         assert path.parent.is_dir()
         assert not path.exists()
         path.touch()

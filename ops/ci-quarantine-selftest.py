@@ -16,6 +16,40 @@ RUNNER = REPO / 'ops' / 'ci-quarantine.py'
 
 
 class QuarantineTests(unittest.TestCase):
+    def test_unittest_cli_child_without_override_refuses_before_sqlite_opens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'sitecustomize.py').write_text(
+                "import sqlite3\n"
+                "def blocked(path, *args, **kwargs):\n"
+                "    print('SQLITE_ATTEMPT', path, flush=True)\n"
+                "    raise RuntimeError('intercepted before open')\n"
+                "sqlite3.connect = blocked\n")
+            probe = root / 'test_cli_smoke.py'
+            probe.write_text(
+                "import os, subprocess, sys, unittest\n"
+                "from pathlib import Path\n"
+                "class CliIsolationTest(unittest.TestCase):\n"
+                "    def test_cli_child_cannot_open_operational_queue_without_override(self):\n"
+                "        env = dict(os.environ)\n"
+                "        for name in ('CARR_WORK_QUEUE_DB', 'CARR_HERMES_RESULTS',\n"
+                "                     'CARR_HOOK_FIXTURE', 'PYTEST_CURRENT_TEST'):\n"
+                "            env.pop(name, None)\n"
+                f"        env.update(HOME={str(root)!r}, PYTHONPATH={str(root)!r})\n"
+                f"        child = subprocess.run([sys.executable, {str(REPO / 'tools/room-bridge/dispatch.py')!r},\n"
+                f"            '--registry', {str(root / 'desks.json')!r},\n"
+                f"            '--results', {str(root / 'results.jsonl')!r}, 'export'],\n"
+                "            env=env, capture_output=True, text=True, timeout=10)\n"
+                "        self.assertNotIn('SQLITE_ATTEMPT', child.stdout,\n"
+                "                         'CLI test child escaped the fail-closed guard')\n"
+                "        self.assertNotEqual(child.returncode, 0)\n"
+                "        self.assertIn('isolated temporary CARR_WORK_QUEUE_DB', child.stderr)\n"
+                "unittest.main()\n")
+            result = self.invoke(root, f"import runpy; runpy.run_path({str(probe)!r}, run_name='__main__')")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr +
+                             (root / 'test.log').read_text())
+            self.assertFalse((root / '.config/carr/work-queue.sqlite3').exists())
+
     def test_queue_writes_are_isolated_and_removed_before_leak_detection(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
