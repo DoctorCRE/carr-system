@@ -112,6 +112,29 @@ class WireTests(unittest.TestCase):
         self.assertEqual(refused.exception.code, 'bad_codex_config')
         run.assert_not_called()
 
+    def test_codex_does_not_release_ownership_without_confirmed_termination(self):
+        for phase, timed_out in [('sandbox', False), ('exec', False), ('sandbox', True), ('exec', True)]:
+            with self.subTest(phase=phase, timed_out=timed_out):
+                calls = []
+                def run(argv, **options):
+                    calls.append(argv[1])
+                    if argv[1] == phase and timed_out:
+                        exc = subprocess.TimeoutExpired('codex', 1)
+                        exc.termination_confirmed = False
+                        raise exc
+                    proc = subprocess.CompletedProcess(argv, 0,
+                        '{"file_write":"denied","network":"denied"}' if argv[1] == 'sandbox' else '', '')
+                    proc.termination_confirmed = argv[1] != phase
+                    return proc
+                result = dispatch._to_codex({'posture': 'record-layer', 'model': 'gpt-6.1-sol',
+                    'effort': 'low'}, 'Synthetic.', env={
+                        'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic'}, provider_run=run)
+                self.assertFalse(result['termination_confirmed'])
+                self.assertNotEqual(result['status'], 'completed')
+                if phase == 'sandbox':
+                    self.assertEqual(calls, ['sandbox'])
+                    self.assertIn('file_write/network', result['detail'])
+
     def test_grok_refuses_before_catalog_or_model_launch(self):
         run = Mock(return_value=subprocess.CompletedProcess([], 1, '', ''))
         with self.assertRaisesRegex(desks.DeskError, 'Grok.*MCP'):
