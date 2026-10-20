@@ -260,8 +260,8 @@ def _source_revision(workspace, env):
         return None
     try:
         result = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=workspace,
-                                env=scrubbed_env(env), capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
+                                env=scrubbed_env(env), capture_output=True, text=True)
+    except OSError:
         return None
     revision = result.stdout.strip()
     return revision if result.returncode == 0 and re.fullmatch(r'[a-f0-9]{40}', revision) else None
