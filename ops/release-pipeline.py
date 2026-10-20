@@ -18,14 +18,18 @@ import dataclasses
 import datetime as dt
 import fcntl
 import hashlib
+import http.client
 import json
 import os
 import re
 import runpy
+import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -522,7 +526,7 @@ def queue_turn(lane: str, sha: str, step: str, rc: int, log: str, record_path: s
                   f"treat Production as serving {sha[:12]} through the deploy that applied it. Cloudflare "
                   "blocks rollback to any version from before that migration, so the fix is forward "
                   "only and must keep working with the migrated Durable Object class.\n")
-    body = (f"@queue enqueue target=claude-desktop cap=repo-write priority=P1 runtime=3h "
+    body = (f"@queue enqueue target=sol-fixer cap=repo-write priority=P1 runtime=3h "
             f"key={key} :: Fix forward: {lane} release of {sha[:12]} failed at {step}\n"
             f"The scripted release pipeline (ops/release-pipeline.py) stopped: step `{step}` "
             f"exited {rc} releasing {sha} ({lane} lane).\n{ahead}"
@@ -680,16 +684,45 @@ class Pipeline:
         return outcome
 
     def git(self, *args: str, cwd: Path | None = None, trim_output: bool = True) -> str:
-        if args and args[0] == "fetch":
+        fetching = bool(args and args[0] == "fetch")
+        if fetching:
             # Ordinary fetches keep the shared remote-tracking refs and
             # FETCH_HEAD untouched. App publication has one explicit,
             # verified ref refresh below because its unchanged release guard
             # requires the detached candidate to equal refs/remotes/origin/main.
             args = ("fetch", "--no-write-fetch-head", "--refmap=", *args[1:])
-        proc = subprocess.run(["git", "-C", str(cwd or self.repo), *args], env=self.env,
-                              stdin=subprocess.DEVNULL, capture_output=True, timeout=300)
+        argv = ["git", "-C", str(cwd or self.repo), *args]
+        log = self.run_dir / "git-fetch.log" if fetching and not self.dry_run else None
+        for attempt in range(1, 3 if fetching else 2):
+            try:
+                proc = subprocess.run(argv, env=self.env, stdin=subprocess.DEVNULL,
+                                      capture_output=True, timeout=300)
+            except subprocess.TimeoutExpired as exc:
+                if not fetching:
+                    raise
+                proc = subprocess.CompletedProcess(argv, 124, exc.stdout or b"",
+                                                   (exc.stderr or b"") + b"\ngit fetch timed out after 300s\n")
+            detail = os.fsdecode(proc.stderr).strip()
+            if fetching:
+                detail = redact_text(detail, known_secrets=sensitive_env_values(self.env))
+                if log is not None:
+                    log.parent.mkdir(parents=True, exist_ok=True)
+                    diagnostic = (f"[attempt {attempt}] $ {shlex.join(argv)}\n"
+                                  f"[stdout]\n{os.fsdecode(proc.stdout)}\n"
+                                  f"[stderr]\n{os.fsdecode(proc.stderr)}\n[exit {proc.returncode}]\n")
+                    with log.open("a", encoding="utf-8", errors="backslashreplace") as sink:
+                        sink.write(redact_text(diagnostic, known_secrets=sensitive_env_values(self.env)))
+                transport_failure = proc.returncode == 124 or (proc.returncode == 128 and any(
+                    message in detail.lower() for message in (
+                        "operation timed out", "connection timed out", "could not resolve host",
+                        "could not resolve proxy", "connection reset by peer", "recv failure",
+                        "failed to connect", "remote end hung up unexpectedly")))
+                if attempt == 1 and transport_failure:
+                    self.sleep(2)
+                    continue
+            break
         if proc.returncode != 0:
-            raise StepFailed(f"git {args[0]}", proc.returncode, "", os.fsdecode(proc.stderr).strip()[:300])
+            raise StepFailed(f"git {args[0]}", proc.returncode, str(log) if log is not None else "", detail[:300])
         # fsdecode preserves filename bytes via surrogateescape. text=True
         # applies universal-newline conversion and would corrupt CR/CRLF names
         # in the NUL-delimited path list used by changed_paths().
@@ -1334,7 +1367,20 @@ class Pipeline:
     def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
         url = lane_cfg["live_release_url"]
         try:
-            live = self.http(url)
+            for attempt in range(1, 3):
+                try:
+                    live = self.http(url)
+                    break
+                except (ConnectionError, TimeoutError, http.client.IncompleteRead,
+                        urllib.error.URLError, socket.gaierror) as exc:
+                    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                    transient = not isinstance(exc, urllib.error.HTTPError) and (
+                        isinstance(cause, (ConnectionError, TimeoutError, http.client.IncompleteRead))
+                        or isinstance(cause, socket.gaierror) and cause.errno == socket.EAI_AGAIN)
+                    if attempt == 1 and transient:
+                        self.sleep(2)
+                        continue
+                    raise
             sha = live["git_sha"]["value"]
             version = live["worker_version"]["id"]
             if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)

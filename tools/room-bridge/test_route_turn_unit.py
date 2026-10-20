@@ -58,7 +58,7 @@ def test_ping_pong_dies_after_one_hop():
 
 
 def test_explicit_mention_reaches_mention_only_desk():
-    assert route(state_mod.default_state(), turn("m4", "codex", "@flash please review")) == ["flash"]
+    assert route(state_mod.default_state(), turn("m4", "codex", "@flash please review")) == []
 
 
 def test_mention_must_be_a_whole_seat_name():

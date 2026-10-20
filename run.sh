@@ -90,6 +90,7 @@ case "${1:-}" in
   graph-system) shift; graph_system "$@" ;;
   graph-health) shift; graph_health "$@" ;;
   salesforce-diff) sf_diff "$@" ;;
+  salesforce-sync) shift; PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" "$PY" -m lib.salesforce_deal_sync "$@" ;;
   section-index) shift; section_index "$@" ;;
   registry-audit) registry_audit "$@" ;;
   review-queue) review_queue "$@" ;;

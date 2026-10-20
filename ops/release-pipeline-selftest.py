@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import http.client
 import importlib.util
 import json
 import os
@@ -32,9 +33,11 @@ import re
 import subprocess
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 from pathlib import Path
 
@@ -422,7 +425,261 @@ class Base(unittest.TestCase):
         self._tmp.cleanup()
 
 
+class GitFetchDiagnostics(Base):
+    def test_failed_fetch_keeps_stderr_in_the_run_log(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        with self.assertRaises(rp.StepFailed) as failed:
+            pipe.git("fetch", "--quiet", "origin", "refs/heads/deleted-branch")
+        self.assertEqual(failed.exception.rc, 128)
+        self.assertTrue(failed.exception.log, "fetch failure must link its diagnostic log")
+        log = Path(failed.exception.log)
+        self.assertTrue(log.is_relative_to(pipe.run_dir))
+        self.assertIn("couldn't find remote ref refs/heads/deleted-branch", log.read_text())
+
+    def test_transient_fetch_retries_once_and_keeps_both_attempts(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        run = subprocess.run
+        attempts = []
+        error = b"fatal: unable to access 'https://github.com/example/app.git/': Recv failure: Operation timed out\n"
+
+        def flaky(argv, **kwargs):
+            attempts.append(argv)
+            if len(attempts) == 1:
+                return subprocess.CompletedProcess(argv, 128, b"", error)
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky), \
+                mock.patch.object(pipe, "sleep") as sleep:
+            pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        sleep.assert_called_once_with(2)
+        logs = "\n".join(p.read_text() for p in pipe.run_dir.glob("*fetch*.log"))
+        self.assertIn(error.decode().strip(), logs)
+        self.assertIn("[exit 128]", logs)
+        self.assertIn("[exit 0]", logs)
+
+    def test_repeated_timeout_stops_after_two_attempts_with_full_stderr(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        error = b"remote: " + b"diagnostic " * 50 + b"\nRecv failure: Operation timed out\n"
+        result = subprocess.CompletedProcess([], 128, b"remote output\n", error)
+        with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                mock.patch.object(pipe, "sleep") as sleep:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(failed.exception.rc, 128)
+        log = Path(failed.exception.log).read_text()
+        self.assertEqual(log.count(error.decode()), 2)
+        self.assertEqual(log.count("remote output"), 2)
+
+    def test_lock_ref_and_auth_errors_fail_without_retry(self):
+        errors = (
+            b"fatal: couldn't find remote ref refs/heads/deleted-branch\n",
+            b"fatal: Unable to create '/fixture/.git/shallow.lock': File exists.\n",
+            b"error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b\n",
+            b"fatal: Authentication failed for 'https://github.com/example/app.git/'\n",
+        )
+        for error in errors:
+            with self.subTest(error=error):
+                pipe = self.fx.pipeline(FakeRunner())
+                result = subprocess.CompletedProcess([], 128, b"", error)
+                with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                        mock.patch.object(pipe, "sleep") as sleep:
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+                self.assertIn(error.decode(), Path(failed.exception.log).read_text())
+
+    def test_app_tick_recovers_without_failed_release_or_diagnosis(self):
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        verbs, messages, attempts = [], [], []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
+        pipe.out = messages.append
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        run = subprocess.run
+
+        def flaky(argv, **kwargs):
+            if "fetch" in argv:
+                attempts.append(argv)
+                if len(attempts) == 1:
+                    return subprocess.CompletedProcess(argv, 128, b"", b"Recv failure: Operation timed out\n")
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky):
+            self.assertEqual(pipe.tick(["app"]), 0)
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse(self.fx.state()["app"].get("failed_sha"))
+        self.assertEqual(self.fx.records(), [])
+        self.assertEqual(verbs, [])
+        self.assertEqual(runner.calls, [])
+        self.assertTrue(any("already released" in line for line in messages))
+
+    def test_immutable_fetch_ignores_deleted_configured_branch_and_shared_ref_locks(self):
+        git(self.fx.origin, "update-ref", "refs/heads/deleted-branch", self.fx.base)
+        git(self.fx.repo, "config", "--add", "remote.origin.fetch",
+            "+refs/heads/deleted-branch:refs/remotes/origin/deleted-branch")
+        git(self.fx.origin, "update-ref", "-d", "refs/heads/deleted-branch")
+        for name in ("index.lock", "shallow.lock", "FETCH_HEAD.lock", "refs/remotes/origin/main.lock"):
+            lock = self.fx.repo / ".git" / name
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            lock.write_text("owned by another operation\n")
+        pipe = self.fx.pipeline(FakeRunner())
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+
+    def test_process_timeout_keeps_partial_output_and_stops_after_one_retry(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        timeout = subprocess.TimeoutExpired("git fetch", 300, output=b"partial stdout\n",
+                                            stderr=b"partial stderr\n")
+        with mock.patch.object(rp.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(failed.exception.rc, 124)
+        log = Path(failed.exception.log).read_text()
+        for expected in ("partial stdout", "partial stderr", "[exit 124]"):
+            self.assertEqual(log.count(expected), 2)
+
+    def test_fetch_log_redacts_credentials_in_command_and_both_streams(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        secret = "fixture-sensitive-output"
+        pipe.env["FIXTURE_SECRET"] = secret
+        result = subprocess.CompletedProcess([], 128, secret.encode(), f"fatal: {secret}".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", secret, self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn(secret, log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+
+    def test_fetch_diagnostics_redact_query_tokens_and_preserve_normal_urls(self):
+        opaque = "syntheticOpaqueFetchValue0123456789abcdef0"
+        cases = (
+            ("access_token=fixture-access-value&service=git-upload-pack",
+             "access_token=[REDACTED]&service=git-upload-pack"),
+            (f"{opaque}&service=git-upload-pack", "[REDACTED]&service=git-upload-pack"),
+            ("service=git-upload-pack&depth=1", "service=git-upload-pack&depth=1"),
+        )
+        for query, expected_query in cases:
+            with self.subTest(query=query):
+                pipe = self.fx.pipeline(FakeRunner())
+                url = f"https://example.invalid/app.git?{query}"
+                expected_url = f"https://example.invalid/app.git?{expected_query}"
+                error = f"fatal: unable to access '{url}': Authentication failed"
+                result = subprocess.CompletedProcess([], 128, url.encode(), error.encode())
+                with mock.patch.object(rp.subprocess, "run", return_value=result):
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", url, self.fx.base)
+                log = Path(failed.exception.log)
+                self.assertEqual(log.read_text().count(expected_url), 3)
+                self.assertEqual(failed.exception.detail,
+                                 f"fatal: unable to access '{expected_url}': Authentication failed")
+                if query != expected_query:
+                    self.assertNotIn(url, log.read_text() + failed.exception.detail)
+                log.unlink()
+
+    def test_dry_run_fetch_writes_no_state_or_logs(self):
+        pipe = self.fx.pipeline(FakeRunner(), dry_run=True)
+        before = {path.relative_to(pipe.store.root): path.read_bytes()
+                  for path in pipe.store.root.rglob("*") if path.is_file()}
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        after = {path.relative_to(pipe.store.root): path.read_bytes()
+                 for path in pipe.store.root.rglob("*") if path.is_file()}
+        self.assertEqual(after, before)
+
+    def test_fetch_log_redacts_username_only_url_userinfo(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://opaque-fixture-access-token@github.com/example/app.git/"
+        error = f"fatal: unable to access '{url}': Authentication failed\n"
+        result = subprocess.CompletedProcess([], 128, b"", error.encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn("opaque-fixture-access-token", log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+        self.assertIn("Authentication failed", log)
+
+    def test_fetch_log_preserves_redaction_of_passwords_containing_slashes(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://fixture-user:fixture-password/with/slashes@github.com/example/app.git/"
+        result = subprocess.CompletedProcess([], 128, b"", f"unable to access '{url}'".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertNotIn("fixture-password", Path(failed.exception.log).read_text() + failed.exception.detail)
+
+
 class WorkerIdentityReconciliation(Base):
+    def test_second_unreadable_identity_stops_after_one_retry(self):
+        responses = [http.client.RemoteDisconnected("fixture second dropped connection"),
+                     json.JSONDecodeError("fixture invalid JSON", "{", 1), {}]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[http.client.RemoteDisconnected("fixture first drop"),
+                                                   response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(runner.calls, [])
+
+    def test_malformed_or_permanent_identity_read_blocks_without_retry(self):
+        responses = [json.JSONDecodeError("fixture invalid JSON", "{", 1),
+                     {}, {"git_sha": "malformed"},
+                     {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}},
+                     urllib.error.HTTPError("https://fixture.invalid/release", 503, "unavailable", {}, None),
+                     urllib.error.URLError(socket.gaierror(socket.EAI_NONAME, "fixture unknown host")),
+                     PermissionError("fixture access denied")]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 1)
+                sleep.assert_not_called()
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(runner.calls, [])
+
+    def test_transient_identity_read_recovers_after_one_bounded_retry(self):
+        errors = [http.client.RemoteDisconnected("fixture dropped connection"),
+                  ConnectionResetError("fixture connection reset"), TimeoutError("fixture timeout"),
+                  urllib.error.URLError(ConnectionResetError("fixture reset")),
+                  urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "fixture DNS timeout")),
+                  http.client.IncompleteRead(b"partial identity")]
+        for error in errors:
+            with self.subTest(error=error):
+                runner, verbs = FakeRunner(), []
+                pipe = self.fx.pipeline(runner, verbs=verbs)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[error, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(self.fx.records(), [])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
         latest = self.fx.commit({"mcp-server/src/a.js": "next"})
@@ -1359,7 +1616,7 @@ class StopOnFailure(Base):
         self.assertEqual(self.fx.state()["worker"]["failed_sha"], sha)
         self.assertEqual([v for v, _ in verbs], ["add-room-turn"])
         body = verbs[0][1]["body"]
-        self.assertTrue(body.startswith("@queue enqueue target=claude-desktop cap=repo-write "))
+        self.assertTrue(body.startswith("@queue enqueue target=sol-fixer cap=repo-write "), body)
         self.assertIn(f"key=release-fix-{sha[:8]} ", body)
         self.assertEqual(verbs[0][1]["room"], "model-room")
         # the next tick on the same SHA runs nothing and dispatches nothing more

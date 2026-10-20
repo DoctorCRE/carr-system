@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { EventEmitter } from "node:events";
 
 import { digest } from "../src/artifact-trust.js";
 import { BENCHMARK_CELL_DOMAIN_TAG, benchmarkRequiredCells } from
@@ -15,30 +14,10 @@ import {
   assembleFoundationAssuranceEvidence,
   canonicalStagingOrigin,
   canonicalStagingOriginFromRegistry,
-  closeChromeProfile,
   parseFoundationAssuranceArgs,
   selectProductionEvidenceDsn,
   stagingReleaseSource,
 } from "../bin/seal-foundation-assurance-evidence.mjs";
-
-test("Chrome exits before profile cleanup and ENOTEMPTY cleanup retries", async () => {
-  class Chrome extends EventEmitter {
-    constructor() { super(); this.exitCode = null; this.signalCode = null; this.signals = []; }
-    kill(signal) {
-      this.signals.push(signal);
-      queueMicrotask(() => { this.signalCode = signal; this.emit("exit"); });
-      return true;
-    }
-  }
-  const chrome = new Chrome();
-  let removes = 0;
-  await closeChromeProfile(chrome, "/tmp/fake-profile", async () => {
-    assert.equal(chrome.signalCode, "SIGTERM");
-    if (++removes === 1) throw Object.assign(new Error("busy"), { code: "ENOTEMPTY" });
-  });
-  assert.deepEqual(chrome.signals, ["SIGTERM"]);
-  assert.equal(removes, 2);
-});
 
 const config = JSON.parse(await readFile(new URL(
   "../../ops/config/foundation-assurance-benchmark.v1.json", import.meta.url), "utf8"));
