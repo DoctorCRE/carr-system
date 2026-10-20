@@ -43,7 +43,7 @@ def send(args, task, registry, results):
     codex = entry['kind'] in codex_models.CODEX_KINDS
     options = dict(fresh=args.fresh, stream_output=args.stream_output, retrieval=args.retrieve,
                    family=args.family, effort=args.effort, writes=args.writes, checkout=args.checkout,
-                   codex=codex, result_path=str(results.resolve()), registry_path=str(registry.path.resolve()))
+                   codex=codex, allow_phrasing=args.allow_phrasing, result_path=str(results.resolve()), registry_path=str(registry.path.resolve()))
     card_id = args.card_id or f'job:{uuid.uuid4()}'
     path = default_path()
     with WorkQueue(path) as queue:

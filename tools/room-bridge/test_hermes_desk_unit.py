@@ -15,6 +15,7 @@ from unittest.mock import patch
 import desks
 import dispatch
 from work_runner import Resources
+import write_ownership
 from ops.git_env import fixture_env
 
 
@@ -310,6 +311,32 @@ print(json.dumps({'paidRecommendedModels': [
         self.assertTrue(row['termination_confirmed'])
         time.sleep(0.6)
         self.assertFalse((self.root / 'escaped').exists())
+        self.assertEqual(len(self.results.read_text().splitlines()), 1)
+
+    def test_timeout_confirms_a_zombie_only_process_group(self):
+        self.register(timeout_s=0.3)
+        self.env['FAKE_MODE'] = 'timeout'
+        killpg = os.killpg
+        run = subprocess.run
+        killed_group = []
+
+        def group_probe(pgid, sig):
+            if sig == 0 and pgid in killed_group:
+                return None
+            if sig == signal.SIGKILL:
+                killed_group.append(pgid)
+            return killpg(pgid, sig)
+
+        def inventory(argv, **options):
+            if argv == ['/bin/ps', '-axo', 'pgid=,stat=']:
+                return subprocess.CompletedProcess(argv, 0, f'1 S\n{killed_group[-1]} Z\n', '')
+            return run(argv, **options)
+
+        with patch.object(write_ownership.os, 'killpg', side_effect=group_probe), \
+             patch.object(write_ownership.subprocess, 'run', side_effect=inventory):
+            row = self.send()
+        self.assertEqual(row['status'], 'timed_out')
+        self.assertTrue(row['termination_confirmed'], row)
         self.assertEqual(len(self.results.read_text().splitlines()), 1)
 
     def test_deadline_includes_auth_preflight(self):
