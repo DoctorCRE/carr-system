@@ -2266,8 +2266,12 @@ function assertSingleOwner(owner) {
 
 
 async function lockDealField(c, dealId, field) {
-  // Same-field writers serialize; different fields deliberately use different
-  // advisory keys and can commit independently on the same deal.
+  // Phase changes can supersede the current plan. Acquire its locks before
+  // the phase lock, matching update-deal and preventing an inverted lock order.
+  if (field === "phase") {
+    await lockDealField(c, dealId, "next_date");
+    await lockDealField(c, dealId, "next_step");
+  }
   await c.query(
     "select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0)) /* dealroom:field-lock */",
     [dealId, field],
@@ -2492,7 +2496,10 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
       where subject_type='deal' and subject_id=$1 and field=$2 and idempotency_key=$3
       order by recorded_at desc, id desc limit 1 /* dealroom:written-event */`,
     [dealId, field, idempotencyKey]))?.rows?.[0] || null;
+  const status = field === "phase" && oldRow.rows[0].value !== value
+    ? await supersedeOverdueDealAction(c, actor, dealId, idempotencyKey, verb) : {};
   return {
+    ...status,
     old_value: oldRow.rows[0].value,
     new_value: value,
     // Null when this write carried no key to find the row by. A client that gets
