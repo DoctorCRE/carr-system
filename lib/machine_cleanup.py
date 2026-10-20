@@ -305,11 +305,12 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         existing = {repo: path for repo, path in roots.items() if Path(path).expanduser().is_dir()}
         if existing:
             reaper = FleetReaper(root, hook, provider=provider, process_probe=process_probe, config=config)
+            reaper_deadline = min(deadline, time.monotonic() + policy['max_seconds'] / 3)
             trees = reaper.run(existing, execute=not dry_run, local_only=True,
-                               max_items=policy['max_items'], max_seconds=min(policy['max_seconds'] / 3, max(0, deadline - time.monotonic())))
+                               max_items=policy['max_items'], max_seconds=max(0, reaper_deadline - time.monotonic()))
             report['errors'].extend(trees['errors'])
             report['deferred'].extend(trees['deferred'])
-            report['budget_exhausted'] |= trees['budget_exhausted']
+            report['budget_exhausted'] |= time.monotonic() >= reaper_deadline
             actions = {a['candidate'].get('path'): a for a in trees['actions']}
             for row in trees['rows']:
                 action = actions.get(row.get('path'))
@@ -376,7 +377,6 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             if row.get('error') or row.get('budget_exhausted'):
                 break
         else:
-            report['budget_exhausted'] |= len(candidates) == policy['max_items']
             if len(candidates) < policy['max_items'] and not report['budget_exhausted']:
                 cursor.pop('clone', None)
                 save(cursor_path, cursor)
@@ -430,5 +430,4 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     else:
                         cursor['thread_offset'] = stream.tell()
                         save(cursor_path, cursor)
-                report['budget_exhausted'] |= processed >= policy['max_items']
         return finish()

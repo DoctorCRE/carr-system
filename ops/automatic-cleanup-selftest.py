@@ -730,6 +730,64 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_worktree_slice_timeout_defers_scheduler_before_overall_deadline(self):
+        import branch_retirement as retirement
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        self.addCleanup(shutil.rmtree, fixture.base)
+        trees = [fixture.tree(f'slow-{index}') for index in range(4)]
+        elapsed = [0.0]
+        real_entries = retirement.iter_worktrees
+        def slow_entries(root):
+            for entry in real_entries(root):
+                elapsed[0] += 40
+                yield entry
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+             patch.object(retirement, 'iter_worktrees', side_effect=slow_entries):
+            report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=fixture.base,
+                dispatch_path=fixture.base / 'absent', roots={'fixture/repo': fixture.repo},
+                provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+                archive_thread=lambda *a, **k: self.fail('no thread fixture'))
+        self.assertLess(elapsed[0], config['machine_cleanup']['max_seconds'])
+        self.assertEqual(report['status'], 'deferred', report)
+        self.assertTrue(report['budget_exhausted'], report)
+        self.assertFalse(report['errors'], report)
+        self.assertFalse(report['removed'], report)
+        self.assertIsNone(report['last_success_at'])
+        self.assertTrue(any(row['kind'] == 'sweep' for row in report['deferred']))
+        for tree in trees:
+            self.assertEqual((tree / 'file').read_text(), 'initial\n')
+
+    def test_thread_item_batches_complete_and_resume_without_duplicate_archives(self):
+        import machine_cleanup as cleanup
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            clones = root / 'clones'
+            clones.mkdir()
+            dispatch = root / 'dispatch.jsonl'
+            dispatch.write_text(''.join(json.dumps({'thread_id': thread, 'status': 'completed',
+                'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n' for thread in ('first', 'second')))
+            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            config['machine_cleanup']['max_items'] = 1
+            archived, offsets = [], []
+            def archive(thread, **kwargs):
+                archived.append(thread)
+                return {'kind': 'thread', 'thread_id': thread, 'status': 'archived'}
+            with patch.object(cleanup.time, 'monotonic', return_value=0):
+                for thread in ('first', 'second'):
+                    report = cleanup.run(root, config, hook=None, tmp_root=clones, roots={},
+                        dispatch_path=dispatch, provider=object(), process_probe=lambda paths: set(),
+                        archive_thread=archive)
+                    self.assertEqual(report['status'], 'completed', report)
+                    self.assertFalse(report['deferred'], report)
+                    self.assertFalse(report['budget_exhausted'], report)
+                    self.assertEqual([row['thread_id'] for row in report['removed']], [thread])
+                    offsets.append(json.loads((root / 'out/machine-cleanup-cursor.json').read_text())['thread_offset'])
+            self.assertGreater(offsets[0], 0)
+            self.assertGreater(offsets[1], offsets[0])
+            self.assertEqual(archived, ['first', 'second'])
+
     def test_temp_budget_resumes_unfinished_fixture_before_or_after_move(self):
         import machine_cleanup as cleanup
         for moved in (False, True):
