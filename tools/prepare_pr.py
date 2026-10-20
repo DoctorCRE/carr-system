@@ -12,9 +12,11 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
 from git_env import scrubbed_env
 from regen import OUTPUTS
+from lib.secret_redaction import redacted_tail, sensitive_env_values
 
 
 CANONICAL = Path(__file__).resolve().parents[1]
@@ -93,10 +95,12 @@ def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
             raise ValueError('PR head moved during regeneration; no push')
         started, result = time.monotonic(), 'failed'
         try:
-            git(repo, 'push', 'origin', f'HEAD:refs/heads/{branch}', timeout=push_timeout)
+            git(repo, 'push', '--progress', 'origin', f'HEAD:refs/heads/{branch}', timeout=push_timeout)
             result = 'success'
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             result = 'timeout'
+            detail = exc.stderr.decode(errors='replace') if isinstance(exc.stderr, bytes) else exc.stderr
+            print('prepare-pr: push stderr: ' + (redacted_tail(detail, known_secrets=sensitive_env_values(os.environ)).strip() or '(empty)'), file=sys.stderr)
             raise
         finally:
             print(f'prepare-pr: push result={result} elapsed_seconds={time.monotonic() - started:.3f} '

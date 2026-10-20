@@ -595,6 +595,9 @@ class Queue:
                     pass
                 process.wait()
             self.check_cancelled()
+            if stderr.strip():
+                with self.db:
+                    self.event(repo, n, 'regeneration_push', redacted_tail(stderr).strip())
             if process.returncode:
                 raise ActionUncertain('regeneration failed; inspect receipt before retry: ' + redacted_tail(stderr))
         output = json.loads(stdout)
