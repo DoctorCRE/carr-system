@@ -192,6 +192,41 @@ class SkillReceiptTests(unittest.TestCase):
             self.assertNotIn('skill_receipt', row)
             self.assertEqual(json.loads(results.read_text()), row)
 
+    def test_api_observed_inventory_refuses_missing_skills_from_every_source(self):
+        for source in ('session', 'results', 'ledger'):
+            for available in (['tdd'], []):
+                with self.subTest(source=source, available=available), \
+                     tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    results = root / 'results.jsonl'
+                    session_id = 'b' * 36
+                    transcript = root / 'session.jsonl'
+                    transcript.write_text(json.dumps({'type': 'system', 'subtype': 'init',
+                        'skills': available}) + '\n')
+                    registry = Registry(root / 'registry.json')
+                    registry.register('api-build', 'claude-api', effort='high')
+                    entry = registry.resolve('api-build')
+                    if source == 'session':
+                        entry['session_id'] = session_id
+                    else:
+                        path = results if source == 'results' else dispatch._skill_ledger(results)
+                        path.write_text(json.dumps({'desk': 'api-build', 'kind': 'claude-api',
+                            'session_id': session_id}) + '\n')
+                    prepared = {'checkout_path': str(root), 'checkout_workspace': str(root)}
+                    with patch.object(registry, 'resolve', return_value=entry), \
+                         patch.object(skill_receipts, 'session_path',
+                                      side_effect=lambda sid, runtime: transcript if sid == session_id else None), \
+                         patch.object(dispatch.codex_checkout, 'prepare', return_value=prepared), \
+                         patch.object(dispatch.write_ownership, 'checkout_writer',
+                                      return_value=contextlib.nullcontext(lambda identity: None)), \
+                         patch.object(dispatch, '_execute', return_value={
+                             'status': 'completed', 'result': 'fixture complete'}) as execute:
+                        with self.assertRaises(dispatch.DeskError) as refused:
+                            dispatch.dispatch('api-build', 'Skills: grill-with-docs',
+                                registry=registry, results_path=results, checkout='fixture-branch')
+                        self.assertEqual(refused.exception.code, 'skill_unavailable')
+                        execute.assert_not_called()
+
     def test_prior_job_reads_and_unfinished_calls_do_not_count(self):
         self.assertEqual(self.scan(self.codex('cat /skills/tdd/SKILL.md'),
             since='2026-10-19T16:00:00Z')['opened'], [])
