@@ -1484,7 +1484,7 @@ def _storage_hygiene_row():
         return ("SKIP storage hygiene — Studio Data volume check not applicable "
                 "outside macOS", False)
     import storage_hygiene
-    _tmp, clone_root, _replay = storage_hygiene._defaults()
+    _tmp, clone_root, _replay = storage_hygiene.storage_roots()
     used, clones = storage_hygiene.storage_snapshot(
         Path("/System/Volumes/Data"), clone_root)
     return (storage_hygiene.health_row(used_bytes=used, clone_count=clones),

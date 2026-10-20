@@ -23,6 +23,9 @@ import time
 from pathlib import Path
 from types import ModuleType
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 
 _ROOT = Path(__file__).resolve().parents[1]
 _WORKFLOW = _ROOT / ".github" / "workflows" / "backup-nightly.yml"
@@ -1422,7 +1425,7 @@ def _mutated_status_tree(original: str, replacement: str, prefix: str) -> Path |
     source = _STATUS_HELPER.read_text(encoding="utf-8")
     if source.count(original) != 1:
         return None
-    root = Path(tempfile.mkdtemp(prefix=prefix))
+    root = Path(temporary_directory(prefix=prefix))
     (root / "ops" / "config").mkdir(parents=True)
     (root / "lib").mkdir()
     (root / "ops" / _STATUS_HELPER.name).write_text(
@@ -1453,7 +1456,7 @@ def _paused_policy_tree() -> Path:
     the door from a tree whose policy says no. Nothing is patched, injected or
     rebound: the same bytes of the same script read a different sealed file.
     """
-    root = Path(tempfile.mkdtemp(prefix="carr-dispatch-paused-"))
+    root = Path(temporary_directory(prefix="carr-dispatch-paused-"))
     (root / "ops" / "config").mkdir(parents=True)
     (root / "lib").mkdir()
     shutil.copy2(_STATUS_HELPER, root / "ops" / _STATUS_HELPER.name)
@@ -1692,7 +1695,7 @@ def _dispatch_door_contract() -> None:
     )
 
     def fixture(state_extra: dict[str, object] | None = None):
-        root = Path(tempfile.mkdtemp(prefix="carr-dispatch-door-"))
+        root = Path(temporary_directory(prefix="carr-dispatch-door-"))
         state: dict[str, object] = {
             "run": _run_state(), "artifacts": [],
             # BOTH halves of the door's evidence test, seeded green: one
@@ -2207,7 +2210,7 @@ def _reexport_probe_module() -> tuple[ModuleType, str]:
     source = ("import sys\n"
               f"sys.path.insert(0, {str(_ROOT)!r})\n"
               "from lib.platform_metering import authorize_metered_execution\n")
-    root = Path(tempfile.mkdtemp(prefix="carr-reexport-probe-"))
+    root = Path(temporary_directory(prefix="carr-reexport-probe-"))
     probe = root / "reexport_probe.py"
     probe.write_text(source, encoding="utf-8")
     return _load_module(probe, "carr_reexport_probe"), source

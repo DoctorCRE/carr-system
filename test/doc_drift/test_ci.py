@@ -15,7 +15,7 @@ class CiTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('doc_drift_ci', ROOT / 'scripts/doc-drift/ci.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        scratch = Path(tempfile.mkdtemp(prefix='doc-drift-missing-pin-'))
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='doc-drift-missing-pin-')))
         with self.assertRaises(ValueError):
             module.verify_snapshot(scratch)
 
@@ -23,7 +23,7 @@ class CiTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('doc_drift_ci', ROOT / 'scripts/doc-drift/ci.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        scratch = Path(tempfile.mkdtemp(prefix='doc-drift-pin-fixture-'))
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='doc-drift-pin-fixture-')))
         (scratch / 'scripts/doc-drift').mkdir(parents=True)
         (scratch / 'tool.py').write_text('changed')
         (scratch / 'scripts/doc-drift/source.json').write_text(json.dumps(dict(
@@ -34,7 +34,7 @@ class CiTest(unittest.TestCase):
 
     @unittest.skipUnless((ROOT / 'ops/ci.sh').exists(), 'CARR owns the single CI script')
     def test_carr_ci_entrypoint_forwards_arguments_to_local_checker(self):
-        scratch = Path(tempfile.mkdtemp(prefix='doc-drift-ci-fixture-'))
+        scratch = Path(self.enterContext(tempfile.TemporaryDirectory(prefix='doc-drift-ci-fixture-')))
         (scratch / 'ops').mkdir()
         (scratch / 'ops/ci.sh').write_bytes((ROOT / 'ops/ci.sh').read_bytes())
         (scratch / '.venv/bin').mkdir(parents=True)
