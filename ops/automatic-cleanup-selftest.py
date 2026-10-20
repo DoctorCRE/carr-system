@@ -774,6 +774,56 @@ class ScheduledCleanupTests(unittest.TestCase):
                 self.assertEqual((Path(second['removed'][0]['staged_path']) / 'payload').read_text(),
                     'preserve complete fixture')
 
+    def test_deferred_temp_vanishes_before_resume(self):
+        import machine_cleanup as cleanup
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch, clones = root / 'scratch', root / 'clones'
+            scratch.mkdir()
+            clones.mkdir()
+            candidate = scratch / 'carr-ci-test-budget'
+            candidate.mkdir()
+            (candidate / 'payload').write_text('owned fixture bytes')
+            for path in (candidate / 'payload', candidate):
+                os.utime(path, (0, 0))
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            receipt.write_text(json.dumps({'last_success_at': 123}))
+            elapsed, calls = [0.0], []
+            def probe(paths):
+                calls.append(paths)
+                if len(calls) == 2:
+                    elapsed[0] = 240
+                return set()
+            config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            options = dict(hook=None, tmp_root=clones, user_tmp_root=scratch, roots={},
+                dispatch_path=root / 'absent', provider=object(), archive_thread=lambda *a, **k: None)
+            with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+                first = cleanup.run(root, config, **options, process_probe=probe)
+            self.assertEqual(first['status'], 'deferred', first)
+            self.assertEqual(first['last_success_at'], 123)
+            self.assertEqual(first['errors'], [])
+            self.assertIn('pending', first)
+            staged = Path(first['pending']['staged_path'])
+            (candidate / 'payload').unlink()
+            candidate.rmdir()
+            self.assertFalse(staged.exists())
+            resumed = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+            self.assertEqual(resumed['status'], 'completed', resumed)
+            self.assertEqual(resumed['errors'], [])
+            self.assertEqual([(r['path'], r['status']) for r in resumed['removed']],
+                [(str(candidate), 'removed')])
+            self.assertNotIn('pending', resumed)
+            self.assertEqual(resumed['temp_freed_bytes'], 0)
+            self.assertEqual(resumed['temp_staged_allocated_bytes'], 0)
+            self.assertEqual(resumed['removed'][0]['allocated_bytes'], 0)
+            self.assertEqual(json.loads(receipt.read_text()), resumed)
+            again = cleanup.run(root, config, **options, process_probe=lambda paths: set())
+            self.assertEqual(again['status'], 'completed', again)
+            self.assertEqual(again['errors'], [])
+            self.assertEqual(again['removed'], [])
+            self.assertNotIn('pending', again)
+
     def test_thread_timeout_defers_and_reads_back_before_retry(self):
         import machine_cleanup as cleanup
         sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
