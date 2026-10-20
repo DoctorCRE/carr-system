@@ -98,10 +98,6 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
         entity = _text(raw.get("Entity Type Code"))
         if entity not in {"1", "2"}:
             raise ValueError("unknown NPPES entity type")
-        name = (_text(raw.get("Provider Organization Name (Legal Business Name)")) if entity == "2" else
-                " ".join(_text(raw.get(k)) for k in ("Provider First Name", "Provider Middle Name", "Provider Last Name (Legal Name)")).strip())
-        if not name:
-            raise ValueError("NPPES provider name missing")
         addresses = [{"city": raw.get("Provider Business Practice Location Address City Name"),
                       "state": raw.get("Provider Business Practice Location Address State Name"),
                       "zip": raw.get("Provider Business Practice Location Address Postal Code"),
@@ -111,6 +107,10 @@ def parse_nppes(rows, *, as_of, source, practice_locations=None):
         mailing = {"city": raw.get("Provider Business Mailing Address City Name"), "state": raw.get("Provider Business Mailing Address State Name"), "zip": raw.get("Provider Business Mailing Address Postal Code")}
         if local is None and not in_territory(mailing):
             continue
+        name = (_text(raw.get("Provider Organization Name (Legal Business Name)")) if entity == "2" else
+                " ".join(_text(raw.get(k)) for k in ("Provider First Name", "Provider Middle Name", "Provider Last Name (Legal Name)")).strip())
+        if not name:
+            raise ValueError("NPPES provider name missing")
         # A mailing-only tie remains visible with its weak evidence explicitly marked.
         selected = local or mailing
         codes = [_text(raw.get(f"Healthcare Provider Taxonomy Code_{i}")) for i in range(1, 16)]
