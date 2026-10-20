@@ -451,6 +451,23 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
+    def test_pending_action_survives_two_write_failures_then_a_model_failure(self):
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.fail_verbs = {'set-next-action'}
+        for _ in range(2):
+            self.assertEqual(self.run_intake(mails).state, 'failed')
+        self.fake.model_reply = RuntimeError('model down')
+        self.assertEqual(self.run_intake(mails).state, 'failed')
+        fourth = self.run_intake(mails, touch=False)
+        self.assertEqual(fourth.state, 'failed', 'an unacknowledged action cannot become nothing_new')
+        self.assertNotIn('high_water', json.loads((self.out() / intake.STATE).read_text()))
+        self.fake.fail_verbs.clear()
+        recovered = self.run_intake([], touch=False)
+        self.assertEqual(recovered.state, 'succeeded', 'frozen actions no longer need the source or model')
+        self.assertEqual(self.fake.writes('set-next-action')[-1][1]['description'], 'Send the floor plan')
+        self.assertEqual(len(self.fake.model_calls), 1, 'model proposal is frozen before the first write')
+
     def test_a_failed_ball_write_for_an_upcoming_meeting_is_retried(self):
         events = [event('G7', timedelta(days=2), attendees=[('Pat Example', 'pat@example.test')])]
         self.fake.fail_verbs = {'set-next-action'}
