@@ -44,6 +44,7 @@ class BusinessDispatchTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.db = self.root / 'queue.sqlite3'
+        self.claude_ledger_read = dispatch.claude_api_wire.Ledger.read
         for p in (patch.dict(os.environ, {'CARR_WORK_QUEUE_DB': str(self.db)}),
                   patch.object(work_runner, 'kick'),
                   patch.object(dispatch.claude_api_wire.Ledger, 'read', return_value={
@@ -107,6 +108,33 @@ class BusinessDispatchTests(unittest.TestCase):
             item = q.get('changed')
             self.assertEqual((item['stage'], execute.call_count,
                               'brief_desk_mismatch' in json.dumps(item)), ('failed', 0, True))
+
+    def test_worker_rechecks_the_ledger_after_business_enqueue(self):
+        ledger_path = self.root / 'spend.json'
+        with patch.object(dispatch.claude_api_wire.config, 'LEDGER_PATH', ledger_path), patch.object(
+                dispatch.claude_api_wire.Ledger, 'read', self.claude_ledger_read):
+            ledger = dispatch.claude_api_wire.Ledger()
+            for card, spent, stop, reason in (
+                    ('spent-after-enqueue', '200', None, 'provider budget spent or reserved'),
+                    ('stopped-after-enqueue', '0', 'billing_error', 'billing_error')):
+                with self.subTest(card=card):
+                    ledger_path.write_text(json.dumps({'months': {}}))
+                    result = self.send(['send', 'business', 'Read the record.', '--brief', 'business',
+                                        '--card-id', card])
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(self.route(card)['chosen'], 'biz-desk')
+                    with ledger.locked() as data:
+                        data['months'][dispatch.claude_api_wire.month_now()] = {
+                            'spent_usd': spent, 'reservations': {}}
+                        data['stop'] = stop
+                    with WorkQueue(self.db) as q, patch.object(dispatch, '_execute') as execute:
+                        claim = q.claim(eligible_desks={'biz-desk'}, actor='runner', owner={})
+                        work_runner.worker(q, card, claim['claim'], self.reg.path, self.results)
+                        item = q.get(card)
+                        self.assertEqual(item['stage'], 'failed')
+                        self.assertIn('business_desk_unavailable', json.dumps(item))
+                        self.assertIn(reason, json.dumps(item))
+                        execute.assert_not_called()
 
     def test_business_footer_passes_the_phrasing_lint(self):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
