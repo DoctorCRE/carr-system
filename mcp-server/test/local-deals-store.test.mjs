@@ -234,6 +234,31 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         }
       }));
 
+    await t.test('checklist requires receipt evidence for every installment on an open uninvoiced deal', async () => transaction(async () => {
+      await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
+      const readReceipt = async () => {
+        await c.query('set local role carr_reader');
+        try {
+          const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+          assert.equal(detail.invoiced_on, null);
+          return detail.checklist.phases.flatMap(phase => phase.items).find(item => item.id === 'commission_received');
+        } finally { await c.query('reset role'); }
+      };
+      assert.equal((await readReceipt()).status, 'not_recorded', 'no installments prove no receipt');
+      await c.query("insert into commission(id,deal_id,gross_amount,status,received_on,created_by) values($1,$2,100,'received','2026-10-19',$3),($4,$2,100,'expected',null,$3)", [id(31),id(4),actor.id,id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'an expected installment cannot disappear from completion');
+      await c.query("update commission set status='invoiced' where id=$1", [id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'an invoiced installment remains unpaid');
+      await c.query("update commission set status='received' where id=$1", [id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'received status alone is not dated receipt evidence');
+      await c.query("update commission set received_on='2026-10-20' where id=$1", [id(32)]);
+      const receipt = await readReceipt();
+      assert.equal(receipt.status, 'complete');
+      assert.deepEqual(receipt.evidence_ref.split(', ').sort(), [`commission:${id(31)}`, `commission:${id(32)}`]);
+      assert.equal((await c.query("select has_table_privilege('carr_reader','commission','select') allowed")).rows[0].allowed, false);
+    }));
+
     await t.test('timeline reader returns exact current lease and excludes unverified history', async () => transaction(async () => {
       await fixture(false);
       for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
