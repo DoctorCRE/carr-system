@@ -880,10 +880,8 @@ class Queue:
                         self.event(a['repo'], a['pr'], 'dispatch_not_started', 'Process did not start; brief remains queued')
 
     def behind(self, repo, p):
-        if p['mergeable_state'] == 'behind':
-            return True
         # Required checks and drafts can mask BEHIND. Prove ancestry before updating.
-        if p.get('mergeable') is True and p['mergeable_state'] in ('blocked', 'draft'):
+        if p.get('mergeable') is True and p['mergeable_state'] in ('behind', 'blocked', 'draft'):
             return not self.contains_main(repo, p['head']['sha'])
         return False
 
