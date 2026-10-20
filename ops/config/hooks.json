@@ -195,6 +195,15 @@
           "timeout": 20
         }
       ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "if [ ! -e \"{{REPO}}/hooks/rule-claim-gate.py\" ]; then printf '%s\\n' \"CARR HOOK WARNING: missing script {{REPO}}/hooks/rule-claim-gate.py; skipping\" >&2; exit 0; fi; {{REPO}}/.venv/bin/python {{REPO}}/hooks/rule-claim-gate.py",
+          "timeout": 20
+        }
+      ]
     }
   ],
   "SessionStart": [
