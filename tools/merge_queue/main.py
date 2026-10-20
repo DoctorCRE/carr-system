@@ -553,7 +553,8 @@ class Queue:
         if p['head'].get('repo', {}).get('full_name', repo) != repo:
             raise RuntimeError('regeneration refuses a fork branch')
         head, n = p['head']['sha'], p['number']
-        self.fetch(repo, head)
+        if self.contains_main(repo, head):
+            return False
         main = self.git(repo, 'rev-parse', 'origin/main').strip()
         key = f'regen:{repo}:{n}:{head}:{main}'
         receipt = self.state / 'regen' / f'{n}-{head}-{main}.json'
@@ -883,17 +884,23 @@ class Queue:
             return True
         # Required checks and drafts can mask BEHIND. Prove ancestry before updating.
         if p.get('mergeable') is True and p['mergeable_state'] in ('blocked', 'draft'):
-            self.fetch(repo, p['head']['sha'])
-            d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
-            result = subprocess.run(['git', '-C', str(d), 'merge-base', '--is-ancestor',
-                                     'origin/main', p['head']['sha']], capture_output=True, env=scrubbed_env(),
-                                    timeout=BOUNDS['command']['seconds'])
-            if result.returncode not in (0, 1):
-                raise RuntimeError('main ancestry readback failed')
-            return result.returncode == 1
+            return not self.contains_main(repo, p['head']['sha'])
         return False
 
+    def contains_main(self, repo, head):
+        self.fetch(repo, head)
+        d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
+        result = subprocess.run(['git', '-C', str(d), 'merge-base', '--is-ancestor',
+                                 'origin/main', head], capture_output=True, env=scrubbed_env(),
+                                timeout=BOUNDS['command']['seconds'])
+        if result.returncode not in (0, 1):
+            raise RuntimeError('main ancestry readback failed')
+        return result.returncode == 0
+
     def refresh(self, repo, merged_branch):
+        with WorkQueue(default_path(), read_only=True) as work:
+            queued = {pin['pr'] for pin in bounded_items('snapshot', work.merge_order()['entries'])
+                      if pin['repo'] == repo}
         complete = True
         retargeted = {row['pr'] for row in bounded_items('snapshot', self.db.execute(
             "SELECT DISTINCT pr FROM actions WHERE kind='retarget' AND repo=? AND expected_base=? AND payload='main'",
@@ -920,7 +927,7 @@ class Queue:
                 if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
                     if not self.conflict(repo, p):
                         complete = False
-                elif self.behind(repo, p) and p.get('mergeable') is True:
+                elif n not in queued and self.behind(repo, p) and p.get('mergeable') is True:
                     self.action('update', repo, n, p['head']['sha'], 'main')
                 elif p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
                     complete = False

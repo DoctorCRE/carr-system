@@ -770,6 +770,128 @@ class QueueTests(unittest.TestCase):
         self.q.enqueue(module.REPOS[0], 1, self.approved)
         return f'{module.REPOS[0]}#1@{self.approved}'
 
+    def queue_local_preparations(self, count=4):
+        for n in range(1, count + 1):
+            self.git('branch', f'branch-{n}', self.approved)
+            self.pr(n)
+            self.q.enqueue(module.REPOS[0], n, self.approved)
+        self.data['required'] = [{'bucket': 'pending'}]
+        self.save()
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'import json,os,sys\nfrom pathlib import Path\n'
+            + 'sys.path.insert(0, ' + repr(str(ROOT / 'tools')) + ')\n'
+            'from prepare_pr import prepare\n'
+            'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
+            'head = prepare(args["--remote"], args["--branch"], args["--head"], '
+            'args["--main"], Path(args["--receipt"]), lambda repo: None)\n'
+            'state = Path(os.environ["FAKE_GH_STATE"])\ndata = json.loads(state.read_text())\n'
+            'n = int(args["--pr"])\n'
+            'data.setdefault("preparations", []).append(n)\n'
+            'data["prs"][f"jbookout/carr-system#{n}"]["head"]["sha"] = head\n'
+            'state.write_text(json.dumps(data))\n'
+            'print(json.dumps(dict(head=head, changed=head != args["--head"])))\n')
+
+    def assert_branch_head(self, n, head):
+        self.assertEqual(self.git('rev-parse', f'branch-{n}').strip(), head)
+
+    def test_only_prioritized_front_is_prepared_across_polls_and_restart(self):
+        self.queue_local_preparations()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.prioritize(f'{module.REPOS[0]}#2@{self.approved}', actor='test', reason='reviewed priority')
+        self.q.tick()
+        prepared = self.load()['prs'][module.REPOS[0]+'#2']['head']['sha']
+        self.assertNotEqual(prepared, self.approved)
+        for _ in range(2):
+            self.restart()
+            self.q.tick()
+        self.assertEqual(self.load()['preparations'], [2])
+        self.assert_branch_head(2, prepared)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual([pin['pr'] for pin in work.merge_order()['entries']], [2, 1, 3, 4])
+            for n in (1, 3, 4):
+                self.assert_branch_head(n, self.approved)
+                self.assertEqual(work.get(f'{module.REPOS[0]}#{n}@{self.approved}')['prs'][0]['head'], self.approved)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_failed_ci_front_expires_then_only_next_entry_is_prepared(self):
+        self.queue_local_preparations()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            prepared = self.load()['prs'][module.REPOS[0]+'#1']['head']['sha']
+            self.data['required'] = [{'bucket': 'fail'}]
+            self.save()
+            self.restart()
+            self.q.tick()
+            clock.return_value += module.CI_WAIT_SECONDS - 1
+            self.q.tick()
+            self.assertEqual(self.load()['preparations'], [1])
+            clock.return_value += 1
+            self.q.tick()
+        self.assertEqual(self.load()['preparations'], [1, 2])
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (prepared,)).fetchone()[:], ('exhausted', 'ci_timeout'))
+        for n in (3, 4):
+            self.assert_branch_head(n, self.approved)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_held_prepared_front_advances_only_next_entry(self):
+        self.queue_local_preparations()
+        self.q.tick()
+        prepared = self.load()['prs'][module.REPOS[0]+'#1']['head']['sha']
+        self.data['prs'][module.REPOS[0]+'#1']['labels'] = [{'name': module.HOLD}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.load()['preparations'], [1, 2])
+        self.assert_branch_head(1, prepared)
+        for n in (3, 4):
+            self.assert_branch_head(n, self.approved)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (prepared,)).fetchone()[0], 'held')
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_merge_advances_only_next_entry_without_refreshing_all_pending(self):
+        self.queue_local_preparations()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.assertEqual(self.load()['preparations'], [1])
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        self.assertEqual(self.load()['preparations'], [1, 2])
+        for n in (3, 4):
+            self.assert_branch_head(n, self.approved)
+        self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
+
+    def test_post_merge_refresh_leaves_queued_heads_for_merge_order(self):
+        for n in (1, 2, 3):
+            self.pr(n, base='parent')
+            self.q.enqueue(module.REPOS[0], n, self.approved)
+        self.q.refresh(module.REPOS[0], 'parent')
+        self.assertEqual(len(self.calls('edit')), 3)
+        self.assertFalse(any('update-branch' in str(call) for call in self.load()['calls']))
+        for n in (1, 2, 3):
+            self.assertEqual(self.data['prs'][module.REPOS[0]+f'#{n}']['head']['sha'], self.approved)
+        self.q.tick()
+        updates = [call[1] for call in self.load()['calls'] if 'update-branch' in str(call)]
+        self.assertEqual(updates, [f'repos/{module.REPOS[0]}/pulls/1/update-branch'])
+        for n in (2, 3):
+            self.assertEqual(self.data['prs'][module.REPOS[0]+f'#{n}']['head']['sha'], self.approved)
+
+    def test_head_containing_main_merges_without_regeneration(self):
+        self.pr(head=self.updated)
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        (self.root / 'tools/prepare_pr.py').write_text(
+            'raise AssertionError("head already contains main")\n')
+        self.q.tick()
+        self.assertEqual([call[-1] for call in self.calls('merge')], [self.updated])
+        self.assertEqual(self.q.db.execute("SELECT COUNT(*) FROM actions WHERE kind='regen'").fetchone()[0], 0)
+
     def test_preparation_push_waits_for_checks_on_the_new_head(self):
         card_id = self.prepare_pinned_head()
         self.q.tick()
