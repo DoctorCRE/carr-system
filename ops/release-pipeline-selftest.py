@@ -4873,6 +4873,23 @@ class RunnerUploadOutput(unittest.TestCase):
             self.assertNotIn(CF_TOKEN, result.out)
             self.assertNotIn(CF_TOKEN, log.read_text())
 
+    def test_provider_version_label_does_not_exempt_credentials_or_invalid_ids(self):
+        for output, value, env in (
+            (f"provider version: {VERSION}\n", VERSION, {"API_TOKEN": VERSION}),
+            (f"token: {VERSION}\n", VERSION, {}),
+            (f"token provider version: {VERSION}\n", VERSION, {}),
+            ("provider version: " + "a" * 40 + "\n", "a" * 40, {}),
+        ):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / "upload.log"
+                completed = subprocess.CompletedProcess([], 0, stdout=output)
+                with mock.patch.object(rp.subprocess, "run", return_value=completed):
+                    result = rp.Runner().run(["synthetic-upload"], cwd=Path(tmp), log=log, env=env)
+                self.assertNotIn(value, result.out)
+                self.assertNotIn(value, log.read_text())
+                with self.assertRaises(rp.StepFailed):
+                    rp.parse_provider_version(result)
+
 
 class DeployCredential(unittest.TestCase):
     """CLOUDFLARE_API_TOKEN comes from $HOME/.config/carr/tokens.env into the
