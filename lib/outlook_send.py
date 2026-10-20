@@ -29,6 +29,7 @@ import fcntl
 import ctypes
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -734,6 +735,28 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow
         raise _transport_failure(exc) from None
 
 
+def resolve_store(home: Path) -> Path:
+    """Locate the New Outlook store when a job runs."""
+    profiles = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
+    override = os.environ.get('CARR_OUTLOOK_STORE')
+    if override:
+        selected = home / Path(override).expanduser()
+        if selected.is_file():
+            return selected
+        message = f'CARR_OUTLOOK_STORE is not a file: {selected}'
+        logging.error('%s', message)
+        raise FileNotFoundError(message)
+    stores = [path for path in profiles.glob('*/HxStore.hxd') if path.is_file()]
+    if not stores:
+        message = f'No Outlook store found: searched {profiles}/*/HxStore.hxd'
+        logging.error('%s', message)
+        raise FileNotFoundError(message)
+    selected = max(stores, key=lambda path: (path.stat().st_mtime_ns, str(path)))
+    if len(stores) > 1:
+        logging.warning('Multiple Outlook stores found; using most recently modified: %s', selected)
+    return selected
+
+
 class DecodedMailbox:
     """Read metadata from a private snapshot using PR #2023's pinned calendar decoder.
 
@@ -742,7 +765,6 @@ class DecodedMailbox:
     """
     PIN = ('191b54e42757687806202f8f696e9066f0514e11 '
            '2f09252e1336f17e374a4c1fd8d112bcc44d3af185a9daa283c0c9fba20471f0')
-    STORE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/HxStore.hxd')
 
     def __init__(self, home: Path):
         self.home = home
@@ -760,7 +782,7 @@ class DecodedMailbox:
             work = Path(folder)
             copy, db = work / 'store.hxd', work / 'store.db'
             fd = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, 'wb') as writer, (self.home / self.STORE).open('rb') as reader:
+            with os.fdopen(fd, 'wb') as writer, resolve_store(self.home).open('rb') as reader:
                 shutil.copyfileobj(reader, writer)
             fd = os.open(db, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             os.close(fd)
