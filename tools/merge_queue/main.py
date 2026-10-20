@@ -1043,6 +1043,14 @@ class Queue:
                               merged=merged, actor='merge-daemon',
                               reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
 
+    def regeneration_receipt_matches(self, action, p):
+        try:
+            receipt = json.loads(Path(action['receipt']).read_text())
+        except (OSError, ValueError, TypeError):
+            return False
+        return receipt == dict(head=action['head'], main=action['payload'],
+                               prepared=p['head']['sha'], branch=p['head']['ref'])
+
     def advance_regenerated_pin(self, e, card_id, p, expected_order):
         head = p['head']['sha']
         if (e['tested'] is not None or head == e['approved'] or p['state'] != 'open'
@@ -1058,15 +1066,11 @@ class Queue:
                                   'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
                                   (e['repo'], e['pr'], e['approved'])).fetchall()
         for action in bounded_items('snapshot', actions):
-            try:
-                receipt = json.loads(Path(action['receipt']).read_text())
-            except (OSError, ValueError):
-                continue
-            if receipt != dict(head=e['approved'], main=action['payload'], prepared=head, branch=p['head']['ref']):
+            if not self.regeneration_receipt_matches(action, p):
                 continue
             with WorkQueue(default_path()) as work:
                 work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
-                                       prepared=head, main=receipt['main'], actor='merge-daemon',
+                                       prepared=head, main=action['payload'], actor='merge-daemon',
                                        reason=f'journal entry {e["id"]}: verified regeneration receipt {action["receipt"]}',
                                        expected_order=expected_order)
             self.report(e, 'regenerated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
@@ -1422,6 +1426,8 @@ class Queue:
             raise RuntimeError('reconciliation requires an issued update, retarget or regen intent')
         p = self.pr(a['repo'], a['pr'])
         completed = (a['kind'] in ('update', 'regen') and p['head']['sha'] != a['head']) or (a['kind'] == 'retarget' and p['base']['ref'] == a['payload'])
+        if completed and a['kind'] == 'regen' and not self.regeneration_receipt_matches(a, p):
+            raise ActionUncertain('regeneration head moved without a matching receipt; no reconciliation')
         if completed or p['state'] != 'open':
             with self.db:
                 self.db.execute("UPDATE actions SET phase='done' WHERE key=?", (key,))
