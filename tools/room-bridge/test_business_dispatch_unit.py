@@ -299,7 +299,7 @@ class BusinessDispatchTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
 
     def test_overlapping_calls_reserve_capacity_atomically(self):
-        start = threading.Barrier(5)
+        start = threading.Barrier(12)
         release = threading.Event()
         def ok(argv, **kwargs):
             release.wait(1)
@@ -308,10 +308,10 @@ class BusinessDispatchTests(unittest.TestCase):
         def enqueue(n):
             start.wait(2)
             return run.enqueue(f'party:{n}', 'draft_reply', 'Draft.', 'mail:1').status
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            futures = [pool.submit(enqueue, n) for n in range(5)]
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            futures = [pool.submit(enqueue, n) for n in range(12)]
             statuses = [future.result(10) for future in futures]
-        self.assertEqual(sorted(statuses), ['capped'] * 2 + ['queued'] * 3)
+        self.assertEqual(sorted(statuses), ['capped'] * 9 + ['queued'] * 3)
 
     def test_failures_return_refusals_instead_of_raising(self):
         def broken(argv, **kwargs):
