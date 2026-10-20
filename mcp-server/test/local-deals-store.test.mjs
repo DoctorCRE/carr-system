@@ -69,7 +69,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role carr_writer; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space']) {
+    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
@@ -237,6 +237,53 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.ok(events[0].recorded_at);
       assert.deepEqual(events[0].new_value.superseded_action_ids, [prior.next_action_id]);
     }));
+
+    for (const writer of ['add-deal-note', 'set-next-step', 'set-next-action', 'patch-deal-field', 'update-deal'])
+      await t.test(`${writer} supersedes accepted overdue Call Mode actions without completing them`, async () => transaction(async () => {
+        await fixture(false);
+        const dates = (await c.query("select (current_date-1)::text as past, current_date::text as today, (current_date+7)::text as future")).rows[0];
+        const dell = {...actor, id: id(7), slug: 'dell'};
+        await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+        await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Other Synthetic Assignment','renewal','research','joe',$3,$3)", [id(9), id(3), actor.id]);
+        const accept = async (deal, owner, due) => {
+          const candidate = randomUUID();
+          await c.query(`insert into capture_post_call_candidate
+            (id,session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+            values ($1,$2,$3,$4,0,'assigned_action',$5,$6,'Review call terms',$7,'Review call terms',1)`,
+            [candidate, randomUUID(), randomUUID(), 'a'.repeat(64), deal, owner, due]);
+          return (await TOOLS['resolve-post-call-candidate'].handler(c, actor, {
+            idempotency_key: randomUUID(), candidate_id: candidate, accept: true,
+          })).ref;
+        };
+        await TOOLS['set-next-step'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: dates.past,
+        });
+        const expired = await accept(id(4), 'joe', dates.past);
+        const preserved = [await accept(id(4), 'joe', dates.today), await accept(id(4), 'joe', dates.future),
+          await accept(id(4), 'dell', dates.past)];
+        const otherDeal = await accept(id(9), 'joe', dates.past);
+        const args = {idempotency_key: randomUUID(), deal: id(4)};
+        if (writer === 'add-deal-note') Object.assign(args, {text: 'Terms received', next_step: 'Review revised terms', next_date: dates.future});
+        if (writer === 'set-next-step') Object.assign(args, {text: 'Review revised terms', next_date: dates.future});
+        if (writer === 'set-next-action') Object.assign(args, {ref: id(4), description: 'Review revised terms', due_on: dates.future});
+        if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
+        if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
+          (await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)})).base_version});
+        await TOOLS[writer].handler(c, actor, args);
+        assert.equal((await TOOLS[writer].handler(c, actor, args)).replayed, true);
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped', 'expired accepted actions must be superseded');
+        // set-next-action explicitly replaces all of this owner's actions, including future ones.
+        for (const action of writer === 'set-next-action' ? preserved.slice(2) : preserved)
+          assert.equal(room.next_actions.find(a => a.id === action).status, 'open');
+        const other = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(9)});
+        assert.equal(other.next_actions.find(a => a.id === otherDeal).status, 'open');
+        const events = room.events.filter(e => e.verb === writer && e.field === 'next_action' && e.new_value.superseded_action_ids?.includes(expired));
+        assert.equal(events.length, 1, 'supersession must retain one attributed event on retry');
+        assert.equal(events[0].actor, 'joe');
+        assert.ok(events[0].recorded_at);
+        assert.equal(room.attention, true);
+      }));
 
     await t.test('a verified native partner update supersedes the sponsor action with runtime attribution', async () => transaction(async () => {
       await fixture(false);
