@@ -109,6 +109,14 @@ test("the internal CoS marker cannot be caller-set and human/authority invariant
   assert.equal(TOOLS["teach"].humanOnly, undefined);
 });
 
+test("set-next-action publishes partner assignment and runtime provenance in its owner guidance", () => {
+  const tool = TOOLS["set-next-action"];
+  assert.equal(tool.inputSchema.properties.owner.description,
+    "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime.");
+  assert.match(tool.description,
+    /Any authenticated caller, agent seats included, may name owner 'joe' or 'dell'; created_by remains the real runtime\./);
+});
+
 test("Joe 2026-10-20, agent seats may own-assign to-dos: every caller may name itself, Joe, or Dell", () => {
   assert.deepEqual(permittedActionOwnerSlugs(cos()), ["hermes-pilot", "joe", "dell"]);
   assert.deepEqual(permittedActionOwnerSlugs(plain()), ["hermes-pilot", "joe", "dell"]);

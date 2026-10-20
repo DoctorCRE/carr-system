@@ -3900,7 +3900,7 @@ export const TOOLS = {
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, ref: { type: "string" },
       description: { type: "string" }, due_on: { type: "string", description: "YYYY-MM-DD, optional" },
-      owner: { type: "string", description: "optional server-derived owner; only the caller or a Hermes CoS runtime's Joe sponsor" } },
+      owner: { type: "string", description: "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime." } },
       required: ["idempotency_key","ref","description"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-action", args, async () => {
       const s = await resolveSubject(c, args.ref);
