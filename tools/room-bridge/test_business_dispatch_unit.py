@@ -182,7 +182,7 @@ class BusinessDispatchTests(unittest.TestCase):
 
     def test_flash_is_excluded_by_default_and_requires_both_switches(self):
         self.add_business_desks()
-        for flag, off, expected in [('0', False, 'codex'), ('1', True, 'codex'), ('1', False, 'flash')]:
+        for flag, off, expected in [('0', False, 'codex'), ('1', True, 'codex'), ('1', False, 'codex')]:
             card = f'flash-{flag}-{off}'
             with patch.dict(os.environ, {'CARR_BUSINESS_FLASH_ENABLED': flag}), patch.dict(
                     dispatch.record_layer.REFUSALS, {}, clear=True), patch.object(
@@ -192,6 +192,22 @@ class BusinessDispatchTests(unittest.TestCase):
                 result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', card])
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(self.route(card)['chosen'], expected)
+
+    def test_enabled_flash_is_last_after_every_other_business_desk(self):
+        self.add_business_desks()
+        order = ['nous', 'grok', 'codex', 'biz-desk', 'flash']
+        for index, expected in enumerate(order):
+            blocked = set(order[:index])
+            with patch.dict(os.environ, {'CARR_BUSINESS_FLASH_ENABLED': '1'}), patch.dict(
+                    dispatch.record_layer.REFUSALS, {}, clear=True), patch.object(
+                    dispatch.business_routing.flashlib, 'is_switched_off', return_value=False), patch.object(
+                    dispatch.seat_gate, 'check', side_effect=lambda e: ('provider_capped', 'cap')
+                    if e['name'] in blocked else None):
+                card = f'enabled-order-{index}'
+                result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', card])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(self.route(card), {'chosen': expected, 'skips': [
+                {'desk': name, 'reason': 'provider_capped: cap'} for name in order[:index]]})
 
     def test_nous_budget_stop_is_recorded_and_claude_is_selected(self):
         self.reg.register('nous', 'hermes-nous', posture='record-layer')
