@@ -580,7 +580,7 @@ class SendTests(unittest.TestCase):
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
         (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
-        store = home / send_mod.DecodedMailbox.STORE
+        store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         store.parent.mkdir(parents=True)
         store.write_bytes(b'fixture-store')
         def decode(command, **kwargs):
@@ -622,7 +622,7 @@ class SendTests(unittest.TestCase):
         vendor = home / 'carr-local/hxstore-reverse-engineering'
         vendor.mkdir(parents=True)
         (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
-        store = home / send_mod.DecodedMailbox.STORE
+        store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         store.parent.mkdir(parents=True)
         store.write_bytes(b'synthetic-mailbox')
         workspaces = []
@@ -642,7 +642,7 @@ class SendTests(unittest.TestCase):
         vendor.mkdir(parents=True)
         (vendor / '.carr-pin').write_text(send_mod.DecodedMailbox.PIN)
         (home / '.git').write_text('gitdir: synthetic-worktree')
-        store = home / send_mod.DecodedMailbox.STORE
+        store = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         store.parent.mkdir(parents=True)
         store.write_bytes(b'synthetic-mailbox')
         repo = Path(self.tmp.name) / 'checkout'
@@ -733,6 +733,28 @@ class SendTests(unittest.TestCase):
     def test_invalid_address_is_refused_before_anything_runs(self):
         with self.assertRaises(ValueError):
             Harness(self.out).send(to=['not an address'])
+
+
+class StoreResolverTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.profiles = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
+        self.env = patch.dict(os.environ, {}, clear=False)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        os.environ.pop('CARR_OUTLOOK_STORE', None)
+
+    def store(self, profile):
+        path = self.profiles / profile / 'HxStore.hxd'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'synthetic-store')
+        return path
+
+    def test_main_identity_profile(self):
+        expected = self.store('Main Identity')
+        self.assertEqual(send_mod.resolve_store(self.home), expected)
 
 
 if __name__ == '__main__':
