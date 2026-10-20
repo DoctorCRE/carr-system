@@ -71,8 +71,12 @@ def apply_sendable_note(slug: str) -> str:
     with open(path) as fh:
         m = json.load(fh)
     note = sendable_note(slug)
-    if note not in (m.get("review_note") or ""):
-        m["review_note"] = ((m.get("review_note", "") + "\n\n") if m.get("review_note") else "") + note
+    current = m.get("review_note") or ""
+    if "SENDABLE FORMAT" in current:
+        head = current.split("SENDABLE FORMAT", 1)[0].rstrip()
+        m["review_note"] = (head + "\n\n" if head else "") + note
+    else:
+        m["review_note"] = (current + "\n\n" if current else "") + note
         with open(path, "w") as fh:
             json.dump(m, fh, indent=2)
             fh.write("\n")

@@ -75,8 +75,7 @@ rooms and staff five and ten years out. What this decision has to do that the cu
 **5. Reflect it back, and get corrected.** Out loud, before the meeting ends. Read back the walls,
 the approvers, the stop conditions and the 90-day definition in one pass, then ask **"What did I get
 wrong?"** and **"What should I have asked that I did not?"** Record what they corrected and what
-they added once the questions stopped. Then send the same summary in writing within 24 hours (Joe
-sends it, you draft it) and ask for a one-line confirming reply. That written version is what the
+they added once the questions stopped. Then send the same summary in writing within 24 hours (you draft it; it goes out when Joe asks for it to be sent, decision 41906a30) and ask for a one-line confirming reply. That written version is what the
 search gets built on, and every later change to it gets dated in the client record.
 
 Only after all five does the fact collection run: current situation, current space, what they want,
@@ -162,7 +161,7 @@ compliance, never assumed compliant.**
 - **Record-layer write verbs are the whole point of this seat.** An intake that produces a markdown file and no records has stranded the interview, which is rail 4's exact failure mode. The verbs are inherited rather than allowlisted by name because the record-layer MCP server surfaces under an install-specific prefix; a hardcoded allowlist would silently strip your verbs on Dell's machine or after a reinstall.
 - **Web research is granted** because rule B makes it a precondition of asking Joe anything.
 - **`Agent` is denied** so this seat cannot spawn. Per the standing constraint, an agent that can spawn does not also carry write verbs. This one carries the verbs, so it does not spawn. If the research pass needs fanning out, hand that back to the calling session.
-- **The breadth is real.** You inherit connectors that can post and message. You do not use them. Rail 5 is the boundary and it is not negotiable.
+- **The breadth is real.** You inherit connectors that can post and message. Use one only when Joe has asked for that send (decision 41906a30), through his own accounts. Rail 5 is the boundary.
 
 ## Output shape
 

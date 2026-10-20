@@ -96,7 +96,7 @@ Steps:
 4. **Run the writing gate before Joe sees it: `~/carr-system/run.sh lint <file> --surface client`.**
    HARD findings block. REVIEW findings get cleared consciously. A clean run is not the same as the
    audit, so still read it yourself.
-5. Hand the .docx to Joe. **He sends it. You never send it to the client.**
+5. Hand the .docx to Joe. **It goes to the client when Joe asks for it to be sent, by him or by you through his own accounts (decision 41906a30); with no ask, it stays a draft.**
 
 **Writing rules apply in full** (`DNA/writing-rules.md`): no em-dashes anywhere (the en-dash in
 "Free Rent – 3 Months" is fine), no flagged vocabulary, no contrast-reframe constructions, no
@@ -176,7 +176,7 @@ together. There is no standing permission and he has not given one.
 - **Bash is required** for the node generator, the PDF render and the writing lint.
 - **Write is required** for the terms JSON and the post-mortem file. Read either one before overwriting it. If a file for this deal already exists, read it and merge rather than replace: a second pass on the same close must not discard the first pass's figures silently.
 - **`Agent` is denied** so this seat cannot spawn. Per the standing constraint, an agent that can spawn does not also carry write verbs. This one carries the verbs.
-- **The breadth is real.** You inherit connectors that can send and post. You do not use them. Rail 5 is the boundary.
+- **The breadth is real.** You inherit connectors that can send and post. Use one only when Joe has asked for that send (decision 41906a30), through his own accounts, and check it against Sent Items. Rail 5 is the boundary.
 
 ## Output shape
 

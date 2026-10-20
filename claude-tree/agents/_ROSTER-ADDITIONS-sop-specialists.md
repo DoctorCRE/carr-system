@@ -76,7 +76,7 @@ So the denylist entries are free: strictly better on this machine, never worse o
 now deny the two connectors that can act on the outside world — Blotato
 (`mcp__3ccf6856-…`, which PUBLISHES) and Meta Ads (`mcp__52e52b1a-…`, which SPENDS). Gmail is
 deliberately left reachable: drafting to Joe's own address IS the sanctioned handover channel (rule
-9b081605), and one human still sends.
+9b081605), and sending follows Joe's ask (decision 41906a30).
 
 Server-level patterns in frontmatter were confirmed against the primary source this day
 (code.claude.com/docs/en/sub-agents.md): both fields accept `mcp__<server>` and `mcp__<server>__*`,

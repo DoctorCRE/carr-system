@@ -599,7 +599,7 @@ def main() -> int:
                        "red, and no pipe anywhere in the body."),
         "routed_to": routed_to, "route_note": route_note,
         "status": "draft",
-        "human_gate": "DRAFT for Joe to review. Nothing was sent; no verb in this system can send.",
+        "human_gate": "DRAFT for Joe to review. Nothing was sent; this pipeline only prepares the document, and sends go through Joe's own accounts when he asks (decision 41906a30).",
     }
 
     if a.finish:
