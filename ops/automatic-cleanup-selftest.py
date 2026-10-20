@@ -730,6 +730,63 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_thread_timeout_defers_and_reads_back_before_retry(self):
+        import machine_cleanup as cleanup
+        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
+        import codex_wire
+        for timeout_at in ('initialize', 'thread/archive'):
+            with self.subTest(timeout_at=timeout_at), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                clones = root / 'clones'
+                clones.mkdir()
+                ledger = root / 'dispatch.jsonl'
+                ledger.write_text(json.dumps({'thread_id': 'finished', 'status': 'completed',
+                    'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+                elapsed, calls, timed_out = [0.0], [], [False]
+                thread = {'id': 'finished', 'updatedAt': 10, 'status': {'type': 'idle'},
+                          'path': '/fixture/session.jsonl'}
+                class Wire:
+                    def __init__(self, timeout):
+                        pass
+                    def upgrade(self):
+                        pass
+                    def close(self):
+                        pass
+                    def send_json(self, request):
+                        self.request = request
+                        calls.append(request['method'])
+                        if request['method'] == 'thread/archive':
+                            thread['path'] = '/fixture/archived_sessions/session.jsonl'
+                    def receive_json(self):
+                        method = self.request['method']
+                        if method == timeout_at and not timed_out[0]:
+                            timed_out[0] = True
+                            elapsed[0] = 240
+                            raise TimeoutError('fixture wire deadline')
+                        result = {'thread': thread} if method == 'thread/read' else {}
+                        if method == 'thread/list':
+                            result = {'data': [], 'nextCursor': None}
+                        return {'id': self.request['id'], 'result': result}
+                def archive(*args, **kwargs):
+                    return codex_wire.archive_finished_thread(*args, **kwargs, wire_factory=Wire)
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=None, tmp_root=clones, roots={}, dispatch_path=ledger,
+                    provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+                    first = cleanup.run(root, config, **options)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertFalse(first['errors'])
+                self.assertEqual(first['pending']['thread_id'], 'finished')
+                self.assertIsNone(first['last_success_at'])
+                second = cleanup.run(root, config, **options)
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertFalse(second['errors'])
+                self.assertNotIn('pending', second)
+                self.assertEqual(len(second['removed']), 1, second)
+                self.assertEqual(calls.count('thread/archive'), 1, calls)
+                self.assertEqual(json.loads((root / 'out/machine-cleanup-runs.jsonl').read_text().splitlines()[0])['status'],
+                    'deferred')
+
     def test_clone_budget_defers_remainder_and_resumes_from_saved_cursor(self):
         import machine_cleanup as cleanup
         from lib.cleanup_budget import BudgetExhausted
