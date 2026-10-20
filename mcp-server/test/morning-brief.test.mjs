@@ -24,14 +24,14 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture() } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null } = {}) {
   const queries = [];
   return {
     queries,
     query: async (sql, params = []) => {
       queries.push({ sql, params });
       if (unavailable && sql.includes(unavailable)) throw new Error("fixture source unavailable");
-      if (sql.includes("from v_today_triage")) return { rows: [
+      if (sql.includes("from v_today_triage")) return { rows: todayRows || [
         { item_kind: "next_action", owner: "joe", what: "Call the client", subject_name: "Example Practice" },
       ] };
       if (sql.includes("from v_claim_card") && sql.includes("count(*)")) return { rows: [
@@ -121,6 +121,18 @@ test("morning-brief filters accounts by authenticated sponsor rather than exposi
   assert.doesNotMatch(JSON.stringify(dell), /Joe Account/);
   assert.doesNotMatch(JSON.stringify(joe), /Unowned Account/);
   assert.doesNotMatch(JSON.stringify(dell), /Unowned Account/);
+});
+
+test("a ball Joe's own local machine seat set is Joe's to-do; another seat's is not", async () => {
+  const todayRows = [
+    { item_kind: "next_action", owner: "joe-local", what: "Reply about the suite tour" },
+    { item_kind: "next_action", owner: "dell-local", what: "Dell's machine ball" },
+    { item_kind: "next_action", owner: "claude", what: "An agent's own ball" },
+  ];
+  const joe = await executeRegisteredTool(client({ todayRows }), JOE, "morning-brief", {});
+  const dell = await executeRegisteredTool(client({ todayRows }), DELL, "morning-brief", {});
+  assert.deepEqual(joe.sections.today.items.map((row) => row.what), ["Reply about the suite tour"]);
+  assert.deepEqual(dell.sections.today.items.map((row) => row.what), ["Dell's machine ball"]);
 });
 
 test("Joe's brief leads with the needs-Joe list, read through governance-queue", async () => {

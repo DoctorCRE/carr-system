@@ -113,6 +113,16 @@ def calendar_for_interval(seconds: int, label: str) -> tuple[list[dict], str | N
     return [{"Hour": h, "Minute": minute} for h in range(0, 24, step // 60)], note
 
 
+def calendar_for_window(start: tuple[int, int], end: tuple[int, int], step_minutes: int) -> list[dict]:
+    """One {Hour, Minute} entry every step_minutes from start through end, both inclusive.
+
+    For a job that retries inside an evening window rather than repeating all day."""
+    first, last = start[0] * 60 + start[1], end[0] * 60 + end[1]
+    if step_minutes <= 0 or not 0 <= first <= last < 24 * 60:
+        raise ValueError(f"bad window {start}..{end} every {step_minutes} minutes")
+    return [{"Hour": m // 60, "Minute": m % 60} for m in range(first, last + 1, step_minutes)]
+
+
 def cadence_seconds(plist: dict) -> int | None:
     """The period of an evenly spaced StartCalendarInterval, or None.
 

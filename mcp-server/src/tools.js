@@ -56,7 +56,7 @@ import { actionClassSuccessorRegistryTools } from "./action-class-successor-regi
 import { tourArtifactTools } from "./tour-artifacts.js";
 import { DEAL_ROOM_FIELDS, assertDealRoomField, stripDealPlaceholders } from "./dealroom.js";
 import { authenticatedIdentity, authorizationClassForActor, organizationTenantForActor,
-         permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
+         partnerOfSlug, permittedActionOwnerSlugs, personalScopeForActor } from "./identity.js";
 import { canExercisePartnerAuthority, partnerAuthoritySlugForActor } from "./partner-authority.js";
 import { assertRegisteredOperation, mutationManifestIdentity, MutationRegistryRefusal } from "./mutation-registry.js";
 import { readRuleEnforcementCoverage } from "./lifecycle-assurance.v5.js";
@@ -3233,7 +3233,9 @@ export const TOOLS = {
           return { state: "unavailable", reason: "source_unavailable", items: [] };
         }
       };
-      const ownOrShared = (row) => !row?.owner || String(row.owner).toLowerCase() === scope.sponsor;
+      // A ball the partner's own machine seat set (joe-local's intake jobs) is
+      // the partner's; set-next-action cannot name the partner from that seat.
+      const ownOrShared = (row) => !row?.owner || partnerOfSlug(row.owner) === scope.sponsor;
 
       const today = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "today-triage", {});

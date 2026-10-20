@@ -329,6 +329,12 @@ export function authorizationClassForActor(actor) {
 // as Joe. Same design weight as a DISPLAY entry, per the note above.
 const LOCAL_SPONSOR = Object.freeze({ "joe-local": "joe", "dell-local": "dell" });
 
+/** The partner a slug acts for: a local machine seat answers to its sponsor. */
+export function partnerOfSlug(slug) {
+  const s = String(slug || "").toLowerCase();
+  return LOCAL_SPONSOR[s] || s;
+}
+
 /**
  * AGENT_TOKENS (or a same-shape sibling map, e.g. LOCAL_TOKENS) bearer ->
  * outside-model agent actor, or null.
