@@ -883,6 +883,39 @@ class QueueTests(unittest.TestCase):
         for n in (2, 3):
             self.assertEqual(self.data['prs'][module.REPOS[0]+f'#{n}']['head']['sha'], self.approved)
 
+    def test_dirty_queued_children_repair_only_on_their_selected_turn(self):
+        (self.remote / 'file.txt').write_text('main conflict\n')
+        self.git('commit', '-qam', 'conflicting main')
+        self.main = self.git('rev-parse', 'HEAD').strip()
+        self.pr(1, head=self.main)
+        self.q.enqueue(module.REPOS[0], 1, self.main)
+        for n in (2, 3, 4):
+            self.git('branch', f'branch-{n}', self.changed)
+            self.pr(n, head=self.changed, state='dirty', base='branch-1')
+            if n != 4:
+                self.q.enqueue(module.REPOS[0], n, self.changed)
+        self.data.update(main=self.main, merge_sha=self.main, retarget_state='dirty')
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.assertEqual(len(self.calls('edit')), 3)
+        repairs = lambda: [row[0] for row in self.q.db.execute(
+            "SELECT pr FROM actions WHERE kind='dispatch' ORDER BY pr")]
+        self.assertEqual(repairs(), [4])
+        self.q.tick()
+        self.assertEqual(repairs(), [2, 4])
+        for _ in range(2):
+            self.restart()
+            self.q.tick()
+            self.assertEqual(repairs(), [2, 4])
+        self.load()['prs'][module.REPOS[0]+'#2']['labels'] = [{'name': module.HOLD}]
+        self.save()
+        self.q.tick()
+        self.assertEqual(repairs(), [2, 3, 4])
+        for n in (2, 3, 4):
+            self.assert_branch_head(n, self.changed)
+        self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
+
     def test_head_containing_main_merges_without_regeneration(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
