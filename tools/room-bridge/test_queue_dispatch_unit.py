@@ -142,6 +142,16 @@ class FakeAdapter:
 
 
 class QueueDispatchTests(unittest.TestCase):
+    def test_nous_spend_stop_is_terminal_and_never_schedules_a_retry(self):
+        adapter = FakeAdapter([task()])
+        controller = queue_dispatch.QueueDeskExecutor(catalog=CATALOG, adapter=adapter)
+        outcome = controller.start('sol', dispatch_call=lambda _prompt: {
+            'status': 'failed', 'code': 'nous_spend_stop', 'detail': 'Nous credit budget spent'})
+        self.assertEqual(outcome['outcome'], 'blocked')
+        self.assertEqual(outcome['code'], 'nous_spend_stop')
+        self.assertEqual(adapter.status['t_queue0001'], 'blocked')
+        self.assertFalse(any(call[0] in ('retry_attempt', 'reclaim') for call in adapter.calls))
+
     def test_repository_catalog_keeps_profiles_mapped_and_ox_budget_gated(self):
         catalog = kanban_adapter.load_catalog()
         targets = catalog["targets"]
@@ -657,43 +667,44 @@ class FlashReplyReachesTheRoomTests(unittest.TestCase):
         }
 
     def test_flash_reply_reaches_the_room_as_the_tasks_result(self):
-        answer = "Loop 640 is blocked on the Dell SSH alias; see decision 79110363 for the routing ruling."
-        protocol_line = "CARR_QUEUE_RESULT " + json.dumps(
-            {"v": 1, "task_id": "t_queue0001", "outcome": "success", "summary": "Answered directly."},
-            separators=(",", ":"),
-        )
+        with mock.patch.object(flash_wire.flashlib, "is_switched_off", return_value=False):
+            answer = "Loop 640 is blocked on the Dell SSH alias; see decision 79110363 for the routing ruling."
+            protocol_line = "CARR_QUEUE_RESULT " + json.dumps(
+                {"v": 1, "task_id": "t_queue0001", "outcome": "success", "summary": "Answered directly."},
+                separators=(",", ":"),
+            )
 
-        def fake_run_turn(task, **_kwargs):
-            return {"status": "completed", "finish": "stop", "result": f"{answer}\n{protocol_line}"}
+            def fake_run_turn(task, **_kwargs):
+                return {"status": "completed", "finish": "stop", "result": f"{answer}\n{protocol_line}"}
 
-        real_run_turn = flash_wire.run_turn
-        flash_wire.run_turn = fake_run_turn
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                registry = desks.Registry(Path(tmp) / "desks.json")
-                registry.register("flash-model", "flash-local")
+            real_run_turn = flash_wire.run_turn
+            flash_wire.run_turn = fake_run_turn
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    registry = desks.Registry(Path(tmp) / "desks.json")
+                    registry.register("flash-model", "flash-local")
 
-                def dispatch_call(prompt: str) -> dict:
-                    # The real dispatch.dispatch(): resolves the registry entry, guards
-                    # its named model/effort, and calls flash_wire.run_turn(prompt).
-                    return dispatch.dispatch(
-                        "flash-model", prompt, registry=registry,
-                        results_path=Path(tmp) / "results.jsonl",
+                    def dispatch_call(prompt: str) -> dict:
+                        # The real dispatch.dispatch(): resolves the registry entry, guards
+                        # its named model/effort, and calls flash_wire.run_turn(prompt).
+                        return dispatch.dispatch(
+                            "flash-model", prompt, registry=registry,
+                            results_path=Path(tmp) / "results.jsonl",
+                        )
+
+                    adapter = FakeAdapter([self._flash_task()])
+                    controller = queue_dispatch.QueueDeskExecutor(catalog=self.FLASH_CATALOG, adapter=adapter)
+                    outcome = controller.start(
+                        "flash", dispatch_call=dispatch_call, include_reply=True, retry_protocol_errors=True,
                     )
+            finally:
+                flash_wire.run_turn = real_run_turn
 
-                adapter = FakeAdapter([self._flash_task()])
-                controller = queue_dispatch.QueueDeskExecutor(catalog=self.FLASH_CATALOG, adapter=adapter)
-                outcome = controller.start(
-                    "flash", dispatch_call=dispatch_call, include_reply=True, retry_protocol_errors=True,
-                )
-        finally:
-            flash_wire.run_turn = real_run_turn
-
-        self.assertEqual(outcome["outcome"], "done")
-        callback = outcome["completion"]["queue_completion"]
-        self.assertEqual(callback["reply"], answer)
-        self.assertEqual(callback["summary"], "Answered directly.")
-        self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1)
+            self.assertEqual(outcome["outcome"], "done")
+            callback = outcome["completion"]["queue_completion"]
+            self.assertEqual(callback["reply"], answer)
+            self.assertEqual(callback["summary"], "Answered directly.")
+            self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1)
 
     def test_reply_over_the_char_bound_is_truncated_with_a_pointer(self):
         """Fails if queue_dispatch._bounded_reply's 4,000-char truncation is removed
@@ -777,30 +788,31 @@ class FlashReplyReachesTheRoomTests(unittest.TestCase):
         self.assertTrue(any("no_answer" in str(reason) for reason in reclaim_reasons))
 
     def test_dispatch_still_routes_flash_local_desks_to_the_flash_wire(self):
-        """Pins tools/room-bridge/dispatch.py's flash-local branch: a test that fails if
-        it (or its wiring to flash_wire.run_turn) is deleted."""
-        calls: list[str] = []
+        with mock.patch.object(flash_wire.flashlib, "is_switched_off", return_value=False):
+            """Pins tools/room-bridge/dispatch.py's flash-local branch: a test that fails if
+            it (or its wiring to flash_wire.run_turn) is deleted."""
+            calls: list[str] = []
 
-        def fake_run_turn(task, **_kwargs):
-            calls.append(task)
-            return {"status": "completed", "result": "42"}
+            def fake_run_turn(task, **_kwargs):
+                calls.append(task)
+                return {"status": "completed", "result": "42"}
 
-        real_run_turn = flash_wire.run_turn
-        flash_wire.run_turn = fake_run_turn
-        try:
-            with tempfile.TemporaryDirectory() as tmp:
-                registry = desks.Registry(Path(tmp) / "desks.json")
-                registry.register("flash-model", "flash-local")
-                row = dispatch.dispatch(
-                    "flash-model", "What is the answer?", registry=registry,
-                    results_path=Path(tmp) / "results.jsonl",
-                )
-        finally:
-            flash_wire.run_turn = real_run_turn
-            self.assertEqual(calls, [desks.DESK_INSTRUCTION + "\n\nWhat is the answer?"])
-        self.assertEqual(row["status"], "completed")
-        self.assertEqual(row["result"], "42")
-        self.assertEqual(row["kind"], "flash-local")
+            real_run_turn = flash_wire.run_turn
+            flash_wire.run_turn = fake_run_turn
+            try:
+                with tempfile.TemporaryDirectory() as tmp:
+                    registry = desks.Registry(Path(tmp) / "desks.json")
+                    registry.register("flash-model", "flash-local")
+                    row = dispatch.dispatch(
+                        "flash-model", "What is the answer?", registry=registry,
+                        results_path=Path(tmp) / "results.jsonl",
+                    )
+            finally:
+                flash_wire.run_turn = real_run_turn
+                self.assertEqual(calls, [desks.DESK_INSTRUCTION + "\n\nWhat is the answer?"])
+            self.assertEqual(row["status"], "completed")
+            self.assertEqual(row["result"], "42")
+            self.assertEqual(row["kind"], "flash-local")
 
 
 class FinalCapabilityRecheckTests(unittest.TestCase):
@@ -866,13 +878,13 @@ class SeatlessQueueDeskTests(unittest.TestCase):
     def _seatless_flash_registry(root: Path):
         return type("Registry", (), {
             "entries": lambda self: {
-                "flash-model": {"kind": "flash-local", "model": "flash", "effort": "minimal"},
+                "sync-model": {"kind": "grok-cli", "model": "sync", "effort": "minimal"},
             },
             "path": root / "desks.json",
         })()
 
     class FakeQueue:
-        catalog = {"targets": {"flash": {"enabled": True, "adapter": "desk", "desk": "flash-model",
+        catalog = {"targets": {"sync": {"enabled": True, "adapter": "desk", "desk": "sync-model",
                                           "capabilities": ["read"]}}}
 
         def reconcile_disabled_targets(self):
@@ -880,7 +892,7 @@ class SeatlessQueueDeskTests(unittest.TestCase):
 
     class FakeExecutor:
         def __init__(self):
-            self.catalog = {"targets": {"flash": {"enabled": True, "adapter": "desk", "desk": "flash-model",
+            self.catalog = {"targets": {"sync": {"enabled": True, "adapter": "desk", "desk": "sync-model",
                                                    "capabilities": ["read"]}}}
             self.start_calls: list[tuple] = []
 
@@ -925,7 +937,7 @@ class SeatlessQueueDeskTests(unittest.TestCase):
         finally:
             flash_wire.is_up = saved_is_up
 
-        self.assertEqual(executor.start_calls, ["flash"], summary)
+        self.assertEqual(executor.start_calls, ["sync"], summary)
         completions = [
             json.loads(p["body"]) for p in posted
             if p.get("kind") == "turn" and "queue_completion" in json.loads(p["body"])
@@ -938,10 +950,10 @@ class SeatlessQueueDeskTests(unittest.TestCase):
         """conversational_desk_seats() is the real gate: it must exclude a desk with
         no room_seat, or route_turn could queue a human turn onto it."""
         seats = bridge.conversational_desk_seats({
-            "flash-model": {"kind": "flash-local", "model": "flash", "effort": "minimal"},
+            "sync-model": {"kind": "grok-cli", "model": "sync", "effort": "minimal"},
             "joe-desk": {"kind": "claude-session", "socket": "/tmp/x", "room_seat": "claude"},
         })
-        self.assertNotIn("flash-model", seats)
+        self.assertNotIn("sync-model", seats)
         self.assertEqual(seats, {"joe-desk": "claude"})
 
     def test_a_conversational_turn_reaching_a_seatless_desk_fails_loudly_not_silently(self):
@@ -958,7 +970,7 @@ class SeatlessQueueDeskTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             state_path = Path(root) / "state.json"
             state = state_mod.default_state()
-            state["desks"]["flash-model"] = {
+            state["desks"]["sync-model"] = {
                 "delivered": [], "pending": None,
                 "queue": [{"msg_id": "m1", "seat": "joe", "body": "What's 6 x 7?", "seq": 1}],
             }
@@ -976,7 +988,7 @@ class SeatlessQueueDeskTests(unittest.TestCase):
                 log=lambda _msg: None,
             )
         self.assertTrue(
-            any(e.get("desk") == "flash-model" for e in summary["errors"]), summary["errors"])
+            any(e.get("desk") == "sync-model" for e in summary["errors"]), summary["errors"])
         self.assertFalse(any(p.get("body") not in (None,) and "42" == str(p.get("body")) for p in posted))
         self.assertFalse(any("queue_completion" not in str(p.get("body")) and p.get("seat") != "hermes"
                              for p in posted if p.get("kind") == "turn"))
@@ -1034,9 +1046,9 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
         class SharedExecutor:
             def __init__(self):
                 self.catalog = {"targets": {
-                    "flash": {"enabled": True, "adapter": "desk", "desk": "flash-model",
+                    "sync": {"enabled": True, "adapter": "desk", "desk": "sync-model",
                              "capabilities": ["read"]},
-                    "flash2": {"enabled": True, "adapter": "desk", "desk": "flash-model-2",
+                    "sync2": {"enabled": True, "adapter": "desk", "desk": "sync-model-2",
                               "capabilities": ["read"]},
                 }}
                 self.start_calls: list[str] = []
@@ -1061,7 +1073,7 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
             key = kwargs.get("idempotency_key") or ""
             # Only the FIRST desk's completion post fails; the second's succeeds —
             # proving the first's RuntimeError was contained to its own desk.
-            if key == "queue-completion:t_flash0001":
+            if key == "queue-completion:t_sync0001":
                 raise RuntimeError("add-room-turn unreachable")
             posted.append(kwargs)
             return {"seq": 1}
@@ -1072,8 +1084,8 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as root:
                 registry = type("Registry", (), {
                     "entries": lambda self: {
-                        "flash-model": {"kind": "flash-local", "model": "flash", "effort": "minimal"},
-                        "flash-model-2": {"kind": "flash-local", "model": "flash", "effort": "minimal"},
+                        "sync-model": {"kind": "grok-cli", "model": "sync", "effort": "minimal"},
+                        "sync-model-2": {"kind": "grok-cli", "model": "sync", "effort": "minimal"},
                     },
                     "path": Path(root) / "desks.json",
                 })()
@@ -1095,13 +1107,13 @@ class SynchronousCompletionPostOrderingTests(unittest.TestCase):
         finally:
             flash_wire.is_up = saved_is_up
 
-        self.assertEqual(executor.start_calls, ["flash", "flash2"], summary)
+        self.assertEqual(executor.start_calls, ["sync", "sync2"], summary)
         self.assertTrue(
-            any(e.get("desk") == "flash-model" and e.get("error") == "queue_completion_post_failed"
+            any(e.get("desk") == "sync-model" and e.get("error") == "queue_completion_post_failed"
                 for e in summary["errors"]), summary["errors"])
         # The SECOND desk's own completion post still landed this same cycle.
         self.assertTrue(any(
-            p.get("idempotency_key") == "queue-completion:t_flash20001" for p in posted), posted)
+            p.get("idempotency_key") == "queue-completion:t_sync20001" for p in posted), posted)
 
 
 class ReplyWordingTests(unittest.TestCase):
@@ -1573,58 +1585,24 @@ class FinalCompletionOnlyTests(unittest.TestCase):
                     controller.start("flash", **kwargs)
             self.assertEqual(provider.call_count, 1)
 
-    def test_bridge_cycles_protocol_error_then_success_finish_the_task(self):
-        """The same defect end to end through run_once: a seatless flash-local desk,
-        the real executor, and a room that enforces key_reuse. Two cycles must
-        finish the Hermes task with exactly one success completion and no
-        queue_completion_post_failed error."""
-        room = KeyReuseRoom()
+    def test_legacy_flash_queue_is_never_claimed_even_when_the_server_is_live(self):
         adapter = RetryCountingAdapter([self._flash_task()])
         executor = queue_dispatch.QueueDeskExecutor(catalog=self.FLASH_CATALOG, adapter=adapter)
-        replies = iter(["An answer, no result line.", self._good("The real answer.")])
-
-        class FakeQueue:
-            catalog = self.FLASH_CATALOG
-
-            def handle(self, _turn, *, room):
-                return {"handled": False}
-
-            def reconcile_disabled_targets(self):
-                return {"scanned": 0, "blocked": [], "diagnostics": []}
-
-        def dispatch_fn(name, _prompt, **_kwargs):
-            self.assertEqual(name, "flash-model")
-            return {"status": "completed", "result": next(replies)}
-
-        saved_is_up = flash_wire.is_up
-        flash_wire.is_up = lambda *_a, **_k: True
-        summaries = []
-        try:
-            with tempfile.TemporaryDirectory() as root:
-                registry = desks.Registry(Path(root) / "desks.json")
-                registry.register("flash-model", "flash-local")
-                self.assertFalse(registry.entries()["flash-model"].get("room_seat"))
-                for cycle_now in ["2026-09-24T12:00:00+00:00", "2026-09-24T12:10:00+00:00"]:
-                    summaries.append(bridge.run_once(
-                        state_path=Path(root) / "state.json",
-                        read_room=lambda *_a, **_k: {"turns": []},
-                        add_room_turn=room, registry=registry,
-                        queue_service=FakeQueue(), queue_executor=executor,
-                        queue_projector=lambda **_k: [], dispatch_fn=dispatch_fn,
-                        desk_state_dir=Path(root) / "desk-state",
-                        probe_auth=lambda _entry: True, read_profiles=lambda: [],
-                        now_fn=lambda n=cycle_now: n, log=lambda _msg: None,
-                    ))
-        finally:
-            flash_wire.is_up = saved_is_up
-
-        for summary in summaries:
-            self.assertFalse(any(e.get("error") == "queue_completion_post_failed"
-                                 for e in summary["errors"]), summary["errors"])
-        self.assertEqual(sum(call[0] == "complete" for call in adapter.calls), 1, adapter.calls)
-        completions = room.completions()
-        self.assertEqual([c["outcome"] for c in completions], ["success"])
-        self.assertEqual(completions[0]["reply"], "The real answer.")
+        provider = mock.Mock(side_effect=AssertionError("Flash must never be auto-dispatched"))
+        queue = SeatlessQueueDeskTests.FakeQueue()
+        queue.catalog = self.FLASH_CATALOG
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(flash_wire, "is_up", return_value=True):
+            registry = desks.Registry(Path(root) / "desks.json")
+            registry.register("flash-model", "flash-local")
+            summary = bridge.run_once(
+                state_path=Path(root) / "state.json", registry=registry,
+                read_room=lambda *_a, **_k: {"turns": []}, add_room_turn=lambda **_: {},
+                queue_service=queue, queue_executor=executor, queue_projector=lambda **_: [],
+                dispatch_fn=provider, probe_auth=lambda _: True, read_profiles=lambda: [],
+                engineering_dispatcher=lambda **_: {}, log=lambda _: None)
+        self.assertEqual(summary["delivered"], [])
+        self.assertEqual(adapter.calls, [])
+        provider.assert_not_called()
 
 
 class ConversationalRuntimeErrorTests(unittest.TestCase):

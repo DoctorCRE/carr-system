@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import flashlib
-parser = argparse.ArgumentParser(description="Ensure local Flash is ready within 180 seconds.")
+parser = argparse.ArgumentParser(description="Check local Flash readiness without starting it.")
 parser.add_argument("--timeout", type=float, default=flashlib.ENSURE_TIMEOUT)
 args = parser.parse_args()
 if not 0 < args.timeout <= flashlib.ENSURE_TIMEOUT:

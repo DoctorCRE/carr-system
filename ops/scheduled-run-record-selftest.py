@@ -45,6 +45,10 @@ import tempfile
 import uuid
 from datetime import datetime, timezone
 
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, REPO)
 
@@ -68,7 +72,7 @@ PY = PYTHON if os.path.exists(PYTHON) else sys.executable
 # its per-session idempotency cache from CARR_REPO_ROOT when the variable is
 # set (hooks/scheduled-run-record.py _repo_root()); without it every concurrent
 # ci.sh run shared one fixed-name out/scheduled-run-record-cache directory.
-PRIVATE_ROOT = tempfile.mkdtemp(prefix="scheduled-run-record-selftest.")
+PRIVATE_ROOT = temporary_directory(prefix="scheduled-run-record-selftest.")
 os.makedirs(os.path.join(PRIVATE_ROOT, "out"), exist_ok=True)
 
 PASSES: list[str] = []

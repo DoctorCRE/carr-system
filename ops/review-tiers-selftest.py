@@ -249,7 +249,7 @@ class LensFaultTests(unittest.TestCase):
         (None: the map file is missing)."""
         def factory():
             module = _load("review_tiers_fault", "lib/review_tiers.py")
-            path = os.path.join(os.environ.get("TMPDIR", "/tmp"), f"review-tiers-fault-{os.getpid()}.json")
+            path = os.path.join(self.enterContext(tempfile.TemporaryDirectory()), "review-tiers-fault.json")
             if text is None:
                 path += ".missing"
             else:

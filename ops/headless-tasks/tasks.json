@@ -1,9 +1,13 @@
 {
   "schema": "carr-headless-tasks/v1",
-  "observed_at": "2026-10-02T01:39:51.290775+00:00",
-  "source": "Claude Desktop native scheduled-tasks.json (read-only); prompts under ~/.claude/scheduled-tasks",
+  "source": "Reviewed recurrence from ops/config/control-plane-workflows.v1.json; portable prompts under ops/scheduled-tasks",
   "timezone": "America/Chicago",
   "tasks": {
+    "cc-update-audit": {
+      "cron": "45 9 * * 1",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
     "contact-enrichment-weekly": {
       "cron": "0 9 * * 4",
       "timeout_seconds": 5400,
@@ -11,6 +15,11 @@
     },
     "content-fuel-harvest-weekly": {
       "cron": "30 9 * * 1",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "deal-history-research-weekly": {
+      "cron": "0 10 * * 5",
       "timeout_seconds": 5400,
       "grace_seconds": 3600
     },
@@ -47,8 +56,18 @@
       "timeout_seconds": 5400,
       "grace_seconds": 3600
     },
+    "restore-rehearse-weekly": {
+      "cron": "40 7 * * 2",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
     "social-batch-weekly": {
       "cron": "0 8 * * 5",
+      "timeout_seconds": 5400,
+      "grace_seconds": 3600
+    },
+    "social-metrics-pull-weekly": {
+      "cron": "45 8 * * 3",
       "timeout_seconds": 5400,
       "grace_seconds": 3600
     },

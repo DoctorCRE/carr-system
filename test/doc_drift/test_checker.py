@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 class CheckerTest(unittest.TestCase):
     def setUp(self):
         self.env = fixture_env()
-        self.root = Path(tempfile.mkdtemp(prefix="doc-drift-fixture-"))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="doc-drift-fixture-")))
         self.git("init", "-q")
         self.git("config", "core.hooksPath", str(self.root / "fixture-hooks"))
         self.git("config", "user.email", "fixture@example.invalid")
