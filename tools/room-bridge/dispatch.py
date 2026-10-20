@@ -734,6 +734,9 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = claude_remote_wire.run_task(entry, task, msg_id)
     elif entry["kind"] == "grok-cli":
         grok_options: dict = {"retrieval": True} if retrieval else {}
+        if entry.get('checkout_path'):
+            # A checkout job is real work; the 180-second default is for room replies.
+            grok_options['timeout_seconds'] = codex_timeout_s if codex_timeout_s is not None else CODEX_TIMEOUT_S
         if env is not None:
             grok_options['env'] = scrubbed_env(env)
         if request.get('provider_run') is not None:
