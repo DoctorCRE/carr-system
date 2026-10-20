@@ -1157,6 +1157,8 @@ class Queue:
                 else:
                     self.report(e, 'entry_timeout', 'Entry deadline expired; intent retained; reconcile before retry', 'blocked')
                 return False
+            if e['phase'] == 'conflict':
+                return True
             if e['phase'] == 'merge_rejected' or (e['phase'] == 'pending' and e['tested'] is not None):
                 if self.merge_pending(repo, n, e['tested']):
                     if self.wait(e, 'provider_merge', 'merge_pending', 'GitHub owns an automatic or queued merge'):
