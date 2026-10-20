@@ -228,6 +228,11 @@ def report(manifest, snapshot, now):
         cron.setdefault(entry["label"], []).append(entry)
     roots = snapshot.get("checkout_roots", {})
     role = snapshot["machine_role"]
+    grant = snapshot.get("flash_grant")
+    flash_granted = (isinstance(grant, dict) and type(grant.get("expires_at")) in (int, float)
+                     and type(grant.get("issued_at")) in (int, float)
+                     and grant["issued_at"] <= now < grant["expires_at"])
+    flash_labels = {"local.ds4-flash-next", "local.flash-desk"}
     # launchd keeps an override entry forever after a job is gone; alone it is not an installed job.
     observed = set(snapshot["plists"]) | {k for k in live if k.startswith(prefixes)} | cron.keys()
     for label in sorted(observed - registry.keys()):
@@ -239,6 +244,8 @@ def report(manifest, snapshot, now):
         owner = job["owner"]
         required = expand(job["required_checkout"])
         enabled, expected_installed = expectation(job, role)
+        if label in flash_labels:
+            enabled = flash_granted
         plist = snapshot["plists"].get(label)
         is_cron = job["scheduler"] == "cron"
         present = label in cron if is_cron else plist is not None
@@ -263,9 +270,13 @@ def report(manifest, snapshot, now):
         else:
             runtime = snapshot["launchctl_print"].get(label, "")
             is_disabled = overrides.get(label, bool((plist or {}).get("Disabled", False)))
-            if enabled and is_disabled:
+            if label in flash_labels and not flash_granted and (plist is not None or label in live):
+                if (not is_disabled or (plist or {}).get("RunAtLoad") or (plist or {}).get("KeepAlive")):
+                    emit(label, "flash_without_grant", "Flash can auto-start without an active human grant",
+                         "run config-as-code install --apply to restore off-by-default plists and disable both labels", owner)
+            if enabled and is_disabled and label not in flash_labels:
                 emit(label, "disabled_but_expected", "launchd disabled override or plist Disabled is set", "restore expected enabled state through the agent owner and verify launchctl print-disabled", owner)
-            if enabled and plist and label not in live:
+            if enabled and plist and label not in live and label not in flash_labels:
                 emit(label, "missing_registration", "plist exists but launchd has no registered job", "bootstrap the declared agent and verify launchctl print", owner)
             if not enabled and label in live and running(label, live, runtime):
                 emit(label, "unexpected_running", "job is running despite disabled expectation; a disable override does not stop it", "stop the running job through its owner (launchctl bootout) and verify launchctl list", owner)
@@ -333,6 +344,9 @@ def checkout_candidates(snapshot):
 def collect(manifest):
     """Capture machine evidence without modifying git refs, schedules or logs."""
     snapshot = {"plists": {}, "launchctl_print": {}, "log_mtimes": {}, "errors": [], "git": {}, "checkout_roots": {}}
+    sys.path.insert(0, str(SOURCE / "tools"))
+    import flashlib
+    snapshot["flash_grant"] = flashlib.active_grant()
     snapshot["machine_role"] = "primary" if machine_role.is_primary(str(SOURCE), env=scrubbed_env()) else "secondary"
     def command(argv, source, absent_ok=False):
         try:
@@ -465,7 +479,7 @@ def native_manifest(source=SOURCE):
             "label": definition["Label"], "scheduler": "launchd",
             "program_arguments": installed_arguments(definition), "interval": interval,
             "required_checkout": "~/carr-system", "expected_enabled": bool(enabled),
-            "expected_installed": bool(enabled), "owner": "orchestrator",
+            "expected_installed": bool(enabled) or definition["Label"] in {"local.ds4-flash-next", "local.flash-desk"}, "owner": "orchestrator",
             "log_path": definition.get("StandardOutPath") or definition.get("StandardErrorPath"),
             "log_paths": [definition.get(k) for k in ("StandardOutPath", "StandardErrorPath")],
             "log_max_age_seconds": None,

@@ -11,6 +11,9 @@ import time
 import unittest
 from unittest.mock import patch
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ops"))
 sys.path.insert(0, str(ROOT / "lib"))
@@ -502,7 +505,7 @@ runpy.run_path(sys.argv[0], run_name='__main__')
         self.assertEqual([r["repo"] for r in report["deferred"]], ["fixture/sibling"])
         self.assertEqual(set(report["counts"]), {"fixture/repo"})
 
-    def test_registered_job_retires_fixture_branches_and_stages_unmerged_bytes(self):
+    def test_registered_job_retires_fixture_branches_and_keeps_dirty_tree(self):
         import contextlib
         import io
         import job_watchdog as watchdog
@@ -562,9 +565,9 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         report = json.loads((fixture.repo / "out/orch/branch-janitor-report.json").read_text())
         self.assertFalse(report["errors"])
         self.assertFalse(report["deferred"])
-        self.assertEqual(sorted(a["status"] for a in report["actions"]), ["retired", "retired", "retired", "staged"])
-        staged = Path(next(a["staged_path"] for a in report["actions"] if a["status"] == "staged"))
-        self.assertEqual((staged / "file").read_text(), "uncommitted orphan bytes\n")
+        self.assertEqual(sorted(a["status"] for a in report["actions"]), ["retired", "retired", "retired"])
+        self.assertTrue(tree.exists())
+        self.assertEqual((tree / "file").read_text(), "uncommitted orphan bytes\n")
         self.assertEqual(fixture.git("rev-parse", "unmerged"), unmerged)
         self.assertIn(unmerged, fixture.git("ls-remote", "origin", "refs/heads/claude/unmerged"))
         after = idle_findings()
@@ -574,7 +577,7 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         self.assertEqual(len(after), 1)
         self.assertEqual(sum(not r.get("cleared_at") for r in latest.values()), 1)
         print("fixture branch-retire: exit=0; eligible remote branches 3 -> 0; "
-              "idle findings 4 -> 1; unstaged orphan trees 1 -> 0; unmerged refs/bytes preserved")
+              "idle findings 4 -> 1; dirty orphan tree kept; unmerged refs/bytes preserved")
 
     def test_receipts_publish_while_maintenance_is_held(self):
         from unittest.mock import patch
@@ -638,11 +641,11 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
             row = next(r for r in reaper.snapshot("fixture/repo", fixture.repo) if r.get("ref") == "refs/heads/old")
         self.assertEqual(row["class"], "abandoned")
 
-    def test_unknown_owner_preserves_clean_tree(self):
+    def test_unknown_owner_does_not_pin_old_clean_merged_tree_forever(self):
         fixture = Fixture()
         tree = fixture.tree("old")
         fixture.reaper(ownership_probe=lambda path: "unknown").run({"fixture/repo": fixture.repo}, execute=True)
-        self.assertTrue(tree.exists())
+        self.assertFalse(tree.exists())
 
     def test_missing_process_evidence_keeps_health_incomplete(self):
         from branch_retirement import health
@@ -686,50 +689,8 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
                                      "GIT_WORK_TREE": str(other.repo)}):
             self.assertEqual(hook.canonical_root(str(target.repo)), str(target.repo))
 
-    def test_scheduler_runs_existing_reaper_once_per_interval_and_preserves_live_job(self):
-        sys.path.insert(0, str(ROOT / "lib"))
-        import job_watchdog as watchdog
+    def test_fixture_cannot_invoke_live_fleet_retirement(self):
         fixture = Fixture()
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        config["repository_roots"]["jbookout/carr-system"] = str(fixture.repo)
-        calls = []
-        class Effects:
-            def launch(self, finding, argv, cwd, *, job_id):
-                calls.append(argv)
-                self.job_id = job_id
-                return {"wrapper_pid": os.getpid()}
-        watchdog.schedule_reaper(fixture.repo, config, Effects(), 10000)
-        watchdog.schedule_reaper(fixture.repo, config, Effects(), 10001)
-        watchdog.schedule_reaper(fixture.repo, config, Effects(), 19000)
-        self.assertEqual(len(calls), 1)
-        self.assertIn(str(ROOT / "hooks/worktree-self-plumb.py"), calls[0])
-        self.assertIn("--fleet", calls[0])
-
-    def test_dead_schedule_wrapper_does_not_preserve_itself_as_a_none_identity(self):
-        from unittest.mock import patch
-        import job_watchdog as watchdog
-        fixture = Fixture()
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        config["repository_roots"]["jbookout/carr-system"] = str(fixture.repo)
-        ledger = fixture.repo / "out/orch/branch-janitor-schedule.jsonl"
-        watchdog.append(ledger, {"key": "schedule", "at": 1000, "wrapper_pid": 99999999,
-                                 "process_identity": None, "status": "started"})
-        calls = []
-        class Effects:
-            def launch(self, finding, argv, cwd, *, job_id):
-                calls.append(argv)
-                return {"wrapper_pid": os.getpid()}
-        watchdog.schedule_reaper(fixture.repo, config, Effects(), 9000)
-        self.assertEqual(len(calls), 1)
-
-    def test_fixture_scan_cannot_launch_the_live_fleet_scheduler(self):
-        import job_watchdog as watchdog
-        from unittest.mock import Mock
-        fixture = Fixture()
-        config = watchdog.load_config(ROOT / "ops/config/job-watchdog.json")
-        effects = Mock()
-        watchdog.schedule_reaper(fixture.repo, config, effects, 20000)
-        effects.launch.assert_not_called()
         self.assertEqual(hook.reap_main(["--reap", "--fleet", "--repo", str(fixture.repo)]), 1)
 
     def test_merged_branch_can_retire_but_abandoned_branch_cannot(self):
@@ -740,8 +701,8 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
         self.assertEqual(merged, "merged")
         self.assertEqual(abandoned, "abandoned")
 
-    def test_dry_run_then_stage_preserves_orphan_bytes_and_branch(self):
-        base = Path(tempfile.mkdtemp(prefix="branch-janitor-fixture-")).resolve()
+    def test_dry_run_and_apply_keep_dirty_orphan_bytes_and_branch(self):
+        base = Path(temporary_directory(prefix="branch-janitor-fixture-")).resolve()
         repo, remote, tree = base / "repo", base / "remote.git", base / "orphan"
         repo.mkdir()
         def git(*args, cwd=repo):
@@ -767,15 +728,12 @@ with patch.object(hook, 'fleet_reaper', return_value=reaper), \
                                    ownership_probe=lambda path: "orphaned")
         report = reaper.run({"fixture/repo": repo}, execute=False)
         self.assertTrue(tree.exists())
-        self.assertEqual(report["counts"]["fixture/repo"]["worktree"]["merged"], 1)
+        self.assertEqual(report["counts"]["fixture/repo"]["worktree"]["live"], 2)
         report = reaper.run({"fixture/repo": repo}, execute=True)
-        self.assertFalse(tree.exists())
-        manifest = next((repo.parent / "_to_delete" / repo.name).glob("*/manifest.json"))
-        staged = manifest.parent / "worktree"
-        self.assertEqual((staged / "file").read_text(), "unsaved work\n")
-        self.assertEqual(json.loads(manifest.read_text())["original_path"], str(tree))
+        self.assertTrue(tree.exists())
+        self.assertEqual((tree / "file").read_text(), "unsaved work\n")
         self.assertEqual(git("rev-parse", "old"), git("rev-parse", "main"))
-        self.assertEqual(git("rev-parse", "--show-toplevel", cwd=staged), str(staged))
+        self.assertEqual(git("rev-parse", "--show-toplevel", cwd=tree), str(tree))
 
     def test_changed_remote_tip_is_not_deleted(self):
         fixture = Fixture()
@@ -921,7 +879,7 @@ def pull(number, head, base, *, body="", merged=None):
 
 class Fixture:
     def __init__(self):
-        self.base = Path(tempfile.mkdtemp(prefix="branch-janitor-fixture-")).resolve()
+        self.base = Path(temporary_directory(prefix="branch-janitor-fixture-")).resolve()
         self.repo, self.remote = self.base / "repo", self.base / "remote.git"
         self.repo.mkdir()
         self.git("init", "-q", "-b", "main")
@@ -967,6 +925,12 @@ class FakeProvider:
 
     def pulls(self, repo):
         return self.rows
+
+    def branch_pulls(self, repo, branch):
+        return [r for r in self.rows if r["head"]["ref"] == branch]
+
+    def commit_pulls(self, repo, head):
+        return [r for r in self.rows if r['head']['sha'] == head]
 
     def pull(self, repo, number):
         return next(r for r in self.rows if r["number"] == number)

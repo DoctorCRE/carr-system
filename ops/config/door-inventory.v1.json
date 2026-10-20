@@ -3,6 +3,12 @@
   "work_request": "WR-000284",
   "declared": [
     {
+      "path": "bin/flash-off",
+      "class": "hand_tool",
+      "reason": "An explicit command revokes Flash's grant and immediately stops its server and desk.",
+      "evidence": "tools/test-flash-on-demand.py verifies immediate revocation and shutdown"
+    },
+    {
       "path": "bin/cutoff-doctrine.sh",
       "class": "one_shot",
       "reason": "Ended the vault's markdown era at the 2026-08-19 cutoff; the exporter flag it flips stays flipped, so it has no second run.",
@@ -72,7 +78,7 @@
       "path": "ops/headless-tasks/install.sh",
       "class": "hand_tool",
       "reason": "The orchestrator invokes this explicit cutover helper after a watched first run to install or uninstall reviewed headless launchd jobs; it is not scheduled.",
-      "evidence": "ops/headless-tasks/install.sh header and lib/headless_tasks.py install_main (added f324adc2, #1482)"
+      "evidence": "ops/headless-tasks/install.sh and lib/scheduler_hygiene.py install_main preflight, then lib/headless_tasks.py installation adapter"
     },
     {
       "path": "ops/launchd-plist-parity.py",
@@ -259,6 +265,12 @@
       "class": "hand_tool",
       "reason": "A person requests one report of unusually slow completed GitHub runs; workflow timeouts bound running jobs.",
       "evidence": "ops/build-duration-check.py module docstring and main CLI"
+    },
+    {
+      "path": "ops/scheduler-hygiene.py",
+      "class": "hand_tool",
+      "reason": "The orchestrator runs this read-only registration report before scheduler cutover and one-shot cleanup. It never installs, activates, or deletes a task.",
+      "evidence": "WR-000014 slice 4; ops/scheduler-hygiene-selftest.py exercises its CLI with isolated provider state."
     }
   ]
 }

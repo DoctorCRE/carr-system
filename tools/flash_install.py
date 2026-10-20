@@ -1,32 +1,84 @@
 """Install the idle watcher and demand launcher without starting either Flash agent."""
 import os
 import plistlib
+import re
 import subprocess
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import flashlib
+
+
+LABELS = ("local.ds4-flash-next", "local.flash-desk")
+WATCHER = "com.carr.flash-idle-stop"
 
 
 def install(repo, home, *, launch=subprocess.run):
+    repo, home = Path(repo), Path(home)
     agents = home / "Library/LaunchAgents"
+    agents.mkdir(parents=True, exist_ok=True)
     domain = f"gui/{os.getuid()}"
-    for label in ("local.ds4-flash-next", "local.flash-desk"):
-        path = agents / f"{label}.plist"
-        body = plistlib.loads(path.read_bytes())
-        body["RunAtLoad"] = False
-        body.pop("KeepAlive", None)
-        path.write_bytes(plistlib.dumps(body))
-        launch(["/bin/launchctl", "disable", f"{domain}/{label}"], check=True)
+    with flashlib.lifecycle_lock(home=home):
+        granted = flashlib.active_grant(home=home) is not None
+        for label in LABELS:
+            path = agents / f"{label}.plist"
+            if path.exists():
+                installed = plistlib.loads(path.read_bytes())
+                if installed.get("RunAtLoad") or installed.get("KeepAlive"):
+                    granted = False
+        if not granted:
+            flashlib._revoke(home=home)
+        for label in LABELS:
+            source = repo / f"ops/launchd/{label}.plist"
+            body = source.read_text().replace("{{HOME}}", str(home)).replace("{{REPO}}", str(repo))
+            definition = plistlib.loads(body.encode())
+            definition["RunAtLoad"] = False
+            definition.pop("KeepAlive", None)
+            (agents / f"{label}.plist").write_bytes(plistlib.dumps(definition))
+            if not granted:
+                launch(["launchctl", "disable", f"{domain}/{label}"], check=True, timeout=15)
+                result = launch(["launchctl", "bootout", f"{domain}/{label}"], capture_output=True, timeout=15)
+                if result.returncode not in (0, 3, 113):
+                    raise RuntimeError(f"could not stop {label}")
+        if not granted:
+            launch([sys.executable, str(repo / "tools/room-bridge/dispatch.py"), "stop", "flash"],
+                   check=True, capture_output=True, timeout=30, env={**os.environ, "HOME": str(home)})
     launcher = home / ".local/bin/flash-desk-start"
+    launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text(f'#!/bin/zsh\nexec "{repo}/bin/flash-desk-start" "$@"\n')
     launcher.chmod(0o755)
-    label = "com.carr.flash-idle-stop"
-    source = repo / f"ops/launchd/{label}.plist"
-    target = agents / f"{label}.plist"
-    target.write_text(source.read_text().replace("{{REPO}}", str(repo)))
-    (repo / "out").mkdir(exist_ok=True)
-    # Only the lightweight watcher is loaded. The model and desk stay disabled.
-    launch(["/bin/launchctl", "bootout", f"{domain}/{label}"], capture_output=True)
-    launch(["/bin/launchctl", "bootstrap", domain, str(target)], check=True)
-    launch(["/bin/launchctl", "print", f"{domain}/{label}"], check=True, capture_output=True)
+    source = repo / f"ops/launchd/{WATCHER}.plist"
+    target = agents / f"{WATCHER}.plist"
+    body = source.read_text().replace("{{REPO}}", str(repo))
+    unchanged = target.exists() and target.read_text() == body
+    loaded = launch(["launchctl", "print", f"{domain}/{WATCHER}"], capture_output=True, timeout=15)
+    if not unchanged or loaded.returncode:
+        target.write_text(body)
+        (repo / "out").mkdir(exist_ok=True)
+        launch(["launchctl", "bootout", f"{domain}/{WATCHER}"], capture_output=True, timeout=15)
+        launch(["launchctl", "bootstrap", domain, str(target)], check=True, timeout=15)
+        launch(["launchctl", "print", f"{domain}/{WATCHER}"], check=True, capture_output=True, timeout=15)
+
+
+def check(home, *, launch=subprocess.run):
+    drift = []
+    result = launch(["launchctl", "print-disabled", f"gui/{os.getuid()}"],
+                    capture_output=True, text=True, timeout=15)
+    if result.returncode:
+        return ["Flash disabled state unavailable"]
+    overrides = dict(re.findall(r'"([^"\n]+)"\s*=>\s*(true|false|disabled|enabled)', result.stdout))
+    for label in LABELS:
+        try:
+            body = plistlib.loads((Path(home) / f"Library/LaunchAgents/{label}.plist").read_bytes())
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            drift.append(f"{label} missing or invalid")
+            continue
+        if body.get("RunAtLoad") or body.get("KeepAlive"):
+            drift.append(f"{label} automatic startup configured")
+        if flashlib.is_switched_off(home=home) and overrides.get(label) not in {"true", "disabled"}:
+            drift.append(f"{label} enabled without a human grant")
+    return drift
 
 
 def configure(repo, *, apply=False):

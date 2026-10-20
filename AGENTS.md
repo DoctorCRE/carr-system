@@ -320,4 +320,4 @@ than claim the pass. The PR body's `Design and debt pass` section gives one
 line per skill: what it changed, or why nothing did.
 This section is the canonical policy for both client entry points.
 
-Rigorous engineering work uses `/poteto-mode` from [upstream pstack](https://github.com/cursor/plugins/tree/main/pstack). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd`.
+Rigorous engineering work uses `/poteto-mode` from [upstream pstack](https://github.com/cursor/plugins/tree/main/pstack). Every job sizes itself first (`/grill-with-docs` if big, `/wayfinder` past one session) and codes test-first with `/tdd` (Pocock's). When pstack and Pocock overlap, the skill map in [tools/room-bridge/brief-footer.md](tools/room-bridge/brief-footer.md) names the one owner per process.
