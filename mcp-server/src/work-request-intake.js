@@ -14,6 +14,7 @@ const TRIAGE_CLASSES = new Set(["operational", "needs_judgment", "safety_review"
 const JOE_ANSWER_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "answer_text", "scope_confirmed", "evidence_ref"]);
 const DECLINE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason"]);
 const SUPERSEDE_FIELDS = new Set(["idempotency_key", "human_ref", "base_version", "exit_reason", "superseded_by"]);
+const DECLINE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "sponsored_actor_required", "work_request_not_declinable", "work_request_not_found"]);
 const SUPERSEDE_REFUSALS = new Set(["withdrawal_reason_missing", "unknown_actor", "successor_not_found",
   "successor_is_self", "successor_withdrawn", "successor_not_sourced", "supersession_cycle",
   "triaged_work_request_has_downstream_evidence", "triaged_work_request_requires_read_committed"]);
@@ -620,10 +621,8 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
               /* work-request-intake:readable-card */`, [args.work_request, tenant])).rows[0];
         if (!row || !WORK_REQUEST_READ_STATES.includes(row.state)) throw new ToolError({ error: "work_request_not_found" });
         const triaged = ["triaged", "ready"].includes(row.state);
-        // A withdrawn row carries no plan and no shape: decline is captured-
-        // only, and 0888 supersedes a triaged row only when nothing downstream
-        // names it. A row superseded from triaged keeps its triage fields, so
-        // the triage block is keyed on the column rather than on the state.
+        // Withdrawal preserves intake history, so triage is keyed on its
+        // recorded timestamp rather than the current lifecycle state.
         const withdrawn = ["declined", "superseded"].includes(row.state);
         let pendingOutcomeFeedback = null;
         if (row.state === "ready") {
@@ -797,7 +796,7 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // same reason; this is that split reaching the verb layer.
     //
     // The STATE RULE lives in the database, not here. ops.decline_sourced_work_
-    // request admits captured only. ops.supersede_sourced_work_request (0888)
+    // request admits captured and triaged. ops.supersede_sourced_work_request (0888)
     // also admits triaged when ops.work_request_supersession_strands finds
     // nothing downstream naming the request, and names each refusal so the
     // handler below can surface it instead of an unhandled failure.
@@ -813,16 +812,9 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
     // passing actor.slug records the agent that actually acted rather than
     // flattening every act to 'joe', which is the gap ACTING_IDENTITY above
     // exists to report.
-    //
-    // humanOnly is not declared either: the label stopped being read by
-    // executeRegisteredTool on 2026-08-26 (decision dc57f62d) and WR-000019
-    // slice S1 is removing the stale declarations. A new one would be dead on
-    // arrival and would misreport this verb's protection in the derived
-    // action-risk registry. base_version is the live guard, as it is for
-    // propose-ready-plan and propose-outcome-feedback.
     "decline-work-request": {
       write: true,
-      description: "Withdraw one sourced Work Request captured in error by declining it, recording why. It is the only backward move a captured request has, it works from captured and no later state, and it never triages, assigns, dispatches, approves, executes, or names a successor.",
+      description: "A human partner or sponsored agent may withdraw one sourced Work Request from captured or triaged by declining it, recording why and preserving its intake history. It never withdraws ready or later work, triages, assigns, dispatches, approves, executes, or names a successor.",
       inputSchema: { type: "object", additionalProperties: false, properties: {
         idempotency_key: { type: "string", pattern: "^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$" },
         human_ref: { type: "string", pattern: "^WR-[0-9]{1,12}$", minLength: 4, maxLength: 15 },
@@ -831,24 +823,38 @@ export function workRequestIntakeTools({ withEnvelope, writeEvent, ToolError }) 
       }, required: ["idempotency_key", "human_ref", "base_version", "exit_reason"] },
       handler: async (c, actor, args) => {
         validateDecline(args, ToolError);
+        const authorizationClass = authorizationClassForActor(actor);
+        if (authorizationClass !== "verified_partner" && authorizationClass !== "sponsored_agent")
+          throw new ToolError({ error: "sponsored_actor_required", authorization_class: authorizationClass,
+            hint: "Only a partner or a sponsored agent may decline a Work Request. Nothing was written." });
         // Bind replays to the authenticated actor without admitting actor data
         // into the closed client schema.
         return withEnvelope(c, actor, "decline-work-request", { ...args, _server_actor_id: actor.id }, async () => {
-          const result = await c.query(
-            `select * from ops.decline_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::uuid)
-               /* work-request-intake:decline */`,
-            [args.human_ref, args.base_version, text(args.exit_reason), actor.slug, args.idempotency_key]);
+          let result;
+          try {
+            result = await c.query(
+              `select * from ops.decline_sourced_work_request($1::text, $2::integer, $3::text, $4::text, $5::uuid)
+                 /* work-request-intake:decline */`,
+              [args.human_ref, args.base_version, text(args.exit_reason), actor.slug, args.idempotency_key]);
+          } catch (error) {
+            const detail = String(error?.message || "");
+            const name = /^([a-z_]+):/.exec(detail)?.[1];
+            if (name === "work_request_version_conflict")
+              throw new ToolError({ error: "version_conflict", human_ref: args.human_ref, detail,
+                resolution: "re-read the Work Request card; only its current captured or triaged version may be declined" });
+            if (DECLINE_REFUSALS.has(name))
+              throw new ToolError({ error: name, human_ref: args.human_ref, detail });
+            throw error;
+          }
           const row = result.rows[0];
-          if (!row) throw new ToolError({ error: "version_conflict", human_ref: args.human_ref,
-            resolution: "re-read the Work Request card; only its current captured version may be withdrawn" });
           // The function returns the card fields, not the row id, and event
           // .subject_id is NOT NULL — so the id is read back by ref rather than
           // the audit link being dropped.
           const subject = await c.query(
-            `select id from ops.work_request where ref = $1
+            `select id, triaged_at is not null as was_triaged from ops.work_request where ref = $1
                /* work-request-intake:withdrawn-subject */`, [row.ref]);
           await writeEvent(c, actor, "decline-work-request", "ops_work_request", subject.rows[0].id, {
-            field: "state", old: { state: "captured", version: args.base_version },
+            field: "state", old: { state: subject.rows[0].was_triaged ? "triaged" : "captured", version: args.base_version },
             new: { state: "declined", version: Number(row.version), exit_reason: row.exit_reason },
             idempotency_key: args.idempotency_key,
           });
