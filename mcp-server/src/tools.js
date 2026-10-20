@@ -2357,10 +2357,21 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
       where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open'
         and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
       returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue])).rows;
+  const postCall = (await c.query(
+    `update capture_post_call_action set status='dropped', updated_at=clock_timestamp(), completed_at=null
+      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and due_on < current_date
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue-post-call */`,
+    [dealId, ownerIds])).rows;
+  const supersededIds = [...dropped, ...postCall].map(a => a.id);
+  if (supersededIds.length) await writeEvent(c, actor, verb, "deal", dealId, {
+    field: "next_action", old: { actions: [...dropped, ...postCall] },
+    new: { superseded_action_ids: supersededIds, status: "dropped" },
+    recorded_at_after_lock: true, idempotency_key: key,
+  });
   const replacesCurrent = dropped.some(a => a.id === current.action_id) ||
     (!current.action_id && current.overdue && current.owner === partner);
   if (!replacesCurrent) return { ...dealNextStepStatus(current.next_step, current.next_date),
-    ...(dropped.length ? { superseded_action_ids: dropped.map(a => a.id) } : {}) };
+    ...(supersededIds.length ? { superseded_action_ids: supersededIds } : {}) };
   const next = (await c.query(
     `select description, due_on::text as due_on from next_action
       where subject_type='deal' and subject_id=$1 and status='open'
@@ -2371,10 +2382,10 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
   for (const [field, before, after] of [["next_date", current.next_date, nextDate],
     ["next_step", current.next_step, next?.description ?? null]])
     await writeEvent(c, actor, verb, "deal", dealId, {
-      field, old: { [field]: before }, new: { [field]: after, superseded_action_ids: dropped.map(a => a.id) },
+      field, old: { [field]: before }, new: { [field]: after, superseded_action_ids: supersededIds },
       recorded_at_after_lock: true, idempotency_key: key,
     });
-  return { superseded_action_ids: dropped.map(a => a.id), ...dealNextStepStatus(next?.description, nextDate) };
+  return { superseded_action_ids: supersededIds, ...dealNextStepStatus(next?.description, nextDate) };
 }
 
 async function latestFieldConflict(c, dealId, field, baseEventId) {
@@ -4011,6 +4022,8 @@ export const TOOLS = {
           hint: "the selected owner has no actor row" });
         ownerId = owner.rows[0].id;
       }
+      if (s.type === "deal")
+        await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action");
       // [amendment 8] Replacing an unfinished ball used to record the old one as
       // 'done'. It wasn't done — it was superseded. No-fabrication applies to
       // metadata too, and 'done' would inflate any completion measure built on this.
@@ -9265,6 +9278,8 @@ registerTools({
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
+      assertDealRoomField("next_date", args.next_date ?? null, ToolError);
+      await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
       return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
     }),
   },
