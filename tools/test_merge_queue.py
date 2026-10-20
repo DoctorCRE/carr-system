@@ -958,6 +958,40 @@ class QueueTests(unittest.TestCase):
             self.assert_branch_head(n, self.changed)
         self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
 
+    def test_deferred_behind_child_preparation_advances_its_pin_with_a_receipt(self):
+        self.queue_local_preparations(2)
+        self.data['prs'][module.REPOS[0]+'#2']['base']['ref'] = 'branch-1'
+        self.save()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.assertEqual(len(self.calls('edit')), 1)
+        self.assertEqual(self.load()['preparations'], [1])
+        self.assert_branch_head(2, self.approved)
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        prepared = self.load()['prs'][module.REPOS[0]+'#2']['head']['sha']
+        self.assertNotEqual(prepared, self.approved)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(f'{module.REPOS[0]}#2@{self.approved}')['prs'][0]['head'], prepared)
+        self.assert_branch_head(2, prepared)
+        self.assertFalse(any('update-branch' in str(call) for call in self.load()['calls']))
+        receipt = self.q.db.execute(
+            "SELECT receipt FROM actions WHERE kind='regen' AND pr=2 AND phase='done'").fetchone()[0]
+        self.assertEqual(json.loads(Path(receipt).read_text()), dict(
+            head=self.approved, main=self.merge_sha, prepared=prepared, branch='branch-2'))
+        self.q.discover()
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT phase,outcome FROM entries WHERE pr=2 AND approved=?',
+                                         (prepared,)).fetchone()[:], ('pending', 'waiting_ci'))
+        self.assertEqual(self.load()['preparations'], [1, 2])
+        self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
+
     def test_head_containing_main_merges_without_regeneration(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
