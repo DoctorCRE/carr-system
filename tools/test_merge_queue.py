@@ -69,7 +69,7 @@ if a[0]=='api':
   elif bits[-1].startswith('statuses'): emit([d.get('statuses',[])])
   else: raise AssertionError(a)
   sys.exit()
-if a[:2]==['pr','checks']: emit(d.get('required',[{'bucket':'pass'}])); sys.exit()
+if a[:2]==['pr','checks']: emit(d.get('required_by_pr',{}).get(a[2],d.get('required',[{'bucket':'pass'}]))); sys.exit()
 if a[:2]==['pr','ready']:
  repo=a[a.index('-R')+1];d['prs'][repo+'#'+a[2]]['draft']=False; save();sys.exit()
 if a[:2]==['pr','edit']:
@@ -833,6 +833,47 @@ class QueueTests(unittest.TestCase):
         for n in (3, 4):
             self.assert_branch_head(n, self.approved)
         self.assertEqual(self.calls('merge'), [])
+
+    def test_released_ci_heads_retry_after_later_entries_without_starving_them(self):
+        self.queue_local_preparations()
+        self.data['required'] = [{'bucket': 'fail'}]
+        self.save()
+        with patch.object(module.time, 'time', return_value=10000) as clock:
+            self.q.tick()
+            for n in (1, 2):
+                self.q.tick()
+                clock.return_value += module.CI_WAIT_SECONDS
+                self.restart()
+                self.q.tick()
+                self.assertEqual(self.load()['preparations'], list(range(1, n + 2)))
+            self.load()['required_by_pr'] = {'1': [{'bucket': 'pass'}]}
+            self.save()
+            self.restart()
+            self.q.tick()
+            self.assertEqual(self.calls('merge'), [])
+            self.q.tick()
+            clock.return_value += module.CI_WAIT_SECONDS
+            self.q.tick()
+            self.assertEqual(self.load()['preparations'], [1, 2, 3, 4])
+            self.q.tick()
+            clock.return_value += module.CI_WAIT_SECONDS
+            self.q.tick()
+            for _ in range(2):
+                self.restart()
+                self.q.tick()
+            self.assertEqual([call[2] for call in self.calls('merge')], ['1'])
+            for n in (2, 3, 4):
+                self.assertEqual(self.q.db.execute(
+                    'SELECT phase,outcome FROM entries WHERE pr=? ORDER BY id DESC',
+                    (n,)).fetchone()[:], ('exhausted', 'ci_timeout'))
+            self.load()['required_by_pr']['2'] = [{'bucket': 'pass'}]
+            self.save()
+            self.restart()
+            self.q.tick()
+            self.assertEqual([call[2] for call in self.calls('merge')], ['1', '2'])
+        self.assertEqual(self.load()['preparations'], [1, 2, 3, 4])
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual([pin['pr'] for pin in work.merge_order()['entries']], [2, 3, 4])
 
     def test_held_prepared_front_advances_only_next_entry(self):
         self.queue_local_preparations()
