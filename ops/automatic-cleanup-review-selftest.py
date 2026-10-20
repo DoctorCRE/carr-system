@@ -23,7 +23,7 @@ spec.loader.exec_module(fixtures)
 class ReviewProbes(unittest.TestCase):
     def test_staging_directory_replacement_during_intent_keeps_clone(self):
         from unittest.mock import patch
-        for replaced in ('_to_delete', 'target'):
+        for replaced in ('_to_delete', 'target', 'staging-directory', 'target-directory', 'workspace', 'checkout'):
             with self.subTest(replaced=replaced):
                 fixture = fixtures.Fixture()
                 workspace = fixture.base / 'room-codex-staging-race'
@@ -40,12 +40,17 @@ class ReviewProbes(unittest.TestCase):
                     encoded = original(row, *args, **kwargs)
                     if row.get('status') == 'intent':
                         path = Path(row['staged_path']).parent / 'manifest.json'
-                        directory = staging if replaced == '_to_delete' else path.parent
+                        directory = {'_to_delete': staging, 'target': path.parent,
+                            'staging-directory': staging, 'target-directory': path.parent,
+                            'workspace': workspace, 'checkout': clone}[replaced]
                         directory.rename(directory.with_name(directory.name + '-original'))
                         if replaced == '_to_delete':
                             shutil.copytree(directory.with_name(directory.name + '-original'), outside,
                                             dirs_exist_ok=True)
-                        directory.symlink_to(outside, target_is_directory=True)
+                        if replaced in ('_to_delete', 'target'):
+                            directory.symlink_to(outside, target_is_directory=True)
+                        else:
+                            shutil.copytree(directory.with_name(directory.name + '-original'), directory)
                         swapped.append(directory)
                     return encoded
 
@@ -59,6 +64,77 @@ class ReviewProbes(unittest.TestCase):
                 self.assertTrue(workspace.is_dir())
                 self.assertEqual((clone / 'file').read_text(), 'initial\n')
                 self.assertFalse(list(outside.rglob('workspace')))
+
+    def test_staging_swap_at_rename_cannot_redirect_move_or_receipt(self):
+        from unittest.mock import patch
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-rename-race'
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        staging = fixture.base / '_to_delete'
+        held = fixture.base / 'held-staging'
+        outside = fixture.base / 'outside'
+        outside.mkdir()
+        original = os.rename
+        moved = []
+
+        def replace_at_move(source, destination, *args, **kwargs):
+            if source == workspace.name and destination == 'workspace':
+                original(staging, held)
+                shutil.copytree(held, outside, dirs_exist_ok=True)
+                staging.symlink_to(outside, target_is_directory=True)
+                moved.append(destination)
+            return original(source, destination, *args, **kwargs)
+
+        with patch.object(machine_cleanup.os, 'rename', side_effect=replace_at_move):
+            result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+        self.assertTrue(moved)
+        self.assertEqual(result['status'], 'kept', result)
+        self.assertIn('error', result)
+        self.assertFalse(list(outside.rglob('workspace')))
+        preserved = next(held.glob('*/workspace/checkout/file'))
+        self.assertEqual(preserved.read_text(), 'initial\n')
+        self.assertTrue(all(json.loads(p.read_text())['status'] == 'intent'
+                            for p in outside.rglob('manifest.json')))
+
+    def test_budget_expiry_after_staging_swap_writes_no_effect_to_held_directory(self):
+        from unittest.mock import patch
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-budget-race'
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        staging = fixture.base / '_to_delete'
+        held = fixture.base / 'held-staging'
+        outside = fixture.base / 'outside'
+        outside.mkdir()
+        original = json.dumps
+        expired = []
+
+        def replace_and_expire(row, *args, **kwargs):
+            encoded = original(row, *args, **kwargs)
+            if row.get('status') == 'intent':
+                staging.rename(held)
+                shutil.copytree(held, outside, dirs_exist_ok=True)
+                staging.symlink_to(outside, target_is_directory=True)
+                expired.append(True)
+            return encoded
+
+        with patch.object(machine_cleanup.json, 'dumps', side_effect=replace_and_expire):
+            result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False,
+                deadline=lambda: bool(expired))
+        self.assertTrue(result['budget_exhausted'], result)
+        self.assertTrue(workspace.is_dir())
+        self.assertFalse(list(outside.rglob('manifest*')))
+        manifest = next(held.glob('*/manifest.json'))
+        self.assertEqual(json.loads(manifest.read_text())['status'], 'verified_no_effect')
 
     def test_hidden_index_flags_protect_clone_before_and_during_cleanup(self):
         for flag in ('--assume-unchanged', '--skip-worktree'):

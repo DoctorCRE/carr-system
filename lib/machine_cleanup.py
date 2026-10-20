@@ -45,6 +45,16 @@ def clone_has_protected_work(clone):
                     for entry in git(clone, 'ls-files', '-v', '-z').split('\0')))
 
 
+def save_clone_manifest(directory_fd, row):
+    encoded = json.dumps(row, indent=2, sort_keys=True) + '\n'
+    temporary = 'manifest.' + uuid.uuid4().hex + '.tmp'
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o600, dir_fd=directory_fd)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(encoded)
+    os.replace(temporary, 'manifest.json', src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+
+
 class CloneEvidence:
     def __init__(self, provider, process_probe, workspaces, roots=None):
         self.provider = provider
@@ -102,6 +112,16 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
     def keep(reason):
         return {**result, 'reason': reason}
 
+    def hold_directory(path, *, dir_fd=None):
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        writer.callback(os.close, fd)
+        return fd
+
+    def staging_matches():
+        return all(os.path.samestat(os.fstat(fd), path.stat(follow_symlinks=False))
+                   for path, fd in ((workspace.parent, parent_fd), (staging, staging_fd),
+                                    (target, target_fd)))
+
     try:
         check(deadline)
         if workspace.resolve() != workspace or clone.resolve() != clone or not (clone / '.git').is_dir() or (clone / '.git').is_symlink():
@@ -112,7 +132,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                 dispatch.get('checkout_workspace') != str(workspace)):
             return keep('dispatch checkout identity mismatch')
         result['dispatch_status'] = dispatch['status']
-        identity = workspace.stat().st_ino, clone.stat().st_ino
+        parent_fd = hold_directory(workspace.parent)
+        identity = workspace.stat(), clone.stat()
         for repo in repository_roots():
             try:
                 provider.verify_repository(repo, clone)
@@ -186,7 +207,8 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         refs = evidence.remote(repo, clone) if dry_run and evidence else remote_refs(clone)
         busy = evidence.processes(workspace) if dry_run and evidence else process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
-                identity != (workspace.stat().st_ino, clone.stat().st_ino) or
+                not all(os.path.samestat(before, after) for before, after in
+                        zip(identity, (workspace.stat(), clone.stat()))) or
                 git(clone, 'rev-parse', 'HEAD') != head or
                 clone_has_protected_work(clone) or
                 not clone_preserved(clone, refs, environment)):
@@ -196,24 +218,35 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         if dry_run:
             return {**result, 'status': 'would_stage', 'reason': reason}
         staging = workspace.parent / '_to_delete'
-        staging.mkdir(exist_ok=True)
-        if staging.resolve() != staging:
-            return keep('staging root is a symlink')
+        try:
+            os.mkdir('_to_delete', dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        staging_fd = hold_directory('_to_delete', dir_fd=parent_fd)
         target = staging / (workspace.name + '-' + uuid.uuid4().hex)
-        target.mkdir()
+        os.mkdir(target.name, dir_fd=staging_fd)
+        target_fd = hold_directory(target.name, dir_fd=staging_fd)
         receipt = {**result, 'status': 'intent', 'reason': reason, 'head': head,
                    'staged_path': str(target / 'workspace'), 'at': now}
-        save(target / 'manifest.json', receipt)
+        save_clone_manifest(target_fd, receipt)
         check(deadline)
-        os.rename(workspace, target / 'workspace')
-        if git(target / 'workspace/checkout', 'rev-parse', 'HEAD') != head:
+        if (not staging_matches() or
+                not os.path.samestat(identity[0], os.stat(workspace.name, dir_fd=parent_fd, follow_symlinks=False)) or
+                not os.path.samestat(identity[1], clone.stat(follow_symlinks=False))):
+            return keep('checkout or staging directory changed before move')
+        os.rename(workspace.name, 'workspace', src_dir_fd=parent_fd, dst_dir_fd=target_fd)
+        if (not staging_matches() or
+                git(target / 'workspace/checkout', 'rev-parse', 'HEAD') != head or
+                not staging_matches()):
             raise RuntimeError('staged checkout readback mismatch')
         receipt['status'] = 'staged'
-        save(target / 'manifest.json', receipt)
+        save_clone_manifest(target_fd, receipt)
+        if not staging_matches():
+            raise RuntimeError('staged directory readback mismatch')
         return receipt
     except BudgetExhausted:
         if receipt is not None:
-            save(target / 'manifest.json', {**receipt, 'status': 'verified_no_effect'})
+            save_clone_manifest(target_fd, {**receipt, 'status': 'verified_no_effect'})
         return {**keep('cleanup time budget exhausted before move'), 'budget_exhausted': True}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
