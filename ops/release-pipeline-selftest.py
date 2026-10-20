@@ -423,6 +423,42 @@ class Base(unittest.TestCase):
 
 
 class WorkerIdentityReconciliation(Base):
+    def test_promoted_worker_read_timeout_reconciles_without_redeploy_or_slice_mark(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "promoted"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        read = pipe.http
+
+        def timeout_after_promote(url):
+            if runner.names() and runner.names()[-1] == "promote":
+                raise TimeoutError("The read operation timed out")
+            return read(url)
+
+        pipe.http = timeout_after_promote
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(live["sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        calls = list(runner.calls)
+        recovered = self.fx.pipeline(runner, live=live)
+        self.assertEqual(recovered.tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], latest)
+        self.assertIsNone(state["failed_sha"])
+        self.assertIsNone(state["failed_step"])
+        receipt = self.fx.records()[-1]
+        self.assertEqual(receipt["status"], "live_identity_reconciled")
+        self.assertEqual((receipt["from_sha"], receipt["sha"]), (self.fx.base, latest))
+        self.assertEqual(receipt["provider_version_id"], VERSION)
+        self.assertEqual(runner.calls, calls)
+        self.assertEqual(self.fx.slice_marks, [])
+        rows = self.fx.records()
+        self.assertEqual(recovered.tick(["worker"]), 0)
+        self.assertEqual(self.fx.records(), rows)
+        self.assertEqual(runner.calls, calls)
+
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
         latest = self.fx.commit({"mcp-server/src/a.js": "next"})
