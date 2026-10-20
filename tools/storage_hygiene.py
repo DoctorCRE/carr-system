@@ -262,32 +262,44 @@ def logical_allocated_bytes(candidates: list[Candidate], timeout_seconds: float)
         return None
 
 
-def allocated_bytes_evidence(paths, *, max_entries=10000, max_seconds=1):
-    import stat
-    result = {'allocated_bytes': 0, 'entries': 0, 'complete': True, 'reason': 'complete'}
-    deadline = time.monotonic() + max_seconds
-    seen = set()
-    def scan(path):
-        if result['entries'] >= max_entries:
-            raise TimeoutError('entry budget')
-        if time.monotonic() >= deadline:
-            raise TimeoutError('time budget')
-        info = path.lstat()
-        result['entries'] += 1
-        identity = info.st_dev, info.st_ino
-        if identity in seen:
-            return
-        seen.add(identity)
-        result['allocated_bytes'] += info.st_blocks * 512
-        if stat.S_ISDIR(info.st_mode):
-            with os.scandir(path) as entries:
-                for entry in entries:
-                    scan(Path(entry.path))
+def allocated_bytes_evidence(paths, *, max_seconds=30):
+    import hashlib
+    paths = sorted({str(path) for path in paths}, key=lambda p: hashlib.sha256(p.encode()).digest())
+    population_size = len(paths)
+    paths = paths[:32]
+    result = {'allocated_bytes': 0, 'entries': 0, 'complete': True, 'reason': 'complete',
+              'population_size': population_size, 'sample_size': len(paths), 'estimated': population_size > len(paths),
+              'method': 'du -sk; sample by path hash; APFS shared extents may be counted repeatedly'}
+    if not paths:
+        return result
     try:
-        for path in paths:
-            scan(Path(path))
-    except (OSError, RecursionError) as exc:
-        result.update(complete=False, reason=str(exc) if isinstance(exc, TimeoutError) else type(exc).__name__)
+        measured = subprocess.run(['/usr/bin/du', '-sk', *paths], stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=max_seconds, check=False)
+        output = measured.stdout
+        if measured.returncode:
+            result.update(complete=False, reason='du scan incomplete')
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or ''
+        if isinstance(output, bytes):
+            output = output.decode('utf-8', errors='replace')
+        # A killed du can leave the last output row incomplete.
+        output = output[:output.rfind('\n') + 1]
+        result.update(complete=False, reason='time budget')
+    except OSError as exc:
+        result.update(complete=False, reason=type(exc).__name__)
+        return result
+    for line in output.splitlines():
+        try:
+            size, _path = line.split(None, 1)
+            result['allocated_bytes'] += int(size) * 1024
+            result['entries'] += 1
+        except (ValueError, IndexError):
+            result.update(complete=False, reason='invalid du evidence')
+    if result['entries'] != len(paths):
+        result.update(complete=False, reason=result['reason'] if not result['complete'] else 'missing du rows')
+    result['measured_allocated_bytes'] = result['allocated_bytes']
+    if result['complete'] and result['estimated']:
+        result['allocated_bytes'] = result['allocated_bytes'] * population_size // len(paths)
     return result
 
 
@@ -504,7 +516,10 @@ def _temp_activity(path, deadline, *, max_entries=None):
         check(deadline)
         if max_entries is not None and len(seen) >= max_entries:
             raise TimeoutError('fixture inspection budget')
-        info = entry.lstat()
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            return
         identity = info.st_dev, info.st_ino
         if identity not in seen:
             seen.add(identity)
@@ -626,6 +641,14 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                             if target is not None:
                                 save(target / 'manifest.json', {**row,
                                     'status': 'staged' if row['status'] == 'staged' else 'verified_no_effect'})
+                except FileNotFoundError:
+                    if not path.exists() and not path.is_symlink() and (target is None or not (target / 'fixture').exists()):
+                        row.update(status='verified_no_effect', reason='fixture vanished before staging')
+                        if target is not None:
+                            save(target / 'manifest.json', row)
+                    else:
+                        row.update(error='FileNotFoundError', reason='fixture staging readback unavailable')
+                        report['errors'].append({'kind': 'test_temp', 'error': 'FileNotFoundError'})
                 except TimeoutError:
                     if target is not None and (target / 'fixture').exists():
                         row.update(error='TimeoutError', reason='staged fixture inspection incomplete')

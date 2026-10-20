@@ -1,6 +1,7 @@
 import ast
 import importlib.util
 import os
+import shutil
 import json
 from pathlib import Path
 import sys
@@ -20,6 +21,235 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_thread_timeout_defers_only_that_item_and_reads_back_before_retry(self):
+        import job_watchdog
+        for returned_error in (False, True):
+            with self.subTest(returned_error=returned_error), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                ledger = root / 'dispatch.jsonl'
+                ledger.write_text(''.join(json.dumps({'thread_id': tid, 'status': 'completed',
+                    'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n' for tid in ('slow', 'healthy')))
+                calls = []
+                def archive(tid, **kwargs):
+                    calls.append((tid, kwargs['dry_run']))
+                    if tid == 'slow':
+                        if returned_error:
+                            return {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'error': 'TimeoutError'}
+                        raise TimeoutError('archive unavailable')
+                    return {'kind': 'thread', 'thread_id': tid, 'status': 'archived'}
+                options = dict(hook=None, tmp_root=root, dispatch_path=ledger, roots={}, provider=object(),
+                    process_probe=lambda paths: set(), archive_thread=archive)
+                config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                first = machine_cleanup.run(root, config, **options)
+                self.assertFalse(first['errors'], first)
+                self.assertEqual(first['status'], 'deferred')
+                self.assertEqual(first['removed'][0]['thread_id'], 'healthy')
+                self.assertNotIn('pending', first)
+                calls.clear()
+                second = machine_cleanup.run(root, config, **options)
+                self.assertIn(('slow', True), calls)
+                self.assertNotIn(('slow', False), calls)
+                self.assertFalse(second['errors'], second)
+                self.assertEqual(len(second['deferred']), 1)
+
+    def test_pending_thread_timeout_allows_other_cleanup_and_preserves_readback(self):
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            scratch = root / 'scratch'
+            candidate = scratch / 'carr-ci-test-finished'
+            candidate.mkdir(parents=True)
+            os.utime(candidate, (0, 0))
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            pending = {'kind': 'thread', 'thread_id': 'slow', 'before': 100}
+            receipt.write_text(json.dumps({'at': 1, 'pending': pending, 'errors': []}))
+            calls = []
+            def archive(tid, **kwargs):
+                calls.append(kwargs['dry_run'])
+                return {'kind': 'thread', 'thread_id': tid, 'status': 'kept', 'error': 'TimeoutError'}
+            report = machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+                hook=None, tmp_root=root, user_tmp_root=scratch, dispatch_path=root / 'absent', roots={},
+                provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+            self.assertFalse(report['errors'], report)
+            self.assertFalse(candidate.exists())
+            self.assertEqual(report['deferred'][0]['pending'], pending)
+            self.assertEqual(calls, [True])
+
+    def test_writer_lock_and_recorded_live_process_group_keep_clone(self):
+        import fcntl
+        sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
+        import write_ownership
+        for held in (False, True):
+            with self.subTest(held=held):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-writer'
+                workspace.mkdir()
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', 'main', cwd=clone)
+                lock = clone / '.git/room-writer.lock'
+                with lock.open('w+') as stream:
+                    if held:
+                        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    else:
+                        json.dump({**write_ownership.process_owner(), 'kind': 'process_group', 'pgid': os.getpgrp()}, stream)
+                        stream.flush()
+                    result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                        'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                        'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                        process_probe=lambda paths: set(), now=time.time(), older_than=1, dry_run=False)
+                self.assertEqual(result['status'], 'kept', result)
+                self.assertIn('writer', result['reason'])
+                self.assertTrue(workspace.exists())
+
+    def test_finished_failed_job_with_stale_termination_flag_reclaims_when_writer_is_gone(self):
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-ended'
+        workspace.mkdir()
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        result = machine_cleanup.clean_clone(workspace, {'status': 'failed', 'termination_confirmed': False,
+            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+            'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+            process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+        self.assertEqual(result['status'], 'staged', result)
+        self.assertTrue((Path(result['staged_path']) / 'checkout/file').exists())
+
+    def test_unpushed_commit_on_another_branch_keeps_clone(self):
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-unpushed'
+        workspace.mkdir()
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', '-c', 'unpublished', 'origin/main', cwd=clone)
+        fixture.git('config', 'user.email', 'fixture@example.invalid', cwd=clone)
+        fixture.git('config', 'user.name', 'Fixture', cwd=clone)
+        fixture.commit('unpublished bytes', cwd=clone)
+        fixture.git('switch', 'main', cwd=clone)
+        result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+            'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+            process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+        self.assertEqual(result['status'], 'kept', result)
+        self.assertIn('unpushed', result['reason'])
+        self.assertTrue(workspace.exists())
+
+    def test_pressure_stages_finished_clones_oldest_first_down_to_threshold(self):
+        import job_watchdog
+        fixture = fixtures.Fixture()
+        fixture.git('switch', '-c', 'job')
+        fixture.commit('published job')
+        fixture.git('push', 'origin', 'job')
+        ledger = fixture.base / 'dispatch.jsonl'
+        rows = []
+        workspaces = []
+        for index, name in enumerate(('a', 'b', 'c', 'd', 'e')):
+            workspace = fixture.base / ('room-codex-' + name)
+            workspace.mkdir()
+            workspaces.append(workspace)
+            clone = workspace / 'checkout'
+            fixture.git('clone', str(fixture.remote), str(clone))
+            fixture.git('switch', 'job', cwd=clone)
+            rows.append({'status': 'completed', 'checkout_workspace': str(workspace),
+                'checkout_path': str(clone), 'dispatched_at': time.time() - index * 60})
+        # The oldest clone must survive, even though HEAD is published.
+        oldest = workspaces[-1] / 'checkout'
+        fixture.git('config', 'user.email', 'fixture@example.invalid', cwd=oldest)
+        fixture.git('config', 'user.name', 'Fixture', cwd=oldest)
+        fixture.commit('private work', cwd=oldest)
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['job_clone_threshold'] = 2
+        options = dict(hook=None, tmp_root=fixture.base, dispatch_path=ledger, roots={},
+            provider=fixtures.FakeProvider(), process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+        dry = machine_cleanup.run(fixture.repo, config, dry_run=True, **options)
+        self.assertEqual([Path(r['path']).name for r in dry['kept'] if r['status'] == 'would_stage'],
+                         ['room-codex-d', 'room-codex-c', 'room-codex-b'], dry)
+        self.assertTrue(all(p.exists() for p in workspaces))
+        config['machine_cleanup']['max_items'] = 1
+        staged = []
+        for _ in range(4):
+            report = machine_cleanup.run(fixture.repo, config, **options)
+            self.assertFalse(report['errors'], report)
+            staged.extend(Path(r['path']).name for r in report['removed'])
+        self.assertEqual(staged, ['room-codex-d', 'room-codex-c', 'room-codex-b'])
+        self.assertEqual(sum(p.exists() for p in workspaces), 2)
+        self.assertTrue(workspaces[0].exists())
+        self.assertTrue(workspaces[-1].exists())
+
+    def test_size_thresholds_resolve_for_410_clones_and_large_user_temp(self):
+        import job_watchdog
+        fixture = fixtures.Fixture()
+        template = fixture.base / 'template'
+        fixture.git('clone', str(fixture.remote), str(template))
+        fixture.git('switch', 'main', cwd=template)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for index in range(410):
+                clone = root / ('room-codex-' + str(index))
+                shutil.copytree(template, clone / 'checkout')
+                for child in range(25):
+                    (clone / str(child)).touch()
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            receipt.write_text(json.dumps({'last_success_at': time.time(), 'errors': []}))
+            config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+            rows = machine_cleanup.health_findings(root, config, tmp_root=root,
+                user_tmp_root=root, roots={}, now=time.time())
+            self.assertEqual([r['code'] for r in rows], ['job_clone_count'], rows)
+
+    def test_interruption_before_deferred_thread_readback_preserves_retry_intent(self):
+        from unittest.mock import patch
+        import job_watchdog
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            deferred = {'kind': 'thread', 'thread_id': 'uncertain', 'status': 'deferred',
+                'pending': {'kind': 'thread', 'thread_id': 'uncertain', 'before': 100}}
+            receipt.write_text(json.dumps({'at': 1, 'deferred': [deferred]}))
+            with patch('machine_cleanup.entries', side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    machine_cleanup.run(root, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+                        hook=None, tmp_root=root, dispatch_path=root / 'absent', roots={}, provider=object(),
+                        process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+            self.assertEqual(json.loads(receipt.read_text())['deferred'], [deferred])
+
+    def test_large_population_size_uses_an_explicit_sample_estimate(self):
+        from unittest.mock import patch
+        import subprocess
+        paths = [Path('/fixture') / str(index) for index in range(410)]
+        def native(argv, **kwargs):
+            if len(argv[2:]) > 32:
+                raise subprocess.TimeoutExpired('du', 30)
+            return subprocess.CompletedProcess(argv, 0, ''.join('8\t' + path + '\n' for path in argv[2:]), '')
+        with patch('storage_hygiene.subprocess.run', side_effect=native):
+            measured = storage_hygiene.allocated_bytes_evidence(paths)
+        self.assertTrue(measured['complete'], measured)
+        self.assertTrue(measured['estimated'])
+        self.assertEqual(measured['population_size'], 410)
+        self.assertEqual(measured['allocated_bytes'], 3358720)
+        self.assertEqual(measured['measured_allocated_bytes'], 262144)
+
+    def test_clone_retention_threshold_keeps_the_remaining_clones_on_later_runs(self):
+        import job_watchdog
+        fixture = fixtures.Fixture()
+        ledger = fixture.base / 'dispatch.jsonl'
+        workspace = fixture.base / 'room-codex-retained'
+        workspace.mkdir()
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        ledger.write_text(json.dumps({'status': 'completed', 'checkout_workspace': str(workspace),
+            'checkout_path': str(clone), 'dispatched_at': '2020-01-01T00:00:00Z'}) + '\n')
+        report = machine_cleanup.run(fixture.repo, job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json'),
+            hook=None, tmp_root=fixture.base, dispatch_path=ledger, roots={}, provider=fixtures.FakeProvider(),
+            process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+        self.assertFalse(report['removed'], report)
+        self.assertTrue(workspace.exists())
+
     def test_interrupted_temp_effect_is_reconciled_in_next_receipt(self):
         from unittest.mock import patch
         import job_watchdog

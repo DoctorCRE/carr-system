@@ -404,7 +404,7 @@ class JobCloneTests(unittest.TestCase):
                 provider.branch_pulls = lambda repo, branch: provider.rows
                 probe = lambda paths: None if condition == 'unknown_process' else ({str(workspace)} if condition == 'live' else set())
                 row = {'checkout_path': str(clone), 'checkout_workspace': str(workspace),
-                       'status': 'timed_out' if condition == 'unfinished' else 'completed',
+                       'status': 'running' if condition == 'unfinished' else 'completed',
                        'dispatched_at': '2020-01-01T00:00:00+00:00'}
                 receipt = cleanup.clean_clone(workspace, row, provider=provider, process_probe=probe,
                                                now=time.time(), older_than=7 * 86400, dry_run=False)
@@ -634,7 +634,7 @@ class CleanupHealthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / 'room-codex-fixture').mkdir()
-            with patch('time.monotonic', side_effect=itertools.count()):
+            with patch('storage_hygiene.subprocess.run', side_effect=subprocess.TimeoutExpired('du', 30)):
                 rows = cleanup.health_findings(root, config, tmp_root=root,
                     user_tmp_root=root, roots={}, now=90000)
             sizes = [r for r in rows if r['code'].endswith('_bytes_partial')]
@@ -655,18 +655,20 @@ class CleanupHealthTests(unittest.TestCase):
                 (root / 'link').symlink_to(outside)
                 for index in range(30):
                     (root / str(index)).mkdir()
-                measured = storage_hygiene.allocated_bytes_evidence([root], max_entries=5)
+                with patch('storage_hygiene.subprocess.run', side_effect=subprocess.TimeoutExpired(
+                        'du', 30, output=b'8\t/completed\n999\t/incomplete')):
+                    measured = storage_hygiene.allocated_bytes_evidence([root, outside])
                 self.assertFalse(measured['complete'])
-                self.assertEqual(measured['entries'], 5)
-                self.assertGreaterEqual(measured['allocated_bytes'], 0)
-                self.assertIn('entry budget', measured['reason'])
+                self.assertEqual(measured['entries'], 1)
+                self.assertEqual(measured['allocated_bytes'], 8192)
+                self.assertIn('time budget', measured['reason'])
                 full = storage_hygiene.allocated_bytes_evidence([root])
                 self.assertTrue(full['complete'])
                 self.assertGreaterEqual(full['allocated_bytes'], 8192)
                 expected_kib = int(subprocess.check_output(
                     ['/usr/bin/du', '-sk', str(root)], text=True, timeout=3).split()[0])
                 self.assertEqual((full['allocated_bytes'] + 1023) // 1024, expected_kib)
-                self.assertEqual(full['entries'], 33)
+                self.assertEqual(full['entries'], 1)
             finally:
                 outside.unlink(missing_ok=True)
 
@@ -795,6 +797,7 @@ class ScheduledCleanupTests(unittest.TestCase):
             return []
         provider.open_pulls = expire
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['job_clone_threshold'] = 0
         with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
             report = cleanup.run(fixture.repo, config, hook=fixtures.hook, tmp_root=clones,
                 dispatch_path=ledger, roots={}, provider=provider, process_probe=lambda paths: set(),
@@ -973,6 +976,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00', 'thread_id': 'finished'}) + '\n')
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['job_clone_threshold'] = 0
         provider = fixtures.FakeProvider()
         provider.branch_pulls = lambda repo, branch: []
         calls = []
@@ -1002,6 +1006,7 @@ class ScheduledCleanupTests(unittest.TestCase):
         ledger.write_text(json.dumps({'checkout_path': str(clone), 'checkout_workspace': str(workspace),
             'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00+00:00'}) + '\n')
         config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['job_clone_threshold'] = 0
         provider = fixtures.FakeProvider()
         real_rename = os.rename
         def interrupt(*args, **kwargs):

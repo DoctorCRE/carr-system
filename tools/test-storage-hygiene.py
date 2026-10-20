@@ -510,6 +510,42 @@ class TestFixtureCleanup(unittest.TestCase):
             self.assertGreaterEqual(report['staged_allocated_bytes'], 8192)
             self.assertTrue(report['kept'])
 
+    def test_vanished_temp_directory_is_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-vanished'
+            candidate.mkdir()
+            def probe(paths):
+                candidate.rmdir()
+                return set()
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=probe, deadline=lambda: False, dry_run=False)
+            self.assertFalse(report['errors'], report)
+            self.assertEqual(report['kept'][0]['status'], 'verified_no_effect')
+
+    def test_vanished_nested_temp_file_is_success_and_later_fixture_stages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            candidate = root / 'carr-ci-test-a'
+            candidate.mkdir()
+            payload = candidate / 'vanishing'
+            payload.touch()
+            later = root / 'carr-ci-test-b'
+            later.mkdir()
+            for path in (payload, candidate, later):
+                os.utime(path, (0, 0))
+            real_lstat = Path.lstat
+            def vanish(path, *args, **kwargs):
+                if path == payload:
+                    payload.unlink(missing_ok=True)
+                return real_lstat(path, *args, **kwargs)
+            with patch.object(Path, 'lstat', vanish):
+                report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                    max_items=100, cursor='', process_probe=lambda paths: set(),
+                    deadline=lambda: False, dry_run=False)
+            self.assertFalse(report['errors'], report)
+            self.assertFalse(later.exists(), report)
+
     def test_unknown_process_evidence_dry_run_budget_and_cursor_keep_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

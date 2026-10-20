@@ -81,6 +81,7 @@ class CleanupThroughputTests(unittest.TestCase):
         dispatch_path.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
         config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
         config['machine_cleanup']['max_items'] //= self.budget_scale
+        config['machine_cleanup']['job_clone_threshold'] = 0
         totals = {'job_clone': 0, 'worktree': 0}
         for run in range(1, 4):
             with patch.object(branch_retirement, 'ownership', return_value='orphaned'):
