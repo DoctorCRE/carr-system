@@ -26,6 +26,13 @@ def git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
     return result.stdout.strip()
 
 
+def regen_env(environ) -> dict[str, str]:
+    # HOME carries gh's stored login; without it the migration-slot check's
+    # `gh api` exits 4 (not authenticated) whenever no token is exported.
+    return {key: value for key, value in environ.items()
+            if key in ('PATH', 'LANG', 'TMPDIR', 'HOME', 'GH_TOKEN', 'GITHUB_TOKEN')}
+
+
 def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
             regenerate: Callable[[Path], None], before_push: Callable[[], None] = lambda: None,
             reference: Path = CANONICAL) -> str:
@@ -90,8 +97,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         def regenerate(repo):
-            env = {key: value for key, value in os.environ.items()
-                   if key in ('PATH', 'LANG', 'TMPDIR', 'GH_TOKEN', 'GITHUB_TOKEN')}
+            env = regen_env(os.environ)
             runtime = Path(__file__).resolve().parents[1] / 'mcp-server'
             if ((runtime / 'node_modules').is_dir() and (runtime / 'package-lock.json').read_bytes() == (repo / 'mcp-server/package-lock.json').read_bytes()):
                 (repo / 'mcp-server/node_modules').symlink_to(runtime / 'node_modules', target_is_directory=True)

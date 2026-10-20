@@ -124,6 +124,10 @@ def command(argv, *, cwd=None, data=None, timeout=None, observe=None, diagnostic
     if observe is not None:
         observe(p)
     checks_result = argv[:3] == ['gh', 'pr', 'checks'] and p.returncode in (1, 8) and bool(p.stdout.strip())
+    if (argv[:3] == ['gh', 'pr', 'checks'] and '--required' in argv and p.returncode == 1
+            and not p.stdout.strip() and 'no required checks reported' in p.stderr):
+        # Required checks that have not reported yet are pending, not a failed read.
+        return '[]'
     if p.returncode and not checks_result:
         stderr = '; stderr tail: ' + (redacted_tail(p.stderr, known_secrets=sensitive_env_values(os.environ)).strip() or '(empty)') if diagnostics else ''
         if argv[:3] == ['gh', 'pr', 'merge'] and 'GraphQL:' in p.stderr and any(
@@ -1034,6 +1038,41 @@ class Queue:
                               merged=merged, actor='merge-daemon',
                               reason=f'journal entry {e["id"]}: verified provider {"merge on main" if merged else "closed without merge"}')
 
+    def advance_regenerated_pin(self, e, card_id, p, expected_order):
+        head = p['head']['sha']
+        if (e['tested'] is not None or head == e['approved'] or p['state'] != 'open'
+                or p.get('draft') or p['base']['ref'] != 'main'):
+            return False
+        if self.held(p):
+            if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase IN ('issued','done') "
+                               'AND repo=? AND pr=? AND head=?',
+                               (e['repo'], e['pr'], e['approved'])).fetchone():
+                raise QueueChanged('held_during_regeneration')
+            return False
+        actions = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase='done' "
+                                  'AND repo=? AND pr=? AND head=? AND receipt IS NOT NULL',
+                                  (e['repo'], e['pr'], e['approved'])).fetchall()
+        for action in bounded_items('snapshot', actions):
+            try:
+                receipt = json.loads(Path(action['receipt']).read_text())
+            except (OSError, ValueError):
+                continue
+            if receipt != dict(head=e['approved'], main=action['payload'], prepared=head, branch=p['head']['ref']):
+                continue
+            with WorkQueue(default_path()) as work:
+                work.advance_merge_pin(card_id, repo=e['repo'], pr=e['pr'], head=e['approved'],
+                                       prepared=head, main=receipt['main'], actor='merge-daemon',
+                                       reason=f'journal entry {e["id"]}: verified regeneration receipt {action["receipt"]}',
+                                       expected_order=expected_order)
+            self.report(e, 'regenerated', f'Advanced work pin from {e["approved"]} to {head}; hosted CI required',
+                        'superseded')
+            return True
+        if self.db.execute("SELECT 1 FROM actions WHERE kind='regen' AND phase='issued' "
+                           'AND repo=? AND pr=? AND head=?',
+                           (e['repo'], e['pr'], e['approved'])).fetchone():
+            raise ActionUncertain('Regeneration may have pushed; reconcile-action before advancing the pin')
+        return False
+
     def _tick_entry(self, e, card_id, expected_order):
         repo, n = e['repo'], e['pr']
         self._github_entry = None if e['phase'] == 'merge_rejected' else e['id']
@@ -1064,6 +1103,8 @@ class Queue:
                 self.report(e, 'closed', 'PR closed without merge', 'done')
                 return False
             if p['head']['sha'] != e['approved']:
+                if self.advance_regenerated_pin(e, card_id, p, expected_order):
+                    return True
                 self.report(e, 'head_moved', 'Live head differs from the approved SHA',
                             'superseded' if e['tested'] is None else None)
                 return False
@@ -1116,7 +1157,9 @@ class Queue:
                     return True
                 return False
             if self.prepare(repo, p):
-                self.report(e, 'regenerated', f'Prepared {head}; new head must be enqueued and pass hosted CI')
+                current = self.pr(repo, n)
+                if not self.advance_regenerated_pin(e, card_id, current, expected_order):
+                    self.report(e, 'regenerated', f'Prepared from {head}; waiting for matching regeneration receipt and provider head')
                 return True
             if not self.green(repo, n, head):
                 since = e['ci_since'] if e['ci_head'] == head and e['ci_since'] is not None else time.time()
@@ -1167,7 +1210,10 @@ class Queue:
             self.report(e, 'merge_requested', f'Guarded squash merge requested at {head}')
             return True
         except QueueChanged as exc:
-            self.report(e, 'selection_changed', str(exc))
+            if str(exc) in ('held_during_regeneration', 'legacy_ownership'):
+                self.report(e, 'needs_repin', str(exc), 'blocked')
+            else:
+                self.report(e, 'selection_changed', str(exc))
             return True
         except Cancelled:
             return True
