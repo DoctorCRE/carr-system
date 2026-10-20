@@ -951,13 +951,13 @@ class QueueTests(unittest.TestCase):
             'from pathlib import Path\n'
             + 'with Path(' + repr(str(marker)) + ').open("a") as f: f.write("call\\n")\n'
             + 'raise SystemExit("push did not land")\n')
-        p = self.data['prs'][f'{module.REPOS[0]}#1']
         for _ in range(module.MAX_ATTEMPTS):
-            with self.assertRaises(module.ActionUncertain):
-                self.q.prepare(module.REPOS[0], p)
+            self.q.tick()
             self.restart()
-        with self.assertRaises(module.ActionExhausted):
-            self.q.prepare(module.REPOS[0], p)
+        self.q.tick()
+        entry = self.q.db.execute('SELECT phase,outcome FROM entries WHERE approved=?', (self.approved,)).fetchone()
+        self.assertEqual(tuple(entry), ('blocked', 'action_uncertain_exhausted'))
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 4)
         self.assertEqual(marker.read_text().splitlines(), ['call'] * module.MAX_ATTEMPTS)
         self.assertEqual(self.git('rev-parse', 'branch-1').strip(), self.approved)
         self.assertEqual(self.calls('merge'), [])
@@ -983,6 +983,10 @@ class QueueTests(unittest.TestCase):
         self.git('branch', 'branch-1', self.approved)
         script.write_text(original)
         self.restart()
+        self.pr(held=True)
+        self.q.tick()
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+        self.pr()
         self.q.tick()
         with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
             self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
