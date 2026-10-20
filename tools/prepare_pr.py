@@ -4,11 +4,13 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
 from git_env import scrubbed_env
@@ -36,6 +38,9 @@ def regen_env(environ) -> dict[str, str]:
 def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
             regenerate: Callable[[Path], None], before_push: Callable[[], None] = lambda: None,
             reference: Path = CANONICAL) -> str:
+    push_timeout = float(os.environ.get('CARR_PREPARE_PUSH_TIMEOUT_SECONDS', '300'))
+    if not math.isfinite(push_timeout) or push_timeout <= 0:
+        raise ValueError('push timeout must be positive and finite')
     if branch == 'main' or not branch or branch.startswith('-'):
         raise ValueError('preparation requires an ordinary PR branch')
     with tempfile.TemporaryDirectory(prefix='carr-prepare-pr.') as temp:
@@ -86,7 +91,16 @@ def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
             raise ValueError('main moved during regeneration; no push')
         if observed.get(f'refs/heads/{branch}') != head:
             raise ValueError('PR head moved during regeneration; no push')
-        git(repo, 'push', 'origin', f'HEAD:refs/heads/{branch}')
+        started, result = time.monotonic(), 'failed'
+        try:
+            git(repo, 'push', 'origin', f'HEAD:refs/heads/{branch}', timeout=push_timeout)
+            result = 'success'
+        except subprocess.TimeoutExpired:
+            result = 'timeout'
+            raise
+        finally:
+            print(f'prepare-pr: push result={result} elapsed_seconds={time.monotonic() - started:.3f} '
+                  f'timeout_seconds={push_timeout:g}', file=sys.stderr)
         return prepared
 
 
