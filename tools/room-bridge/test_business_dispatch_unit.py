@@ -127,7 +127,8 @@ class BusinessDispatchTests(unittest.TestCase):
                         data['months'][dispatch.claude_api_wire.month_now()] = {
                             'spent_usd': spent, 'reservations': {}}
                         data['stop'] = stop
-                    with WorkQueue(self.db) as q, patch.object(dispatch, '_execute') as execute:
+                    with WorkQueue(self.db) as q, patch.object(dispatch, '_execute', return_value={
+                            'status': 'failed', 'detail': 'executor reached', 'termination_confirmed': True}) as execute:
                         claim = q.claim(eligible_desks={'biz-desk'}, actor='runner', owner={})
                         work_runner.worker(q, card, claim['claim'], self.reg.path, self.results)
                         item = q.get(card)
