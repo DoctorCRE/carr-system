@@ -390,14 +390,22 @@ class Run:
         """When the newest open ball on ref was set (unix), or None."""
         if ref in self.balls:
             return self.balls[ref]
-        closed_after = None
+        closed_after: dict[str, int] = {}
+        seen_owners: set[str] = set()
         for row in sorted(self.ports.carr('catch-me-up', {'ref': ref, 'limit': 30}).get('timeline') or [],
                           key=lambda r: r.get('occurred_at') or '', reverse=True):
             at = int(datetime.fromisoformat(row['occurred_at']).timestamp())
             if row.get('verb') in ('complete-action', 'log-outreach'):
-                closed_after = closed_after or at
-            elif row.get('verb') == 'set-next-action' and BALL_OWNERS.match(row.get('summary') or ''):
-                return None if closed_after and closed_after >= at else at
+                actor = row.get('actor')
+                if actor:
+                    closed_after.setdefault(actor, at)
+            elif row.get('verb') == 'set-next-action':
+                owner_match = BALL_OWNERS.match(row.get('summary') or '')
+                if owner_match and owner_match[1] not in seen_owners:
+                    owner = owner_match[1]
+                    seen_owners.add(owner)
+                    if closed_after.get(owner, 0) < at:
+                        return at
         return None
 
     def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
