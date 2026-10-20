@@ -1044,6 +1044,29 @@ class RemotePreservationTests(unittest.TestCase):
         self.assertTrue(tree.exists())
         self.assertEqual((tree / 'file').read_text(), 'archived payload\n')
 
+    def test_worktree_becoming_live_during_final_refresh_is_kept(self):
+        from branch_retirement import fetch_remote_refs
+        for change in ('process', 'write'):
+            with self.subTest(change=change):
+                fixture, tree, head, tag = self.archived_tree()
+                reaper = fixture.reaper()
+                row = next(r for r in reaper.iter_tree_snapshot('fixture/repo', fixture.repo)
+                    if r.get('path') == str(tree))
+
+                def refresh(root):
+                    fetch_remote_refs(root)
+                    if change == 'process':
+                        reaper.process_probe = lambda paths: {str(tree)}
+                    else:
+                        (tree / 'file').write_text('new work during fetch\n')
+
+                with patch('branch_retirement.fetch_remote_refs', side_effect=refresh):
+                    with self.assertRaisesRegex(RuntimeError, 'became live'):
+                        reaper.apply('fixture/repo', fixture.repo, row, ())
+                self.assertTrue(tree.exists())
+                self.assertEqual((tree / 'file').read_text(),
+                    'archived payload\n' if change == 'process' else 'new work during fetch\n')
+
     def test_local_shadow_of_deleted_remote_tag_is_not_evidence(self):
         fixture, tree, head, tag = self.archived_tree()
         reaper = fixture.reaper()
