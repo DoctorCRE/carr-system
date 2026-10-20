@@ -119,6 +119,24 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3),($4,$2,'banker',$3,$3)", [id(22),id(21),actor.id,id(23)]);
       return {deal_id:id(4),role:'lender',company_party_id:id(20),contact_party_id:id(21)};
     };
+    await t.test('retired company assignment permits explicit contact reassignment while active duplicates refuse', async () => transaction(async () => {
+      const entry = await assignmentFixture();
+      await c.query("insert into vendor(id,party_id,category,created_by,updated_by) values($1,$2,'banker',$3,$3)", [id(24),id(20),actor.id]);
+      const update = (vendor,base_version,assignment_base_version,active=true) => TOOLS['update-vendor'].handler(c,actor,{
+        vendor,base_version,assignment_base_version,idempotency_key:randomUUID(),fields:{deal_assignments:[{...entry,active}]},
+      });
+      await update(id(24),1,1);
+      await c.query('savepoint active_duplicate');
+      await assert.rejects(update(id(22),1,1),e=>e.code==='23505');
+      await c.query('rollback to savepoint active_duplicate');
+      await update(id(24),2,2,false);
+      await update(id(22),1,1);
+      const cards = (await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors;
+      assert.equal(cards.length,1);
+      assert.equal(cards[0].party_id,id(21));
+      assert.equal((await c.query('select active from deal_vendor_assignment where party_id=$1',[id(20)])).rows[0].active,false);
+    }));
+
     await t.test('stale duplicate vendor rows cannot overwrite shared party assignments', async () => transaction(async () => {
       const entry = await assignmentFixture();
       const update = (vendor, note) => TOOLS['update-vendor'].handler(c,actor,{
