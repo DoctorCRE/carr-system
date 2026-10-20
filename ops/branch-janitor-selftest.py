@@ -943,6 +943,24 @@ class RemotePreservationTests(unittest.TestCase):
         self.assertIsNone(row['action'], row)
         self.assertEqual(row['reason'], 'unpushed work')
 
+    def test_local_graft_cannot_invent_remote_archive_preservation(self):
+        fixture = Fixture()
+        tree = fixture.tree('unpublished')
+        head = fixture.commit('unpublished payload', cwd=tree)
+        archived = fixture.git('commit-tree', 'main^{tree}', '-p', fixture.git('rev-parse', 'main'),
+            '-m', 'unrelated remote archive')
+        fixture.git('push', 'origin', archived + ':refs/tags/archive/unrelated')
+        (fixture.repo / '.git/info/grafts').write_text(archived + ' ' + head + '\n')
+        fixture.age(tree)
+        report = fixture.reaper().run({'fixture/repo': fixture.repo}, execute=True, local_only=True)
+        self.assertFalse(report['errors'], report)
+        row = next(r for r in report['rows'] if r.get('path') == str(tree))
+        self.assertIsNone(row['action'], row)
+        self.assertEqual(row['reason'], 'unpushed work')
+        self.assertFalse(report['actions'], report)
+        self.assertTrue(tree.exists())
+        self.assertEqual((tree / 'file').read_text(), 'unpublished payload\n')
+
     def test_local_tag_only_does_not_preserve_unpushed_work(self):
         fixture = Fixture()
         tree = fixture.tree('local-only')
