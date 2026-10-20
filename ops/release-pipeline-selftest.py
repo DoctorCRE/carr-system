@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import http.client
 import importlib.util
 import json
 import os
@@ -32,9 +33,11 @@ import re
 import subprocess
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 from pathlib import Path
 
@@ -210,6 +213,8 @@ def install_toolchain_wrangler(repo: Path) -> Path:
     wrangler.parent.mkdir(parents=True, exist_ok=True)
     wrangler.write_text("#!/bin/sh\nexit 0\n")
     wrangler.chmod(0o755)
+    home = wrangler.parents[2]
+    home.with_name(home.name + ".sha256").write_text(rp.toolchain_digest(home) + "\n")
     return wrangler
 
 
@@ -422,7 +427,261 @@ class Base(unittest.TestCase):
         self._tmp.cleanup()
 
 
+class GitFetchDiagnostics(Base):
+    def test_failed_fetch_keeps_stderr_in_the_run_log(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        with self.assertRaises(rp.StepFailed) as failed:
+            pipe.git("fetch", "--quiet", "origin", "refs/heads/deleted-branch")
+        self.assertEqual(failed.exception.rc, 128)
+        self.assertTrue(failed.exception.log, "fetch failure must link its diagnostic log")
+        log = Path(failed.exception.log)
+        self.assertTrue(log.is_relative_to(pipe.run_dir))
+        self.assertIn("couldn't find remote ref refs/heads/deleted-branch", log.read_text())
+
+    def test_transient_fetch_retries_once_and_keeps_both_attempts(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        run = subprocess.run
+        attempts = []
+        error = b"fatal: unable to access 'https://github.com/example/app.git/': Recv failure: Operation timed out\n"
+
+        def flaky(argv, **kwargs):
+            attempts.append(argv)
+            if len(attempts) == 1:
+                return subprocess.CompletedProcess(argv, 128, b"", error)
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky), \
+                mock.patch.object(pipe, "sleep") as sleep:
+            pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0], attempts[1])
+        sleep.assert_called_once_with(2)
+        logs = "\n".join(p.read_text() for p in pipe.run_dir.glob("*fetch*.log"))
+        self.assertIn(error.decode().strip(), logs)
+        self.assertIn("[exit 128]", logs)
+        self.assertIn("[exit 0]", logs)
+
+    def test_repeated_timeout_stops_after_two_attempts_with_full_stderr(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        error = b"remote: " + b"diagnostic " * 50 + b"\nRecv failure: Operation timed out\n"
+        result = subprocess.CompletedProcess([], 128, b"remote output\n", error)
+        with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                mock.patch.object(pipe, "sleep") as sleep:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(failed.exception.rc, 128)
+        log = Path(failed.exception.log).read_text()
+        self.assertEqual(log.count(error.decode()), 2)
+        self.assertEqual(log.count("remote output"), 2)
+
+    def test_lock_ref_and_auth_errors_fail_without_retry(self):
+        errors = (
+            b"fatal: couldn't find remote ref refs/heads/deleted-branch\n",
+            b"fatal: Unable to create '/fixture/.git/shallow.lock': File exists.\n",
+            b"error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b\n",
+            b"fatal: Authentication failed for 'https://github.com/example/app.git/'\n",
+        )
+        for error in errors:
+            with self.subTest(error=error):
+                pipe = self.fx.pipeline(FakeRunner())
+                result = subprocess.CompletedProcess([], 128, b"", error)
+                with mock.patch.object(rp.subprocess, "run", return_value=result) as run, \
+                        mock.patch.object(pipe, "sleep") as sleep:
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+                self.assertEqual(run.call_count, 1)
+                sleep.assert_not_called()
+                self.assertIn(error.decode(), Path(failed.exception.log).read_text())
+
+    def test_app_tick_recovers_without_failed_release_or_diagnosis(self):
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        verbs, messages, attempts = [], [], []
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
+        pipe.out = messages.append
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        run = subprocess.run
+
+        def flaky(argv, **kwargs):
+            if "fetch" in argv:
+                attempts.append(argv)
+                if len(attempts) == 1:
+                    return subprocess.CompletedProcess(argv, 128, b"", b"Recv failure: Operation timed out\n")
+            return run(argv, **kwargs)
+
+        with mock.patch.object(rp.subprocess, "run", side_effect=flaky):
+            self.assertEqual(pipe.tick(["app"]), 0)
+        self.assertEqual(len(attempts), 2)
+        self.assertFalse(self.fx.state()["app"].get("failed_sha"))
+        self.assertEqual(self.fx.records(), [])
+        self.assertEqual(verbs, [])
+        self.assertEqual(runner.calls, [])
+        self.assertTrue(any("already released" in line for line in messages))
+
+    def test_immutable_fetch_ignores_deleted_configured_branch_and_shared_ref_locks(self):
+        git(self.fx.origin, "update-ref", "refs/heads/deleted-branch", self.fx.base)
+        git(self.fx.repo, "config", "--add", "remote.origin.fetch",
+            "+refs/heads/deleted-branch:refs/remotes/origin/deleted-branch")
+        git(self.fx.origin, "update-ref", "-d", "refs/heads/deleted-branch")
+        for name in ("index.lock", "shallow.lock", "FETCH_HEAD.lock", "refs/remotes/origin/main.lock"):
+            lock = self.fx.repo / ".git" / name
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            lock.write_text("owned by another operation\n")
+        pipe = self.fx.pipeline(FakeRunner())
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+
+    def test_process_timeout_keeps_partial_output_and_stops_after_one_retry(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        timeout = subprocess.TimeoutExpired("git fetch", 300, output=b"partial stdout\n",
+                                            stderr=b"partial stderr\n")
+        with mock.patch.object(rp.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(failed.exception.rc, 124)
+        log = Path(failed.exception.log).read_text()
+        for expected in ("partial stdout", "partial stderr", "[exit 124]"):
+            self.assertEqual(log.count(expected), 2)
+
+    def test_fetch_log_redacts_credentials_in_command_and_both_streams(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        secret = "fixture-sensitive-output"
+        pipe.env["FIXTURE_SECRET"] = secret
+        result = subprocess.CompletedProcess([], 128, secret.encode(), f"fatal: {secret}".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", secret, self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn(secret, log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+
+    def test_fetch_diagnostics_redact_query_tokens_and_preserve_normal_urls(self):
+        opaque = "syntheticOpaqueFetchValue0123456789abcdef0"
+        cases = (
+            ("access_token=fixture-access-value&service=git-upload-pack",
+             "access_token=[REDACTED]&service=git-upload-pack"),
+            (f"{opaque}&service=git-upload-pack", "[REDACTED]&service=git-upload-pack"),
+            ("service=git-upload-pack&depth=1", "service=git-upload-pack&depth=1"),
+        )
+        for query, expected_query in cases:
+            with self.subTest(query=query):
+                pipe = self.fx.pipeline(FakeRunner())
+                url = f"https://example.invalid/app.git?{query}"
+                expected_url = f"https://example.invalid/app.git?{expected_query}"
+                error = f"fatal: unable to access '{url}': Authentication failed"
+                result = subprocess.CompletedProcess([], 128, url.encode(), error.encode())
+                with mock.patch.object(rp.subprocess, "run", return_value=result):
+                    with self.assertRaises(rp.StepFailed) as failed:
+                        pipe.git("fetch", "--quiet", url, self.fx.base)
+                log = Path(failed.exception.log)
+                self.assertEqual(log.read_text().count(expected_url), 3)
+                self.assertEqual(failed.exception.detail,
+                                 f"fatal: unable to access '{expected_url}': Authentication failed")
+                if query != expected_query:
+                    self.assertNotIn(url, log.read_text() + failed.exception.detail)
+                log.unlink()
+
+    def test_dry_run_fetch_writes_no_state_or_logs(self):
+        pipe = self.fx.pipeline(FakeRunner(), dry_run=True)
+        before = {path.relative_to(pipe.store.root): path.read_bytes()
+                  for path in pipe.store.root.rglob("*") if path.is_file()}
+        pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        after = {path.relative_to(pipe.store.root): path.read_bytes()
+                 for path in pipe.store.root.rglob("*") if path.is_file()}
+        self.assertEqual(after, before)
+
+    def test_fetch_log_redacts_username_only_url_userinfo(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://opaque-fixture-access-token@github.com/example/app.git/"
+        error = f"fatal: unable to access '{url}': Authentication failed\n"
+        result = subprocess.CompletedProcess([], 128, b"", error.encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        log = Path(failed.exception.log).read_text()
+        self.assertNotIn("opaque-fixture-access-token", log + failed.exception.detail)
+        self.assertIn("[REDACTED]", log)
+        self.assertIn("Authentication failed", log)
+
+    def test_fetch_log_preserves_redaction_of_passwords_containing_slashes(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        url = "https://fixture-user:fixture-password/with/slashes@github.com/example/app.git/"
+        result = subprocess.CompletedProcess([], 128, b"", f"unable to access '{url}'".encode())
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            with self.assertRaises(rp.StepFailed) as failed:
+                pipe.git("fetch", "--quiet", "origin", self.fx.base)
+        self.assertNotIn("fixture-password", Path(failed.exception.log).read_text() + failed.exception.detail)
+
+
 class WorkerIdentityReconciliation(Base):
+    def test_second_unreadable_identity_stops_after_one_retry(self):
+        responses = [http.client.RemoteDisconnected("fixture second dropped connection"),
+                     json.JSONDecodeError("fixture invalid JSON", "{", 1), {}]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[http.client.RemoteDisconnected("fixture first drop"),
+                                                   response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(runner.calls, [])
+
+    def test_malformed_or_permanent_identity_read_blocks_without_retry(self):
+        responses = [json.JSONDecodeError("fixture invalid JSON", "{", 1),
+                     {}, {"git_sha": "malformed"},
+                     {"git_sha": {"value": self.fx.base}, "worker_version": {"id": "bad"}},
+                     urllib.error.HTTPError("https://fixture.invalid/release", 503, "unavailable", {}, None),
+                     urllib.error.URLError(socket.gaierror(socket.EAI_NONAME, "fixture unknown host")),
+                     PermissionError("fixture access denied")]
+        for response in responses:
+            with self.subTest(response=response):
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[response, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 1)
+                sleep.assert_not_called()
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_identity_unreadable")
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(runner.calls, [])
+
+    def test_transient_identity_read_recovers_after_one_bounded_retry(self):
+        errors = [http.client.RemoteDisconnected("fixture dropped connection"),
+                  ConnectionResetError("fixture connection reset"), TimeoutError("fixture timeout"),
+                  urllib.error.URLError(ConnectionResetError("fixture reset")),
+                  urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "fixture DNS timeout")),
+                  http.client.IncompleteRead(b"partial identity")]
+        for error in errors:
+            with self.subTest(error=error):
+                runner, verbs = FakeRunner(), []
+                pipe = self.fx.pipeline(runner, verbs=verbs)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                identity = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+                pipe.http = mock.Mock(side_effect=[error, identity])
+                with mock.patch.object(pipe, "sleep") as sleep:
+                    self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(pipe.http.call_count, 2)
+                sleep.assert_called_once_with(2)
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertFalse(self.fx.state()["worker"].get("failed_sha"))
+                self.assertEqual(self.fx.records(), [])
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(verbs, [])
+
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
         latest = self.fx.commit({"mcp-server/src/a.js": "next"})
@@ -3077,6 +3336,543 @@ class ReleaseTarget(Base):
         self.assert_shipped(*self.ship(gh), b)
 
 
+class CandidateStaging(Base):
+    def setUp(self):
+        super().setUp()
+        self.fx.base = self.fx.commit({"wrangler.jsonc": '{"name":"trusted-app","env":{"staging":{"name":"trusted-staging"}}}'})
+
+    def candidate_sha(self, files=None):
+        git(self.fx.repo, "checkout", "-b", "ui-candidate")
+        for name, value in (files or {"src/worker.js": "candidate"}).items():
+            path = self.fx.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value)
+            git(self.fx.repo, "add", "--", name)
+        git(self.fx.repo, "commit", "-m", "candidate")
+        git(self.fx.repo, "push", "origin", "HEAD:refs/heads/ui-candidate")
+        return git(self.fx.repo, "rev-parse", "HEAD")
+
+    def candidate_pipe(self, *, resume=False):
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        if not resume:
+            self.live = {"source_commit": self.fx.base, "environment": "staging",
+                         "provider_version_id": PRIOR_APP}
+            self.calls = []
+            self.output = []
+        owner = self
+
+        class Provider:
+            def run(self, argv, *, cwd, log, env, timeout=3600):
+                owner.calls.append((log.stem, list(argv), dict(env)))
+                if argv[0] == "git":
+                    proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
+                    return rp.Result(proc.returncode, proc.stdout + proc.stderr)
+                if log.stem.endswith("app-worker-build"):
+                    (cwd / "dist/site").mkdir(parents=True, exist_ok=True)
+                    (cwd / "dist/site/index.html").write_text("candidate assets")
+                    (cwd / "dist/worker.mjs").write_text("export default {};")
+                if "deploy" in argv:
+                    journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+                    version = argv[3].split("@", 1)[0]
+                    if log.stem.endswith("app-candidate-publish"):
+                        owner.assertEqual(journal["published_version_id"], version)
+                    owner.live.update(source_commit=journal["sha"] if version == VERSION else owner.fx.base,
+                                      provider_version_id=version)
+                return rp.Result(0, f"Worker Version ID: {VERSION}")
+
+        pipe = self.fx.pipeline(Provider(), cfg=cfg, github=FakeGitHub(checks=[
+            {"name": "test", "status": "completed", "conclusion": "success",
+             "app": {"slug": "github-actions"}, "head_sha": git(self.fx.repo, "rev-parse", "HEAD")}]))
+        if not resume:
+            pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        pipe.http = lambda url: dict(self.live)
+        pipe.out = self.output.append
+        pipe.deploy_env = lambda: {**pipe.env, "CLOUDFLARE_API_TOKEN": CF_TOKEN}
+        return pipe
+
+    def release_new_main(self, *, replace_staging):
+        git(self.fx.repo, "checkout", "main")
+        sha = self.fx.commit({"src/worker.js": "new main"})
+        runner = FakeRunner()
+        cfg = self.fx.config()
+        cfg["app"]["enabled"] = True
+        release = self.fx.pipeline(runner, cfg=cfg)
+        production = {"source_commit": self.fx.base, "environment": "production"}
+        release.http = lambda _: dict(production)
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv == ["node", "scripts/release-production.mjs"]:
+                production["source_commit"] = sha
+                if replace_staging:
+                    self.live.update(source_commit=sha, provider_version_id=PRIOR)
+            return result
+
+        runner.run = run
+        self.assertEqual(release.tick(["app"]), 0, self.fx.records())
+        self.assertIn("app-release", runner.names())
+        self.assertEqual(self.fx.state()["app"]["last_released_sha"], sha)
+        return sha
+
+    def test_new_main_on_staging_retires_candidate_and_allows_restore_and_restage(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        main = self.release_new_main(replace_staging=True)
+        checkpoint = pipe.store.state_path.read_bytes()
+        before = len(self.calls)
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before, "main already serves staging; no rollback needed")
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+        pipe = self.candidate_pipe(resume=True)
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=main), 0)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"]["source_commit"], main)
+        self.assertEqual(journal["prior"]["provider_version_id"], PRIOR)
+        self.assertEqual(pipe.store.state_path.read_bytes(), checkpoint)
+
+    def test_new_production_main_keeps_recorded_restore_and_restage_available(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        main = self.release_new_main(replace_staging=False)
+        checkpoint = pipe.store.state_path.read_bytes()
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(self.live["source_commit"], self.fx.base)
+        self.assertEqual(self.live["provider_version_id"], PRIOR_APP)
+        pipe = self.candidate_pipe(resume=True)
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=main), 0)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"]["source_commit"], self.fx.base)
+        self.assertEqual(pipe.store.state_path.read_bytes(), checkpoint)
+
+    def test_unowned_same_sha_version_must_not_be_rolled_back(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def interrupted_before_publish(argv, **kwargs):
+            if "upload" in argv:
+                raise OSError("interrupted before provider publication")
+            return original(argv, **kwargs)
+
+        pipe.runner.run = interrupted_before_publish
+        with self.assertRaises(OSError):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.live.update(source_commit=sha, provider_version_id=PRIOR)
+        pipe.runner.run = original
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("restore-candidate", lane="app")
+
+    def test_nonmain_prior_must_not_be_accepted_as_restore_target(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        self.live["source_commit"] = "f" * 40
+        with self.assertRaisesRegex(rp.Blocked, "last released app main SHA"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_unsealed_legacy_toolchain_is_quarantined_and_reinstalled_before_publication(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        home = self.fx.wrangler.parents[2]
+        home.with_name(home.name + ".sha256").unlink()
+        self.fx.wrangler.write_text("legacy untrusted publisher")
+        original = pipe.runner.run
+        quarantined = []
+
+        def run(argv, *, cwd, log, **kwargs):
+            if log.stem.endswith("wrangler-install"):
+                quarantined.extend((pipe.store.root / "_to_delete").glob(home.name + "-*"))
+                self.assertEqual(len(quarantined), 1)
+                self.assertEqual((quarantined[0] / "node_modules/.bin/wrangler").read_text(),
+                                 "legacy untrusted publisher")
+                self.assertFalse(quarantined[0].is_relative_to(home.parent))
+                with rp.single_run_lock(pipe.store.root) as got:
+                    self.assertFalse(got, "quarantine and install must hold the release lock")
+                binary = cwd / "node_modules/.bin/wrangler"
+                binary.parent.mkdir(parents=True)
+                binary.write_text("fresh pinned publisher")
+            return original(argv, cwd=cwd, log=log, **kwargs)
+
+        pipe.runner.run = run
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=sha), 0)
+        self.assertEqual(self.live["source_commit"], sha)
+        self.assertEqual(len(quarantined), 1)
+        self.assertTrue(quarantined[0].is_dir(), "stale-install cleanup must retain quarantine")
+        self.assertEqual(home.with_name(home.name + ".sha256").read_text().strip(), rp.toolchain_digest(home))
+        self.assertTrue(any(name.endswith("wrangler-install") for name, _, _ in self.calls))
+
+    def test_sealed_toolchain_receipt_mismatch_refuses_publication_without_reinstall(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        home = self.fx.wrangler.parents[2]
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text("0" * 64 + "\n")
+        with self.assertRaisesRegex(rp.Blocked, "toolchain_integrity"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(receipt.read_text(), "0" * 64 + "\n")
+        self.assertFalse((pipe.store.root / "_to_delete").exists())
+
+    def test_candidate_build_tree_is_outside_pipeline_store_and_removed(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        roots = []
+
+        def run(argv, *, cwd, **kwargs):
+            if argv == ["npm", "run", "build"]:
+                roots.append(cwd.parent)
+                self.assertTrue((cwd / ".git").is_dir(), "build must not link back to the source repository")
+                self.assertFalse(cwd.resolve().is_relative_to(pipe.store.root.resolve()))
+                self.assertFalse(any((parent / "toolchain").exists() for parent in cwd.parents))
+            return original(argv, cwd=cwd, **kwargs)
+
+        pipe.runner.run = run
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertTrue(roots)
+        self.assertTrue(all(not root.exists() for root in roots))
+
+    def test_candidate_build_tampering_with_pinned_publisher_refuses_publication(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        tampered = []
+
+        def run(argv, *, cwd, log, env, **kwargs):
+            if argv == ["npm", "run", "build"]:
+                result = rp.Runner().run(
+                    ["node", "-e", "require('node:fs').writeFileSync(process.argv[1], 'tampered publisher')",
+                     str(self.fx.wrangler)], cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+                tampered.append(True)
+            return original(argv, cwd=cwd, log=log, env=env, **kwargs)
+
+        pipe.runner.run = run
+        with self.assertRaisesRegex(rp.Blocked, "toolchain"):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertTrue(tampered)
+        self.assertFalse(any("CLOUDFLARE_API_TOKEN" in env for _, _, env in self.calls))
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+
+    def test_candidate_build_cannot_replace_credentialed_provider(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+        marker = self.fx.tmp / "untrusted-provider-ran"
+        build_observations = []
+        credentialed = []
+        real = rp.Runner()
+        node = shutil.which("node", path=rp.BREW_PATH)
+        self.assertIsNotNone(node)
+        payload = """const fs = require('node:fs');
+fs.mkdirSync('node_modules/wrangler/bin', {recursive:true});
+fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
+  'require("node:fs").writeFileSync(' + JSON.stringify(process.argv[1]) +
+  ', process.env.CLOUDFLARE_API_TOKEN || "none"); console.log("Worker Version ID: VERSION")');
+""".replace("VERSION", VERSION)
+
+        def run(argv, *, cwd, log, env, timeout=3600):
+            if argv == ["npm", "run", "build"]:
+                build_observations.append((dict(env), list(cwd.glob("wrangler.*"))))
+                result = real.run([node, "-e", payload, str(marker)], cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+            if "CLOUDFLARE_API_TOKEN" in env:
+                credentialed.append((list(argv), cwd))
+                self.assertFalse(pipe.worktrees)
+                result = real.run(argv, cwd=cwd, log=log, env=env)
+                self.assertEqual(result.rc, 0, result.out)
+                config = Path(argv[argv.index("--config") + 1]).read_text()
+                self.assertEqual(json.loads(config)["env"]["staging"]["name"], "trusted-staging")
+            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+
+        pipe.env.update({"NODE_OPTIONS": "candidate-option", "NPM_CONFIG_USERCONFIG": "deploy-config",
+                         "ARBITRARY_DEPLOY_SECRET": "synthetic"})
+        pipe.runner.run = run
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertFalse(marker.exists(), "candidate executable received the deploy environment")
+        self.assertTrue(credentialed)
+        for argv, cwd in credentialed:
+            executable = Path(argv[0]).resolve()
+            self.assertTrue(executable.is_relative_to((pipe.store.root / "toolchain").resolve()), argv)
+            self.assertIn("--config", argv)
+            self.assertNotIn("node_modules", str(cwd))
+        for env, configs in build_observations:
+            self.assertEqual(configs, [])
+            self.assertNotIn("NODE_OPTIONS", env)
+            self.assertEqual(env["NPM_CONFIG_USERCONFIG"], "/dev/null")
+            self.assertNotIn("ARBITRARY_DEPLOY_SECRET", env)
+            self.assertNotEqual(env["HOME"], pipe.env.get("HOME"))
+
+    def test_candidate_requires_green_hosted_ci_for_exact_sha_before_any_step(self):
+        sha = self.candidate_sha()
+        for override in ([], [{"status": "in_progress"}], [{"conclusion": "failure"}],
+                         [{"app": {"slug": "third-party"}}], [{"head_sha": self.fx.base}]):
+            with self.subTest(checks=override):
+                pipe = self.candidate_pipe()
+                checks = [{"name": "test", "status": "completed", "conclusion": "success",
+                           "app": {"slug": "github-actions"}, "head_sha": sha, **row} for row in override]
+                pipe._github = lambda _: FakeGitHub(checks=checks)
+                with self.assertRaises(rp.Blocked):
+                    pipe.candidate("stage-candidate", lane="app", sha=sha)
+                self.assertEqual(self.calls, [])
+                self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+
+    def test_candidate_refuses_unverifiable_or_production_prior_identity(self):
+        sha = self.candidate_sha()
+        for change in ({"environment": "production"}, {"provider_version_id": ""},
+                       {"source_commit": "short"}, {"provider_version_id": "garbage"}):
+            with self.subTest(change=change):
+                pipe = self.candidate_pipe()
+                self.live.update(change)
+                with self.assertRaises(rp.Blocked):
+                    pipe.candidate("stage-candidate", lane="app", sha=sha)
+                self.assertEqual(self.calls, [])
+
+    def test_candidate_cannot_change_the_publisher_or_staging_target(self):
+        sha = self.candidate_sha({"wrangler.jsonc": '{"env":{"staging":{"name":"production"}}}'})
+        pipe = self.candidate_pipe()
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_candidate_refuses_alternate_wrangler_configuration(self):
+        sha = self.candidate_sha({"wrangler.json": '{"env":{"staging":{"name":"production"}}}'})
+        pipe = self.candidate_pipe()
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_candidate_refuses_wrangler_configuration_redirect(self):
+        sha = self.candidate_sha({".wrangler/deploy/config.json": '{"configPath":"../../production.json"}'})
+        pipe = self.candidate_pipe()
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_candidate_retries_reconcile_without_republishing_or_losing_prior(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        before = len(self.calls)
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(len(self.calls), before)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"]["provider_version_id"], PRIOR_APP)
+        pipe.candidate("restore-candidate", lane="app")
+        before = len(self.calls)
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before)
+
+    def test_candidate_restore_refuses_a_new_staging_deployment(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.live["provider_version_id"] = PRIOR
+        before = len(self.calls)
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before)
+
+    def test_candidate_cli_routes_only_exact_app_operations(self):
+        cfg = self.fx.config()
+        with mock.patch.object(rp, "load_config", return_value=cfg), mock.patch.object(rp, "Pipeline") as factory:
+            factory.return_value.candidate.return_value = 0
+            self.assertEqual(rp.main(["stage-candidate", "--lane", "app", "--sha", self.fx.base]), 0)
+            factory.return_value.candidate.assert_called_once_with("stage-candidate", lane="app", sha=self.fx.base)
+            factory.reset_mock()
+            self.assertEqual(rp.main(["restore-candidate", "--lane", "app"]), 0)
+            factory.return_value.candidate.assert_called_once_with("restore-candidate", lane="app", sha=None)
+            for args in (["stage-candidate", "--lane", "worker", "--sha", self.fx.base],
+                         ["stage-candidate", "--lane", "app", "--sha", "short"],
+                         ["stage-candidate", "--lane", "app", "--sha", self.fx.base, "--env", "production"],
+                         ["restore-candidate"], ["restore-candidate", "--lane", "app", "--sha", self.fx.base],
+                         ["restore-candidate", "--lane", "app", "--dry-run"]):
+                factory.reset_mock()
+                with self.subTest(args=args), self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+                    rp.main(args)
+                factory.assert_not_called()
+
+    def test_candidate_runner_redacts_provider_output_before_logging(self):
+        log = self.fx.tmp / "publication.log"
+        result = subprocess.CompletedProcess([], 1, stdout=f"provider diagnostic {CF_TOKEN}")
+        with mock.patch.object(rp.subprocess, "run", return_value=result):
+            observed = rp.Runner().run(["node", "scripts/release-staging.mjs"], cwd=self.fx.repo,
+                                       log=log, env={"CLOUDFLARE_API_TOKEN": CF_TOKEN})
+        self.assertNotIn(CF_TOKEN, observed.out)
+        self.assertNotIn(CF_TOKEN, log.read_text())
+
+    def test_candidate_and_release_share_lock_and_kill_switch(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        with rp.single_run_lock(pipe.store.root) as held:
+            self.assertTrue(held)
+            with self.assertRaises(rp.Blocked):
+                pipe.candidate("stage-candidate", lane="app", sha=sha)
+        pipe.cfg["app"]["enabled"] = False
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(self.calls, [])
+
+    def test_candidate_reconciles_interrupted_publish_and_restore_from_live_identity(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def interrupted(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if "deploy" in argv:
+                raise OSError("interrupted after provider accepted publication")
+            return result
+
+        pipe.runner.run = interrupted
+        with self.assertRaises(OSError):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        before = len(self.calls)
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(len(self.calls), before)
+        with self.assertRaises(OSError):
+            pipe.candidate("restore-candidate", lane="app")
+        before = len(self.calls)
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before)
+        self.assertEqual(self.live["provider_version_id"], PRIOR_APP)
+
+    def test_candidate_failed_publish_is_not_reexecuted_and_can_be_abandoned_by_restore(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def failed(argv, **kwargs):
+            if "upload" in argv:
+                self.calls.append(("failed-publication", argv, {}))
+                return rp.Result(1, "provider unavailable")
+            return original(argv, **kwargs)
+
+        pipe.runner.run = failed
+        with self.assertRaises(rp.StepFailed):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        before = len(self.calls)
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        self.assertEqual(len(self.calls), before)
+        pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(len(self.calls), before)
+
+    def test_candidate_failed_readbacks_keep_recovery_journal_and_release_state(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}})
+        before = pipe.store.state_path.read_bytes()
+        original = pipe.runner.run
+        wrong_identity = False
+
+        def stale(url):
+            value = dict(self.live)
+            if wrong_identity:
+                value["source_commit"] = "f" * 40
+            return value
+
+        def run(argv, **kwargs):
+            nonlocal wrong_identity
+            result = original(argv, **kwargs)
+            if "deploy" in argv:
+                wrong_identity = True
+            return result
+
+        pipe.http, pipe.runner.run = stale, run
+        with self.assertRaises(rp.StepFailed):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        journal_path = pipe.store.root / "app-candidate/state.json"
+        self.assertEqual(json.loads(journal_path.read_text())["status"], "publishing")
+        wrong_identity = False
+        pipe.candidate("stage-candidate", lane="app", sha=sha)
+        with self.assertRaises(rp.StepFailed):
+            pipe.candidate("restore-candidate", lane="app")
+        self.assertEqual(json.loads(journal_path.read_text())["status"], "restoring")
+        self.assertEqual(pipe.store.state_path.read_bytes(), before)
+        self.assertEqual(len(list(pipe.run_dir.glob("*-verify.jsonl"))), 2)
+
+    def test_candidate_artifact_failure_never_loads_deploy_credential(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def run(argv, **kwargs):
+            if argv == ["node", "scripts/build-artifact.mjs", "prepare-deployment"]:
+                return rp.Result(1, "artifact source mismatch")
+            return original(argv, **kwargs)
+
+        pipe.runner.run = run
+        pipe.deploy_env = mock.Mock(side_effect=AssertionError("credential loaded before verified artifact"))
+        with self.assertRaises(rp.StepFailed):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        pipe.deploy_env.assert_not_called()
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+        self.assertFalse(pipe.worktrees)
+
+    def test_candidate_corrupt_journal_refuses_new_publication(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        path = pipe.store.root / "app-candidate/state.json"
+        path.parent.mkdir(parents=True)
+        for value in ("{}", "null", "[]", "{broken", '{"status":"unknown"}'):
+            with self.subTest(value=value):
+                path.write_text(value)
+                with self.assertRaises(rp.Blocked):
+                    pipe.candidate("stage-candidate", lane="app", sha=sha)
+                self.assertEqual(self.calls, [])
+                self.assertEqual(path.read_text(), value)
+
+    def test_candidate_rechecks_staging_before_publication_after_a_slow_build(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        original = pipe.runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv == ["npm", "run", "build"]:
+                self.live["provider_version_id"] = PRIOR
+            return result
+
+        pipe.runner.run = run
+        pipe.deploy_env = mock.Mock(side_effect=AssertionError("credential loaded after staging drift"))
+        with self.assertRaises(rp.Blocked):
+            pipe.candidate("stage-candidate", lane="app", sha=sha)
+        pipe.deploy_env.assert_not_called()
+        self.assertFalse((pipe.store.root / "app-candidate/state.json").exists())
+
+    def test_candidate_stage_and_restore_leave_release_state_untouched(self):
+        sha = self.candidate_sha()
+        pipe = self.candidate_pipe()
+        pipe.store.save({"app": {"last_released_sha": self.fx.base}, "worker": {"failed_sha": sha}})
+        before = pipe.store.state_path.read_bytes()
+        self.assertEqual(pipe.candidate("stage-candidate", lane="app", sha=sha), 0)
+        journal = json.loads((pipe.store.root / "app-candidate/state.json").read_text())
+        self.assertEqual(journal["prior"], {"source_commit": self.fx.base, "environment": "staging",
+                                           "provider_version_id": PRIOR_APP})
+        self.assertEqual(journal["status"], "staged")
+        self.assertEqual(self.live["source_commit"], sha)
+        self.assertEqual(pipe.candidate("restore-candidate", lane="app"), 0)
+        self.assertEqual(self.live["provider_version_id"], PRIOR_APP)
+        self.assertEqual(pipe.store.state_path.read_bytes(), before)
+        self.assertFalse(pipe.store.records_path.exists())
+        self.assertFalse(pipe.worktrees)
+        publish = next(a for _, a, _ in self.calls if "upload" in a)
+        self.assertEqual(publish[0], str(self.fx.wrangler))
+        self.assertIn("--no-bundle", publish)
+        self.assertIn("GIT_SHA:" + sha, publish)
+        for _, argv, env in self.calls:
+            if "CLOUDFLARE_API_TOKEN" in env:
+                self.assertEqual(argv[0], str(self.fx.wrangler))
+            self.assertNotIn(CF_TOKEN, " ".join(argv))
+        self.assertNotIn(CF_TOKEN, "\n".join(self.output))
+
+
 class AppLane(Base):
     """The app lane requires green checks and verifies the live release."""
 
@@ -3084,6 +3880,26 @@ class AppLane(Base):
         cfg = self.fx.config()
         cfg["app"]["enabled"] = True
         return cfg
+
+    def test_app_build_toolchain_tampering_refuses_production_publication(self):
+        self.fx.commit({"src/worker.js": "new main"})
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner, cfg=self.cfg())
+        pipe.http = lambda _: {"source_commit": self.fx.base, "environment": "production"}
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv == ["npm", "run", "build"]:
+                self.fx.wrangler.write_text("changed after auth")
+            return result
+
+        runner.run = run
+        self.assertEqual(pipe.tick(["app"]), 1)
+        self.assertIn("wrangler-auth", runner.names())
+        self.assertNotIn("app-release", runner.names())
+        self.assertEqual(self.fx.records()[-1]["step"], "blocked:toolchain_integrity")
+        self.assertNotIn("last_released_sha", self.fx.state().get("app", {}))
 
     def test_empty_app_checks_hold(self):
         self.fx.commit({"src/worker.js": "1"})
@@ -4759,6 +5575,87 @@ class TokenCheckWrangler(Base):
     def toolchain(self) -> Path:
         return self.fx.repo / "out/release-pipeline/toolchain"
 
+    def test_reused_toolchain_requires_its_recorded_content_digest(self):
+        for damage in ("binary", "dependency", "receipt", "escaping-link"):
+            with self.subTest(damage=damage):
+                self.tearDown()
+                self.setUp()
+                self.fx.commit({"mcp-server/src/a.js": "new main"})
+                home = self.fx.wrangler.parents[2]
+                if damage == "binary":
+                    self.fx.wrangler.write_text("changed publisher")
+                elif damage == "dependency":
+                    (home / "node_modules/injected.js").write_text("changed dependency")
+                elif damage == "receipt":
+                    home.with_name(home.name + ".sha256").write_text("0" * 64 + "\n")
+                else:
+                    self.fx.wrangler.unlink()
+                    self.fx.wrangler.symlink_to("/bin/sh")
+                runner = FakeRunner()
+                pipe = self.fx.pipeline(runner)
+                self.assertEqual(pipe.tick(["worker"]), 0)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.records()[-1]["reason"], "toolchain_integrity")
+
+    def test_saved_toolchain_integrity_refusal_rechecks_after_fresh_sealed_install(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "new main"})
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text("mismatched publisher")
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live, github=FakeGitHub())
+        clock = [1000.0]
+        pipe.now = lambda: clock[0]
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["rejection"]["reason"], "toolchain_integrity")
+        self.assertEqual(runner.calls, [])
+        quarantine = pipe.store.root / "_to_delete" / "fixture-replaced-toolchain"
+        quarantine.mkdir(parents=True)
+        home.rename(quarantine / home.name)
+        home.with_name(home.name + ".sha256").rename(quarantine / "old.sha256")
+        install_toolchain_wrangler(self.fx.repo)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [], "the retry interval must still apply")
+        clock[0] += pipe.REJECTION_RECHECK_SECONDS
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), sha)
+        self.assertIn("promote", runner.names())
+        self.assertNotIn("rejection", self.fx.state()["worker"])
+
+    def test_clear_failed_clears_rejection_only_state_for_its_exact_recorded_sha(self):
+        sha = self.fx.commit({"mcp-server/src/a.js": "new main"})
+        self.fx.wrangler.write_text("mismatched publisher")
+        pipe = self.fx.pipeline(FakeRunner(), github=FakeGitHub())
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        before = self.fx.state()
+        self.assertNotIn("failed_sha", before["worker"])
+        with self.assertRaises(SystemExit):
+            rp.clear_failed(pipe.store, "worker", "0" * 40, "repair verified", repo_dir=self.fx.repo)
+        self.assertEqual(self.fx.state(), before)
+        message = rp.clear_failed(pipe.store, "worker", sha, "repair verified", repo_dir=self.fx.repo)
+        self.assertNotIn("rejection", self.fx.state()["worker"])
+        self.assertIn("next tick retries", message)
+        self.assertEqual(self.fx.records()[-1]["status"], "rejection_cleared")
+        self.assertEqual(self.fx.records()[-1]["sha"], sha)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["rejection"]["reason"], "toolchain_integrity",
+                         "clearance must not bypass toolchain verification")
+
+    def test_reused_toolchain_checks_internal_symlink_target_content(self):
+        self.fx.commit({"mcp-server/src/a.js": "new main"})
+        home = self.fx.wrangler.parents[2]
+        target = home / "node_modules/publisher.js"
+        target.write_text(self.fx.wrangler.read_text())
+        self.fx.wrangler.unlink()
+        self.fx.wrangler.symlink_to("../publisher.js")
+        home.with_name(home.name + ".sha256").write_text(rp.toolchain_digest(home))
+        target.write_text("tampered symlink target")
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        self.assertEqual(pipe.tick(["worker"]), 0)
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self.fx.records()[-1]["reason"], "toolchain_integrity")
+
     def test_whoami_uses_the_installed_toolchain_not_the_checkout(self):
         self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
@@ -4787,7 +5684,7 @@ class TokenCheckWrangler(Base):
         self.assertNotIn("CLOUDFLARE_API_TOKEN", runner.envs["wrangler-install"])
         self.assertEqual(dict(runner.calls)["wrangler-auth"][0], str(self.fx.wrangler))
         self.assertTrue(self.fx.wrangler.exists())
-        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), [home.name])
+        self.assertEqual(sorted(p.name for p in self.toolchain().iterdir()), sorted([home.name, home.name + ".sha256"]))
         for name in rp.TOOLCHAIN_FILES:
             self.assertEqual((home / name).read_bytes(), (self.fx.repo / "mcp-server" / name).read_bytes())
 
