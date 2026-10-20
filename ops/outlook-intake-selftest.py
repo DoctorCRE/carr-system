@@ -409,11 +409,32 @@ class IntakeTest(unittest.TestCase):
     def test_a_completed_ball_counts_as_no_ball(self):
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
         self.fake.timeline['C-901'] = [
-            {'verb': 'complete-action', 'summary': 'done', 'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
+            {'verb': 'complete-action', 'actor': 'joe', 'summary': 'done', 'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
             {'verb': 'set-next-action', 'summary': 'ball → joe: call back',
              'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
         self.assertEqual(len(self.fake.writes('set-next-action')), 1)
+
+    def test_completions_close_only_the_corresponding_owners_ball(self):
+        self.fake.model_reply = {'next_step': 'Older email task', 'due_on': None}
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
+        for completion in ('complete-action', 'log-outreach'):
+            for actor, owner, should_replace in (('dell', 'joe-local', False),
+                                                  ('joe', 'joe-local', False),
+                                                  ('joe-local', 'joe', False),
+                                                  ('joe-local', 'joe-local', True),
+                                                  ('joe', 'joe', True),
+                                                  (None, 'joe-local', False)):
+                with self.subTest(completion=completion, actor=actor, owner=owner):
+                    shutil.rmtree(self.out(), ignore_errors=True)
+                    self.fake.calls.clear()
+                    self.fake.timeline['C-901'] = [
+                        {'verb': completion, 'summary': 'done', 'actor': actor,
+                         'occurred_at': (NOW - timedelta(minutes=5)).isoformat()},
+                        {'verb': 'set-next-action', 'summary': f'ball → {owner}: Newer local task',
+                         'actor': 'joe-local', 'occurred_at': (NOW - timedelta(minutes=10)).isoformat()}]
+                    self.assertEqual(self.run_intake(mails).state, 'succeeded')
+                    self.assertEqual(len(self.fake.writes('set-next-action')), int(should_replace))
 
     def test_the_later_of_two_emails_in_one_run_owns_the_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': None}
