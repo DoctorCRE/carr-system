@@ -91,8 +91,8 @@ def main() -> int:
     check("installer exposes a render-only seam", "--render-only" in installer, failures)
     check("normal room-bridge activation bootstraps the dedicated Engineering desk",
           '"$REPO/bin/install-engineering-codex-desk.sh"' in installer, failures)
-    check("normal room-bridge activation bootstraps the Claude Desktop desk",
-          '"$REPO/bin/install-claude-desktop-desk.sh"' in installer, failures)
+    check("normal room-bridge activation bootstraps the Luna Codex desk",
+          '"$REPO/bin/install-luna-desk.sh"' in installer, failures)
     check("installer exposes a named plist validator", "validate_plist()" in installer, failures)
     portable_mktemp = 'mktemp "${TMPDIR:-/tmp}/carr-room-bridge-plist.XXXXXX"'
     check("installer pins a GNU/macOS portable mktemp template",
@@ -144,9 +144,9 @@ def main() -> int:
     engineering_bootstrap = installer.index('"$REPO/bin/install-engineering-codex-desk.sh"')
     check("Engineering desk bootstrap precedes destination install",
           engineering_bootstrap >= 0 and engineering_bootstrap < install, failures)
-    claude_desktop_bootstrap = installer.index('"$REPO/bin/install-claude-desktop-desk.sh"')
-    check("Claude Desktop desk bootstrap precedes destination install",
-          claude_desktop_bootstrap >= 0 and claude_desktop_bootstrap < install, failures)
+    luna_bootstrap = installer.index('"$REPO/bin/install-luna-desk.sh"')
+    check("Luna Codex desk bootstrap precedes destination install",
+          luna_bootstrap >= 0 and luna_bootstrap < install, failures)
 
     # The installer lane is only truthful if this non-CI activation path is
     # visible to the repository reachability audit, not just to this test.
@@ -162,8 +162,8 @@ def main() -> int:
     check("Engineering desk installer has a live room-bridge activation door",
           not any(row.get("lane") == "installer" and row.get("entry") == "bin/install-engineering-codex-desk.sh"
                   for row in reachability_rows), failures)
-    check("Claude Desktop desk installer has a live room-bridge activation door",
-          not any(row.get("lane") == "installer" and row.get("entry") == "bin/install-claude-desktop-desk.sh"
+    check("Luna Codex desk installer has a live room-bridge activation door",
+          not any(row.get("lane") == "installer" and row.get("entry") == "bin/install-luna-desk.sh"
                   for row in reachability_rows), failures)
 
     # Exercise the actual zsh/sed renderer, not a Python reimplementation.

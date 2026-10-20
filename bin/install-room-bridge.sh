@@ -102,8 +102,8 @@ if ! "$REPO/bin/install-engineering-codex-desk.sh"; then
   print -u2 -- "install-room-bridge: Engineering Codex desk bootstrap refused; LaunchAgent unchanged"
   exit 1
 fi
-if ! "$REPO/bin/install-claude-desktop-desk.sh"; then
-  print -u2 -- "install-room-bridge: Claude Desktop desk bootstrap refused; LaunchAgent unchanged"
+if ! "$REPO/bin/install-luna-desk.sh"; then
+  print -u2 -- "install-room-bridge: Luna Codex desk bootstrap refused; LaunchAgent unchanged"
   exit 1
 fi
 

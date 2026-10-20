@@ -1,0 +1,128 @@
+{
+  "run_id": 38993143022,
+  "run_attempt": 2,
+  "url": "https://github.com/jbookout/carr-system/actions/runs/38993143022",
+  "attempt_1": {
+    "jobs": [
+      {
+        "completed_at": "2026-10-17T02:11:27Z",
+        "conclusion": "failure",
+        "id": 117279693805,
+        "name": "ops/ci.sh --strict --only gates",
+        "run_attempt": 1,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:06:18Z",
+        "conclusion": "success",
+        "id": 117279694030,
+        "name": "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
+        "run_attempt": 1,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:15:14Z",
+        "conclusion": "success",
+        "id": 117279694165,
+        "name": "ops/ci.sh --strict --only migration",
+        "run_attempt": 1,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:15:28Z",
+        "conclusion": "failure",
+        "id": 117282943102,
+        "name": "ops/ci.sh --strict",
+        "run_attempt": 1,
+        "started_at": "2026-10-17T02:15:16Z",
+        "status": "completed"
+      }
+    ],
+    "total_count": 4
+  },
+  "attempt_2": {
+    "jobs": [
+      {
+        "completed_at": "2026-10-17T02:25:44Z",
+        "conclusion": "success",
+        "id": 117283454232,
+        "name": "ops/ci.sh --strict --only gates",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T02:17:41Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:15:14Z",
+        "conclusion": "success",
+        "id": 117283455597,
+        "name": "ops/ci.sh --strict --only migration",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:06:18Z",
+        "conclusion": "success",
+        "id": 117283480269,
+        "name": "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:25:56Z",
+        "conclusion": "success",
+        "id": 117285122483,
+        "name": "ops/ci.sh --strict",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T02:25:46Z",
+        "status": "completed"
+      }
+    ],
+    "total_count": 4
+  },
+  "latest": {
+    "jobs": [
+      {
+        "completed_at": "2026-10-17T02:25:44Z",
+        "conclusion": "success",
+        "id": 117283454232,
+        "name": "ops/ci.sh --strict --only gates",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T02:17:41Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:15:14Z",
+        "conclusion": "success",
+        "id": 117283455597,
+        "name": "ops/ci.sh --strict --only migration",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:06:18Z",
+        "conclusion": "success",
+        "id": 117283480269,
+        "name": "ops/ci.sh --strict --only pushfloor unit types contract secret dependency binding artifact freshness",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T01:59:45Z",
+        "status": "completed"
+      },
+      {
+        "completed_at": "2026-10-17T02:25:56Z",
+        "conclusion": "success",
+        "id": 117285122483,
+        "name": "ops/ci.sh --strict",
+        "run_attempt": 2,
+        "started_at": "2026-10-17T02:25:46Z",
+        "status": "completed"
+      }
+    ],
+    "total_count": 4
+  }
+}

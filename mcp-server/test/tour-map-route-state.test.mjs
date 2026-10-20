@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -712,8 +712,9 @@ test("the measurement script reports parity and withheld navigation for a route 
   assert.equal(report.stops[1].navigation, "pin_not_entrance_approved");
 });
 
-test("the measurement script exits nonzero on malformed constraint data", async () => {
+test("the measurement script exits nonzero on malformed constraint data", async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "tour-map-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const data = JSON.parse((await import("node:fs")).readFileSync(fixture, "utf8"));
   data.stops[0].dwell_minutes = -10;
   data.stops[0].buffer_minutes = "10";

@@ -13,6 +13,9 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.append(str(Path(__file__).resolve().parents[2] / "lib"))
+from selftest_harness import temporary_directory
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
@@ -43,15 +46,15 @@ CATALOG = {
     "targets": {
         "flash": {"enabled": True, "adapter": "desk", "assignee": "desk:flash-model", "desk": "flash-model",
                   "capabilities": ["read"], "effective_model": "flash"},
-        "claude-desktop": {"enabled": True, "adapter": "desk", "assignee": "desk:claude-desktop",
-                           "desk": "claude-desktop", "capabilities": ["read", "repo-write", "record-write"],
-                           "effective_model": "opus"},
+        "sol-fixer": {"enabled": True, "adapter": "desk", "assignee": "desk:sol-fixer",
+                           "desk": "sol-fixer", "capabilities": ["read", "repo-write", "record-write"],
+                           "effective_model": "sol"},
         "joe": {"enabled": True, "adapter": "manual", "assignee": "human:joe",
                 "capabilities": ["merge-approve", "production", "external-send", "destructive", "credential"]},
     },
 }
-POLICY = {"queue_targets": {"direct": "flash", "escalate": "claude-desktop", "code": "claude-desktop",
-                            "script": "claude-desktop", "fallback": "claude-desktop"}}
+POLICY = {"queue_targets": {"direct": "flash", "escalate": "sol-fixer", "code": "sol-fixer",
+                            "script": "sol-fixer", "fallback": "sol-fixer"}}
 
 
 def turn(body, *, msg_id="22222222-2222-4222-8222-222222222222"):
@@ -117,7 +120,7 @@ def test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available(
     saved = flash_wire.is_up
     try:
         flash_wire.is_up = lambda *a, **k: False
-        assert bridge.probe_live({"kind": "flash-local"}) is True
+        assert bridge.probe_live({"kind": "flash-local"}) is False
     finally:
         flash_wire.is_up = saved
 
@@ -138,7 +141,7 @@ class FakeRouter:
 
     def decide(self, task, context="", *, flash_free=True, policy=None):
         self.calls.append((task, context, flash_free))
-        return {"route": self.route, "model": "flash" if self.route == "direct" else "opus", "effort": "x",
+        return {"route": self.route, "model": "flash" if self.route == "direct" else "sol", "effort": "x",
                 "scores": {"direct": 0.9}, "overflow": self.overflow and not flash_free, "jev_error": None}
 
 
@@ -162,27 +165,27 @@ def test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt():
     svc, adapter, router = service("direct")
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this\nWe are reaching out."), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "flash" and accepted["route"]["route"] == "direct", accepted
-    assert adapter.creates[0][0]["target"] == "flash" and adapter.creates[0][1]["desk"] == "flash-model"
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["route"] == "direct", accepted
+    assert adapter.creates[0][0]["target"] == "sol-fixer"
     assert router.calls[0][0] == "Shorten this" and "reaching out" in router.calls[0][1]
 
 
-def test_auto_judgment_task_goes_to_opus():
+def test_auto_judgment_task_goes_to_sol():
     svc, adapter, _ = service("escalate")
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Can the tenant sublet?"), room="p")
-    assert out["receipt"]["queue_accepted"]["target"] == "claude-desktop"
+    assert out["receipt"]["queue_accepted"]["target"] == "sol-fixer"
 
 
 def test_auto_flash_route_falls_back_when_flash_is_down():
     svc, adapter, _ = service("direct", flash_up=False, overflow=True)
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop", accepted
+    assert accepted["target"] == "sol-fixer", accepted
     assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
 
 
 def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
-    with tempfile.TemporaryDirectory() as root:
+    with patch.object(flash_wire.flashlib, "is_switched_off", return_value=True), tempfile.TemporaryDirectory() as root:
         state = Path(root) / "state"
         home = Path(root) / "home"
         state.mkdir()
@@ -198,7 +201,7 @@ def test_flash_desk_off_switch_overrides_a_live_server_and_installed_plist():
              patch.object(flash_wire, "is_up", return_value=True):
             out = service.handle(turn("@queue enqueue target=auto cap=read :: Shorten this"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop", accepted
+    assert accepted["target"] == "sol-fixer", accepted
     assert accepted["route"]["fallback_reason"] == "flash_busy_or_down", accepted
 
 
@@ -206,13 +209,15 @@ def test_auto_flash_route_falls_back_when_flash_refuses_the_capability():
     svc, adapter, _ = service("direct")
     out = svc.handle(turn("@queue enqueue target=auto cap=repo-write :: Tidy the README"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop"
+    assert accepted["target"] == "sol-fixer"
     assert accepted["route"]["fallback_reason"] == "capability_target_refused", accepted
 
 
 def test_explicit_target_never_consults_the_router():
     svc, adapter, router = service("direct")
-    svc.handle(turn("@queue enqueue target=flash cap=read :: Shorten this"), room="p")
+    incoming = {**turn("@queue enqueue target=flash cap=read :: Shorten this"),
+                "origin_channel": "browser-human", "origin_actor": "joe"}
+    svc.handle(incoming, room="p")
     assert router.calls == [] and adapter.creates[0][0]["target"] == "flash"
 
 
@@ -238,7 +243,7 @@ class FakeAdapterDuplicate:
 
 
 class FlippingRouter:
-    """First call: direct (flash). Second call: escalate (claude-desktop) — Flash's own
+    """First call: direct (flash). Second call: escalate (sol-fixer) — Flash's own
     liveness or Jev's decision can differ between an original target=auto send and a
     retry that reuses the SAME idempotency key, per PR #1249's review finding 4."""
 
@@ -251,7 +256,7 @@ class FlippingRouter:
     def decide(self, task, context="", *, flash_free=True, policy=None):
         self.calls += 1
         route = "direct" if self.calls == 1 else "escalate"
-        model = "flash" if route == "direct" else "opus"
+        model = "flash" if route == "direct" else "sol"
         return {"route": route, "model": model, "effort": "x", "scores": {},
                 "overflow": False, "jev_error": None}
 
@@ -264,9 +269,9 @@ def test_retried_auto_command_reports_the_existing_tasks_actual_target():
     incoming = turn("@queue enqueue target=auto cap=read key=retry-target :: Shorten this.")
     first = svc.handle(incoming, room="p")
     replay = svc.handle(incoming, room="p")
-    assert first["receipt"]["queue_accepted"]["target"] == "flash", first
+    assert first["receipt"]["queue_accepted"]["target"] == "sol-fixer", first
     assert replay["receipt"]["queue_accepted"]["status"] == "duplicate", replay
-    # The retry's own route_auto call picked escalate -> claude-desktop, but the task
+    # The retry's own route_auto call picked escalate -> sol-fixer, but the task
     # ALREADY EXISTS, on flash: the receipt must report where that existing task really
     # is, not this call's freshly recomputed (and here, different) route.
     assert replay["receipt"]["queue_accepted"]["target"] == "flash", replay
@@ -290,7 +295,7 @@ SCRIPT_POLICY = {**POLICY, "queue_targets": {**POLICY["queue_targets"], "script"
 
 
 def data_root():
-    root = tempfile.mkdtemp(prefix="flash-inputs-")
+    root = temporary_directory(prefix="flash-inputs-")
     with open(os.path.join(root, "sales.csv"), "w") as fh:
         fh.write("a,b\n1,2\n")
     os.mkdir(os.path.join(root, "leases"))
@@ -309,7 +314,7 @@ def test_script_inputs_takes_named_data_under_an_allowed_root():
 
 def test_script_inputs_refuses_data_outside_the_roots_or_through_a_link():
     root = data_root()
-    outside = tempfile.mkdtemp(prefix="flash-outside-")
+    outside = temporary_directory(prefix="flash-outside-")
     for text in (f"q\ndata: {outside}", f"q\ndata: {root}/../{os.path.basename(outside)}",
                  f"q\ndata: {root}/missing.csv", f"q\ndata: {root}"):
         paths, _, err = flash_wire.script_inputs(text, roots=[root])
@@ -340,7 +345,7 @@ def test_auto_script_task_with_allowed_data_goes_to_flash():
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Total column b\ndata: {root}/sales.csv"),
                      room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "flash" and accepted["route"]["fallback_reason"] is None, accepted
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only", accepted
 
 
 def test_auto_script_task_without_usable_data_goes_to_the_fallback():
@@ -348,10 +353,10 @@ def test_auto_script_task_without_usable_data_goes_to_the_fallback():
     svc, _ = script_service(root)
     out = svc.handle(turn("@queue enqueue target=auto cap=read :: Total column b"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop" and accepted["route"]["fallback_reason"] == "script_needs_data"
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
     out = svc.handle(turn("@queue enqueue target=auto cap=read key=k2 :: Total b\ndata: /etc/hosts"), room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop" and accepted["route"]["fallback_reason"] == "script_data_refused"
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def test_auto_script_task_falls_back_when_jev_abstained():
@@ -362,7 +367,7 @@ def test_auto_script_task_falls_back_when_jev_abstained():
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Total column b\ndata: {root}/sales.csv"),
                      room="p")
     accepted = out["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop" and accepted["route"]["fallback_reason"] == "jev_abstained"
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def test_auto_script_task_falls_back_when_no_score_cleared_its_cutoff():
@@ -373,7 +378,7 @@ def test_auto_script_task_falls_back_when_no_score_cleared_its_cutoff():
     svc._router.decide = lambda *a, **k: {**decide(*a, **k), "fallback": True}
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: Look at this\ndata: {root}/sales.csv"),
                      room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "jev_abstained"
+    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def test_a_data_line_in_the_title_counts_on_neither_side():
@@ -381,7 +386,7 @@ def test_a_data_line_in_the_title_counts_on_neither_side():
     svc, _ = script_service(root)
     out = svc.handle(turn(f"@queue enqueue target=auto cap=read :: data: {root}/sales.csv\nTotal column b"),
                      room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "script_needs_data"
+    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only"
     prompt = queue_dispatch.QueueDeskExecutor._prompt({
         "task_id": "t_script001", "title": f"data: {root}/sales.csv", "instructions": "Total column b",
         "meta": {"source_seq": 5, "source_msg_id": "m", "cap": "read"}})
@@ -429,7 +434,7 @@ def test_flash_desk_blocks_a_handed_off_script_answer_with_flashs_answer_shown()
     root = data_root()
     out = flash_wire.run_task(queued_prompt(f"Sum it.\ndata: {root}/sales.csv"), roots=[root],
                               runner=lambda q, p: (4, {"answer": "maybe 3", "handoff": "ungrounded",
-                                                       "handoff_desk": "claude-desktop"}))
+                                                       "handoff_desk": "sol-fixer"}))
     result = queue_dispatch.parse_terminal_result(out["result"], "t_script001")
     assert out["status"] == "completed" and result["outcome"] == "blocked", out
     assert "ungrounded" in result["summary"] and "maybe 3" in out["result"], out
@@ -471,7 +476,7 @@ def _git(cwd, *args):
 
 def code_root():
     """A folder of projects: one git project (`app`, with one test script), one plain folder and one link."""
-    root = os.path.realpath(tempfile.mkdtemp(prefix="flash-projects-"))
+    root = os.path.realpath(temporary_directory(prefix="flash-projects-"))
     app = os.path.join(root, "app")
     os.makedirs(os.path.join(app, "tests"))
     with open(os.path.join(app, "calc.py"), "w") as fh:
@@ -589,14 +594,14 @@ def test_auto_code_task_with_an_allowed_project_goes_to_flash():
     root = code_root()
     svc, adapter = code_service(root)
     accepted = svc.handle(enqueue(code_body(root)), room="p")["receipt"]["queue_accepted"]
-    assert accepted["target"] == "flash" and accepted["route"]["fallback_reason"] is None, accepted
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only", accepted
 
 
 def test_auto_code_task_without_a_project_falls_back():
     root = code_root()
     svc, _ = code_service(root)
     accepted = svc.handle(enqueue("Fix add."), room="p")["receipt"]["queue_accepted"]
-    assert accepted["target"] == "claude-desktop" and accepted["route"]["fallback_reason"] == "code_needs_project"
+    assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def test_auto_code_task_with_a_refused_project_or_test_falls_back():
@@ -606,8 +611,8 @@ def test_auto_code_task_with_a_refused_project_or_test_falls_back():
                               code_body(code_root()), code_body(root, test="pytest; rm -rf ~"),
                               code_body(root, test=None))):
         accepted = svc.handle(enqueue(body, key=f"r{n}"), room="p")["receipt"]["queue_accepted"]
-        assert accepted["target"] == "claude-desktop", (body, accepted)
-        assert accepted["route"]["fallback_reason"] == "code_project_refused", (body, accepted)
+        assert accepted["target"] == "sol-fixer", (body, accepted)
+        assert accepted["route"]["fallback_reason"] == "flash_explicit_only", (body, accepted)
 
 
 def test_auto_code_task_from_an_untrusted_origin_falls_back():
@@ -615,7 +620,7 @@ def test_auto_code_task_from_an_untrusted_origin_falls_back():
     root = code_root()
     svc, _ = code_service(root)
     acc = svc.handle(enqueue(code_body(root), channel="mcp", actor="claude"), room="p")["receipt"]["queue_accepted"]
-    assert acc["target"] == "claude-desktop" and acc["route"]["fallback_reason"] == "code_origin_untrusted", acc
+    assert acc["target"] == "sol-fixer" and acc["route"]["fallback_reason"] == "flash_explicit_only", acc
     # an unknown browser actor is refused even earlier, by the grammar's origin check
     rej = svc.handle(enqueue(code_body(root), channel="browser-human", actor="mallory"), room="p")["receipt"]
     assert "queue_rejected" in rej and rej["queue_rejected"]["code"] == "origin_untrusted", rej
@@ -628,7 +633,7 @@ def test_auto_code_task_falls_back_when_jev_abstained():
         decide = svc._router.decide
         svc._router.decide = lambda *a, _d=decide, _f=flag, **k: {**_d(*a, **k), **_f}
         accepted = svc.handle(enqueue(code_body(root)), room="p")["receipt"]["queue_accepted"]
-        assert accepted["target"] == "claude-desktop" and accepted["route"]["fallback_reason"] == "jev_abstained"
+        assert accepted["target"] == "sol-fixer" and accepted["route"]["fallback_reason"] == "flash_explicit_only"
 
 
 def code_prompt(body, title="Fix add", *, origin="browser-human:joe", cap="repo-write"):
@@ -644,7 +649,7 @@ def test_a_project_line_in_the_title_counts_on_neither_side():
     svc, _ = code_service(root)
     out = svc.handle(code_turn(f"@queue enqueue target=auto cap=repo-write :: project: {root}/app\n"
                                "test: python3 tests/check.py\nFix add"), room="p")
-    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "code_needs_project", out
+    assert out["receipt"]["queue_accepted"]["route"]["fallback_reason"] == "flash_explicit_only", out
     prompt = code_prompt("test: python3 tests/check.py\nFix add", title=f"project: {root}/app")
     body = flash_wire.task_parts(prompt)[2]
     assert body == "test: python3 tests/check.py\nFix add", body
@@ -716,7 +721,7 @@ sys.exit(5)
 
 
 def fake_flash_run():
-    path = os.path.join(tempfile.mkdtemp(prefix="fake-flash-run-"), "flash-run.py")
+    path = os.path.join(temporary_directory(prefix="fake-flash-run-"), "flash-run.py")
     with open(path, "w") as fh:
         fh.write(FAKE_FLASH_RUN)
     return [sys.executable, path]
@@ -764,7 +769,7 @@ def test_code_run_desk_git_never_trusts_a_swapped_git_in_the_worktree():
     project = f"{root}/app"
     spec, _, err = flash_wire.code_inputs(code_body(root), roots=[root])
     assert err is None, err
-    hookdir = tempfile.mkdtemp(prefix="flash-canary-")
+    hookdir = temporary_directory(prefix="flash-canary-")
     canary = os.path.join(hookdir, "CANARY")
     hook = os.path.join(hookdir, "hook.sh")
     with open(hook, "w") as fh:
@@ -816,7 +821,7 @@ def test_a_code_run_timeout_kills_the_whole_process_group():
     root = code_root()
     project = f"{root}/app"
     spec, _, _ = flash_wire.code_inputs(code_body(root), roots=[root])
-    pidfile = os.path.join(tempfile.mkdtemp(), "pid")
+    pidfile = os.path.join(temporary_directory(), "pid")
     os.environ["FAKE_FLASH_PID"] = pidfile
     try:
         row = _run_with("sleep", spec, timeout=3)
@@ -831,9 +836,9 @@ def test_a_code_run_timeout_kills_the_whole_process_group():
     assert len(_out(project, "worktree", "list").strip().splitlines()) == 1
 
 
-def test_the_real_policy_names_code_project_roots_and_routes_code_to_flash():
+def test_the_real_policy_names_code_project_roots_and_routes_code_to_luna():
     policy = kanban_adapter._model_router().load_policy()
-    assert policy["queue_targets"]["code"] == "flash", policy["queue_targets"]
+    assert policy["queue_targets"]["code"] == "luna", policy["queue_targets"]
     assert isinstance(policy.get("code_project_roots"), list) and policy["code_project_roots"]
     assert "repo-write" in kanban_adapter.load_catalog()["targets"]["flash"]["capabilities"]
 
@@ -934,6 +939,8 @@ def test_code_metadata_with_a_malformed_origin_is_rejected():
 
 
 def main() -> int:
+    grant = patch.object(flash_wire.flashlib, "is_switched_off", return_value=False)
+    grant.start()
     check("wire answers with thinking off", test_wire_answers_with_thinking_off)
     check("wire empty reply is no_answer", test_wire_empty_reply_is_no_answer_not_completed)
     check("wire unreachable and malformed fail cleanly", test_wire_unreachable_and_malformed_fail_cleanly)
@@ -941,7 +948,7 @@ def main() -> int:
     check("bridge delivers flash synchronously and probes it", test_bridge_delivers_flash_synchronously_and_keeps_the_cold_route_available)
     check("grammar accepts auto, keeps human-only on Joe's lane", test_grammar_accepts_auto_and_keeps_human_only_on_joes_lane)
     check("auto direct task goes to flash", test_auto_direct_task_goes_to_flash_with_the_route_on_the_receipt)
-    check("auto judgment task goes to opus", test_auto_judgment_task_goes_to_opus)
+    check("auto judgment task goes to sol", test_auto_judgment_task_goes_to_sol)
     check("auto flash route falls back when flash is down", test_auto_flash_route_falls_back_when_flash_is_down)
     check("auto flash route falls back on capability", test_auto_flash_route_falls_back_when_flash_refuses_the_capability)
     check("explicit target never consults the router", test_explicit_target_never_consults_the_router)

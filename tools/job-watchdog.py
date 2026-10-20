@@ -13,10 +13,6 @@ import job_watchdog as watchdog  # noqa: E402
 
 
 def main():
-    hold = read_holds().get("com.carr.job-watchdog")
-    if hold:
-        print(hold.describe())
-        return 0
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default=os.environ.get("CARR_WATCHDOG_CONFIG", str(SOURCE / "ops/config/job-watchdog.json")))
     parser.add_argument("--root", default=os.environ.get("CARR_JOB_ROOT"))
@@ -34,6 +30,10 @@ def main():
     resolve.add_argument("--outcome", choices=["not-executed"], required=True)
     resolve.add_argument("--evidence", required=True, help="observed destination/process evidence that proves no effect occurred; this assertion is not verified by the command")
     args = parser.parse_args()
+    hold = read_holds().get("com.carr.job-watchdog") if args.mode != "run" else None
+    if hold:
+        print(hold.describe())
+        return 0
     config = watchdog.load_config(args.config)
     if os.environ.get("CARR_JOB_BOARD"):
         config["board"] = os.environ["CARR_JOB_BOARD"]
