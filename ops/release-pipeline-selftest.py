@@ -64,6 +64,12 @@ def git(cwd: Path, *args: str) -> str:
 
 
 class RunnerUploadOutput(unittest.TestCase):
+    def test_provider_version_on_next_line_is_redacted_without_known_secrets(self):
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                output = f"  provider version:{newline}{VERSION}\n"
+                self.assertEqual(rp.redact_text(output), "  provider version:[REDACTED]\n")
+
     def test_uploaded_provider_version_survives_redaction_and_remains_parseable(self):
         output = ("Uploaded carr-mcp-server (1.23 sec)\n"
                   f"  provider version: {VERSION}\n"
