@@ -27,6 +27,7 @@ const PROJECTOR = JSON.stringify({ "hermes-pilot": "projector-secret" });
 const WRITE = { write: true };
 const HALBERD = "Halberd Tire — Pensacola distribution warehouse";
 const IDS = Object.freeze({ joe: "10000000-0000-0000-0000-000000000002",
+  dell: "10000000-0000-0000-0000-000000000003",
   hermes: "10000000-0000-0000-0000-000000000009",
   deal: "20000000-0000-0000-0000-00000000f459", joeBall: "30000000-0000-0000-0000-000000000001",
   hermesBall: "30000000-0000-0000-0000-000000000002", newBall: "30000000-0000-0000-0000-000000000003" });
@@ -108,11 +109,13 @@ test("the internal CoS marker cannot be caller-set and human/authority invariant
   assert.equal(TOOLS["teach"].humanOnly, undefined);
 });
 
-test("only CoS may select Joe; plain Hermes and Joe remain own-ball-only", () => {
-  assert.deepEqual(permittedActionOwnerSlugs(cos()), ["hermes-pilot", "joe"]);
-  assert.deepEqual(permittedActionOwnerSlugs(plain()), ["hermes-pilot"]);
-  assert.deepEqual(permittedActionOwnerSlugs(joe()), ["joe"]);
-  assert.ok(!permittedActionOwnerSlugs(cos()).includes("dell"));
+test("Joe 2026-10-20, agent seats may own-assign to-dos: every caller may name itself, Joe, or Dell", () => {
+  assert.deepEqual(permittedActionOwnerSlugs(cos()), ["hermes-pilot", "joe", "dell"]);
+  assert.deepEqual(permittedActionOwnerSlugs(plain()), ["hermes-pilot", "joe", "dell"]);
+  assert.deepEqual(permittedActionOwnerSlugs(joe()), ["joe", "dell"]);
+  assert.deepEqual(permittedActionOwnerSlugs({ slug: "claude" }), ["claude", "joe", "dell"]);
+  assert.deepEqual(permittedActionOwnerSlugs({ slug: "joe-local" }), ["joe-local", "joe", "dell"]);
+  assert.ok(!permittedActionOwnerSlugs(plain()).includes("codex"), "only the caller and the two partners");
 });
 
 class FakeDB {
@@ -133,7 +136,7 @@ class FakeDB {
     if (sql.includes("from v_ref_index where subject_type='deal'"))
       return { rows: [{ subject_id: IDS.deal, display_name: HALBERD, status: "site_selection", client_ref: "C-127" }] };
     if (sql.startsWith("select id from actor where slug=$1")) {
-      const id = { joe: IDS.joe, "hermes-pilot": IDS.hermes }[params[0]];
+      const id = { joe: IDS.joe, dell: IDS.dell, "hermes-pilot": IDS.hermes }[params[0]];
       return { rows: id ? [{ id }] : [] };
     }
     if (sql.startsWith("update next_action set status='dropped'")) {
@@ -177,10 +180,26 @@ test("Halberd CoS handoff selects Joe, replaces Joe's ball, and keeps runtime pr
   assert.equal(db.events[0].new_value.set_by, "hermes-pilot");
 });
 
-test("CoS handoff refuses Dell before any write", async () => {
+for (const [label, seat] of [["CoS", cos], ["plain Hermes", plain],
+  ["claude", () => ({ slug: "claude", id: IDS.hermes })]]) {
+  for (const partner of ["joe", "dell"]) {
+    test(`${label} seat sets a ${partner} to-do; created_by stays the real runtime`, async () => {
+      const db = new FakeDB();
+      const result = await TOOLS["set-next-action"].handler(db, seat(), {
+        idempotency_key: `seat-${label}-${partner}`, ref: HALBERD, owner: partner, description: "Agent-assigned to-do",
+      });
+      assert.equal(result.owner, partner);
+      assert.equal(db.inserted.owner_id, IDS[partner]);
+      assert.equal(db.inserted.created_by, IDS.hermes);
+      assert.equal(db.events[0].new_value.owner, partner);
+    });
+  }
+}
+
+test("a seat still cannot name an owner outside itself, Joe, and Dell", async () => {
   const db = new FakeDB();
   await assert.rejects(() => TOOLS["set-next-action"].handler(db, cos(), {
-    idempotency_key: "cos-459-dell", ref: HALBERD, owner: "dell", description: "forbidden",
+    idempotency_key: "cos-459-codex", ref: HALBERD, owner: "codex", description: "forbidden",
   }), (e) => e instanceof ToolError && e.payload.error === "owner_not_permitted");
   assert.equal(db.inserted, undefined);
   assert.equal(db.events.length, 0);
