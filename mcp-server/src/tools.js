@@ -3432,6 +3432,7 @@ export const TOOLS = {
                 ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_room_account a
            join v_client_engagement_status ce on ce.client_id=a.account_client_id
+          where ce.client_status <> 'prospect' or ce.prospect_engagement_status = 'active'
           order by a.account_name`);
       const session = await c.query(
         `select session_id, workspace_kind, account_client_id,

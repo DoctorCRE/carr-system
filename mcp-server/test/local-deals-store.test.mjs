@@ -153,6 +153,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual((await c.query("select new_value->>'stage' as stage from event where verb='update-lead' order by mutation_order")).rows,[{stage:'opportunity'}]);
     }));
 
+    await t.test('inactive prospect accounts leave the portfolio summaries', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=$1",[id(6)]);
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).accounts,[]);
+    }));
+
     await t.test('existing linked lead, multiple deals and parking survive both engagement directions', async () => transaction(async () => {
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
