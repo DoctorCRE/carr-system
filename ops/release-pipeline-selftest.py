@@ -163,7 +163,7 @@ class FakeRunner:
         if name == "promote" and self.live is not None:
             upload = next(a for n, a in self.calls if n == "upload")
             self.live["sha"] = upload[upload.index("--release-sha") + 1]
-            self.live["version"] = VERSION
+            self.live["version"] = argv[argv.index("--promote-version") + 1]
         if name == "rollback" and self.live is not None:
             self.live["version"] = argv[argv.index("--promote-version") + 1]
         return rp.Result(0, out)
@@ -4286,11 +4286,13 @@ class DeployCredential(unittest.TestCase):
         cfg = self.fx.config(credential_dir="~/.config/carr")
         cfg["app"].update(enabled=True)
         live = {"worker": self.fx.base, "app": self.fx.base}
+        worker_live = {"sha": self.fx.base}
         verbs: list = []
 
         def pipeline(runner):
             pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
-            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}, "worker_version": {"id": PRIOR}}
+            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]},
+                                     "worker_version": {"id": worker_live.get("version", PRIOR)}}
                                      if url == cfg["worker"]["live_release_url"] else
                                      {"source_commit": live["app"], "environment": "production"})
             return pipe
@@ -4305,7 +4307,6 @@ class DeployCredential(unittest.TestCase):
 
         self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        worker_live = {"sha": self.fx.base}
         runner = FakeRunner(live=worker_live)
         original_run = runner.run
         def run(argv, **kw):
