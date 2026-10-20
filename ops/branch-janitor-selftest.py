@@ -1139,7 +1139,7 @@ class FakeProvider:
         return next(r for r in self.rows if r["number"] == number)
 
     def open_pulls(self, repo, branch):
-        return [r for r in self.rows if r["state"] == "open" and r["head"]["ref"] == branch]
+        return [r for r in self.rows if r["state"] == "open" and (branch is None or r["head"]["ref"] == branch)]
 
     def close(self, repo, number, successor):
         self.closed.append((number, successor))

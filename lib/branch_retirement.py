@@ -204,7 +204,18 @@ class GitHub:
         return [self.normalize(row) for row in connection['nodes']]
 
     def open_pulls(self, repo, branch):
-        return [row for row in self.branch_pulls(repo, branch) if row["state"] == "open"]
+        if branch is not None:
+            return [row for row in self.branch_pulls(repo, branch) if row["state"] == "open"]
+        cursor, rows = None, []
+        query = """query($owner:String!,$name:String!,$cursor:String) {
+            repository(owner:$owner,name:$name) { pullRequests(first:100,states:OPEN,after:$cursor) {
+            nodes { """ + self.fields + " } pageInfo { hasNextPage endCursor } } } }"
+        while True:
+            connection = self.query(repo, query, cursor=cursor)["pullRequests"]
+            rows.extend(self.normalize(row) for row in connection["nodes"])
+            if not connection["pageInfo"]["hasNextPage"]:
+                return [r for r in rows if (r["head"]["repo"] or {}).get("full_name") == repo]
+            cursor = connection["pageInfo"]["endCursor"]
 
     def close(self, repo, number, successor):
         message = (f"Superseded by merged PR https://github.com/{repo}/pull/{successor}. "

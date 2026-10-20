@@ -4,26 +4,89 @@ from __future__ import annotations
 import json
 import fcntl
 from contextlib import ExitStack
+from collections import Counter
 import os
 import subprocess
 from pathlib import Path
 import time
 import uuid
 
-from branch_retirement import GitHub, git, command, process_paths, save, fetch_remote_refs
-from job_watchdog import epoch
+from branch_retirement import GitHub, git, command, process_paths, save
+from job_watchdog import epoch, repository_roots
 from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
 
 
-def clone_preserved(clone):
+def remote_refs(clone):
+    return {ref: head for head, ref in (line.split() for line in
+            git(clone, 'ls-remote', 'origin', timeout=20).splitlines())}
+
+
+def clone_preserved(clone, refs, environment=None):
     if git(clone, 'stash', 'list'):
         return False
+    environment = {**(environment or {}), 'GIT_GRAFT_FILE': os.devnull, 'GIT_NO_LAZY_FETCH': '1'}
+    heads = sorted(set(refs.values()))
+    objects = git(clone, '--no-replace-objects', 'cat-file', '--batch-check',
+                  input=''.join(head + '\n' for head in heads),
+                  environment=environment)
+    published = [line.split()[0] for line in objects.splitlines()
+                 if len(line.split()) == 3 and line.split()[1] in {'commit', 'tag'}]
+    if not published:
+        return False
     return not git(clone, '--no-replace-objects', 'rev-list', '--max-count=1',
-                   'HEAD', '--branches', '--tags', '--not', '--glob=refs/carr-cleanup/origin/*',
-                   environment={'GIT_GRAFT_FILE': os.devnull})
+                   'HEAD', '--branches', '--tags', '--stdin',
+                   input=''.join('^' + head + '\n' for head in published),
+                   environment=environment)
 
 
-def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run, deadline=None):
+class CloneEvidence:
+    def __init__(self, provider, process_probe, workspaces, roots=None):
+        self.provider = provider
+        self.process_probe = process_probe
+        self.workspaces = [str(p) for p in workspaces]
+        self.roots = repository_roots() if roots is None else roots
+        self.environments = {}
+        self.refs = {}
+        self.pulls = {}
+        self.commits = {}
+        self.busy = None
+        self.probed = False
+
+    def object_environment(self, repo):
+        if repo not in self.environments:
+            environment = {}
+            configured = self.roots.get(repo)
+            root = Path(configured).expanduser() if configured is not None else None
+            if root is not None and root.is_dir():
+                self.provider.verify_repository(repo, root)
+                objects = git(root, 'rev-parse', '--path-format=absolute', '--git-path', 'objects')
+                environment['GIT_ALTERNATE_OBJECT_DIRECTORIES'] = objects
+            self.environments[repo] = environment
+        return self.environments[repo]
+
+    def remote(self, repo, clone):
+        if repo not in self.refs:
+            self.refs[repo] = remote_refs(clone)
+        return self.refs[repo]
+
+    def branch_pulls(self, repo, branch):
+        if repo not in self.pulls:
+            self.pulls[repo] = self.provider.open_pulls(repo, None)
+        return [p for p in self.pulls[repo] if p['head']['ref'] == branch]
+
+    def commit_pulls(self, repo, head):
+        if (repo, head) not in self.commits:
+            self.commits[repo, head] = self.provider.commit_pulls(repo, head)
+        return list(self.commits[repo, head])
+
+    def processes(self, workspace):
+        if not self.probed:
+            self.busy = self.process_probe(self.workspaces)
+            self.probed = True
+        return None if self.busy is None else {str(workspace)} & self.busy
+
+
+def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run, deadline=None, evidence=None):
     workspace = Path(workspace)
     clone = workspace / 'checkout'
     result = {'kind': 'job_clone', 'path': str(workspace), 'status': 'kept'}
@@ -42,12 +105,18 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         if (dispatch.get('checkout_path') != str(clone) or
                 dispatch.get('checkout_workspace') != str(workspace)):
             return keep('dispatch checkout identity mismatch')
+        result['dispatch_status'] = dispatch['status']
         identity = workspace.stat().st_ino, clone.stat().st_ino
-        repo = 'jbookout/carr-system'
-        try:
-            provider.verify_repository(repo, clone)
-        except RuntimeError:
+        for repo in repository_roots():
+            try:
+                provider.verify_repository(repo, clone)
+                break
+            except RuntimeError:
+                continue
+        else:
             return keep('repository identity unavailable or outside authorized cleanup scope')
+        result['repo'] = repo
+        result['writer_evidence'] = 'no registered writer'
         lock_path = clone / '.git/room-writer.lock'
         try:
             flags = os.O_RDONLY if dry_run else os.O_RDWR | os.O_CREAT
@@ -63,49 +132,58 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
                     import sys
                     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools/room-bridge'))
                     from write_ownership import termination_evidence
-                    if not termination_evidence({'executor': json.loads(executor)}):
+                    owner = json.loads(executor)
+                    termination = termination_evidence({'executor': owner})
+                    if not termination:
                         return keep('live writer or writer termination evidence unavailable')
+                    result['writer_evidence'] = termination
+                    if owner.get('pgid'):
+                        result['writer_pgid'] = owner['pgid']
         except (OSError, ValueError):
             return keep('live writer lock or writer evidence unavailable')
         check(deadline)
-        fetch_remote_refs(clone)
+        refs = evidence.remote(repo, clone) if evidence else remote_refs(clone)
         check(deadline)
         head = git(clone, 'rev-parse', 'HEAD')
         branch = git(clone, 'symbolic-ref', '--quiet', '--short', 'HEAD', allowed=(0, 1))
         if git(clone, 'status', '--porcelain=v1', '--untracked-files=all'):
             return keep('uncommitted work')
-        if not clone_preserved(clone):
+        environment = evidence.object_environment(repo) if evidence else {}
+        if not clone_preserved(clone, refs, environment):
             return keep('unpushed work')
         check(deadline)
-        busy = process_probe([str(workspace)])
+        busy = evidence.processes(workspace) if evidence else process_probe([str(workspace)])
         if busy is None or busy:
             return keep('live process or process evidence unavailable')
         evidence_branch = branch or dispatch.get('checkout_branch')
-        pulls = provider.branch_pulls(repo, evidence_branch) if evidence_branch else []
+        source = evidence or provider
+        pulls = source.branch_pulls(repo, evidence_branch) if evidence_branch else []
         if not branch:
-            pulls.extend(provider.commit_pulls(repo, head))
+            pulls.extend(source.commit_pulls(repo, head))
         if any(p['state'] == 'open' for p in pulls):
             return keep('open PR')
         if not branch and (not evidence_branch or command(['git', '-C', str(clone), 'merge-base', '--is-ancestor',
-                head, 'refs/remotes/origin/' + evidence_branch], allowed=(0, 1, 128)).returncode != 0):
+                head, refs.get('refs/heads/' + evidence_branch, 'unavailable-remote-ref')], allowed=(0, 1, 128), environment=environment).returncode != 0):
             return keep('detached HEAD has uncertain PR or dispatch branch evidence')
-        merged = command(['git', '-C', str(clone), 'merge-base', '--is-ancestor', head, 'origin/main'],
-                         allowed=(0, 1, 128)).returncode == 0
+        merged = command(['git', '-C', str(clone), 'merge-base', '--is-ancestor', head, refs.get('refs/heads/main', 'unavailable-remote-ref')],
+                         allowed=(0, 1, 128), environment=environment).returncode == 0
         closed = any(p['state'] == 'closed' and p['head']['sha'] == head for p in pulls)
         last_activity = max(epoch(dispatch['dispatched_at']), workspace.stat().st_mtime,
                             clone.stat().st_mtime, (clone / '.git/index').stat().st_mtime)
         if not (merged or closed or now - last_activity >= older_than):
             return keep('clean abandoned checkout younger than age limit')
-        if (evidence_branch and provider.open_pulls(repo, evidence_branch) or
-                not branch and any(p['state'] == 'open' for p in provider.commit_pulls(repo, head))):
+        final_source = source if dry_run else provider
+        final_pulls = final_source.branch_pulls if dry_run else provider.open_pulls
+        if (evidence_branch and any(p['state'] == 'open' for p in final_pulls(repo, evidence_branch)) or
+                not branch and any(p['state'] == 'open' for p in final_source.commit_pulls(repo, head))):
             return keep('open PR appeared before staging')
-        fetch_remote_refs(clone)
-        busy = process_probe([str(workspace)])
+        refs = evidence.remote(repo, clone) if dry_run and evidence else remote_refs(clone)
+        busy = evidence.processes(workspace) if dry_run and evidence else process_probe([str(workspace)])
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
                 identity != (workspace.stat().st_ino, clone.stat().st_ino) or
                 git(clone, 'rev-parse', 'HEAD') != head or
                 git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
-                not clone_preserved(clone)):
+                not clone_preserved(clone, refs, environment)):
             return keep('checkout became live or changed before staging')
         check(deadline)
         reason = 'merged branch' if merged else 'closed PR' if closed else 'old clean pushed checkout'
@@ -398,6 +476,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         after = tuple(cursor.get('clone_order', ()))
         candidates = [p for p in candidates if not after or oldest(p) > after]
         visited = 0
+        evidence = CloneEvidence(provider, process_probe, candidates, roots=roots)
         for workspace in candidates:
             if remaining_count <= policy['job_clone_threshold']:
                 break
@@ -411,7 +490,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             save(receipt_path, report)
             row = clean_clone(workspace, dispatches.get(str(workspace)),
                 provider=provider, process_probe=process_probe, now=now,
-                older_than=0, dry_run=dry_run,
+                older_than=0, dry_run=dry_run, evidence=evidence,
                 deadline=lambda: time.monotonic() >= clone_deadline)
             if not row.get('error') and not row.get('budget_exhausted'):
                 cursor['clone_order'] = list(order)
@@ -426,6 +505,14 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             cursor.pop('clone_order', None)
             cursor.pop('clone', None)
             save(cursor_path, cursor)
+        clone_rows = [r for r in report['kept'] + report['removed'] if r.get('kind') == 'job_clone']
+        report['job_clones'] = {
+            'population': count, 'threshold': policy['job_clone_threshold'],
+            'inspected': len(clone_rows), 'uninspected': count - len(clone_rows),
+            'would_stage': sum(r['status'] == 'would_stage' for r in clone_rows),
+            'projected_remaining': remaining_count,
+            'reasons': dict(Counter(r['status'] + ': ' + r['reason'] for r in clone_rows)),
+        }
         for tid, intent in deferred_threads.items():
             if tid in checked_threads:
                 continue

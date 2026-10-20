@@ -76,6 +76,138 @@ class ReviewProbes(unittest.TestCase):
             self.assertEqual(report['deferred'][0]['pending'], pending)
             self.assertEqual(calls, [True])
 
+    def test_cached_evidence_never_overrides_final_publication_or_live_process(self):
+        for changed in ('remote', 'process'):
+            with self.subTest(changed=changed):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-changed'
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', '-c', 'job', 'origin/main', cwd=clone)
+                fixture.git('config', 'user.email', 'fixture@example.invalid', cwd=clone)
+                fixture.git('config', 'user.name', 'Fixture', cwd=clone)
+                fixture.commit('published job', cwd=clone)
+                fixture.git('push', 'origin', 'job', cwd=clone)
+                provider = fixtures.FakeProvider()
+                def final_pulls(repo, branch):
+                    if changed == 'remote' and branch is not None:
+                        fixture.git('push', 'origin', '--delete', 'job', cwd=clone)
+                    return []
+                provider.open_pulls = final_pulls
+                probes = []
+                def processes(paths):
+                    probes.append(paths)
+                    return set(paths) if changed == 'process' and len(probes) > 1 else set()
+                evidence = machine_cleanup.CloneEvidence(provider, processes, [workspace], roots={})
+                result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                    'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                    'dispatched_at': '2020-01-01T00:00:00Z'}, provider=provider,
+                    process_probe=processes, now=time.time(), older_than=0, dry_run=False,
+                    evidence=evidence)
+                self.assertEqual(result['status'], 'kept', result)
+                self.assertNotIn('error', result)
+                self.assertTrue(clone.exists())
+
+    def test_published_ancestor_uses_canonical_objects_without_fetching_clone(self):
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-old-published'
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        fixture.commit('new published main')
+        fixture.git('push', 'origin', 'main')
+        provider = fixtures.FakeProvider()
+        from unittest.mock import patch
+        with patch.object(machine_cleanup, 'repository_roots', return_value={'jbookout/carr-system': fixture.repo}):
+            evidence = machine_cleanup.CloneEvidence(provider, lambda paths: set(), [workspace])
+            result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                'dispatched_at': '2020-01-01T00:00:00Z'}, provider=provider,
+                process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=True,
+                evidence=evidence)
+        self.assertEqual(result['status'], 'would_stage', result)
+
+    def test_dry_run_shares_remote_pr_evidence_across_finished_clones(self):
+        import job_watchdog
+        from unittest.mock import patch
+        fixture = fixtures.Fixture()
+        clones = fixture.base / 'clones'
+        clones.mkdir()
+        ledger = fixture.base / 'dispatch.jsonl'
+        rows = []
+        for index in range(6):
+            workspace = clones / ('room-codex-' + str(index))
+            clone = workspace / 'checkout'
+            fixture.git('clone', str(fixture.remote), str(clone))
+            fixture.git('switch', 'main', cwd=clone)
+            rows.append({'status': 'completed', 'checkout_workspace': str(workspace),
+                'checkout_path': str(clone), 'dispatched_at': index})
+        ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        elapsed = [0]
+        class SlowProvider(fixtures.FakeProvider):
+            def branch_pulls(self, repo, branch):
+                elapsed[0] += 50
+                return []
+            def open_pulls(self, repo, branch):
+                elapsed[0] += 50
+                return []
+        config = job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        config['machine_cleanup']['job_clone_threshold'] = 2
+        with patch.object(machine_cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+            report = machine_cleanup.run(fixture.repo, config, hook=None, tmp_root=clones,
+                dispatch_path=ledger, roots={}, provider=SlowProvider(), dry_run=True,
+                process_probe=lambda paths: set(), archive_thread=lambda *a, **k: None)
+        selected = [r for r in report['kept'] if r['status'] == 'would_stage']
+        self.assertEqual(len(selected), 4, report)
+        self.assertFalse(report['errors'], report)
+        self.assertEqual(report['job_clones']['would_stage'], 4)
+        self.assertEqual(report['job_clones']['projected_remaining'], 2)
+        self.assertEqual(report['job_clones']['threshold'], 2)
+        self.assertEqual(sum(report['job_clones']['reasons'].values()), 4)
+
+    def test_finished_clone_from_each_authorized_repository_is_eligible(self):
+        import job_watchdog
+        fixture = fixtures.Fixture()
+        for index, repo in enumerate(job_watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')['repositories']):
+            with self.subTest(repo=repo):
+                workspace = fixture.base / ('room-codex-repo-' + str(index))
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', 'main', cwd=clone)
+                provider = fixtures.FakeProvider()
+                def verify_repository(actual, path):
+                    if actual != repo:
+                        raise RuntimeError('wrong repository')
+                provider.verify_repository = verify_repository
+                result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                    'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                    'dispatched_at': '2020-01-01T00:00:00Z'}, provider=provider,
+                    process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=True)
+                self.assertEqual(result['status'], 'would_stage', result)
+
+    def test_published_clone_dry_run_needs_no_remote_object_download(self):
+        from unittest.mock import patch
+        import subprocess
+        fixture = fixtures.Fixture()
+        workspace = fixture.base / 'room-codex-published'
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        original = subprocess.run
+
+        def without_download(argv, *args, **kwargs):
+            if argv[0] == 'git' and 'fetch' in argv:
+                raise subprocess.TimeoutExpired('git fetch', 120)
+            return original(argv, *args, **kwargs)
+
+        with patch('subprocess.run', side_effect=without_download):
+            result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=True)
+        self.assertEqual(result['status'], 'would_stage', result)
+        self.assertTrue(clone.exists())
+
     def test_writer_lock_and_recorded_live_process_group_keep_clone(self):
         import fcntl
         sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
