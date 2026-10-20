@@ -60,6 +60,7 @@ BODY_ROLE, BODY_LABEL = 'AXTextArea', 'Message body'
 
 class State(Enum):
     DONE = 'done'
+    ACTIVITY_LOG_FAILED = 'activity_log_failed'
     PRESSED_UNCONFIRMED = 'pressed_unconfirmed'
     WINDOW_NOT_CLOSED = 'window_not_closed'
     DUPLICATE_KEY = 'duplicate_key'
@@ -70,7 +71,7 @@ class State(Enum):
 
     @property
     def pressed(self) -> bool:
-        return self in (State.DONE, State.PRESSED_UNCONFIRMED, State.WINDOW_NOT_CLOSED)
+        return self in (State.DONE, State.ACTIVITY_LOG_FAILED, State.PRESSED_UNCONFIRMED, State.WINDOW_NOT_CLOSED)
 
 
 @dataclass(frozen=True)
@@ -302,6 +303,8 @@ def write(item: Mail | Event, key: str, ports: Ports, record: str | None = None)
         result = _write(item, key, ports, Ledger(out / LEDGER))
     if result.ok:
         result = replace(result, logged=_log_matches(item, key, record, ports))
+        if 'log_failed' in result.logged:
+            result = replace(result, state=State.ACTIVITY_LOG_FAILED, reason='confirmed_in_mailbox:log_failed')
     return result
 
 
@@ -835,7 +838,7 @@ def create_event(subject: str, start: datetime, end: datetime, location: str, bo
     return write(event, idempotency_key, ports or default_ports(), record)
 
 
-EXIT = {State.DONE: 0, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
+EXIT = {State.DONE: 0, State.ACTIVITY_LOG_FAILED: 4, State.NOT_IDLE: 75, State.PRESSED_UNCONFIRMED: 3, State.WINDOW_NOT_CLOSED: 3}
 
 
 def main(argv: list[str]) -> int:
