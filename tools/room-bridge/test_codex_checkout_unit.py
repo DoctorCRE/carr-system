@@ -123,6 +123,21 @@ class CheckoutDispatchTests(unittest.TestCase):
         self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
         self.assertEqual(self.git('remote', 'get-url', 'origin', cwd=repo), str(self.origin))
 
+    def test_unreadable_canonical_objects_fall_back_to_an_origin_clone(self):
+        # The fixture origin hardlinks canonical objects; give it its own copy.
+        shutil.rmtree(self.origin)
+        REAL_RUN(['git', 'clone', '--bare', '--no-local', str(self.source), str(self.origin)],
+                 check=True, capture_output=True, env=fixture_env())
+        objects = [f for f in (self.source / '.git' / 'objects').rglob('*')
+                   if f.is_file() and len(f.parent.name) == 2]
+        for f in objects:
+            f.chmod(0)
+        self.addCleanup(lambda: [f.chmod(0o444) for f in objects])
+        row = self.send(checkout='repair', fresh=True)
+        repo = Path(row['checkout_path'])
+        self.assertEqual(self.git('branch', '--show-current', cwd=repo), 'repair')
+        self.assertFalse((repo / '.git' / 'objects' / 'info' / 'alternates').exists())
+
     def test_new_branch_uses_origin_default_head(self):
         row = self.send(checkout='new:job-repair')
         repo = Path(row['checkout_path'])
