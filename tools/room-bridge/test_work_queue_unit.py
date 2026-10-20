@@ -232,6 +232,24 @@ with WorkQueue(Path(sys.argv[2])) as q:
         self.assertIsNotNone(merged['finished_at'])
         self.assertGreaterEqual(merged['elapsed'], 0)
 
+    def test_later_pin_can_advance_while_another_pin_merge_is_in_flight(self):
+        self.add('A')
+        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
+        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
+        pins = [dict(repo='jbookout/carr-system', number=n, head='a' * 40) for n in (1, 2)]
+        self.q.update('A', actor='reviewer', reason='reviewed', prs=pins)
+        self.q.transition('A', 'merging', actor='test', reason='review complete')
+        self.q.begin_merge('A', pin=pins[0], actor='merge-daemon', reason='first pin in flight')
+        arguments = dict(repo='jbookout/carr-system', head='a' * 40, prepared='b' * 40,
+                         main='c' * 40, actor='merge-daemon', reason='verified regeneration',
+                         expected_order=self.q.merge_order()['entries'])
+        with WorkQueue(self.path) as restarted:
+            with self.assertRaises(QueueChanged):
+                restarted.advance_merge_pin('A', pr=1, **arguments)
+            restarted.advance_merge_pin('A', pr=2, **arguments)
+            self.assertEqual(restarted.get('A')['prs'], [pins[0], {**pins[1], 'head': 'b' * 40}])
+            self.assertTrue(restarted.get('A')['active'])
+
     def test_regenerated_pin_preserves_other_prs_and_requires_current_selection(self):
         self.add('A')
         claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})

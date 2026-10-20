@@ -135,6 +135,33 @@ class QueueTests(unittest.TestCase):
             self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'merge_completed']), 1)
         self.assertEqual(len(self.calls('merge')), 1)
 
+    def test_later_regenerated_pin_advances_after_first_pr_merges(self):
+        card_id = self.prepare_pinned_head()
+        self.pr(2, head=self.updated)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.update(card_id, actor='test', reason='first PR precedes regenerating PR', prs=[
+                dict(repo=module.REPOS[0], number=2, head=self.updated),
+                dict(repo=module.REPOS[0], number=1, head=self.approved)])
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            card = work.get(card_id)
+            self.assertEqual(card['prs'][1]['head'], self.updated)
+            self.assertEqual(card['stage'], 'merging')
+            self.assertEqual(card['merge_receipts'], [dict(repo=module.REPOS[0], number=2, head=self.updated)])
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+
     def test_verified_merge_survives_later_provider_read_failure(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
