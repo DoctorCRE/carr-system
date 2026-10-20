@@ -269,7 +269,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
         if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
           (await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)})).base_version});
-        await TOOLS[writer].handler(c, actor, args);
+        const update = await TOOLS[writer].handler(c, actor, args);
+        if (writer === 'set-next-action') assert.ok(update.dropped_post_call_action_ids.includes(expired),
+          'replacement receipts must include expired Call Mode actions');
         assert.equal((await TOOLS[writer].handler(c, actor, args)).replayed, true);
         const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
         assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped', 'expired accepted actions must be superseded');
