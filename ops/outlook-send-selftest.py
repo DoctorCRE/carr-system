@@ -6,6 +6,10 @@ title "SUBJECT • account", AXTextFields "To Recipients", "Cc Recipients" and
 "Bcc Recipients" whose AXStaticText children read "ADDRESS, Presence Unknown", an
 AXTextField "Subject", depth-1 Send and Discard buttons, and a Draft > Send menu.
 """
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+import logging
+import traceback
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
@@ -248,6 +252,40 @@ class SendTests(unittest.TestCase):
     def ledger(self) -> list[dict]:
         path = self.out / send_mod.LEDGER
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def test_transport_timeout_never_exposes_message_in_diagnostics(self):
+        h = Harness(self.out)
+        h.fake.open_url = send_mod._open_url
+        stderr, stdout, logs = StringIO(), StringIO(), StringIO()
+        handler = logging.StreamHandler(logs)
+        logging.getLogger().addHandler(handler)
+        def timeout(command, **kwargs):
+            raise subprocess.TimeoutExpired(command, 60, output=MAIL['body'], stderr=MAIL['subject'])
+        path = Path(self.tmp.name) / 'input.json'
+        path.write_text(json.dumps({**MAIL, 'idempotency_key': 'timeout-key'}))
+        path.chmod(0o600)
+        sender = send_mod.send
+        def dispatch(*args, **kwargs):
+            with patch.object(send_mod, 'send', sender):
+                return h.send()
+        try:
+            with redirect_stderr(stderr), redirect_stdout(stdout), \
+                    patch.object(send_mod.subprocess, 'run', timeout), \
+                    patch.object(send_mod, 'send', dispatch):
+                try:
+                    code = send_mod.main(['send', '--json', str(path)])
+                except Exception:
+                    traceback.print_exc()
+                    code = 1
+        finally:
+            logging.getLogger().removeHandler(handler)
+        diagnostics = stderr.getvalue() + stdout.getvalue() + logs.getvalue()
+        diagnostics += ''.join(p.read_text() for p in self.out.glob('*') if p.is_file())
+        for sentinel in (*MAIL['to'], *MAIL['cc'], *MAIL['bcc'], MAIL['subject'],
+                         'Line one.', 'Line two.', 'mailto:'):
+            self.assertNotIn(sentinel, diagnostics)
+        self.assertEqual(code, 1)
+        self.assertRegex(stdout.getvalue(), r'transport_TimeoutExpired_[0-9a-f]{12}')
 
     def test_account_comes_from_private_config(self):
         config = Path(self.tmp.name) / 'account'
