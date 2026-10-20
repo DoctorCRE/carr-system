@@ -1,4 +1,6 @@
 -- Keep superseded steps in history without reviving them as the current plan.
+-- rollback: In a new compensating migration, restore only public.v_deal_room_board
+-- from migrations/0782_deal_invoice_read_fields.sql; preserve action statuses and events.
 CREATE OR REPLACE VIEW public.v_deal_room_board AS
  SELECT d.id,
     d.name,
