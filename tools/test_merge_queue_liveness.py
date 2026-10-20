@@ -634,7 +634,7 @@ class LivenessTests(unittest.TestCase):
                     original=subprocess.run; faults=[]
                     def run(argv,**kw):
                         current=f.q._github_entry
-                        target=current==entry
+                        target=current==entry or f.q._github_scope==f'merge-truth:{entry}'
                         hit=(route=='conflict' and 'merge-tree' in argv or
                              route=='git_init' and 'init' in argv or route=='git_remote' and 'remote' in argv and 'add' in argv or
                              route=='git_remote_read' and 'get-url' in argv or
