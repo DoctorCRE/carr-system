@@ -561,33 +561,6 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
   assert.equal(Object.keys(TOOLS).some(name => /send.*email|email.*send/iu.test(name)), false);
 });
 
-test("post-call actions complete and replace only for the calling partner", async () => {
-  const db = new CaptureFake();
-  db.postCallActions.push(
-    { id: "joe-post-action", deal_id: ids.deal, owner_id: ids.joe, description: "Joe follow-up",
-      due_on: "2026-08-11", status: "open", updated_at: "2026-08-08T15:00:00.000Z", completed_at: null },
-    { id: "dell-post-action", deal_id: ids.deal, owner_id: ids.dell, description: "Dell follow-up",
-      due_on: "2026-08-12", status: "open", updated_at: "2026-08-08T15:00:00.000Z", completed_at: null },
-  );
-  const completed = await TOOLS["complete-action"].handler(db, joe,
-    { idempotency_key: "complete-joe-post", ref: ids.deal, outcome: "Called client" });
-  assert.equal(completed.count, 1);
-  assert.equal(completed.completed[0].source, "post_call_action");
-  assert.equal(db.postCallActions.find(action => action.id === "joe-post-action").status, "done");
-  assert.equal(db.postCallActions.find(action => action.id === "dell-post-action").status, "open");
-
-  db.postCallActions.push({ id: "joe-replacement", deal_id: ids.deal, owner_id: ids.joe,
-    description: "Old Joe task", due_on: "2026-08-13", status: "open",
-    updated_at: "2026-08-08T15:00:00.000Z", completed_at: null });
-  const replaced = await TOOLS["set-next-action"].handler(db, joe,
-    { idempotency_key: "replace-joe-post", ref: ids.deal,
-      description: "New Joe task", due_on: "2026-08-14" });
-  assert.deepEqual(replaced.dropped_post_call_action_ids, ["joe-replacement"]);
-  assert.equal(db.postCallActions.find(action => action.id === "joe-replacement").status, "dropped");
-  assert.equal(db.postCallActions.find(action => action.id === "dell-post-action").status, "open");
-  assert.equal(db.nextActions.at(-1).description, "New Joe task");
-});
-
 test("log-outreach completes only the caller's post-call action on the deal", async () => {
   const db = new CaptureFake();
   db.postCallActions.push(

@@ -2371,7 +2371,8 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
   const replacesCurrent = dropped.some(a => a.id === current.action_id) ||
     (!current.action_id && current.overdue && current.owner === partner);
   if (!replacesCurrent) return { ...dealNextStepStatus(current.next_step, current.next_date),
-    ...(supersededIds.length ? { superseded_action_ids: supersededIds } : {}) };
+    ...(supersededIds.length ? { superseded_action_ids: supersededIds,
+      superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
   const next = (await c.query(
     `select description, due_on::text as due_on from next_action
       where subject_type='deal' and subject_id=$1 and status='open'
@@ -2385,7 +2386,8 @@ async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-dea
       field, old: { [field]: before }, new: { [field]: after, superseded_action_ids: supersededIds },
       recorded_at_after_lock: true, idempotency_key: key,
     });
-  return { superseded_action_ids: supersededIds, ...dealNextStepStatus(next?.description, nextDate) };
+  return { superseded_action_ids: supersededIds, superseded_post_call_action_ids: postCall.map(a => a.id),
+    ...dealNextStepStatus(next?.description, nextDate) };
 }
 
 async function latestFieldConflict(c, dealId, field, baseEventId) {
@@ -4022,8 +4024,8 @@ export const TOOLS = {
           hint: "the selected owner has no actor row" });
         ownerId = owner.rows[0].id;
       }
-      if (s.type === "deal")
-        await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action");
+      const superseded = s.type === "deal"
+        ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action") : {};
       // [amendment 8] Replacing an unfinished ball used to record the old one as
       // 'done'. It wasn't done — it was superseded. No-fabrication applies to
       // metadata too, and 'done' would inflate any completion measure built on this.
@@ -4036,6 +4038,7 @@ export const TOOLS = {
           where deal_id=$1 and owner_id=$2 and status='open'
           returning id,description /* capture:replace-post-call-actions */`,
         [s.id, ownerId])).rows : [];
+      const droppedPostCallIds = [...(superseded.superseded_post_call_action_ids || []), ...droppedPostCall.map(x => x.id)];
       const oldDate = s.type === "deal" ? (await c.query(
         "select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null : null;
       const r = await c.query(
@@ -4048,7 +4051,7 @@ export const TOOLS = {
           new: { summary: `ball → ${ownerSlug}: ${args.description}`,
             next_action: args.description, due: args.due_on, owner: ownerSlug,
             set_by: actor.slug,
-            dropped_post_call_action_ids: droppedPostCall.map(x => x.id) },
+            dropped_post_call_action_ids: droppedPostCallIds },
           idempotency_key: args.idempotency_key });
       if (s.type === "deal") {
         await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
@@ -4059,7 +4062,7 @@ export const TOOLS = {
         });
       }
       return { ok: true, next_action_id: r.rows[0].id, subject: s, owner: ownerSlug,
-        dropped_post_call_action_ids: droppedPostCall.map(x => x.id) };
+        dropped_post_call_action_ids: droppedPostCallIds };
     }),
   },
 
