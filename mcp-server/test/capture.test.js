@@ -40,6 +40,7 @@ class CaptureFake {
   async query(text, params = []) {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
+    if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))

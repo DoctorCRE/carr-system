@@ -919,7 +919,8 @@ def main() -> int:
                     f"{LIVE_REGISTRY_VERSION} registry is absent or authority-expanding: {registry!r}"
                 )
             validate_current_catalog(cur)
-            expected_grant_snapshot = registry[3].get("runtime_dml_grants")
+            expected_grant_snapshot = cur.execute("select ops.scac_current_grant_contract()").fetchone()[0].get(
+                "runtime_dml_grants", registry[3].get("runtime_dml_grants"))
             if not isinstance(expected_grant_snapshot, dict) or \
                set(expected_grant_snapshot) != {"count", "digest"} or \
                not isinstance(expected_grant_snapshot.get("count"), int) or \

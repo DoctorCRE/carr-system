@@ -1,14 +1,16 @@
 import { ToolError } from './tool-error.js';
 
+const DEAL_VENDOR_ROLES = ['lender','contractor','architect','attorney','title','inspector','landlord_rep'];
+
 export const DEAL_ASSIGNMENTS_SCHEMA = { type: 'array', minItems: 1, maxItems: 30,
   description: 'Explicit sourced vendor roles on deals. Upserts only these roles; active:false retires a role without deleting history. Company and contact are exact party UUIDs.',
   items: { type: 'object', additionalProperties: false, properties: {
-    deal_id: { type: 'string', format: 'uuid' }, role: { type: 'string', pattern: '^[a-z][a-z0-9_]{1,49}$' },
+    deal_id: { type: 'string', format: 'uuid' }, role: { type: 'string', enum: DEAL_VENDOR_ROLES },
     company_party_id: { type: 'string', format: 'uuid' }, contact_party_id: { type: 'string', format: 'uuid' },
     active: { type: 'boolean' }, note: { type: 'string', maxLength: 2000 },
   }, required: ['deal_id','role','company_party_id','contact_party_id'] } };
 
-export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb) {
+export async function writeDealAssignments(c, actor, vendorId, entries, recordEvent, key, verb, baseVersion, states = new Map()) {
   const refuse = () => { throw new ToolError({error:'deal_assignment_invalid'}); };
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!Array.isArray(entries) || !entries.length || entries.length > 30) refuse();
@@ -16,16 +18,29 @@ export async function writeDealAssignments(c, actor, vendorId, entries, recordEv
   for (const entry of entries) {
     if (!entry || Object.keys(entry).some(k => !Object.hasOwn(DEAL_ASSIGNMENTS_SCHEMA.items.properties,k)) ||
         !['deal_id','company_party_id','contact_party_id'].every(k => typeof entry[k] === 'string' && uuid.test(entry[k])) ||
-        typeof entry.role !== 'string' || !/^[a-z][a-z0-9_]{1,49}$/.test(entry.role) || ['vendor','worked','referred','other','unknown'].includes(entry.role) ||
+        !DEAL_VENDOR_ROLES.includes(entry.role) ||
         entry.active !== undefined && typeof entry.active !== 'boolean' ||
         entry.note !== undefined && (typeof entry.note !== 'string' || entry.note.length > 2000)) refuse();
     const identity = `${entry.deal_id.toLowerCase()}:${entry.role}`;
     if (seen.has(identity)) refuse();
     seen.add(identity);
   }
-  const vendor = (await c.query(`select v.party_id from public.vendor v join public.party p on p.id=v.party_id
-    where v.id=$1 and v.merged_into is null and p.merged_into is null and p.deleted_at is null for share of p`, [vendorId])).rows[0];
+  const vendor = (await c.query(`select v.party_id,p.vendor_assignment_version from public.vendor v join public.party p on p.id=v.party_id
+    where v.id=$1 and v.merged_into is null and p.merged_into is null and p.deleted_at is null for update of p`, [vendorId])).rows[0];
   if (!vendor) refuse();
+  let state = states.get(vendor.party_id);
+  const expected = state?.version ?? vendor.vendor_assignment_version;
+  if (!Number.isInteger(baseVersion)) throw new ToolError({error:'invalid_assignment_base_version'});
+  if (baseVersion !== expected) throw new ToolError({error:'version_conflict',current_assignment_version:expected});
+  if (!state) {
+    state = {version:expected,assignments:new Set()};
+    states.set(vendor.party_id,state);
+    await c.query('update public.party set vendor_assignment_version=vendor_assignment_version+1 where id=$1',[vendor.party_id]);
+  }
+  for (const identity of seen) {
+    if (state.assignments.has(identity)) refuse();
+    state.assignments.add(identity);
+  }
   const changes = [];
   for (const entry of entries) {
     const before = (await c.query(`select role,company_party_id,contact_party_id,active,note from public.deal_vendor_assignment

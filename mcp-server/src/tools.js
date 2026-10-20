@@ -1,4 +1,4 @@
-import { DEAL_ASSIGNMENTS_SCHEMA, writeDealAssignments, dealVendorCards } from './deal-vendors.js';
+import { DEAL_ASSIGNMENTS_SCHEMA, writeDealAssignments, dealVendorCards } from "./deal-vendors.js";
 import { canonicalJson } from "./artifact-trust.js";
 import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
@@ -3775,10 +3775,10 @@ export const TOOLS = {
       occurred_at: { type: "string", description: "ISO timestamp; omit for now" },
       owed: { type: "string", description: "what is missing (a figure, a name) — recorded as owed" },
       human_quote: { type: "string", description: "the human's literal words, if dictated" },
-      vendor_assignments: {type:'array',minItems:1,maxItems:30,description:'Update explicit vendor roles atomically with this deal call or update. Exact vendor UUID and current vendor base_version required.',items:{
+      vendor_assignments: {type:'array',minItems:1,maxItems:30,description:'Update explicit vendor roles atomically with this deal call or update. Exact vendor UUID, current vendor base_version and shared party assignment_base_version required.',items:{
         ...DEAL_ASSIGNMENTS_SCHEMA.items,properties:{...Object.fromEntries(Object.entries(DEAL_ASSIGNMENTS_SCHEMA.items.properties).filter(([k])=>k!=='deal_id')),
-          vendor_id:{type:'string',format:'uuid'},base_version:{type:'integer'}},
-        required:['vendor_id','base_version','role','company_party_id','contact_party_id']}},
+          vendor_id:{type:'string',format:'uuid'},base_version:{type:'integer'},assignment_base_version:{type:'integer',minimum:1}},
+        required:['vendor_id','base_version','assignment_base_version','role','company_party_id','contact_party_id']}},
       links: { type: "array", maxItems: 10, description:
         "[ORDER 34] introductions carried by this touch become intro-graph edges NOW, atomically. REFS ONLY (L-/C-/V-/T-), never names — ambiguity is find's job, before this call.",
         items: { type: "object", properties: {
@@ -3824,18 +3824,25 @@ export const TOOLS = {
       if (args.vendor_assignments !== undefined) {
         if (s.type !== 'deal' || !Array.isArray(args.vendor_assignments) || !args.vendor_assignments.length || args.vendor_assignments.length > 30)
           throw new ToolError({error:'deal_assignment_invalid'});
-        const seen = new Set();
+        const seen = new Set(), versions = new Map(), states = new Map();
         for (const assignment of args.vendor_assignments) {
-          const {vendor_id,base_version,...entry} = assignment || {};
+          const {vendor_id,base_version,assignment_base_version,...entry} = assignment || {};
           if (typeof vendor_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(vendor_id) || Object.hasOwn(entry,'deal_id'))
             throw new ToolError({error:'deal_assignment_invalid'});
           const identity = `${vendor_id.toLowerCase()}:${entry.role}`;
           if (seen.has(identity)) throw new ToolError({error:'deal_assignment_invalid'});
           seen.add(identity);
-          await versionGuard(c,'vendor',vendor_id,base_version);
-          assignments.push(...await writeDealAssignments(c,actor,vendor_id,[{...entry,deal_id:s.id}],writeEvent,args.idempotency_key,'log-activity'));
-          await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendor_id]);
+          const vendorId = vendor_id.toLowerCase();
+          if (versions.has(vendorId)) {
+            if (versions.get(vendorId) !== base_version) throw new ToolError({error:'deal_assignment_invalid'});
+          } else {
+            await versionGuard(c,'vendor',vendorId,base_version);
+            versions.set(vendorId,base_version);
+          }
+          assignments.push(...await writeDealAssignments(c,actor,vendorId,[{...entry,deal_id:s.id}],writeEvent,args.idempotency_key,'log-activity',assignment_base_version,states));
         }
+        for (const vendorId of versions.keys())
+          await c.query('update vendor set updated_by=$1 where id=$2',[actor.id,vendorId]);
       }
       const r = await c.query(
         `insert into activity (occurred_at, actor_id, kind, summary, detail, owed, ${FK[s.type]}, source)
@@ -4897,7 +4904,7 @@ export const TOOLS = {
 
   "vendor-assignment-context": {
     write: false,
-    description: "Read a live vendor's exact ID, base_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
+    description: "Read a live vendor's exact ID, base_version, assignment_version, company and existing contact party IDs before updating a deal assignment. Company can be null and contacts can be empty. Never creates identities or infers a role. Use find to resolve an ambiguous name first.",
     inputSchema: {type:'object',additionalProperties:false,properties:{vendor:{type:'string'}},required:['vendor']},
     handler: async (c,_actor,args) => {
       const subject = await resolveSubject(c,args.vendor);
@@ -4945,10 +4952,10 @@ export const TOOLS = {
 
   "update-vendor": {
     write: true,
-    description: "Field-level change to a vendor (stage, seeking, offers, referral_active, territory, out_of_market). fields.deal_assignments upserts explicit deal roles with exact deal_id, role, company_party_id and contact_party_id; active:false retires a role. Never infer assignments from a general intro edge. stage takes a vendor_stage SLUG, not the label; a wrong one comes back with the full valid list. base_version required.",
+    description: "Field-level change to a vendor (stage, seeking, offers, referral_active, territory, out_of_market). fields.deal_assignments upserts explicit deal roles with exact deal_id, role, company_party_id and contact_party_id; active:false retires a role. assignment_base_version from the shared party assignment_version is required with deal_assignments. Never infer assignments from a general intro edge. stage takes a vendor_stage SLUG, not the label; a wrong one comes back with the full valid list. base_version required.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, vendor: { type: "string" },
-      base_version: { type: "integer" }, fields: { type: "object", properties: {deal_assignments: DEAL_ASSIGNMENTS_SCHEMA} } },
+      base_version: { type: "integer" }, assignment_base_version: {type:"integer",minimum:1,description:"Shared party assignment_version from vendor-assignment-context; required with deal_assignments."}, fields: { type: "object", properties: {deal_assignments: DEAL_ASSIGNMENTS_SCHEMA} } },
       required: ["idempotency_key","vendor","base_version","fields"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "update-vendor", args, async () => {
       const s = await resolveSubject(c, args.vendor);
@@ -5002,7 +5009,7 @@ export const TOOLS = {
         args.fields.deal_history_verified_at = null; keys.push("deal_history_verified_at");
       }
       const assignments = Object.hasOwn(args.fields,'deal_assignments')
-        ? await writeDealAssignments(c,actor,s.id,args.fields.deal_assignments,writeEvent,args.idempotency_key,'update-vendor') : [];
+        ? await writeDealAssignments(c,actor,s.id,args.fields.deal_assignments,writeEvent,args.idempotency_key,'update-vendor',args.assignment_base_version) : [];
       const old = keys.length ? (await c.query(`select ${keys.join(",")} from vendor where id=$1`, [s.id])).rows[0] : {};
       const sets = keys.map((k, i) => `${k}=$${i + 2}`).join(", ");
       await c.query(`update vendor set ${sets ? sets + ", " : ""}updated_by=$1 where id=$${keys.length + 2}`,

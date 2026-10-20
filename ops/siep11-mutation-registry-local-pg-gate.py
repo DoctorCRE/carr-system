@@ -135,9 +135,10 @@ def main() -> int:
             sealed_projection = successor[1] if successor is not None else cur.execute(
                 "select catalog_projection from ops.scac_mutation_registry_version where registry_version='scac-mutation-registry.v1'"
             ).fetchone()[0]
+            validated_categories = validate_current_catalog(cur)["categories"]
             expected_categories = {
-                "secdef_execute": validate_current_catalog(cur)["categories"]["secdef_execute"],
-                "relation_dml": sealed_projection["relation_dml"],
+                "secdef_execute": validated_categories["secdef_execute"],
+                "relation_dml": validated_categories["relation_dml"],
                 "column_dml": sealed_projection["column_dml"],
                 "job_definitions": JOB_DEFINITION_CATALOG,
             }

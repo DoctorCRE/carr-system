@@ -37,6 +37,31 @@ begin
     raise exception 'hardening successor does not match the live catalog';
   end if;
 end $coherence$;
+savepoint assignment_grant;
+revoke update on public.deal_vendor_assignment from carr_writer;
+do $assignment_grant_drift$
+begin
+  if ops.scac_mutation_catalog_v118_current() then
+    raise exception 'catalog accepted a missing reviewed assignment grant';
+  end if;
+  begin
+    perform ops.scac_policy_epoch_snapshot();
+    raise exception 'policy snapshot accepted a missing reviewed assignment grant';
+  exception when others then
+    if sqlerrm not like 'live SCAC % mutation catalog drifted' then raise; end if;
+  end;
+end $assignment_grant_drift$;
+rollback to savepoint assignment_grant;
+do $assignment_grant_access$
+declare state jsonb := ops.scac_reference_monitor_state();
+begin
+  if has_table_privilege('carr_reader','public.deal_vendor_assignment','select') then
+    raise exception 'reader can bypass assignment projection';
+  end if;
+  if state->>'grant_state'<>'current' or state->>'guard_state'<>'complete' then
+    raise exception 'assignment reference monitor is not current: %',state;
+  end if;
+end $assignment_grant_access$;
 -- An unrelated search path change must still invalidate the current seal.
 alter function ops.engineering_admission_source(text) set search_path=pg_catalog,ops,public;
 do $drift$

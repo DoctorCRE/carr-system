@@ -74,9 +74,10 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
+      if (name === "party") await c.query("alter table party drop column if exists vendor_assignment_version");
     }
     for (const table of ['actor','party','deal']) await c.query(`alter table ${table} add primary key(id)`);
-    await c.query(readMigration('0915_deal_vendor_assignments.sql'));
+    await c.query(readMigration('0918_deal_vendor_assignments.sql').split('-- Current catalog reseal')[0]);
     const touch = schema.match(/CREATE FUNCTION public\.trg_touch_row\(\) RETURNS trigger[\s\S]*?end \$\$;/)?.[0];
     assert.ok(touch);
     await c.query(touch);
@@ -181,7 +182,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(context.vendor.company.id,id(20));
       assert.equal(context.vendor.contacts[0].id,id(21));
       const assignment = { deal_id: id(4), role: 'lender', company_party_id: id(20), contact_party_id: id(21) };
-      await TOOLS['update-vendor'].handler(c, actor, {vendor:id(22),base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[assignment]}});
+      await TOOLS['update-vendor'].handler(c, actor, {vendor:id(22),base_version:1,assignment_base_version:1,idempotency_key:randomUUID(),fields:{deal_assignments:[assignment]}});
       const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
       assert.equal(detail.vendors.length,1);
       assert.equal(detail.vendors[0].role,'lender');
@@ -190,13 +191,13 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const board = await TOOLS['deal-room-board'].handler(c, actor, {});
       assert.deepEqual(board.deals[0].vendors,detail.vendors);
       const call = {ref:id(4),kind:'call',summary:'Synthetic financing update',idempotency_key:randomUUID(),
-        vendor_assignments:[{vendor_id:id(23),base_version:1,role:'lender',company_party_id:id(20),contact_party_id:id(21),note:'Application received'}]};
+        vendor_assignments:[{vendor_id:id(23),base_version:1,assignment_base_version:2,role:'lender',company_party_id:id(20),contact_party_id:id(21),note:'Application received'}]};
       const result = await TOOLS['log-activity'].handler(c,actor,call);
       assert.equal(result.vendor_assignments.length,1);
       assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).vendors[0].note,'Application received');
       assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).events.find(e=>e.field==='vendor_assignment' && e.new_value?.vendor_assignment?.note==='Application received')?.verb,'log-activity');
       assert.equal((await TOOLS['log-activity'].handler(c,actor,call)).replayed,true);
-      const request = (fields,base_version=2) => ({vendor:id(22),base_version,idempotency_key:randomUUID(),fields});
+      const request = (fields,base_version=2) => ({vendor:id(22),base_version,assignment_base_version:base_version+1,idempotency_key:randomUUID(),fields});
       for (const change of [{role:'vendor'},{role:'worked'},{role:'other'},{role:'Lender'},{deal_id:'vague deal'},
         {contact_party_id:id(20)},{company_party_id:id(2)},{active:'yes'},{unexpected:'value'}]) {
         await c.query('savepoint invalid_assignment');
@@ -211,8 +212,8 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await TOOLS['update-vendor'].handler(c,actor,request({deal_assignments:[assignment]},3));
       await c.query('savepoint atomic_call');
       await assert.rejects(TOOLS['log-activity'].handler(c,actor,{...call,idempotency_key:randomUUID(),vendor_assignments:[
-        {...call.vendor_assignments[0],vendor_id:id(22),base_version:4,note:'Must roll back'},
-        {...call.vendor_assignments[0],base_version:2,contact_party_id:id(20)},
+        {...call.vendor_assignments[0],vendor_id:id(22),base_version:4,assignment_base_version:5,note:'Must roll back'},
+        {...call.vendor_assignments[0],base_version:2,assignment_base_version:5,contact_party_id:id(20)},
       ]}),e=>e.payload?.error==='deal_assignment_invalid');
       await c.query('rollback to savepoint atomic_call');
       const afterFailedCall = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
