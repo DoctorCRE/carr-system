@@ -47,6 +47,7 @@ from datetime import date, datetime, time, timedelta, timezone
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -58,7 +59,6 @@ from typing import Callable
 import uuid
 import zoneinfo
 
-STORE = Path('Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Profile/HxStore.hxd')
 HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe')
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
@@ -80,6 +80,28 @@ VERIFIED_MIN = 0.95
 MODEL_ATTEMPTS = 3
 MODEL_BODY_CHARS = 12_000
 BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
+
+
+def resolve_store(home: Path) -> Path:
+    """Locate the New Outlook store when a job runs."""
+    profiles = home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles'
+    override = os.environ.get('CARR_OUTLOOK_STORE')
+    if override:
+        selected = home / Path(override).expanduser()
+        if selected.is_file():
+            return selected
+        message = f'CARR_OUTLOOK_STORE is not a file: {selected}'
+        logging.error('%s', message)
+        raise FileNotFoundError(message)
+    stores = [path for path in profiles.glob('*/HxStore.hxd') if path.is_file()]
+    if not stores:
+        message = f'No Outlook store found: searched {profiles}/*/HxStore.hxd'
+        logging.error('%s', message)
+        raise FileNotFoundError(message)
+    selected = max(stores, key=lambda path: (path.stat().st_mtime_ns, str(path)))
+    if len(stores) > 1:
+        logging.warning('Multiple Outlook stores found; using most recently modified: %s', selected)
+    return selected
 
 
 class CarrError(RuntimeError):
@@ -597,8 +619,9 @@ def _save(out: Path, state: dict) -> None:
 
 
 def _run(out: Path, home: Path, ports: Ports) -> Outcome:
-    store = home / STORE
-    if not store.is_file():
+    try:
+        store = resolve_store(home)
+    except FileNotFoundError:
         return Outcome('failed', 'store_missing')
     try:
         state = json.loads((out / STATE).read_text())

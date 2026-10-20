@@ -651,6 +651,42 @@ class StoreResolverTest(unittest.TestCase):
         expected = self.store('Main Identity')
         self.assertEqual(intake.resolve_store(self.home), expected)
 
+    def test_main_profile(self):
+        expected = self.store('Main Profile')
+        self.assertEqual(intake.resolve_store(self.home), expected)
+
+    def test_no_store_names_the_searched_directory(self):
+        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
+            intake.resolve_store(self.home)
+        self.assertIn(str(self.profiles), str(refusal.exception))
+        self.assertIn(str(self.profiles), '\n'.join(logs.output))
+
+    def test_newest_store_wins_and_is_logged(self):
+        older = self.store('Main Identity')
+        newer = self.store('Main Profile')
+        for old, new in ((older, newer), (newer, older)):
+            os.utime(old, ns=(1_000_000_000, 1_000_000_000))
+            os.utime(new, ns=(2_000_000_000, 2_000_000_000))
+            with self.assertLogs(level='WARNING') as logs:
+                self.assertEqual(intake.resolve_store(self.home), new)
+            self.assertIn(str(new), '\n'.join(logs.output))
+
+    def test_override_takes_precedence(self):
+        self.store('Main Identity')
+        override = self.home / 'chosen.hxd'
+        override.write_bytes(b'synthetic-override')
+        os.environ['CARR_OUTLOOK_STORE'] = str(override)
+        self.assertEqual(intake.resolve_store(self.home), override)
+
+    def test_invalid_override_refuses_without_fallback(self):
+        self.store('Main Identity')
+        override = self.home / 'missing.hxd'
+        os.environ['CARR_OUTLOOK_STORE'] = str(override)
+        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
+            intake.resolve_store(self.home)
+        self.assertIn('CARR_OUTLOOK_STORE', str(refusal.exception))
+        self.assertIn(str(override), str(refusal.exception))
+        self.assertIn(str(override), '\n'.join(logs.output))
 
 if __name__ == '__main__':
     unittest.main()
