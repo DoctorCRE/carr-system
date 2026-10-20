@@ -418,6 +418,36 @@ class SendTests(unittest.TestCase):
         self.assertEqual((result.state, result.reason), (State.FAILED, 'wrong_account'))
         self.assertEqual((h.fake.presses(), h.fake.forms), (0, {}))
 
+    def test_failed_activity_log_exits_nonzero_and_never_resends(self):
+        for failure in ('reply', 'exception'):
+            with self.subTest(failure=failure):
+                h = Harness(self.out / failure)
+                original = h.ports.carr
+                def failed_log(verb, args):
+                    if verb == 'log-activity':
+                        if failure == 'exception':
+                            raise OSError('synthetic-log-failure')
+                        return {'ok': False}
+                    return original(verb, args)
+                h.ports.carr = failed_log
+                result = h.send(record='client-001')
+                self.assertFalse(result.ok)
+                self.assertTrue(result.state.pressed)
+                self.assertEqual(result.state.value, 'activity_log_failed')
+                self.assertEqual(result.reason, 'confirmed_in_mailbox:log_failed')
+                self.assertEqual(result.logged, ('log_failed',))
+                path = Path(self.tmp.name) / 'input.json'
+                path.write_text(json.dumps({**MAIL, 'idempotency_key': 'key-1'}))
+                path.chmod(0o600)
+                stdout = StringIO()
+                with redirect_stdout(stdout), patch.object(send_mod, 'send', return_value=result):
+                    self.assertEqual(send_mod.main(['send', '--json', str(path)]), 4)
+                self.assertIn('activity_log_failed confirmed_in_mailbox:log_failed', stdout.getvalue())
+                self.assertEqual(h.send().state, State.DUPLICATE_KEY)
+                self.assertEqual(h.send(key='new-key').state, State.DUPLICATE_KEY)
+                self.assertEqual(h.fake.presses(), 1)
+                self.assertEqual(len(h.mailbox.sent), 1)
+
     def test_unmatched_record_still_reports_the_send(self):
         h = Harness(self.out)
         h.carr = lambda verb, args: {'parties': []}
