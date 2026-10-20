@@ -21,6 +21,39 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_hidden_index_flags_protect_clone_before_and_during_cleanup(self):
+        for flag in ('--assume-unchanged', '--skip-worktree'):
+            for dry_run in (True, False):
+                for late in (False, True):
+                    with self.subTest(flag=flag, dry_run=dry_run, late=late):
+                        fixture = fixtures.Fixture()
+                        workspace = fixture.base / 'room-codex-hidden-work'
+                        clone = workspace / 'checkout'
+                        fixture.git('clone', str(fixture.remote), str(clone))
+                        fixture.git('switch', 'main', cwd=clone)
+                        probes = []
+
+                        def hide_work():
+                            fixture.git('update-index', flag, 'file', cwd=clone)
+                            (clone / 'file').write_text('unpublished working bytes\n')
+                            self.assertFalse(fixture.git('status', '--porcelain=v1', cwd=clone))
+
+                        def processes(paths):
+                            probes.append(paths)
+                            if late and len(probes) == 2:
+                                hide_work()
+                            return set()
+
+                        if not late:
+                            hide_work()
+                        result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                            'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                            'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                            process_probe=processes, now=time.time(), older_than=0, dry_run=dry_run)
+                        self.assertEqual(result['status'], 'kept', result)
+                        self.assertNotIn('error', result)
+                        self.assertEqual((clone / 'file').read_text(), 'unpublished working bytes\n')
+
     def test_thread_timeout_defers_only_that_item_and_reads_back_before_retry(self):
         import job_watchdog
         for returned_error in (False, True):
