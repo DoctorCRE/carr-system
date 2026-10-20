@@ -163,7 +163,7 @@ class FakeRunner:
         if name == "promote" and self.live is not None:
             upload = next(a for n, a in self.calls if n == "upload")
             self.live["sha"] = upload[upload.index("--release-sha") + 1]
-            self.live["version"] = VERSION
+            self.live["version"] = argv[argv.index("--promote-version") + 1]
         if name == "rollback" and self.live is not None:
             self.live["version"] = argv[argv.index("--promote-version") + 1]
         return rp.Result(0, out)
@@ -448,6 +448,7 @@ class WorkerIdentityReconciliation(Base):
         self.assertEqual(state["last_released_sha"], latest)
         self.assertIsNone(state["failed_sha"])
         self.assertIsNone(state["failed_step"])
+        self.assertNotIn("failed_run_id", state)
         receipt = self.fx.records()[-1]
         self.assertEqual(receipt["status"], "live_identity_reconciled")
         self.assertEqual((receipt["from_sha"], receipt["sha"]), (self.fx.base, latest))
@@ -458,6 +459,162 @@ class WorkerIdentityReconciliation(Base):
         self.assertEqual(recovered.tick(["worker"]), 0)
         self.assertEqual(self.fx.records(), rows)
         self.assertEqual(runner.calls, calls)
+
+    def failed_worker_readback(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "promoted"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        read = pipe.http
+        def timeout_after_promote(url):
+            if runner.names() and runner.names()[-1] == "promote":
+                raise TimeoutError("read timeout")
+            return read(url)
+
+        pipe.http = timeout_after_promote
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "verify-live")
+        return latest, live, runner, pipe
+
+    def test_promote_transport_timeout_recovers_only_the_served_uploaded_version(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "promoted"})
+        live = {"sha": self.fx.base}
+        runner = FakeRunner(live=live)
+        run = runner.run
+
+        def lost_ack(argv, **kwargs):
+            result = run(argv, **kwargs)
+            if runner.names()[-1] == "promote":
+                raise TimeoutError("promotion response unavailable")
+            return result
+
+        runner.run = lost_ack
+        pipe = self.fx.pipeline(runner, live=live)
+        pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "promote")
+        calls = list(runner.calls)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertIsNone(self.fx.state()["worker"]["failed_sha"])
+        self.assertEqual(runner.calls, calls)
+        self.assertEqual(self.fx.slice_marks, [])
+
+    def test_failed_steps_before_and_after_promotion_never_reconcile_as_shipped(self):
+        latest = self.fx.commit({"mcp-server/src/a.js": "candidate"})
+        for step in ("staging", "health", "unexpected"):
+            with self.subTest(step=step):
+                live = {"sha": self.fx.base}
+                runner = FakeRunner(live=live, fail_at=step)
+                pipe = self.fx.pipeline(runner, live=live)
+                pipe.store.save({"worker": {"last_released_sha": self.fx.base}})
+                if step == "unexpected":
+                    pipe.health_gate = mock.Mock(side_effect=TimeoutError("unrelated post-promote timeout"))
+                self.assertEqual(pipe.tick(["worker"]), 1)
+                self.assertEqual(self.fx.state()["worker"]["failed_step"], step)
+                live.update(sha=latest, version=VERSION)
+                calls = list(runner.calls)
+                self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_target_unreceipted")
+                self.assertEqual(runner.calls, calls)
+                self.assertEqual(self.fx.slice_marks, [])
+
+    def test_recovery_requires_the_complete_matching_promotion_failure(self):
+        latest, live, runner, pipe = self.failed_worker_readback()
+        original_state, rows = self.fx.state(), self.fx.records()
+        mutations = {
+            "missing promotion": lambda row: row.pop("promotion"),
+            "different source": lambda row: row["promotion"].update(sha=self.fx.base),
+            "different provider version": lambda row: row["promotion"].update(provider_version_id=PRIOR),
+            "different endpoint": lambda row: row["promotion"].update(release_endpoint="https://other.invalid/release"),
+            "different attempt": lambda row: row.update(run_id="other-attempt"),
+            "different base": lambda row: row.update(from_sha="e" * 40),
+            "no promote": lambda row: row.update(executed=["staging"]),
+            "later step": lambda row: row["executed"].append("health"),
+            "legacy unexpected": lambda row: row.update(step="unexpected"),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                pipe.store.save(json.loads(json.dumps(original_state)))
+                changed = json.loads(json.dumps(rows))
+                mutate(changed[-1])
+                pipe.store.records_path.write_text("".join(json.dumps(row) + "\n" for row in changed))
+                calls = list(runner.calls)
+                self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+                self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+                self.assertEqual(self.fx.records()[-1]["reason"], "live_target_unreceipted")
+                self.assertEqual(runner.calls, calls)
+        pipe.store.save(original_state)
+        pipe.store.records_path.write_text("")
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+
+    def test_failed_promotion_cannot_reconcile_bad_live_identity_or_history(self):
+        latest, live, runner, pipe = self.failed_worker_readback()
+        original_state, rows = self.fx.state(), self.fx.records()
+        for version, reason in (("invalid", "live_identity_unreadable"), (PRIOR, "live_target_unreceipted")):
+            with self.subTest(version=version):
+                pipe.store.save(json.loads(json.dumps(original_state)))
+                live["version"] = version
+                self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+                self.assertEqual(self.fx.records()[-1]["reason"], reason)
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+        git(self.fx.repo, "checkout", "-q", "-b", "outside-main", self.fx.base)
+        (self.fx.repo / "outside.js").write_text("outside main history")
+        git(self.fx.repo, "add", "outside.js")
+        git(self.fx.repo, "commit", "-q", "-m", "outside")
+        outside = git(self.fx.repo, "rev-parse", "HEAD")
+        git(self.fx.repo, "checkout", "-q", "main")
+        original_state["worker"]["failed_sha"] = outside
+        rows[-1]["sha"] = outside
+        rows[-1]["promotion"]["sha"] = outside
+        pipe.store.save(original_state)
+        pipe.store.records_path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        live.update(sha=outside, version=VERSION)
+        calls = list(runner.calls)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.records()[-1]["reason"], "history_diverged")
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], outside)
+        self.assertEqual(runner.calls, calls)
+
+    def test_failed_promotion_receipt_failure_preserves_failure_and_checkpoint(self):
+        latest, live, runner, pipe = self.failed_worker_readback()
+        calls = list(runner.calls)
+        recovery = self.fx.pipeline(runner, live=live)
+        with mock.patch.object(recovery.store, "record_durable", side_effect=OSError("receipt unavailable")):
+            self.assertEqual(recovery.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+        self.assertEqual(runner.calls, calls)
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+
+    def test_written_recovery_receipt_survives_readback_failure_without_duplicate(self):
+        latest, live, runner, pipe = self.failed_worker_readback()
+        recovery = self.fx.pipeline(runner, live=live)
+        original = recovery.store.readback_durable
+
+        def unavailable(row):
+            if row["status"] == "live_identity_reconciled":
+                raise OSError("receipt readback unavailable")
+            return original(row)
+
+        with mock.patch.object(recovery.store, "readback_durable", side_effect=unavailable):
+            self.assertEqual(recovery.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+        calls = list(runner.calls)
+        self.assertEqual(self.fx.pipeline(runner, live=live).tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(sum(row["status"] == "live_identity_reconciled" for row in self.fx.records()), 1)
+        self.assertEqual(runner.calls, calls)
+        self.assertEqual(self.fx.slice_marks, [])
 
     def test_live_identity_replaces_stale_checkpoint_before_target_selection(self):
         live_sha = self.fx.commit({"mcp-server/src/a.js": "already live"})
@@ -3433,7 +3590,7 @@ class ClearFailedRetirement(Base):
         super().setUp()
         self.sha = self.fx.commit({"mcp-server/src/a.js": "1"})
         self.store = rp.Store(self.fx.repo / "out/release-pipeline")
-        self.store.save({"worker": {"failed_sha": self.sha, "failed_step": "upload"}})
+        self.store.save({"worker": {"failed_sha": self.sha, "failed_step": "upload", "failed_run_id": "failed-attempt"}})
         self.kept = self.store.release_worktree("worker", self.sha)
         self.kept.parent.mkdir(parents=True, exist_ok=True)
         git(self.fx.repo, "worktree", "add", "--detach", str(self.kept), self.sha)
@@ -3444,6 +3601,7 @@ class ClearFailedRetirement(Base):
 
     def assert_retry_available(self):
         self.assertIsNone(self.store.load()["worker"]["failed_sha"])
+        self.assertNotIn("failed_run_id", self.store.load()["worker"])
         moved = Path(self.store.records()[-1]["cleared_worktree"])
         self.assertEqual((moved / "diagnosis.log").read_text(), "evidence")
         git(self.fx.repo, "worktree", "add", "--detach", str(self.kept), self.sha)
@@ -4265,11 +4423,13 @@ class DeployCredential(unittest.TestCase):
         cfg = self.fx.config(credential_dir="~/.config/carr")
         cfg["app"].update(enabled=True)
         live = {"worker": self.fx.base, "app": self.fx.base}
+        worker_live = {"sha": self.fx.base}
         verbs: list = []
 
         def pipeline(runner):
             pipe = self.fx.pipeline(runner, cfg=cfg, verbs=verbs)
-            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]}, "worker_version": {"id": PRIOR}}
+            pipe.http = lambda url: ({"git_sha": {"value": live["worker"]},
+                                     "worker_version": {"id": worker_live.get("version", PRIOR)}}
                                      if url == cfg["worker"]["live_release_url"] else
                                      {"source_commit": live["app"], "environment": "production"})
             return pipe
@@ -4284,7 +4444,6 @@ class DeployCredential(unittest.TestCase):
 
         self.write_tokens(f"CLOUDFLARE_API_TOKEN={CF_TOKEN}\n")
         store = rp.Store(self.fx.repo / "out/release-pipeline")
-        worker_live = {"sha": self.fx.base}
         runner = FakeRunner(live=worker_live)
         original_run = runner.run
         def run(argv, **kw):

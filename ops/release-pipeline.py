@@ -623,6 +623,7 @@ class Pipeline:
         self.schema_superseded_closed: list[int] = []   # older snapshot PRs closed this run
         self.observed_main = ""   # the exact main SHA this lane fetched; origin/main may be stale
         self.post_release: dict | None = None   # the post-release proof of a failed release
+        self.worker_promotion: dict | None = None
 
     # -- plumbing ---------------------------------------------------------
     def _call_verb(self, verb: str, args: dict) -> tuple[bool, Any]:
@@ -1346,17 +1347,47 @@ class Pipeline:
         previous = lane_state.get("last_released_sha")
         if not previous or previous == sha:
             return live
+        failure = None
         if lane_state.get("failed_sha") == sha:
-            raise Blocked("live_target_unreceipted", "failed release source identity has no durable shipped checkpoint")
+            failures = [row for row in self.store.records() if isinstance(row, dict)
+                        and row.get("lane") == "worker" and row.get("sha") == sha
+                        and row.get("status") == "failed"]
+            failure = failures[-1] if failures else None
+            promotion = {"sha": sha, "provider_version_id": version, "release_endpoint": url}
+            if (not failure or failure.get("step") not in {"promote", "verify-live"}
+                    or failure.get("step") != lane_state.get("failed_step")
+                    or not failure.get("run_id")
+                    or failure["run_id"] != lane_state.get("failed_run_id")
+                    or failure.get("from_sha") != previous
+                    or failure.get("promotion") != promotion
+                    or not isinstance(failure.get("executed"), list)
+                    or failure["executed"][-1:] != ["promote"]):
+                raise Blocked("live_target_unreceipted", "failed release source identity has no matching promotion evidence")
         self.controller_current(state)
         if not self._at_or_before(sha, main, self.repo):
             raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
         self.out(f"release-pipeline[worker]: recorded {previous[:12]} differs from live {sha[:12]}")
         if not self.dry_run:
-            self.store.record_durable({"lane": "worker", "status": "live_identity_reconciled",
+            receipt = {"lane": "worker", "status": "live_identity_reconciled",
                 "from_sha": previous, "sha": sha, "provider_version_id": version,
-                "release_endpoint": url, "run_id": self.run_id})
+                "release_endpoint": url, "run_id": self.run_id}
+            if failure:
+                self.store.recover_durable(failure)
+                receipt["recovered_failure"] = {"run_id": failure["run_id"], "step": failure["step"]}
+                written = next((row for row in reversed(self.store.records())
+                                if isinstance(row, dict) and all(row.get(k) == v for k, v in receipt.items()
+                                                                if k != "run_id")), None)
+                if written:
+                    self.store.recover_durable(written)
+                else:
+                    self.store.record_durable(receipt)
+            else:
+                self.store.record_durable(receipt)
         lane_state["last_released_sha"] = sha
+        if failure:
+            lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
+            lane_state.pop("failed_run_id", None)
+            lane_state.pop("rejection", None)
         if not self.dry_run:
             self.store.save(state)
         return live
@@ -1534,6 +1565,7 @@ class Pipeline:
                            if row.get("proof_digest") == proof["proof_digest"] and row.get("status") == "shipped")
         lane_state = state.setdefault(lane, {})
         lane_state.pop("rejection", None)
+        lane_state.pop("failed_run_id", None)
         lane_state.update({"last_released_sha": proof["sha"], "failed_sha": None, "failed_step": None,
                            "last_shipped_at": shipped["ts"], "last_shipped_proof": proof["proof_digest"]})
         self.store.save(state)
@@ -1596,6 +1628,7 @@ class Pipeline:
         self.db_ahead_of_worker = False
         self.do_migration = None
         self.post_release = None
+        self.worker_promotion = None
         lane_cfg = self.cfg[lane]
         why = kill_switch(self.cfg, lane)
         if why:
@@ -1828,7 +1861,7 @@ class Pipeline:
         if self.dry_run:
             return 1
         state.setdefault(lane, {}).update({
-            "failed_sha": sha, "failed_step": step,
+            "failed_sha": sha, "failed_step": step, "failed_run_id": self.run_id,
             "failed_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
         owned = [wt for _, wt in self.worktrees if wt.name.startswith(f"{lane}-{sha[:12]}-")]
         if owned:
@@ -1883,6 +1916,7 @@ class Pipeline:
                            "do_migration": self.do_migration,
                            "run_dir": str(self.run_dir), "executed": list(self.executed),
                            "dispatched": ok, "run_id": self.run_id,
+                           **({"promotion": self.worker_promotion} if self.worker_promotion else {}),
                            **({"post_release": self.post_release} if self.post_release else {}), **extra})
         if not diagnosis_key and not ok:
             self.out(f"release-pipeline[{lane}]: diagnosis dispatch FAILED: {res}")
@@ -2039,16 +2073,29 @@ class Pipeline:
         # 7. promotion
         if not staging_ok:  # pragma: no cover — structural; StepFailed above already left
             raise StepFailed("promote", 1, "", "staging did not pass")
-        self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
-                  env=self.deploy_env())
+        self.worker_promotion = {"sha": sha, "provider_version_id": version,
+                                 "release_endpoint": lane_cfg["live_release_url"]}
+        try:
+            self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
+                      env=self.deploy_env())
+        except StepFailed:
+            raise
+        except Exception as exc:
+            raise StepFailed("promote", 1, "", f"{type(exc).__name__}: {str(exc)[:300]}") from exc
 
         # 8. live verification
         if self.dry_run:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require git_sha.value == {sha}")
         else:
-            live = self.http(lane_cfg["live_release_url"])
-            if (live.get("git_sha") or {}).get("value") != sha:
-                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA")
+            try:
+                live = self.http(lane_cfg["live_release_url"])
+                if ((live.get("git_sha") or {}).get("value") != sha
+                        or (live.get("worker_version") or {}).get("id") != version):
+                    raise StepFailed("verify-live", 1, "", "production /release does not serve the released Worker identity")
+            except StepFailed:
+                raise
+            except Exception as exc:
+                raise StepFailed("verify-live", 1, "", f"{type(exc).__name__}: {str(exc)[:300]}") from exc
         health_excused = self.health_gate(wt, health_baseline)
         post_release = self.post_release_proof(
             "worker", sha, smoke_baseline, worker_dir=mcp,
@@ -2956,7 +3003,7 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     retirement["phase"] = "registration_removed"
     retirement.setdefault("id", uuid.uuid4().hex)
     store.save(state)
-    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at")}
+    previous = {k: lane_state.get(k) for k in ("failed_sha", "failed_step", "failed_at", "failed_run_id")}
     receipt_id = retirement.setdefault("id", uuid.uuid4().hex)
 
     def receipted() -> bool:
@@ -2969,7 +3016,7 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     if not receipted():  # only a durable, readable receipt authorizes clearing
         raise SystemExit(f"release-pipeline[{lane}]: clearance receipt unreadable; failure NOT cleared")
     lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
-    for field in ("failed_worktree_retirement", "failed_worktree", "rejection"):
+    for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection"):
         lane_state.pop(field, None)
     store.save(state)
     retired = f"; kept worktree moved to {moved}" if moved else ""
