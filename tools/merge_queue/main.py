@@ -1008,7 +1008,10 @@ class Queue:
             self._observing_entries = set()
             try:
                 waiting = set()
-                for pin in bounded_items('snapshot', order):
+                released = {(e['repo'], e['pr'], e['approved']) for e in bounded_items('snapshot', self.db.execute(
+                    "SELECT repo,pr,approved FROM entries WHERE phase='exhausted' AND outcome='ci_timeout' AND tested IS NULL"))}
+                candidates = sorted(order, key=lambda pin: (pin['repo'], pin['pr'], pin['head']) in released)
+                for pin in bounded_items('snapshot', candidates):
                     if self.stopped:
                         return
                     repo = pin['repo']
@@ -1016,6 +1019,10 @@ class Queue:
                         continue
                     entry = self.enqueue(repo, pin['pr'], pin['head'], 'work queue projection', rearm=False)
                     e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
+                    if (repo, pin['pr'], pin['head']) in released:
+                        if not self.retry_green_ci(e):
+                            continue
+                        e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
                     if e['phase'] == 'done' and e['merged_commit']:
                         self.complete_work_merge(e, pin['card_id'], merged=True)
                         continue
@@ -1037,6 +1044,24 @@ class Queue:
                     parked = f"SELECT id FROM entries WHERE tested IS NULL AND phase='pending' AND id NOT IN ({placeholders})"
                     self.db.execute(f'UPDATE entries SET ci_since=NULL,ci_head=NULL WHERE id IN ({parked})', observed)
                     self.db.execute(f"DELETE FROM waits WHERE kind IN ('entry','mergeability') AND owner IN (SELECT 'entry:' || id FROM entries WHERE id IN ({parked}))", observed)
+
+    def retry_green_ci(self, e):
+        try:
+            with self.github_scope(f'ci-recovery:{e["id"]}'):
+                p = self.pr(e['repo'], e['pr'])
+                if (p['state'] != 'open' or p.get('draft') or self.held(p)
+                        or p['head']['sha'] != e['approved'] or p['base']['ref'] != 'main'
+                        or not self.green(e['repo'], e['pr'], e['approved'])):
+                    return False
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            with self.db:
+                self.event(e['repo'], e['pr'], 'ci_recovery_waiting', str(exc), e['id'])
+            return False
+        with self.db:
+            self._clear_reads(e['id'])
+            self.db.execute("UPDATE entries SET phase='pending',ci_since=NULL,ci_head=NULL WHERE id=?", (e['id'],))
+            self.report(e, 'ci_recovered', 'Released head is green; retrying after ordinary candidates')
+        return True
 
     def complete_work_merge(self, e, card_id, *, merged):
         with WorkQueue(default_path()) as work:
@@ -1610,6 +1635,7 @@ class Queue:
                     self.dispatch_conflicts()
                     if not discover and legacy is None and not self.children and not self.db.execute(
                             "SELECT 1 FROM entries WHERE phase IN ('pending','merging','merge_rejected','refreshing') "
+                            "OR (phase='exhausted' AND outcome='ci_timeout' AND tested IS NULL) "
                             "UNION ALL SELECT 1 FROM actions WHERE kind='dispatch' AND phase IN ('planned','issued') LIMIT 1").fetchone():
                         with (self.state / 'queue.log').open('a') as f:
                             f.write(json.dumps({'outcome': 'idle',

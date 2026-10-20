@@ -870,8 +870,9 @@ class QueueTests(unittest.TestCase):
             self.save()
             self.restart()
             self.q.tick()
+            self.q.tick()
             self.assertEqual([call[2] for call in self.calls('merge')], ['1', '2'])
-        self.assertEqual(self.load()['preparations'], [1, 2, 3, 4])
+        self.assertEqual(self.load()['preparations'], [1, 2, 3, 4, 2])
         with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
             self.assertEqual([pin['pr'] for pin in work.merge_order()['entries']], [2, 3, 4])
 
