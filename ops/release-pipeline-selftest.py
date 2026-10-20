@@ -63,6 +63,45 @@ def git(cwd: Path, *args: str) -> str:
                           capture_output=True, text=True).stdout.strip()
 
 
+class RunnerUploadOutput(unittest.TestCase):
+    def test_provider_version_on_next_line_is_redacted_without_known_secrets(self):
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=newline):
+                output = f"  provider version:{newline}{VERSION}\n"
+                self.assertEqual(rp.redact_text(output), "  provider version:[REDACTED]\n")
+
+    def test_uploaded_provider_version_survives_redaction_and_remains_parseable(self):
+        output = ("Uploaded carr-mcp-server (1.23 sec)\n"
+                  f"  provider version: {VERSION}\n"
+                  f"provider diagnostic {CF_TOKEN}\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = root / "upload.py"
+            script.write_text(f"print({output!r})\n")
+            log = root / "11-upload.log"
+            result = rp.Runner().run([sys.executable, str(script)], cwd=root, log=log,
+                                     env={"CLOUDFLARE_API_TOKEN": CF_TOKEN})
+            self.assertEqual(result.rc, 0)
+            self.assertEqual(rp.parse_provider_version(result), VERSION)
+            self.assertIn(f"  provider version: {VERSION}\n", log.read_text())
+            self.assertIn("[exit 0]", log.read_text())
+            for text in (result.out, log.read_text()):
+                self.assertNotIn(CF_TOKEN, text)
+
+    def test_provider_version_label_keeps_secret_redaction_and_uuid_validation(self):
+        cases = (
+            (f"provider version: {VERSION}", {"RUNNER_TOKEN": VERSION}),
+            (f"provider version: {CF_TOKEN}", {"RUNNER_TOKEN": CF_TOKEN}),
+            ("provider version: 0123456789abcdef0123456789abcdef01234567", {}),
+            (f"token provider version: {VERSION}", {}),
+            (f"password={VERSION}", {}),
+        )
+        for output, env in cases:
+            with self.subTest(output=output):
+                redacted = rp.redact_text(output, known_secrets=rp.sensitive_env_values(env))
+                self.assertRegex(redacted, r"[:=]\s*\[REDACTED\]$")
+
+
 class FakeRunner:
     """Answers by step name (the log file's name), records everything."""
 
