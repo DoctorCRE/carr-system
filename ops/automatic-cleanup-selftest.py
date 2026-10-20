@@ -730,6 +730,55 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_clone_budget_defers_remainder_and_resumes_from_saved_cursor(self):
+        import machine_cleanup as cleanup
+        from lib.cleanup_budget import BudgetExhausted
+        for failure in (BudgetExhausted('fixture deadline'), subprocess.TimeoutExpired('git fetch', 1)):
+            with self.subTest(failure=type(failure).__name__):
+                fixture = fixtures.Fixture()
+                clones = fixture.base / 'clones'
+                clones.mkdir()
+                workspaces = [clones / ('room-codex-' + name) for name in ('a', 'b', 'c')]
+                dispatches = []
+                for workspace in workspaces:
+                    workspace.mkdir()
+                    clone = workspace / 'checkout'
+                    fixture.git('clone', str(fixture.remote), str(clone))
+                    fixture.git('switch', 'main', cwd=clone)
+                    dispatches.append({'checkout_workspace': str(workspace), 'checkout_path': str(clone),
+                        'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})
+                ledger = fixture.base / 'dispatch.jsonl'
+                ledger.write_text(''.join(json.dumps(row) + '\n' for row in dispatches))
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=fixtures.hook, tmp_root=clones, dispatch_path=ledger,
+                    roots={}, provider=fixtures.FakeProvider(), process_probe=lambda paths: set(),
+                    archive_thread=lambda *a, **k: self.fail('no thread'))
+                elapsed = [0.0]
+                fetch = cleanup.fetch_remote_refs
+                def slow_fetch(path):
+                    if Path(path).parent == workspaces[1]:
+                        elapsed[0] = 240
+                        raise failure
+                    return fetch(path)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]), \
+                     patch.object(cleanup, 'fetch_remote_refs', side_effect=slow_fetch):
+                    first = cleanup.run(fixture.repo, config, **options)
+                self.assertEqual(first['status'], 'deferred', first)
+                self.assertTrue(first['deferred'], first)
+                self.assertTrue(first['budget_exhausted'])
+                self.assertEqual(first['errors'], [])
+                self.assertIsNone(first['last_success_at'])
+                cursor = json.loads((fixture.repo / 'out/machine-cleanup-cursor.json').read_text())
+                self.assertEqual(cursor['clone'], workspaces[0].name)
+                self.assertEqual([path.exists() for path in workspaces], [False, True, True])
+                second = cleanup.run(fixture.repo, config, **options)
+                self.assertEqual(second['status'], 'completed', second)
+                self.assertEqual(second['errors'], [])
+                self.assertNotIn('pending', second)
+                self.assertEqual([row['path'] for row in second['removed']],
+                    [str(path) for path in workspaces[1:]])
+                self.assertFalse(any(path.exists() for path in workspaces))
+
     def test_vanished_temp_is_removed_and_run_completes(self):
         import machine_cleanup as cleanup
         for stage in ('listed', 'before_move'):
