@@ -1,0 +1,69 @@
+{
+  "observed_at": "2026-10-20T00:07:27.058781+00:00",
+  "registered_entries": 711,
+  "existing_directories": 646,
+  "missing_registrations": 65,
+  "origin_unpushed_worktrees": 396,
+  "already_remote_clean_unpushed": 299,
+  "uncommitted_unpushed_untouched": 58,
+  "all_uncommitted_untouched": 109,
+  "archive_candidates": 39,
+  "archived": 26,
+  "already_archive": 0,
+  "already_remote_recheck": 2,
+  "already_remote_total": 301,
+  "failures": 11,
+  "other_outcomes": {},
+  "remote_readbacks": 39,
+  "guard_tests_passed": 1,
+  "source_behavior_changes": 0,
+  "evidence_delivery": "separate annotated archive tag; no branch push or PR",
+  "cleanup_tag_gap": [
+    "lib/branch_retirement.py:483",
+    "ops/disk-reaper.py:372-388"
+  ],
+  "skills_used": [
+    "poteto-mode",
+    "Prove It Works",
+    "grill-with-docs",
+    "domain-modeling",
+    "codebase-design",
+    "zero-tech-debt",
+    "technical-writing",
+    "unslop",
+    "show-me-your-work"
+  ],
+  "per_repo": {
+    "carr-system": {
+      "origin_unpushed": 231,
+      "already_remote": 175,
+      "uncommitted_untouched": 33,
+      "archived": 13,
+      "failures": 10
+    },
+    "doctorcre-app": {
+      "origin_unpushed": 129,
+      "already_remote": 100,
+      "uncommitted_untouched": 17,
+      "archived": 11,
+      "failures": 1
+    },
+    "software-factory": {
+      "origin_unpushed": 36,
+      "already_remote": 26,
+      "uncommitted_untouched": 8,
+      "archived": 2,
+      "failures": 0
+    }
+  },
+  "inventory_format": "JSON Lines; five phone-shaped numeric identifier fragments are redacted in the published views",
+  "inventory_files": [
+    "inventory.jsonl",
+    "unpushed.jsonl"
+  ],
+  "full_local_inventory_files": [
+    "out/worktree-archive-2026-10-19/inventory-full.jsonl",
+    "out/worktree-archive-2026-10-19/unpushed-full.jsonl"
+  ],
+  "redacted_numeric_identifier_occurrences": 5
+}

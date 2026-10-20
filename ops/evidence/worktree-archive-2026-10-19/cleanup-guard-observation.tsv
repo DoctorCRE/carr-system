@@ -1,0 +1,2 @@
+"observed_at"	"path"	"head"	"remote_tag"	"remote_peeled_head"	"branch_only_unpushed_count"	"guard_source"
+"2026-10-19T23:54:56.225641+00:00"	"/Users/booko/carr-system-fix-1477"	"87195615f7949435e6cb5efc98abb7572e625e5b"	"archive/worktree/practice-planner-extensions-2026-10-19"	"87195615f7949435e6cb5efc98abb7572e625e5b"	"15"	"lib/branch_retirement.py:483"
