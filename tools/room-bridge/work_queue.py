@@ -302,12 +302,13 @@ class WorkQueue:
             if row['stage'] != 'merging':
                 raise ValueError('merge executor can start only a merging-stage card')
             data = json.loads(row['data'])
-            inflight = self._merge_inflight(card, data)
-            owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
-            if owned != data.get('merge_inflight'):
-                data['merge_inflight'] = owned
-                self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
-                self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
+            if 'merge_inflight' in data or not self._merge_active(card):
+                inflight = self._merge_inflight(card, data)
+                owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
+                if owned != data.get('merge_inflight'):
+                    data['merge_inflight'] = owned
+                    self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+                    self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
             run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
             if run['started_at'] is None:
                 at = timestamp()
@@ -325,6 +326,8 @@ class WorkQueue:
             row = self._item(card)
             data = json.loads(row['data'])
             pin = {'repo': repo, 'number': pr, 'head': head}
+            if 'merge_inflight' not in data and self._merge_active(card):
+                raise QueueChanged('legacy_ownership')
             if row['claim'] or row['stage'] != 'merging' or pin in self._merge_inflight(card, data):
                 raise QueueChanged('pin advancement requires a merging-stage pin without an in-flight merge')
             if pin not in data['prs'] or pin in data.get('merge_receipts', []) or pin in data.get('merge_stopped', []):
@@ -345,7 +348,8 @@ class WorkQueue:
             pin = {'repo': repo, 'number': pr, 'head': head}
             if pin not in data['prs']:
                 raise ValueError('merge receipt does not match a pinned PR')
-            data['merge_inflight'] = [p for p in self._merge_inflight(card, data) if p != pin]
+            if 'merge_inflight' in data:
+                data['merge_inflight'] = [p for p in data['merge_inflight'] if p != pin]
             receipts = data.setdefault('merge_receipts', [])
             if merged and pin not in receipts:
                 receipts.append(pin)
