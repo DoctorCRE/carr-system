@@ -19,7 +19,7 @@
 # TWO GUARDS, because the cause and the class are different problems:
 #   PREFLIGHT catches the cause — refuse to ship anything that is not exactly
 #   origin/main (or an explicitly approved immutable ancestor), and refuse to
-#   ship dirty mcp-server/ or dealroom/ trees (this repo
+#   ship dirty mcp-server/ trees (this repo
 #   regularly holds another live session's uncommitted work; see rule 308ef1de).
 #   COUNT CHECK catches the class — compare the verb count about to ship against
 #   the count recorded by the last successful deploy, and refuse on a DROP.
@@ -548,18 +548,18 @@ fi
 # until the file is committed. It is a guard artifact and never ships to the
 # Worker. The postflight still tells you to commit it, because an uncommitted
 # baseline protects only this checkout.
-DIRTY_LIST="$(git -C "$SOURCE_ROOT" status --porcelain -- mcp-server/ dealroom/ \
+DIRTY_LIST="$(git -C "$SOURCE_ROOT" status --porcelain -- mcp-server/ \
   | grep -v 'mcp-server/node_modules' \
   | grep -v 'mcp-server/.last-deployed-verb-count' || true)"
 DIRTY="$(printf '%s' "$DIRTY_LIST" | grep -c . || true)"
 if [ "$DIRTY" != "0" ]; then
   printf '%s\n' "$DIRTY_LIST" >&2
-  fail "mcp-server/ or dealroom/ has $DIRTY uncommitted change(s) above.
+  fail "mcp-server/ has $DIRTY uncommitted change(s) above.
   Shipping them would put code or assets in production that are in no commit, and this
   repo regularly holds ANOTHER live session's work (rule 308ef1de). Commit
   them deliberately, or deploy from a clean worktree."
 fi
-echo "  OK  mcp-server/ and dealroom/ are clean"
+echo "  OK  mcp-server/ is clean"
 
 # ---------- preflight 2b: what this deploy will ATTACH to ----------
 # Every other preflight is about the ARTIFACT — right commit, clean tree, no verb
