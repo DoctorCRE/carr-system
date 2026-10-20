@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 import time
 import uuid
@@ -96,10 +97,11 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         receipt['status'] = 'staged'
         save(target / 'manifest.json', receipt)
         return receipt
-    except BudgetExhausted:
-        if receipt is not None:
+    except (TimeoutError, subprocess.TimeoutExpired) as exc:
+        if receipt is not None and isinstance(exc, BudgetExhausted):
             save(target / 'manifest.json', {**receipt, 'status': 'verified_no_effect'})
-        return {**keep('cleanup time budget exhausted before move'), 'budget_exhausted': True}
+        return {**result, 'status': 'deferred' if receipt is not None and not isinstance(exc, BudgetExhausted) else 'kept',
+                'reason': 'cleanup evidence or move verification timed out', 'budget_exhausted': True}
     except Exception as exc:
         return {**keep('evidence or staging failed'), 'error': type(exc).__name__}
 
@@ -222,6 +224,19 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         report = {'schema': 'machine-cleanup/v1', 'at': now, 'status': 'running', 'dry_run': dry_run,
                   'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': [], 'deferred': [],
                   'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0, 'budget_exhausted': False}
+        def finish():
+            report['budget_exhausted'] |= time.monotonic() >= deadline
+            if report['budget_exhausted']:
+                report['deferred'].append({'kind': 'sweep', 'reason': 'cleanup budget exhausted; resume from saved cursor',
+                                           'cursor': dict(cursor)})
+            report['status'] = 'failed' if report['errors'] else 'deferred' if report['deferred'] else 'completed'
+            if report['status'] == 'completed' and not dry_run:
+                report['last_success_at'] = now
+            save(cursor_path, cursor)
+            save(receipt_path, report)
+            append(root / 'out/machine-cleanup-runs.jsonl', {k: v for k, v in report.items() if k not in {'removed', 'kept'}})
+            return report
+
         pending = previous.get('pending')
         recovered = None
         if pending:
@@ -230,7 +245,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 kind = pending['kind']
                 if kind == 'job_clone':
                     recovered = recover_clone(pending['path'], deadline=lambda: time.monotonic() >= deadline)
-                    cursor['clone'] = Path(pending['path']).name
+                    if recovered and recovered['status'] == 'staged':
+                        cursor['clone'] = Path(pending['path']).name
                 elif kind == 'test_temp':
                     sys.path.append(str(Path(__file__).resolve().parents[1] / 'tools'))
                     from storage_hygiene import recover_test_temp
@@ -252,9 +268,8 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 append(root / 'out/machine-cleanup-recovery.jsonl',
                        {'previous': previous, 'resolution': recovered, 'at': now})
             except BudgetExhausted:
-                report.update(status='completed', budget_exhausted=True, pending=pending)
-                save(receipt_path, report)
-                return report
+                report.update(budget_exhausted=True, pending=pending)
+                return finish()
             except Exception as exc:
                 error = {'kind': pending.get('kind'), 'error': type(exc).__name__, 'reason': str(exc)}
                 errors = previous.get('errors', [])
@@ -266,10 +281,12 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         def record(row):
             if row.get('kind') == 'test_temp' and row.get('status') == 'staged':
                 report['temp_staged_allocated_bytes'] += row['allocated_bytes']
-            report['removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept'].append(row)
+            collection = ('deferred' if row.get('status') == 'deferred' else
+                          'removed' if row.get('status') in {'staged', 'archived', 'removed'} else 'kept')
+            report[collection].append(row)
             if row.get('error'):
                 report['errors'].append({'kind': row['kind'], 'error': row['error']})
-            if not row.get('error'):
+            if not row.get('error') and row.get('status') != 'deferred':
                 report.pop('pending', None)
             save(receipt_path, report)
             save(cursor_path, cursor)
@@ -353,6 +370,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
             if row.get('error') or row.get('budget_exhausted'):
                 break
         else:
+            report['budget_exhausted'] |= len(candidates) == policy['max_items']
             if len(candidates) < policy['max_items'] and not report['budget_exhausted']:
                 cursor.pop('clone', None)
                 save(cursor_path, cursor)
@@ -405,10 +423,4 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     else:
                         cursor['thread_offset'] = stream.tell()
                         save(cursor_path, cursor)
-        report['status'] = 'failed' if report['errors'] else 'deferred' if report['deferred'] else 'completed'
-        report['budget_exhausted'] |= time.monotonic() >= deadline
-        if report['status'] == 'completed' and not dry_run:
-            report['last_success_at'] = now
-        save(receipt_path, report)
-        append(root / 'out/machine-cleanup-runs.jsonl', {k: v for k, v in report.items() if k not in {'removed', 'kept'}})
-        return report
+        return finish()
