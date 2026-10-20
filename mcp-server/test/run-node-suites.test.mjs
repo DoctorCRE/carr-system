@@ -29,3 +29,13 @@ test("private PostgreSQL clusters run alone without dropping or duplicating suit
   for (const file of postgres) assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
   assert.deepEqual(batches.flat().sort(), files.sort());
 });
+
+test("browser suites run alone even when their filenames do not say browser", () => {
+  const files = ["workspace-command-center-browser.test.mjs", "chrome-launch.test.mjs",
+    "shared-oauth.test.mjs", "chromium-binary.test.mjs", "ordinary.test.mjs"];
+  const batches = suiteBatches(files, ["shared-oauth.test.mjs", "chromium-binary.test.mjs"]);
+  for (const file of ["shared-oauth.test.mjs", "chromium-binary.test.mjs"]) {
+    assert.deepEqual(batches.find(batch => batch.includes(file)), [file]);
+  }
+  assert.deepEqual(batches.flat().sort(), files.sort());
+});

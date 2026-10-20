@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,12 +43,23 @@ def verdict(jobs, groups):
 
 def hosted_verdict():
     repo, run_id = os.environ['GITHUB_REPOSITORY'], os.environ['GITHUB_RUN_ID']
-    # latest retains successful jobs when only one failed job is rerun.
-    raw = subprocess.run(['gh', 'api', '--paginate', '--slurp',
-        f'repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100'],
-        capture_output=True, text=True, timeout=60, check=True)
-    jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
-    rc, lines = verdict(jobs, class_groups())
+    run_attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+    groups = class_groups()
+    # The jobs API can lag needs.classes. Leave a minute for checkout and
+    # evidence upload within the checks job's five-minute timeout.
+    deadline = time.monotonic() + 240
+    while True:
+        raw = subprocess.run(['gh', 'api', '--paginate', '--slurp',
+            f'repos/{repo}/actions/runs/{run_id}/attempts/{run_attempt}/jobs?per_page=100'],
+            capture_output=True, text=True,
+            timeout=min(15, max(0.001, deadline - time.monotonic())), check=True)
+        jobs = [job for page in json.loads(raw.stdout) for job in page['jobs']]
+        rc, lines = verdict(jobs, groups)
+        if (rc == 0 or deadline - time.monotonic() <= 5 or any(
+                not line.endswith((': PASSED', ': MISSING', ': INCOMPLETE')) for line in lines)):
+            break
+        print('Class job conclusions still settling; retrying in 5 seconds')
+        time.sleep(5)
     print('\n'.join(lines))
     with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
         summary.write('Class job conclusions:\n\n' + '\n'.join('- ' + line for line in lines) + '\n')
@@ -56,7 +68,9 @@ def hosted_verdict():
 
 def contract_digest(root=ROOT):
     digest = hashlib.sha256()
-    for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'requirements.lock',
+    for name in ('.github/workflows/ci.yml', 'ops/ci.sh', 'ops/ci-unit.py', 'ops/node_test_summary.py',
+                 'ops/ci-node-file.mjs',
+                 'ops/ci-quarantine.py', 'requirements.lock',
                  'mcp-server/package-lock.json', '.nvmrc', '.python-version'):
         digest.update(name.encode() + b'\0' + (root / name).read_bytes() + b'\0')
     return digest.hexdigest()

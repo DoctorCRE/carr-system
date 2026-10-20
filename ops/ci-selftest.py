@@ -140,7 +140,9 @@ def run(args, env=None, shell_cmd=None, timeout=600):
     if env:
         e.update(env)
     cmd = shell_cmd if shell_cmd else [str(CI), *args]
-    p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
+    with tempfile.TemporaryDirectory(prefix="carr-ci-test-", dir="/tmp") as directory:
+        e.update(TMPDIR=directory, TMP=directory, TEMP=directory)
+        p = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO, env=e, timeout=timeout)
     return p.returncode, ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
 
 def test_freshness_requires_main_without_a_second_config_checker():
@@ -149,6 +151,7 @@ def test_freshness_requires_main_without_a_second_config_checker():
         (root / "ops/config").mkdir(parents=True)
         (root / "ops/ci.sh").write_bytes(CI.read_bytes())
         shutil.copy2(REPO / "ops/ci-quarantine.py", root / "ops/ci-quarantine.py")
+        shutil.copy2(REPO / "ops/node_test_summary.py", root / "ops/node_test_summary.py")
         (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
         (root / "ops/config/ci-check-scope.json").write_text('{}')
         env = fixture_env()
@@ -419,6 +422,21 @@ def _test_shaped_files(tree=None):
                 found.add(pathlib.Path(root, name)
                           .relative_to(tree).as_posix())
     return found
+
+def test_each_class_runs_in_exactly_one_hosted_group():
+    from collections import Counter
+    listed = subprocess.run(["bash", str(CI), "--list"], cwd=REPO,
+                            capture_output=True, text=True, check=True).stdout
+    classes = set(re.findall(r"^  ([a-z]+)\s", listed, re.MULTILINE))
+    workflow = (REPO / ".github/workflows/ci.yml").read_text()
+    block = workflow.split("        classes:\n", 1)[1].split("    #", 1)[0]
+    groups = re.findall(r'^          - "([a-z ]+)"$', block, re.MULTILINE)
+    membership = Counter(name for group in groups for name in group.split())
+    check("every hosted class runs in exactly one group",
+          bool(classes) and set(membership) == classes
+          and all(count == 1 for count in membership.values()),
+          f"classes={sorted(classes)}, membership={dict(membership)}")
+
 
 def test_every_test_file_in_the_tree_is_collected():
     ci = (REPO / "ops" / "ci.sh").read_text()
@@ -885,7 +903,12 @@ def test_hosted_zsh_cache_requires_authenticated_bytes():
             "timeout": '#!/bin/sh\nshift 2\nexec "$@"\n',
             "sudo": '#!/bin/sh\nexec "$@"\n',
             "apt-cache": "#!" + sys.executable + "\n" + '''
-import hashlib, os, pathlib, sys
+import hashlib, os, pathlib, sys, time
+mode = os.environ["CI_CACHE_MODE"]
+downloaded = pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()
+if ((mode == "metadata-timeout" and not downloaded)
+        or (mode == "install-metadata-timeout" and downloaded)):
+    time.sleep(31)
 if (os.environ["CI_CACHE_MODE"] == "missing-metadata"
         and not pathlib.Path(os.environ["CI_CACHE_LOG"]).exists()):
     sys.exit(0)
@@ -929,23 +952,27 @@ log.write_text(json.dumps(state))
             path.write_text(source)
             path.chmod(0o755)
         for mode in ("valid", "same-size-tampered", "other-version", "old-version-filename",
-                     "missing-metadata", "metadata-error", "replace-after-verification",
+                     "missing-metadata", "metadata-error", "metadata-timeout",
+                     "install-metadata-timeout", "replace-after-verification",
                      "replace-during-retries", "replace-downloaded-archive"):
             archives = fixture / mode
             archives.mkdir()
             archive = archives / ("zsh_2_amd64.deb" if mode == "old-version-filename" else "zsh_1_amd64.deb")
             restored = (b"trusted-zsh-package" if mode in ("valid", "old-version-filename",
                         "replace-after-verification", "replace-during-retries",
-                        "replace-downloaded-archive") else
+                        "replace-downloaded-archive", "metadata-timeout",
+                        "install-metadata-timeout") else
                         b"older-zsh-package!!" if mode == "other-version" else b"altered-zsh-package")
             archive.write_bytes(restored)
+            if mode == "metadata-timeout":
+                (archives / "zsh-common_1_all.deb").write_bytes(b"cached-zsh-common")
             log = fixture / (mode + ".json")
             env = scrubbed_env()
             env.update(PATH=str(fixture) + os.pathsep + os.environ["PATH"],
                        ZSH_ARCHIVE_DIR=str(archives), ZSH_RETRY_BACKOFF="0",
                        CI_CACHE_MODE=mode, CI_CACHE_LOG=str(log))
             ran = subprocess.run(["bash", "-c", installer], cwd=fixture, env=env,
-                                 capture_output=True, text=True, timeout=10)
+                                 capture_output=True, text=True, timeout=40)
             state = json.loads(log.read_text()) if log.exists() else {}
             if mode == "metadata-error":
                 check("zsh cache verification error stops before apt can consume archives",
@@ -953,6 +980,10 @@ log.write_text(json.dumps(state))
                 continue
             if mode == "replace-downloaded-archive":
                 check("zsh refuses a same-size replacement of downloaded bytes before install",
+                      ran.returncode != 0 and "installed" not in state, state)
+                continue
+            if mode == "install-metadata-timeout":
+                check("zsh refuses downloaded bytes when their metadata verification times out",
                       ran.returncode != 0 and "installed" not in state, state)
                 continue
             check(f"zsh cache {mode} installs authenticated package bytes",
@@ -975,11 +1006,16 @@ log.write_text(json.dumps(state))
                 quarantined = archives / "quarantine" / archive.name
                 check(f"zsh cache {mode} preserves rejected bytes in quarantine",
                       quarantined.is_file() and quarantined.read_bytes() == restored)
+                if mode == "metadata-timeout":
+                    remaining = archives / "quarantine/zsh-common_1_all.deb"
+                    check("zsh quarantines remaining cached archives within the verification deadline",
+                          remaining.is_file() and remaining.read_bytes() == b"cached-zsh-common")
 
 
 def main(argv=None):
     if (sys.argv[1:] if argv is None else argv) == ["--collection-only"]:
         test_every_test_file_in_the_tree_is_collected()
+        test_each_class_runs_in_exactly_one_hosted_group()
         return 1 if any(not ok for _, ok, _ in RESULTS) else 0
     for fn in (test_freshness_requires_main_without_a_second_config_checker,
                test_no_green_without_running,
@@ -991,6 +1027,7 @@ def main(argv=None):
                test_types_class_catches_a_seeded_type_error,
                test_no_env_claims_a_production_hostname,
                test_every_test_file_in_the_tree_is_collected,
+               test_each_class_runs_in_exactly_one_hosted_group,
                test_the_walk_prunes_named_roots_only,
                test_a_failing_gates_output_is_printed_whole_when_it_is_short,
                test_a_long_failing_gate_log_is_tailed_and_still_redacted,

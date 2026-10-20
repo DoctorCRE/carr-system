@@ -89391,7 +89391,8 @@ CREATE VIEW public.v_deal_board AS
     d.notes_path,
     d.invoiced_on,
     d.closed_on,
-    d.lane
+    d.lane,
+    d.client_id
    FROM ((((((public.deal d
      JOIN public.client c ON ((c.id = d.client_id)))
      JOIN public.party pc ON ((pc.id = c.party_id)))
@@ -122862,6 +122863,9 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0904_one_step_gate_rule_approval.sql	905efb2e63c9c78be92f524634c1f829c3c71b8bc720f473d13d1bf2fe6dfc19	2026-10-18 09:49:15.78479+00
 0906_dot_database_design.sql	d7844153bf7d6da0d33cc358d9c3c5e0b4dc73b752da991c8a8026435ab2a128	2026-10-18 06:47:49.612561+00
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
+0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
+0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
+0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 \.
 
 
@@ -123377,7 +123381,6 @@ insert into ops.enforcement_control_catalog (control_key,implementation_ref,test
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('executor_tier','hooks/executor-tier-gate.py','external:no dedicated suite yet','deny_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('gate_integrity','hooks/gate-integrity.py','command:python3 hooks/gate-integrity.py --selftest','stop_gate','f',NULL::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('github-burst-guard','hooks/github-burst-guard.py','ops/github-burst-guard-selftest.py','deny_gate','t','2026-10-13T11:50:55.570087Z'::timestamptz,'2026-10-13T11:50:55.570087Z'::timestamptz) on conflict (control_key) do nothing;
-insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('glanceable_lead','ops/glanceable-lead-check.py','ops/glanceable-lead-selftest.py','schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('human_authority_runtime','migrations/0161_control_plane_authority_boundary.sql; mcp-server/src/mcp.js','mcp-server/test/control-plane-authority-boundary.test.mjs; ops/control-plane-authority-runtime-preflight-selftest.py','transactional_schema','t','2026-08-20T15:09:01.704306Z'::timestamptz,'2026-08-20T15:09:01.704306Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('index_upkeep','ops/githooks/index-upkeep-check.py; ops/githooks/pre-commit','ops/path-index-hygiene-selftest.py','deny_gate','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;
 insert into ops.enforcement_control_catalog (control_key,implementation_ref,test_ref,enforcement_class,installed,verified_at,updated_at) values ('lead_client_pair','mcp-server/src/tools.js','mcp-server/test/confirm-merge-lead-client.test.mjs','transactional_schema','t','2026-08-22T10:55:23.365715Z'::timestamptz,'2026-08-22T10:55:23.365715Z'::timestamptz) on conflict (control_key) do nothing;

@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHROME_STOP_TIMEOUT_MS, launchChrome, processTreeStopsWithin } from "./helpers/chrome-launch.mjs";
+import { CHROME_STOP_TIMEOUT_MS, launchChrome, launchTestChrome, processTreeStopsWithin } from "./helpers/chrome-launch.mjs";
 
 const fixture = new URL("./fixtures/chrome-launch-fixture.mjs", import.meta.url);
 const nativeKill = process.kill.bind(process);
@@ -21,7 +22,10 @@ const realChromeSkipReason = process.platform !== "darwin"
     : process.env.CODEX_SANDBOX === "seatbelt"
       ? "Codex seatbelt aborts Chrome before DevTools"
       : false;
-const codeSignCloneDirectory = path.resolve(tmpdir(), "..", "X", "com.google.Chrome.code_sign_clone");
+const systemTemp = process.platform === "darwin"
+  ? execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim()
+  : tmpdir();
+const codeSignCloneDirectory = path.resolve(systemTemp, "..", "X", "com.google.Chrome.code_sign_clone");
 function fakeChrome(t, scenarios, beforeSpawn = () => {}) {
   const calls = [];
   t.after(async () => {
@@ -58,6 +62,11 @@ async function directoryEntryCount(directory) {
   catch (error) { if (error.code === "ENOENT") return 0; throw error; }
 }
 
+test("code-sign clone root ignores the suite TMPDIR", { skip: process.platform !== "darwin" }, () => {
+  const userTemp = execFileSync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], { encoding: "utf8" }).trim();
+  assert.equal(codeSignCloneDirectory, path.resolve(userTemp, "..", "X", "com.google.Chrome.code_sign_clone"));
+});
+
 test("code-sign clone counting treats an absent directory as empty", async (t) => {
   const parent = await mkdtemp(path.join(tmpdir(), "chrome-clone-count-"));
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -90,6 +99,24 @@ test("graceful Chrome shutdown does not grow the macOS code-sign clone directory
   }
   assert.ok(after <= before, `Chrome code-sign clones grew ${before} -> ${after}`);
 });
+
+for (const scenario of ["temp-artifact", "temp-artifact-exit"]) {
+  test(`Chrome owns temporary downloads across close and startup failure (${scenario})`, async (t) => {
+    const parent = await mkdtemp(path.join(tmpdir(), "chrome-download-test-"));
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const previousTmp = process.env.TMPDIR;
+    process.env.TMPDIR = parent;
+    t.after(() => {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+    });
+    const fake = fakeChrome(t, [scenario]);
+    const launched = launchChrome("fake-chrome", { spawnChrome: fake.spawnChrome, timeoutMs: 1500 });
+    if (scenario.endsWith("-exit")) await assert.rejects(launched, /Chrome failed to start/);
+    else await (await launched).close();
+    assert.deepEqual(await readdir(parent), []);
+  });
+}
 
 test("Chrome requests a real CDP shutdown before sending process signals", async (t) => {
   const fake = fakeChrome(t, ["ready"]);
@@ -389,4 +416,33 @@ test("fake Chrome after hooks leave no fixture process alive", async (t) => {
   });
   assert.ok(pids.every((pid) => !processAlive(pid)), `fixture processes survived: ${pids.filter(processAlive).join(", ")}`);
   assert.ok(profiles.every((profile) => !existsSync(profile)), "fake Chrome profiles survive after-hook cleanup");
+});
+
+
+test("test-owned Chrome closes after an assertion fails without caller cleanup", { timeout: 10000 }, async () => {
+  const source = `
+    import test from 'node:test';
+    import { spawn } from 'node:child_process';
+    import { launchTestChrome } from ${JSON.stringify(new URL('./helpers/chrome-launch.mjs', import.meta.url).href)};
+    test('intentional failure', async t => {
+      await launchTestChrome(t, 'fake-chrome', { timeoutMs: 1500, spawnChrome(binary, args, options) {
+        const profile = args.find(arg => arg.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
+        const child = spawn(process.execPath, [${JSON.stringify(fixture.pathname)}, profile, 'ready'], options);
+        console.log('browser-pid=' + child.pid);
+        return child;
+      }});
+      throw new Error('intentional teardown probe');
+    });`;
+  let result;
+  try { await promisify(execFile)(process.execPath, ["--input-type=module", "--eval", source], { timeout: 5000 }); }
+  catch (error) { result = error; }
+  const pid = Number(result?.stdout?.match(/browser-pid=(\d+)/)?.[1]);
+  try {
+    assert.equal(result?.code, 1, result?.stdout);
+    assert.match(result.stdout, /intentional teardown probe/);
+    assert.ok(pid > 0, result.stdout);
+    assert.equal(processAlive(pid), false);
+  } finally {
+    if (pid > 0 && processAlive(pid)) nativeKill(process.platform === "win32" ? pid : -pid, "SIGKILL");
+  }
 });

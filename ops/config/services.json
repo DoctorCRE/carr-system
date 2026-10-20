@@ -115,7 +115,7 @@
     {
       "key": "flash-idle-stop",
       "name": "Flash idle shutdown",
-      "purpose": "Every five minutes, stop and disable ds4-server and its Model Room desk after fifteen minutes without a request. Shared request locks protect in-flight work.",
+      "purpose": "Every five minutes, stop and disable Flash after its human grant expires or fifteen idle minutes. Expiry ends in-flight work.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "joe",
@@ -249,26 +249,6 @@
       ]
     },
     {
-      "key": "rules-refresh",
-      "name": "Taught-rule refresh",
-      "purpose": "Re-renders the compiled rule files Dell's sessions boot from.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "bin/refresh-rules.sh",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/com.carr.rules-refresh.plist",
-          "runs_on": "primary",
-          "expected_cadence_seconds": 39600,
-          "cadence_grace_seconds": 3600,
-          "notes": "Hourly 07:00-20:00 by fourteen calendar entries, so the real worst-case gap is the eleven hours overnight \u2014 not one hour."
-        }
-      ]
-    },
-    {
       "key": "local-briefs",
       "name": "Local review queue maintenance",
       "purpose": "Refreshes the review queue every business morning; legacy brief-pack files are explicit recovery only.",
@@ -389,8 +369,8 @@
     },
     {
       "key": "storage-hygiene",
-      "name": "Studio storage hygiene",
-      "purpose": "Daily bounded cleanup of known stale Chrome code-sign clones. Allowlisted CARR scratch and unlocked gate-replay residue require explicit command-line opt-in. Reports unknown paths without deleting them and opens a record-layer investigation on findings or a Data-volume threshold breach.",
+      "name": "Automatic machine cleanup",
+      "purpose": "Hourly bounded cleanup of clean idle worktrees, finished Codex job clones, old completed desk threads, and stale Chrome clones. Keeps dirty, unpushed, live, and open-PR work. Writes local JSON receipts and reports health through the orchestrator watchdog.",
       "family": "Local Mac edge",
       "criticality": "medium",
       "owner_actor": "orchestrator",
@@ -401,9 +381,9 @@
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.storage-hygiene.plist",
           "runs_on": "every",
-          "expected_cadence_seconds": 86400,
-          "cadence_grace_seconds": 172800,
-          "notes": "Daily at 04:10 local after nightly record-layer work. Source ships uninstalled; activation and first watched run are separate machine effects."
+          "expected_cadence_seconds": 3600,
+          "cadence_grace_seconds": 7200,
+          "notes": "Every machine. StartCalendarInterval comes from the shared renderer. Job watchdog enforces a five-minute process-group budget. Source only; no machine installation in this change."
         }
       ]
     },
@@ -1163,42 +1143,6 @@
           "deploy_mechanism": "ops/launchd/local.carr-progress-board.plist",
           "runs_on": "primary",
           "notes": "Canonical checkout and out/boards are preserved. Only the active host publishes. Source declaration only; no service import or activation performed."
-        }
-      ]
-    },
-    {
-      "key": "ds4-flash-next",
-      "name": "DS4 model serving",
-      "purpose": "External model runtime and weights must be provisioned and fit target memory before takeover.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "~/src/ds4-main/ds4-server",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/local.ds4-flash-next.plist",
-          "runs_on": "primary",
-          "notes": "External model runtime and weights must be provisioned and fit target memory before takeover. Source declaration only; no service import or activation performed."
-        }
-      ]
-    },
-    {
-      "key": "flash-desk",
-      "name": "Flash desk model runtime",
-      "purpose": "External runtime must be provisioned and verified; guarded process group retains one leader.",
-      "family": "Local Mac edge",
-      "criticality": "high",
-      "owner_actor": "joe",
-      "repo_path": "~/.local/bin/flash-desk-start",
-      "runtime": "launchd",
-      "environments": [
-        {
-          "environment": "production",
-          "deploy_mechanism": "ops/launchd/local.flash-desk.plist",
-          "runs_on": "primary",
-          "notes": "External runtime must be provisioned and verified; guarded process group retains one leader. Source declaration only; no service import or activation performed."
         }
       ]
     }

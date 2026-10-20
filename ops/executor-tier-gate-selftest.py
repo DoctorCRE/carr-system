@@ -106,15 +106,9 @@ r = run({**brief, "subagent_type": "fork"}, "haiku:0.99")
 check("forks stay exempt", r is None, r)
 
 # A routing pin exempts an in-process spawn only when the pin actually names
-# that model. The merge_review pin preserves the Opus review policy.
+# that model. Matching and desk-only policy shapes are exercised below.
 pinned = {**brief, "model": "opus", "prompt": "executor: opus per routing pin merge_review\nReview PR 1 adversarially."}
-r = run(pinned, "sonnet:0.84")
-check("the Opus merge-review pin exempts its matching model", r is None, r)
-
 routed = {**brief, "model": "opus", "prompt": "executor: opus per routing dispatch\nChange the parser."}
-r = run(routed, "sonnet:0.84")
-check("a spawn the routing dispatch chose gets no cheaper-tier advice", r is None, r)
-
 made_up = {**brief, "model": "opus", "prompt": "executor: opus per routing pin because_i_said_so\nSweep grants."}
 r = run(made_up, "sonnet:0.84")
 check("an unknown pin name does not silence the advice",
@@ -142,8 +136,6 @@ try:
 finally:
     os.unlink(path)
 
-print(f"executor-tier-gate-selftest: all {PASS} checks passed")
-
 # Policy changes vary the pin contract, not the rest of the executor suite.
 # Exercise the actual hook against the loaded policy and both supported target
 # shapes. Test copies keep installed policy untouched.
@@ -169,4 +161,11 @@ for target_model in ("loaded", "opus", None):
         else:
             check("an Opus spawn cannot claim a different merge-review target as an exemption",
                   r and "EXECUTOR ADVICE" in r.get("additionalContext", ""), r)
-print("executor-tier-gate-selftest: loaded and both merge-review policy shapes passed")
+        r = run(routed, "sonnet:0.84", hook=str(copied_hook))
+        if any(target.get("subagent_model") == routed["model"]
+               for target in candidate["dispatch_targets"].values() if isinstance(target, dict)):
+            check("a spawn matching a routing dispatch model gets no cheaper-tier advice", r is None, r)
+        else:
+            check("an Opus spawn cannot claim a desk-only routing dispatch as an exemption",
+                  r and "EXECUTOR ADVICE" in r.get("additionalContext", ""), r)
+print(f"executor-tier-gate-selftest: all {PASS} checks passed; loaded and both policy shapes passed")

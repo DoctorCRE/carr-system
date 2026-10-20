@@ -133,15 +133,6 @@
       "enabled": true
     },
     {
-      "label": "com.carr.rules-refresh",
-      "source": "ops/launchd/com.carr.rules-refresh.plist",
-      "credentials": [
-        "~/.config/carr/db.env"
-      ],
-      "state": [],
-      "enabled": true
-    },
-    {
       "label": "com.carr.tailscale-up",
       "source": "ops/launchd/com.carr.tailscale-up.plist",
       "credentials": [],
@@ -162,14 +153,14 @@
       "source": "ops/launchd/local.ds4-flash-next.plist",
       "credentials": [],
       "state": [],
-      "enabled": true
+      "enabled": false
     },
     {
       "label": "local.flash-desk",
       "source": "ops/launchd/local.flash-desk.plist",
       "credentials": [],
       "state": [],
-      "enabled": true
+      "enabled": false
     }
   ],
   "manual_roles": [

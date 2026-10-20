@@ -37,6 +37,7 @@ import os
 import subprocess
 import sys
 import socket
+import tempfile
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -190,41 +191,33 @@ def isolated_ci_database(base_dsn: str) -> Iterator[str]:
         yield dsn
 
 
-def _cases(dsn: str) -> None:
+def _cases(dsn: str, fixture_root: Path) -> None:
     provision_authority_principal(dsn)
     record(dsn, "sync-registry")
     # Candidate intake verifies every environment before opening the database,
     # so every abandonment fixture uses a real staging manifest rather than a
-    # synthetic shape that the release door must refuse. Each fixture uses a
-    # distinct repository revision so their immutable source evidence differs.
-    staging_manifests: dict[str, Path] = {}
-    staging_error = ""
+    # synthetic shape that the release door must refuse. Distinct ledger rows
+    # can share verified source; abandonment does not require valid ancestors.
     fixture_keys = ("rel-abandon-a", "rel-abandon-b", "rel-malformed", "rel-successor")
-    for offset, key in enumerate(fixture_keys, start=1):
-        staging_built = subprocess.run(
-            [sys.executable, str(REPO / "tools" / "release-manifest.py"),
-             "build", "--sha", f"HEAD~{offset}", "--environment", "staging",
-             "--performance-budget-ref", "runbook:worker-performance-v1",
-             "--performance-budget-ms", "1500",
-             "--recovery-strategy", "rollback",
-             "--rollback-plan-ref", "runbook:rollback-worker-v1"],
-            cwd=REPO, capture_output=True, text=True, timeout=300)
-        if staging_built.returncode != 0:
-            staging_error = (staging_built.stderr or staging_built.stdout).strip()[:160]
-            break
-        manifest_path = (Path(os.environ.get("TMPDIR", "/tmp")) /
-                         f"abandon-manifest-{offset}.json")
-        manifest_path.write_text(staging_built.stdout)
-        staging_manifests[key] = manifest_path
-    check("0. canonical staging source manifests build on distinct revisions",
-          not staging_error and len(staging_manifests) == len(fixture_keys),
-          staging_error)
-    if staging_error or len(staging_manifests) != len(fixture_keys):
+    staging_built = subprocess.run(
+        [sys.executable, str(REPO / "tools" / "release-manifest.py"),
+         "build", "--sha", "HEAD", "--environment", "staging",
+         "--performance-budget-ref", "runbook:worker-performance-v1",
+         "--performance-budget-ms", "1500",
+         "--recovery-strategy", "rollback",
+         "--rollback-plan-ref", "runbook:rollback-worker-v1"],
+        cwd=REPO, capture_output=True, text=True, timeout=300)
+    check("0. canonical staging source manifest builds",
+          staging_built.returncode == 0,
+          (staging_built.stderr or staging_built.stdout).strip()[:160])
+    if staging_built.returncode != 0:
         return
+    staging_mpath = fixture_root / "abandon-staging-manifest.json"
+    staging_mpath.write_text(staging_built.stdout)
 
     for k in fixture_keys:
         record(dsn, "release", "candidate", "--key", k,
-               "--manifest", str(staging_manifests[k]),
+               "--manifest", str(staging_mpath),
                "--service", "carr-mcp", "--environment", "staging",
                "--test-evidence", "ref", "--security-evidence", "ref")
     # Production candidate intake now rebuilds the manifest before it opens a
@@ -243,8 +236,8 @@ def _cases(dsn: str) -> None:
           built.returncode == 0, (built.stderr or built.stdout).strip()[:160])
     if built.returncode != 0:
         return
-    production_mpath = Path(os.environ.get("TMPDIR", "/tmp")) / "abandon-production-manifest.json"
-    source_mpath = Path(os.environ.get("TMPDIR", "/tmp")) / "abandon-production-source.json"
+    production_mpath = fixture_root / "abandon-production-manifest.json"
+    source_mpath = fixture_root / "abandon-production-source.json"
     source_mpath.write_text(built.stdout)
     bound = subprocess.run(
         [sys.executable, str(REPO / "tools" / "release-manifest.py"),
@@ -386,7 +379,7 @@ def _cases(dsn: str) -> None:
 
 
 
-def run_cases(dsn: str) -> None:
+def run_cases(dsn: str, fixture_root: Path) -> None:
     """Run current release cases on the prepared pristine database."""
     mig = subprocess.run([sys.executable, str(REPO / "tools" / "migrate.py"),
                           "--apply", "--yes"], capture_output=True, text=True,
@@ -397,7 +390,7 @@ def run_cases(dsn: str) -> None:
           if (mig.stderr or mig.stdout) else "")
     if mig.returncode != 0:
         return
-    _cases(dsn)
+    _cases(dsn, fixture_root)
 
 
 def clone_fixture_database(dsn: str, database: str) -> str:
@@ -504,14 +497,15 @@ def main() -> int:
     if ci_dsn:
         print("release-abandon-selftest: using an owned disposable PostgreSQL cluster")
         try:
-            with isolated_ci_database(ci_dsn) as isolated_dsn:
+            with isolated_ci_database(ci_dsn) as isolated_dsn, tempfile.TemporaryDirectory(
+                    prefix="abandon-manifests-") as directory:
                 loaded = psql(isolated_dsn, "-f", str(REPO / "db" / "schema.sql"))
                 check("the pristine schema loads for both release fixtures", loaded.returncode == 0)
                 if loaded.returncode:
                     return 1
                 legacy_dsn = clone_fixture_database(isolated_dsn, "abandon_legacy")
                 legacy_approval_receipt_refusal(legacy_dsn)
-                run_cases(isolated_dsn)
+                run_cases(isolated_dsn, Path(directory))
         except Exception:
             print("release-abandon-selftest: disposable PostgreSQL fixture unavailable",
                   file=sys.stderr)

@@ -3,13 +3,15 @@
 // bindings only; measurements, conclusions, identities, time and pass/fail are
 // acquired by this process and cannot be supplied by its caller.
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import pg from "pg";
+import { launchChrome } from "../test/helpers/chrome-launch.mjs";
+import { findDisposableChromium } from "../test/helpers/chromium-binary.mjs";
 
 import { digest } from "../src/artifact-trust.js";
 import {
@@ -249,73 +251,13 @@ class Cdp {
   close() { this.ws.close(); }
 }
 
-async function waitFor(path, timeout = 10000) {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    try { return await readFile(path, "utf8"); } catch { await new Promise(ok => setTimeout(ok, 50)); }
-  }
-  throw new Error(`timed out waiting for ${path}`);
-}
-
-function waitForChildExit(child, timeout = 5000) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise(resolvePromise => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      child.off("exit", finish);
-      resolvePromise();
-    };
-    const timer = setTimeout(finish, timeout);
-    child.once("exit", finish);
-  });
-}
-
-export async function closeChromeProfile(chrome, profile, remove = rm) {
-  if (chrome.exitCode === null && chrome.signalCode === null) {
-    chrome.kill("SIGTERM");
-    await waitForChildExit(chrome);
-  }
-  if (chrome.exitCode === null && chrome.signalCode === null) {
-    chrome.kill("SIGKILL");
-    await waitForChildExit(chrome, 2000);
-  }
-  let last;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { await remove(profile, { recursive: true, force: true }); return; }
-    catch (error) {
-      last = error;
-      if (error?.code !== "ENOTEMPTY") throw error;
-      await new Promise(ok => setTimeout(ok, 100));
-    }
-  }
-  throw last;
-}
-
-function chromePath() {
-  const candidates = [process.env.CHROME_BIN,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/usr/bin/google-chrome", "/usr/bin/chromium"].filter(Boolean);
-  const selected = candidates.find(candidate => existsSync(candidate));
-  if (!selected) fail("installed_chrome_unavailable");
-  return selected;
-}
-
 async function chromeMeasurements(bindings, config, payload) {
-  const profile = await mkdtemp(join(tmpdir(), "wr95-chrome-"));
-  const chrome = spawn(chromePath(), ["--headless=new", "--disable-gpu", "--no-first-run",
-    "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"],
-  { stdio: ["ignore", "ignore", "ignore"] });
+  const executable = await findDisposableChromium();
+  if (!executable) fail("disposable_chrome_unavailable");
+  const browserProcess = await launchChrome(executable);
   let cdp;
   try {
-    const active = (await waitFor(join(profile, "DevToolsActivePort"))).trim().split(/\r?\n/);
-    const targets = await (await fetch(`http://127.0.0.1:${active[0]}/json/list`)).json();
-    const page = targets.find(row => row.type === "page");
-    if (!page?.webSocketDebuggerUrl) fail("chrome_target_unavailable");
-    cdp = new Cdp(page.webSocketDebuggerUrl); await cdp.open();
+    cdp = new Cdp(browserProcess.pageWsUrl); await cdp.open();
     await cdp.call("Page.enable"); await cdp.call("Network.enable");
     await cdp.call("Page.addScriptToEvaluateOnNewDocument", { source:
       "window.__wr95Lcp=0;new PerformanceObserver(l=>{for(const e of l.getEntries())window.__wr95Lcp=Math.max(window.__wr95Lcp,e.startTime)}).observe({type:'largest-contentful-paint',buffered:true});" });
@@ -349,7 +291,7 @@ async function chromeMeasurements(bindings, config, payload) {
     return { browser, measured, provenance };
   } finally {
     try { cdp?.close(); } catch {}
-    await closeChromeProfile(chrome, profile);
+    await browserProcess.close();
   }
 }
 

@@ -34,6 +34,10 @@ import subprocess
 import sys
 import tempfile
 
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 SPOOL_TOOL = os.path.join(REPO, "tools", "ops-spool.py")
 
@@ -50,7 +54,7 @@ def check(label: str, cond: bool, detail: str = "") -> bool:
 
 
 def fresh_spool() -> str:
-    return os.path.join(tempfile.mkdtemp(prefix="carr-spool-selftest-"),
+    return os.path.join(temporary_directory(prefix="carr-spool-selftest-"),
                         "spool.sqlite3")
 
 

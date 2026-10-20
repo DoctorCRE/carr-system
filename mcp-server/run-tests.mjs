@@ -1,4 +1,4 @@
-import { readdir, mkdir, writeFile } from "node:fs/promises";
+import { readdir, readFile, mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,10 +13,11 @@ const PRIVATE_POSTGRES_SUITES = new Set([
   "self-closing-records-sql.test.mjs",
 ]);
 
-export function suiteBatches(files) {
+export function suiteBatches(files, browserFiles = []) {
   const suites = files.filter((file) => /\.test\.(?:js|mjs)$/.test(file)).sort();
-  const browsers = suites.filter((file) => /-browser\.test\.(?:js|mjs)$/.test(file));
-  const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file));
+  const browsers = suites.filter((file) => file !== LAUNCH_REGRESSIONS
+    && (browserFiles.includes(file) || /-browser\.test\.(?:js|mjs)$/.test(file)));
+  const postgres = suites.filter((file) => PRIVATE_POSTGRES_SUITES.has(file) && !browsers.includes(file));
   return [suites.filter((file) => file === LAUNCH_REGRESSIONS),
     ...browsers.map((file) => [file]),
     ...postgres.map((file) => [file]),
@@ -38,11 +39,18 @@ async function main() {
     child.once('close', (code) => code === 0 ? resolve(output) : reject(new Error('source identity unreadable')));
   });
   await writeFile(identity, snapshot);
+  // Chrome's cold first launch must not compete with the bulk MCP test pool.
+  // Keep the browser shim intact (its inventory test enforces all imports),
   // Run the timing-sensitive launch fixtures alone too, then run the rest
   // Private PostgreSQL clusters also run alone: parallel postmasters can
   // exhaust the host's shared-memory IDs even with unique database paths.
   // Keep the serial batches; the bulk pool gives each suite its own result.
-  for (const batch of suiteBatches(await readdir(path.join(ROOT, "test")))) {
+  const files = await readdir(path.join(ROOT, "test"));
+  const browserFiles = [];
+  for (const file of files.filter(file => /\.test\.(?:js|mjs)$/.test(file))) {
+    if ((await readFile(path.join(ROOT, "test", file), "utf8")).includes("chrome-launch.mjs")) browserFiles.push(file);
+  }
+  for (const batch of suiteBatches(files, browserFiles)) {
     if (!batch.length) continue;
     let cursor = 0;
     const workers = Math.min(batch.length, Number(process.env.CARR_CI_NODE_JOBS || 4));

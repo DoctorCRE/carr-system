@@ -9,6 +9,9 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
+
+from node_test_summary import test_counts
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / 'ops/config/ci-quarantine.json'
@@ -58,20 +61,34 @@ def ordinary_failure(code):
     return type(code) is int and 0 < code < 124 and code != 78
 
 
+def attempt(command, log):
+    with tempfile.TemporaryDirectory(prefix='carr-ci-test-', dir='/tmp') as directory:
+        environment = {**os.environ, 'TMPDIR': directory, 'TMP': directory, 'TEMP': directory,
+                       'CI': '1', 'NODE_DISABLE_COMPILE_CACHE': '1', 'NO_UPDATE_NOTIFIER': '1'}
+        with log.open('w') as output:
+            code = subprocess.run(command, env=environment, stdout=output, stderr=subprocess.STDOUT).returncode
+        with os.scandir(directory) as entries:
+            leaks = [entry.name for _, entry in zip(range(25), entries)]
+        if leaks:
+            with log.open('a') as output:
+                output.write('\nTest leaked temporary files: ' + ', '.join(leaks) + '\n')
+        return (125 if leaks else code), leaks, directory
+
+
 def run(args):
     entries = load_manifest(args.manifest)
     entry = entries.get(args.test)
     log = Path(args.log)
     log.parent.mkdir(parents=True, exist_ok=True)
     identity = json.loads(Path(args.identity_file).read_text()) if args.identity_file else source_identity(args.repo)
-    with log.open('w') as output:
-        first = subprocess.run(args.command, stdout=output, stderr=subprocess.STDOUT).returncode
-    status = 'passed' if first == 0 else 'failed'
+    first, leaks, temp_root = attempt(args.command, log)
+    status = 'temp-leak' if leaks else 'passed' if first == 0 else 'failed'
     effective = first
     rerun = None
     if ordinary_failure(first) and source_identity(args.repo) == identity:
-        with Path(str(log) + '.rerun.log').open('w') as output:
-            rerun = subprocess.run(args.command, stdout=output, stderr=subprocess.STDOUT).returncode
+        rerun, retry_leaks, retry_root = attempt(args.command, Path(str(log) + '.rerun.log'))
+        if retry_leaks:
+            status, leaks, temp_root = 'temp-leak', retry_leaks, retry_root
         if not ordinary_failure(rerun) and rerun != 0:
             # A configuration error on retry cannot turn the first failure into a skip.
             effective = first if rerun == 78 else rerun
@@ -85,6 +102,11 @@ def run(args):
         effective = 0
         print(f"QUARANTINED {args.test} · owner {entry['owner']} · loop {entry['loop']} · expires {entry['expires']}")
     receipt = {'version': 1, 'test': args.test, 'first_exit': first, 'rerun_exit': rerun, 'status': status, 'candidate': candidate, **identity}
+    if leaks:
+        receipt.update(temp_leaks=leaks, temp_root=temp_root)
+    counts = test_counts(log.read_text(errors='replace'))
+    if counts is not None:
+        receipt['test_counts'] = counts
     Path(str(log) + '.result.json').write_text(json.dumps(receipt) + '\n')
     print(PREFIX + json.dumps(receipt, separators=(',', ':')))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')

@@ -7,6 +7,7 @@ import plistlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -55,12 +56,12 @@ class StorageHygieneTests(unittest.TestCase):
         self.assertEqual([item.path for item in self.clone_only_plan().removable], [clone])
 
     @unittest.skipUnless(sys.platform == "darwin", "Darwin root discovery")
-    def test_defaults_ignore_environment_temp_roots(self):
+    def teststorage_roots_ignore_environment_temp_roots(self):
         expected = Path(subprocess.check_output(
             ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], text=True).strip()).resolve()
         with patch.dict(os.environ, {"TMPDIR": str(self.tmp), "TMP": str(self.tmp),
                                     "TEMP": str(self.tmp)}):
-            tmp, clones, _ = storage_hygiene._defaults()
+            tmp, clones, _ = storage_hygiene.storage_roots()
         self.assertEqual(tmp, expected)
         self.assertEqual(clones, expected.parent / "X" / "com.google.Chrome.code_sign_clone")
 
@@ -119,7 +120,7 @@ class StorageHygieneTests(unittest.TestCase):
 
     def test_launchd_child_records_with_script_import_path(self):
         job = plistlib.loads((ROOT / "ops/launchd/com.carr.storage-hygiene.plist").read_bytes())
-        script = job["ProgramArguments"][5].replace("{{REPO}}", str(ROOT))
+        script = next(arg for arg in job["ProgramArguments"] if arg.endswith("/tools/storage_hygiene.py")).replace("{{REPO}}", str(ROOT))
         harness = self.root / "scheduled-fixture"
         harness.mkdir()
         # Instrument only filesystem/transport effects; execute launchd's actual child script.
@@ -132,14 +133,27 @@ def configure(frame, event, arg):
     if event == 'call' and frame.f_code.co_name == 'main' and frame.f_code.co_filename == os.environ['FIXTURE_SCRIPT']:
         g = frame.f_globals
         g['REPO'] = Path(os.environ['FIXTURE_ROOT'])
-        g['_defaults'] = lambda: (g['REPO'], g['REPO'], g['REPO'])
+        g['storage_roots'] = lambda: (g['REPO'], g['REPO'], g['REPO'])
         g['plan_cleanup'] = lambda **kwargs: g['CleanupPlan']()
-        g['storage_snapshot'] = lambda *args: (1_000_000_000_001, 0)
+        g['storage_snapshot'] = lambda *args: (int(os.environ['FIXTURE_USED']), 0)
         def record_transport(argv, **kwargs):
-            assert argv[1:3] == ['call', 'add-loop'], argv
-            assert json.loads(argv[3])['kind'] == 'open_loop'
-            assert json.loads(argv[3])['owner'] in ('joe', 'dell', 'claude'), argv[3]
-            return subprocess.CompletedProcess(argv, 0, '{"ok":true}', '')
+            assert argv[1] == 'call', argv
+            verb, args = argv[2], json.loads(argv[3])
+            with (g['REPO'] / 'calls.jsonl').open('a') as handle:
+                handle.write(json.dumps({'verb': verb, 'args': args}) + chr(10))
+            if verb == 'add-loop':
+                assert args['kind'] == 'open_loop'
+                assert args['owner'] in ('joe', 'dell', 'claude'), args
+                reply = {'ok': True, 'loop_id': 'loop-1'}
+            elif verb == 'read-loop':
+                reply = {'loop': {'loop_id': 'loop-1', 'version': 7},
+                         'amended': False, 'amendments': []}
+            elif verb == 'update-loop':
+                assert args['base_version'] == 7, args
+                reply = {'ok': True}
+            else:
+                raise AssertionError(verb)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(reply), '')
         patch('subprocess.run', side_effect=record_transport).start()
         sys.settrace(None)
     return configure
@@ -149,7 +163,7 @@ sys.settrace(configure)
         env = {key: value for key, value in os.environ.items()
                if key not in ("PYTHONPATH", "PYTHONHOME")}
         env.update(PYTHONPATH=str(harness), FIXTURE_SCRIPT=script,
-                   FIXTURE_ROOT=str(harness))
+                   FIXTURE_ROOT=str(harness), FIXTURE_USED='1000000000001')
         result = subprocess.run([sys.executable, script], cwd=ROOT, env=env,
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -158,6 +172,21 @@ sys.settrace(configure)
         self.assertIn("logical allocated size", result.stdout)
         self.assertIn("APFS", result.stdout)
         self.assertIn("free space", result.stdout)
+        env['FIXTURE_USED'] = '1000000000002'
+        refreshed = subprocess.run([sys.executable, script], cwd=ROOT, env=env,
+                                   capture_output=True, text=True)
+        self.assertEqual(refreshed.returncode, 0, refreshed.stdout + refreshed.stderr)
+        rows = [json.loads(line) for line in
+                (harness / "out/storage-hygiene.jsonl").read_text().splitlines()]
+        self.assertEqual([row['record_status'] for row in rows], ['recorded', 'recorded'])
+        calls = [json.loads(line) for line in (harness / 'calls.jsonl').read_text().splitlines()]
+        self.assertEqual([call['verb'] for call in calls],
+                         ['add-loop', 'add-loop', 'read-loop', 'update-loop'])
+        self.assertEqual(calls[0]['args'], calls[1]['args'])
+        self.assertEqual(calls[-1]['args']['base_version'], 7)
+        self.assertIn('1000000000002', calls[-1]['args']['body'])
+        self.assertNotEqual(calls[-1]['args']['idempotency_key'],
+                            calls[0]['args']['idempotency_key'])
 
     def test_apply_protects_path_when_lsof_warns_on_recheck(self):
         target = self.old_dir(self.clones, "code_sign_clone.old")
@@ -426,6 +455,80 @@ sys.settrace(configure)
                     and node.func.value.id == "tempfile"
                     and node.func.attr == "mkdtemp"]
             self.assertEqual(bare, [], f"{relative} has bare mkdtemp calls at {bare}")
+
+
+class TestFixtureCleanup(unittest.TestCase):
+    def test_each_known_fixture_prefix_is_disposable_after_age_and_process_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for index, prefix in enumerate(storage_hygiene.TEST_TMP_PREFIXES):
+                path = root / (prefix + str(index))
+                path.mkdir()
+                os.utime(path, (0, 0))
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=lambda paths: set(), deadline=lambda: False, dry_run=False)
+            self.assertEqual(len(report['removed']), len(storage_hygiene.TEST_TMP_PREFIXES))
+            self.assertEqual([p.name for p in root.iterdir()], ['_to_delete'])
+            self.assertEqual(len(list((root / '_to_delete').glob('*/manifest.json'))), len(storage_hygiene.TEST_TMP_PREFIXES))
+
+
+    def test_process_starting_during_fixture_inspection_keeps_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / 'branch-janitor-fixture-race'
+            path.mkdir()
+            os.utime(path, (0, 0))
+            calls = []
+            def probe(paths):
+                calls.append(paths)
+                return set() if len(calls) == 1 else set(paths)
+            report = storage_hygiene.cleanup_test_temps(root, now=time.time(), min_age=21600,
+                max_items=100, cursor='', process_probe=probe, deadline=lambda: False, dry_run=False)
+            self.assertTrue(path.exists())
+            self.assertFalse(report['removed'])
+
+
+    def test_old_allowlisted_fixtures_stage_but_recent_live_unknown_and_symlinks_stay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            now = time.time()
+            for name in ('branch-janitor-fixture-old', 'presence-live', 'flash-inputs-new', 'unrelated-old', 'doc-drift-fixture-active-file'):
+                path = root / name
+                path.mkdir()
+                (path / 'payload').write_bytes(b'x' * 8192)
+                if name != 'doc-drift-fixture-active-file':
+                    os.utime(path / 'payload', (now - 30000, now - 30000))
+                os.utime(path, (now - (10 if name.endswith('-new') else 30000),) * 2)
+            (root / 'jev-ring-link').symlink_to(root / 'unrelated-old', target_is_directory=True)
+            report = storage_hygiene.cleanup_test_temps(root, now=now, min_age=21600, max_items=100,
+                cursor='', process_probe=lambda paths: {str(root / 'presence-live')},
+                deadline=lambda: False, dry_run=False)
+            self.assertFalse((root / 'branch-janitor-fixture-old').exists())
+            for name in ('presence-live', 'flash-inputs-new', 'unrelated-old', 'doc-drift-fixture-active-file', 'jev-ring-link'):
+                self.assertTrue((root / name).exists(), name)
+            self.assertEqual(len(report['removed']), 1)
+            self.assertGreaterEqual(report['staged_allocated_bytes'], 8192)
+            self.assertTrue(report['kept'])
+
+    def test_unknown_process_evidence_dry_run_budget_and_cursor_keep_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            for name in ('jev-ring-a', 'hookenv-b-b', 'playwright_chromiumdev_profile-c'):
+                (root / name).mkdir()
+                os.utime(root / name, (0, 0))
+            kwargs = dict(now=time.time(), min_age=21600, max_items=1, cursor='', deadline=lambda: False)
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: None, dry_run=False)
+            self.assertFalse(report['removed'])
+            self.assertTrue(report['kept'])
+            self.assertEqual(report['cursor'], 'hookenv-b-b')
+            kwargs['cursor'] = report['cursor']
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=True)
+            self.assertEqual(report['kept'][0]['status'], 'would_stage')
+            self.assertEqual(len(list(root.iterdir())), 3)
+            kwargs['deadline'] = lambda: True
+            report = storage_hygiene.cleanup_test_temps(root, **kwargs, process_probe=lambda paths: set(), dry_run=False)
+            self.assertTrue(report['budget_exhausted'])
+            self.assertFalse(report['removed'])
 
 
 if __name__ == "__main__":

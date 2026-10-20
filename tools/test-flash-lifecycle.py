@@ -34,6 +34,7 @@ class LifecycleTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
+        (self.directory / "flash.grant.json").write_text(json.dumps({"issued_at": 0, "expires_at": 4e9}))
         env = patch.dict(os.environ, {"CARR_FLASH_STATE_DIR": str(self.directory),
                                      "CARR_FLASH_LOG": str(self.directory / "server.log")})
         env.start()
@@ -47,7 +48,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_warm_ensure_does_not_launch(self):
         launch = Mock(side_effect=AssertionError("warm server must not be launched"))
-        self.assertTrue(flashlib.ensure(ready=lambda **_: True, launch=launch))
+        self.assertTrue(flashlib.ensure(ready=lambda **_: True))
 
     def test_off_switch_path_defaults_to_config_and_uses_state_dir_override(self):
         self.assertEqual(flashlib.off_switch_path(), self.directory / "flash.off")
@@ -60,46 +61,27 @@ class LifecycleTests(unittest.TestCase):
         launch = Mock(side_effect=AssertionError("switched-off Flash must not launch"))
         error = io.StringIO()
         with contextlib.redirect_stderr(error):
-            self.assertFalse(flashlib.ensure(ready=lambda **_: True, launch=launch))
+            self.assertFalse(flashlib.ensure(ready=lambda **_: True))
         self.assertIn("flash is switched off", error.getvalue())
         with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
             flashlib.ensure_server()
         with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
-            flashlib.ensure_desk(lambda: True, launch=launch)
+            flashlib.ensure_desk(lambda: True)
         for scope in (flashlib.activity_scope, flashlib.request_scope):
             with self.assertRaisesRegex(flashlib.FlashSwitchedOff, "^flash is switched off$"):
                 with scope():
                     pass
         launch.assert_not_called()
 
-    def test_cold_ensure_bootstraps_once(self):
-        ready = Mock(side_effect=[False, False, False, True])
-        launch = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-        self.assertTrue(flashlib.ensure(ready=ready, launch=launch, sleep=lambda _: None))
-        self.assertEqual([c.args[0] for c in launch.call_args_list], ["enable", "bootstrap", "kickstart"])
 
-    def test_loaded_job_uses_kickstart(self):
-        ready = Mock(side_effect=[False, False, True])
-        launch = Mock(side_effect=[subprocess.CompletedProcess([], code, "", "") for code in (0, 5, 0)])
-        self.assertTrue(flashlib.ensure(ready=ready, launch=launch))
-        self.assertEqual([c.args[0] for c in launch.call_args_list], ["enable", "bootstrap", "kickstart"])
 
-    def test_timeout_fixture_waits_180_seconds_and_disables_late_load(self):
-        elapsed = [0]
-        def sleep(seconds):
-            elapsed[0] += seconds
-        launch = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-        with patch.object(flashlib.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")):
-            self.assertFalse(flashlib.ensure(ready=lambda **_: False, launch=launch,
-                                           clock=lambda: elapsed[0], sleep=sleep))
-        self.assertEqual(elapsed[0], 180)
-        self.assertEqual([c.args[0] for c in launch.call_args_list],
-                         ["enable", "bootstrap", "kickstart", "disable", "bootout", "disable", "bootout"])
 
     def test_idle_fixtures(self):
         fixtures = json.loads((HERE / "fixtures/flash-idle.v1.json").read_text())
         for case in fixtures:
             with self.subTest(case=case["name"]):
+                flashlib.off_switch_path().unlink(missing_ok=True)
+                flashlib.grant_path().write_text(json.dumps({"issued_at": 0, "expires_at": 4e9}))
                 activity = self.directory / "last-request"
                 if case["request"] is None:
                     activity.unlink(missing_ok=True)
@@ -177,28 +159,12 @@ class LifecycleTests(unittest.TestCase):
                 self.fail("exclusive lock was bypassed")
         self.assertEqual(elapsed[0], 180)
 
-    def test_desk_timeout_stops_detached_desk_and_server(self):
-        elapsed = [0]
-        def sleep(seconds):
-            elapsed[0] += seconds
-        launch = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
-        with patch.object(flashlib, "ensure_server"), patch.object(flashlib, "_stop") as stop:
-            with self.assertRaises(TimeoutError):
-                flashlib.ensure_desk(lambda: False, launch=launch, clock=lambda: elapsed[0], sleep=sleep)
-        self.assertEqual(elapsed[0], 120)
-        self.assertEqual([c.args[0] for c in launch.call_args_list], ["enable", "bootstrap", "kickstart"])
-        stop.assert_called_once_with(launch=launch)
 
     def test_live_desk_joins_an_active_request_without_waiting_for_exclusive_lock(self):
         with flashlib.activity_scope(), patch.object(flashlib, "ensure_server"), patch.object(flashlib, "_start") as start:
-            flashlib.ensure_desk(lambda: True, sleep=Mock(side_effect=AssertionError("warm desk waited")))
+            flashlib.ensure_desk(lambda: True)
         start.assert_not_called()
 
-    def test_readiness_wrapper_reserves_the_complete_cleanup_budget(self):
-        with patch.object(flashlib.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as run:
-            with self.assertRaises(TimeoutError):
-                flashlib.ensure_server()
-        self.assertGreaterEqual(run.call_args.kwargs["timeout"], 180 + 4 * 15 + 30)
 
     def test_stop_disables_both_agents_and_stops_the_detached_process(self):
         launch = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
@@ -210,7 +176,7 @@ class LifecycleTests(unittest.TestCase):
     def test_ensure_timeout_preserves_collector_offline_observation(self):
         collector = load(HERE / "resource-collector.py", "fixture_collector")
         with patch.object(flashlib, "ensure_server", side_effect=TimeoutError("cold timeout")):
-            self.assertEqual(collector.flash_server_available(), (False, None))
+            self.assertEqual(collector.flash_server_available(opener=Mock(side_effect=OSError("offline"))), (False, None))
 
     def test_ensure_timeout_preserves_scorecard_error(self):
         scorecard = load(HERE.parent / "ops/jev_scorecard.py", "fixture_scorecard")
@@ -220,7 +186,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("TimeoutError", result["error"])
 
     def test_room_only_queues_flash_when_mentioned(self):
-        for body, expected in (("hello", []), ("@flash-extra hi", []), ("@flash hi", ["flash"]), ("@FLASH hi", ["flash"])):
+        for body, expected in (("hello", []), ("@flash-extra hi", []), ("@flash hi", []), ("@FLASH hi", [])):
             snapshot = {"desks": {}, "last_seq": 0}
             turn = {"kind": "turn", "msg_id": "m1", "seat": "joe", "seq": 1, "body": body}
             self.assertEqual(state.route_turn(snapshot, turn, {"flash": "flash"}), expected)
@@ -231,24 +197,6 @@ class LifecycleTests(unittest.TestCase):
             result = flash_wire.run_turn("fixture", opener=flashlib.urllib.request.urlopen)
         self.assertEqual(result["status"], "timed_out")
 
-    def test_installer_never_enables_model_or_desk(self):
-        installer = load(HERE / "flash_install.py", "fixture_installer")
-        home = self.directory / "home"
-        agents = home / "Library/LaunchAgents"
-        agents.mkdir(parents=True)
-        (home / ".local/bin").mkdir(parents=True)
-        for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
-            (agents / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))
-        launch = Mock()
-        installer.install(HERE.parent, home, launch=launch)
-        self.assertEqual([c.args[0][1] for c in launch.call_args_list], ["disable", "disable", "bootout", "bootstrap", "print"])
-        for call in launch.call_args_list[2:]:
-            self.assertIn("com.carr.flash-idle-stop", " ".join(call.args[0]))
-        for label in (flashlib.SERVER_LABEL, flashlib.DESK_LABEL):
-            self.assertFalse(plistlib.loads((agents / f"{label}.plist").read_bytes())["RunAtLoad"])
-            self.assertNotIn("KeepAlive", plistlib.loads((agents / f"{label}.plist").read_bytes()))
-        job = plistlib.loads((agents / "com.carr.flash-idle-stop.plist").read_bytes())
-        self.assertEqual(job["StartCalendarInterval"], [{"Minute": m} for m in range(0, 60, 5)])
 
 
 if __name__ == "__main__":

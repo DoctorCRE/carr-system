@@ -25,6 +25,7 @@ SOURCE = Path(__file__).resolve().parents[1]
 # a kind its source does not declare, and an unreadable source blinds exactly these.
 EVIDENCE = {
     "scheduled_jobs": frozenset({"scheduled_job_drift"}),
+    "machine_cleanup": frozenset({"machine_cleanup"}),
     "vendor_releases": frozenset({"vendor_release_fetch_error"}),
     "jobs": frozenset({"job_failed", "job_dead", "job_hang", "job_silent", "job_over_limit"}),
     "prs": frozenset({"pr_blocked_review", "pr_ci_red", "pr_conflict", "pr_draft_idle", "pr_ready"}),
@@ -328,13 +329,42 @@ def detect(facts, config, now):
         emit("scheduled_jobs", "scheduled_job_drift", row["label"], row["detail"],
              key=row["key"], next_action=row["fix"] +
              "; verify python3 ops/scheduled-jobs-check.py; auto-clear on next complete scan without this finding")
+    for row in facts.get("machine_cleanup", []):
+        emit("machine_cleanup", "machine_cleanup", row["code"], row["detail"])
     jobs = facts.get("jobs", [])
+    def job_scope(job):
+        return tuple(job.get(key) for key in ("card", "executor", "repo", "pr", "head"))
+    successes = {}
     for job in jobs:
+        if job.get("card") and "start" in job and job.get("ended_at") and job.get("exit_code") == 0:
+            if job["card"] == "branch-janitor":
+                try:
+                    report = json.loads(job.get("log_tail", ""))
+                except ValueError:
+                    continue
+                if (not isinstance(report, dict) or report.get("schema") != "branch-retirement/v1"
+                        or report.get("execute") is not True or report.get("deferred") != []
+                        or report.get("errors") != [] or not isinstance(report.get("counts"), dict)
+                        or set(report["counts"]) != set(config["repositories"])):
+                    continue
+            scope = job_scope(job)
+            successes[scope] = max(successes.get(scope, -math.inf), epoch(job["ended_at"]))
+    failures = set()
+    for job in sorted(jobs, key=lambda j: (epoch(j.get("start", 0)), j["id"]), reverse=True):
         subject = job["id"]
         fields = {"job": job, "card": job.get("card", subject)}
         if "exit_code" in job:
-            if job["exit_code"] != 0 and not job.get("superseded"):
-                emit("jobs", "job_failed", subject, f"exit {job['exit_code']}: {job.get('log_tail', '')}", **fields)
+            card = job.get("card", subject)
+            scope = job_scope(job)
+            completed = job.get("card") and "start" in job and job.get("ended_at")
+            recovered = completed and successes.get(scope, -math.inf) > epoch(job["ended_at"])
+            if job["exit_code"] != 0 and not job.get("superseded") and not recovered:
+                reason = f"exit {job['exit_code']}: {job.get('log_tail', '')}"
+                incident = json.dumps([scope, reason, successes.get(scope) if completed else None])
+                key = f"job_failed:{card}:" + hashlib.sha256(incident.encode()).hexdigest()
+                if key not in failures:
+                    failures.add(key)
+                    emit("jobs", "job_failed", card, reason, key=key, **fields)
             continue
         if not job.get("alive"):
             emit("jobs", "job_dead", subject, "registered PID is dead or changed without an exit record", **fields)
@@ -539,8 +569,24 @@ def board_task(root, config, card, executor, status, note, health=None, reason=N
         return receipt.get("before") or {}
 
 
+def terminate_group(proc, grace):
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + grace
+    while process_group_alive(proc.pid) and time.monotonic() < deadline:
+        proc.poll()
+        time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait(timeout=max(1, grace))
+
+
 def run_job(root, config, card, executor, minutes, argv):
-    if minutes <= 0 or not argv or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", card):
+    if not math.isfinite(minutes) or minutes <= 0 or not argv or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", card):
         raise ValueError("positive minutes, safe card id, and command required")
     job_id = os.environ.get("CARR_JOB_ID") or uuid.uuid4().hex
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", job_id):
@@ -553,6 +599,8 @@ def run_job(root, config, card, executor, minutes, argv):
     board_task(root, config, card, executor, "running", "Job starting; log " + str(log))
     started = time.time()
     proc = None
+    timed_out = False
+    cancelled = None
     row = {"id": job_id, "card": card, "executor": executor, "start": started,
            "limit": minutes * 60, "log_path": str(log), "cwd": str(Path.cwd()),
            "command": argv, "root_id": os.environ.get("CARR_JOB_ROOT_ID", job_id),
@@ -569,11 +617,24 @@ def run_job(root, config, card, executor, minutes, argv):
             row.update(pid=proc.pid, pgid=proc.pid, process_identity=process_identity(proc.pid, config))
             append(registry, row)
             def stop(signum, frame):
-                if proc.poll() is None:
-                    os.killpg(proc.pid, signum)
+                nonlocal cancelled
+                cancelled = signum
             previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT)}
             try:
-                code = proc.wait()
+                deadline = time.monotonic() + minutes * 60
+                while proc.poll() is None and not cancelled:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        timed_out = True
+                        break
+                    try:
+                        proc.wait(timeout=min(0.2, remaining))
+                    except subprocess.TimeoutExpired:
+                        pass
+                # Reap descendants even when their leader exited successfully.
+                if process_group_alive(proc.pid):
+                    terminate_group(proc, config["thresholds"]["kill_grace_seconds"])
+                code = 124 if timed_out else (128 + cancelled if cancelled else proc.returncode)
             finally:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
@@ -584,11 +645,11 @@ def run_job(root, config, card, executor, minutes, argv):
         with log.open("ab") as output:
             output.write(str(exc).encode())
     except BaseException:
-        if proc and proc.poll() is None:
-            os.killpg(proc.pid, signal.SIGTERM)
+        if proc:
+            terminate_group(proc, config["thresholds"]["kill_grace_seconds"])
         raise
     code = 128 - code if code < 0 else code
-    end = {"id": job_id, "exit_code": code, "ended_at": stamp(),
+    end = {"id": job_id, "exit_code": code, "ended_at": stamp(), "timed_out": timed_out,
            "log_tail": tail(log, config["thresholds"]["log_tail_bytes"])}
     append(registry, end)
     board_task(root, config, card, executor, "done" if code == 0 else "blocked",
@@ -644,7 +705,9 @@ def reconcile(root, config, found, effects, now, complete=True, *, clear_kinds=N
             row.update(loop_id=None if new_incident else prior.get("loop_id"),
                        loop_idempotency_key=incident_key if new_incident else prior.get("loop_idempotency_key", legacy_key),
                        reported=False if new_incident else prior.get("reported", False))
-        if not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]:
+        if (not prior or prior.get("cleared_at") or prior.get("reason") != f["reason"]
+                or f["kind"] == "job_failed" and prior.get("job") != f["job"]):
+            row["reported"] = prior.get("reported", False) and not prior.get("cleared_at")
             append(findings_path, row)
         # An unchanged record request retries with the same idempotency key.
         if not prior.get("reported") or prior.get("cleared_at"):
@@ -903,6 +966,15 @@ def collect(root, config, now=None):
                 error("scheduled job evidence", RuntimeError("incomplete scheduled-job observation"), "scheduled_jobs")
         except Exception as exc:
             error("scheduled jobs", exc, "scheduled_jobs")
+    if sys.platform == "darwin" and Path(root).resolve() == repository_roots(config).get("jbookout/carr-system"):
+        try:
+            from machine_cleanup import health_findings
+            sys.path.append(str(Path(__file__).resolve().parents[1] / "tools"))
+            from storage_hygiene import storage_roots
+            facts["machine_cleanup"] = health_findings(root, config, tmp_root=Path("/private/tmp"),
+                roots=repository_roots(config), now=now, user_tmp_root=storage_roots()[0])
+        except Exception as exc:
+            error("machine cleanup", exc, "machine_cleanup")
     queue = path_at(root, config["paths"]["merge_queue"])
     if queue.exists():
         try:
@@ -922,11 +994,14 @@ def collect(root, config, now=None):
         dates = {}
     t = config["thresholds"]
     for repo in config["repositories"]:
+        open_branches = None
         if limited:
             facts["prs"].extend(v["pr"] for k, v in cache.items() if k.startswith(repo + "#"))
             continue  # Stop provider reads; all skipped evidence is blinded.
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/pulls?state=open&per_page=100"], config))
+            open_branches = {pr["head"]["ref"] for page in pages for pr in page
+                             if (pr["head"].get("repo") or {}).get("full_name") == repo}
             # Closed PRs leave the cache; an unlisted repository keeps its entries.
             listed = {f"{repo}#{pr['number']}" for page in pages for pr in page}
             cache = {k: v for k, v in cache.items() if k in listed or not k.startswith(repo + "#")}
@@ -950,7 +1025,11 @@ def collect(root, config, now=None):
                             facts["prs"].append(entry["pr"])
         except Exception as exc:
             error(repo + " PRs", exc, "prs")
+            if open_branches is None:
+                error(repo + " branches", exc, "branches")
         if limited:
+            continue
+        if open_branches is None:
             continue
         try:
             pages = json.loads(command(["gh", "api", "--paginate", "--slurp", f"repos/{repo}/branches?per_page=100"], config))
@@ -979,8 +1058,7 @@ def collect(root, config, now=None):
                             dates[key] = date
                         facts["branches"].append({"repo": repo, "name": branch["name"],
                                                   "updated": date,
-                            "open_pr": any(p["repo"] == repo and p.get("headRefName") == branch["name"]
-                                           for p in facts["prs"])})
+                            "open_pr": branch["name"] in open_branches})
         except Exception as exc:
             error(repo + " branches", exc, "branches")
     logs = [(p, "queue") for p in config["paths"]["queue_logs"]] + [(config["paths"]["release_log"], "release")]
@@ -1263,38 +1341,6 @@ def digest(root, config, *, session_id=None):
     return "\n".join(lines)
 
 
-def schedule_reaper(root, config, effects, now):
-    policy = config.get("branch_janitor")
-    if not policy:
-        return
-    canonical = config.get("repository_roots", {}).get("jbookout/carr-system")
-    if not canonical or Path(root).resolve() != Path(canonical).expanduser().resolve():
-        return  # A fixture or session checkout must never schedule the live fleet.
-    ledger = root / "out/orch/branch-janitor-schedule.jsonl"
-    previous = read_latest(ledger).get("schedule", {})
-    if now - previous.get("at", 0) < policy["interval_seconds"]:
-        return
-    pid = previous.get("wrapper_pid")
-    identity = process_identity(pid, config) if pid else None
-    if identity and identity == previous.get("process_identity"):
-        return
-    # Read back a possibly interrupted launch before starting another wrapper.
-    jobs = read_latest(path_at(root, config["paths"]["registry"]))
-    active = next((j for j in jobs.values() if j.get("card") == "branch-janitor" and
-                   "exit_code" not in j and j.get("process_identity") and
-                   process_identity(j.get("pid"), config) == j["process_identity"]), None)
-    if active:
-        return
-    job_id = "branch-janitor-" + uuid.uuid4().hex[:12]
-    append(ledger, {"key": "schedule", "at": now, "status": "intent", "job_id": job_id})
-    result = effects.launch({"card": "branch-janitor", "executor": "deterministic reaper",
-                             "limit": policy["limit_seconds"]},
-        [sys.executable, str(SOURCE / "hooks/worktree-self-plumb.py"), "--reap", "--fleet",
-         "--repo", str(root)], root, job_id=job_id)
-    append(ledger, {"key": "schedule", "at": now, "status": "started", **result,
-                    "process_identity": process_identity(result["wrapper_pid"], config)})
-
-
 def scan(root, config, config_path=None, *, vendor_only=False):
     try:
         with locked(path_at(root, config["paths"]["scan_lock"]), blocking=False):
@@ -1306,12 +1352,6 @@ def scan(root, config, config_path=None, *, vendor_only=False):
                             "previous_status": prior_runs.get(scan_key, {}).get("status")})
             effects = Effects(root, config)
             effects.config_path = Path(config_path or SOURCE / "ops/config/job-watchdog.json").resolve()
-            if not vendor_only:
-                try:
-                    schedule_reaper(root, config, effects, now)
-                except Exception as exc:
-                    append(root / "out/orch/branch-janitor-schedule.jsonl",
-                           {"key": "schedule_error", "at": now, "error": type(exc).__name__})
             facts = {"errors": []} if vendor_only else collect(root, config, now)
             candidates = detect(facts, config, now) + vendor_release_findings(root, config, now)
             found = reconcile(root, config, candidates, effects, now,

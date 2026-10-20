@@ -198,6 +198,7 @@ class FakeClient {
         recorded_at: this.now.toISOString() });
       return { rows: [] };
     }
+    if (sql.includes("dealroom:closed-deals")) return { rows: [] };
     if (sql.includes("dealroom:board-field-base")) {
       // The board list read, with each editable cell's latest committed event —
       // the same (recorded_at desc, id desc) the SQL orders by, and the same

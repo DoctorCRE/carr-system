@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
-import { launchChrome } from "./helpers/chrome-launch.mjs";
+import { launchTestChrome } from "./helpers/chrome-launch.mjs";
 import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
 
 const SYSTEM_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -92,7 +92,7 @@ test("completed disposable Chrome launch leaves no new macOS code-sign clone", {
     { encoding: "utf8" }).trim();
   const root = path.join(userTemp, "..", "X", "com.google.Chrome.code_sign_clone");
   const before = new Set(await codeSignClones(root));
-  const browser = await launchChrome(chrome);
+  const browser = await launchTestChrome(t, chrome);
   let socket;
   try {
     socket = new WebSocket(browser.pageWsUrl);
@@ -118,4 +118,18 @@ test("completed disposable Chrome launch leaves no new macOS code-sign clone", {
   }
   const added = (await codeSignClones(root)).filter(name => !before.has(name));
   assert.deepEqual(added, [], "completed test launch leaked code-sign clones");
+});
+
+test("macOS refuses headless shell overrides, including aliases, because they can surface as apps", async () => {
+  for (const executable of ["/cache/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+    "/tmp/test-chrome"]) {
+    const result = await findDisposableChromium({
+      env: { PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: executable },
+      home: "/Users/tester", platform: "darwin",
+      exists: () => true,
+      realpath: () => "/cache/chromium_headless_shell-1243/chrome-headless-shell-mac-arm64/chrome-headless-shell",
+      listDirectories: async () => [],
+    });
+    assert.equal(result, null);
+  }
 });
