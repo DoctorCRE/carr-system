@@ -2322,6 +2322,17 @@ def cost_snapshot_reader() -> Callable:
     return module.load_snapshot
 
 
+def snapshot_linkage_metadata(task: dict[str, Any]) -> dict[str, Any]:
+    metadata = {"linkage_metadata_version": 1}
+    unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
+                           "blocker_task_id", "parent_refs", "related_refs", "dependencies")
+    held = task.get("held")
+    if (any(task.get(key) is not None for key in unsupported_linkage)
+            or isinstance(held, dict) and held.get("blocker") is not None):
+        metadata["linkage_metadata_unavailable"] = True
+    return metadata
+
+
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     """The versioned data contract the app page renders, including fresh local
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
@@ -2336,13 +2347,7 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
-        card["linkage_metadata_version"] = 1
-        unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
-                               "blocker_task_id", "parent_refs", "related_refs", "dependencies")
-        held = task.get("held")
-        if (any(task.get(key) is not None for key in unsupported_linkage)
-                or isinstance(held, dict) and held.get("blocker") is not None):
-            card["linkage_metadata_unavailable"] = True
+        card.update(snapshot_linkage_metadata(task))
         for key, value in card.items():
             if key.endswith("_at") and isinstance(value, str) and value.endswith("+00:00"):
                 card[key] = value[:-6] + "Z"
@@ -2404,7 +2409,8 @@ def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     projection = repo_lib("progress_hierarchy").project(copy.deepcopy(state))
     fields = (SNAPSHOT_TASK_FIELDS - {"plan_id", "plan_ref", "title", "summary", "stage_history", "release_wait"}) | {
         "id", "parent_id", "done", "archived", "legacy_disposition", "card_title", "card_description", "branch", "reason"}
-    cards = {key: {field: value for field, value in card.items() if field in fields and value is not None}
+    cards = {key: {**{field: value for field, value in card.items() if field in fields and value is not None},
+                   **snapshot_linkage_metadata(card)}
              for key, card in projection.pop("cards").items()}
     aliases = projection["aliases"]
     for card in cards.values():
