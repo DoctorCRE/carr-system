@@ -141,7 +141,10 @@ class BusinessDispatchTests(unittest.TestCase):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
 
     def test_business_footer_uses_the_partner_role(self):
-        self.assertNotIn('Joe', (HERE / 'business-brief-footer.md').read_text())
+        self.assertIn('the partner', (HERE / 'business-brief-footer.md').read_text())
+
+    def test_dispatch_business_instructions_use_the_partner_role(self):
+        self.assertIn('Business work for the partner', dispatch.__doc__)
 
     def test_record_layer_posture_is_stored_for_every_business_runtime(self):
         for kind in ('codex-session', 'grok-cli', 'hermes-nous', 'flash-local', 'claude-desktop'):
