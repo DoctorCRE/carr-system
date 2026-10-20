@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { createTourInternalWebHandler, isTourInternalRequest, TOUR_INTERNAL_ASSET_DIRECTORY } from "../src/tour-internal-web.js";
+import { createTourInternalWebHandler, isTourInternalRequest } from "../src/tour-internal-web.js";
 
-const ROOT = fileURLToPath(new URL("../../dealroom", import.meta.url));
 const ORIGIN = "https://app.doctorcre.com";
 const ACTOR = { id: "partner-actor" };
 const SESSION = { key: "opaque-server-session", csrfToken: "csrf-value" };
@@ -21,8 +18,7 @@ class Assets {
   async fetch(request) {
     const pathname = new URL(request.url).pathname;
     this.paths.push(pathname);
-    try { return new Response(await readFile(`${ROOT}${pathname}`)); }
-    catch { return new Response("missing", { status: 404 }); }
+    return new Response(`<!doctype html><main>Asset fixture ${pathname}</main>`);
   }
 }
 function request(path, options = {}) { return new Request(`${ORIGIN}${path}`, options); }
@@ -253,32 +249,6 @@ test("only a SHA-256 digest crosses the confidential share issue seam", async ()
   assert.equal(JSON.stringify(received).includes("token="), false);
   assert.equal(Object.hasOwn(received.input, "token"), false);
   assert.deepEqual(received.actor, ACTOR, "actor is server-injected, not selected in body");
-});
-
-test("static shell has no raw-token persistence/logging and stays in dealroom/tours assets", async () => {
-  const [html, js, css, handlerSource] = await Promise.all([
-    readFile(new URL("../../dealroom/tours/index.html", import.meta.url), "utf8"), readFile(new URL("../../dealroom/tours/app.js", import.meta.url), "utf8"),
-    readFile(new URL("../../dealroom/tours/app.css", import.meta.url), "utf8"), readFile(new URL("../src/tour-internal-web.js", import.meta.url), "utf8"),
-  ]);
-  assert.equal(TOUR_INTERNAL_ASSET_DIRECTORY, "../out/doctorcre-artifacts/current/tours");
-  assert.match(html, /\/tours\/app\.js/); assert.match(html, /\/tours\/app\.css/); assert.ok(css.length > 300);
-  assert.match(js, /new Uint8Array\(32\)/); assert.match(js, /crypto\.getRandomValues/); assert.match(js, /crypto\.subtle\.digest\("SHA-256"/);
-  assert.match(js, /https:\/\/reports\.doctorcre\.com\/share#token=\$\{raw\}/);
-  assert.match(html, /value="view_map"/);
-  assert.match(html, /id="share-grants"/);
-  assert.match(js, /grant\.status === "active"/);
-  assert.match(js, /dataset\.shareGrantId/);
-  assert.match(js, /issueShare\(id\(state\.shareGrantId\)\)/);
-  assert.match(js, /stops\(\)\.filter\(\(stop\) => stop\.stop_state === "active"\)\.map/);
-  assert.match(js, /state\.cheatDirty \? "Unsaved changes"/);
-  assert.match(js, /#cheat-content"\)\.addEventListener\("input"/);
-  assert.match(js, /if \(!state\.cheatDirty \|\| state\.cheatDraftTourId !== tour\.id\)/);
-  assert.doesNotMatch(html, /value="(?:download_pdf|react)"/);
-  assert.match(html, /Shortlist and Comment let the client mark preferred properties/);
-  assert.match(css, /#002F6C/); assert.match(css, /#F57F29/);
-  for (const source of [js, handlerSource]) { assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|console\.(?:log|warn|error)/); }
-  assert.doesNotMatch(handlerSource, /\/api\/v1/);
-  assert.doesNotMatch(js, /\/api\/v1|(?:mapbox|leaflet|google\.maps)/i);
 });
 
 test("route seams enforce their exact body contracts", async () => {

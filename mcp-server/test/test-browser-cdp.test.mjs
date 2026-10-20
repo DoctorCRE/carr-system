@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createInterface } from "node:readline";
-import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
+import { findDisposableChromium } from "./helpers/chromium-binary.mjs";
 
 const bridge = new URL("../../tools/room-bridge/test-browser-cdp.mjs", import.meta.url);
 

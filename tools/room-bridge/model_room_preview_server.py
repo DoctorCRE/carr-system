@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Offline browser-verification host for the real Model Room bundle.
 
-This is test-only plumbing: it serves the checked-in Model Room assets and a
+This is test-only plumbing: it serves the materialized, pinned DoctorCRE Model Room assets and a
 single synthetic typed wire turn from the existing execution-fabric fixtures.
+Materialize the release before starting this server:
+
+    python3 tools/release-manifest.py doctorcre-artifact materialize \
+        --pin ops/config/doctorcre-artifact.v1.json --root out/doctorcre-artifacts
+
 It neither writes a room turn nor stands in for the deployed Worker.
 """
 
@@ -22,7 +27,7 @@ sys.path.insert(0, str(HERE))
 
 
 class PreviewHandler(SimpleHTTPRequestHandler):
-    assets = ROOT / "dealroom"
+    assets = ROOT / "out" / "doctorcre-artifacts" / "current"
     fixtures = ROOT / "control-room" / "contracts" / "fixtures" / "execution-fabric"
 
     def __init__(self, *args, **kwargs):

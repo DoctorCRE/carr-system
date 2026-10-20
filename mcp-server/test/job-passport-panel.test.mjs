@@ -15,8 +15,6 @@ const portfolio = JSON.parse(fs.readFileSync(new URL("../../control-room/contrac
 const spatial = JSON.parse(fs.readFileSync(new URL("../../control-room/contracts/fixtures/execution-fabric/codex_desktop.spatial-surface.v1.json", import.meta.url)));
 const elapsedTelemetry = JSON.parse(fs.readFileSync(new URL("../../control-room/contracts/fixtures/execution-fabric/codex_desktop.elapsed-time.telemetry-measurement.v1.json", import.meta.url)));
 const unavailableCost = JSON.parse(fs.readFileSync(new URL("../../control-room/contracts/fixtures/execution-fabric/codex_desktop.billed-cost.telemetry-measurement.v1.json", import.meta.url)));
-const roomSource = fs.readFileSync(new URL("../../dealroom/js/room.js", import.meta.url), "utf8");
-const roomCss = fs.readFileSync(new URL("../../dealroom/css/room.css", import.meta.url), "utf8");
 const evidenceActivationSource = fs.readFileSync(new URL("../src/evidence-activation.js", import.meta.url), "utf8");
 const turn = (payload, seq = 1) => ({ seq: String(seq), kind: "receipt", at: "2026-08-24T12:00:06Z", body: JSON.stringify(payload) });
 const wrap = (kind, payload) => ({ job_passport: { schema_version: "job-passport-wire.v1", kind, payload } });
@@ -464,10 +462,6 @@ testCase("attempt receipt activation facts are redacted and forged nested conten
   const withheld = deriveJobPassports([turn(wrap("observatory_projection", fixture), 1), turn(wrap("attempt_receipt", forged), 2)]);
   assert.equal(withheld.passports[0].activation_reliability, null);
   assert.ok(withheld.rejected.some((row) => row.reason === "invalid_activation_reliability"));
-  assert.match(roomSource, /Knowledge & Grounding/);
-  assert.match(roomSource, /Route & Agent Topology/);
-  assert.match(roomSource, /Evaluation & Outcome/);
-  assert.match(roomSource, /All remain human-gated and unpromoted/);
 });
 
 testCase("activation reads use tenant-scoped server seams", () => {
@@ -488,9 +482,6 @@ testCase("spatial Home Zone binds exact visual state, preserves list parity, and
   const withheld = deriveJobPassports([turn(wrap("observatory_projection", fixture), 1), turn(wrap("spatial_surface", stale), 2), turn(wrap("spatial_surface", mismatch), 3)]);
   assert.equal(withheld.passports[0].spatial_surface, null);
   assert.ok(withheld.rejected.some((row) => row.reason === "mismatched_spatial_surface"));
-  assert.match(roomSource, /Job Passport Home Zone/);
-  assert.match(roomSource, /Telemetry: unavailable/);
-  assert.match(roomCss, /passport-spatial-list/);
 });
 
 testCase("typed telemetry remains attributed, unavailable, and never manufactures a quota or cost zero", () => {
@@ -505,7 +496,6 @@ testCase("typed telemetry remains attributed, unavailable, and never manufacture
   const withheld = deriveJobPassports([turn(wrap("observatory_projection", fixture), 1), turn(wrap("telemetry_measurement", malformed), 2)]);
   assert.equal(withheld.passports[0].telemetry_measurements.length, 0);
   assert.ok(withheld.rejected.some((row) => row.reason === "invalid_telemetry_measurement"));
-  assert.match(roomSource, /unavailable — \$\{measurement\.value\.unavailable_reason\}/);
 });
 
 testCase("eval ladder binds to the exact visual projection and keeps critical regression visible without a score", () => {
@@ -520,10 +510,6 @@ testCase("eval ladder binds to the exact visual projection and keeps critical re
   const withheld = deriveJobPassports([turn(wrap("observatory_projection", fixture), 1), turn(wrap("evaluation_kernel", mismatched), 2)]);
   assert.equal(withheld.passports[0].eval_portfolio, null);
   assert.ok(withheld.rejected.some((row) => row.reason === "mismatched_eval_portfolio"));
-  assert.match(roomSource, /no aggregate score/);
-  assert.match(roomCss, /passport-eval-matrix/);
-  assert.match(roomSource, /Execution environment:/);
-  assert.match(roomSource, /Environment session:/);
 });
 
 testCase("a malformed projection digest is visibly withheld before it can paint", () => {
@@ -667,12 +653,4 @@ testCase("browser accepts reordered binding keys but rejects semantic mismatches
   const mismatch = structuredClone(reordered); mismatch.slice_plan.work_request.id = "wr-other"; delete mismatch.projection_digest; mismatch.projection_digest = seal(mismatch);
   const refused = deriveJobPassports([turn(wrap("observatory_projection", fixture), 1), turn(wrap("engineering_passport", mismatch), 2)]);
   assert.equal(refused.passports[0].engineering_passport, null);
-});
-
-testCase("regression guards preserve keyboard drilldown across a poll and a real mobile grid row", () => {
-  assert.match(roomSource, /card\.dataset\.detailOpen = "true"/);
-  assert.match(roomSource, /detail\.open = card\.dataset\.detailOpen === "true"/);
-  assert.match(roomSource, /event\.key === "Enter" \|\| event\.key === " "/);
-  assert.match(roomCss, /minmax\(280px, max-content\)/);
-  assert.match(roomCss, /\.job-passport \{ overflow: visible; min-height: max-content; \}/);
 });
