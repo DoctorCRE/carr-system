@@ -162,6 +162,55 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
                                          (self.updated,)).fetchone()[0], 'waiting_ci')
 
+    def test_legacy_card_regeneration_requires_manual_repin_after_first_merge(self):
+        card_id = self.prepare_pinned_head()
+        self.pr(2, head=self.updated)
+        self.q.enqueue = module.Queue.enqueue.__get__(self.q)
+        first = dict(repo=module.REPOS[0], number=2, head=self.updated)
+        later = dict(repo=module.REPOS[0], number=1, head=self.approved)
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            work.update(card_id, actor='test', reason='legacy multi-PR card', prs=[first, later])
+            work.begin_merge(card_id, pin=first, actor='test', reason='first merge started')
+            with work.db:
+                work.db.execute("UPDATE items SET data=json_remove(data, '$.merge_inflight') WHERE card_id=?",
+                                (card_id,))
+        self.load()['required'] = [{'bucket': 'pass'}]
+        self.save()
+        self.q.tick()
+        self.q.tick()
+        self.load()['required'] = [{'bucket': 'pending'}]
+        self.save()
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries WHERE pr=1 AND approved=?',
+                                (self.approved,)).fetchone()
+        self.assertEqual((row['phase'], row['outcome']), ('blocked', 'needs_repin'))
+        event = self.q.db.execute('SELECT * FROM events WHERE entry_id=? ORDER BY id DESC',
+                                  (row['id'],)).fetchone()
+        self.assertEqual(event['detail'], 'legacy_ownership')
+        action = dict(self.q.db.execute("SELECT * FROM actions WHERE kind='regen' AND pr=1").fetchone())
+        receipt = Path(action['receipt']).read_text()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB'])) as work:
+            card = work.get(card_id)
+            self.assertEqual(card['prs'], [first, later])
+            self.assertEqual(card['merge_receipts'], [first])
+            self.assertTrue(card['active'])
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+            work.finish_merge(card_id, repo=later['repo'], pr=1, head=self.approved, merged=False,
+                              actor='human', reason='provider confirms no pending merge on remaining legacy pin')
+            work.update(card_id, actor='human', reason='manual re-pin after reconciliation',
+                        prs=[{**later, 'head': self.updated}])
+            work.requeue(card_id, stage='review', actor='human', reason='review manual re-pin')
+            work.transition(card_id, 'merging', actor='human', reason='reviewed prepared head')
+        self.restart()
+        self.q.tick()
+        self.assertEqual(self.q.db.execute('SELECT outcome FROM entries WHERE pr=1 AND approved=?',
+                                         (self.updated,)).fetchone()[0], 'waiting_ci')
+        self.assertEqual(Path(action['receipt']).read_text(), receipt)
+        self.assertEqual(self.q.db.execute("SELECT attempts FROM actions WHERE kind='regen'").fetchone()[0], 1)
+        self.assertEqual(len(self.calls('merge')), 1)
+
     def test_verified_merge_survives_later_provider_read_failure(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
