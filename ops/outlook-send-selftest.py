@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Offline tests for lib/outlook_send.py. A fake cua-driver plays Outlook and a fake decoded mailbox
 plays Sent Items and the calendar; nothing real is touched and no Send is ever pressed.
 
