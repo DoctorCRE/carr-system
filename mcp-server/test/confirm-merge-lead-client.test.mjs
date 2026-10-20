@@ -39,7 +39,7 @@ class Fake {
     if (sql.includes("merge_survivorship")) {
       return { rows: params[0].map(id => ({ id, ...this.metrics[id] })) };
     }
-    if (sql.includes("merge_orphan_sweep")) return { rows: [{ attachment: "party_link", count: 0 }] };
+    if (sql.includes("merge_orphan_sweep")) return { rows: [{ attachment: "party_link", count: 0 }, {attachment:"vendor_assignment",count:this.assignmentCount || 0}] };
 
     if (sql.startsWith("update lead set party_id") ||
         sql.startsWith("update client set party_id") ||
@@ -174,4 +174,12 @@ test("the gate is symmetric — it does not depend on which side is the survivor
     match_basis: "exact email domain",
   }), /lead_client_pair|wrong_merge_survivor/,
     "a caller who swaps the arguments cannot slip past either the pair gate or survivor precedence");
+});
+
+
+test('party merges refuse unresolved deal vendor assignments before moving any records', async () => {
+  const fake = new Fake({[ids.leadSide]:['vendor'],[ids.clientSide]:['vendor']});
+  fake.assignmentCount = 1;
+  await assert.rejects(merge(fake),error=>error.payload?.error==='merge_vendor_assignments_require_resolution');
+  assert.deepEqual(fake.updates,[]);
 });

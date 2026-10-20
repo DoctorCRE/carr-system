@@ -11,7 +11,7 @@ import { TOOLS, executeRegisteredTool } from "../src/tools.js";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const schema = readFileSync(path.join(root, "db/schema.sql"), "utf8");
 const tables = ["party", "lead", "client", "vendor", "deal", "activity", "deal_participant",
-  "party_link", "record_flag", "tool_call", "event"];
+  "party_link", "record_flag", "tool_call", "event", "deal_vendor_assignment"];
 const ddl = tables.map(name => {
   const match = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\(.*?\\n\\);`, "s"));
   assert.ok(match, `current schema must define ${name}`);
@@ -84,6 +84,17 @@ test("confirm-merge executes against the current activity schema", async t => {
         values (now(),$1,'note','Synthetic activity',$2,$3,$4)`, [actor.id, ...refs]);
     }
     const merge = extra => TOOLS["confirm-merge"].handler(db, actor, { ...options, ...extra });
+
+    for (const endpoint of ['party_id','company_party_id','contact_party_id']) {
+      await t.test(`vendor assignment ${endpoint} refuses a party merge without hiding history`, () => fixture(async () => {
+        const assignment = {party_id:unrelated,company_party_id:unrelated,contact_party_id:unrelated,[endpoint]:loser};
+        await db.query(`insert into deal_vendor_assignment(deal_id,party_id,role,company_party_id,contact_party_id,active,updated_by)
+          values($1,$2,'lender',$3,$4,false,$5)`,[role(50),assignment.party_id,assignment.company_party_id,assignment.contact_party_id,actor.id]);
+        await assert.rejects(() => executeRegisteredTool(db,actor,'confirm-merge',options),
+          error=>error.payload?.error==='merge_vendor_assignments_require_resolution' && error.payload.count===1);
+        assert.equal((await db.query('select merged_into from party where id=$1',[loser])).rows[0].merged_into,null);
+      }));
+    }
 
     for (const endpoint of ["from", "to", "via"]) {
       await t.test(`graph attachments on the losing ${endpoint} endpoint refuse without stranding refs`, () => fixture(async () => {

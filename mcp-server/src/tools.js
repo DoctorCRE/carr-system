@@ -5811,6 +5811,7 @@ export const TOOLS = {
               or exists(select 1 from vendor v where v.id=a.vendor_id and v.party_id=$1)
               or exists(select 1 from deal d join client cl on cl.id=d.client_id
                         where d.id=a.deal_id and cl.party_id=$1)
+         union all select 'vendor_assignment', count(*)::int from public.deal_vendor_assignment where $1::uuid in (party_id,company_party_id,contact_party_id)
          union all select 'deal_participant', count(*)::int from deal_participant where party_id=$1
          union all select 'record_flag', count(*)::int from record_flag where subject_type='party' and subject_id=$1
          union all select 'child_party', count(*)::int from party where org_id=$1`, [merg.partyId]);
@@ -5818,6 +5819,10 @@ export const TOOLS = {
       // Moving role rows cannot preserve graph endpoints or the broker. Until
       // an attachment-preserving merge handles duplicate and self edges, refuse
       // this pair before any write instead of retiring a still-cited party.
+      const assignmentCount = sweep.rows.find(row => row.attachment === 'vendor_assignment')?.count;
+      if (Number(assignmentCount) > 0)
+        throw new ToolError({error:'merge_vendor_assignments_require_resolution',party_id:merg.partyId,count:Number(assignmentCount),
+          hint:'reconcile the losing party, company and contact assignment references in a reviewed follow-up before merging'});
       const graphCount = sweep.rows.find(row => row.attachment === "party_link")?.count;
       if (Number(graphCount) > 0)
         throw new ToolError({ error: "merge_graph_attachments_require_resolution",
