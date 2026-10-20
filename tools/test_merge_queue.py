@@ -80,6 +80,7 @@ if a[:2]==['pr','merge']:
  assert '--squash' in a and a[a.index('--match-head-commit')+1]==p['head']['sha']
  p['merged']=True;p['state']='closed';p['merge_commit_sha']=d['merge_sha']
  subprocess.run(['git','-C',d['remote'],'update-ref','refs/heads/main',d['merge_sha']],check=True)
+ if d.get('merge_landed_error'): save();print('gh: response lost after merge (HTTP 502)',file=sys.stderr);sys.exit(1)
  save();sys.exit()
 raise AssertionError(a)
 '''
@@ -90,6 +91,19 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class QueueTests(unittest.TestCase):
+    def test_error_after_merge_lands_records_merged_without_remerging(self):
+        self.pr(head=self.updated)
+        self.data['merge_landed_error'] = True
+        self.save()
+        self.q.enqueue(module.REPOS[0], 1, self.updated)
+        self.q.tick()
+        row = self.q.db.execute('SELECT * FROM entries').fetchone()
+        self.assertEqual(row['outcome'], 'merged')
+        self.assertIn(row['phase'], ('refreshing', 'done'))
+        self.restart()
+        self.q.tick()
+        self.assertEqual(len(self.calls('merge')), 1)
+
     def test_pending_checks_exit_eight_waits_without_spending_retries(self):
         self.pr(head=self.updated)
         self.q.enqueue(module.REPOS[0], 1, self.updated)
