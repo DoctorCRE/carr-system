@@ -571,13 +571,16 @@ class FleetReaper:
                 self.tree_identity(root, path) != {k: row[k] for k in ("head", "branch", "detached")} or \
                 self.tree_fresh(path):
             raise RuntimeError("worktree became live before move; preserve it")
+        fetch_remote_refs(root)
+        if not remote_preserves(path, row["head"]):
+            return {"status": "preserved", "reason": "remote preservation changed before staging"}
         git(root, "worktree", "move", str(path), str(target / "worktree"))
         if self.tree_identity(root, target / "worktree") != {k: row[k] for k in ("head", "branch", "detached")} or \
                 self.work_content(target / "worktree") != row["content"]:
             raise RuntimeError("staged worktree HEAD readback mismatch")
         manifest["state"] = "staged"
         save(target / "manifest.json", manifest)
-        return {"staged_path": str(target / "worktree"), "manifest": str(target / "manifest.json")}
+        return {"status": "staged", "staged_path": str(target / "worktree"), "manifest": str(target / "manifest.json")}
 
     def recover_pending(self, repo, root):
         ledger = self.root / "out/orch/branch-janitor-actions.jsonl"
@@ -640,8 +643,6 @@ class FleetReaper:
 
     def _apply(self, repo, root, row, skip):
         self.provider.verify_repository(repo, root)
-        if row["action"] == "stage_worktree":
-            fetch_remote_refs(root)
         advertised = git(root, "ls-remote", "--heads", "origin", "refs/heads/main").split()
         if not advertised or advertised[0] != row["main"]:
             if advertised and row["action"] == "delete_remote":
@@ -662,7 +663,7 @@ class FleetReaper:
                 self.process_probe([row["path"]]), {str(root), *(str(Path(p).resolve()) for p in skip)})
             if any(current.get(k) != row.get(k) for k in ("action", "status", "ownership", "content", "branch", "detached", "head")):
                 return {"status": "preserved", "reason": "worktree became live or content changed"}
-            return {"status": "staged", **self.stage(root, row)}
+            return self.stage(root, row)
         if row["action"] == "close_pr":
             successor = row["successor"]
             landed = self.provider.pull(repo, successor["number"])
