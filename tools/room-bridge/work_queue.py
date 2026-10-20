@@ -305,6 +305,25 @@ class WorkQueue:
                             {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
         return self.get(card)
 
+    def advance_merge_pin(self, card, *, repo, pr, head, prepared, main, actor, reason, expected_order):
+        if any(not re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (head, prepared, main)) or head == prepared:
+            raise ValueError('regeneration requires distinct pinned and prepared heads and a main SHA')
+        with self.transaction():
+            if self._merge_entries() != expected_order:
+                raise QueueChanged('merge order changed before pin advancement')
+            row = self._item(card)
+            if row['claim'] or row['stage'] != 'merging' or self._merge_active(card):
+                raise QueueChanged('pin advancement requires an unstarted merging-stage card')
+            data = json.loads(row['data'])
+            pin = {'repo': repo, 'number': pr, 'head': head}
+            if pin not in data['prs'] or pin in data.get('merge_receipts', []) or pin in data.get('merge_stopped', []):
+                raise QueueChanged('regeneration no longer matches an unfinished pinned PR')
+            replacement = {**pin, 'head': prepared}
+            data['prs'][data['prs'].index(pin)] = replacement
+            self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+            self._event(card, pin, {**replacement, 'main': main}, actor, reason, 'pin_regenerated')
+        return self.get(card)
+
     def finish_merge(self, card, *, repo, pr, head, merged, actor, reason):
         """Consume a provider receipt after exact-head ancestry or termination readback."""
         with self.transaction():

@@ -675,7 +675,7 @@ class QueueTests(unittest.TestCase):
             return entry
         self.q.enqueue = projected_enqueue
 
-    def test_preparation_push_waits_for_checks_on_the_new_head(self):
+    def prepare_pinned_head(self):
         self.pr()
         self.data['required'] = [{'bucket': 'pending'}]
         self.save()
@@ -683,6 +683,7 @@ class QueueTests(unittest.TestCase):
             'import json,os,sys\nfrom pathlib import Path\n'
             'args = dict(zip(sys.argv[1::2], sys.argv[2::2]))\n'
             'prepared = ' + repr(self.updated) + '\n'
+            'if prepared == args["--head"]:\n print(json.dumps(dict(head=prepared, changed=False))); sys.exit()\n'
             'receipt = Path(args["--receipt"])\nreceipt.parent.mkdir(parents=True, exist_ok=True)\n'
             'receipt.write_text(json.dumps(dict(head=args["--head"], main=args["--main"], '
             'prepared=prepared, branch=args["--branch"])))\n'
@@ -691,7 +692,10 @@ class QueueTests(unittest.TestCase):
             'state.write_text(json.dumps(data))\n'
             'print(json.dumps(dict(head=prepared, changed=True)))\n')
         self.q.enqueue(module.REPOS[0], 1, self.approved)
-        card_id = f'{module.REPOS[0]}#1@{self.approved}'
+        return f'{module.REPOS[0]}#1@{self.approved}'
+
+    def test_preparation_push_waits_for_checks_on_the_new_head(self):
+        card_id = self.prepare_pinned_head()
         self.q.tick()
         self.assertEqual(self.calls('merge'), [])
         with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
@@ -712,6 +716,40 @@ class QueueTests(unittest.TestCase):
         self.q.tick()
         self.assertEqual(len(self.calls('merge')), 1)
         self.assertEqual(self.calls('merge')[0][-1], self.updated)
+
+    def test_completed_regeneration_recovers_pin_after_restart_once(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        self.restart()
+        self.q.tick()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.updated)
+            self.assertEqual(len([e for e in work.export()['history'] if e['kind'] == 'pin_regenerated']), 1)
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_foreign_push_after_regeneration_does_not_advance_pin(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        self.load()
+        self.pr(head=self.changed)
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+            self.assertFalse(any(e['kind'] == 'pin_regenerated' for e in work.export()['history']))
+        self.assertEqual(self.calls('merge'), [])
+
+    def test_regeneration_without_a_matching_receipt_does_not_advance_pin(self):
+        card_id = self.prepare_pinned_head()
+        self.q.prepare(module.REPOS[0], self.data['prs'][f'{module.REPOS[0]}#1'])
+        path = self.state / 'regen' / f'1-{self.approved}-{self.main}.json'
+        path.write_text(json.dumps(dict(head=self.changed, main=self.main, prepared=self.updated, branch='branch-1')))
+        self.restart()
+        self.q.tick()
+        with module.WorkQueue(Path(os.environ['CARR_WORK_QUEUE_DB']), read_only=True) as work:
+            self.assertEqual(work.get(card_id)['prs'][0]['head'], self.approved)
+        self.assertEqual(self.calls('merge'), [])
 
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()

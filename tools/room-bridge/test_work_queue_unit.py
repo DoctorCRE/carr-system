@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from work_queue import WorkQueue
+from work_queue import WorkQueue, QueueChanged
 
 
 class WorkQueueTests(unittest.TestCase):
@@ -231,6 +231,32 @@ with WorkQueue(Path(sys.argv[2])) as q:
         merged = self.q.get('A')['stages'][-2]
         self.assertIsNotNone(merged['finished_at'])
         self.assertGreaterEqual(merged['elapsed'], 0)
+
+    def test_regenerated_pin_preserves_other_prs_and_requires_current_selection(self):
+        self.add('A')
+        claim = self.q.claim(eligible_desks={'sol'}, actor='runner', owner={})
+        self.q.finish('A', claim['claim'], {'status': 'completed'}, actor='worker')
+        pins = [dict(repo='jbookout/carr-system', number=n, head='a' * 40) for n in (1, 2)]
+        self.q.update('A', actor='reviewer', reason='reviewed', prs=pins)
+        self.q.transition('A', 'merging', actor='test', reason='review complete')
+        order = self.q.merge_order()['entries']
+        arguments = dict(repo='jbookout/carr-system', pr=1, head='a' * 40, prepared='b' * 40,
+                         main='c' * 40, actor='merge-daemon', reason='verified regeneration', expected_order=order)
+        self.q.advance_merge_pin('A', **arguments)
+        self.assertEqual(self.q.get('A')['prs'], [{**pins[0], 'head': 'b' * 40}, pins[1]])
+        revision = self.q.export()['revision']
+        with self.assertRaises(QueueChanged):
+            self.q.advance_merge_pin('A', **arguments)
+        self.assertEqual(self.q.export()['revision'], revision)
+        arguments['expected_order'] = self.q.merge_order()['entries']
+        arguments['head'] = 'b' * 40
+        arguments['prepared'] = 'd' * 40
+        self.q.begin_merge('A', actor='merge-daemon', reason='provider merge starting')
+        revision = self.q.export()['revision']
+        with self.assertRaises(QueueChanged):
+            self.q.advance_merge_pin('A', **arguments)
+        self.assertEqual(self.q.export()['revision'], revision)
+        self.assertEqual(self.q.get('A')['prs'][0]['head'], 'b' * 40)
 
 
 if __name__ == '__main__':
