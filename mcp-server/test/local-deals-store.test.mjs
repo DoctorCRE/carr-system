@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { TOOLS } from '../src/tools.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -77,12 +78,14 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await restoreEventIdentity(c, schema);
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
+    await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
+    await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
@@ -146,6 +149,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
+            delete prior.checklist;
           }
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach((row, index) => invoiceFields.forEach(field => {
@@ -232,12 +236,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
 
     await t.test('timeline reader returns exact current lease and excludes unverified history', async () => transaction(async () => {
       await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
       await c.query("insert into lease(id,deal_id,status,executed_on,commencement_on,expiration_on,evidence_kind,evidence_ref,source,created_by) values($1,$2,'current','2026-10-01','2026-11-01','2031-10-31','executed_lease','Synthetic clause 3','Synthetic abstract',$3)", [id(21),id(4),actor.id]);
       await c.query("insert into lease(id,deal_id,status,expiration_on,created_by) values($1,$2,'legacy_unverified','2040-01-01',$3)", [id(22),id(4),actor.id]);
       await c.query('set local role carr_reader');
       assert.equal((await c.query("select has_table_privilege('carr_reader','lease','select') as allowed")).rows[0].allowed,false);
       const read = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
       assert.equal(read.schema_version,'deal-timeline.v1');
+      assert.equal(read.checklist.template_state,'current');
+      assert.equal(read.checklist.phases.flatMap(p=>p.items).find(i=>i.id==='executed_lease').status,'complete');
       assert.equal(read.lease.id,id(21));
       assert.equal(read.lease.commencement_on,'2026-11-01');
       assert.equal(read.lease.expiration_on,'2031-10-31');
@@ -245,7 +252,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('reset role');
       await c.query("update lease set status='superseded' where id=$1",[id(21)]);
       await c.query('set local role carr_reader');
-      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).lease,null);
+      const superseded = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(superseded.lease,null);
+      assert.equal(superseded.checklist.phases.flatMap(p=>p.items).find(i=>i.id==='executed_lease').status,'not_recorded');
     }));
 
     await t.test('actual legacy handler works as carr_reader, including an empty board', async () => transaction(async () => {
