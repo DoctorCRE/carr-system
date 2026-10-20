@@ -20,6 +20,7 @@ from typing import Callable
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "lib"))
+from lib.cleanup_budget import BudgetExhausted, check, entries, walk
 AGE_SECONDS = 24 * 60 * 60
 DATA_THRESHOLD_BYTES = 1_000_000_000_000
 TMP_PREFIXES = (
@@ -500,7 +501,8 @@ def _temp_activity(path, deadline, *, max_entries=None):
     seen = set()
     def inspect(entry):
         nonlocal latest, size
-        if deadline() or max_entries is not None and len(seen) >= max_entries:
+        check(deadline)
+        if max_entries is not None and len(seen) >= max_entries:
             raise TimeoutError('fixture inspection budget')
         info = entry.lstat()
         identity = info.st_dev, info.st_ino
@@ -511,9 +513,7 @@ def _temp_activity(path, deadline, *, max_entries=None):
         digest.update(repr((str(entry.relative_to(path)), info.st_dev, info.st_ino,
                             info.st_mode, info.st_size, info.st_mtime_ns)).encode())
     inspect(path)
-    def fail(error):
-        raise error
-    for parent, dirs, files in os.walk(path, followlinks=False, onerror=fail):
+    for parent, dirs, files in walk(path, deadline):
         dirs.sort()
         for name in sorted(dirs + files):
             inspect(Path(parent) / name)
@@ -540,6 +540,7 @@ def recover_test_temp(pending, *, deadline):
         raise RuntimeError('interrupted fixture directory changed')
     if actual == staged and _temp_activity(staged, deadline)[0] != row['activity']:
         raise RuntimeError('interrupted staged fixture changed')
+    check(deadline)
     row.update(status='staged' if actual == staged else 'verified_no_effect',
                reason='interrupted fixture move read back before retry')
     save(manifest, row)
@@ -556,9 +557,12 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
     descriptor = _open_root(root)
     identity = os.fstat(descriptor)
     try:
-        with os.scandir(descriptor) as entries:
-            names = heapq.nsmallest(max_items, (e.name for e in entries
+        try:
+            names = heapq.nsmallest(max_items, (e.name for e in entries(descriptor, deadline)
                 if e.name.startswith(TEST_TMP_PREFIXES) and e.name > cursor))
+        except BudgetExhausted:
+            report['budget_exhausted'] = True
+            return report
         for offset in range(0, len(names), 50):
             if deadline():
                 report['budget_exhausted'] = True
@@ -605,6 +609,7 @@ def cleanup_test_temps(root, *, now, min_age, max_items, cursor, process_probe,
                                 row.update(status='would_stage', reason='old inactive disposable test fixture', allocated_bytes=size)
                             else:
                                 assert target is not None
+                                check(deadline)
                                 os.rename(name, target / 'fixture', src_dir_fd=descriptor)
                                 staged_busy = process_probe([str(path), str(target / 'fixture')])
                                 verification_deadline = time.monotonic() + 2
