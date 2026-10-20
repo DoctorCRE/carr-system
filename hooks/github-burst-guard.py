@@ -11,6 +11,11 @@ lockout. Joe ordered a rule (74ddb23c, "never burst GitHub") and enforcement;
 this hook is the enforcement.
 
 WHAT IT REFUSES (PreToolUse, Bash and the Codex exec shapes):
+  0. Direct PR merges and branch updates. Use tools/mq.sh to enqueue into the existing daemon.
+     Scan the full text after joining continuation lines, including quoted prose
+     and nested shell bodies. Explicit GET reads remain allowed. A standalone
+     tools/merge_queue/main.py invocation is the merge owner's entry point.
+     Naming mq.sh beside a direct mutation does not exempt that mutation.
   1. A shell loop — for / while / until, or xargs / parallel — that runs `gh`
      with no `sleep N` (N >= 2) inside it. Allowed: the same loop with that
      sleep, which covers the `until gh ...; do sleep 30; done` poll; and a
@@ -68,7 +73,8 @@ background.
 ALWAYS ALLOWED outside the cooldown, when not inside a loop: a single gh
 command, gh --paginate, and gh api graphql. One paginated call is the cheap
 alternative the refusals name. Text the shell will not run (a heredoc body, a
-commit message, a --body or grep pattern in quotes) is not scanned for gh.
+commit message, a --body or grep pattern in quotes) is not scanned for bursts.
+Merge-action text is conservatively refused even in those inert examples.
 
 STATE: out/github-burst-guard-state.json (out/ is git-ignored), shared by every
 session on the machine because the limit is per account, not per session.
@@ -81,13 +87,15 @@ longer read. CARR_RELEASE_PIPELINE_LOCK overrides the lock path probed.
 
 KNOWN LIMIT. It sees the command a session issues, not what a script does
 inside itself, and a loop hidden behind a variable or a script file is not
-visible. The threat model is the 2026-10-06 shape: a session typing the burst.
+visible. Deliberately computed tool names and string-built commands are out
+of scope for merge enforcement. The threat model is the 2026-10-06 shape: a session typing the burst.
 
-FAILS OPEN. An internal error, malformed input or an unreadable state file
+Unsupported native exec_command arguments fail closed. An internal error, malformed input or an unreadable state file
 allows the call and logs the reason to out/hook-guard.log.
 
 Fixtures: ops/github-burst-guard-selftest.py
 """
+import ast
 import fcntl
 import json
 import os
@@ -477,9 +485,37 @@ def pending_ticks(state, now):
             if isinstance(v, (int, float)) and now - v < TICK_PENDING_TTL}
 
 
+def merge_queue_reason(cmd):
+    source = cmd.replace('\\\n', '')
+    daemon = _PREFIX + _INTERP + r"(?:\S*/)?tools/merge_queue/main\.py(?:\s+[^;&|\n]*)?"
+    if re.fullmatch(r"\s*" + daemon + r"\s*", source) and not re.search(r'[$`<>]', source):
+        return None
+    scan = re.sub(r"['\"`]", '', source)
+    repo_options = r"(?:(?:-R|--repo|--hostname)(?:=|\s*)\S+\s+)*"
+    direct = re.search(r"\bgh\s+" + repo_options + r"pr\s+" + repo_options + r"(?:merge|update-branch)\b", scan)
+    graphql = re.search(r"\bgh\s+" + repo_options + r"api\s+graphql\b", scan) and re.search(
+        r"\b(?:mergePullRequest|updatePullRequestBranch)\b", scan)
+    rest = False
+    for statement in re.split(r"[;|&\n()]", scan):
+        if not re.search(r"\bpulls/[^/\s]+/(?:merge|update-branch)\b", statement):
+            continue
+        methods = re.findall(r"(?:-X\s*|--(?:method|request)(?:=|\s+))(\S+)", statement)
+        if any(method.upper() != 'GET' for method in methods) or (
+                not methods and re.search(r"\bgh\s+" + repo_options + r"api\b", statement)):
+            rest = True
+            break
+    if direct or rest or graphql:
+        return ('MERGE QUEUE GUARD: only the existing merge-queue daemon may merge or update branches. '
+                'Use tools/mq.sh PR... or tools/mq.sh --queue owner/repo queue-file log-file to enqueue pinned heads.')
+    return None
+
+
 def pre_verdict(cmd, now, key="-"):
     """Return a refusal reason, or None to allow. Notes when an allowed tick
     starts; only PostToolUse (observe_tick) stamps the window."""
+    reason = merge_queue_reason(cmd)
+    if reason:
+        return reason
     scan = mask_quoted_data(inert_stripped(cmd))
     has_gh = bool(gh_calls(scan))
     tick = runs_release_tick(scan)
@@ -671,12 +707,67 @@ def observe(payload, cmd, now, event):
         log(f"RECORDED rate-limit answer :: {cmd[:200]}")
 
 
+class UninspectableCommand(ValueError):
+    pass
+
+
+def native_commands(code):
+    tokens = re.findall(r'''//[^\n]*|/\*[\s\S]*?\*/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\])*`|[A-Za-z_$][\w$]*|[^\s]''', code)
+    tokens = [token for token in tokens if not token.startswith(('//', '/*'))]
+    commands = []
+    for i, token in enumerate(tokens):
+        if token == 'exec_command':
+            argument = i + 1
+        elif token in ('"exec_command"', "'exec_command'", '`exec_command`') and i and tokens[i - 1] == '[':
+            if tokens[i + 1:i + 2] != [']']:
+                raise UninspectableCommand('Dynamic native tool names cannot be inspected.')
+            argument = i + 2
+        else:
+            continue
+        if tokens[argument:argument + 2] == ['?', '.']:
+            argument += 2
+        if tokens[argument:argument + 2] != ['(', '{']:
+            raise UninspectableCommand('Native exec_command requires an inspectable object argument.')
+        depth, values = 1, []
+        for j in range(argument + 2, len(tokens)):
+            current = tokens[j]
+            if depth == 1 and current in ('.', '['):
+                raise UninspectableCommand('Spread or computed native command arguments cannot be inspected.')
+            if depth == 1 and current in ('cmd', '"cmd"', "'cmd'") and tokens[j + 1:j + 2] == [':']:
+                literal = tokens[j + 2] if j + 2 < len(tokens) else ''
+                if not literal.startswith(('"', "'", '`')) or tokens[j + 3:j + 4] not in ([','], ['}']):
+                    raise UninspectableCommand('Dynamic native commands cannot be inspected; use a literal cmd.')
+                if literal.startswith('`'):
+                    if '${' in literal or '\\' in literal:
+                        raise UninspectableCommand('Interpolated or escaped native templates cannot be inspected; use a plain literal cmd.')
+                    values.append(literal[1:-1])
+                else:
+                    if re.search(r'''\\(?![\\'"abfnrtv0-7xuU\n])''', literal):
+                        raise UninspectableCommand('Unsupported JavaScript string escape in native command.')
+                    try:
+                        values.append(ast.literal_eval(literal))
+                    except (ValueError, SyntaxError):
+                        raise UninspectableCommand('Unsupported native command literal.') from None
+            if current in ('{', '[', '('):
+                depth += 1
+            elif current in ('}', ']', ')'):
+                depth -= 1
+            if depth == 0:
+                break
+        if depth != 0 or len(values) != 1:
+            raise UninspectableCommand('Native exec_command requires exactly one literal cmd.')
+        commands.extend(values)
+    return '\n'.join(commands)
+
+
 def command_of(payload):
     tool = payload.get("tool_name") or payload.get("toolName") or ""
     if tool not in ("Bash", "exec_command", "functions.exec"):
         return None
     ti = payload.get("tool_input") or payload.get("toolInput") or {}
-    cmd = (ti.get("command") or ti.get("cmd") or "") if isinstance(ti, dict) else ti
+    cmd = (ti.get("command") or ti.get("cmd") or ti.get("code") or "") if isinstance(ti, dict) else ti
+    if tool == 'functions.exec' and isinstance(cmd, str) and 'exec_command' in cmd:
+        cmd = native_commands(cmd)
     return cmd if isinstance(cmd, str) and cmd else None
 
 
@@ -704,6 +795,9 @@ def main():
             print(reason, file=sys.stderr)
             return 2
         return 0
+    except UninspectableCommand as exc:
+        print(f'MERGE QUEUE GUARD: {exc} Enqueue with tools/mq.sh.', file=sys.stderr)
+        return 2
     except Exception as exc:                       # fail OPEN
         log(f"ALLOW(internal-error) {type(exc).__name__}: {exc}")
         return 0
