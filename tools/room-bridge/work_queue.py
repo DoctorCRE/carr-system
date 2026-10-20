@@ -9,6 +9,9 @@ results file. CARR_WORK_QUEUE_DB selects an explicit isolated store. A job's
 FULL, BEGIN IMMEDIATE mutations and the runner's nonblocking flock mirror the
 merge executor's locking discipline.
 
+Test runners export CARR_WORK_QUEUE_TEST=1 alongside a temporary queue path.
+Children inherit the marker, so dropping the path cannot restore live defaults.
+
 export() returns room-work-queue/v1, including full ordered cards and events.
 merge_order() returns room-work-queue-merges/v1 with revision and ordered
 entries [{card_id, position, repo, pr, head}]. Only pinned merging-stage PRs
@@ -47,6 +50,7 @@ FIELDS = {'wr', 'slice', 'title', 'description', 'agent', 'family', 'model', 'ef
 def _guard_test_store(path=None):
     entry = Path(sys.argv[0]).name
     testing = ('unittest' in sys.modules or 'pytest' in sys.modules
+               or os.environ.get('CARR_WORK_QUEUE_TEST') == '1'
                or os.environ.get('CARR_HOOK_FIXTURE') == '1'
                or entry.startswith(('test_', 'test-')) or 'selftest' in entry)
     if testing and (path is None or not Path(path).expanduser().resolve().is_relative_to(

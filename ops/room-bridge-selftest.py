@@ -62,7 +62,8 @@ def run_suite(rel, *, runner=subprocess.run, timeout=SUITE_TIMEOUT_SECONDS):
         return False
     try:
         with tempfile.TemporaryDirectory() as directory:
-            environment = {**os.environ, 'CARR_WORK_QUEUE_DB': str(Path(directory) / 'work-queue.sqlite3')}
+            environment = {**os.environ, 'CARR_WORK_QUEUE_DB': str(Path(directory) / 'work-queue.sqlite3'),
+                           'CARR_WORK_QUEUE_TEST': '1'}
             result = runner([sys.executable, str(path)], cwd=REPO, env=environment,
                             capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:

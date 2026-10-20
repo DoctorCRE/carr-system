@@ -1,4 +1,5 @@
 """Tests and smoke probes must opt into an isolated work queue."""
+import json
 import os
 from pathlib import Path
 import sys
@@ -12,6 +13,35 @@ from work_queue import WorkQueue, board_projection, default_path
 
 
 class QueueIsolationTests(unittest.TestCase):
+    def test_marked_cli_child_can_export_an_explicit_temporary_store(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'work.sqlite3'
+            with WorkQueue(path) as queue:
+                queue.enqueue('fixture', desk='sol', task='offline fixture', actor='test')
+            env = {**os.environ, 'HOME': str(root), 'CARR_WORK_QUEUE_DB': str(path),
+                   'CARR_WORK_QUEUE_TEST': '1'}
+            result = subprocess.run([sys.executable, str(Path(__file__).with_name('dispatch.py')),
+                '--registry', str(root / 'desks.json'), '--results', str(root / 'results.jsonl'),
+                'export'], env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual([item['card_id'] for item in json.loads(result.stdout)['items']], ['fixture'])
+
+    def test_marker_free_worker_process_retains_operational_default_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            env = {**os.environ, 'HOME': str(root),
+                   'PYTHONPATH': str(Path(__file__).resolve().parent)}
+            for name in ('CARR_WORK_QUEUE_DB', 'CARR_WORK_QUEUE_TEST', 'CARR_HERMES_RESULTS',
+                         'CARR_HOOK_FIXTURE', 'PYTEST_CURRENT_TEST'):
+                env.pop(name, None)
+            result = subprocess.run([sys.executable, '-c',
+                'from work_queue import default_path; print(default_path())'],
+                env=env, capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), str(root / '.config/carr/work-queue.sqlite3'))
+            self.assertFalse((root / '.config').exists())
+
     def test_test_process_without_explicit_store_refuses_before_resolving_default(self):
         with patch.dict(os.environ):
             os.environ.pop('CARR_WORK_QUEUE_DB', None)
