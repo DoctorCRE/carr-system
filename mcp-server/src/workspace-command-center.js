@@ -2,7 +2,7 @@ import { organizationTenantForActor } from "./identity.js";
 
 export const COMMAND_CENTER_PATH = "/api/v1/command-center";
 // Every destination below is a deep link the Deal Room boot parser already
-// honors (dealroom/js/app.js: workspace=team, filter=flagged, owner=me). There
+// honors (workspace=team, filter=flagged, owner=me). There
 // is no URL form for "mine, active", so that scope reports a null destination
 // rather than inventing an unsupported filter.
 export const TEAM_ACTIVE_DESTINATION = "/deals?workspace=team";
@@ -105,7 +105,7 @@ export async function readCommandCenterSummary({ client, actor, tenant = organiz
     needs_you_now: needs,
     // this_week and recent_calls are in the exact-key contract and carry nothing.
     // They are DECLARED empty, not left empty pending a query: the browser
-    // validator (dealroom/js/workspace-command-center-model.js, emptyContractList)
+    // validator in the DoctorCRE app
     // refuses a non-empty value for either, so a later producer cannot quietly fill
     // one with an unvalidated shape that no renderer would ever show. Filling either
     // means declaring its element shape and its renderer in the same change.
