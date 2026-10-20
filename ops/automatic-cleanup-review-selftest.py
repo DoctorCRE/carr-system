@@ -21,6 +21,45 @@ spec.loader.exec_module(fixtures)
 
 
 class ReviewProbes(unittest.TestCase):
+    def test_staging_directory_replacement_during_intent_keeps_clone(self):
+        from unittest.mock import patch
+        for replaced in ('_to_delete', 'target'):
+            with self.subTest(replaced=replaced):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-staging-race'
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', 'main', cwd=clone)
+                staging = fixture.base / '_to_delete'
+                outside = fixture.base / 'outside'
+                outside.mkdir()
+                original = json.dumps
+                swapped = []
+
+                def replace_directory(row, *args, **kwargs):
+                    encoded = original(row, *args, **kwargs)
+                    if row.get('status') == 'intent':
+                        path = Path(row['staged_path']).parent / 'manifest.json'
+                        directory = staging if replaced == '_to_delete' else path.parent
+                        directory.rename(directory.with_name(directory.name + '-original'))
+                        if replaced == '_to_delete':
+                            shutil.copytree(directory.with_name(directory.name + '-original'), outside,
+                                            dirs_exist_ok=True)
+                        directory.symlink_to(outside, target_is_directory=True)
+                        swapped.append(directory)
+                    return encoded
+
+                with patch.object(machine_cleanup.json, 'dumps', side_effect=replace_directory):
+                    result = machine_cleanup.clean_clone(workspace, {'status': 'completed',
+                        'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                        'dispatched_at': '2020-01-01T00:00:00Z'}, provider=fixtures.FakeProvider(),
+                        process_probe=lambda paths: set(), now=time.time(), older_than=0, dry_run=False)
+                self.assertTrue(swapped)
+                self.assertEqual(result['status'], 'kept', result)
+                self.assertTrue(workspace.is_dir())
+                self.assertEqual((clone / 'file').read_text(), 'initial\n')
+                self.assertFalse(list(outside.rglob('workspace')))
+
     def test_hidden_index_flags_protect_clone_before_and_during_cleanup(self):
         for flag in ('--assume-unchanged', '--skip-worktree'):
             for dry_run in (True, False):
