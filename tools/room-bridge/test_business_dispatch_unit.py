@@ -4,11 +4,13 @@ import io
 import json
 import os
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -93,8 +95,24 @@ class BusinessDispatchTests(unittest.TestCase):
         with WorkQueue(self.db) as q:
             self.assertEqual(q.export()['items'], [])
 
+    def test_registration_change_cannot_widen_a_queued_business_task(self):
+        self.send(['send', 'business', 'Read the record.', '--brief', 'business', '--card-id', 'changed'])
+        self.reg.register('biz-desk', 'claude-desktop', model='claude-sonnet-5-5', effort='medium',
+                          cwd=str(self.root))
+        with WorkQueue(self.db) as q, patch.object(dispatch, '_execute') as execute:
+            claim = q.claim(eligible_desks={'biz-desk'}, actor='runner', owner={})
+            options = json.loads(q.execution('changed', claim['claim'])['options'])
+            self.assertEqual((options.get('posture'), options.get('brief_kind')), ('record-layer', 'business'))
+            work_runner.worker(q, 'changed', claim['claim'], self.reg.path, self.results)
+            item = q.get('changed')
+            self.assertEqual((item['stage'], execute.call_count,
+                              'brief_desk_mismatch' in json.dumps(item)), ('failed', 0, True))
+
     def test_business_footer_passes_the_phrasing_lint(self):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
+
+    def test_business_footer_uses_the_partner_role(self):
+        self.assertNotIn('Joe', (HERE / 'business-brief-footer.md').read_text())
 
     def test_record_layer_posture_is_stored_for_every_business_runtime(self):
         for kind in ('codex-session', 'grok-cli', 'hermes-nous', 'flash-local', 'claude-desktop'):
@@ -186,7 +204,7 @@ class BusinessDispatchTests(unittest.TestCase):
 
     def test_nous_accepts_exact_remaining_reservation_and_codex_limits_cover_live_kind(self):
         self.reg.register('nous', 'hermes-nous', posture='record-layer')
-        with patch.object(dispatch.nous_budget.Ledger, 'read', return_value={
+        with patch.dict(dispatch.record_layer.REFUSALS, {}, clear=True), patch.object(dispatch.nous_budget.Ledger, 'read', return_value={
                 'spent_usd': '20', 'reserved_usd': '1', 'budget_usd': '22', 'stop': None}):
             result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', 'exact'])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -205,6 +223,11 @@ class BusinessDispatchTests(unittest.TestCase):
         self.assertEqual(one, business_dispatch.card_id('draft_reply', 'party:7', 'mail:1'))
         self.assertNotEqual(one, business_dispatch.card_id('draft_reply', 'party:7', 'mail:2'))
         self.assertNotEqual(one, business_dispatch.card_id('pull_comps', 'party:7', 'mail:1'))
+
+    def test_delimiters_in_record_and_source_do_not_collide(self):
+        self.assertNotEqual(
+            business_dispatch.card_id('draft_reply', 'party:7|mail:1', 'mail:2'),
+            business_dispatch.card_id('draft_reply', 'party:7', 'mail:1|mail:2'))
 
     def test_duplicate_is_refused_cleanly_and_does_not_use_the_cap(self):
         run = business_dispatch.Run(cap=1, run=self.in_process)
@@ -227,6 +250,21 @@ class BusinessDispatchTests(unittest.TestCase):
         self.assertEqual([r.status for r in receipts], ['queued'] * 3 + ['capped'] * 2)
         self.assertEqual(len(calls), 3)
 
+    def test_overlapping_calls_reserve_capacity_atomically(self):
+        start = threading.Barrier(5)
+        release = threading.Event()
+        def ok(argv, **kwargs):
+            release.wait(1)
+            return subprocess.CompletedProcess(argv, 0, '{}', '')
+        run = business_dispatch.Run(cap=3, run=ok)
+        def enqueue(n):
+            start.wait(2)
+            return run.enqueue(f'party:{n}', 'draft_reply', 'Draft.', 'mail:1').status
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            futures = [pool.submit(enqueue, n) for n in range(5)]
+            statuses = [future.result(10) for future in futures]
+        self.assertEqual(sorted(statuses), ['capped'] * 2 + ['queued'] * 3)
+
     def test_failures_return_refusals_instead_of_raising(self):
         def broken(argv, **kwargs):
             raise OSError('no python')
@@ -236,6 +274,28 @@ class BusinessDispatchTests(unittest.TestCase):
         self.assertEqual(run.enqueue('', 'draft_reply', 'Reply.', 'mail:1').status, 'refused')
         unregistered = business_dispatch.Run(desk='missing', run=self.in_process)
         self.assertEqual(unregistered.enqueue('party:7', 'draft_reply', 'Reply.', 'mail:1').status, 'refused')
+
+    def test_invalid_inputs_are_refused_before_subprocess(self):
+        defaults = dict(record_ref='party:7', action='draft_reply', instructions='Draft.', source_id='mail:1')
+        for field, limit in [('record_ref', 1000), ('action', 64), ('instructions', 32000),
+                             ('source_id', 1000), ('desk', 128), ('actor', 128)]:
+            for value in [None, [], '', 'x\x00y', 'x\x1fy', 'x\x7fy', 'x\x85y', '\ud800', 'x' * (limit + 1)]:
+                with self.subTest(field=field, value=repr(value)[:30]):
+                    invoke = Mock(return_value=subprocess.CompletedProcess([], 0, '', ''))
+                    args, options = dict(defaults), {'run': invoke}
+                    (options if field in ('desk', 'actor') else args)[field] = value
+                    receipt = business_dispatch.Run(**options).enqueue(**args)
+                    self.assertEqual((receipt.status, invoke.call_count), ('refused', 0))
+
+    def test_subprocess_value_error_is_a_refusal(self):
+        run = business_dispatch.Run(run=Mock(side_effect=ValueError('embedded null byte')))
+        self.assertEqual(run.enqueue('party:7', 'draft_reply', 'Draft.', 'mail:1').status, 'refused')
+
+    def test_invalid_caps_are_refused(self):
+        for cap in [None, '3', -1, 1.5, True]:
+            with self.subTest(cap=cap):
+                run = business_dispatch.Run(cap=cap)
+                self.assertEqual(run.enqueue('party:7', 'draft_reply', 'Draft.', 'mail:1').status, 'refused')
 
     def test_end_to_end_the_desk_receives_the_business_brief_with_only_carr_tools(self):
         bin_dir = self.root / 'bin'
@@ -259,11 +319,13 @@ class BusinessDispatchTests(unittest.TestCase):
             self.assertIn(block, prompt)
         for block in blocks('brief-footer.md'):
             self.assertNotIn(block, prompt)
-        posture = argv[argv.index('--tools'):argv.index('--permission-mode')]
-        self.assertEqual(posture, ['--tools', '', '--strict-mcp-config', '--mcp-config',
+        posture = argv[argv.index('--effort') + 2:argv.index('--permission-mode')]
+        self.assertEqual(posture, ['--bare', '--setting-sources', '', '--settings',
+            '{"disableAllHooks": true, "enabledPlugins": {}}', '--disable-slash-commands',
+            '--tools', '', '--strict-mcp-config', '--mcp-config',
             json.dumps({'mcpServers': {'carr': {'type': 'http', 'url': claude_desktop_wire.CARR_MCP_URL}}}),
             '--allowedTools', 'mcp__carr'])
-        self.assertEqual(posture[1], '')
+        self.assertEqual(posture[posture.index('--tools') + 1], '')
         servers = json.loads(posture[posture.index('--mcp-config') + 1])['mcpServers']
         self.assertEqual(list(servers), ['carr'])
         self.assertEqual(posture[-2:], ['--allowedTools', 'mcp__carr'])

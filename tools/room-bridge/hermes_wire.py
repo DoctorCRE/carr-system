@@ -72,6 +72,8 @@ def select_model(payload: dict, family: str) -> str:
 
 
 def run_task(entry: dict, task: str, *, env: dict, run, results_path, run_id) -> dict:
+    from record_layer import enforce
+    enforce(entry, kind='hermes-nous')
     accounting = {'launched': False, 'usage': {}}
     try:
         results_path = Path(results_path).absolute()

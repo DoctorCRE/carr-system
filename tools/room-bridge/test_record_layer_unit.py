@@ -15,6 +15,15 @@ import hermes_wire
 
 
 class WireTests(unittest.TestCase):
+    def test_nous_refuses_before_config_import_budget_or_process_launch(self):
+        run = Mock()
+        with patch.object(hermes_wire.nous_budget, 'Ledger') as ledger:
+            with self.assertRaisesRegex(desks.DeskError, 'Hermes.*isolation'):
+                hermes_wire.run_task({'kind': 'hermes-nous', 'posture': 'record-layer', 'provider': 'nous',
+                    'family': 'glm', 'effort': 'medium', 'cwd': '.', 'timeout_s': 30},
+                    'Read the record.', env={}, run=run, results_path='unused', run_id='unused')
+        self.assertEqual((run.call_args_list, ledger.call_args_list), ([], []))
+
     def test_codex_refuses_before_desktop_resume_or_exec(self):
         with patch.object(dispatch.subprocess, 'run') as run, patch.object(dispatch.codex_ipc, 'thread_owner') as owner:
             with self.assertRaisesRegex(desks.DeskError, 'Codex.*tool'):

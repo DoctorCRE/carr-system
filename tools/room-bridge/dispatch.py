@@ -672,6 +672,8 @@ def dispatch(
     checkout: str | None = None,
     on_started=None,
     allow_phrasing: bool = False,
+    brief_kind: str | None = None,
+    posture: str | None = None,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -695,6 +697,10 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if brief_kind is not None:
+        _check_brief_desk(brief_kind, entry)
+    if posture is not None and entry.get('posture') != posture:
+        raise DeskError('brief_desk_mismatch', 'resolved desk no longer carries the queued posture')
     record_layer.enforce(entry)
     if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
         raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")

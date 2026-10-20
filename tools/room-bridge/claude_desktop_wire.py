@@ -42,11 +42,13 @@ COMPLETED_STATES = {"completed", "done"}
 FAILED_STATES = {"failed", "stopped", "killed"}
 NEEDS_INPUT_STATES = {"needs_input", "needs-input", "blocked"}
 CARR_MCP_URL = os.environ.get("CARR_MCP_URL", "https://api.doctorcre.com/mcp")
-# record-layer: no built-in tools, and the CARR server is the only MCP server
-# loaded, so no other connector (mail, browser, desktop) is even visible.
-# The user-config `carr` login carries over to the same name and URL.
+# --bare skips inherited customizations and OAuth/keychain auth. A missing
+# explicit auth source must fail rather than retry with inherited settings.
 TOOL_POSTURES = {
     "record-layer": [
+        "--bare", "--setting-sources", "",
+        "--settings", json.dumps({"disableAllHooks": True, "enabledPlugins": {}}),
+        "--disable-slash-commands",
         "--tools", "",
         "--strict-mcp-config",
         "--mcp-config", json.dumps({"mcpServers": {"carr": {"type": "http", "url": CARR_MCP_URL}}}),
