@@ -28,6 +28,8 @@ class RecordLayer:
         if verb == "read-deal-reconciliation":
             return {"deals": copy.deepcopy(self.deals)}
         if verb == "new-deal":
+            if not {"client", "name", "deal_type", "phase"} <= args.keys():
+                raise AssertionError("new-deal requires phase under the deployed contract")
             self.deals.append({"id": "new-deal", "name": args["name"], "base_version": 1,
                                "owner": None, **{k: args[k] for k in ("phase", "salesforce_id", "sf_close_date_placeholder") if k in args}})
             return {"ok": True, "deal_id": "new-deal"}
@@ -149,15 +151,30 @@ class SalesforceSyncTests(unittest.TestCase):
                     call_verb=lambda verb, args: self.fail('empty input must not read records'))
             self.assertEqual(code, 1)
 
-    def test_closed_lost_never_plans_closed_phase_and_fully_closed_out_means_won(self):
+    def test_closed_lost_maps_to_lost_and_fully_closed_out_means_won(self):
         lost = self.plan("006000000000001,Example office,Example Practice,Closed Lost,Joe,2026-10-01\n",
                          clients=[{"ref": "C-001", "name": "Example Practice"}])['items'][0]
-        self.assertEqual(lost['kind'], 'held')
-        self.assertEqual(lost['reason'], 'lost_status_contract_required')
+        self.assertEqual(lost['kind'], 'create')
+        self.assertEqual(lost['fields'].get('phase'), 'pending')
+        self.assertEqual(lost['fields']['outcome'], 'lost')
         won = self.plan("006000000000001,Example office,Example Practice,Fully Closed Out,Joe,2026-10-01\n",
                         clients=[{"ref": "C-001", "name": "Example Practice"}])['items'][0]
         self.assertEqual(won['fields']['phase'], 'closed')
         self.assertEqual(won['fields']['outcome'], 'won')
+
+    def test_lost_preserves_phase_and_cannot_reclassify_a_won_deal(self):
+        row = '006000000000001,Example office,Example Practice,Closed Lost,Joe,2026-10-01\n'
+        deal = {'id': 'd1', 'name': 'Example office', 'salesforce_id': '006000000000001',
+                'phase': 'legal', 'owner': 'joe', 'base_version': 1}
+        plan = self.plan(row, deals=[deal])
+        self.assertNotIn('phase', plan['items'][0]['fields'])
+        records = RecordLayer([deal])
+        with tempfile.TemporaryDirectory() as folder:
+            sync.apply_plan(plan, records, Path(folder) / 'receipts')
+        self.assertEqual(records.deals[0]['phase'], 'legal')
+        self.assertEqual(records.deals[0]['outcome'], 'lost')
+        self.assertEqual(self.plan(row, deals=records.deals)['counts']['unchanged'], 1)
+        self.assertEqual(self.plan(row, deals=[{**deal, 'phase': 'closed', 'outcome': 'won'}])['counts']['held'], 1)
 
     def test_closed_deal_is_never_reopened_or_reclassified(self):
         p = self.plan("006000000000001,Example expansion,Example Practice,Legal,Dell McCraney,2026-12-01\n",

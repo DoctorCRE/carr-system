@@ -31,6 +31,50 @@ def tearDownModule():
 
 
 class ReplayTests(unittest.TestCase):
+    def test_salesforce_signout_is_a_watchdog_finding_and_clears_after_success(self):
+        from unittest.mock import Mock
+        import job_watchdog as w
+        config = w.load_config(ROOT / 'ops/config/job-watchdog.json')
+        effects = Mock()
+        effects.report.return_value = {}
+        facts = {'salesforce_refresh': [{'subject': 'salesforce-browser-refresh', 'reason': 'Salesforce sign-in needed'}]}
+        found = w.detect(facts, config, 100)
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]['kind'], 'salesforce_refresh')
+        self.assertEqual(found[0]['needs_joe'], 'credentials')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            w.reconcile(root, config, found, effects, 100)
+            w.reconcile(root, config, [], effects, 101)
+            row = w.read_latest(root / config['paths']['findings'])[found[0]['key']]
+            self.assertIsNotNone(row['cleared_at'])
+
+    def test_salesforce_health_collection_uses_only_enabled_private_state_and_preserves_errors(self):
+        import salesforce_browser_refresh
+        from unittest.mock import patch
+        import job_watchdog as w
+        config = w.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as folder, patch('job_watchdog.sys.platform', 'linux'):
+            root = Path(folder)
+            config['repositories'] = ['jbookout/carr-system']
+            config['repository_roots']['jbookout/carr-system'] = str(root)
+            config['paths'].update(merge_queue='queue.txt', queue_logs=[], release_log='release.log')
+            directory = root / 'synthetic-refresh'
+            config['paths']['salesforce_refresh'] = str(directory)
+            with patch('job_watchdog.command', return_value='[]'):
+                self.assertNotIn('salesforce_refresh', w.collect(root, config, 1000))
+                directory.mkdir()
+                (directory / 'config.json').write_text('{}')
+                (directory / 'state.json').write_text(json.dumps({'last_success': w.stamp(1000),
+                    'latest': {'status': 'failed', 'reason': 'Salesforce sign-in needed'}}))
+                facts = w.collect(root, config, 1000)
+                self.assertIn('salesforce_refresh', facts, facts['errors'])
+                self.assertEqual(facts['salesforce_refresh'][0]['reason'], 'Salesforce sign-in needed')
+                (directory / 'state.json').write_text('truncated')
+                facts = w.collect(root, config, 1001)
+                error = next(error for error in facts['errors'] if error['source'] == 'Salesforce refresh evidence')
+                self.assertEqual(error['blinds'], ['salesforce_refresh'])
+
     def test_success_and_recurrence_between_scans_starts_a_new_incident(self):
         from unittest.mock import Mock
         import job_watchdog as w
