@@ -1002,6 +1002,25 @@ class Queue:
                 finally:
                     self._github_entry = old_entry
 
+    def recover_regeneration(self, e):
+        if (e['phase'] != 'blocked' or e['tested'] is not None
+                or e['outcome'] not in ('action_uncertain_exhausted', 'wait_exhausted')):
+            return
+        action = self.db.execute("SELECT * FROM actions WHERE kind='regen' AND phase='issued' "
+                                 'AND repo=? AND pr=? AND head=? AND attempts<? ORDER BY rowid DESC LIMIT 1',
+                                 (e['repo'], e['pr'], e['approved'], MAX_ATTEMPTS)).fetchone()
+        if not action:
+            return
+        try:
+            with self.github_scope(f'regen-recovery:{e["id"]}'):
+                p = self.pr(e['repo'], e['pr'])
+                if p['head']['sha'] != e['approved'] or p['state'] != 'open':
+                    return
+                self._reconcile_action(action['key'], retry=True)
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            with self.db:
+                self.event(e['repo'], e['pr'], 'regeneration_recovery_waiting', str(exc), e['id'])
+
     def tick(self):
         with self.runner_lock():
             with WorkQueue(default_path(), read_only=True) as work:
@@ -1020,6 +1039,8 @@ class Queue:
                     if e['phase'] == 'done' and e['merged_commit']:
                         self.complete_work_merge(e, pin['card_id'], merged=True)
                         continue
+                    self.recover_regeneration(e)
+                    e = self.db.execute('SELECT * FROM entries WHERE id=?', (entry,)).fetchone()
                     if e['phase'] not in ('pending', 'merging', 'merge_rejected', 'refreshing'):
                         continue
                     wait = self._tick_entry(e, pin['card_id'], order)
