@@ -14,6 +14,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 import job_watchdog as w
+from progress_board_test_support import seed_captured_task
 
 FIXTURES = ROOT / "tools/fixtures/job-watchdog"
 INDEX = "https://developers.openai.com/api/reference/llms.txt"
@@ -77,9 +78,17 @@ class VendorWatchTests(unittest.TestCase):
         return (FIXTURES / name).read_text()
 
     def check(self, now):
-        return w.vendor_release_findings(self.root, self.config, now, fetch=self.fetch)
+        found = w.vendor_release_findings(self.root, self.config, now, fetch=self.fetch)
+        self.provision(found)
+        return found
+
+    def provision(self, found):
+        effects = w.Effects(self.root, self.config)
+        for row in found:
+            seed_captured_task(self.root / 'out', self.config['board'], effects.card(row), 'orchestrator')
 
     def report(self, found, now):
+        self.provision(found)
         return w.reconcile(self.root, self.config, found, w.Effects(self.root, self.config), now, complete=False)
 
     def test_no_reference_and_hourly_boundary(self):
@@ -317,7 +326,8 @@ class VendorWatchTests(unittest.TestCase):
 
     def test_scan_wires_watch_without_model_calls(self):
         self.index = "vendor-index-live.txt"
-        with patch.object(w, "collect", return_value={"errors": []}), patch.object(w, "fetch_document", self.fetch), patch.object(w.Effects, "act", side_effect=AssertionError("watch must only report")):
+        self.provision([{'card': self.config['vendor_release_watches'][0]['card']}])
+        with patch.object(w.time, 'time', return_value=1000), patch.object(w, "collect", return_value={"errors": []}), patch.object(w, "fetch_document", self.fetch), patch.object(w.Effects, "act", side_effect=AssertionError("watch must only report")):
             self.assertEqual(w.scan(self.root, self.config), 0)
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(len(w.read_latest(self.root / self.config["paths"]["findings"])), 1)
@@ -334,6 +344,7 @@ class VendorWatchTests(unittest.TestCase):
 
     def test_vendor_only_cli_fetch_failure_has_no_agent_actions(self):
         self.error = True
+        self.check(1000)
         # This clock loses precision when rendered to the ledger's ISO timestamp.
         with patch.object(w, 'collect', side_effect=AssertionError('vendor-only must not collect PRs')), patch.object(w, 'fetch_document', self.fetch), patch.object(w.Effects, 'act', side_effect=AssertionError('no model actions')), patch.object(w.time, 'time', return_value=1790736000.1234562):
             self.assertEqual(w.scan(self.root, self.config, vendor_only=True), 1)
