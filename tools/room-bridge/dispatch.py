@@ -719,7 +719,12 @@ def dispatch(
         on_started(entry)
 
     if checkout is not None:
-        prepared = codex_checkout.prepare(checkout, env)
+        try:
+            prepared = codex_checkout.prepare(checkout, env)
+        except DeskError as exc:
+            _record(results_path, {**base, 'status': 'failed', 'code': exc.code,
+                                   'detail': str(exc), 'termination_confirmed': True})
+            raise
         env = scrubbed_env(env)
         base.update(prepared)
         task = codex_checkout.instruction(prepared) + task

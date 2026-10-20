@@ -260,6 +260,55 @@ class CheckoutDispatchTests(unittest.TestCase):
         with WorkQueue(default_path()) as queue:
             self.assertEqual(queue.candidates(), [])
 
+    def test_cli_new_checkout_can_be_queued_without_an_origin_branch(self):
+        import work_runner
+        from work_queue import WorkQueue, default_path
+        with patch.object(work_runner, 'kick'), \
+             patch.object(dispatch.seat_gate, 'check', return_value=None), \
+             contextlib.redirect_stdout(io.StringIO()):
+            code = dispatch.main(['--registry', str(self.reg.path), '--results', str(self.results),
+                                  'send', 'cx', 'repair', '--checkout', 'new:job-repair'])
+        self.assertEqual(code, 0)
+        with WorkQueue(default_path()) as queue:
+            self.assertEqual(json.loads(queue.candidates()[0]['options'])['checkout'], 'new:job-repair')
+
+    def test_cli_requires_an_exact_origin_head_not_a_tag_or_pattern(self):
+        import work_runner
+        self.git('tag', 'tag-only', cwd=self.origin)
+        for target in ('tag-only', 'rep*'):
+            with self.subTest(target=target), patch.object(work_runner, 'kick') as kick, \
+                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(dispatch.main([
+                    '--registry', str(self.reg.path), '--results', str(self.results),
+                    'send', 'cx', 'repair', '--checkout', target]), 2)
+                kick.assert_not_called()
+
+    def test_cli_origin_lookup_is_bounded_and_git_errors_are_sanitized(self):
+        import work_runner
+        cases = (subprocess.TimeoutExpired('git', 15),
+                 subprocess.CompletedProcess(['git'], 128, '', 'private origin diagnostic'))
+        for outcome in cases:
+            def run(argv, **kwargs):
+                self.assertEqual(argv[:5], ['git', 'ls-remote', '--exit-code', '--heads', 'origin'])
+                self.assertGreater(kwargs['timeout'], 0)
+                self.assertLessEqual(kwargs['timeout'], 15)
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+            err = io.StringIO()
+            with self.subTest(outcome=type(outcome).__name__), \
+                 patch.object(dispatch.subprocess, 'run', side_effect=run), \
+                 patch.object(work_runner, 'kick') as kick, \
+                 patch.object(dispatch.seat_gate, 'check', return_value=None), \
+                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                self.assertEqual(dispatch.main([
+                    '--registry', str(self.reg.path), '--results', str(self.results),
+                    'send', 'cx', 'repair', '--checkout', 'repair']), 2)
+            self.assertIn('origin branch lookup', err.getvalue())
+            self.assertNotIn('private origin diagnostic', err.getvalue())
+            kick.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
