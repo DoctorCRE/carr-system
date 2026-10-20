@@ -67,8 +67,14 @@ def run_codex(entry, task, *, env, run, timeout_s):
                 probe = run(['codex', 'sandbox', *CODEX_SANDBOX, '--',
                              sys.executable, '-I', '-c', CANARY, str(work / 'canary')], **options)
             except (OSError, subprocess.SubprocessError) as exc:
+                if getattr(exc, 'termination_confirmed', True) is False:
+                    return {'status': 'failed', 'termination_confirmed': False,
+                            'detail': 'record_layer_canary_failed: file_write/network canaries still running'}
                 raise DeskError('record_layer_canary_failed',
                                 'file_write/network canaries unavailable: ' + type(exc).__name__) from exc
+            if getattr(probe, 'termination_confirmed', True) is False:
+                return {'status': 'failed', 'termination_confirmed': False,
+                        'detail': 'record_layer_canary_failed: file_write/network canaries still running'}
             try:
                 canaries = json.loads(probe.stdout)
             except (TypeError, ValueError):
@@ -93,6 +99,9 @@ def run_codex(entry, task, *, env, run, timeout_s):
                 argv += ['-c', key + '=' + json.dumps(value)]
             proc = run([*argv, task], **options)
         except (OSError, subprocess.SubprocessError) as exc:
+            if getattr(exc, 'termination_confirmed', True) is False:
+                return {'status': 'failed', 'termination_confirmed': False, 'canaries': canaries,
+                        'detail': 'record_layer_launch_failed: Codex termination unconfirmed; do not replay'}
             raise DeskError('record_layer_launch_failed',
                             'Codex confined launch failed: ' + type(exc).__name__) from exc
         events = []
@@ -107,9 +116,10 @@ def run_codex(entry, task, *, env, run, timeout_s):
                     if event.get('type') == 'item.completed'
                     and isinstance(event.get('item'), dict)
                     and event['item'].get('type') == 'agent_message']
-        completed = proc.returncode == 0 and messages and any(
+        terminated = getattr(proc, 'termination_confirmed', True)
+        completed = terminated and proc.returncode == 0 and messages and any(
             event.get('type') == 'turn.completed' for event in events)
         return {'status': 'completed' if completed else 'failed',
                 'result': '\n'.join(messages), 'canaries': canaries,
                 'detail': '' if completed else 'Codex confined turn failed; no retry',
-                'resumed': False, 'termination_confirmed': True}
+                'resumed': False, 'termination_confirmed': terminated}
