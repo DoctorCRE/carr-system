@@ -2,14 +2,15 @@
 """Offline tests for the evening Outlook triage. A fake cua-driver plays Outlook; nothing real is touched.
 
 The fake mirrors the shapes read from Joe's live Outlook on 2026-10-20: a folder
-pane (AXOutline) that View > Sidebar toggles, an AXTable "Message List" whose
-AXRow children each hold one AXCell labelled "Sender: ..., Subject: ...", group
-header cells directly under the table, and snapshot-scoped element tokens that go
-stale. Like Outlook it marks a message read when it is selected and when the
-selection moves on, and shows an unread row's label starting with "Unread".
-Every name here is invented.
+pane (AXOutline) that View > Sidebar toggles, the window title naming the open
+folder ("Inbox • account"), an AXTable "Message List" whose AXRow children each
+hold one AXCell labelled "Sender: ..., Subject: ...", group header cells directly
+under the table, and snapshot-scoped element tokens that go stale. Like Outlook
+it marks a message read when it is selected and when the selection moves on, and
+shows an unread row's label starting with "Unread". Fixtures use neutral IDs
+(client-001, folder-A) so no person-shaped name is committed.
 """
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime
 import hashlib
 import io
@@ -17,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import stat
 import sys
@@ -37,29 +39,32 @@ GUIDE = '''### Choosing the folder
 The folder tree (all folders live under Inbox; "/" separates levels):
 Deals
 Deals/Active Deals
-Deals/Active Deals/_National Accounts
-Deals/Active Deals/_National Accounts/Zephyrologie
-Deals/Active Deals/Quillfeather
-Deals/Active Deals/Connor.Kevin
-Deals/Active Deals/Ambrose
+Deals/Active Deals/_group-1
+Deals/Active Deals/_group-1/national-folder-B
+Deals/Active Deals/folder-A
+Deals/Active Deals/folder-G.client-005
+Deals/Active Deals/folder-F
 Deals/Prospects
-Deals/Prospects/Brightwater Dental
-Deals/Prospects/Lark
+Deals/Prospects/folder-D
+Deals/Prospects/folder-E
+Deals/Prospects/folder-H
 Networking
 Networking/Vendors
 Networking/Vendors/A.List
-Networking/Vendors/A.List/Vera Example
+Networking/Vendors/A.List/vendor-001
 CARR
-CARR/Company Wide
+CARR/folder-C
 Reference
-Reference/Ambrose   (old correspondence)
-map: Firm Announcements -> CARR/Company Wide
-map: @carr.test -> CARR/Company Wide
+Reference/folder-F   (old correspondence)
+map: sender-firm -> CARR/folder-C
+map: @firm.test -> CARR/folder-C
 
 Matching guidance:
 - Deal folders are named for the client: surname or business.
 '''
-MAILBOX = 'Inbox • owner@example.com'
+ACCOUNT = 'owner@example.com'
+MAILBOX = f'Inbox • {ACCOUNT}'
+NAMES = re.compile(r'(client|folder|sender|vendor|subject)-')
 
 
 def window(window_id, title, width, height, on_current_space=True):
@@ -70,30 +75,36 @@ def window(window_id, title, width, height, on_current_space=True):
 TOOLBAR = window(11, '', 1512, 32, False)
 FULL_SCREEN = window(12, MAILBOX, 1512, 949, False)
 ORDINARY = window(13, MAILBOX, 1230, 768)
-COMPOSE = window(14, 'Re: example subject', 917, 911)
+COMPOSE = window(14, 'Re: subject-000', 917, 911)
 
 
 def msg(sender, subject, when='10:02 AM', unread=False, email=None):
     return {'label': f'Sender: {sender}, Subject: {subject},      {when},        '
-                     f'Message preview: invented preview text', 'unread': unread, 'email': email}
+                     f'Message preview: preview-text', 'unread': unread, 'email': email}
 
 
-QUILL = msg('Quillfeather, Pat', 'Lease draft')
-VENDOR = msg('Vera Example', 'Invoice 12')
-FIRM = msg('Firm Announcements', 'Office closed Friday')
-NEWS = msg('Weekly Digest', 'Ten things this week')
-UNREAD = msg('Quillfeather, Pat', 'Follow up', '9:41 AM', unread=True)
+def short(label):
+    return hashlib.sha256(label.encode()).hexdigest()[:12]
+
+
+FILE_A = msg('folder-A, client-001', 'subject-001')
+VENDOR = msg('vendor-001', 'subject-002')
+FIRM = msg('sender-firm', 'subject-003')
+NEWS = msg('sender-news', 'subject-004')
+UNREAD = msg('folder-A, client-001', 'subject-005', '9:41 AM', unread=True)
 UNCERTAIN = {'label': 'Meeting request, 9:30 AM', 'unread': False}
-AMBIGUOUS = msg('Ann Lark', 'Two folders')
-NOT_UNIQUE = msg('Ambrose, Ida', 'Same name twice')
+AMBIGUOUS = msg('client-003 folder-D', 'subject-006')
+NOT_UNIQUE = msg('folder-F, client-004', 'subject-007')
+ARRIVAL = msg('sender-news', 'subject-008', '7:01 PM', unread=True)
+ELSEWHERE = msg('folder-A, client-001', 'subject-009')
 
 FIND = {
-    'Pat Quillfeather': {'parties': [{'name': 'Pat Quillfeather', 'kind': 'client', 'ref': 'C-1',
-                                      'org_name': None, 'merged': False}], 'deals': []},
-    'Ann Lark': {'parties': [{'name': 'Ann Lark', 'kind': 'client', 'ref': 'C-2',
-                              'org_name': 'Brightwater Dental', 'merged': False}], 'deals': []},
-    'Ida Ambrose': {'parties': [{'name': 'Ida Ambrose', 'kind': 'lead', 'ref': 'L-3',
-                                 'org_name': None, 'merged': False}], 'deals': []},
+    'client-001 folder-A': {'parties': [{'name': 'client-001 folder-A', 'kind': 'client', 'ref': 'C-1',
+                                         'org_name': None, 'merged': False}], 'deals': []},
+    'client-003 folder-D': {'parties': [{'name': 'client-003 folder-D', 'kind': 'client', 'ref': 'C-2',
+                                         'org_name': 'folder-E', 'merged': False}], 'deals': []},
+    'client-004 folder-F': {'parties': [{'name': 'client-004 folder-F', 'kind': 'lead', 'ref': 'L-3',
+                                         'org_name': None, 'merged': False}], 'deals': []},
 }
 
 FAKE = r'''#!{python}
@@ -111,17 +122,18 @@ def lists():
 def current():
     if state.get('search'):
         return [r for rows in lists().values() for r in rows if r.get('email') == state['search']]
+    if state['folder'] != 'Inbox':
+        return state['elsewhere']
     return lists()[state['tab'] or 'only']
 def mark_read(label):
-    for rows in lists().values():
+    for rows in list(lists().values()) + [state['elsewhere']]:
         for r in rows:
             if r['label'] == label:
                 r['unread'] = False
 def select(label):
     previous = state.get('selected')
-    if previous and previous != state.get('marked_unread'):
+    if previous:
         mark_read(previous)
-    state['marked_unread'] = None
     state['selected'] = label
     state['selections'].append(label)
     if label:
@@ -172,15 +184,15 @@ elif tool == 'get_window_state':
         elements.append(element)
         tokens[str(index)] = kind
         return index
-    top = add('AXWindow', MAILBOX, 0)
+    top = add('AXWindow', state['folder'] + ' • ' + ACCOUNT, 0)
     for label in ('New Mail', 'Delete', 'Archive', 'Move', 'Flag', 'Mark Unread'):
         add('AXButton', label, 1, top, ['button', label])
     for depth in (1, 2, 3):
         add('AXTextField', 'Search', depth, top, ['search_field'])
     if state['sidebar']:
         outline = add('AXOutline', '', 2, top)
-        for folder in ['Favorites', 'Inbox'] + state['folder_rows']:
-            row = add('AXRow', '', 3, outline, selected=False)
+        for folder in ['Favorites', 'Inbox', 'Sent Items'] + state['folder_rows']:
+            row = add('AXRow', '', 3, outline, ['folder_row', folder], selected=folder == state['folder'])
             add('AXStaticText', folder, 6, row, value=folder)
             if folder == 'Inbox':
                 unread = state.get('badge')
@@ -188,7 +200,7 @@ elif tool == 'get_window_state':
                     unread = sum(r['unread'] for rows in lists().values() for r in rows)
                 if unread:
                     add('AXStaticText', str(unread), 6, row, value=str(unread))
-    if state['tab']:
+    if state['tab'] and state['folder'] == 'Inbox':
         focused = 'Selected' if state['tab'] == 'focused' else 'Unselected'
         other = 'Unselected' if state['tab'] == 'focused' else 'Selected'
         add('AXCheckBox', f'Focused Inbox {focused};  Other Inbox {other}', 4, top, value='0')
@@ -237,14 +249,10 @@ elif tool in ('click', 'type_text'):
             fail('not a text field')
     elif kind and kind[0] == 'row':
         select(kind[1])
-    elif kind == ['button', 'Mark Unread']:
-        state['presses'].append('Mark Unread')
-        if state.get('selected') and not state.get('mark_unread_lost'):
-            for rows in lists().values():
-                for r in rows:
-                    if r['label'] == state['selected']:
-                        r['unread'] = True
-            state['marked_unread'] = state['selected']
+    elif kind and kind[0] == 'folder_row':
+        state['presses'].append('folder:' + kind[1])
+        if not state.get('inbox_click_ignored'):
+            state['folder'] = kind[1]
     elif kind == ['button', 'Move']:
         state['presses'].append('Move')
         if state.get('selected'):
@@ -253,7 +261,9 @@ elif tool in ('click', 'type_text'):
         state['presses'].append(kind[1])
     elif kind and kind[0] == 'folder' and state.get('picker') is not None:
         state['picker'] = None
-        if state['move_works']:
+        if state['failing_moves'] > 0:
+            state['failing_moves'] -= 1
+        else:
             label = state['selected']
             rows = current()
             at = next(i for i, r in enumerate(rows) if r['label'] == label)
@@ -264,6 +274,10 @@ elif tool in ('click', 'type_text'):
                 select(rows[at]['label'])
             for other in state.get('read_elsewhere_after_move', []):
                 mark_read(other)
+            for arrival in state.pop('arrive_after_move', []):
+                lists()[state['tab'] or 'only'].insert(0, arrival)
+            if state.get('leave_inbox_after_move'):
+                state['folder'] = 'Archive'
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 elif tool == 'press_key':
@@ -272,14 +286,15 @@ elif tool == 'press_key':
     else:
         state['picker'] = None
         state['search'] = None
-        select(None)
-        state['selections'].pop()
+        if state.get('selected'):
+            select(None)
+            state['selections'].pop()
     save()
     print(json.dumps({'effect': 'unverifiable'}))
 else:
     fail('unexpected tool ' + tool)
 sys.exit(0)
-'''.replace('MAILBOX', repr(MAILBOX))
+'''.replace('ACCOUNT', repr(ACCOUNT))
 
 
 class FakeOutlookCase(unittest.TestCase):
@@ -287,8 +302,10 @@ class FakeOutlookCase(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix='outlook-triage-selftest-'))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo, self.home, bin_dir = self.tmp / 'repo', self.tmp / 'home', self.tmp / 'bin'
-        (self.home / triage.GUIDE).parent.mkdir(parents=True)
-        (self.home / triage.GUIDE).write_text(GUIDE)
+        self.guide = self.home / triage.GUIDE
+        self.guide.parent.mkdir(parents=True)
+        self.guide.write_text(GUIDE)
+        self.guide.chmod(0o600)
         bin_dir.mkdir()
         self.repo.mkdir()
         fakes = [bin_dir / n for n in ('pgrep', 'osascript', 'open', 'cua-driver', 'ioreg')]
@@ -304,16 +321,18 @@ class FakeOutlookCase(unittest.TestCase):
         lists = tabs if tabs is not None else {'only': rows or []}
         self.state.write_text(json.dumps({
             'running': True, 'windows': [TOOLBAR, FULL_SCREEN], 'after_launch': [TOOLBAR, ORDINARY],
-            'idle_seconds': 3600, 'sidebar': True, 'tab': 'focused' if tabs else None,
-            'lists': lists, 'folder_rows': ['Deals', 'Active Deals', 'Quillfeather'],
-            'picker_folders': ['Quillfeather', 'Vera Example', 'Company Wide', 'Ambrose', 'Lark',
-                               'Brightwater Dental', 'Zephyrologie', 'Connor.Kevin'],
-            'move_works': True, 'snapshot': 0, 'search': None, 'selections': [], 'presses': [], 'moved': [],
+            'idle_seconds': 3600, 'sidebar': True, 'tab': 'focused' if tabs else None, 'folder': 'Inbox',
+            'lists': lists, 'elsewhere': [], 'folder_rows': ['Deals', 'Active Deals', 'folder-A'],
+            'picker_folders': ['folder-A', 'vendor-001', 'folder-C', 'folder-D', 'folder-E', 'folder-F',
+                               'national-folder-B', 'folder-H'],
+            'failing_moves': 0, 'snapshot': 0, 'search': None, 'selections': [], 'presses': [], 'moved': [],
             'find': FIND, **state}))
 
-    def run_triage(self, now=EVENING, limits=triage.Limits()):
-        with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()):
-            outcome = triage.run(self.repo, self.home, now, Waits(0, 0, 0, 0, 0, 0, 0), limits)
+    def run_triage(self, now=EVENING, limits=triage.Limits(), clock=None):
+        with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()), \
+                redirect_stderr(io.StringIO()):
+            outcome = triage.run(self.repo, self.home, now, Waits(0, 0, 0, 0, 0, 0, 0), limits,
+                                 clock or (lambda: now))
         return outcome, json.loads(self.state.read_text())
 
     def called(self, name):
@@ -328,47 +347,85 @@ class FakeOutlookCase(unittest.TestCase):
         path.write_text(json.dumps(entries))
         return path
 
+    def report_path(self):
+        return self.repo / triage.OUT / '2026-10-20.report.md'
+
     def report(self):
-        return (self.repo / triage.OUT / '2026-10-20.report.md').read_text()
+        return self.report_path().read_text()
 
     def settled(self):
-        return (self.repo / triage.OUT / '2026-10-20.settled')
+        return self.repo / triage.OUT / '2026-10-20.settled'
 
     def unread_labels(self, state):
         return {r['label'] for rows in state['lists'].values() for r in rows if r['unread']}
 
+
 class OutlookTriageTest(FakeOutlookCase):
     def test_files_read_email_by_each_rule_and_never_selects_unread(self):
-        self.given([QUILL, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
+        self.given([FILE_A, VENDOR, FIRM, NEWS, UNCERTAIN, UNREAD])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
-        self.assertEqual(state['moved'], [[QUILL['label'], 'Quillfeather'],
-                                          [VENDOR['label'], 'Vera Example'],
-                                          [FIRM['label'], 'Company Wide']])
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A'],
+                                          [VENDOR['label'], 'vendor-001'],
+                                          [FIRM['label'], 'folder-C']])
         self.assertNotIn(UNREAD['label'], state['selections'])
         self.assertNotIn(UNCERTAIN['label'], state['selections'])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
-        self.assertEqual(set(state['presses']), {'Move'})
+        self.assertEqual({p for p in state['presses'] if not p.startswith('folder:')}, {'Move'})
         report = self.report()
-        self.assertIn('-> Deals/Active Deals/Quillfeather (deal)', report)
-        self.assertIn('-> Networking/Vendors/A.List/Vera Example (vendor)', report)
-        self.assertIn('-> CARR/Company Wide (map)', report)
+        for row, rule in ((FILE_A, 'deal'), (VENDOR, 'vendor'), (FIRM, 'map')):
+            self.assertIn(f'  {short(row["label"])} {rule}', report)
         self.assertIn('no_rule_matched: 1', report)
         self.assertIn('uncertain: 1', report)
         self.assertIn('unread: 1', report)
-        self.assertEqual(stat.S_IMODE((self.repo / triage.OUT / '2026-10-20.report.md').stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.report_path().stat().st_mode), 0o600)
         self.assertEqual(self.settled().read_text(), 'succeeded filed\n')
         self.assertTrue(state['sidebar'], 'folder pane restored')
 
+    def test_report_carries_counts_and_hashes_but_no_names(self):
+        self.given([FILE_A, VENDOR, FIRM, NEWS, UNREAD], read_elsewhere_after_move=[UNREAD['label']])
+        self.run_triage()
+        report = self.report()
+        self.assertIn(short('Unread, ' + UNREAD['label']), report)
+        self.assertNotRegex(report, NAMES)
+        self.assertNotIn('Sender:', report)
+
+    def test_existing_world_readable_report_is_made_private(self):
+        self.given([NEWS])
+        self.report_path().parent.mkdir(parents=True)
+        self.report_path().write_text('')
+        self.report_path().chmod(0o644)
+        self.run_triage()
+        self.assertEqual(stat.S_IMODE(self.report_path().stat().st_mode), 0o600)
+
     def test_reads_and_files_both_focused_and_other_tabs(self):
-        self.given(tabs={'focused': [NEWS, QUILL], 'other': [FIRM, NEWS, UNREAD]})
+        self.given(tabs={'focused': [NEWS, FILE_A], 'other': [FIRM, NEWS, UNREAD]})
         outcome, state = self.run_triage()
         self.assertEqual(outcome.state, 'succeeded')
-        self.assertEqual([m[1] for m in state['moved']], ['Quillfeather', 'Company Wide'])
+        self.assertEqual([m[1] for m in state['moved']], ['folder-A', 'folder-C'])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
 
+    def test_selects_the_inbox_before_reading_and_never_files_another_folder(self):
+        self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR])
+        outcome, state = self.run_triage()
+        self.assertEqual(outcome.state, 'succeeded')
+        self.assertIn('folder:Inbox', state['presses'])
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+
+    def test_inbox_that_will_not_open_blocks_every_move(self):
+        self.given([FILE_A, NEWS], folder='Sent Items', elsewhere=[ELSEWHERE, VENDOR], inbox_click_ignored=True)
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'inbox_not_selected'))
+        self.assertEqual((state['moved'], state['selections']), ([], []))
+
+    def test_leaving_the_inbox_mid_run_stops_before_the_next_move(self):
+        self.given([FILE_A, NEWS, VENDOR], leave_inbox_after_move=True, elsewhere=[ELSEWHERE, VENDOR])
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'not_inbox'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+
     def test_row_next_to_unread_is_left_even_when_outlook_opens_the_next_message(self):
-        self.given([QUILL, UNREAD, VENDOR], open_next_after_move=True)
+        self.given([FILE_A, UNREAD, VENDOR], open_next_after_move=True)
         outcome, state = self.run_triage()
         self.assertEqual(outcome.state, 'succeeded')
         self.assertEqual(state['moved'], [])
@@ -377,10 +434,10 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertIn('next_to_unread: 2', self.report())
 
     def test_move_proceeds_when_both_neighbours_are_read(self):
-        self.given([NEWS, QUILL, NEWS | {'label': NEWS['label'] + ' 2'}, UNREAD], open_next_after_move=True)
+        self.given([NEWS, FILE_A, NEWS | {'label': NEWS['label'] + ' 2'}, UNREAD], open_next_after_move=True)
         outcome, state = self.run_triage()
         self.assertEqual(outcome.state, 'succeeded')
-        self.assertEqual([m[0] for m in state['moved']], [QUILL['label']])
+        self.assertEqual([m[0] for m in state['moved']], [FILE_A['label']])
         self.assertEqual(self.unread_labels(state), {UNREAD['label']})
 
     def test_ambiguous_or_shared_folder_names_stay_in_the_inbox(self):
@@ -392,36 +449,49 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertIn('deal_ambiguous: 1', report)
         self.assertIn('folder_name_not_unique: 1', report)
 
-    def test_two_failed_moves_stop_the_run(self):
-        self.given([QUILL, VENDOR, FIRM], move_works=False)
+    def test_two_failed_moves_in_a_row_stop_the_run(self):
+        self.given([FILE_A, VENDOR, FIRM], failing_moves=99)
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'move_failed_twice'))
-        self.assertEqual(state['presses'], ['Move', 'Move'])
+        self.assertEqual(state['presses'].count('Move'), 2)
         self.assertEqual(state['moved'], [])
         self.assertEqual(triage.EXIT[outcome.state], 1)
 
-    def test_unread_email_read_during_the_run_fails_it_and_names_the_email(self):
-        self.given([QUILL, NEWS, UNREAD], read_elsewhere_after_move=[UNREAD['label']])
+    def test_one_failed_move_fails_the_run_and_leaves_the_day_open(self):
+        self.given([FILE_A, VENDOR, NEWS], failing_moves=1)
+        outcome, state = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'move_failed'))
+        self.assertEqual(state['moved'], [[VENDOR['label'], 'vendor-001']])
+        self.assertFalse(self.settled().exists())
+
+    def test_unread_email_read_during_the_run_fails_it(self):
+        self.given([FILE_A, NEWS, UNREAD], read_elsewhere_after_move=[UNREAD['label']])
+        outcome, _ = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
+        self.assertIn(short('Unread, ' + UNREAD['label']), self.report())
+
+    def test_new_unread_mail_arriving_during_the_run_fails_it_for_a_later_retry(self):
+        self.given([FILE_A, NEWS, VENDOR], arrive_after_move=[ARRIVAL])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
-        self.assertIn('Sender: Quillfeather, Pat, Subject: Follow up, 9:41 AM', self.report())
-        self.assertNotIn('invented preview text', self.report())
+        self.assertIn(short('Unread, ' + ARRIVAL['label']), self.report())
+        self.assertFalse(self.settled().exists())
 
     def test_unread_rows_that_do_not_add_up_to_the_badge_block_every_move(self):
-        self.given([QUILL, VENDOR, UNREAD], badge=2)
+        self.given([FILE_A, VENDOR, UNREAD], badge=2)
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_unverified'))
         self.assertEqual(state['selections'], [])
-        self.assertEqual(state['presses'], [])
+        self.assertNotIn('Move', state['presses'])
 
     def test_a_selected_unread_row_blocks_every_move(self):
-        self.given([QUILL, VENDOR, UNREAD], selected=UNREAD['label'])
+        self.given([FILE_A, VENDOR, UNREAD], selected=UNREAD['label'])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_row_selected'))
         self.assertEqual(state['selections'], [])
 
     def test_active_user_skips_without_touching_outlook_until_the_last_fire(self):
-        self.given([QUILL], idle_seconds=120)
+        self.given([FILE_A], idle_seconds=120)
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('skipped', 'user_active'))
         self.assertEqual(self.called('cua-driver') + self.called('open'), [])
@@ -431,46 +501,79 @@ class OutlookTriageTest(FakeOutlookCase):
         self.assertEqual(self.settled().read_text(), 'skipped user_active\n')
 
     def test_open_draft_skips_the_night(self):
-        self.given([QUILL], windows=[TOOLBAR, ORDINARY, COMPOSE])
+        self.given([FILE_A], windows=[TOOLBAR, ORDINARY, COMPOSE])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('skipped', 'compose_window_open'))
         self.assertTrue(state['running'], 'Outlook left running')
         self.assertEqual(state['moved'], [])
 
     def test_missing_folder_guide_fails_before_outlook(self):
-        self.given([QUILL])
-        (self.home / triage.GUIDE).unlink()
+        self.given([FILE_A])
+        self.guide.unlink()
         outcome, _ = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'folder_guide_missing'))
         self.assertEqual(self.called('cua-driver') + self.called('pgrep'), [])
-        self.assertTrue(self.settled().exists())
+
+    def test_folder_guide_readable_by_others_is_refused_before_outlook(self):
+        self.given([FILE_A])
+        self.guide.chmod(0o644)
+        outcome, _ = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'folder_guide_not_0600'))
+        self.assertEqual(self.called('cua-driver') + self.called('pgrep'), [])
+
+    def test_an_early_failure_leaves_later_slots_to_retry_and_the_last_slot_settles(self):
+        self.given([FILE_A, VENDOR], find_fails=True)
+        outcome, _ = self.run_triage()
+        self.assertEqual((outcome.state, outcome.reason), ('failed', 'carr_find_failed'))
+        self.assertFalse(self.settled().exists())
+        with patch('os.execv') as execv, patch('os.chdir'):
+            triage.fire(self.repo, EVENING.replace(minute=30))
+            execv.assert_called_once()
+        self.run_triage(LAST)
+        self.assertEqual(self.settled().read_text(), 'failed carr_find_failed\n')
 
     def test_record_layer_failure_stops_the_run(self):
-        self.given([QUILL, VENDOR], find_fails=True)
+        self.given([FILE_A, VENDOR], find_fails=True)
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'carr_find_failed'))
         self.assertEqual(state['moved'], [])
 
     def test_folder_pane_that_will_not_hide_fails_loudly(self):
-        self.given([QUILL], sidebar_stuck=True)
+        self.given([FILE_A], sidebar_stuck=True)
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'folder_pane_toggle_failed'))
         self.assertEqual(state['selections'], [])
 
-    def test_output_carries_counts_not_names(self):
-        self.given([QUILL, VENDOR, NEWS, UNREAD])
-        with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as out:
-            triage.run(self.repo, self.home, EVENING, Waits(0, 0, 0, 0, 0, 0, 0))
-        printed = out.getvalue()
-        self.assertRegex(printed, r'^outlook-triage succeeded filed moved=2 left=2\s*$')
+    def test_window_closing_mid_run_stops_moving_cleanly(self):
+        self.given([FILE_A, VENDOR, FIRM])
+        closed = EVENING.replace(hour=21, minute=20)
+        outcome, state = self.run_triage(clock=lambda: closed if json.loads(self.state.read_text())['moved']
+                                         else EVENING)
+        self.assertEqual((outcome.state, outcome.reason), ('timed_out', 'window_closed'))
+        self.assertEqual(state['moved'], [[FILE_A['label'], 'folder-A']])
+        self.assertTrue(state['sidebar'], 'folder pane restored')
 
-    def test_fire_exits_quietly_once_the_day_is_settled_and_hands_over_otherwise(self):
+    def test_output_carries_counts_not_names(self):
+        self.given([FILE_A, VENDOR, NEWS, UNREAD])
+        with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()) as out:
+            triage.run(self.repo, self.home, EVENING, Waits(0, 0, 0, 0, 0, 0, 0), triage.Limits(),
+                       lambda: EVENING)
+        self.assertRegex(out.getvalue(), r'^outlook-triage succeeded filed moved=2 left=2\s*$')
+
+    def test_fire_runs_only_inside_the_window_and_only_until_the_day_is_settled(self):
         folder = self.repo / triage.OUT
         with patch('os.execv') as execv, patch('os.chdir'):
+            for outside in (EVENING.replace(hour=18, minute=0), EVENING.replace(minute=14),
+                            LAST.replace(minute=10), EVENING.replace(hour=23, minute=30)):
+                self.assertEqual(triage.fire(self.repo, outside), 0)
+            execv.assert_not_called()
             self.assertIsNone(triage.fire(self.repo, EVENING))
             program, argv = execv.call_args.args
             self.assertEqual(argv[1:5], [str(self.repo / 'bin/run-scheduled.sh'), 'outlook-triage',
                                          'outlook.triage', sys.executable])
+            execv.reset_mock()
+            self.assertIsNone(triage.fire(self.repo, LAST))
+            execv.assert_called_once()
             folder.mkdir(parents=True)
             (folder / '2026-10-20.settled').write_text('succeeded filed\n')
             execv.reset_mock()
@@ -485,12 +588,12 @@ def listed(message_id, row, sender_email, **extra):
 
 
 class RefreshTest(FakeOutlookCase):
-    READ_BODY = msg('Weekly Digest', 'Body pending', email='digest@news.test')
-    UNREAD_BODY = msg('Quillfeather, Pat', 'Big attachment', '8:15 AM', unread=True, email='pat@client.test')
+    READ_BODY = msg('sender-news', 'subject-010', email='news@news.test')
+    UNREAD_BODY = msg('folder-A, client-001', 'subject-011', '8:15 AM', unread=True, email='c1@client.test')
 
     def test_read_email_is_opened_unchanged_and_stamped(self):
-        self.given([QUILL, self.READ_BODY, NEWS])
-        path = self.refresh_list([listed('m1', self.READ_BODY, 'digest@news.test')])
+        self.given([FILE_A, self.READ_BODY, NEWS])
+        path = self.refresh_list([listed('m1', self.READ_BODY, 'news@news.test')])
         outcome, state = self.run_triage()
         self.assertEqual(outcome.state, 'succeeded')
         self.assertIn(self.READ_BODY['label'], state['selections'])
@@ -501,28 +604,20 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertIn('opened: 1', self.report())
 
-    def test_unread_email_is_opened_marked_unread_and_still_unread_at_the_end(self):
-        self.given([QUILL, NEWS, self.UNREAD_BODY])
-        self.refresh_list([listed('m2', self.UNREAD_BODY, 'pat@client.test')])
+    def test_unread_email_is_never_selected_and_waits_until_joe_reads_it(self):
+        self.given([FILE_A, NEWS, self.UNREAD_BODY])
+        path = self.refresh_list([listed('m2', self.UNREAD_BODY, 'c1@client.test')])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('succeeded', 'filed'))
-        self.assertIn(self.UNREAD_BODY['label'], state['selections'])
-        self.assertEqual(state['presses'].count('Mark Unread'), 1)
+        self.assertNotIn(self.UNREAD_BODY['label'], state['selections'])
+        self.assertNotIn('Mark Unread', state['presses'])
         self.assertEqual(self.unread_labels(state), {self.UNREAD_BODY['label']})
-        self.assertIn('restored_unread: 1', self.report())
-        self.assertEqual([m[0] for m in state['moved']], [QUILL['label']])
-
-    def test_unread_marker_that_does_not_come_back_fails_and_names_the_email(self):
-        self.given([QUILL, NEWS, self.UNREAD_BODY], mark_unread_lost=True)
-        self.refresh_list([listed('m2', self.UNREAD_BODY, 'pat@client.test')])
-        outcome, state = self.run_triage()
-        self.assertEqual((outcome.state, outcome.reason), ('failed', 'unread_set_changed'))
-        self.assertIn('unread_not_restored: 1', self.report())
-        self.assertIn('Sender: Quillfeather, Pat, Subject: Big attachment, 8:15 AM', self.report())
-        self.assertEqual(state['moved'], [])
+        self.assertIn('unread_skipped: 1', self.report())
+        self.assertNotIn('opened_at', json.loads(path.read_text())[0])
+        self.assertEqual([m[0] for m in state['moved']], [FILE_A['label']])
 
     def test_unmatched_entries_are_counted_and_left_alone(self):
-        self.given([QUILL, self.READ_BODY])
+        self.given([FILE_A, self.READ_BODY])
         path = self.refresh_list([listed('m3', self.READ_BODY, 'nobody@example.com')])
         outcome, state = self.run_triage()
         self.assertEqual(outcome.state, 'succeeded')
@@ -541,7 +636,7 @@ class RefreshTest(FakeOutlookCase):
         self.assertEqual(searched, ['b@example.com', 'd@example.com', 'c@example.com'])
 
     def test_malformed_list_fails_loudly(self):
-        self.given([QUILL])
+        self.given([FILE_A])
         self.refresh_list([{'message_id': 'm4'}])
         outcome, state = self.run_triage()
         self.assertEqual((outcome.state, outcome.reason), ('failed', 'refresh_list_invalid'))
@@ -552,7 +647,7 @@ class DecideTest(unittest.TestCase):
     guide = triage.FolderGuide.parse(GUIDE)
 
     def decide(self, sender, find=None):
-        row = Row(msg(sender, 'x')['label'], 't', False)
+        row = Row(msg(sender, 'subject-x')['label'], 't', False)
         return triage.decide(row, self.guide, lambda name: (find or {}).get(name, {'parties': [], 'deals': []}))
 
     def party(self, name, **extra):
@@ -560,53 +655,74 @@ class DecideTest(unittest.TestCase):
                        'deals': []}}
 
     def test_business_name_must_match_the_folder_exactly(self):
-        self.assertEqual(self.decide('Zephyrology', self.party('Zephyrology')), triage.Leave('no_rule_matched'))
-        self.assertEqual(self.decide('Zephyrologie', self.party('Zephyrologie')),
-                         triage.Move('Deals/Active Deals/_National Accounts/Zephyrologie', 'deal'))
+        self.assertEqual(self.decide('national-folder-Bx', self.party('national-folder-Bx')),
+                         triage.Leave('no_rule_matched'))
+        self.assertEqual(self.decide('national-folder-B', self.party('national-folder-B')),
+                         triage.Move('Deals/Active Deals/_group-1/national-folder-B', 'deal'))
 
     def test_surname_does_not_match_a_dotted_folder(self):
-        self.assertEqual(self.decide('Kevin Connor', self.party('Kevin Connor')), triage.Leave('no_rule_matched'))
+        self.assertEqual(self.decide('client-005 folder-G', self.party('client-005 folder-G')),
+                         triage.Leave('no_rule_matched'))
 
     def test_two_exact_party_matches_are_not_a_match(self):
-        twice = {'Pat Quillfeather': {'parties': FIND['Pat Quillfeather']['parties'] * 2, 'deals': []}}
-        self.assertEqual(self.decide('Pat Quillfeather', twice), triage.Leave('no_rule_matched'))
+        twice = {'client-001 folder-A': {'parties': FIND['client-001 folder-A']['parties'] * 2, 'deals': []}}
+        self.assertEqual(self.decide('client-001 folder-A', twice), triage.Leave('no_rule_matched'))
 
     def test_vendor_party_never_matches_a_deal(self):
-        vendor = {'Pat Quillfeather': {'parties': [{'name': 'Pat Quillfeather', 'kind': 'vendor'}], 'deals': []}}
-        self.assertEqual(self.decide('Pat Quillfeather', vendor), triage.Leave('no_rule_matched'))
+        vendor = {'client-001 folder-A': {'parties': [{'name': 'client-001 folder-A', 'kind': 'vendor'}],
+                                          'deals': []}}
+        self.assertEqual(self.decide('client-001 folder-A', vendor), triage.Leave('no_rule_matched'))
 
     def test_linked_deal_name_matches(self):
-        linked = {'Rae Holt': {'parties': [{'name': 'Rae Holt', 'kind': 'client', 'ref': 'C-5'}],
-                               'deals': [{'name': 'Brightwater Dental', 'client_ref': 'C-5'},
-                                         {'name': 'Lark', 'client_ref': 'C-6'}]}}
-        self.assertEqual(self.decide('Rae Holt', linked),
-                         triage.Move('Deals/Prospects/Brightwater Dental', 'deal'))
+        linked = {'client-006': {'parties': [{'name': 'client-006', 'kind': 'client', 'ref': 'C-5'}],
+                                 'deals': [{'name': 'folder-H', 'client_ref': 'C-5'},
+                                           {'name': 'folder-D', 'client_ref': 'C-6'}]}}
+        self.assertEqual(self.decide('client-006', linked), triage.Move('Deals/Prospects/folder-H', 'deal'))
 
     def test_map_matches_display_name_and_sender_domain(self):
-        self.assertEqual(self.decide('Firm Announcements'), triage.Move('CARR/Company Wide', 'map'))
-        self.assertEqual(self.decide('news@carr.test'), triage.Move('CARR/Company Wide', 'map'))
+        self.assertEqual(self.decide('sender-firm'), triage.Move('CARR/folder-C', 'map'))
+        self.assertEqual(self.decide('news@firm.test'), triage.Move('CARR/folder-C', 'map'))
         self.assertEqual(self.decide('news@other.test'), triage.Leave('no_rule_matched'))
 
     def test_unread_and_unparseable_rows_are_never_candidates(self):
-        unread = Row('Unread, ' + msg('Firm Announcements', 'x')['label'], 't', False)
+        unread = Row('Unread, ' + msg('sender-firm', 'subject-x')['label'], 't', False)
         self.assertEqual(triage.decide(unread, self.guide, None), triage.Leave('unread'))
         self.assertEqual(triage.decide(Row('Meeting request', 't', False), self.guide, None),
                          triage.Leave('uncertain'))
 
     def test_guide_without_deals_or_with_a_dangling_map_is_refused(self):
         with self.assertRaises(ValueError):
-            triage.FolderGuide.parse('CARR\nCARR/Company Wide\n')
+            triage.FolderGuide.parse('CARR\nCARR/folder-C\n')
         with self.assertRaises(ValueError):
-            triage.FolderGuide.parse(GUIDE + 'map: someone -> CARR/Nowhere\n')
+            triage.FolderGuide.parse(GUIDE + 'map: sender-x -> CARR/folder-Z\n')
 
 
 class InstallTest(unittest.TestCase):
-    def test_plist_fires_every_quarter_hour_from_19_15_to_21_00_through_the_gate(self):
+    """The installer is checked by reading it: running it here could load a real job on this Mac."""
+
+    installer = (ROOT / 'bin/install-outlook-triage.sh').read_text()
+
+    def test_plist_fires_every_quarter_hour_from_19_15_to_21_00_privately_through_the_gate(self):
         plist = plistlib.loads((ROOT / 'ops/launchd/com.carr.outlook-triage.plist').read_bytes())
         self.assertEqual(plist['StartCalendarInterval'], calendar_for_window((19, 15), (21, 0), 15))
         self.assertNotIn('RunAtLoad', plist)
+        self.assertEqual(plist['Umask'], 0o077)
         self.assertEqual(plist['ProgramArguments'][1:],
                          ['-c', 'from lib.outlook_triage import fire; raise SystemExit(fire())'])
+
+    def test_installer_never_loads_the_job_and_prints_the_command_instead(self):
+        commands = [line.strip() for line in self.installer.splitlines()
+                    if line.strip() and not line.lstrip().startswith(('#', 'print '))]
+        self.assertEqual([c for c in commands if 'launchctl' in c], [])
+        self.assertRegex(self.installer, r'print -- .*launchctl bootstrap gui/\$\(id -u\) \$DEST')
+
+    def test_installer_creates_the_launchd_log_private_in_advance(self):
+        plist = plistlib.loads((ROOT / 'ops/launchd/com.carr.outlook-triage.plist').read_bytes())
+        log = plist['StandardOutPath'].replace('{{REPO}}', '$REPO')
+        self.assertIn(f'LOG="{log}"', self.installer)
+        self.assertIn('[ -e "$LOG" ] || /usr/bin/install -m 600 /dev/null "$LOG"', self.installer)
+        self.assertIn('/bin/chmod 600 "$LOG"', self.installer)
+        self.assertLess(self.installer.index('/bin/chmod 600 "$LOG"'), self.installer.index('print -- '))
 
     def test_service_runs_on_the_secondary_mac_daily(self):
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']

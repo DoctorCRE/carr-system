@@ -7,7 +7,8 @@
     lib/outlook_triage.fire() exits at once when today is already settled and
     otherwise runs the triage under bin/run-scheduled.sh. It skips while Joe has
     used the Mac in the last 10 minutes or has a draft open. No RunAtLoad:
-    loading this agent at login must never restart Outlook. The calendar is
+    loading this agent at login must never restart Outlook. fire() also refuses
+    any time outside 19:15 to 21:00, and a run stops at 21:15. The calendar is
     calendar_for_window((19, 15), (21, 0), 15) from lib/launchd_calendar.py.
   -->
   <key>Label</key><string>com.carr.outlook-triage</string>
@@ -19,6 +20,8 @@
     <string>from lib.outlook_triage import fire; raise SystemExit(fire())</string>
   </array>
   <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <!-- 077: every file the job creates, its log included, is private to Joe. -->
+  <key>Umask</key><integer>63</integer>
 
   <key>StartCalendarInterval</key>
   <array>

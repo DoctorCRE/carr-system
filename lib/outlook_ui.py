@@ -11,7 +11,8 @@ pane is hidden (View > Sidebar) while rows are read. invoke_menu reports
 "unverifiable", so every view change is confirmed by a fresh walk. The message
 list is an AXTable labelled "Message List"; each message is an AXRow whose
 AXCell label reads "Sender: NAME, Subject: SUBJECT, ..., DATE, Message preview:
-TEXT". Not yet seen live: an unread row's label, the Inbox unread badge, and the
+TEXT". The window's own title names the open folder ("Inbox • account"), and
+every read the moves rely on checks it. Not yet seen live: an unread row's label, the Inbox unread badge, and the
 Move folder picker; those paths fail closed.
 """
 from __future__ import annotations
@@ -28,6 +29,7 @@ import time
 
 APP = 'Microsoft Outlook'
 MAILBOX_TITLE = re.compile(r'. • [^\s@]+@[^\s@]+\.[^\s@]+$')
+INBOX_TITLE = re.compile(r'^Inbox • ')
 FULL_SCREEN_HEIGHT = 949
 EXIT = {'succeeded': 0, 'skipped': 78, 'timed_out': 124, 'failed': 1}
 SIDEBAR = ['View', 'Sidebar']
@@ -73,8 +75,7 @@ class Moved(Enum):
 
 class Refreshed(Enum):
     OPENED = 'opened'
-    RESTORED = 'restored_unread'
-    NOT_RESTORED = 'unread_not_restored'
+    UNREAD_SKIPPED = 'unread_skipped'
     NOT_FOUND = 'not_found'
     UNCERTAIN = 'uncertain'
 
@@ -224,7 +225,10 @@ def prepare_outlook(waits: Waits) -> Outcome | None:
 
 
 def private_file(path: Path):
-    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'a')
+    """Append to path, making it 0600 even when it already existed with a wider mode."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    os.fchmod(fd, 0o600)
+    return os.fdopen(fd, 'a')
 
 
 class Window:
@@ -258,25 +262,49 @@ class Window:
         if self._folder_pane_visible() != visible:
             raise UiError('folder_pane_toggle_failed')
 
-    def inbox_badge(self) -> int:
-        """Unread count on the Inbox folder row; needs the folder pane showing."""
+    def _inbox_rows(self) -> tuple[list[dict], list[tuple[dict, list[str]]]]:
+        """(walk, the folder pane's Inbox rows as (row, child texts)); needs the folder pane showing."""
         elements = self._walk(max_elements=BADGE_WALK)
         children: dict[int | None, list[dict]] = {}
         for e in elements:
             children.setdefault(e.get('parent_index'), []).append(e)
+        found: list[tuple[dict, list[str]]] = []
         for row in (e for e in elements if e.get('role') == 'AXRow'):
             texts = [(c.get('label') or c.get('value') or '').strip()
                      for c in children.get(row['element_index'], [])]
             if 'Inbox' in texts:
-                counts = [int(m.group(1)) for t in texts if (m := re.fullmatch(r'(\d+)(?: unread)?', t))]
-                if len(counts) > 1:
-                    raise UiError('inbox_badge_ambiguous')
-                return counts[0] if counts else 0
-        raise UiError('inbox_row_not_found')
+                found.append((row, texts))
+        if not found:
+            raise UiError('inbox_row_not_found')
+        return elements, found
 
-    def rows(self) -> tuple[str | None, list[Row]]:
-        """(current Focused/Other tab or None, every message row the list exposes)."""
+    def select_inbox(self) -> None:
+        """Open the Inbox from the folder pane and confirm it by its selected row and the window title."""
+        elements, found = self._inbox_rows()
+        if not (any(row.get('selected') for row, _ in found) and _in_inbox(elements)):
+            cua('click', {'pid': self.pid, 'element_token': found[0][0]['element_token']})
+            time.sleep(self.waits.settle_seconds)
+            elements, found = self._inbox_rows()
+        if not (any(row.get('selected') for row, _ in found) and _in_inbox(elements)):
+            raise UiError('inbox_not_selected')
+
+    def inbox_badge(self) -> int:
+        """Unread count on the Inbox folder row; needs the folder pane showing."""
+        texts = self._inbox_rows()[1][0][1]
+        counts = [int(m.group(1)) for t in texts if (m := re.fullmatch(r'(\d+)(?: unread)?', t))]
+        if len(counts) > 1:
+            raise UiError('inbox_badge_ambiguous')
+        return counts[0] if counts else 0
+
+    def rows(self, require_inbox: bool = True) -> tuple[str | None, list[Row]]:
+        """(current Focused/Other tab or None, every message row the list exposes).
+
+        Unless require_inbox is off (search results), a window whose title does not
+        name the Inbox raises not_inbox, so a Sent Items or Archive list never passes.
+        """
         elements = self._walk(max_elements=LIST_WALK)
+        if require_inbox and not _in_inbox(elements):
+            raise UiError('not_inbox')
         tables = [e for e in elements if e.get('role') == 'AXTable' and e.get('label') == 'Message List']
         if len(tables) != 1:
             raise UiError('message_list_not_found')
@@ -358,49 +386,29 @@ class Window:
         cua('type_text', {'pid': self.pid, 'element_token': fields[0]['element_token'], 'text': query})
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'return'})
         time.sleep(self.waits.settle_seconds)
-        return self.rows()[1]
+        return self.rows(require_inbox=False)[1]
 
     def end_search(self) -> None:
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
         time.sleep(self.waits.settle_seconds)
 
     def refresh(self, key: str) -> Refreshed:
-        """Open one listed email so Outlook downloads its full body, leaving its read state as found.
+        """Open one listed, already-read email so Outlook downloads its full body.
 
-        A read email is selected and left. An unread one is selected, marked unread
-        again while still selected, and the selection moves to a read neighbour (or
-        is dropped) before the unread marker is checked.
+        An unread email is never selected: it is skipped and refreshed on a later
+        night, once Joe has read it.
         """
-        rows = self.rows()[1]
+        rows = self.rows(require_inbox=False)[1]
         index = next((i for i, r in enumerate(rows) if r.key == key), None)
         if index is None:
             return Refreshed.NOT_FOUND
-        was = rows[index].read_state
-        if was is ReadState.UNCERTAIN:
+        if rows[index].read_state is ReadState.UNREAD:
+            return Refreshed.UNREAD_SKIPPED
+        if rows[index].read_state is ReadState.UNCERTAIN:
             return Refreshed.UNCERTAIN
         cua('click', {'pid': self.pid, 'element_token': rows[index].token})
         time.sleep(self.waits.render_seconds)
-        if was is ReadState.READ:
-            return Refreshed.OPENED
-        rows = self.rows()[1]
-        buttons = [e for e in self._walk(max_elements=LIST_WALK) if e.get('role') == 'AXButton'
-                   and e.get('label') == 'Mark Unread' and e.get('depth') == 1]
-        if [r.key for r in rows if r.selected] != [key] or len(buttons) != 1:
-            return Refreshed.NOT_RESTORED
-        cua('click', {'pid': self.pid, 'element_token': buttons[0]['element_token']})
-        time.sleep(self.waits.settle_seconds)
-        rows = self.rows()[1]
-        index = next(i for i, r in enumerate(rows) if r.key == key)
-        neighbour = next((r for r in (rows[index + 1:index + 2] + rows[max(0, index - 1):index])
-                          if r.read_state is ReadState.READ), None)
-        if neighbour:
-            cua('click', {'pid': self.pid, 'element_token': neighbour.token})
-        else:
-            cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
-        time.sleep(self.waits.settle_seconds)
-        after = [r for r in self.rows()[1] if r.key == key]
-        restored = len(after) == 1 and after[0].read_state is ReadState.UNREAD
-        return Refreshed.RESTORED if restored else Refreshed.NOT_RESTORED
+        return Refreshed.OPENED
 
     def _abandon(self) -> Moved:
         cua('press_key', {'pid': self.pid, 'window_id': self.window_id, 'key': 'escape'})
@@ -410,6 +418,10 @@ class Window:
 
 FIELDS = ('AXTextField', 'AXSearchField')
 ENTRIES = ('AXRow', 'AXCell', 'AXMenuItem', 'AXButton', 'AXStaticText')
+
+
+def _in_inbox(elements: list[dict]) -> bool:
+    return any(e.get('role') == 'AXWindow' and INBOX_TITLE.match(e.get('label') or '') for e in elements)
 
 
 def _tab(elements: list[dict]) -> str | None:

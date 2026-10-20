@@ -1,24 +1,31 @@
 """Nightly Inbox triage: file Joe's already-read Inbox email into Outlook folders.
 
 Code only: no agent session and no model. launchd fires `fire()` every 15
-minutes from 19:15 to 21:00. Once a day is settled (a run that was not
-skipped, or the 21:00 fire) the remaining fires exit at once without a run row;
-otherwise `fire()` hands over to bin/run-scheduled.sh, which runs `main()` and
-turns its exit code into the run row (0 succeeded, 78 skipped, 124 timed out,
-anything else failed). The row carries no names.
+minutes from 19:15 to 21:00, and `fire()` itself refuses any other time. Once a
+day is settled (a run that succeeded, or whatever the 21:00 fire ends with) the
+remaining fires exit at once without a run row; a skipped or failed earlier run
+leaves the later fires to retry. Otherwise `fire()` hands over to
+bin/run-scheduled.sh, which runs `main()` and turns its exit code into the run
+row (0 succeeded, 78 skipped, 124 timed out, anything else failed). A run stops
+moving at 21:15, so the 21:00 fire gets a quarter hour. The row carries no names.
 
-Unread email is never selected, so it stays unread: the unread rows are read off
-the list first and must add up to the Inbox unread badge before anything is
-touched, and after the moves the same rows must still be unread. The folder tree
-and the sender table come from Joe's private ~/.config/carr folder guide; the
-moves report (sender, subject, folder) stays in out/outlook-triage/ (0700/0600).
+The Inbox is selected from the folder pane and confirmed by the window title
+before anything is read, and every move re-checks that title. Unread email is
+never selected, so it stays unread: the unread rows are read off the list first
+and must add up to the Inbox unread badge before anything is touched, and after
+the moves the unread set must be exactly the same, new arrivals included (a
+difference fails the run and a later fire retries). Any failed move fails the
+run; two in a row stop it at once. The folder tree and the sender table come
+from Joe's private ~/.config/carr folder guide, which must be 0600; the report in
+out/outlook-triage/ (0700/0600) carries counts and a 12-character sha256 of each
+moved row's label, never a sender, subject or folder.
 
-Before filing, up to 50 emails the intake job lists as missing their full body
-are opened so Outlook downloads them: found by searching the sender address and
-matching the subject's sha256, selected, given time to render, and, when they
-were unread, marked unread again before the selection moves on. The intake job
-owns that list; triage only adds opened_at. REFRESH_LIST's path and the hash
-are a provisional contract until the intake job publishes its own.
+Before filing, up to 50 already-read emails the intake job lists as missing
+their full body are opened so Outlook downloads them: found by searching the
+sender address and matching the subject's sha256, selected, and given time to
+render. A listed email that is still unread is skipped until Joe reads it. The
+intake job owns that list; triage only adds opened_at. REFRESH_LIST's path and
+the hash are a provisional contract until the intake job publishes its own.
 """
 from __future__ import annotations
 
@@ -30,9 +37,10 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
-import time
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from lib.outlook_ui import (EXIT, CuaError, Moved, Outcome, ReadState, Refreshed, Row, UiError, Waits,
@@ -43,7 +51,7 @@ OUT = Path('out/outlook-triage')
 REFRESH_LIST = Path('out/outlook-intake/needs-refresh.json')
 REFRESH_FIELDS = ('message_id', 'subject_hash', 'sent_utc', 'sender_email')
 ZONE = ZoneInfo('America/Chicago')
-LAST_FIRE = clock(21, 0)
+FIRST_FIRE, LAST_FIRE, WINDOW_CLOSE = clock(19, 15), clock(21, 0), clock(21, 15)
 IDLE_SECONDS = 600
 DEALS = 'Deals/'
 VENDORS = 'Networking/Vendors/A.List/'
@@ -57,7 +65,6 @@ ENTRY = 'from lib.outlook_triage import main; raise SystemExit(main())'
 class Limits:
     max_refreshes: int = 50
     max_moves: int = 150
-    deadline_seconds: float = 6000
     failures_in_a_row: int = 2
 
 
@@ -191,9 +198,14 @@ def decide(row: Row, guide: FolderGuide, find) -> Move | Leave:
     return Leave('no_rule_matched')
 
 
+def short_hash(label: str) -> str:
+    """Names one row in the report without naming its sender, subject or folder."""
+    return hashlib.sha256(label.encode('utf-8')).hexdigest()[:12]
+
+
 @dataclass
 class Report:
-    moved: list[tuple[str, str, str]] = field(default_factory=list)
+    moved: list[tuple[str, str]] = field(default_factory=list)
     left: Counter = field(default_factory=Counter)
     refreshed: Counter = field(default_factory=Counter)
     unread_changed: list[str] = field(default_factory=list)
@@ -201,12 +213,11 @@ class Report:
     def text(self, outcome: Outcome) -> str:
         lines = [f'outcome: {outcome.state} {outcome.reason}']
         lines += ['opened for a full download:'] + [f'  {r}: {n}' for r, n in sorted(self.refreshed.items())]
-        lines += [f'moved: {len(self.moved)}']
-        lines += [f'  {headline} -> {path} ({rule})' for headline, path, rule in self.moved]
+        lines += [f'moved: {len(self.moved)}'] + [f'  {digest} {rule}' for digest, rule in self.moved]
         lines += ['left in Inbox:'] + [f'  {reason}: {n}' for reason, n in sorted(self.left.items())]
         if self.unread_changed:
-            lines += ['unread email that changed (must stay unread):']
-            lines += [f'  {headline}' for headline in self.unread_changed]
+            lines += ['unread set changed (rows gone, read, or arrived):']
+            lines += [f'  {digest}' for digest in self.unread_changed]
         return '\n'.join(lines) + '\n'
 
 
@@ -223,6 +234,7 @@ def hid_idle_seconds() -> float | None:
 def _inbox(window: Window) -> tuple[int, dict[str | None, list[Row]]]:
     """(Inbox unread badge, rows per Focused/Other tab), leaving the folder pane hidden."""
     window.show_folder_pane(True)
+    window.select_inbox()
     badge = window.inbox_badge()
     window.show_folder_pane(False)
     tab, rows = window.rows()
@@ -240,7 +252,7 @@ def _unread(tabs: dict[str | None, list[Row]]) -> Counter:
 
 
 def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report: Report,
-               refresh_list: Path) -> Outcome:
+               refresh_list: Path, closed: Callable[[], bool]) -> Outcome:
     badge, tabs = _inbox(window)
     unread = _unread(tabs)
     if any(r.selected and r.read_state is not ReadState.READ for rows in tabs.values() for r in rows):
@@ -249,8 +261,8 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
         report.left['unread_set_unverified'] += sum(len(rows) for rows in tabs.values())
         return Outcome('failed', 'unread_set_unverified')
     try:
-        outcome = (refresh_all(window, refresh_list, limits, report)
-                   or _move_all(window, tabs, guide, find, limits, report))
+        outcome = (refresh_all(window, refresh_list, limits, report, closed)
+                   or _move_all(window, tabs, guide, find, limits, report, closed))
     except ValueError:
         outcome = Outcome('failed', 'refresh_list_invalid')
     except UiError as exc:
@@ -259,10 +271,9 @@ def file_inbox(window: Window, guide: FolderGuide, find, limits: Limits, report:
         outcome = Outcome('failed', 'cua_driver_failed')
     end_badge, end_tabs = _inbox(window)
     end_unread = _unread(end_tabs)
-    lost = unread - end_unread
-    report.unread_changed = sorted(set(report.unread_changed)
-                                   | {Row(label, '', False).headline for label in lost.elements()})
-    if lost or end_badge != sum(end_unread.values()):
+    changed = (unread - end_unread) + (end_unread - unread)
+    report.unread_changed = sorted({short_hash(label) for label in changed})
+    if changed or end_badge != sum(end_unread.values()):
         return Outcome('failed', 'unread_set_changed')
     return outcome
 
@@ -298,13 +309,15 @@ def _record_opened(path: Path, opened: dict[str, str]) -> None:
     os.replace(temp, path)
 
 
-def refresh_all(window: Window, path: Path, limits: Limits, report: Report) -> Outcome | None:
-    """Open up to max_refreshes listed emails, least recently opened first; None means no failure."""
+def refresh_all(window: Window, path: Path, limits: Limits, report: Report,
+                closed: Callable[[], bool]) -> Outcome | None:
+    """Open up to max_refreshes listed emails, least recently opened first; None means carry on."""
     entries = sorted(read_refresh_list(path), key=lambda e: e.get('opened_at') or '')[:limits.max_refreshes]
     opened: dict[str, str] = {}
-    outcome = None
     try:
         for entry in entries:
+            if closed():
+                return Outcome('timed_out', 'window_closed')
             matches = [r for r in window.search(entry['sender_email'])
                        if r.subject is not None and _subject_hash(r.subject) == entry['subject_hash']]
             if len({r.key for r in matches}) != 1:
@@ -314,22 +327,17 @@ def refresh_all(window: Window, path: Path, limits: Limits, report: Report) -> O
             result = window.refresh(matches[0].key)
             window.end_search()
             report.refreshed[result.value] += 1
-            if result in (Refreshed.OPENED, Refreshed.RESTORED):
+            if result is Refreshed.OPENED:
                 opened[entry['message_id']] = datetime.now(timezone.utc).isoformat()
-            if result is Refreshed.NOT_RESTORED:
-                report.unread_changed.append(matches[0].headline)
-                outcome = Outcome('failed', 'unread_set_changed')
-                break
     finally:
         if opened:
             _record_opened(path, opened)
-    return outcome
+    return None
 
 
 def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGuide, find,
-              limits: Limits, report: Report) -> Outcome:
-    deadline = time.monotonic() + limits.deadline_seconds
-    failures = 0
+              limits: Limits, report: Report, closed: Callable[[], bool]) -> Outcome:
+    failures = in_a_row = 0
     for tab, rows in tabs.items():
         if tab is not None:
             window.switch_tab(tab)
@@ -344,24 +352,31 @@ def _move_all(window: Window, tabs: dict[str | None, list[Row]], guide: FolderGu
             if len(report.moved) >= limits.max_moves:
                 report.left['move_cap_reached'] += 1
                 continue
-            if time.monotonic() >= deadline:
-                return Outcome('timed_out', 'deadline_reached')
+            if closed():
+                return Outcome('timed_out', 'window_closed')
             result = window.move(row.label, guide.leaf(decision.path))
             if result is Moved.MOVED:
-                failures = 0
-                report.moved.append((row.headline, decision.path, decision.rule))
+                in_a_row = 0
+                report.moved.append((short_hash(row.label), decision.rule))
                 continue
             report.left[result.value] += 1
             if result is Moved.FAILED:
                 failures += 1
-                if failures >= limits.failures_in_a_row:
+                in_a_row += 1
+                if in_a_row >= limits.failures_in_a_row:
                     return Outcome('failed', 'move_failed_twice')
-    return Outcome('succeeded', 'filed')
+    return Outcome('failed', 'move_failed') if failures else Outcome('succeeded', 'filed')
 
 
-def triage(repo: Path, home: Path, waits: Waits = Waits(), limits: Limits = Limits()) -> tuple[Outcome, Report]:
+def triage(repo: Path, home: Path, waits: Waits, limits: Limits,
+           closed: Callable[[], bool]) -> tuple[Outcome, Report]:
     report = Report()
     try:
+        mode = stat.S_IMODE((home / GUIDE).stat().st_mode)
+        if mode != 0o600:
+            print(f'outlook-triage: the folder guide names clients, so it must be mode 0600, not {mode:04o}; '
+                  f'run chmod 600 ~/{GUIDE}', file=sys.stderr)
+            return Outcome('failed', 'folder_guide_not_0600'), report
         guide = FolderGuide.parse((home / GUIDE).read_text())
     except OSError:
         return Outcome('failed', 'folder_guide_missing'), report
@@ -385,7 +400,7 @@ def triage(repo: Path, home: Path, waits: Waits = Waits(), limits: Limits = Limi
     window = Window(pid, found['window_id'], waits)
     try:
         window.front()
-        outcome = file_inbox(window, guide, CarrFinder(repo), limits, report, repo / REFRESH_LIST)
+        outcome = file_inbox(window, guide, CarrFinder(repo), limits, report, repo / REFRESH_LIST, closed)
     except UiError as exc:
         outcome = Outcome('failed', str(exc))
     except CuaError:
@@ -402,16 +417,23 @@ def _settled(repo: Path, day: str) -> Path:
     return repo / OUT / f'{day}.settled'
 
 
-def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits()) -> Outcome:
+def _minute(moment: datetime) -> clock:
+    return moment.astimezone(ZONE).time().replace(second=0, microsecond=0)
+
+
+def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: Limits = Limits(),
+        now_fn: Callable[[], datetime] = lambda: datetime.now(ZONE)) -> Outcome:
+    """One triage run; it stops before the next move or refresh once now_fn() reaches 21:15."""
     os.umask(0o077)
+    close = datetime.combine(now.astimezone(ZONE).date(), WINDOW_CLOSE, ZONE)
     folder = repo / OUT
     folder.mkdir(parents=True, exist_ok=True)
     folder.chmod(0o700)
     day = now.strftime('%Y-%m-%d')
-    outcome, report = triage(repo, home, waits, limits)
+    outcome, report = triage(repo, home, waits, limits, lambda: now_fn() >= close)
     with private_file(folder / f'{day}.report.md') as handle:
         handle.write(f'## {now.isoformat()}\n' + report.text(outcome))
-    if outcome.state != 'skipped' or now.time() >= LAST_FIRE:
+    if outcome.state == 'succeeded' or _minute(now) >= LAST_FIRE:
         with private_file(_settled(repo, day)) as handle:
             handle.write(f'{outcome.state} {outcome.reason}\n')
     print(f'outlook-triage {outcome.state} {outcome.reason} moved={len(report.moved)} '
@@ -420,9 +442,11 @@ def run(repo: Path, home: Path, now: datetime, waits: Waits = Waits(), limits: L
 
 
 def fire(repo: Path | None = None, now: datetime | None = None) -> int:
-    """launchd entry: nothing to do once today is settled, else run under bin/run-scheduled.sh."""
+    """launchd entry: nothing to do outside 19:15-21:00 or once today is settled, else run the job."""
     repo = repo or Path(__file__).resolve().parents[1]
     now = now or datetime.now(ZONE)
+    if not FIRST_FIRE <= _minute(now) <= LAST_FIRE:
+        return 0
     if _settled(repo, now.strftime('%Y-%m-%d')).exists():
         return 0
     os.chdir(repo)
