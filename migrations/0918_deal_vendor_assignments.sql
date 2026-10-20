@@ -12,9 +12,11 @@ create table public.deal_vendor_assignment (
   note text,
   updated_by uuid not null references public.actor(id),
   updated_at timestamptz not null default now(),
-  primary key (deal_id,party_id,role),
-  unique (deal_id,role,contact_party_id)
+  primary key (deal_id,party_id,role)
 );
+
+create unique index deal_vendor_assignment_active_contact
+  on public.deal_vendor_assignment(deal_id,role,contact_party_id) where active;
 
 create view public.v_deal_room_vendor as
 select a.deal_id,a.party_id,a.role,
