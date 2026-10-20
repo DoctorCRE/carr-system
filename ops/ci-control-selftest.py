@@ -160,6 +160,56 @@ class Controls(unittest.TestCase):
         with self.assertRaises(Exception): mod.rerun(remote,123,456,'a'*40,policy,checks,dispatch)
         dispatch.assert_not_called()
 
+    def test_rerun_ignores_repository_and_mergeability_cache_changes(self):
+        mod = load('ci-rerun')
+        head = 'a' * 40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':head, 'run_attempt':1, 'repository':{'size':220185}}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        pr = {'number':1927, 'state':'open', 'head':{'sha':head},
+              'base':{'sha':'b' * 40, 'repo':{'pushed_at':'before'}},
+              'mergeable':None, 'mergeable_state':'unknown', 'rebaseable':None}
+        current = ({**run, 'repository':{'size':232385}}, job,
+                   {**pr, 'base':{'sha':'b' * 40, 'repo':{'pushed_at':'after'}},
+                    'mergeable':True, 'mergeable_state':'blocked', 'rebaseable':False})
+        remote = Mock(repo=mod.REPO)
+        remote.snapshot.side_effect = [(run, job, pr), current]
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        dispatch = Mock()
+        mod.rerun(remote, 123, 456, head, policy, Mock(), dispatch)
+        dispatch.assert_called_once_with(123, 456, 1, head)
+
+    def test_rerun_refuses_changed_admission_binding(self):
+        mod = load('ci-rerun')
+        head = 'a' * 40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml',
+               'event':'pull_request', 'status':'completed', 'conclusion':'failure',
+               'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'ops/ci.sh --strict --only gates',
+               'status':'completed', 'conclusion':'failure'}
+        pr = {'number':1927, 'state':'open', 'draft':False,
+              'head':{'sha':head}, 'base':{'sha':'b' * 40}}
+        policy = json.loads((ROOT/'ops/config/platform-metering.v1.json').read_text())
+        for current in (
+                ({**run, 'run_attempt':2}, job, pr),
+                (run, {**job, 'id':457}, pr),
+                (run, {**job, 'name':'ops/ci.sh --strict --only unit'}, pr),
+                (run, {**job, 'conclusion':'cancelled'}, pr),
+                (run, job, {**pr, 'number':1928}),
+                (run, job, {**pr, 'base':{'sha':'c' * 40}}),
+                (run, job, {**pr, 'head':{'sha':'c' * 40}}),
+                (run, job, {**pr, 'state':'closed'}),
+                (run, job, {**pr, 'draft':True})):
+            with self.subTest(current=current):
+                remote = Mock(repo=mod.REPO)
+                remote.snapshot.side_effect = [(run, job, pr), current]
+                dispatch = Mock()
+                with self.assertRaises(mod.Refusal):
+                    mod.rerun(remote, 123, 456, head, policy, Mock(), dispatch)
+                dispatch.assert_not_called()
+
     def test_draft_reruns_keep_fast_feedback_and_refuse_expensive_jobs(self):
         mod = load('ci-rerun')
         head = 'a' * 40

@@ -9,7 +9,6 @@
 import { APP_STAGING_HOST, CARR_STAGING_HOST, isStagingBrowserEnvironment } from "./staging-browser.js";
 
 export const REPORTS_ORIGIN = "https://reports.doctorcre.com";
-export const REPORTS_ASSET_DIRECTORY = "../dealroom/reports";
 
 const SESSION_COOKIE = "__Host-tour_share_session";
 const MAX_BODY_BYTES = 16 * 1024;

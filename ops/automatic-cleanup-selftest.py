@@ -143,6 +143,53 @@ class RetirementKeepTests(unittest.TestCase):
 
 
 class JobCloneTests(unittest.TestCase):
+    def test_remote_archive_preservation_keeps_other_clone_guards(self):
+        import machine_cleanup as cleanup
+        for guard in ('none', 'dirty', 'open-pr', 'unfinished', 'deleted-tag'):
+            with self.subTest(guard=guard):
+                fixture = fixtures.Fixture()
+                workspace = fixture.base / 'room-codex-archived'
+                workspace.mkdir()
+                clone = workspace / 'checkout'
+                fixture.git('clone', str(fixture.remote), str(clone))
+                fixture.git('switch', '-c', 'job', 'origin/main', cwd=clone)
+                fixture.git('config', 'user.email', 'fixture@example.invalid', cwd=clone)
+                fixture.git('config', 'user.name', 'Fixture', cwd=clone)
+                head = fixture.commit('archived clone payload', cwd=clone)
+                tag = 'archive/worktree/job-2026-10-19'
+                fixture.git('tag', '-a', tag, head, '-m', 'fixture archive', cwd=clone)
+                fixture.git('push', 'origin', 'refs/tags/' + tag, cwd=clone)
+                fixture.git('update-ref', '-d', 'refs/tags/' + tag, cwd=clone)
+                provider = fixtures.FakeProvider()
+                if guard == 'dirty':
+                    (clone / 'file').write_text('keep uncommitted clone payload')
+                elif guard == 'open-pr':
+                    opened = fixtures.pull(1, head, fixture.git('rev-parse', 'main'))
+                    opened['head']['ref'] = 'job'
+                    provider.rows.append(opened)
+                elif guard == 'deleted-tag':
+                    def remove_tag(*args):
+                        fixture.git('--git-dir=' + str(fixture.remote), 'update-ref', '-d', 'refs/tags/' + tag)
+                        return []
+                    provider.open_pulls = remove_tag
+                dispatch = {'status': 'running' if guard == 'unfinished' else 'completed',
+                    'checkout_path': str(clone), 'checkout_workspace': str(workspace),
+                    'dispatched_at': '2020-01-01T00:00:00Z'}
+                row = cleanup.clean_clone(workspace, dispatch, provider=provider,
+                    process_probe=lambda paths: set(), now=time.time() + 10 * 86400,
+                    older_than=7 * 86400, dry_run=False)
+                self.assertNotIn('error', row, row)
+                self.assertEqual(row['status'], 'staged' if guard == 'none' else 'kept', row)
+                if guard == 'none':
+                    self.assertFalse(workspace.exists())
+                    self.assertIn('_to_delete', Path(row['staged_path']).parts)
+                    self.assertEqual((Path(row['staged_path']) / 'checkout/file').read_text(), 'archived clone payload\n')
+                else:
+                    self.assertTrue(clone.exists())
+                    expected = {'dirty': 'uncommitted', 'open-pr': 'open PR',
+                        'unfinished': 'finished dispatch', 'deleted-tag': 'changed before staging'}[guard]
+                    self.assertIn(expected, row['reason'])
+
     def test_clone_outside_authorized_repository_identity_is_kept(self):
         import machine_cleanup as cleanup
         from branch_retirement import GitHub

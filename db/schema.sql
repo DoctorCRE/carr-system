@@ -10987,30 +10987,48 @@ CREATE FUNCTION ops.decline_sourced_work_request(p_work_request text, p_base_ver
     AS $$
 declare
   v_id uuid;
-  v_actor uuid;
+  v_actor public.actor%rowtype;
+  v_state text;
+  v_version integer;
+  v_sourced boolean;
   v_now timestamp with time zone := now();
 begin
   if p_exit_reason is null or btrim(p_exit_reason) = '' then
-    raise exception 'a withdrawal must record why';
+    raise exception 'withdrawal_reason_missing: a withdrawal must record why';
   end if;
-  select a.id into v_actor from public.actor a where a.slug = p_actor_slug;
-  if v_actor is null then
-    raise exception 'unknown actor %', p_actor_slug;
+  select a.* into v_actor from public.actor a where a.slug = p_actor_slug;
+  if v_actor.id is null then
+    raise exception 'unknown_actor: unknown actor %', p_actor_slug;
+  end if;
+  if not coalesce(v_actor.active and (
+    v_actor.kind = 'human'
+    or (v_actor.kind = 'automation'
+        and nullif(btrim(current_setting('carr.sponsoring_human_slug', true)), '') in ('joe', 'dell'))
+  ), false) then
+    raise exception 'sponsored_actor_required: declining a Work Request requires an active human actor or a sponsored agent'
+      using errcode = '42501';
   end if;
 
-  select w.id into v_id from ops.work_request w
-   where w.ref = p_work_request and w.capture_idempotency_key is not null
-     and w.state = 'captured' and w.version = p_base_version
-   for update;
+  select w.id, w.state, w.version, w.capture_idempotency_key is not null
+    into v_id, v_state, v_version, v_sourced from ops.work_request w
+   where w.ref = p_work_request for update;
   if v_id is null then
-    raise exception 'no captured sourced Work Request % at version %', p_work_request, p_base_version;
+    raise exception 'work_request_not_found: no Work Request %', p_work_request;
+  end if;
+  if v_state not in ('captured','triaged') or not v_sourced then
+    raise exception 'work_request_not_declinable: % is in state %; only captured or triaged sourced requests may be declined',
+      p_work_request, v_state;
+  end if;
+  if v_version <> p_base_version then
+    raise exception 'work_request_version_conflict: % is in state % at version %, not version %',
+      p_work_request, v_state, v_version, p_base_version;
   end if;
 
   insert into ops.work_request_withdrawal_receipt
     (work_request_id, idempotency_key, base_version, result_version, final_state,
      exit_reason, superseded_by, withdrawn_by_actor_id, withdrawn_at)
   values (v_id, p_idempotency_key, p_base_version, p_base_version + 1, 'declined',
-          p_exit_reason, null, v_actor, v_now)
+          p_exit_reason, null, v_actor.id, v_now)
   on conflict (idempotency_key) do nothing;
 
   update ops.work_request w
@@ -11623,7 +11641,7 @@ CREATE TABLE ops.work_request (
     CONSTRAINT work_request_program_ordinal_positive CHECK (((program_ordinal IS NULL) OR (program_ordinal > 0))),
     CONSTRAINT work_request_shape_disposition_complete CHECK ((((shape_disposition IS NULL) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NULL) AND (shape_decided_by_actor_id IS NULL) AND (shape_decided_at IS NULL)) OR ((shape_disposition = 'required'::text) AND (shape_fixed_surface_ref IS NULL) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)) OR ((shape_disposition = 'not_required'::text) AND (shape_fixed_surface_ref IS NOT NULL) AND (btrim(shape_fixed_surface_ref) <> ''::text) AND (shape_rationale IS NOT NULL) AND (btrim(shape_rationale) <> ''::text) AND (shape_decided_by_actor_id IS NOT NULL) AND (shape_decided_at IS NOT NULL)))),
     CONSTRAINT work_request_shape_disposition_valid CHECK (((shape_disposition IS NULL) OR (shape_disposition = ANY (ARRAY['required'::text, 'not_required'::text])))),
-    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = 'superseded'::text) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
+    CONSTRAINT work_request_sourced_capture_shape CHECK ((((capture_idempotency_key IS NULL) AND (organization_tenant_id IS NULL) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL)) OR ((capture_idempotency_key IS NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NULL) AND (doctrine_revision_id IS NULL) AND (sourced_capture_sequence IS NULL) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL) AND (program_key = ANY (ARRAY['carr-ai-engineering-suite-v1'::text, 'carr-system-integrity-elimination-v1'::text])) AND (program_ordinal IS NOT NULL) AND (program_ordinal > 0) AND (NOT (requester_actor IS DISTINCT FROM 'joe'::text)) AND (NOT (owner_actor IS DISTINCT FROM 'joe'::text))) OR ((capture_idempotency_key IS NOT NULL) AND (NOT (organization_tenant_id IS DISTINCT FROM 'carr-internal'::text)) AND (doctrine_section_id IS NOT NULL) AND (doctrine_revision_id IS NOT NULL) AND (sourced_capture_sequence IS NOT NULL) AND (program_key IS NULL) AND (program_ordinal IS NULL) AND (origin_ref IS NOT NULL) AND (origin_ref ~ '^doctrine:[a-z0-9][a-z0-9-]*#[a-z0-9][a-z0-9-]*$'::text) AND (((state = 'captured'::text) AND (triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['triaged'::text, 'ready'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (((triage_classification IS NULL) AND (triaged_by_actor_id IS NULL) AND (triaged_at IS NULL)) OR ((state = ANY (ARRAY['declined'::text, 'superseded'::text])) AND (triage_classification = ANY (ARRAY['operational'::text, 'needs_judgment'::text, 'safety_review'::text])) AND (triaged_by_actor_id IS NOT NULL) AND (triaged_at IS NOT NULL))) AND (exit_reason IS NOT NULL) AND (btrim(exit_reason) <> ''::text) AND (closed_at IS NOT NULL) AND (((state = 'declined'::text) AND (superseded_by IS NULL)) OR ((state = 'superseded'::text) AND (superseded_by IS NOT NULL)))))))),
     CONSTRAINT work_request_state_check CHECK ((state = ANY (ARRAY['captured'::text, 'triaged'::text, 'ready'::text, 'claimed'::text, 'in_progress'::text, 'verification'::text, 'awaiting_release'::text, 'released'::text, 'confirmed_closed'::text, 'needs_joe'::text, 'blocked'::text, 'declined'::text, 'superseded'::text, 'failed'::text])))
 );
 
@@ -65448,7 +65466,22 @@ begin
     return new;
   end if;
 
-  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-superseded transitions';
+  if old.state = 'triaged'
+     and new.state = 'declined'
+     and new.version = old.version + 1
+     and (to_jsonb(new) - array['state','exit_reason','closed_at','version','updated_at'])
+           is not distinct from
+         (to_jsonb(old) - array['state','exit_reason','closed_at','version','updated_at'])
+     and exists (
+       select 1 from ops.work_request_withdrawal_receipt r
+        where r.work_request_id = old.id and r.base_version = old.version
+          and r.result_version = new.version and r.final_state = 'declined'
+          and r.exit_reason = new.exit_reason and r.superseded_by is null
+     ) then
+    return new;
+  end if;
+
+  raise exception 'sourced Program 6 Work Requests permit only receipt-backed captured-to-triaged, triaged shape-disposition, triaged-to-ready, captured-to-withdrawn, or triaged-to-withdrawn transitions';
 end;
 $$;
 
@@ -122869,6 +122902,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
+0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
 \.
 
 
