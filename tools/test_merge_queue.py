@@ -962,6 +962,16 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'branch-1').strip(), self.approved)
         self.assertEqual(self.calls('merge'), [])
 
+    def test_successful_regeneration_preserves_push_elapsed_diagnostic(self):
+        self.prepare_pinned_head()
+        script = self.root / 'tools/prepare_pr.py'
+        script.write_text(script.read_text() +
+            'print("prepare-pr: push result=success elapsed_seconds=1.234 timeout_seconds=300", file=sys.stderr)\n')
+        self.q.tick()
+        events = self.q.db.execute("SELECT detail FROM events WHERE outcome='regeneration_push'").fetchall()
+        self.assertEqual([row[0] for row in events],
+            ['prepare-pr: push result=success elapsed_seconds=1.234 timeout_seconds=300'])
+
     def test_interrupted_preparation_is_not_replayed(self):
         self.pr()
         marker = self.root / 'preparation-calls'

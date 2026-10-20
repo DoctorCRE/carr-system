@@ -58,7 +58,7 @@ class PrepareTests(unittest.TestCase):
 
     def test_slow_disposable_receive_obeys_push_deadline_and_logs_elapsed(self):
         hook = self.remote / 'hooks/pre-receive'
-        hook.write_text('#!/bin/sh\nsleep 2\nexit 1\n')
+        hook.write_text('#!/bin/sh\necho seeded-receive-wait >&2\nsleep 2\nexit 1\n')
         hook.chmod(0o755)
         diagnostics = io.StringIO()
         with patch.dict(os.environ, {'CARR_PREPARE_PUSH_TIMEOUT_SECONDS': '0.1'}):
@@ -67,6 +67,7 @@ class PrepareTests(unittest.TestCase):
                     prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda _: None)
         self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
         self.assertRegex(diagnostics.getvalue(), r'push result=timeout elapsed_seconds=[0-9.]+ timeout_seconds=0.1')
+        self.assertIn('seeded-receive-wait', diagnostics.getvalue())
         hook.unlink()
         diagnostics = io.StringIO()
         with patch.dict(os.environ, {'CARR_PREPARE_PUSH_TIMEOUT_SECONDS': '5'}):
