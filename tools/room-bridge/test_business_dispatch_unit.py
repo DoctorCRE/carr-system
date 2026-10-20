@@ -297,6 +297,40 @@ class BusinessDispatchTests(unittest.TestCase):
                 run = business_dispatch.Run(cap=cap)
                 self.assertEqual(run.enqueue('party:7', 'draft_reply', 'Draft.', 'mail:1').status, 'refused')
 
+    def test_record_layer_refuses_an_untrusted_carr_endpoint_before_launch(self):
+        for url in ('https://other.example.test/mcp',
+                    'https://api.doctorcre.com.example.test/mcp',
+                    'http://api.doctorcre.com/mcp',
+                    'https://api.doctorcre.com:8443/mcp',
+                    'https://api.doctorcre.com/other'):
+            with self.subTest(url=url), patch.dict(os.environ, {'CARR_MCP_URL': url}):
+                launch = Mock()
+                with self.assertRaises(claude_desktop_wire.ClaudeDesktopError) as refused:
+                    claude_desktop_wire.launch_background(
+                        self.reg.resolve('biz-desk'), 'Read the record.', run=launch)
+                self.assertEqual(refused.exception.code, 'untrusted_carr_endpoint')
+                self.assertIn('configured CARR endpoint', str(refused.exception))
+                launch.assert_not_called()
+
+    def test_inherited_untrusted_endpoint_is_refused_in_a_fresh_process(self):
+        code = """
+import claude_desktop_wire as wire
+from unittest.mock import Mock
+launch = Mock()
+try:
+    wire.launch_background({'model': 'sonnet', 'effort': 'medium', 'cwd': '/tmp',
+                            'posture': 'record-layer'}, 'Read.', run=launch)
+except wire.ClaudeDesktopError as exc:
+    assert exc.code == 'untrusted_carr_endpoint', exc.code
+else:
+    raise AssertionError('untrusted endpoint accepted')
+launch.assert_not_called()
+"""
+        child = subprocess.run([sys.executable, '-c', code], cwd=HERE,
+                               env={**os.environ, 'CARR_MCP_URL': 'https://other.example.test/mcp'},
+                               capture_output=True, text=True)
+        self.assertEqual(child.returncode, 0, child.stderr)
+
     def test_end_to_end_the_desk_receives_the_business_brief_with_only_carr_tools(self):
         bin_dir = self.root / 'bin'
         bin_dir.mkdir()
