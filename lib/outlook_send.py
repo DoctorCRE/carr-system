@@ -484,6 +484,8 @@ def _open_url(url: str) -> None:
 class Window:
     """One compose or event window, read and pressed by accessibility only."""
 
+    commit_label: str
+
     def __init__(self, pid: int, window_id: int, waits: ui.Waits):
         self.pid, self.window_id, self.waits = pid, window_id, waits
 
@@ -534,6 +536,8 @@ class Window:
         if idle is None or idle < IDLE_SECONDS:
             raise UiFailure('user_active_before_front')
         previous = _frontmost()
+        if previous is None:
+            raise UiFailure('frontmost_unreadable')
         try:
             _cua('bring_to_front', {'pid': self.pid, 'window_id': self.window_id})
             time.sleep(self.waits.settle_seconds)
@@ -662,7 +666,7 @@ def _new_window(pid: int, before: set[int], waits: ui.Waits) -> int:
         time.sleep(waits.poll_seconds)
 
 
-def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> Window:
+def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> ComposeWindow | EventWindow:
     try:
         pid, main = _main_window(waits)
         windows = _cua('list_windows', {'pid': pid}).get('windows') or []
@@ -671,11 +675,12 @@ def open_form(item: Mail | Event, waits: ui.Waits = ui.Waits()) -> Window:
                for w in windows):
             raise UiFailure('compose_window_open')
         before = {w['window_id'] for w in windows}
+        window: ComposeWindow | EventWindow
         if isinstance(item, Mail):
             handler = _mailto_handler()
             if handler == BUNDLE.lower():
                 _open_url(mailto(item))
-                window: Window = ComposeWindow(pid, _new_window(pid, before, waits), waits)
+                window = ComposeWindow(pid, _new_window(pid, before, waits), waits)
             else:
                 main_form = Window(pid, main['window_id'], waits)
                 target = main_form._button(main_form.elements(), 'New Mail')

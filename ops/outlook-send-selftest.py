@@ -88,7 +88,8 @@ class FakeOutlook:
             return [{'element_index': 0, 'role': 'AXWindow', 'label': MAIN['title'], 'depth': 0},
                     {'element_index': 1, 'role': 'AXButton', 'label': 'New Mail', 'depth': 1,
                      'element_token': '1:1'}]
-        form, out = self.forms[wid], []
+        form = self.forms[wid]
+        out: list[dict] = []
 
         def add(role, label, value=None, parent=None, depth=1):
             out.append({'element_index': len(out), 'role': role, 'label': label, 'value': value,
@@ -195,6 +196,8 @@ class Harness:
         self.fake = FakeOutlook(self.clock, self.mailbox, on_send, corrupt)
         self.idle = [idle]
         self.handler = send_mod.BUNDLE.lower()
+        self.previous = 'com.example.editor'
+        self.front_idle = 600
         self.carr_calls: list[tuple[str, dict]] = []
         self.ports = Ports(open_form=lambda item: send_mod.open_form(item, ui.Waits(settle_seconds=0,
                                                                                    poll_seconds=0,
@@ -214,7 +217,7 @@ class Harness:
         with patch.object(send_mod, 'account', lambda: ACCOUNT), patch.object(ui, 'cua', self.fake), patch.object(ui, 'outlook_pid', lambda: 42), \
                 patch.object(send_mod, '_mailto_handler', lambda: self.handler), \
                 patch.object(send_mod, '_open_url', self.fake.open_url), \
-                patch.object(send_mod, '_idle_seconds', lambda: 600), patch.object(send_mod, '_frontmost', lambda: 'com.example.editor'), \
+                patch.object(send_mod, '_idle_seconds', lambda: self.front_idle), patch.object(send_mod, '_frontmost', lambda: self.previous), \
                 patch.object(send_mod, '_activate', lambda bundle: self.fake.calls.append(('activate', bundle))), \
                 patch.object(send_mod.time, 'sleep', lambda s: None):
             return send_mod.send(spec['to'], spec['cc'], spec['bcc'], spec['subject'], spec['body'],
@@ -547,6 +550,20 @@ class SendTests(unittest.TestCase):
         with patch.object(send_mod.ComposeWindow, 'press', side_effect=ui.CuaError('lost reply')):
             self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
         self.assertEqual(h.send().state, State.DUPLICATE_KEY)
+
+    def test_front_fallback_requires_readable_previous_app(self):
+        h = Harness(self.out)
+        h.previous = None
+        self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
+
+    def test_front_fallback_rechecks_idle_after_background_refusal(self):
+        h = Harness(self.out)
+        h.front_idle = 10
+        self.assertEqual(h.send().state, State.WINDOW_NOT_CLOSED)
+        self.assertEqual(h.fake.presses(), 0)
+        self.assertFalse(any(tool == 'bring_to_front' for tool, _ in h.fake.calls))
 
     def test_status_line_carries_no_address_or_subject(self):
         result = Harness(self.out).send(record='client-001')
