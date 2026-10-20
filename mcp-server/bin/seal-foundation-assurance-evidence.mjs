@@ -10,8 +10,8 @@ import { homedir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import pg from "pg";
-import { launchChrome } from "../../dealroom/test/chrome-launch.mjs";
-import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
+import { launchChrome } from "../test/helpers/chrome-launch.mjs";
+import { findDisposableChromium } from "../test/helpers/chromium-binary.mjs";
 
 import { digest } from "../src/artifact-trust.js";
 import {

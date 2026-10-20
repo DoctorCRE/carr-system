@@ -1,5 +1,5 @@
 import { chromium } from "playwright-core";
-import { findDisposableChromium } from "../../dealroom/test/chromium-binary.mjs";
+import { findDisposableChromium } from "../../mcp-server/test/helpers/chromium-binary.mjs";
 
 export async function testBrowser(t) {
   const chrome = await findDisposableChromium();

@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CHROME_STOP_TIMEOUT_MS, launchChrome, launchTestChrome, processTreeStopsWithin } from "../../dealroom/test/chrome-launch.mjs";
+import { CHROME_STOP_TIMEOUT_MS, launchChrome, launchTestChrome, processTreeStopsWithin } from "./helpers/chrome-launch.mjs";
 
 const fixture = new URL("./fixtures/chrome-launch-fixture.mjs", import.meta.url);
 const nativeKill = process.kill.bind(process);
@@ -423,7 +423,7 @@ test("test-owned Chrome closes after an assertion fails without caller cleanup",
   const source = `
     import test from 'node:test';
     import { spawn } from 'node:child_process';
-    import { launchTestChrome } from ${JSON.stringify(new URL('../../dealroom/test/chrome-launch.mjs', import.meta.url).href)};
+    import { launchTestChrome } from ${JSON.stringify(new URL('./helpers/chrome-launch.mjs', import.meta.url).href)};
     test('intentional failure', async t => {
       await launchTestChrome(t, 'fake-chrome', { timeoutMs: 1500, spawnChrome(binary, args, options) {
         const profile = args.find(arg => arg.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
