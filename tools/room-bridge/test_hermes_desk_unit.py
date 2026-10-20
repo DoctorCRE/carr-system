@@ -3,6 +3,7 @@ import contextlib
 import io
 import json
 import os
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -291,7 +292,19 @@ print(json.dumps({'paidRecommendedModels': [
     def test_timeout_kills_the_entire_process_group_and_records_once(self):
         self.register(timeout_s=0.3)
         self.env['FAKE_MODE'] = 'timeout'
-        row = self.send()
+        killpg = os.killpg
+        killed, settling = set(), set()
+
+        def delayed_reaping(pgid, sig):
+            if sig == signal.SIGKILL:
+                killed.add(pgid)
+            elif pgid in killed and pgid not in settling:
+                settling.add(pgid)
+                return
+            return killpg(pgid, sig)
+
+        with patch.object(os, 'killpg', side_effect=delayed_reaping):
+            row = self.send()
         self.assertEqual(row['status'], 'timed_out')
         self.assertTrue(row['termination_confirmed'])
         time.sleep(0.6)
