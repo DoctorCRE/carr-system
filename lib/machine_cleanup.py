@@ -39,6 +39,12 @@ def clone_preserved(clone, refs, environment=None):
                    environment=environment)
 
 
+def clone_has_protected_work(clone):
+    return bool(git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
+                any(entry and (entry[0].islower() or entry[0] == 'S')
+                    for entry in git(clone, 'ls-files', '-v', '-z').split('\0')))
+
+
 class CloneEvidence:
     def __init__(self, provider, process_probe, workspaces, roots=None):
         self.provider = provider
@@ -146,7 +152,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         check(deadline)
         head = git(clone, 'rev-parse', 'HEAD')
         branch = git(clone, 'symbolic-ref', '--quiet', '--short', 'HEAD', allowed=(0, 1))
-        if git(clone, 'status', '--porcelain=v1', '--untracked-files=all'):
+        if clone_has_protected_work(clone):
             return keep('uncommitted work')
         environment = evidence.object_environment(repo) if evidence else {}
         if not clone_preserved(clone, refs, environment):
@@ -182,7 +188,7 @@ def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than
         if (busy is None or busy or workspace.resolve() != workspace or clone.resolve() != clone or
                 identity != (workspace.stat().st_ino, clone.stat().st_ino) or
                 git(clone, 'rev-parse', 'HEAD') != head or
-                git(clone, 'status', '--porcelain=v1', '--untracked-files=all') or
+                clone_has_protected_work(clone) or
                 not clone_preserved(clone, refs, environment)):
             return keep('checkout became live or changed before staging')
         check(deadline)
