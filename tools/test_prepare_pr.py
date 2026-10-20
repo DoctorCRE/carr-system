@@ -9,6 +9,7 @@ from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ops"))
 from git_env import fixture_env
+import prepare_pr
 from prepare_pr import prepare
 
 
@@ -52,6 +53,23 @@ class PrepareTests(unittest.TestCase):
         self.git('merge-base', '--is-ancestor', self.main, sha, repo=self.remote)
         self.assertEqual(self.git('show', f'{sha}:generated.txt', repo=self.remote), 'fresh')
         self.assertEqual(json.loads(self.receipt.read_text())['prepared'], sha)
+
+    def test_clone_borrows_reference_objects_and_survives_a_missing_reference(self):
+        clones = []
+        real_git = prepare_pr.git
+        def spy(repo, *args, **kwargs):
+            if args and args[0] == 'clone':
+                clones.append((args, kwargs.get('timeout')))
+            return real_git(repo, *args, **kwargs)
+        with patch.object(prepare_pr, 'git', spy):
+            prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, lambda repo: None,
+                    reference=self.repo)
+        self.assertIn('--reference-if-able', clones[0][0])
+        self.assertIn('--dissociate', clones[0][0])
+        self.assertGreaterEqual(clones[0][1], 600)
+        sha = prepare(str(self.remote), 'feature', self.git('rev-parse', 'feature', repo=self.remote),
+                      self.main, self.receipt, lambda repo: None, reference=self.root / 'missing')
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), sha)
 
     def test_failed_generator_never_pushes(self):
         def fail(_):
