@@ -4,6 +4,7 @@ model one question. Standard library only, since the scripts run with nothing el
 from __future__ import annotations
 
 import json
+import math
 import os
 import contextlib
 import fcntl
@@ -34,26 +35,46 @@ REPO = Path(__file__).resolve().parents[1]
 LOCAL_URL = "http://127.0.0.1:8000"
 IDLE_SECONDS = 15 * 60
 ENSURE_TIMEOUT = 180
-STOP_TIMEOUT = 4 * 15 + 30
 OFF_REASON = "flash is switched off"
+GRANT_SECONDS = 2 * 60 * 60
 
 
 class FlashSwitchedOff(RuntimeError):
     pass
 
 
-def state_dir():
-    return Path(os.environ.get("CARR_FLASH_STATE_DIR", str(Path.home() / ".local/state/carr/flash")))
+def state_dir(*, home=None):
+    return Path(os.environ.get("CARR_FLASH_STATE_DIR", str(Path(home or Path.home()) / ".local/state/carr/flash")))
 
 
-def off_switch_path():
+def off_switch_path(*, home=None):
     override = os.environ.get("CARR_FLASH_STATE_DIR")
-    directory = Path(override) if override else Path.home() / ".config/carr"
+    directory = Path(override) if override else Path(home or Path.home()) / ".config/carr"
     return directory / "flash.off"
 
 
-def is_switched_off():
-    return os.path.isfile(off_switch_path())
+def grant_path(*, home=None):
+    return off_switch_path(home=home).with_name("flash.grant.json")
+
+
+def active_grant(*, now=None, home=None):
+    if off_switch_path(home=home).exists():
+        return None
+    try:
+        grant = json.loads(grant_path(home=home).read_text())
+        issued, expires = grant["issued_at"], grant["expires_at"]
+        now = time.time() if now is None else now
+        if (type(issued) in (int, float) and type(expires) in (int, float)
+                and math.isfinite(issued) and math.isfinite(expires)
+                and issued <= now < expires):
+            return grant
+    except (OSError, ValueError, KeyError, TypeError, OverflowError):
+        pass
+    return None
+
+
+def is_switched_off(*, home=None):
+    return active_grant(home=home) is None
 
 
 def _require_enabled():
@@ -62,10 +83,11 @@ def _require_enabled():
 
 
 @contextlib.contextmanager
-def lifecycle_lock(*, shared=False, blocking=True, deadline=None, clock=time.monotonic, sleep=time.sleep):
-    directory = state_dir()
+def lifecycle_lock(*, shared=False, blocking=True, deadline=None, clock=time.monotonic, sleep=time.sleep,
+                   name="lifecycle.lock", home=None):
+    directory = state_dir(home=home)
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / "lifecycle.lock").open("a") as lock:
+    with (directory / name).open("a") as lock:
         operation = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
         if deadline is None:
             fcntl.flock(lock, operation | (0 if blocking else fcntl.LOCK_NB))
@@ -127,77 +149,70 @@ def _stop(*, launch=_launch):
         raise RuntimeError("; ".join(errors))
 
 
-def ensure(*, timeout=ENSURE_TIMEOUT, ready=is_ready, launch=_launch,
-           clock=time.monotonic, sleep=time.sleep):
-    """Start once across concurrent callers, with bounded cold readiness."""
-    if is_switched_off():
-        print(OFF_REASON, file=sys.stderr)
-        return False
+def _revoke(*, home=None):
+    off_switch_path(home=home).parent.mkdir(parents=True, exist_ok=True)
+    off_switch_path(home=home).touch()
+    grant_path(home=home).unlink(missing_ok=True)
+
+
+def turn_on(*, seconds=GRANT_SECONDS, timeout=ENSURE_TIMEOUT, ready=is_ready,
+            launch=_launch, clock=time.monotonic, sleep=time.sleep):
+    """Explicit human activation. This is the only cold-start interface."""
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("grant duration must be positive and finite")
     deadline = clock() + timeout
-    if ready(timeout=min(2, max(0.01, deadline - clock()))):
-        return True
     with lifecycle_lock(deadline=deadline, clock=clock, sleep=sleep):
-        if is_switched_off():
-            print(OFF_REASON, file=sys.stderr)
-            return False
-        if clock() >= deadline:
-            return False
-        if ready(timeout=min(2, deadline - clock())):
-            return True
+        now = time.time()
+        grant_path().parent.mkdir(parents=True, exist_ok=True)
+        temporary = grant_path().with_suffix(".tmp")
+        temporary.write_text(json.dumps({"issued_at": now, "expires_at": now + seconds}))
+        temporary.replace(grant_path())
+        off_switch_path().unlink(missing_ok=True)
         try:
             _start(SERVER_LABEL, launch=launch)
-            while clock() < deadline:
+            while clock() < deadline and not is_switched_off():
                 if ready(timeout=min(2, deadline - clock())):
                     return True
                 sleep(min(1, max(0, deadline - clock())))
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-            print(f"flash-ensure: {exc}", file=sys.stderr)
-        # A late load after a failed caller must not remain resident.
+            print(f"flash-on: {exc}", file=sys.stderr)
+        _revoke()
         _stop(launch=launch)
         return False
 
 
+def turn_off(*, stop=_stop):
+    with lifecycle_lock():
+        _revoke()
+        stop()
+
+
+def ensure(*, timeout=ENSURE_TIMEOUT, ready=is_ready):
+    """Observe readiness. Automated callers never activate or restart Flash."""
+    if is_switched_off():
+        print(OFF_REASON, file=sys.stderr)
+        return False
+    return ready(timeout=min(2, timeout))
+
+
 def ensure_server(url=LOCAL_URL, *, timeout=ENSURE_TIMEOUT):
     _require_enabled()
-    if url.rstrip("/") != LOCAL_URL:
-        return
-    try:
-        result = subprocess.run([str(REPO / "bin/flash-ensure"), "--timeout", str(timeout)], timeout=timeout + STOP_TIMEOUT + 10)
-    except subprocess.TimeoutExpired as exc:
-        raise TimeoutError("Flash readiness command timed out") from exc
-    if result.returncode:
-        raise TimeoutError("Flash did not become ready within 180 seconds")
+    if url.rstrip("/") == LOCAL_URL and not is_ready(url, timeout=min(2, timeout)):
+        raise TimeoutError("Flash is not running; only an explicit bin/flash-on starts it")
 
 
-def ensure_desk(ready, *, launch=_launch, clock=time.monotonic, sleep=time.sleep):
+def ensure_desk(ready):
     _require_enabled()
     ensure_server()
-    deadline = clock() + 120
-    with lifecycle_lock(shared=True, deadline=deadline, clock=clock, sleep=sleep):
-        _require_enabled()
-        if ready():
-            return
-    with lifecycle_lock(deadline=deadline, clock=clock, sleep=sleep):
-        _require_enabled()
-        if ready():
-            return
-        try:
-            _start(DESK_LABEL, launch=launch)
-            while clock() < deadline:
-                if ready():
-                    return
-                sleep(min(1, deadline - clock()))
-        except (OSError, RuntimeError, subprocess.TimeoutExpired):
-            _stop(launch=launch)
-            raise
-        _stop(launch=launch)
-        raise TimeoutError("Flash desk did not start within 120 seconds")
+    if not ready():
+        raise TimeoutError("Flash desk is not running; automated dispatch cannot start it")
 
 
 @contextlib.contextmanager
 def activity_scope():
     _require_enabled()
-    with lifecycle_lock(shared=True):
+    with lifecycle_lock(shared=True, name="requests.lock"):
+        _require_enabled()
         activity = state_dir() / "last-request"
         activity.touch()
         try:
@@ -217,7 +232,8 @@ def request_scope(url=LOCAL_URL, *, opener=None):
         return
     deadline = time.monotonic() + ENSURE_TIMEOUT
     ensure_server(url, timeout=max(0.01, deadline - time.monotonic()))
-    with lifecycle_lock(shared=True, deadline=deadline):
+    with lifecycle_lock(shared=True, deadline=deadline, name="requests.lock"):
+        _require_enabled()
         remaining = deadline - time.monotonic()
         if remaining <= 0 or not is_ready(url, timeout=min(2, remaining)):
             raise TimeoutError("Flash stopped before the request; readiness deadline exhausted")
@@ -289,14 +305,17 @@ def idle_stop(*, now=None, started=server_started, stop=_stop):
     try:
         with lifecycle_lock(blocking=False):
             now = time.time() if now is None else now
-            age = idle_seconds(started(), _activity(now), now)
-            if age is None:
+            if active_grant(now=now) is None:
+                _revoke()
                 stop()
-                return False
-            if age < IDLE_SECONDS:
-                return False
-            stop()
-            return True
+                return True
+            with lifecycle_lock(blocking=False, name="requests.lock"):
+                age = idle_seconds(started(), _activity(now), now)
+                if age is not None and age < IDLE_SECONDS:
+                    return False
+                _revoke()
+                stop()
+                return age is not None
     except BlockingIOError:
         return False
 
@@ -322,15 +341,21 @@ def health_row(*, now=None, started=server_started):
         return f"WARN flash residency · read failed: {exc} · {action}"
 
 
-def main(command, *, timeout=ENSURE_TIMEOUT):
+def main(command, *, timeout=ENSURE_TIMEOUT, seconds=GRANT_SECONDS):
     try:
+        if command == "on":
+            return 0 if turn_on(seconds=seconds, timeout=timeout) else 1
+        if command == "off":
+            turn_off()
+            print("Flash is off; server and desk disabled")
+            return 0
         if command == "ensure":
             if is_switched_off():
                 print(OFF_REASON, file=sys.stderr)
                 return 1
             if ensure(timeout=timeout):
                 return 0
-            print(f"flash-ensure: readiness timed out after {timeout:g} seconds", file=sys.stderr)
+            print("Flash is not running; only an explicit bin/flash-on starts it", file=sys.stderr)
             return 1
         if command == "idle-stop":
             if idle_stop():

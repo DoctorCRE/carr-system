@@ -208,7 +208,7 @@ class Verdicts(unittest.TestCase):
 
 class BriefStamp(unittest.TestCase):
     def setUp(self):
-        self.dir = tempfile.mkdtemp()
+        self.dir = self.enterContext(tempfile.TemporaryDirectory())
         self.path = os.path.join(self.dir, "gap9.md")
         with open(self.path, "w", encoding="utf-8") as handle:
             handle.write(brief("gap9.md"))

@@ -12,7 +12,7 @@
 		<string>{{HOME}}/.local/bin/flash-desk-start</string>
 	</array>
 	<key>RunAtLoad</key>
-	<true/>
+	<false/>
 	<key>StandardErrorPath</key>
 	<string>{{HOME}}/Library/Logs/flash-desk.log</string>
 	<key>StandardOutPath</key>

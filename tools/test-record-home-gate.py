@@ -13,6 +13,10 @@ import subprocess
 import tempfile
 import sys
 
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 # Script-relative, NOT expanduser("~/carr-system") — see the same fix in
 # test-ledger-sweep.py. A checkout outside $HOME made this file crash on import
 # rather than report a failure.
@@ -148,7 +152,7 @@ CASES = [
 # subprocess below points that variable at this temp file, so the list-guarded
 # case is hermetic: the same verdict on Joe's Mac, on Dell's, and on the runner.
 SYNTHETIC_DOSSIER = "LumoraDentalGroup.md"
-_ROSTER_DIR = tempfile.mkdtemp(prefix="record-home-roster-")
+_ROSTER_DIR = temporary_directory(prefix="record-home-roster-")
 SYNTHETIC_ROSTER = os.path.join(_ROSTER_DIR, "dossier-roster.local.json")
 with open(SYNTHETIC_ROSTER, "w", encoding="utf-8") as _fh:
     json.dump({"dossiers": {SYNTHETIC_DOSSIER: "flat", "SampleClinic-Harbor.md": "chronological"}}, _fh)

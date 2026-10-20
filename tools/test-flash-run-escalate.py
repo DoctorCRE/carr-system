@@ -2,9 +2,9 @@
 """Contract tests for flash-run's escalation through the Model Room.
 
 Joe's decision 2026-09-24: Flash replaces Sonnet for scoped, testable coding; what Flash
-cannot do goes to Sol or Opus, through Model Room desks, never a direct model call.
+cannot do goes to Codex Sol through Model Room desks, never a direct model call.
 A code failure goes to the Sol desk, whose patch is applied only if the task's test then
-passes; a task routed away as a design/judgment call goes to the Opus desk.
+passes; a task routed away as a design/judgment call also goes to the Sol desk.
 """
 
 from __future__ import annotations
@@ -99,11 +99,11 @@ def code_failure_goes_to_sol_with_files_and_test():
     assert out["desk"] == "sol-fixer", out
 
 
-def judgment_goes_to_opus():
+def judgment_goes_to_sol():
     desks = FakeDesks(status="launched")
     out = fr.escalate("redesign the routing", repo(), "t2", None, [], "auto",
                       kind="judgment", dispatcher=desks)
-    assert desks.sent[0][0] == fr.ESCALATION_DESKS["judgment"] == "claude-desktop", desks.sent
+    assert desks.sent[0][0] == fr.ESCALATION_DESKS["judgment"] == "sol-fixer", desks.sent
     assert out["outcome"] == "dispatched", out
 
 
@@ -170,7 +170,7 @@ def extract_diff_finds_the_block():
 
 
 check("code failure goes to Sol with files and test", code_failure_goes_to_sol_with_files_and_test)
-check("judgment call goes to Opus", judgment_goes_to_opus)
+check("judgment call goes to Codex Sol", judgment_goes_to_sol)
 check("suggest mode dispatches nothing", suggest_mode_dispatches_nothing)
 check("Sol's edits in the copy are applied and kept", sol_edits_in_copy_are_applied_and_kept)
 check("bytecode caches never block Sol's fix", bytecode_caches_never_block_the_fix)

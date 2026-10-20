@@ -46,8 +46,9 @@ import codex_models
 NAME_OK = re.compile(r"^[a-z0-9][a-z0-9-]{1,40}$")
 PID_SOCKET = re.compile(r"^\d+\.sock$")
 
-KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli")
+KINDS = ("claude-session", "claude-desktop", "claude-remote", "codex-session", "codex-live", "flash-local", "grok-cli", "hermes-nous")
 KIND_ALIASES = {"codex-exec": "codex-session"}
+AUTOMATIC_CODEX_DESKS = frozenset({"luna-desk", "sol-fixer", "codex-desk"})
 EFFORT_CHOICES = ("minimal", "low", "medium", "high", "xhigh")
 
 DESK_INSTRUCTION = (
@@ -154,6 +155,24 @@ def remote_posture(entry: dict) -> None:
         raise DeskError("bad_remote_timeout", "remote desk deadline must be greater than 0 and at most 3600 seconds")
 
 
+def grok_posture(entry: dict) -> None:
+    from grok_wire import validate_entry
+    try:
+        validate_entry(entry)
+    except ValueError as exc:
+        raise DeskError('bad_grok_posture', str(exc)) from exc
+
+
+def hermes_posture(entry: dict) -> None:
+    if entry.get('provider') != 'nous' or entry.get('family') not in ('glm', 'deepseek'):
+        raise DeskError('bad_hermes_posture', 'Hermes Nous requires provider nous and family glm or deepseek')
+    timeout = entry.get('timeout_s')
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 3600:
+        raise DeskError('bad_hermes_timeout', 'Hermes deadline must be greater than 0 and at most 3600 seconds')
+    if entry.get('effort') not in EFFORT_CHOICES:
+        raise DeskError('bad_effort', 'Hermes Nous requires a reasoning effort')
+
+
 class Registry:
     def __init__(self, path: str | Path = DEFAULT_REGISTRY):
         self.path = Path(path)
@@ -210,6 +229,7 @@ class Registry:
         timeout_s: float = 900,
         family: str | None = None,
         network_access: bool = False,
+        provider: str | None = None,
     ) -> dict:
         if not NAME_OK.match(name or ""):
             raise DeskError(
@@ -227,7 +247,7 @@ class Registry:
         effort = _normalize_effort(kind, effort)
         if kind in codex_models.CODEX_KINDS:
             family = codex_models.family_default(family, model)
-        elif family is not None:
+        elif kind != 'hermes-nous' and family is not None:
             raise DeskError("bad_family", "family is only supported by Codex desks")
 
         entry: dict[str, object]
@@ -254,10 +274,16 @@ class Registry:
                      "timeout_s": timeout_s, "permission_mode": dispatched_permission_mode(permission_mode)}
             remote_posture(entry)
         elif kind == "grok-cli":
-            if model != "grok-4.7" or effort != "high" or sandbox != "read-only":
-                raise DeskError("bad_grok_posture", "Grok requires grok-4.7/high/read-only")
-            entry = {"kind": kind, "model": model, "effort": effort,
-                     "sandbox": sandbox, "cwd": str(cwd or Path.cwd())}
+            entry = {"kind": kind, "model": model or "grok", "effort": effort or "high",
+                     "cwd": str(cwd or Path.cwd())}
+            grok_posture(entry)
+        elif kind == 'hermes-nous':
+            entry = {'kind': kind, 'provider': provider or 'nous', 'family': family or 'glm',
+                     'effort': effort or 'high', 'timeout_s': timeout_s,
+                     'cwd': str(cwd or Path.cwd())}
+            if model is not None:
+                raise DeskError('bad_hermes_posture', 'use --family glm or deepseek, not a versioned model')
+            hermes_posture(entry)
         elif kind == "flash-local":
             entry = {"kind": kind, "model": "flash", "effort": "minimal"}
         elif kind == "codex-live":
@@ -320,11 +346,12 @@ class Registry:
             raise DeskError("bad_kind", f"desk {name!r} has kind {kind!r}")
         if kind == "claude-remote":
             remote_posture(entry)
+        if kind == "grok-cli":
+            grok_posture(entry)
+        if kind == 'hermes-nous':
+            hermes_posture(entry)
         if kind in ("claude-session", "claude-desktop"):
             entry["permission_mode"] = dispatched_permission_mode(entry.get("permission_mode"))
-        if kind == "grok-cli" and (entry.get("model") != "grok-4.7"
-                or entry.get("effort") != "high" or entry.get("sandbox") != "read-only"):
-            raise DeskError("bad_grok_posture", "Grok requires grok-4.7/high/read-only")
         network_access = entry.get("network_access", False)
         if type(network_access) is not bool or (network_access and kind != "codex-live"):
             raise DeskError("bad_network_access", "network_access must be boolean and is supported only by codex-live")

@@ -31,6 +31,10 @@ import subprocess
 import sys
 import time
 
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import importlib.util
@@ -147,7 +151,7 @@ def main() -> int:
             os.environ[var] = "postgresql://nobody@127.0.0.1:1/nothing"
 
         os.environ["CARR_RUN_SPOOL_DB"] = os.path.join(
-            tempfile.mkdtemp(prefix="carr-probe-selftest-spool-"), "spool.sqlite3")
+            temporary_directory(prefix="carr-probe-selftest-spool-"), "spool.sqlite3")
         rc = pk.main()
         check("every server down with the ledger unreachable but the spool "
               "writable returns 0 — the DOWN rows are queued durably, not lost",
