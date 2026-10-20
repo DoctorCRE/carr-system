@@ -212,6 +212,10 @@ class WorkQueue:
             "SELECT 1 FROM stage_runs WHERE card_id=? AND stage='merging' "
             'AND started_at IS NOT NULL AND finished_at IS NULL', (card,)).fetchone() is not None
 
+    def _merge_inflight(self, card, data):
+        # Older active runs did not record pins, so retain ownership conservatively.
+        return data.get('merge_inflight', data['prs'] if self._merge_active(card) else [])
+
     def _stage(self, card, stage, ready):
         if self._item(card)['stage'] != 'merging' or not self._merge_active(card):
             self._end_stage(card)
@@ -297,12 +301,41 @@ class WorkQueue:
                 raise ValueError('merge head differs from pinned work card')
             if row['stage'] != 'merging':
                 raise ValueError('merge executor can start only a merging-stage card')
+            data = json.loads(row['data'])
+            if 'merge_inflight' in data or not self._merge_active(card):
+                inflight = self._merge_inflight(card, data)
+                owned = inflight + [p for p in ([pin] if pin is not None else data['prs']) if p not in inflight]
+                if owned != data.get('merge_inflight'):
+                    data['merge_inflight'] = owned
+                    self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+                    self._event(card, inflight, owned, actor, reason, 'merge_pin_started')
             run = self.db.execute('SELECT * FROM stage_runs WHERE card_id=? ORDER BY id DESC LIMIT 1', (card,)).fetchone()
             if run['started_at'] is None:
                 at = timestamp()
                 self.db.execute('UPDATE stage_runs SET started_at=?,started=? WHERE id=?', (at, time.time(), run['id']))
                 self._event(card, {**self._state(row), 'started_at': None},
                             {**self._state(row), 'started_at': at}, actor, reason, 'merge_started')
+        return self.get(card)
+
+    def advance_merge_pin(self, card, *, repo, pr, head, prepared, main, actor, reason, expected_order):
+        if any(not re.fullmatch(r'[0-9a-f]{40}', sha or '') for sha in (head, prepared, main)) or head == prepared:
+            raise ValueError('regeneration requires distinct pinned and prepared heads and a main SHA')
+        with self.transaction():
+            if self._merge_entries() != expected_order:
+                raise QueueChanged('merge order changed before pin advancement')
+            row = self._item(card)
+            data = json.loads(row['data'])
+            pin = {'repo': repo, 'number': pr, 'head': head}
+            if 'merge_inflight' not in data and self._merge_active(card):
+                raise QueueChanged('legacy_ownership')
+            if row['claim'] or row['stage'] != 'merging' or pin in self._merge_inflight(card, data):
+                raise QueueChanged('pin advancement requires a merging-stage pin without an in-flight merge')
+            if pin not in data['prs'] or pin in data.get('merge_receipts', []) or pin in data.get('merge_stopped', []):
+                raise QueueChanged('regeneration no longer matches an unfinished pinned PR')
+            replacement = {**pin, 'head': prepared}
+            data['prs'][data['prs'].index(pin)] = replacement
+            self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
+            self._event(card, pin, {**replacement, 'main': main}, actor, reason, 'pin_regenerated')
         return self.get(card)
 
     def finish_merge(self, card, *, repo, pr, head, merged, actor, reason):
@@ -315,6 +348,8 @@ class WorkQueue:
             pin = {'repo': repo, 'number': pr, 'head': head}
             if pin not in data['prs']:
                 raise ValueError('merge receipt does not match a pinned PR')
+            if 'merge_inflight' in data:
+                data['merge_inflight'] = [p for p in data['merge_inflight'] if p != pin]
             receipts = data.setdefault('merge_receipts', [])
             if merged and pin not in receipts:
                 receipts.append(pin)
@@ -349,6 +384,7 @@ class WorkQueue:
                 self._validate_merge(data)
                 data.pop('merge_receipts', None)
                 data.pop('merge_stopped', None)
+                data.pop('merge_inflight', None)
                 self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
             self._stage(card, stage, False)
             self._event(card, self._state(old), self._state(self._item(card)), actor, reason, 'stage')
