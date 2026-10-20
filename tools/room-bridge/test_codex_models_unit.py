@@ -44,6 +44,8 @@ class FamilyDispatchTests(unittest.TestCase):
     def send(self, **kwargs):
         seen = []
         def run(argv, **options):
+            if argv[:3] == ['git', 'rev-parse', 'HEAD']:
+                return subprocess.CompletedProcess(argv, 0, 'a' * 40 + '\n', '')
             seen.append(argv)
             Path(argv[argv.index('-o') + 1]).write_text('done')
             return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')
@@ -89,6 +91,8 @@ class FamilyDispatchTests(unittest.TestCase):
                         self.reg.remember_thread(desk, 'subscription-thread')
                     seen = []
                     def run(argv, **options):
+                        if argv[:3] == ['git', 'rev-parse', 'HEAD']:
+                            return subprocess.CompletedProcess(argv, 0, 'a' * 40 + '\n', '')
                         seen.append(argv)
                         Path(argv[argv.index('-o') + 1]).write_text('done')
                         return subprocess.CompletedProcess(argv, 0, '{"type":"turn.completed"}\n', '')

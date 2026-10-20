@@ -33,6 +33,11 @@ def output(end=None, text="Safe Methods", before=None):
 
 
 class GrokTests(unittest.TestCase):
+    def setUp(self):
+        catalog = mock.patch.object(grok_wire, 'resolve_model', return_value='grok-4.7')
+        catalog.start()
+        self.addCleanup(catalog.stop)
+
     def test_default_desk_refuses_unsafe_urls_without_provider_invocation(self):
         for url in ("https://fixture-user:fixture-secret@example.com/post",
                     "https://example.com/post?access_token=fixture-secret",
@@ -329,6 +334,7 @@ class GrokTests(unittest.TestCase):
             run_task = grok_wire.run_task
             with mock.patch.object(grok_wire, "run_task", side_effect=
                     lambda entry, task: run_task(entry, task, run=provider)), \
+                    mock.patch.object(dispatch, "_source_revision", return_value="a" * 40), \
                     mock.patch.object(subprocess, "Popen", side_effect=AssertionError("live process denied")), \
                     mock.patch.object(socket.socket, "connect", side_effect=AssertionError("live network denied")), \
                     mock.patch.dict(os.environ, {"CARR_ENGINEERING_DISPATCH_ENABLED": "false",
@@ -475,7 +481,7 @@ class GrokTests(unittest.TestCase):
         argv, options = calls[0]
         self.assertEqual(argv[argv.index("--model")+1], "grok-4.7")
         self.assertIn("--always-approve", argv)
-        self.assertEqual(argv[argv.index("--sandbox")+1], "read-only")
+        self.assertEqual(argv[argv.index("--sandbox")+1], "workspace")
         self.assertEqual(argv[argv.index("--output-format")+1], "streaming-json")
         self.assertEqual(options["stdin"], subprocess.DEVNULL)
         self.assertEqual(options["timeout"], 180)
@@ -513,12 +519,12 @@ class GrokTests(unittest.TestCase):
             self.assertEqual(row["msg_id"], receipt["dispatch_msg_id"])
             heartbeat = json.loads(bridge.heartbeat_body(reg.entries(), 42, "now"))["heartbeat"]
             grok = next(e for e in heartbeat["desks"] if e["name"] == "grok-desk")
-            self.assertEqual((grok["model"],grok["effort"]), ("grok-4.7","high"))
+            self.assertEqual((grok["model"],grok["effort"]), ("grok","high"))
 
-    def test_registry_refuses_widened_or_stale_grok_even_if_hand_edited(self):
+    def test_registry_refuses_invalid_grok_model_or_effort_even_if_hand_edited(self):
         with tempfile.TemporaryDirectory() as td:
             reg = desks.Registry(Path(td)/"desks.json")
-            for changes in ({"model":"grok-4.6"}, {"effort":"low"}, {"sandbox":"workspace"}):
+            for changes in ({"model":"other-provider"}, {"effort":"invalid"}):
                 e = {**ENTRY, **changes}
                 with self.assertRaises(ValueError):
                     grok_wire.run_task(e, "test", run=lambda *a,**k: self.fail("must not execute"))

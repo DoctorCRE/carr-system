@@ -222,3 +222,9 @@ export async function launchChrome(chrome, {
   }
   throw new Error(`Chrome failed to start after one retry:\n${attempts.map((item) => item.diagnostic).join("\n")}`);
 }
+
+export async function launchTestChrome(t, chrome, options) {
+  const browser = await launchChrome(chrome, options);
+  t.after(() => browser.close());
+  return browser;
+}
