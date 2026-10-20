@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import stat
 import sys
@@ -57,7 +58,7 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
                 organizer_email=organizer[1], body='Agenda', attendees=list(attendees))
 
 
-def write_db(path: Path, mails=(), events=(), found=1000, verified=999):
+def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
     for m in mails:
@@ -74,7 +75,9 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999):
         for name, email in e['attendees']:
             con.execute('INSERT INTO event_attendees VALUES (?,?,?)', (cur.lastrowid, name, email))
     con.executemany('INSERT INTO meta VALUES (?,?)',
-                    [('blocks_found', found), ('blocks_verified', verified), ('messages', len(mails))])
+                    [('blocks_found', found), ('blocks_verified', verified), ('messages', len(mails)),
+                     ('event_identities', len(events) if identities is None else identities),
+                     ('events_decoded', len(events) if decoded is None else decoded)])
     con.commit()
     con.close()
 
@@ -94,6 +97,7 @@ class Fake:
         self.model_reply = {'next_step': None, 'due_on': None}
         self.contacts_rows = [CLIENT, LEAD]
         self.now = NOW
+        self.on_decode = None
 
     def carr(self, verb, args):
         self.calls.append((verb, args))
@@ -114,12 +118,18 @@ class Fake:
             raise self.model_reply
         return self.model_reply
 
-    def decode(self, store_copy, db_path):
+    def decode(self, store_copy, files_copy, db_path):
         self.decodes += 1
         self.test.assertTrue(store_copy.exists(), 'decoder reads a copy')
         self.test.assertNotEqual(store_copy, self.test.store, 'never the live store')
         self.test.assertEqual(stat.S_IMODE(store_copy.stat().st_mode), 0o600, 'copy is 0600')
         self.test.assertEqual(stat.S_IMODE(store_copy.parent.stat().st_mode), 0o700, 'copy dir is 0700')
+        self.test.assertEqual(files_copy.parent, store_copy.parent, 'sidecars are read from the private copy')
+        sidecar = files_copy / 'S0' / '845' / 'EFMData' / '7.dat'
+        self.test.assertEqual(sidecar.read_bytes(), b'gzip-body', 'the sidecar is snapshotted')
+        self.test.assertEqual(stat.S_IMODE(sidecar.stat().st_mode), 0o600, 'sidecar copy is 0600')
+        if self.on_decode:
+            self.on_decode(store_copy.parent)
         db_path.write_bytes(self.fixture.read_bytes())
 
     def ports(self):
@@ -133,11 +143,15 @@ class Fake:
 class IntakeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
         self.home = self.tmp / 'home'
         self.store = self.home / intake.STORE
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'Nostromo-fixture')
+        live = self.store.parent / 'Files' / 'S0' / '845' / 'EFMData'
+        live.mkdir(parents=True)
+        (live / '7.dat').write_bytes(b'gzip-body')
         self.fake = Fake(self)
         self.fake.fixture = self.tmp / 'fixture.db'
 
@@ -376,12 +390,98 @@ class IntakeTest(unittest.TestCase):
         keys = [a['idempotency_key'] for _, a in self.fake.writes('set-next-action')]
         self.assertEqual(keys[-1], str(uuid.uuid5(uuid.NAMESPACE_URL, f'set-next-action|C-901|next|{ident(second)}')))
 
-    def test_a_model_failure_still_logs_the_activity(self):
+    def test_a_model_failure_logs_the_activity_fails_the_run_and_retries_the_step(self):
+        mails = [mail('pat@example.com', -timedelta(hours=1))]
         self.fake.model_reply = RuntimeError('model down')
-        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
-        self.assertEqual(result.state, 'succeeded')
+        result = self.run_intake(mails)
+        self.assertEqual((result.state, result.reason), ('failed', 'model_failed'))
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
         self.assertEqual(result.counts['model_failed'], 1)
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.now = NOW + timedelta(minutes=30)
+        again = self.run_intake(mails, touch=False)
+        self.assertEqual(again.state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1, 'the activity is not logged twice')
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1, 'the step is retried')
+
+    def test_a_failed_ball_write_for_an_email_is_retried(self):
+        mails = [mail('pat@example.com', -timedelta(hours=1))]
+        self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
+        self.fake.fail_verbs = {'set-next-action'}
+        first = self.run_intake(mails)
+        self.assertEqual((first.state, first.reason), ('failed', 'writes_failed'))
+        self.fake.fail_verbs = set()
+        self.fake.now = NOW + timedelta(minutes=30)
+        second = self.run_intake(mails, touch=False)
+        self.assertEqual(second.state, 'succeeded')
+        keys = [a['idempotency_key'] for v, a in self.fake.calls if v == 'set-next-action']
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_a_failed_ball_write_for_an_upcoming_meeting_is_retried(self):
+        events = [event('G7', timedelta(days=2), attendees=[('Pat Example', 'pat@example.com')])]
+        self.fake.fail_verbs = {'set-next-action'}
+        first = self.run_intake(events=events)
+        self.assertEqual(first.state, 'failed')
+        self.fake.fail_verbs = set()
+        self.fake.now = NOW + timedelta(minutes=30)
+        second = self.run_intake(events=events, touch=False)
+        self.assertEqual(second.state, 'succeeded')
+        self.assertEqual(len([1 for v, _ in self.fake.calls if v == 'set-next-action']), 2)
+
+    def test_outside_seven_to_seven_nothing_is_decoded_or_called(self):
+        local = intake.LOCAL
+        for when in (datetime(2026, 10, 20, 0, 0, tzinfo=local), datetime(2026, 10, 20, 6, 59, tzinfo=local),
+                     datetime(2026, 10, 20, 19, 31, tzinfo=local)):
+            self.fake.now = when
+            result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+            self.assertEqual((result.state, result.reason), ('skipped', 'outside_window'), when)
+            self.assertEqual(intake.EXIT[result.state], 78)
+        self.assertEqual((self.fake.decodes, self.fake.calls), (0, []))
+        self.assertFalse((self.out() / intake.STATE).exists())
+        self.fake.now = datetime(2026, 10, 20, 7, 0, tzinfo=local)
+        self.assertEqual(self.run_intake([mail('pat@example.com', -timedelta(hours=1))]).state, 'succeeded')
+        self.fake.now = datetime(2026, 10, 20, 19, 0, 30, tzinfo=local)
+        self.assertNotEqual(self.run_intake([mail('lee@example.org', -timedelta(hours=1))]).reason, 'outside_window')
+
+    def test_calendar_objects_with_no_decoded_event_fail_without_advancing(self):
+        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))], identities=5, decoded=0)
+        self.assertEqual((result.state, result.reason), ('failed', 'calendar_decode_empty'))
+        self.assertEqual(self.fake.calls, [])
+        self.assertFalse((self.out() / intake.STATE).exists(), 'the watermark does not move')
+
+    def test_an_upcoming_meeting_is_logged_once_over_even_when_the_store_is_unchanged(self):
+        events = [event('G8', timedelta(hours=1), attendees=[('Pat Example', 'pat@example.com')])]
+        self.run_intake(events=events)
+        self.fake.now = NOW + timedelta(minutes=30)
+        quiet = self.run_intake(events=events, touch=False)
+        self.assertEqual(quiet.reason, 'store_unchanged', 'nothing is due yet')
+        self.fake.now = NOW + timedelta(hours=3)
+        self.run_intake(events=events, touch=False)
+        self.assertEqual([a['kind'] for _, a in self.fake.writes('log-activity')], ['meeting'])
+
+    def test_a_failed_cleanup_fails_the_run_loudly(self):
+        def jam(work):
+            locked = work / 'locked'
+            locked.mkdir()
+            (locked / 'f').write_bytes(b'x')
+            os.chmod(locked, 0o500)
+            self.addCleanup(os.chmod, locked, 0o700)
+        self.fake.on_decode = jam
+        result = self.run_intake([mail('pat@example.com', -timedelta(hours=1))])
+        self.assertEqual((result.state, result.reason), ('failed', 'cleanup_failed'))
+        self.assertEqual(self.fake.calls, [])
+
+    def test_private_files_are_narrowed_to_0600_even_when_they_already_existed(self):
+        self.out().mkdir(parents=True)
+        for name in ('lock', intake.STATE, intake.REFRESH_LIST):
+            path = self.out() / name
+            path.write_text('[]' if name == intake.REFRESH_LIST else '{}')
+            os.chmod(path, 0o644)
+        self.run_intake([mail('pat@example.com', -timedelta(hours=1), kind='preview', body='Can we meet')])
+        for path in self.out().iterdir():
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
 
     def test_a_malformed_model_reply_sets_no_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': 'next tuesday'}
@@ -435,7 +535,7 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.state, result.reason), ('failed', 'store_missing'))
 
     def test_a_decoder_failure_fails_and_cleans_up(self):
-        def broken(store_copy, db_path):
+        def broken(store_copy, files_copy, db_path):
             raise intake.DecodeError('exit 101')
         ports = self.fake.ports()
         ports.decode = broken
@@ -497,6 +597,14 @@ class ScheduleTest(unittest.TestCase):
         self.assertEqual(env['runs_on'], 'secondary')
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 12 * 3600 + 1800,
                                 'the overnight stand-down plus the spool flush is not stale')
+        self.assertEqual(plist['Umask'], 0o077)
+
+    def test_the_installer_never_loads_the_job_and_prepares_a_private_log(self):
+        text = (ROOT / 'bin/install-outlook-intake.sh').read_text()
+        self.assertNotRegex(text, r'(?m)^\s*/bin/launchctl\b', 'the operator loads it')
+        self.assertNotRegex(text, r'(?m)^\s*/usr/bin/install\b', 'nothing lands in LaunchAgents to load at login')
+        self.assertIn('launchctl bootstrap', text, 'the command is printed for the operator')
+        self.assertRegex(text, r'chmod 600 "\$LOG"')
 
 
 class ModelCallTest(unittest.TestCase):

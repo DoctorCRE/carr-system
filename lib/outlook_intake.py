@@ -1,9 +1,10 @@
 """Outlook intake: Joe's mail and calendar into the record layer, by code.
 
-Every 30 minutes from 07:00 to 19:00 (com.carr.outlook-intake) this reads a
-private copy of the new Outlook's HxStore.hxd, never the live file, decodes it
-with the pinned hxprobe fork (vendor-patches/hxprobe-calendar-and-bodies.patch),
-and writes what it finds through the named record-layer verbs:
+Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
+a private copy of the new Outlook's HxStore.hxd and its EFMData body sidecars,
+never the live files, decodes it with the pinned hxprobe fork
+(vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
+through the named record-layer verbs:
 
 - an email to or from a known address becomes log-activity email_in/email_out
   with the full deduplicated plain-text body as its detail;
@@ -12,10 +13,13 @@ and writes what it finds through the named record-layer verbs:
 - one isolated haiku call per new matched email proposes a next step, which
   becomes a ball when the record has none or only an older one.
 
-Matching is deterministic: one record with that exact address, else one exact,
-unmerged record name; anything else is reported as unmatched. Records are never
-created, merged or renamed. Every write carries
-uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>") so a retry replays.
+A run outside 07:00-19:30 local does nothing. Matching is deterministic: one
+record with that exact address, else one exact, unmerged record name; anything
+else is reported as unmatched. Records are never created, merged or renamed.
+Every write carries uuid5(NAMESPACE_URL, "<verb>|<ref>|<source id>"), so an
+action stays pending in the state file until the verb acknowledges it and the
+retry replays the same key. A run with any write, model or cleanup failure
+reports failed and does not advance its watermark.
 
 An email whose body is still only Outlook's preview is logged with the preview,
 flagged preview_only, and listed in out/outlook-intake/needs-refresh.json for the
@@ -31,15 +35,15 @@ listed email decodes with its full body, the next run logs that text as a
 log-activity note (activities cannot be updated in place: the verb refuses a
 reused key with new arguments) and drops the entry.
 
-The store copy and decoded database live in a 0700 temporary folder under
-out/outlook-intake/ and are deleted before the run ends. The report and state
-are 0600 there too; nothing with a name, address or body reaches the status
-line, the launchd log or the run row.
+The private copy and decoded database live in a 0700 work folder under
+out/outlook-intake/ and are deleted before the run ends; a folder that cannot be
+deleted fails the run. The report and state are 0600 there too; nothing with a
+name, address or body reaches the status line, the launchd log or the run row.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import fcntl
 import hashlib
 import json
@@ -59,7 +63,9 @@ HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hx
 OUT = Path('out/outlook-intake')
 REFRESH_LIST = 'needs-refresh.json'
 STATE = 'state.json'
+WORK_PREFIX = 'work-'
 LOCAL = zoneinfo.ZoneInfo('America/Chicago')
+WINDOW = (time(7, 0), time(19, 30))
 INTERNAL_DOMAIN = 'carr.us'
 WRITE_VERBS = frozenset({'log-activity', 'set-next-action'})
 RECORD_REF = re.compile(r'^[CLV]-')
@@ -71,6 +77,7 @@ UPCOMING = timedelta(days=7)
 REFRESH_DAYS = timedelta(days=7)
 COPY_WINDOW = 86_400
 VERIFIED_MIN = 0.95
+MODEL_ATTEMPTS = 3
 MODEL_BODY_CHARS = 12_000
 BALL_OWNERS = re.compile(r'^ball → (joe|joe-local):')
 
@@ -81,6 +88,10 @@ class CarrError(RuntimeError):
 
 class DecodeError(RuntimeError):
     """hxprobe could not decode the store copy."""
+
+
+class CleanupError(RuntimeError):
+    """A private work folder could not be deleted."""
 
 
 @dataclass(frozen=True)
@@ -95,7 +106,7 @@ class Ports:
     carr: Callable[[str, dict], dict]
     contacts: Callable[[], list]
     next_step: Callable[[dict, date], dict]
-    decode: Callable[[Path, Path], None]
+    decode: Callable[[Path, Path, Path], None]
     now: Callable[[], datetime]
 
 
@@ -125,11 +136,17 @@ def mail_identity(copy_key: str | None, sender: str, subject: str, sent_unix: in
     return ck, f'{ck}:{sent_unix}'
 
 
+def _private_fd(path: Path, flags: int) -> int:
+    """Open a private file and narrow it to 0600 even when it already existed wider."""
+    fd = os.open(path, flags | os.O_CREAT, 0o600)
+    os.fchmod(fd, 0o600)
+    return fd
+
+
 def _private_write(path: Path, text: str) -> None:
     temp = path.with_name(path.name + '.tmp')
-    with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as handle:
+    with os.fdopen(_private_fd(temp, os.O_WRONLY | os.O_TRUNC), 'w') as handle:
         handle.write(text)
-    os.chmod(temp, 0o600)
     os.replace(temp, path)
 
 
@@ -157,6 +174,10 @@ def _clean_name(name: str | None, subject: str | None) -> str | None:
     return name
 
 
+def in_window(now: datetime) -> bool:
+    return WINDOW[0] <= now.astimezone(LOCAL).time() <= WINDOW[1]
+
+
 # ---- the decoded store -------------------------------------------------------
 
 def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
@@ -178,17 +199,40 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
         con.close()
 
 
-def _decode(store: Path, out: Path, decode: Callable[[Path, Path], None]):
-    work = Path(tempfile.mkdtemp(dir=out))
+def _copy_private(src: Path, dst: Path) -> None:
+    with open(src, 'rb') as reader, os.fdopen(_private_fd(dst, os.O_WRONLY | os.O_EXCL), 'wb') as writer:
+        shutil.copyfileobj(reader, writer)
+
+
+def _snapshot_sidecars(files: Path, into: Path) -> None:
+    """Copy every S0/*/EFMData/*.dat body sidecar so the decoder reads only private copies."""
+    for efm in sorted(files.glob('S0/*/EFMData')):
+        target = into / efm.relative_to(files)
+        target.mkdir(parents=True, mode=0o700)
+        for dat in efm.glob('*.dat'):
+            if dat.is_file():
+                _copy_private(dat, target / dat.name)
+
+
+def _remove(work: Path) -> None:
+    shutil.rmtree(work, onerror=lambda *_: None)
+    if work.exists():
+        raise CleanupError('private work folder left behind')
+
+
+def _decode(store: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
+    work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
-        with open(store, 'rb') as src, os.fdopen(os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as dst:
-            shutil.copyfileobj(src, dst)
+        _copy_private(store, copy)
+        files = work / 'Files'
+        files.mkdir(mode=0o700)
+        _snapshot_sidecars(store.parent / 'Files', files)
         db = work / 'store.db'
-        decode(copy, db)
+        decode(copy, files, db)
         return _load(db)
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        _remove(work)
 
 
 def _best_copies(mails: list[dict]) -> list[dict]:
@@ -293,7 +337,7 @@ class Run:
         self.today = now.astimezone(LOCAL).date()
         self.counts = {k: 0 for k in ('emails', 'events_past', 'events_upcoming', 'logged', 'preview_only',
                                       'full_text_notes', 'balls_set', 'balls_kept', 'unmatched',
-                                      'model_failed', 'writes_failed')}
+                                      'model_failed', 'steps_abandoned', 'writes_failed')}
         self.written: list[tuple[str, str, str, str]] = []
         self.unmatched: set[tuple[str, str]] = set()
         self.balls: dict[str, int] = {}
@@ -322,31 +366,35 @@ class Run:
         return None
 
     def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
-             only_if_none: bool = False) -> None:
+             only_if_none: bool = False) -> bool:
+        """Set the ball unless a newer one stands; True once nothing is left to do."""
         existing = self.open_ball(ref)
         if existing is not None and (only_if_none or existing >= item_at):
             self.counts['balls_kept'] += 1
             self.written.append((who, ref, 'set-next-action', 'kept newer ball'))
-            return
+            return True
         note = 'no prior ball' if existing is None else 'replaced ball'
         args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
                 'description': description, 'due_on': due_on}
-        if self.write('set-next-action', args, who, note):
-            self.counts['balls_set'] += 1
-            self.balls[ref] = item_at
+        if not self.write('set-next-action', args, who, note):
+            return False
+        self.counts['balls_set'] += 1
+        self.balls[ref] = item_at
+        return True
 
     # emails
 
     def emails(self, mails: list[dict], matcher: Matcher, since: int) -> None:
         done = self.state.setdefault('mail_done', {})
         pending = self.state.setdefault('pending_full', {})
+        steps = self.state.setdefault('steps', {})
         for m in mails:
             if m['sent_unix'] < since or m['sent_unix'] > self.now.timestamp() + 300:
                 continue
             if any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], [])):
                 continue
-            m['outbound'] = _internal(m['sender'])
-            parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a)] if m['outbound']
+            outbound = _internal(m['sender'])
+            parties = ([(a, None) for a in _addresses(m['recipients']) if not _internal(a)] if outbound
                        else [(m['sender'].lower(), _clean_name(m['sender_name'], m['subject']))])
             if not parties:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
@@ -364,8 +412,8 @@ class Run:
                 done.setdefault(m['ck'], []).append(m['sent_unix'])
                 continue
             who = _clean_name(m['sender_name'], m['subject']) or m['sender'].lower()
-            kind = 'email_out' if m['outbound'] else 'email_in'
-            label = f'Email to {", ".join(a for a, _ in parties)}' if m['outbound'] else f'Email from {who}'
+            kind = 'email_out' if outbound else 'email_in'
+            label = f'Email to {", ".join(a for a, _ in parties)}' if outbound else f'Email from {who}'
             ok = all([self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
@@ -379,17 +427,35 @@ class Run:
                 pending[m['ident']] = {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                        'sender_email': m['sender'].lower(),
                                        'subject_hash': _hash(m['subject'] or '')}
-            self.propose(m, refs[0], who)
+            steps[m['ident']] = {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0], 'who': who,
+                                 'outbound': outbound, 'attempts': 0}
 
-    def propose(self, m: dict, ref: str, who: str) -> None:
-        try:
-            reply = parse_reply({'is_error': False, 'structured_output': self.ports.next_step(m, self.today)})
-        except Exception:
-            self.counts['model_failed'] += 1
-            return
-        if reply['next_step']:
-            self.ball(ref, who, reply['next_step'], reply['due_on'] or self.today.isoformat(),
-                      m['sent_unix'], f'next|{m["ident"]}')
+    def next_steps(self, mails: list[dict]) -> None:
+        """Ask for each pending email's next step and set its ball; a step stays pending until both succeed."""
+        steps = self.state.setdefault('steps', {})
+        by_ck: dict[str, list[dict]] = {}
+        for m in mails:
+            by_ck.setdefault(m['ck'], []).append(m)
+        for ident, s in sorted(steps.items(), key=lambda kv: kv[1]['sent']):
+            found = [m for m in by_ck.get(s['ck'], []) if abs(m['first_sent'] - s['sent']) <= COPY_WINDOW]
+            if not found:
+                del steps[ident]
+                self.counts['steps_abandoned'] += 1
+                continue
+            m = {**found[0], 'outbound': s['outbound']}
+            s['attempts'] += 1
+            try:
+                reply = parse_reply({'is_error': False, 'structured_output': self.ports.next_step(m, self.today)})
+            except Exception:
+                self.counts['model_failed'] += 1
+                if s['attempts'] >= MODEL_ATTEMPTS:
+                    del steps[ident]
+                    self.counts['steps_abandoned'] += 1
+                continue
+            if not reply['next_step'] or self.ball(
+                    s['ref'], s['who'], reply['next_step'], reply['due_on'] or self.today.isoformat(),
+                    s['sent'], f'next|{ident}'):
+                del steps[ident]
 
     def full_text(self, mails: list[dict]) -> None:
         """Log the full text of emails first logged from their preview, once it decodes."""
@@ -418,12 +484,17 @@ class Run:
     def events(self, events: list[dict], matcher: Matcher, since: int) -> None:
         logged = self.state.setdefault('events_logged', {})
         balled = self.state.setdefault('events_balled', {})
+        upcoming = self.state.setdefault('upcoming', {})
         now = int(self.now.timestamp())
+        present = set()
         for e in sorted(events, key=lambda e: e['start_unix']):
             source = f'{e["goid"]}|{e["start_unix"]}'
+            present.add(source)
             past = since <= e['end_unix'] <= now
-            upcoming = now < e['start_unix'] <= now + UPCOMING.total_seconds()
-            if not (past and source not in logged) and not (upcoming and source not in balled):
+            soon = now < e['start_unix'] <= now + UPCOMING.total_seconds()
+            if soon:
+                upcoming[source] = e['end_unix']
+            if not (past and source not in logged) and not (soon and source not in balled):
                 continue
             people = [(email, name) for name, email in e['attendees'] if email and not _internal(email)]
             org = (e['organizer_email'] or '').lower()
@@ -437,24 +508,24 @@ class Run:
                 elif ref not in [r for r, _ in refs]:
                     refs.append((ref, name or email))
             subject = e['subject'] or 'Meeting'
-            ok = True
             if past:
                 self.counts['events_past'] += 1
                 kind = 'tour' if re.search(r'\btour', subject, re.I) else 'call' if re.search(r'\bcall\b', subject, re.I) else 'meeting'
-                for ref, name in refs:
-                    ok &= self.write('log-activity', {
+                if all([self.write('log-activity', {
                         'idempotency_key': key('log-activity', ref, source), 'ref': ref, 'kind': kind,
                         'summary': f'{kind.capitalize()}: {subject}', 'detail': e['body'] or '',
-                        'occurred_at': _iso(e['start_unix'])}, name)
-                if ok:
+                        'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]):
                     logged[source] = e['end_unix']
+                    upcoming.pop(source, None)
             else:
                 self.counts['events_upcoming'] += 1
                 start = datetime.fromtimestamp(e['start_unix'], LOCAL)
-                for ref, name in refs:
-                    self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
-                              start.date().isoformat(), now, f'event|{source}', only_if_none=True)
-                balled[source] = e['start_unix']
+                if all([self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
+                                  start.date().isoformat(), now, f'event|{source}', only_if_none=True)
+                        for ref, name in refs]):
+                    balled[source] = e['start_unix']
+        for source in [s for s, end in upcoming.items() if s not in present and int(s.rsplit('|', 1)[1]) > now]:
+            del upcoming[source]
 
     def report(self, out: Path, refresh_count: int) -> None:
         lines = [f'# Outlook intake {self.now.astimezone(LOCAL):%Y-%m-%d %H:%M %Z}', '', '## Counts', '']
@@ -492,20 +563,37 @@ def _prune(state: dict, now: datetime) -> None:
         state[name] = {k: t for k, t in state.get(name, {}).items() if t >= horizon}
 
 
+def _calendar_due(state: dict, now: datetime) -> bool:
+    """A meeting seen as upcoming has ended and is not logged yet: needs a run even on an unchanged store."""
+    logged = state.get('events_logged', {})
+    return any(end <= now.timestamp() and source not in logged
+               for source, end in state.get('upcoming', {}).items())
+
+
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
+    if not in_window(ports.now()):
+        return Outcome('skipped', 'outside_window')
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
-    lock = open(out / 'lock', 'a')
-    os.chmod(out / 'lock', 0o600)
+    fd = _private_fd(out / 'lock', os.O_RDWR)
     try:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return Outcome('skipped', 'previous_run_active')
-        return _run(out, home, ports)
+        try:
+            for stale in out.glob(WORK_PREFIX + '*'):
+                _remove(stale)
+            return _run(out, home, ports)
+        except CleanupError:
+            return Outcome('failed', 'cleanup_failed')
     finally:
-        lock.close()
+        os.close(fd)
+
+
+def _save(out: Path, state: dict) -> None:
+    _private_write(out / STATE, json.dumps(state))
 
 
 def _run(out: Path, home: Path, ports: Ports) -> Outcome:
@@ -518,9 +606,9 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         state = {}
     info = store.stat()
     signature = [info.st_mtime_ns, info.st_size]
-    if state.get('store') == signature:
-        return Outcome('succeeded', 'store_unchanged')
     now = ports.now()
+    if state.get('store') == signature and not _calendar_due(state, now):
+        return Outcome('succeeded', 'store_unchanged')
     try:
         meta, mails, events = _decode(store, out, ports.decode)
     except (DecodeError, sqlite3.Error, OSError):
@@ -528,47 +616,34 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     found = meta.get('blocks_found') or 0
     if not found or (meta.get('blocks_verified') or 0) / found < VERIFIED_MIN:
         return Outcome('failed', 'store_verification_low')
+    if (meta.get('event_identities') or 0) > 0 and not meta.get('events_decoded'):
+        return Outcome('failed', 'calendar_decode_empty')
 
     high = state.get('high_water')
     since = int((datetime.fromtimestamp(high, timezone.utc) - LOOKBACK if high else now - BACKFILL).timestamp())
     mails = _best_copies(mails)
     work = Run(ports, state, now)
-    done = state.get('mail_done', {})
-    nowu = now.timestamp()
-    new_mail = any(since <= m['sent_unix'] <= nowu + 300
-                   and not any(abs(t - m['sent_unix']) <= COPY_WINDOW for t in done.get(m['ck'], []))
-                   for m in mails)
-    new_event = any((since <= e['end_unix'] <= nowu and f'{e["goid"]}|{e["start_unix"]}' not in state.get('events_logged', {}))
-                    or (nowu < e['start_unix'] <= nowu + UPCOMING.total_seconds()
-                        and f'{e["goid"]}|{e["start_unix"]}' not in state.get('events_balled', {}))
-                    for e in events)
-    pending = state.get('pending_full', {})
-    full_cks = {m['ck'] for m in mails if m['full']}
-    follow_up = any(p['ck'] in full_cks for p in pending.values())
-    if not (new_mail or new_event or follow_up):
-        state.update(store=signature, high_water=int(nowu))
-        _prune(state, now)
-        refresh = _refresh_list(out, state.get('pending_full', {}))
-        _private_write(out / STATE, json.dumps(state))
-        return Outcome('succeeded', 'nothing_new', {'needs_refresh_listed': refresh})
-
     try:
         matcher = Matcher(ports.contacts(), ports.carr)
         work.full_text(mails)
         work.emails(mails, matcher, since)
+        work.next_steps(mails)
         work.events(events, matcher, since)
     except CarrError:
+        _save(out, state)
         return Outcome('failed', 'carr_unreachable', work.counts)
     refresh = _refresh_list(out, state.get('pending_full', {}))
-    work.report(out, refresh)
+    if any(work.counts.values()) or work.written:
+        work.report(out, refresh)
     counts = {**work.counts, 'needs_refresh_listed': refresh}
-    if work.counts['writes_failed']:
-        _private_write(out / STATE, json.dumps(state))
-        return Outcome('failed', 'writes_failed', counts)
-    state.update(store=signature, high_water=int(nowu))
+    failed = 'writes_failed' if work.counts['writes_failed'] else 'model_failed' if work.counts['model_failed'] else None
+    if failed:
+        _save(out, state)
+        return Outcome('failed', failed, counts)
+    state.update(store=signature, high_water=int(now.timestamp()))
     _prune(state, now)
-    _private_write(out / STATE, json.dumps(state))
-    return Outcome('succeeded', 'processed', counts)
+    _save(out, state)
+    return Outcome('succeeded', 'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
 
 
 # ---- production ports --------------------------------------------------------
@@ -613,9 +688,8 @@ def _contacts(repo: Path) -> Callable[[], list]:
     return read
 
 
-def _decoder(home: Path) -> Callable[[Path, Path], None]:
-    def decode(copy: Path, db: Path) -> None:
-        files = (home / STORE).parent / 'Files'
+def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
+    def decode(copy: Path, files: Path, db: Path) -> None:
         try:
             done = subprocess.run([str(home / HXPROBE), 'db', str(copy), str(db), str(files)],
                                   capture_output=True, timeout=900)

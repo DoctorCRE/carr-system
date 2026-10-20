@@ -1,12 +1,13 @@
 #!/bin/zsh
-# install-outlook-intake.sh — build the pinned hxprobe and install only com.carr.outlook-intake.
+# install-outlook-intake.sh — build the pinned hxprobe and prepare com.carr.outlook-intake.
 #
 # A narrow installer like install-outlook-triage.sh: ops/config-as-code.py install
 # would also rewrite every unrelated hook and LaunchAgent. The decoder is
 # ukd1/hxstore-reverse-engineering at a pinned commit plus
 # vendor-patches/hxprobe-calendar-and-bodies.patch, built offline from its
-# locked dependencies (see vendor-patches/README.md). The agent is loaded
-# without running: the first fire is the next half hour between 07:00 and 19:00.
+# locked dependencies (see vendor-patches/README.md). It never loads the job:
+# it renders the plist, creates the launchd log at 0600, and prints the two
+# commands the operator runs to load it.
 #
 # Usage: ./bin/install-outlook-intake.sh
 
@@ -16,6 +17,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LABEL="com.carr.outlook-intake"
 SOURCE="$REPO/ops/launchd/$LABEL.plist"
 DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
+RENDERED="$REPO/out/$LABEL.plist"
+LOG="$REPO/out/outlook-intake-launchd.log"
 COMMIT="191b54e42757687806202f8f696e9066f0514e11"
 VENDOR="$HOME/carr-local/hxstore-reverse-engineering"
 PATCH="$REPO/vendor-patches/hxprobe-calendar-and-bodies.patch"
@@ -49,15 +52,17 @@ if [ ! -x "$VENDOR/hxprobe/target/release/hxprobe" ] || [ "$(cat "$PIN" 2>/dev/n
   print -- "$WANT_PIN" > "$PIN"
 fi
 
+mkdir -p "$REPO/out"
 /usr/bin/sed -e "s|{{REPO}}|$REPO|g" -e "s|{{HOME}}|$HOME|g" "$SOURCE" > "$TMP"
 /usr/bin/plutil -lint "$TMP" >/dev/null
+cp "$TMP" "$RENDERED"
+chmod 644 "$RENDERED"
 
-mkdir -p "$HOME/Library/LaunchAgents" "$REPO/out"
-/usr/bin/install -m 644 "$TMP" "$DEST"
+touch "$LOG"
+chmod 600 "$LOG"
 
-/bin/launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
-/bin/launchctl bootstrap "gui/$(id -u)" "$DEST"
-/bin/launchctl print "gui/$(id -u)/$LABEL" >/dev/null
-
-print -- "install-outlook-intake: installed and loaded $LABEL (every 30 minutes, 07:00 to 19:00)"
+print -- "install-outlook-intake: hxprobe pinned and built; plist rendered to $RENDERED"
+print -- "install-outlook-intake: it is NOT loaded. To load it, run:"
+print -- "  install -m 644 '$RENDERED' '$DEST'"
+print -- "  launchctl bootstrap gui/$(id -u) '$DEST'"
 print -- "install-outlook-intake: private reports: $REPO/out/outlook-intake/"

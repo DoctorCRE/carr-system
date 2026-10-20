@@ -24,6 +24,7 @@
     <string>from lib.outlook_intake import main; raise SystemExit(main())</string>
   </array>
   <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>Umask</key><integer>63</integer>
 
   <key>StartCalendarInterval</key>
   <array>
