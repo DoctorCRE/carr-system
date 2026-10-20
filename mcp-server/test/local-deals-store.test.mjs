@@ -104,6 +104,16 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("update deal set phase='closed',outcome='lost' where id=$1", [id(4)]);
+      await c.query('set local role carr_reader');
+      const team = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      const account = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'national_account',account_client_id:id(6)});
+      assert.deepEqual(team.lost_deals, [], 'account history never leaks into team history');
+      assert.deepEqual(account.lost_deals.map(d => [d.id,d.client_ref,d.workspace_kind,d.account_client_id]), [[id(4),null,'national_account',id(6)]]);
+    }));
+
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
     const readInvoiceDeals = async () => ({
       'deal-board': await TOOLS['deal-board'].handler(c),
@@ -128,9 +138,12 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             invoiced_on: null, closed_on: outcome ? '2026-10-01' : null, lane: 'territory', outcome,
           }], name);
           const prior = structuredClone(result);
+          if (name === 'deal-room-board') { delete prior.closed_deals; delete prior.lost_deals; }
           if (name === 'get-deal-room') {
             assert.equal(prior.schema_version,'deal-timeline.v1');
             assert.equal(prior.lease,null);
+            assert.equal(prior.client_id,id(3));
+            delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
           }
@@ -153,7 +166,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         invoiced_on: '2026-10-02', closed_on: '2026-10-01', lane: 'national', outcome: 'won',
       });
       assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals, []);
-      assert.deepEqual((await TOOLS['deal-room-board'].handler(c, actor, {})).deals, []);
+      const archived = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.deepEqual(archived.deals, []);
+      assert.equal(archived.closed_deals.length, 1);
+      const detail=await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(detail.deal_id,id(4));
+      assert.equal(detail.client_id,id(3));
+      assert.deepEqual(Object.fromEntries(['id','name','type','closed_on','invoiced_on'].map(key => [key, archived.closed_deals[0][key]])), {
+        id:id(4), name:'Synthetic Assignment', type:'renewal', closed_on:'2026-10-01', invoiced_on:'2026-10-02',
+      });
     }));
 
     await t.test('all invoice reads preserve national lane and separate client benefit from commission', async () => transaction(async () => {
