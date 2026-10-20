@@ -269,6 +269,8 @@ def atomic_write(path: Path, text: str) -> None:
 
 
 def write_json(state: dict[str, Any]) -> None:
+    if state.get("work_requests"):
+        repo_lib("progress_hierarchy").project(state)
     atomic_write(state_path(state["project"]), json.dumps(state, indent=2, sort_keys=False) + "\n")
 
 
@@ -1715,7 +1717,7 @@ def assemble_all_repos(prior: dict[str, Any],
     raw_tasks = prior.get("tasks")
     prior_tasks: dict[str, Any] = raw_tasks if isinstance(raw_tasks, dict) else {}
     at = stamp()
-    tasks: dict[str, dict[str, Any]] = {}
+    tasks: dict[str, dict[str, Any]] = copy.deepcopy(prior_tasks) if prior.get("work_requests") else {}
     rows = []
     failed = []
     for repo, result in reads.items():
@@ -1733,7 +1735,8 @@ def assemble_all_repos(prior: dict[str, Any],
                 key = card_key(repo, pr["number"])
                 card = pr_card(repo, pr, merged)
                 previous = prior_tasks.get(key) or {}
-                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs"):
+                for field in ("delivery_target", "delivery_workflow", "consumer_proof", "consumer_proofs",
+                              "work_request", "slice_id", "job_id", "job_ref", "card_id", "card_title", "card_description", "proposed_copy"):
                     if field in previous:
                         card[field] = previous[field]
                 if merged and pr.get("_legacy_terminal") and previous:
@@ -1756,6 +1759,7 @@ def assemble_all_repos(prior: dict[str, Any],
     raw_sync = prior.get("github_sync")
     previous_sync: dict[str, Any] = raw_sync if isinstance(raw_sync, dict) else {}
     return {
+        **{key: copy.deepcopy(prior[key]) for key in ("work_requests", "card_jobs", "card_aliases", "legacy_work_request", "later_triage") if key in prior},
         "version": 2, "project": ALL_REPOS_BOARD, "title": "All repositories", "kind": "all-repos",
         "created_at": prior.get("created_at") or at,
         "updated_at": max((str(t.get("updated_at") or "") for t in tasks.values()), default=at) or at,
@@ -1978,6 +1982,8 @@ def retain_recent_cards(state: dict[str, Any], facts: dict[tuple[str, int], dict
     if archived:
         state["tasks"] = proposed["tasks"]
         state["legacy_history"] = proposed["legacy_history"]
+    if state.get("work_requests"):
+        return archived
     cutoff = now_utc() - RECENT_MERGED
     expired = []
     for task_id, task in state.get("tasks", {}).items():
@@ -2208,6 +2214,10 @@ def fit_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     Merged cards, then the oldest History rows. Milestone cards, in-flight work, notes,
     decisions and the ledger are never dropped; if they alone are too large
     the snapshot is refused rather than published short."""
+    if snapshot.get("schema") == "carr-progress-board.v4":
+        if snapshot_size(snapshot) > 2097152:
+            raise SnapshotTooLarge("Work Request snapshot exceeds 2097152 UTF-16 units; no evidence was dropped")
+        return snapshot
     tasks, history = snapshot["tasks"], snapshot["history"]
 
     def discard_unused_defaults() -> int:
@@ -2312,6 +2322,17 @@ def cost_snapshot_reader() -> Callable:
     return module.load_snapshot
 
 
+def snapshot_linkage_metadata(task: dict[str, Any]) -> dict[str, Any]:
+    metadata = {"linkage_metadata_version": 1}
+    unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
+                           "blocker_task_id", "parent_refs", "related_refs", "dependencies")
+    held = task.get("held")
+    if (any(task.get(key) is not None for key in unsupported_linkage)
+            or isinstance(held, dict) and held.get("blocker") is not None):
+        metadata["linkage_metadata_unavailable"] = True
+    return metadata
+
+
 @functools.lru_cache(maxsize=1)
 def work_queue_module():
     spec = importlib.util.spec_from_file_location('carr_work_queue', REPO_ROOT / 'tools/room-bridge/work_queue.py')
@@ -2323,6 +2344,8 @@ def work_queue_module():
 def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     """The versioned data contract the app page renders, including fresh local
     cost evidence. Full diagnostics stay local; the app receives bounded cards."""
+    if state.get("work_requests"):
+        return hierarchy_snapshot(state, costs=costs)
     tasks = {}
     all_tasks = state.get("tasks") or {}
     active = {task_id: copy.deepcopy(task) for task_id, task in all_tasks.items() if not is_retired(task)}
@@ -2332,13 +2355,7 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         provider, model, effort = task_identity(task)
         card = {key: value for key, value in task.items()
                 if key in SNAPSHOT_TASK_FIELDS and value is not None}
-        card["linkage_metadata_version"] = 1
-        unsupported_linkage = ("dependency_refs", "depends_on", "blocked_by", "blocker_ref",
-                               "blocker_task_id", "parent_refs", "related_refs", "dependencies")
-        held = task.get("held")
-        if (any(task.get(key) is not None for key in unsupported_linkage)
-                or isinstance(held, dict) and held.get("blocker") is not None):
-            card["linkage_metadata_unavailable"] = True
+        card.update(snapshot_linkage_metadata(task))
         for key, value in card.items():
             if key.endswith("_at") and isinstance(value, str) and value.endswith("+00:00"):
                 card[key] = value[:-6] + "Z"
@@ -2396,6 +2413,39 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
         "omitted": {"live": 0, "merged": 0, "history": 0},
         "updated_at": state.get("updated_at"),
     })
+
+
+def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
+    projection = repo_lib("progress_hierarchy").project(copy.deepcopy(state))
+    fields = (SNAPSHOT_TASK_FIELDS - {"plan_id", "plan_ref", "title", "summary", "stage_history", "release_wait"}) | {
+        "id", "parent_id", "done", "archived", "legacy_disposition", "card_title", "card_description", "branch", "reason"}
+    cards = {key: {**{field: value for field, value in card.items() if field in fields and value is not None},
+                   **snapshot_linkage_metadata(card)}
+             for key, card in projection.pop("cards").items()}
+    aliases = projection["aliases"]
+
+    def resolve_alias(ref: str) -> str:
+        seen: set[str] = set()
+        while ref not in cards and ref in aliases and ref not in seen:
+            seen.add(ref)
+            ref = aliases[ref]
+        return ref
+
+    for card in cards.values():
+        if isinstance(card.get("blocked_by_task_ids"), list):
+            card["blocked_by_task_ids"] = [
+                resolve_alias(ref) if isinstance(ref, str) else ref
+                for ref in card["blocked_by_task_ids"]]
+        parent = card.get("parent_task_id")
+        if isinstance(parent, str):
+            card["parent_task_id"] = resolve_alias(parent)
+    snapshot = {"schema": "carr-progress-board.v4", "project": state["project"],
+        "title": state.get("title") or "Work Requests", "kind": state.get("kind", "project"),
+        "tasks": cards, "hierarchy": projection, "task_counts": activity_counts(state.get("tasks", {}), now_utc()),
+        "github_sync": state.get("github_sync"), "updated_at": state.get("updated_at"),
+        "questions": state.get("questions", {}), "history": {}, "omitted": {"live": 0, "merged": 0, "history": 0},
+        "costs": costs if costs is not None else cost_snapshot_reader()(REPO_ROOT / "out" / "system-costs.json", now=now_utc())}
+    return fit_snapshot(snapshot)
 
 
 def question_revision(question: dict[str, Any], project: str) -> dict[str, Any]:
@@ -2805,6 +2855,9 @@ def command_init(args: argparse.Namespace) -> None:
 
 
 def command_task(args: argparse.Namespace) -> None:
+    binding = None
+    if getattr(args, "work_request", None):
+        binding = repo_lib("progress_hierarchy").load_request(args.work_request, call_verb)
     expected = json.loads(args.expected_task) if args.expected_task is not None else None
     if args.expected_task is not None and not isinstance(expected, dict):
         raise SystemExit("--expected-task must be a task object")
@@ -2817,6 +2870,11 @@ def command_task(args: argparse.Namespace) -> None:
                 for key, value in expected.items()):
             receipt["after"] = before
             return False
+        if binding is not None:
+            registry = state.setdefault("work_requests", {})
+            edited = {key: value for key, value in registry.get(args.work_request, {}).items()
+                      if key in {"card_title", "card_description", "proposed_copy"}}
+            registry[args.work_request] = {**binding, **edited}
         update_task(state, args)
         receipt["applied"] = True
         receipt["after"] = copy.deepcopy(state["tasks"][args.task_id])
@@ -2842,6 +2900,14 @@ def update_task(state: dict[str, Any], args: argparse.Namespace) -> None:
     if args.evidence and stage != "live":
         raise SystemExit("--evidence requires --stage live")
     task = dict(prior)
+    for field in ("work_request", "slice_id", "job_id", "card_title", "card_description"):
+        value = getattr(args, field, None)
+        if value is not None:
+            task[field] = value
+    if not prior or state.get("work_requests"):
+        if task.get("work_request") not in state.get("work_requests", {}):
+            raise SystemExit("Capture and bind the Work Request before dispatching its job")
+        task.setdefault("slice_id", "implicit")
     if args.delivery_target is not None:
         task["delivery_target"] = args.delivery_target
     for field in ("delivery_workflow", "delivery_source_sha"):
@@ -3015,6 +3081,11 @@ def parser() -> argparse.ArgumentParser:
     task.add_argument("--creation-defaults", action="store_true",
                       help="apply title and executor metadata only when creating a task")
     task.add_argument("--summary")
+    task.add_argument("--work-request")
+    task.add_argument("--slice-id")
+    task.add_argument("--job-id")
+    task.add_argument("--card-title")
+    task.add_argument("--card-description")
     task.add_argument("--pr", type=int)
     task.add_argument("--repo")
     task.add_argument("--domain", choices=("system", "deals", "unclassified"))
