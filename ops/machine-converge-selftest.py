@@ -25,6 +25,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 SELF_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
@@ -56,6 +57,11 @@ COPIES = [
     "mcp-server/continuity-stdio-proxy.mjs",
     "ops/claude-continuity-hook.py",
     "ops/config-as-code.py",
+    "tools/flash_install.py",
+    "tools/flashlib.py",
+    "ops/launchd/local.ds4-flash-next.plist",
+    "ops/launchd/local.flash-desk.plist",
+    "ops/launchd/com.carr.flash-idle-stop.plist",
     "ops/install-claude-continuity.py",
     "ops/config/claude-continuity-hooks.json",
     "ops/git_env.py",
@@ -148,6 +154,8 @@ def build_fixture(root, email, actor_slug=None, behind=True, dirty=False,
     write_exec(os.path.join(repo, "bin", "run-scheduled.sh"), "#!/bin/zsh\nexit 0\n")
     write_exec(os.path.join(repo, "tools", "dictation-rig", "bin", "consent-watch.sh"),
                "#!/bin/zsh\nexit 0\n")
+    write_exec(os.path.join(repo, "tools", "room-bridge", "dispatch.py"),
+               "#!/usr/bin/env python3\n")
     with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as fh:
         fh.write("fixture\n")
 
@@ -210,6 +218,20 @@ if args[0] == 'print':
         sys.exit(0)
     print(f'Could not find service "{label}" in domain for user gui: 501', file=sys.stderr)
     sys.exit(113)
+if args[0] in ('disable', 'enable'):
+    sys.exit(0)
+if args[0] == 'print-disabled':
+    print('{}')
+    sys.exit(0)
+if args[0] == 'bootout':
+    state.pop(args[-1].rsplit('/', 1)[-1], None)
+    state_path.write_text(json.dumps(state))
+    sys.exit(0)
+if args[0] == 'bootstrap':
+    dest = args[-1]
+    state[plistlib.loads(Path(dest).read_bytes())['Label']] = dest
+    state_path.write_text(json.dumps(state))
+    sys.exit(0)
 if args[0] in ('load', 'unload'):
     dest = args[-1]
     label = plistlib.loads(Path(dest).read_bytes())['Label']
@@ -399,8 +421,28 @@ def case_marker_primary_noop(tmp):
     }
 
 
+def case_flash_converges(tmp):
+    repo, home, stubs = build_fixture(tmp, "dell@example.com", actor_slug="dell")
+    agents = Path(home) / "Library/LaunchAgents"
+    labels = ("local.ds4-flash-next", "local.flash-desk")
+    for label in labels:
+        (agents / (label + ".plist")).write_bytes(plistlib.dumps({
+            "Label": label, "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False}}))
+    r = run_hook(repo, home, stubs, tmp)
+    log = Path(tmp, "launchctl.log").read_text()
+    bodies = [plistlib.loads((agents / (label + ".plist")).read_bytes()) for label in labels]
+    return {
+        "hook finishes": r.returncode == 0 and "re-applied" in r.stdout,
+        "both templates off": all(not b.get("RunAtLoad") and not b.get("KeepAlive") for b in bodies),
+        "both labels disabled": all("disable gui/" in log and label in log for label in labels),
+        "watcher loaded": "bootstrap" in log and "com.carr.flash-idle-stop" in log,
+        "no model started": not any(x in log for x in ("kickstart", "enable gui/")),
+    }
+
+
 def main():
     cases = [
+        ("Flash drift converges to off", case_flash_converges),
         ("secondary machine converges", case_secondary_converges),
         ("stale continuity receipt is re-stamped and the install completes",
          case_stale_continuity_receipt_self_heals),

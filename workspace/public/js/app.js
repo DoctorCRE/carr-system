@@ -1,7 +1,7 @@
 import { authoredStates, isActionableState, loadFixture } from "./client.js";
 
 const surfaces = {
-  "command-center": { label: "Command Center", short: "Home", icon: "⌂", fixture: "command-center", description: "What changed, what needs you, and what Doc is handling." },
+  "command-center": { label: "Command Center", short: "Home", icon: "⌂", fixture: "command-center", description: "Recent updates, pending decisions, and Doc activity." },
   "lead-board": { label: "The Lead Board", short: "Leads", icon: "◎", fixture: "lead-board", description: "Named prospecting reminders live only here." },
   "deal-room": { label: "The Deal Room", short: "Deals", icon: "▤", fixture: "deal-room", description: "Active, parked, and closed work with preserved provenance." },
   "call-review": { label: "Calls", short: "Calls", icon: "◉", fixture: "call-review", description: "Structured facts, decisions, deliverables, drafts, and agent work history—not a transcript library." },

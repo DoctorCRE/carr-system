@@ -28,6 +28,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).resolve().parents[1] / "lib"))
+from selftest_harness import temporary_directory
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(REPO, "ops", "githooks", "pre-push")
 STRIPPED = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")
@@ -54,8 +57,8 @@ def temp_repo_is_hijacked_without_the_fix():
     With GIT_DIR pointed at repo A, a `git` run with cwd=B reports A's toplevel.
     That is the whole bug in one assertion.
     """
-    a = tempfile.mkdtemp(prefix="hookenv-a-")
-    b = tempfile.mkdtemp(prefix="hookenv-b-")
+    a = temporary_directory(prefix="hookenv-a-")
+    b = temporary_directory(prefix="hookenv-b-")
     for d in (a, b):
         subprocess.run(["git", "init", "-q", d], check=True, capture_output=True)
     env = dict(os.environ, GIT_DIR=os.path.join(a, ".git"))

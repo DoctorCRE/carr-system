@@ -164,22 +164,32 @@ def write_receipt(receipt: dict, path=None) -> str:
     return str(path)
 
 def validate_entry(entry: dict) -> None:
-    if (entry.get("model") != MODEL or entry.get("effort") != EFFORT
-            or entry.get("sandbox") != "read-only"):
-        raise ValueError("Grok retrieval requires grok-4.7/high/read-only")
+    if (not re.fullmatch(r"grok(?:-[0-9]+(?:\.[0-9]+)*)?", entry.get("model", ""))
+            or entry.get("effort") not in ("minimal", "low", "medium", "high", "xhigh")):
+        raise ValueError("Grok desk requires a Grok model or family and reasoning effort")
 
 
-def model_usage_error(models) -> str | None:
+def resolve_model(run=subprocess.run, env=None) -> str:
+    proc = run(["grok", "models"], capture_output=True, text=True,
+               stdin=subprocess.DEVNULL, timeout=15, **({'env': env} if env is not None else {}))
+    models = re.findall(r"^\s*[-*]\s+(grok-\d+(?:\.\d+)*)(?=\s|$)", proc.stdout or "", re.M)
+    if proc.returncode or not models:
+        raise ValueError("Grok model catalog unavailable")
+    return max(models, key=lambda model: tuple(map(int, model[5:].split('.'))))
+
+
+def model_usage_error(models, model=MODEL) -> str | None:
     """Validate the complete provider model set and evidence of a model call."""
-    if not isinstance(models, dict) or set(models) != {PROVIDER_MODEL}:
+    provider_model = model + "-build"
+    if not isinstance(models, dict) or set(models) != {provider_model}:
         return "grok_provider_model_mismatch"
-    usage = models[PROVIDER_MODEL]
+    usage = models[provider_model]
     if not isinstance(usage, dict) or type(usage.get("modelCalls")) is not int or usage["modelCalls"] < 1:
         return "grok_provider_usage_invalid"
     return None
 
 
-def parse_stream(lines, returncode: int = 0) -> dict:
+def parse_stream(lines, returncode: int = 0, *, model=MODEL) -> dict:
     """Keep the latest assistant response with exactly one end.
 
     These events do not identify which task produced each response. Prose
@@ -234,27 +244,27 @@ def parse_stream(lines, returncode: int = 0) -> dict:
     elif end.get("stopReason") != "end_turn":
         detail, code = "grok_incomplete_turn", 4
     else:
-        detail = model_usage_error(end.get("modelUsage"))
+        detail = model_usage_error(end.get("modelUsage"), model)
         if detail:
             code = 5
     return {"text": text, "report_text": "\n\n".join(responses), "end": end, "detail": detail, "code": code}
 
 
-def provider_receipt(end: dict, cli_version=None) -> dict:
+def provider_receipt(end: dict, cli_version=None, model=MODEL) -> dict:
     models = end.get("modelUsage", {})
     cost = end.get("total_cost_usd", end.get("cost_usd"))
     turns = end.get("num_turns")
-    return {"requested_model": MODEL, "actual_models": sorted(models) if isinstance(models, dict) else [],
+    return {"requested_model": model, "actual_models": sorted(models) if isinstance(models, dict) else [],
                "stopReason": end.get("stopReason") if isinstance(end.get("stopReason"), str) else None,
                "num_turns": turns if type(turns) is int else None,
                "cost_usd": cost if type(cost) in (int, float) else None, "cli_version": cli_version}
 
 
 def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
-                 effort=EFFORT, cli_version=None, require_identity=True) -> dict:
-    parsed = parse_stream(stdout.splitlines(), returncode)
+                 effort=EFFORT, cli_version=None, require_identity=True, model=MODEL) -> dict:
+    parsed = parse_stream(stdout.splitlines(), returncode, model=model)
     end = parsed["end"]
-    receipt = provider_receipt(end, cli_version)
+    receipt = provider_receipt(end, cli_version, model)
     if parsed["code"]:
         return {"status": "failed", "detail": parsed["detail"], "code": parsed["code"],
                 "result": "" if urls else parsed["text"], "receipt": receipt}
@@ -264,8 +274,9 @@ def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
     result = parsed["text"].strip()
     if not result and not urls and require_identity:
         return {"status": "failed", "code": 4, "detail": "grok_empty_result", "receipt": receipt}
-    usage = end["modelUsage"][PROVIDER_MODEL]
-    metadata = {"requested_model": MODEL, "actual_model": PROVIDER_MODEL,
+    provider_model = model + "-build"
+    usage = end["modelUsage"][provider_model]
+    metadata = {"requested_model": model, "actual_model": provider_model,
                 "effort": effort, "request_id": end.get("requestId"),
                 "session_id": end.get("sessionId"), "model_calls": usage["modelCalls"],
                 "cost_usd": receipt["cost_usd"], "stop_reason": end["stopReason"]}
@@ -275,13 +286,13 @@ def parse_result(stdout: str, returncode: int, *, urls: list[str] | None = None,
 
 
 def invoke_cli(prompt: str, *, cwd=None, effort=EFFORT, max_turns=MAX_TURNS,
-               writable=False, timeout_seconds=TIMEOUT_S, run=subprocess.run):
+               writable=False, timeout_seconds=TIMEOUT_S, run=subprocess.run, model=MODEL, env=None):
     """The sole model-work invocation; the desk retains its 180-second default."""
-    argv = ["grok", "--model", MODEL, "--reasoning-effort", effort,
+    argv = ["grok", "--model", model, "--reasoning-effort", effort,
             "--max-turns", str(max_turns), "--always-approve",
             "--sandbox", "workspace" if writable else "read-only",
-            "--output-format", "streaming-json", "--print", prompt]
-    env = dict(os.environ)
+            "--output-format", "streaming-json", "--single", prompt]
+    env = dict(os.environ if env is None else env)
     env.pop("CARR_GROK_RUN_READ_ONLY", None)
     if not writable:
         env["CARR_GROK_RUN_READ_ONLY"] = "1"
@@ -298,7 +309,7 @@ class PreflightError(Exception):
 def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFORT,
                 max_turns=MAX_TURNS, writable=False, timeout_seconds=TIMEOUT_S,
                 invoke=invoke_cli, preflight=None, fixture=None, require_identity=True,
-                receipt_path=None) -> dict:
+                receipt_path=None, model=MODEL) -> dict:
     """One execution owns URL validation, provider outcome codes and private receipts.
 
     Every prompt URL must be public and free of embedded credentials before
@@ -321,7 +332,7 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
                               writable=writable, timeout_seconds=timeout_seconds)
                 raw, returncode = proc.stdout or "", proc.returncode
             outcome = parse_result(raw, returncode, urls=urls, effort=effort, cli_version=cli_version,
-                                   require_identity=require_identity or retrieval)
+                                   require_identity=require_identity or retrieval, model=model)
         except PreflightError as error:
             outcome = {"status": "failed", "code": error.code,
                        "detail": "grok_sign_in_required" if error.code == 3 else "grok_preflight_failed"}
@@ -333,7 +344,7 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
         except (OSError, ValueError):
             outcome = {"status": "failed", "code": 4, "detail": "grok_invocation_failed"}
     metadata = outcome.get("provider_metadata", {})
-    receipt = {**outcome.pop("receipt", provider_receipt({}, cli_version)),
+    receipt = {**outcome.pop("receipt", provider_receipt({}, cli_version, model)),
                "effort": effort, "status": outcome["status"],
                "code": outcome["code"], "detail": outcome.get("detail"),
                "task_sha256": hashlib.sha256(task.encode()).hexdigest(), "max_turns": max_turns,
@@ -350,10 +361,15 @@ def run_request(task: str, *, retrieval=False, prefix="", cwd=None, effort=EFFOR
     return {**outcome, "receipt": receipt}
 
 
-def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run) -> dict:
+def run_task(entry: dict, task: str, *, retrieval=False, run=subprocess.run, env=None) -> dict:
     validate_entry(entry)
+    try:
+        model = resolve_model(run=run, env=env) if entry['model'] == 'grok' else entry['model']
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {"status": "failed", "code": 4, "detail": "grok_model_catalog_unavailable"}
     return run_request(task, retrieval=retrieval, cwd=entry.get("cwd"),
+        model=model, effort=entry['effort'], writable=not retrieval,
         prefix=("Read-only retrieval or explanation only. Do not call CARR or MCP tools, "
                 "read credential/config files, write files, or delegate. Return a bounded "
-                "answer with public source URLs when retrieving."),
-        invoke=lambda prompt, **kw: invoke_cli(prompt, **kw, run=run))
+                "answer with public source URLs when retrieving.") if retrieval else "",
+        invoke=lambda prompt, **kw: invoke_cli(prompt, **kw, run=run, model=model, env=env))

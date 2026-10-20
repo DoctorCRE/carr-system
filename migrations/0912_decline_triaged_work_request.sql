@@ -1,6 +1,6 @@
 -- rollback: forward-only; declined triaged rows retain intake history that the previous check rejects
 -- lock-review: replace one validated CHECK on the small ops.work_request table; brief ACCESS EXCLUSIVE lock
--- 0910_decline_triaged_work_request.sql
+-- 0912_decline_triaged_work_request.sql
 -- Joe authorized declining captured or triaged requests, including answered work.
 -- Preserve downstream history; supersession keeps its separate evidence rules.
 

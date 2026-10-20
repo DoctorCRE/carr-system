@@ -89424,7 +89424,8 @@ CREATE VIEW public.v_deal_board AS
     d.notes_path,
     d.invoiced_on,
     d.closed_on,
-    d.lane
+    d.lane,
+    d.client_id
    FROM ((((((public.deal d
      JOIN public.client c ON ((c.id = d.client_id)))
      JOIN public.party pc ON ((pc.id = c.party_id)))
@@ -122897,7 +122898,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0907_approve_rule_trusted_search_path.sql	3a3f54caee7a1bb2fa308ac1aa45710630ae98774f23f98ba6de325dc7a44cee	2026-10-18 10:30:31.947739+00
 0908_retire_markdown_rule_refresh.sql	b17833bec736169cc9315ce1e3845092ff2d0333f84794150620ee86a021f018	2026-10-19 07:24:09.849152+00
 0909_retire_glanceable_lead_control.sql	83db61a97c4b34410b952ba8a548e51f7efc3d951f80507dba28663172a4f81c	2026-10-19 09:01:48.196914+00
-0910_decline_triaged_work_request.sql	02d7a5696149c883a55674227944437fad0196e7f2a1e22350c7023625761698	2026-10-19 12:53:32.223408+00
+0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
+0912_decline_triaged_work_request.sql	6c042ce8dba26ffb1cfd1bf7d3c682c414c2ad8f7884f5c48587aba43a0ebf78	2026-10-20 02:09:38.105499+00
 \.
 
 
