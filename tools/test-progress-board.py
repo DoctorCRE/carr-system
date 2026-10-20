@@ -35,7 +35,7 @@ SPEC = importlib.util.spec_from_file_location("progress_board", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 BOARD = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BOARD)
-from progress_board_test_support import exercise_fields
+from progress_board_test_support import exercise_fields, seed_legacy_task
 
 def fixture_budget(fixture):
     return BOARD.repo_lib("github_rate_limit").GitHubReadBudget(
@@ -204,6 +204,12 @@ class BoardCase(unittest.TestCase):
             check=check,
         )
 
+    def update_legacy_task(self, project, task_id, *args, **kwargs):
+        # These v2/v3 regressions operate on imported legacy records. New dispatch
+        # through the CLI requires a captured WR and is covered by hierarchy tests.
+        seed_legacy_task(BOARD, self.root, project, task_id, args)
+        return self.run_board('task', project, task_id, *args, **kwargs)
+
     def read_state(self, project):
         return json.loads((self.root / "boards" / f"{project}.json").read_text())
 
@@ -256,7 +262,7 @@ class BoardCase(unittest.TestCase):
 class ProgressBoardCLI(BoardCase):
     def test_task_producer_explicitly_classifies_system_work(self):
         self.run_board('init','demo','--title','Synthetic board')
-        self.run_board('task','demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
+        self.update_legacy_task('demo','repair','--title','Synthetic repair','--status','running','--executor','codex')
         self.assertEqual(self.read_state('demo')['tasks']['repair'].get('domain'),'system')
 
     def test_large_history_publishes_bounded_pages_without_losing_rows(self):
@@ -286,7 +292,7 @@ class ProgressBoardCLI(BoardCase):
     def test_conditional_recovery_compares_after_acquiring_shared_lock(self):
         import fcntl
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "work", "--title", "Work", "--status", "running",
+        self.update_legacy_task("demo", "work", "--title", "Work", "--status", "running",
                        "--executor", "executor", "--note", "Old evidence")
         expected = {"status": "running", "note": "Old evidence"}
         code = '''
@@ -319,13 +325,13 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
                 self.assertEqual(writer.returncode, 0, errors)
         self.assertEqual(self.read_state("demo"), state)
         # Matching ownership permits recovery through the same CLI transaction.
-        self.run_board("task", "demo", "work", "--status", "running", "--note", "Resumed",
+        self.update_legacy_task("demo", "work", "--status", "running", "--note", "Resumed",
                        "--expected-task", json.dumps({"status": "review", "note": "Fresh executor evidence"}))
         self.assertEqual(self.read_state("demo")["tasks"]["work"]["note"], "Resumed")
 
-    def test_init_task_ask_answer_and_deliver(self):
+    def test_init_legacy_task_ask_answer_and_deliver(self):
         self.run_board("init", "demo", "--title", "Demo project")
-        self.run_board("task", "demo", "build", "--title", "Build board", "--status", "running",
+        self.update_legacy_task("demo", "build", "--title", "Build board", "--status", "running",
                        "--executor", "codex gpt-5.6-luna high", "--pr", "42", "--note", "working")
         self.run_board("ask", "demo", "q1", "--question", "Ship this?", "--default", "continue on the default")
         self.run_board("answer", "demo", "q1", input_text="yes\n")
@@ -351,7 +357,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         self.run_board("init", "demo", "--title", "Demo")
         leftover = self.root / "boards" / "demo.html"
         leftover.write_text("<html>stale copy</html>")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex")
         self.run_board("render", "demo")
         self.assertFalse(leftover.exists(), "render removes the retired static copy")
         self.assertEqual(sorted(p.name for p in (self.root / "boards").iterdir()
@@ -371,9 +377,9 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_snapshot_is_the_versioned_data_contract(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "Build card", "--status", "running",
+        self.update_legacy_task("demo", "a", "--title", "Build card", "--status", "running",
                        "--executor", "gpt-6-sol high (Codex)", "--summary", "Show the card.")
-        self.run_board("task", "demo", "b", "--title", "Seat", "--status", "queued",
+        self.update_legacy_task("demo", "b", "--title", "Seat", "--status", "queued",
                        "--executor", "claude-plan Opus subagent")
         self.run_board("ask", "demo", "q1", "--question", "Ship?", "--default", "Proceed")
         self.run_board("ask", "demo", "q2", "--question", "Colour?", "--default", "Blue")
@@ -409,9 +415,9 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_stuck_is_derived_for_blocked_and_old_running_tasks(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "blocked", "--title", "Blocked", "--status", "blocked",
+        self.update_legacy_task("demo", "blocked", "--title", "Blocked", "--status", "blocked",
                        "--executor", "codex", "--reason", "Waiting on API key", "--next-action", "Joe adds the key")
-        self.run_board("task", "demo", "running", "--title", "Old", "--status", "running", "--executor", "codex")
+        self.update_legacy_task("demo", "running", "--title", "Old", "--status", "running", "--executor", "codex")
         state = self.read_state("demo")
         state["tasks"]["running"]["updated_at"] = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
         self.assertTrue(BOARD.is_stuck(state["tasks"]["blocked"]))
@@ -421,21 +427,21 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_blocked_requires_reason_and_next_action_and_clears_when_unblocked(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex")
         for extra in ([], ["--reason", "Needs a key"], ["--next-action", "Add it"]):
             with self.subTest(extra=extra):
-                refused = self.run_board("task", "demo", "a", "--status", "blocked", *extra, check=False)
+                refused = self.update_legacy_task("demo", "a", "--status", "blocked", *extra, check=False)
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertIn("--reason and --next-action", refused.stderr)
-        refused = self.run_board("task", "demo", "a", "--health", "blocked", check=False)
+        refused = self.update_legacy_task("demo", "a", "--health", "blocked", check=False)
         self.assertNotEqual(refused.returncode, 0)
-        self.run_board("task", "demo", "a", "--status", "blocked", "--reason", "Needs a key",
+        self.update_legacy_task("demo", "a", "--status", "blocked", "--reason", "Needs a key",
                        "--next-action", "Joe adds the key")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(BOARD.blocked_detail(task), ("Needs a key", "Joe adds the key"))
-        self.run_board("task", "demo", "a", "--note", "still waiting")  # keeps the recorded reason
+        self.update_legacy_task("demo", "a", "--note", "still waiting")  # keeps the recorded reason
         self.assertEqual(self.read_state("demo")["tasks"]["a"]["blocked_reason"], "Needs a key")
-        self.run_board("task", "demo", "a", "--status", "running")
+        self.update_legacy_task("demo", "a", "--status", "running")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertNotIn("blocked_reason", task)
         self.assertNotIn("next_action", task)
@@ -476,11 +482,11 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_live_or_done_cards_drop_leftover_blocked_health(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex",
                        "--pr", "42", "--health", "blocked", "--reason", "Review round 1",
                        "--next-action", "Fix the findings")
         self.prove_task()
-        self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Served in production")
+        self.update_legacy_task("demo", "a", "--stage", "live", "--evidence", "Served in production")
         task = self.read_state("demo")["tasks"]["a"]
         for field in ("health", "blocked_reason", "next_action"):
             self.assertNotIn(field, task)
@@ -516,7 +522,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_ledger_flags_claude_plan_executor(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "violation", "--title", "Wrong seat", "--status", "queued",
+        self.update_legacy_task("demo", "violation", "--title", "Wrong seat", "--status", "queued",
                        "--executor", "claude-plan Opus subagent")
         ledger = {row["pool"]: row for row in BOARD.executor_ledger(self.read_state("demo")["tasks"])}
         self.assertTrue(ledger["claude-cloud"]["violation"])
@@ -548,7 +554,7 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_explicit_metadata_overrides_executor(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "queued",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "queued",
                        "--executor", "orchestrator", "--provider", "Codex",
                        "--model", "gpt-6-sol", "--effort", "xhigh", "--summary", "Check the route.")
         task = self.read_state("demo")["tasks"]["a"]
@@ -563,16 +569,16 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
         defaults = {"title": "Queue card", "executor": "Merge queue", "provider": "Unknown",
                     "model": "unknown", "effort": "unknown"}
         fields = lambda values: [item for key, value in values.items() for item in ("--" + key, value)]
-        self.run_board("task", "demo", "existing", *fields(assigned), "--status", "running", "--pr", "42")
+        self.update_legacy_task("demo", "existing", *fields(assigned), "--status", "running", "--pr", "42")
         for card in ("existing", "new"):
-            self.run_board("task", "demo", card, *fields(defaults), "--creation-defaults",
+            self.update_legacy_task("demo", card, *fields(defaults), "--creation-defaults",
                            "--status", "review", "--pr", "42", "--stage", "ci", "--note", "Checks pending")
         tasks = self.read_state("demo")["tasks"]
         for card, expected in (("existing", assigned), ("new", defaults)):
             self.assertEqual({key: tasks[card][key] for key in expected}, expected)
             self.assertEqual((tasks[card]["status"], tasks[card]["stage"], tasks[card]["note"]),
                              ("review", "ci", "Checks pending"))
-        self.run_board("task", "demo", "existing", *fields(defaults))
+        self.update_legacy_task("demo", "existing", *fields(defaults))
         task = self.read_state("demo")["tasks"]["existing"]
         self.assertEqual({key: task[key] for key in defaults}, defaults)
 
@@ -620,24 +626,24 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_legacy_live_without_evidence_with_a_pr_is_not_live(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "legacy", "--title", "Legacy", "--status", "done",
+        self.update_legacy_task("demo", "legacy", "--title", "Legacy", "--status", "done",
                        "--executor", "Codex", "--pr", "42")
         state = self.read_state("demo")
         state["tasks"]["legacy"]["stage"] = "measured"
         state["tasks"]["legacy"]["status"] = "measured"
         self.write_state("demo", state)
-        self.run_board("task", "demo", "plain", "--title", "Plain", "--status", "done", "--executor", "Codex")
+        self.update_legacy_task("demo", "plain", "--title", "Plain", "--status", "done", "--executor", "Codex")
         tasks = self.read_state("demo")["tasks"]
         self.assertEqual(BOARD.task_stage(tasks["legacy"]), "build")
         self.assertEqual(BOARD.task_stage(tasks["plain"]), "review")
 
     def test_reopening_live_clears_completion(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "done",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "done",
                        "--executor", "Codex")
         self.prove_task()
-        self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Observed outcome")
-        self.run_board("task", "demo", "a", "--status", "running")
+        self.update_legacy_task("demo", "a", "--stage", "live", "--evidence", "Observed outcome")
+        self.update_legacy_task("demo", "a", "--status", "running")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["status"], "running")
         self.assertNotIn("stage", task)
@@ -646,13 +652,13 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_live_requires_explicit_evidence_and_merge_does_not_complete(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
-        missing = self.run_board("task", "demo", "a", "--stage", "live", check=False)
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
+        missing = self.update_legacy_task("demo", "a", "--stage", "live", check=False)
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("evidence", missing.stderr.lower())
         self.assertEqual(self.read_state("demo")["tasks"]["a"].get("stage"), None)
         self.prove_task()
-        self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Page returned expected data")
+        self.update_legacy_task("demo", "a", "--stage", "live", "--evidence", "Page returned expected data")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "live")
         self.assertIn("Page returned expected data", task["evidence"])
@@ -660,10 +666,10 @@ board.main(["task", "demo", "work", "--status", "done", "--note", "Recovered",
 
     def test_legacy_measured_maps_to_live(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "legacy", "--title", "Legacy", "--status", "done",
+        self.update_legacy_task("demo", "legacy", "--title", "Legacy", "--status", "done",
                        "--executor", "Codex", "--pr", "42")
         self.prove_task(task_id="legacy")
-        self.run_board("task", "demo", "legacy", "--stage", "measured", "--evidence", "Legacy verified")
+        self.update_legacy_task("demo", "legacy", "--stage", "measured", "--evidence", "Legacy verified")
         self.assertEqual(self.read_state("demo")["tasks"]["legacy"]["stage"], "live")
 
 
@@ -679,7 +685,7 @@ class PullRequestStatus(BoardCase):
 
     def start(self, **task_args):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running",
                        "--executor", "Codex", "--pr", "42", *task_args.get("extra", []))
 
     def test_malformed_github_payload_keeps_previous_status(self):
@@ -750,8 +756,8 @@ class PullRequestStatus(BoardCase):
 
     def test_same_pr_number_in_two_repositories_and_legacy_state(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "carr", "--title", "CARR fix", "--status", "running", "--executor", "Codex", "--pr", "85")
-        self.run_board("task", "demo", "app", "--title", "App fix", "--status", "running", "--executor", "Codex",
+        self.update_legacy_task("demo", "carr", "--title", "CARR fix", "--status", "running", "--executor", "Codex", "--pr", "85")
+        self.update_legacy_task("demo", "app", "--title", "App fix", "--status", "running", "--executor", "Codex",
                        "--pr", "85", "--repo", "jbookout/doctorcre-app")
         state = self.read_state("demo")
         self.assertEqual(state["tasks"]["carr"]["repo"], "jbookout/carr-system")
@@ -777,7 +783,7 @@ class PullRequestStatus(BoardCase):
         self.assertEqual((old["status"], old["stage"], old["pr_phase"], old["pr_head"]),
                          ("review", "merged", "Merged", SHA_A))
         self.set_fixture({})
-        self.run_board("task", "demo", "a", "--repo", "jbookout/doctorcre-app")
+        self.update_legacy_task("demo", "a", "--repo", "jbookout/doctorcre-app")
         moved = self.read_state("demo")["tasks"]["a"]
         self.assertEqual((moved["repo"], moved["pr"]), ("jbookout/doctorcre-app", 42))
         self.assertEqual((moved["status"], moved["stage"]), ("running", "build"))
@@ -825,7 +831,7 @@ class PullRequestStatus(BoardCase):
         self.run_board("render", "demo")
         self.assertEqual(self.read_state("demo")["tasks"]["a"]["stage"], "merged")
         self.prove_task()
-        self.run_board("task", "demo", "a", "--stage", "live", "--evidence", "Production response measured")
+        self.update_legacy_task("demo", "a", "--stage", "live", "--evidence", "Production response measured")
         completed_at = self.read_state("demo")["tasks"]["a"]["completed_at"]
         self.run_board("render", "demo")
         task = self.read_state("demo")["tasks"]["a"]
@@ -844,7 +850,7 @@ class PullRequestStatus(BoardCase):
         self.assertEqual((task["stage"], task["merge_sha"]), ("merged", SHA_M))
         self.assertNotIn("evidence", task)
         self.assertIn("no delivery target recorded", task["release_wait"])
-        self.run_board("task", "demo", "a", "--delivery-target", "workstation")
+        self.update_legacy_task("demo", "a", "--delivery-target", "workstation")
         self.run_board("render", "demo")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual(task["stage"], "merged")
@@ -919,13 +925,13 @@ class PullRequestStatus(BoardCase):
 
     def test_stage_changes_record_history_and_the_timer_reads_stage_entered_at(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "queued", "--executor", "Codex")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "queued", "--executor", "Codex")
         first = self.read_state("demo")["tasks"]["a"]
         self.assertEqual([h["stage"] for h in first["stage_history"]], ["queued"])
         self.assertEqual(first["stage_entered_at"], first["stage_history"][-1]["entered_at"])
-        self.run_board("task", "demo", "a", "--note", "same stage")
+        self.update_legacy_task("demo", "a", "--note", "same stage")
         self.assertEqual(len(self.read_state("demo")["tasks"]["a"]["stage_history"]), 1)
-        self.run_board("task", "demo", "a", "--status", "running")
+        self.update_legacy_task("demo", "a", "--status", "running")
         task = self.read_state("demo")["tasks"]["a"]
         self.assertEqual([h["stage"] for h in task["stage_history"]], ["queued", "build"])
         self.assertEqual(task["stage_entered_at"], task["stage_history"][-1]["entered_at"])
@@ -972,7 +978,7 @@ class GitHubSync(BoardCase):
 
     def start(self, *extra):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running",
                        "--executor", "Codex", "--pr", "42", *extra)
 
     def sync(self, view, *extra_fixture):
@@ -1026,7 +1032,7 @@ class GitHubSync(BoardCase):
     def test_manual_block_clears_when_the_pr_merges(self):
         self.start()
         self.fake_gh({})
-        self.run_board("task", "demo", "a", "--status", "blocked", "--reason", "Hold", "--next-action", "Wait")
+        self.update_legacy_task("demo", "a", "--status", "blocked", "--reason", "Hold", "--next-action", "Wait")
         task, _ = self.sync({**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M}})
         self.assertEqual((task["status"], task["stage"]), ("review", "merged"))
         self.assertNotIn("blocked_reason", task)
@@ -1562,6 +1568,8 @@ class CardColumns(unittest.TestCase):
         self.tempdir.cleanup()
 
     def board(self, *args, check=True):
+        if args[0] == 'task':
+            seed_legacy_task(BOARD, self.root, args[1], args[2], args[3:])
         return subprocess.run([sys.executable, str(SCRIPT), *args], cwd=REPO, env=self.env,
                               text=True, capture_output=True, check=check)
 
@@ -1682,7 +1690,7 @@ class ReviewRound1420(BoardCase):
     # 1 ── concurrent writers
     def test_1_superseded_project_render_cannot_replace_newer_review_evidence(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running",
                        "--executor", "Codex", "--pr", "42")
         old = copy.deepcopy(self.OPEN)
         old["comments"] = [{"author": {"login": "jbookout"}, "authorAssociation": "OWNER",
@@ -1749,7 +1757,7 @@ class ReviewRound1420(BoardCase):
 
     def test_1_a_note_written_while_render_reads_github_survives(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
         wrote = []
 
         def fetch(number, repo):
@@ -1840,7 +1848,7 @@ class ReviewRound1420(BoardCase):
     # 4 ── one review interpretation, shared with the release pipeline
     def test_4_same_account_and_review_blocked_verdicts_count_on_project_cards(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
         self.fake_gh({})
 
         def comment(body):
@@ -2017,7 +2025,7 @@ class ReviewRound1420(BoardCase):
         # Project cards: only a declared worker/app target completes from a
         # release (#1439); a local tool or LaunchAgent declares workstation.
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex",
                        "--pr", "42", "--delivery-target", "workstation")
         merged = {**self.OPEN, "state": "MERGED", "mergeCommit": {"oid": SHA_M},
                   "files": [{"path": "tools/progress_board.py"}], "changedFiles": 1}
@@ -2088,7 +2096,7 @@ class ReviewRound1420(BoardCase):
     # 10 ── the snapshot says whether GitHub facts are fresh
     def test_10_a_github_outage_and_recovery_are_published(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running", "--executor", "Codex", "--pr", "42")
         self.fake_gh({"view": {**self.OPEN, "comments": [{"author": {"login": "r"}, "authorAssociation": "OWNER",
                                                             "body": "APPROVE\nReviewed-SHA: " + SHA_A,
                                                             "createdAt": "2026-09-30T10:00:00Z"}]}})
@@ -2115,6 +2123,7 @@ class ReviewRound1420(BoardCase):
 
     def test_11_b_mutation_does_not_refresh_or_publish(self):
         self.run_board("init", "demo", "--title", "Demo")
+        seed_legacy_task(BOARD, self.root, "demo", "a", ["--title", "A", "--executor", "Codex"])
         with self.in_process(PROGRESS_BOARD_LOCAL_ONLY="1"), \
              patch.object(BOARD, "render", side_effect=AssertionError("local mutation refreshed the whole board")), \
              patch.object(BOARD, "publish_board", side_effect=AssertionError("local mutation published")):
@@ -2123,11 +2132,11 @@ class ReviewRound1420(BoardCase):
 
     def test_11_c_task_receipt_captures_locked_before_state_and_cas_noop(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "a", "--title", "A", "--status", "running",
+        self.update_legacy_task("demo", "a", "--title", "A", "--status", "running",
                        "--executor", "Codex", "--note", "Original evidence")
         before = self.read_state("demo")["tasks"]["a"]
 
-        applied = self.run_board("task", "demo", "a", "--status", "blocked", "--health", "blocked",
+        applied = self.update_legacy_task("demo", "a", "--status", "blocked", "--health", "blocked",
                                  "--reason", "Synthetic failure", "--next-action", "Recover",
                                  "--note", "Watchdog overlay", "--receipt")
         receipt = json.loads(applied.stdout)
@@ -2136,7 +2145,7 @@ class ReviewRound1420(BoardCase):
         self.assertEqual(receipt["after"], self.read_state("demo")["tasks"]["a"])
 
         current = receipt["after"]
-        refused = self.run_board("task", "demo", "a", "--status", "done", "--note", "stale restore",
+        refused = self.update_legacy_task("demo", "a", "--status", "done", "--note", "stale restore",
                                  "--expected-task", json.dumps({"status": "running"}), "--receipt")
         receipt = json.loads(refused.stdout)
         self.assertFalse(receipt["applied"])
@@ -2322,7 +2331,7 @@ class DeliveryTargetRelease(BoardCase):
                 project = repo.split("/")[1]
                 self.run_board("init", project, "--title", "Demo")
                 for task_id, number in (("deployed", 1), ("future", 2)):
-                    self.run_board("task", project, task_id, "--title", task_id,
+                    self.update_legacy_task(project, task_id, "--title", task_id,
                                    "--status", "done", "--executor", "codex",
                                    "--pr", str(number), "--repo", repo, "--stage", "merged",
                                    "--delivery-target", "worker" if repo == BOARD.DEFAULT_PR_REPO else "app")
@@ -2354,7 +2363,7 @@ class DeliveryTargetRelease(BoardCase):
 
     def test_render_keeps_merged_when_production_identity_cannot_be_proven(self):
         self.run_board("init", "demo", "--title", "Demo")
-        self.run_board("task", "demo", "pending", "--title", "Pending",
+        self.update_legacy_task("demo", "pending", "--title", "Pending",
                        "--status", "done", "--executor", "codex", "--pr", "1", "--stage", "merged",
                        "--delivery-target", "worker")
         from unittest.mock import MagicMock
