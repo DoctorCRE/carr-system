@@ -89,7 +89,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
-    await c.query(readFileSync(path.join(root, 'migrations/0917_deal_status_next_step.sql'), 'utf8'));
+    await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
@@ -447,6 +447,25 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
       assert.equal(room.thread.length, 1);
       assert.equal(room.next_date, past);
+    }));
+
+    await t.test('overdue migration replay preserves inactive prospect board membership and retained history', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1", [id(3)]);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Synthetic retained plan', next_date: '2027-01-01',
+      });
+      await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', {
+        client_id: id(3), status: 'inactive', base_version: 2,
+        reason: 'Synthetic deferral', idempotency_key: 'synthetic-overdue-inactive',
+      });
+      await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c, actor, {})).deals, []);
+      assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals, []);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      assert.ok(room.thread.some(n => n.id === prior.next_step_id));
     }));
 
     await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
