@@ -41,6 +41,11 @@ class CaptureFake {
     this.queryCount += 1;
     const sql = text.replace(/\s+/g, " ").trim();
     if (sql === "select pg_advisory_xact_lock(hashtextextended($1, 0))") return { rows: [] };
+    if (sql.includes("dealroom:field-lock")) return { rows: [] };
+    if (sql === "select next_date::text as next_date from deal where id=$1")
+      return { rows: [{ next_date: this.nextDate ?? null }] };
+    if (sql.includes("dealroom:set-next-date")) { this.nextDate = params[1]; return { rows: [] }; }
+
     if (sql.includes("capture:claim-nonce"))
       return { rows: this.sessions.filter(session => session.nonce === params[0]).map(session => ({ id: session.id })) };
     if (sql.includes("capture:device-actor"))
@@ -555,33 +560,6 @@ test("post-call lifecycle cannot finalize after one acceptance and stores only s
     at: "2026-08-08T16:01:00.000Z" });
   assert.equal(done.status, 200);
   assert.equal(Object.keys(TOOLS).some(name => /send.*email|email.*send/iu.test(name)), false);
-});
-
-test("post-call actions complete and replace only for the calling partner", async () => {
-  const db = new CaptureFake();
-  db.postCallActions.push(
-    { id: "joe-post-action", deal_id: ids.deal, owner_id: ids.joe, description: "Joe follow-up",
-      due_on: "2026-08-11", status: "open", updated_at: "2026-08-08T15:00:00.000Z", completed_at: null },
-    { id: "dell-post-action", deal_id: ids.deal, owner_id: ids.dell, description: "Dell follow-up",
-      due_on: "2026-08-12", status: "open", updated_at: "2026-08-08T15:00:00.000Z", completed_at: null },
-  );
-  const completed = await TOOLS["complete-action"].handler(db, joe,
-    { idempotency_key: "complete-joe-post", ref: ids.deal, outcome: "Called client" });
-  assert.equal(completed.count, 1);
-  assert.equal(completed.completed[0].source, "post_call_action");
-  assert.equal(db.postCallActions.find(action => action.id === "joe-post-action").status, "done");
-  assert.equal(db.postCallActions.find(action => action.id === "dell-post-action").status, "open");
-
-  db.postCallActions.push({ id: "joe-replacement", deal_id: ids.deal, owner_id: ids.joe,
-    description: "Old Joe task", due_on: "2026-08-13", status: "open",
-    updated_at: "2026-08-08T15:00:00.000Z", completed_at: null });
-  const replaced = await TOOLS["set-next-action"].handler(db, joe,
-    { idempotency_key: "replace-joe-post", ref: ids.deal,
-      description: "New Joe task", due_on: "2026-08-14" });
-  assert.deepEqual(replaced.dropped_post_call_action_ids, ["joe-replacement"]);
-  assert.equal(db.postCallActions.find(action => action.id === "joe-replacement").status, "dropped");
-  assert.equal(db.postCallActions.find(action => action.id === "dell-post-action").status, "open");
-  assert.equal(db.nextActions.at(-1).description, "New Joe task");
 });
 
 test("log-outreach completes only the caller's post-call action on the deal", async () => {

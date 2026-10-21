@@ -35,7 +35,7 @@ SEALED_PREDECESSOR_ORDINAL = 117
 SEALED_PREDECESSOR_DIGEST = 'sha256:bba3689ccfaad427b77c3d8295406d5e56c2ac506c5d5ddb1232fa0461315838'
 SEALED_PREDECESSOR_ENTRY_COUNTS = (2801, 1207)
 SEALED_PREDECESSOR_MIGRATION = 'migrations/0869_loop_residue_scac_successor.sql'
-LIVE_REGISTRY_MIGRATION = 'migrations/0922_deal_vendor_assignments.sql'
+LIVE_REGISTRY_MIGRATION = 'migrations/0925_deal_vendor_assignments.sql'
 
 LIVE_CATALOG_CURRENT_FN = f"ops.scac_mutation_catalog_v{LIVE_REGISTRY_ORDINAL}_current()"
 LIVE_REGISTRATION_FN = f"ops.scac_mutation_registration_v{LIVE_REGISTRY_ORDINAL}"
