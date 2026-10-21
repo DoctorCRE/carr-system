@@ -336,7 +336,7 @@ async function withEnvelope(client, actor, verb, args, fn) {
   // reports a version conflict instead of the promised replay.
   // Keep this scoped until the shared envelope's existing fake-client suites
   // are migrated to model the extra query for every historical write verb.
-  if (verb === "record-commission-receipt" || ["record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
+  if (verb === "record-commission-receipt" || ["set-prospect-engagement-status", "record-lead-contact", "update-lead", "advance-leads", "approve-lead-draft", "approve-lead-move", "undo-lead-move", "record-deal-invoice", "undo-invoice-close"].includes(verb) || verb === "teach" || verb === "claim-lead" || verb === "link-lead-client" || verb === "whats-new" || verb === "write-work-shape" || verb === "set-work-shape-disposition" || verb === "report-problem" || verb === "review-and-triage" || verb === "answer-work-request-for-joe" || verb === "decline-work-request" || verb === "supersede-work-request" || verb === "propose-ready-plan" || verb === "accept-ready-plan" || verb === "propose-ready-plan-amendment" || verb === "accept-ready-plan-amendment" || verb === "acknowledge-ready-plan-amendment" || verb === "propose-outcome-feedback" || verb === "accept-outcome-feedback" || verb === "record-executed-lease" || verb === "observe-memory" || verb === "promote-memory" || verb === "correct-memory" || verb === "forget-memory" || verb === "register-engineering-slice-plan" || verb === "admit-engineering-slice" || verb === "review-engineering-slice" || verb === "append-tour-rights-receipt" || verb === "revoke-tour-rights-receipt" || verb === "append-tour-source-evidence" || verb === "append-tour-field-assertion" || verb === "create-tour-public-projection-draft" || verb === "seal-tour-public-projection" || verb === "append-tour-property-identifier-assertion" || verb === "append-tour-coordinate-candidate" || verb === "append-tour-entrance-verification-receipt" || verb === "codex-checkpoint" || verb === "ask-jev" || TOUR_DOMAIN_SERIALIZED_WRITES.has(verb) || BOARD_ANSWER_WRITE_VERBS.has(verb) || RESEARCH_SITE_WRITE_VERBS.has(verb) || MEETING_MODE_WRITE_VERBS.includes(verb))
     await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [key]);
   if (FEATURE_SWITCH_WRITES.has(verb)) await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))',[key]);
   const prior = await client.query("select request_hash, response from tool_call where idempotency_key=$1", [key]);
@@ -3401,7 +3401,8 @@ export const TOOLS = {
       const deals = await c.query(
         `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
                 to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.market, b.segment,
-                b.client_id, b.client_ref, b.client_name, b.account_client_id, b.account_client_ref,
+                b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
+                ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
                 b.account_name, b.account_owner, b.market_agent,
                 to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -3423,6 +3424,7 @@ export const TOOLS = {
                            order by e.field, e.recorded_at desc, e.id desc) latest
                 ), '{}'::jsonb) as field_base
            from v_deal_room_board b
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where ($1 = 'all' or b.workspace_kind = $1)
             and ($2::uuid is null or b.account_client_id = $2::uuid)
           order by b.attention desc, b.next_date nulls last, b.name
@@ -3444,10 +3446,14 @@ export const TOOLS = {
           /* dealroom:closed-deals */`,
         [workspace, args.account_client_id || null]);
       const accounts = await c.query(
-        `select account_client_id, account_client_ref, account_name, account_owner,
-                open_deals, attention_deals, overdue_deals, stale_deals,
-                to_jsonb(last_review_at)#>>'{}' as last_review_at, parked_deals
-           from v_deal_room_account order by account_name`);
+        `select a.account_client_id, a.account_client_ref, a.account_name, a.account_owner,
+                a.open_deals, a.attention_deals, a.overdue_deals, a.stale_deals,
+                to_jsonb(a.last_review_at)#>>'{}' as last_review_at, a.parked_deals,
+                ce.client_status, ce.client_version, ce.prospect_engagement_status
+           from v_deal_room_account a
+           join v_client_engagement_status ce on ce.client_id=a.account_client_id
+          where ce.client_status <> 'prospect' or ce.prospect_engagement_status = 'active'
+          order by a.account_name`);
       const session = await c.query(
         `select session_id, workspace_kind, account_client_id,
                 to_jsonb(started_at)#>>'{}' as started_at
@@ -4861,6 +4867,69 @@ export const TOOLS = {
                note: completedActions.length
                  ? "your open ball on this subject was completed, which is what feeds the follow-up cadence"
                  : "no open ball of yours existed on this subject; nothing to complete" };
+    }),
+  },
+
+  "set-prospect-engagement-status": {
+    write: true, humanOnly: true,
+    description: "Move a prospect between the deal board and the existing Leads pipeline atomically. Inactive uses nurture_drip; active uses opportunity. Preserves deals, suppression, history and audit. Requires a fresh client version from deal-room-board or the Leads workspace.",
+    inputSchema: { type: "object", properties: {
+      idempotency_key: { type: "string" }, client_id: { type: "string" },
+      base_version: { type: "integer" }, status: { type: "string", enum: ["active","inactive"] },
+      reason: { type: "string" }, human_quote: { type: "string" }, expected_actor: { type: "string", minLength: 1 } },
+      required: ["idempotency_key","client_id","base_version","status","reason"] },
+    handler: async (c, actor, args) => withEnvelope(c, actor, "set-prospect-engagement-status", args, async () => {
+      if (args.expected_actor && args.expected_actor !== actor.slug) throw new ToolError({ error: "account_changed" });
+      if (!canExercisePartnerAuthority(actor)) throw new ToolError({ error: "human_confirmation_required" });
+      if (!["active","inactive"].includes(args.status))
+        throw new ToolError({ error: "invalid_engagement_status", allowed: ["active","inactive"] });
+      if (typeof args.reason !== "string" || !args.reason.trim())
+        throw new ToolError({ error: "engagement_reason_required" });
+      await versionGuard(c, "client", args.client_id, args.base_version);
+      const current = (await c.query(
+        "select prospect_engagement_status,status,party_id,merged_into from client where id=$1", [args.client_id])).rows[0];
+      if (current.merged_into) throw new ToolError({ error: "client_merged_away", merged_into: current.merged_into });
+      if (current.status !== "prospect") throw new ToolError({ error: "not_a_prospect" });
+      const party = (await c.query("select merged_into,deleted_at,contact_state from party where id=$1 for share",[current.party_id])).rows[0];
+      if (!party || party.merged_into || party.deleted_at || args.status === "active" && party.contact_state === "do_not_contact")
+        throw new ToolError({ error: "prospect_party_protected" });
+      let leads = (await c.query(`select id,client_id,stage,suppressed,version from lead
+        where client_id=$1 or (party_id=$2 and client_id is null) order by id for update`,
+        [args.client_id,current.party_id])).rows;
+      const protectedLead = lead => lead.suppressed || ["archived","do_not_contact"].includes(lead.stage);
+      if (args.status === "active" && leads.some(protectedLead))
+        throw new ToolError({ error: "prospect_lead_protected" });
+      const stage = args.status === "inactive" ? "nurture_drip" : "opportunity";
+      if (!leads.length) {
+        const created = await TOOLS["new-lead"].handler(c,actor,{
+          idempotency_key: `${args.idempotency_key}:lead`,party_id:current.party_id,stage });
+        leads = [{id:created.lead_id,client_id:null,stage,suppressed:false,version:1}];
+      }
+      for (const lead of leads) {
+        if (!lead.client_id) {
+          await c.query("update lead set client_id=$1,updated_by=$2 where id=$3",[args.client_id,actor.id,lead.id]);
+          await writeEvent(c,actor,"link-lead-client","lead",lead.id,{
+            field:"client_id",old:{client_id:null},new:{client_id:args.client_id},
+            agent_rationale:args.reason.trim(),idempotency_key:args.idempotency_key });
+        }
+        if (!protectedLead(lead) && lead.stage !== stage) {
+          const version = (await c.query("select version from lead where id=$1",[lead.id])).rows[0].version;
+          await TOOLS["update-lead"].handler(c,actor,{
+            idempotency_key:`${args.idempotency_key}:stage:${lead.id}`,lead:lead.id,base_version:version,
+            fields:{stage},stage_review:{reason:args.reason.trim(),evidence_ids:[],human_quote:args.human_quote} });
+        }
+      }
+      const updated = (await c.query(
+        "update client set prospect_engagement_status=$2,updated_by=$3 where id=$1 returning version",
+        [args.client_id, args.status, actor.id])).rows[0];
+      await writeEvent(c, actor, "set-prospect-engagement-status", "client", args.client_id, {
+        field: "prospect_engagement_status",
+        old: { prospect_engagement_status: current.prospect_engagement_status },
+        new: { prospect_engagement_status: args.status },
+        agent_rationale: args.reason.trim(), human_quote: args.human_quote || null,
+        idempotency_key: args.idempotency_key });
+      return { ok: true, client_id: args.client_id, prospect_engagement_status: args.status,
+        client_version: updated.version, lead_id: leads[0].id };
     }),
   },
 
@@ -8951,9 +9020,10 @@ registerTools({
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
-                r.salesforce_id, r.base_version
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_room_board b
            join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
           where b.id=$1`, [s.id]);
       if (!deal.rows.length) deal = await c.query(
         `select b.id, b.name, b.phase, b.lead_owner as owner, b.deal_type as type,
@@ -8963,9 +9033,10 @@ registerTools({
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
                 coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
                             from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
-                r.salesforce_id, r.base_version
+                r.salesforce_id, r.base_version, ce.client_status, ce.client_version, ce.prospect_engagement_status
            from v_deal_board b
            join v_deal_reconciliation_read r on r.id=b.id
+           join v_client_engagement_status ce on ce.client_id=b.client_id
            left join v_client_account a on a.client_id=b.client_id
           where b.id=$1 /* dealroom:archived-detail */`, [s.id]);
       if (!deal.rows.length) throw new ToolError({ error: "not_found", table: "deal", id: s.id });
