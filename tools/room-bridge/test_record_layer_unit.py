@@ -52,6 +52,9 @@ class WireTests(unittest.TestCase):
             mcp = json.loads(config['mcp_servers.carr.url'])
             self.assertEqual(mcp, dispatch.claude_desktop_wire.CARR_MCP_URL)
             self.assertIn('mcp_servers.carr.required=true', argv)
+            approvals = {key: json.loads(value) for key, value in config.items()
+                         if key.endswith('default_tools_approval_mode')}
+            self.assertEqual(approvals, {'mcp_servers.carr.default_tools_approval_mode': 'approve'})
             self.assertIn('Draft for someone@example.test.', argv[-1])
             events = [{'type': 'item.completed', 'item': {
                 'type': 'agent_message', 'text': 'Synthetic business reply.'}}, {'type': 'turn.completed'}]

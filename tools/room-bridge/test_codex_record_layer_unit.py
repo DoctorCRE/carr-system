@@ -2,6 +2,7 @@
 import http.server
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import threading
@@ -10,8 +11,10 @@ from unittest.mock import patch
 
 import claude_desktop_wire
 import dispatch
+import record_layer
 
 
+@unittest.skipUnless(shutil.which('codex'), 'requires the installed Codex CLI')
 class CodexIsolationProbe(unittest.TestCase):
     def test_business_turn_and_required_carr_auth_fail_closed(self):
         requests = []
@@ -37,12 +40,16 @@ class CodexIsolationProbe(unittest.TestCase):
                         self.send_response(202)
                         self.end_headers()
                         return
-                    if data['method'] == 'initialize':
+                    if data['method'] == 'tools/call':
+                        result = {'content': [{'type': 'text', 'text': 'synthetic write recorded'}]}
+                    elif data['method'] == 'initialize':
                         result = {'protocolVersion': '2024-11-05', 'capabilities': {'tools': {}},
                                   'serverInfo': {'name': 'example.test', 'version': '1'}}
                     else:
-                        result = {'tools': [{'name': 'synthetic_read',
-                                  'description': 'Read synthetic example.test record',
+                        result = {'tools': [{'name': 'synthetic_write',
+                                  'description': 'Write synthetic example.test record',
+                                  'annotations': {'readOnlyHint': False, 'destructiveHint': True,
+                                                  'idempotentHint': True, 'openWorldHint': False},
                                   'inputSchema': {'type': 'object', 'properties': {}}}]}
                     payload = json.dumps({'jsonrpc': '2.0', 'id': data['id'], 'result': result}).encode()
                     self.send_response(200)
@@ -60,6 +67,11 @@ class CodexIsolationProbe(unittest.TestCase):
                 message = {'id': 'msg_synthetic', 'type': 'message', 'role': 'assistant',
                            'status': 'completed', 'content': [{'type': 'output_text',
                            'text': 'Draft for someone@example.test. Contact the partner.', 'annotations': []}]}
+                response_count = sum(path == '/v1/responses' for path, _ in requests)
+                if response_count == 1:
+                    message = {'type': 'function_call', 'id': 'fc_synthetic',
+                               'call_id': 'call_synthetic', 'namespace': 'mcp__carr',
+                               'name': 'synthetic_write', 'arguments': '{}'}
                 events = [
                     {'type': 'response.created', 'response': {'id': 'resp_synthetic',
                      'object': 'response', 'status': 'in_progress', 'output': []}},
@@ -78,6 +90,9 @@ class CodexIsolationProbe(unittest.TestCase):
         self.addCleanup(thread.join)
         self.addCleanup(server.shutdown)
         url = f'http://127.0.0.1:{server.server_port}'
+        canary = record_layer.CANARY.replace("'1.1.1.1', 443",
+                                            f"'127.0.0.1', {server.server_port}")
+        self.enterContext(patch.object(record_layer, 'CANARY', canary))
         launches = []
 
         def run(argv, **options):
@@ -107,13 +122,26 @@ class CodexIsolationProbe(unittest.TestCase):
             result = dispatch._to_codex({'posture': 'record-layer', 'model': 'gpt-6.1-sol', 'effort': 'low'},
                 'Draft for someone@example.test.', env=env, provider_run=run, timeout_s=30)
             self.assertEqual(result['status'], 'completed', result)
+            calls = [data for path, data in requests
+                     if path == '/mcp' and data.get('method') == 'tools/call']
+            self.assertEqual([call['params']['name'] for call in calls], ['synthetic_write'],
+                             'CARR write tool never invoked: ' + json.dumps([item for item in
+                                 requests[-1][1].get('input', [])
+                                 if item.get('type', '').endswith('call_output')]))
             self.assertEqual(result['canaries'], {'file_write': 'denied', 'network': 'denied'})
             self.assertIn('someone@example.test', result['result'])
             self.assertTrue(any(path == '/mcp' and data.get('method') == 'tools/list' for path, data in requests))
             inference = [data for path, data in requests if path == '/v1/responses']
-            self.assertEqual(len(inference), 1)
-            self.assertIn('synthetic_read', json.dumps(inference[0]))
-            self.assertNotIn('### `exec_command`', json.dumps(inference[0]))
+            self.assertEqual(len(inference), 2)
+            self.assertIn('synthetic_write', json.dumps(inference[0]))
+            declared = []
+            for tool in inference[0].get('tools', []):
+                declared.extend(tool.get('tools', []) if tool.get('type') == 'namespace' else [tool])
+            self.assertFalse({'apply_patch', 'exec', 'exec_command', 'shell', 'shell_command'} &
+                             {tool.get('name') for tool in declared}, declared)
+            replies = [item for item in inference[1].get('input', [])
+                       if item.get('type', '').endswith('call_output')]
+            self.assertIn('synthetic write recorded', json.dumps(replies))
             self.assertEqual(launches, ['sandbox', 'exec'])
             requests.clear()
             launches.clear()
@@ -123,7 +151,7 @@ class CodexIsolationProbe(unittest.TestCase):
             self.assertEqual(refused['status'], 'failed', refused)
             self.assertFalse(any(path == '/v1/responses' for path, _ in requests))
             self.assertEqual(launches, ['sandbox', 'exec'])
-        print('Real Codex profile completed with loopback CARR and Responses stand-ins. '
+        print('Real Codex profile invoked a write tool with loopback CARR and Responses stand-ins. '
               'Both native canaries denied. Required CARR 401 refused before inference. '
               'Invalid user config ignored. No paid inference or production CARR calls.')
 
