@@ -16,14 +16,23 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('intake_fixture', ROOT / 'ops/outlook-intake-selftest.py')
+if spec is None:
+    raise RuntimeError('could not load the intake fixture module spec')
+loader = spec.loader
+if loader is None:
+    raise RuntimeError('the intake fixture module spec has no loader')
 fixture = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(fixture)
+loader.exec_module(fixture)
 SOURCE = ROOT / 'vendor/hxprobe/src/main.rs'
 source = SOURCE.read_text()
-fixture.SCHEMA = re.search(r'db.execute_batch\(\s*"(.*?)",\s*\)', source, re.S)[1]
+schema_match = re.search(r'db.execute_batch\(\s*"(.*?)",\s*\)', source, re.S)
+if schema_match is None:
+    raise RuntimeError('could not find the intake schema in the decoder source')
+schema = schema_match.group(1)
+fixture.__dict__['SCHEMA'] = schema
 ALLOWED = 'joe.bookout@carr.us'
 TESTER = 'joe.b.tester@outlook.com'
-fixture.OWNER = ALLOWED
+fixture.__dict__['OWNER'] = ALLOWED
 CASES = {
     'allowed': [ALLOWED],
     'tester': [TESTER],
@@ -121,7 +130,7 @@ def main():
                  and observations['tester_upcoming']['action_writes'] == 0
                  and observations['legacy_retry']['replayed_writes'] == 0)
     with sqlite3.connect(':memory:') as con:
-        con.executescript(fixture.SCHEMA)
+        con.executescript(schema)
         columns = {table: [r[1] for r in con.execute(f'PRAGMA table_info({table})')]
                    for table in ('folders', 'messages', 'message_folders', 'events', 'meta')}
     print(json.dumps({
