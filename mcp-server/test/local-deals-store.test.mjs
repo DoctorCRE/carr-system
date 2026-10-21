@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { TOOLS, executeRegisteredTool } from '../src/tools.js';
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -82,12 +83,14 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query('create sequence ref_client_seq start 900000');
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
+    await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
+    await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
@@ -112,6 +115,44 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
+    await t.test('deal detail survives missing checklist storage and recovers after migration 0922', async t => {
+      const warning = t.mock.method(console, 'warn', () => {});
+      const read = async () => {
+        await c.query('set role carr_reader');
+        try { return await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)}); }
+        finally { await c.query('reset role'); }
+      };
+      await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
+      try {
+        const before = await read();
+        assert.equal(before.deal_id, id(4));
+        assert.equal(before.name, 'Synthetic Assignment');
+        assert.equal(before.schema_version, 'deal-timeline.v1');
+        assert.deepEqual(before.checklist, {
+          schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [],
+        });
+        assert.deepEqual(await read(), before, 'repeated reads preserve the same detail');
+        assert.equal(warning.mock.callCount(), 1, 'missing storage logs once across reads');
+        assert.match(warning.mock.calls[0].arguments.join(' '), /checklist.*unavailable/i);
+        await c.query(readFileSync(path.join(root, 'migrations/0922_deal_checklist_commissions.sql'), 'utf8'));
+        const after = await read();
+        assert.equal(after.checklist.template_state, 'current');
+        assert.equal(after.checklist.phases.length, 6);
+        const {checklist: beforeChecklist, ...beforeDetail} = before;
+        const {checklist: afterChecklist, ...afterDetail} = after;
+        assert.deepEqual(beforeDetail, afterDetail, 'every existing detail field survives the missing migration');
+        await c.query('revoke select on v_deal_room_commission from carr_reader');
+        await assert.rejects(read(), error => error.code === '42501', 'other database errors still propagate');
+        assert.equal(warning.mock.callCount(), 1, 'other errors are not logged as unavailable storage');
+      } finally {
+        await c.query(readFileSync(path.join(root, 'migrations/0922_deal_checklist_commissions.sql'), 'utf8').replace('create view', 'create or replace view'));
+        await c.query('delete from deal where id=$1', [id(4)]);
+        await c.query('delete from client where id=$1', [id(3)]);
+        await c.query('delete from party where id=$1', [id(2)]);
+        await c.query('delete from doctrine_section');
+      }
+    });
     await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
       await fixture(true);
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
@@ -384,6 +425,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.client_id;
             delete prior.schema_version;
             delete prior.lease;
+            delete prior.checklist;
           }
           rowsOf(prior).forEach(row => delete row.phase_started_on);
           const oldRows = rowsOf(baseline[name]);
@@ -470,14 +512,42 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         }
       }));
 
+    await t.test('checklist requires receipt evidence for every installment on an open uninvoiced deal', async () => transaction(async () => {
+      await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
+      const readReceipt = async () => {
+        await c.query('set local role carr_reader');
+        try {
+          const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+          assert.equal(detail.invoiced_on, null);
+          return detail.checklist.phases.flatMap(phase => phase.items).find(item => item.id === 'commission_received');
+        } finally { await c.query('reset role'); }
+      };
+      assert.equal((await readReceipt()).status, 'not_recorded', 'no installments prove no receipt');
+      await c.query("insert into commission(id,deal_id,gross_amount,status,received_on,created_by) values($1,$2,100,'received','2026-10-19',$3),($4,$2,100,'expected',null,$3)", [id(31),id(4),actor.id,id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'an expected installment cannot disappear from completion');
+      await c.query("update commission set status='invoiced' where id=$1", [id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'an invoiced installment remains unpaid');
+      await c.query("update commission set status='received' where id=$1", [id(32)]);
+      assert.equal((await readReceipt()).status, 'not_recorded', 'received status alone is not dated receipt evidence');
+      await c.query("update commission set received_on='2026-10-20' where id=$1", [id(32)]);
+      const receipt = await readReceipt();
+      assert.equal(receipt.status, 'complete');
+      assert.deepEqual(receipt.evidence_ref.split(', ').sort(), [`commission:${id(31)}`, `commission:${id(32)}`]);
+      assert.equal((await c.query("select has_table_privilege('carr_reader','commission','select') allowed")).rows[0].allowed, false);
+    }));
+
     await t.test('timeline reader returns exact current lease and excludes unverified history', async () => transaction(async () => {
       await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
       await c.query("insert into lease(id,deal_id,status,executed_on,commencement_on,expiration_on,evidence_kind,evidence_ref,source,created_by) values($1,$2,'current','2026-10-01','2026-11-01','2031-10-31','executed_lease','Synthetic clause 3','Synthetic abstract',$3)", [id(21),id(4),actor.id]);
       await c.query("insert into lease(id,deal_id,status,expiration_on,created_by) values($1,$2,'legacy_unverified','2040-01-01',$3)", [id(22),id(4),actor.id]);
       await c.query('set local role carr_reader');
       assert.equal((await c.query("select has_table_privilege('carr_reader','lease','select') as allowed")).rows[0].allowed,false);
       const read = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
       assert.equal(read.schema_version,'deal-timeline.v1');
+      assert.equal(read.checklist.template_state,'current');
+      assert.equal(read.checklist.phases.flatMap(p=>p.items).find(i=>i.id==='executed_lease').status,'complete');
       assert.equal(read.lease.id,id(21));
       assert.equal(read.lease.commencement_on,'2026-11-01');
       assert.equal(read.lease.expiration_on,'2031-10-31');
@@ -485,7 +555,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('reset role');
       await c.query("update lease set status='superseded' where id=$1",[id(21)]);
       await c.query('set local role carr_reader');
-      assert.equal((await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)})).lease,null);
+      const superseded = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(superseded.lease,null);
+      assert.equal(superseded.checklist.phases.flatMap(p=>p.items).find(i=>i.id==='executed_lease').status,'not_recorded');
     }));
 
     await t.test('actual legacy handler works as carr_reader, including an empty board', async () => transaction(async () => {
