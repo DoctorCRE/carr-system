@@ -99,6 +99,27 @@ class SourceReachability(unittest.TestCase):
         self.assertEqual(self.fetch_head.read_text(), "another session's fetch evidence\n")
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), candidate)
 
+    def test_unmerged_branch_is_refused(self):
+        self.git(self.writer, "checkout", "-q", "-b", "unmerged")
+        candidate = self.commit("unmerged source", branch="unmerged")
+        self.checkout(candidate)
+        with self.assertRaisesRegex(ctl.ReplacementRefusal, "SHA is not reachable"):
+            self.validate(candidate)
+
+    def test_merged_sha_remains_valid_after_remote_main_advances(self):
+        candidate = self.commit("reviewed source")
+        self.checkout(candidate)
+        self.commit("later reviewed source")
+        self.assertEqual(self.validate(candidate).git_sha, candidate)
+        self.assertEqual(self.git(self.repo, "rev-parse", "origin/main"), self.base)
+        self.assertEqual(self.fetch_head.read_text(), "another session's fetch evidence\n")
+
+    def test_missing_remote_main_cannot_fall_back_to_cached_tracking_ref(self):
+        self.checkout(self.base)
+        self.git(self.origin, "update-ref", "-d", "refs/heads/main")
+        with self.assertRaisesRegex(ctl.ReplacementRefusal, "git source check failed"):
+            self.validate(self.base)
+
 
 def refuses(call, contains: str) -> None:
     try:
