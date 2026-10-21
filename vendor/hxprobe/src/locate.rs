@@ -2,7 +2,7 @@
 use crate::{block, header, observe};
 use std::{collections::BTreeMap, ffi::OsStr, fs};
 
-fn ranges(before: &[u8], after: &[u8]) -> Vec<(usize, usize)> {
+pub(crate) fn ranges(before: &[u8], after: &[u8]) -> Vec<(usize, usize)> {
     let mut result = Vec::new();
     let mut start = None;
     for i in 0..before.len().max(after.len()) {
@@ -72,7 +72,7 @@ fn changed_records(data: &[u8], diff: &[(usize, usize)]) -> String {
         .join(",")
 }
 
-fn stored(data: &[u8], off: usize) -> &[u8] {
+pub(crate) fn stored(data: &[u8], off: usize) -> &[u8] {
     let length = u32::from_le_bytes(data[off + 20..off + 24].try_into().unwrap()) as usize;
     &data[off..off + block::PAYLOAD + length]
 }

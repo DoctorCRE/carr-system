@@ -34,6 +34,7 @@ mod folder;
 mod header;
 mod lz;
 mod locate;
+mod study;
 mod observe;
 mod record;
 mod schema;
@@ -689,6 +690,17 @@ rewrites the file while it runs.";
 
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "study-diff") {
+        let result = if raw.len() == 4 { study::run(&raw[2], &raw[3]) } else { Err(()) };
+        match result {
+            Ok(json) => println!("{json}"),
+            Err(()) => {
+                eprintln!("study input rejected");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if raw.get(1).is_some_and(|arg| arg == "locate") {
         let result = if raw.len() == 5 { locate::run(&raw[2], &raw[3], &raw[4]) } else { Err(()) };
         match result {

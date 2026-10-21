@@ -149,13 +149,9 @@ def study_diff(args):
         raise ValueError('immutable copy assertion required')
     paths = (args.before, args.after)
     before_stats = [path.stat() for path in paths]
-    with tempfile.TemporaryDirectory() as tmp:
-        needles = Path(tmp) / 'needles'
-        # locate requires one needle; its fixed zero-byte search results never leave this worker.
-        needles.write_text('00\n')
-        result = subprocess.run([str(ROOT / 'vendor/hxprobe/target/debug/hxprobe'), 'locate',
-                                 str(args.before), str(args.after), str(needles)],
-                                capture_output=True, timeout=300)
+    result = subprocess.run([str(ROOT / 'vendor/hxprobe/target/debug/hxprobe'), 'study-diff',
+                             str(args.before), str(args.after)],
+                            capture_output=True, timeout=300)
     after_stats = [path.stat() for path in paths]
     for old, new in zip(before_stats, after_stats):
         if (old.st_dev, old.st_ino, old.st_size, old.st_mtime_ns, old.st_ctime_ns) != (
@@ -164,27 +160,8 @@ def study_diff(args):
     if result.returncode:
         raise ValueError('store rejected')
     report = json.loads(result.stdout)
-    blocks = report['blocks']
-    counts = {
-        'file_changed_ranges': len(report['file_ranges']),
-        'file_changed_bytes': sum(end - start for start, end in report['file_ranges']),
-        'changed_blocks': len(blocks),
-        'added_blocks': sum(b['status'] == 'added' for b in blocks),
-        'removed_blocks': sum(b['status'] == 'removed' for b in blocks),
-        'payload_changed_ranges': sum(len(b['payload_ranges']) for b in blocks),
-        'payload_changed_bytes': sum(end - start for b in blocks for start, end in b['payload_ranges']),
-    }
-    output = {'schema': 'hxstore-study-diff/v1',
-              'interpretation': 'candidates_only_no_causal_or_field_mapping_claim', 'counts': counts}
-    for side in ('before', 'after'):
-        records = []
-        for block in blocks:
-            for record in block[f'records_{side}']:
-                records.append({'record_type': record['record_type'],
-                                'record_id': f"{block['block_offset']}:{record['start']}:{record['end']}"})
-        output[f'records_{side}'] = records
-        counts[f'records_{side}'] = len(records)
-    return output
+    return {key: report[key] for key in (
+        'schema', 'interpretation', 'counts', 'coverage', 'records_before', 'records_after')}
 
 
 def import_hypotheses(args):

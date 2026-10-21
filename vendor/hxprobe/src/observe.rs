@@ -47,6 +47,45 @@ impl Issue {
     }
 }
 
+pub fn verified_blocks(
+    data: &[u8],
+    mut accept: impl FnMut(usize, usize, block::Block),
+) -> Result<(usize, Vec<Issue>), Issue> {
+    let h = header::check(data).map_err(|_| Issue::input("header", "not_store"))?;
+    if !h.known || h.page_size != 4096 {
+        return Err(Issue::input("header", "unsupported_format"));
+    }
+    let offsets = block::find_all(data);
+    let signatures = offsets.len();
+    let mut issues = Vec::new();
+    let mut previous_end = 0;
+    for (index, off) in offsets.into_iter().enumerate() {
+        if off < previous_end {
+            issues.push(Issue {
+                stage: "block",
+                reason_code: "overlapping_candidate",
+                block_ordinal: Some(index + 1),
+            });
+            continue;
+        }
+        let b = match block::parse_checked(data, off) {
+            Ok(b) => b,
+            Err(error) => {
+                issues.push(Issue {
+                    stage: "block",
+                    reason_code: error.reason_code(),
+                    block_ordinal: Some(index + 1),
+                });
+                continue;
+            }
+        };
+        let compressed = u32::from_le_bytes(data[off + 20..off + 24].try_into().unwrap()) as usize;
+        previous_end = off + block::PAYLOAD + compressed;
+        accept(off, index + 1, b);
+    }
+    Ok((signatures, issues))
+}
+
 pub fn run(path: &OsStr) -> Result<String, Issue> {
     let file = File::open(path).map_err(|_| Issue::input("input", "unreadable"))?;
     let size = file
@@ -58,43 +97,15 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
     }
     // SAFETY: the caller supplies an immutable copy; this mapping is read-only.
     let mm = unsafe { Mmap::map(&file) }.map_err(|_| Issue::input("input", "unreadable"))?;
-    let h = header::check(&mm).map_err(|_| Issue::input("header", "not_store"))?;
-    if !h.known || h.page_size != 4096 {
-        return Err(Issue::input("header", "unsupported_format"));
-    }
-    let mut blocks: BTreeMap<u32, Counts> = BTreeMap::new();
-    let mut records: BTreeMap<String, Counts> = BTreeMap::new();
-    let offsets = block::find_all(&mm);
-    let signatures = offsets.len();
     let mut issues = Vec::new();
     let mut verified = 0;
+    let mut blocks: BTreeMap<u32, Counts> = BTreeMap::new();
+    let mut records: BTreeMap<String, Counts> = BTreeMap::new();
     let mut verified_bytes = 0;
     let mut undecodable = 0;
-    let mut previous_end = 0;
-    for (index, off) in offsets.into_iter().enumerate() {
-        if off < previous_end {
-            issues.push(Issue {
-                stage: "block",
-                reason_code: "overlapping_candidate",
-                block_ordinal: Some(index + 1),
-            });
-            continue;
-        }
-        let b = match block::parse_checked(&mm, off) {
-            Ok(b) => b,
-            Err(error) => {
-                issues.push(Issue {
-                    stage: "block",
-                    reason_code: error.reason_code(),
-                    block_ordinal: Some(index + 1),
-                });
-                continue;
-            }
-        };
+    let (signatures, mut block_issues) = verified_blocks(&mm, |_, ordinal, b| {
         verified += 1;
         verified_bytes += b.data.len();
-        let compressed = u32::from_le_bytes(mm[off + 20..off + 24].try_into().unwrap()) as usize;
-        previous_end = off + block::PAYLOAD + compressed;
         blocks.entry(b.kind).or_default().add(b.data.len(), 0);
         let mut block_records = BTreeMap::new();
         if observe_payload(&b.data, &mut block_records).is_err() {
@@ -102,13 +113,13 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
             issues.push(Issue {
                 stage: "record",
                 reason_code: "invalid_object_bounds",
-                block_ordinal: Some(index + 1),
+                block_ordinal: Some(ordinal),
             });
             records
                 .entry("unframed".into())
                 .or_default()
                 .add(b.data.len(), 0);
-            continue;
+            return;
         }
         for (kind, n) in block_records {
             let total = records.entry(kind).or_default();
@@ -120,7 +131,9 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
                 *total.fields.entry(field).or_default() += count;
             }
         }
-    }
+    })?;
+    issues.append(&mut block_issues);
+    issues.sort_by_key(|issue| issue.block_ordinal);
     let block_rows: Vec<_> = blocks
         .iter()
         .map(|(kind, n)| {
