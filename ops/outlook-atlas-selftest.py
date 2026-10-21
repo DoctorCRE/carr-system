@@ -2,6 +2,8 @@
 """Synthetic bundle tests. No installed Outlook or private store is consulted."""
 
 import importlib.util
+import copy
+import hashlib
 import json
 from pathlib import Path
 import plistlib
@@ -63,6 +65,71 @@ class SurfaceTests(unittest.TestCase):
         self.assertEqual([e["offset"] for e in route["evidence"]], [32, 32 + len(literal)])
         self.assertEqual(route["claim"], "literal grammar only; runtime acceptance unknown")
         self.assertNotIn("opaque", json.dumps(result))
+
+    def grammar_audits(self):
+        path = self.binary(b'separate synthetic instruction constants, no complete URL')
+        source = 'Contents/MacOS/Microsoft Outlook'
+        raw = path.read_bytes()
+        grammar = {
+            'schema': 'wr443-deeplink-grammar/v1',
+            'subject': {'binary': source, 'build': '16.114.123', 'bytes': len(raw),
+                        'sha256': hashlib.sha256(raw).hexdigest(), 'architecture': 'arm64'},
+            'emails': {
+                'recognized_query_keys': ['from', 'body', 'account', 'immutableID'],
+                'new': {'route': 'ms-outlook://emails/new', 'reads': ['body', 'account'],
+                        'evidence': ['email_keys']},
+                'send': {'route': 'ms-outlook://emails/send', 'result': 'false, unhandled',
+                         'evidence': ['email_send_false']},
+                'existing_message': {'route': 'ms-outlook://emails/open/message?immutableID=SECRET',
+                                     'evidence': ['email_keys']},
+            },
+            'events': {
+                'route': 'ms-outlook://events/new', 'recognized_query_keys': ['title', 'location',
+                    'isallday', 'start', 'end', 'attendees'],
+                'location': {'key': 'location'}, 'isallday': {'key': 'isallday'},
+                'dates': {'keys': ['start', 'end']}, 'attendees': {'key': 'attendees'},
+                'evidence': ['event_keys'],
+            },
+            'evidence': [{'id': key, 'file_offset': '0x20', 'byte_length': 4,
+                          'vm_start': '0x100000020', 'sha256': hashlib.sha256(raw[32:36]).hexdigest()}
+                         for key in ['email_keys', 'email_send_false', 'event_keys']],
+        }
+        send = {
+            'schema': 'wr443-send-by-id/v1',
+            'sources': [{'path': 'MacOS/Microsoft Outlook', 'size_bytes': len(raw),
+                         'sha256': hashlib.sha256(raw).hexdigest()}],
+            'questions': {
+                '1_emails_send': {'any_query_keys_consumed': False},
+                '2_immutableID': {'applicable_path': 'ms-outlook://emails/open/message',
+                                  'required_message_query_key': 'immutableID', 'evidence': ['E07']},
+                '3_accountID': {'actual_query_key': 'account', 'fallback_query_key': 'from',
+                                'evidence': ['E15']},
+            },
+            'evidence': [{'id': key, 'binary': 'MacOS/Microsoft Outlook',
+                          'universal_file_offset': '0x20', 'bytes_hex': raw[32:36].hex(),
+                          'arm64_vm_address': '0x100000020', 'symbol': 'Synthetic.rawValue'}
+                         for key in ['E07', 'E15']],
+        }
+        return grammar, send
+
+    def test_reconstruction_extracts_audited_constants_without_runtime_claims(self):
+        grammar, send = self.grammar_audits()
+        before = self.extract()
+        result = atlas.reconcile_surface(before, grammar, send, {'sources': []})
+        self.assertFalse(any(e['kind'] == 'url_literal' for e in result['surfaces'].values()))
+        routes = {e['value']['path']: e for e in result['surfaces'].values()
+                  if e['kind'] == 'url_reconstructed' and e['value']['host'] == 'emails'}
+        self.assertEqual(routes['/new']['value']['query_keys'], ['account', 'body', 'from'])
+        self.assertEqual(routes['/open/message']['value']['query_keys'],
+                         ['account', 'from', 'immutableID'])
+        self.assertEqual(routes['/send']['value']['query_keys'], [])
+        self.assertEqual(routes['/send']['value']['static_dispatch'], 'unhandled_false')
+        self.assertEqual(routes['/new']['confidence'], 'inferred')
+        self.assertEqual(routes['/new']['value']['runtime_acceptance'], 'untested')
+        self.assertTrue(all(e['offset'] == 32 for e in routes['/new']['evidence']))
+        self.assertNotIn('SECRET', json.dumps(result))
+        self.assertEqual(before, self.extract(), 'reconciliation must not mutate its input')
+        self.assertEqual(result, self.extract(result), 'bound reconstruction must regenerate')
 
     def test_non_macho_resources_are_not_url_evidence(self):
         resource = self.app / "Contents/Resources/example.txt"
