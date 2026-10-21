@@ -137,6 +137,8 @@ def seeded_paths(*rels):
 def run(args, env=None, shell_cmd=None, timeout=600):
     e = dict(os.environ)
     e.pop("CARR_CI_DATABASE_URL", None)
+    e.pop("GITHUB_EVENT_NAME", None)
+    e.pop("GITHUB_EVENT_PATH", None)
     if env:
         e.update(env)
     cmd = shell_cmd if shell_cmd else [str(CI), *args]
