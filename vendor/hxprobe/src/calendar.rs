@@ -50,6 +50,7 @@ pub struct Attendee {
 #[derive(Clone, Debug, Default)]
 pub struct Event {
     pub goid: String,
+    pub sources: BTreeSet<String>,
     pub start_unix: i64,
     pub end_unix: i64,
     pub subject: Option<String>,
@@ -70,14 +71,15 @@ pub struct Index {
 }
 
 impl Index {
-    pub fn observe(&mut self, data: &[u8]) {
+    pub fn observe(&mut self, data: &[u8], source: &str) {
         for obj in objects(data) {
             let (Some(goid), Some(start), Some(end)) = (goid(obj), tick(obj, START), tick(obj, END)) else {
                 continue;
             };
             self.objects += 1;
             self.identities.insert((goid.clone(), start));
-            let Some(ev) = parse(obj, goid, start, end) else { continue };
+            let Some(mut ev) = parse(obj, goid, start, end) else { continue };
+            ev.sources.insert(source.to_string());
             match self.events.get_mut(&(ev.goid.clone(), start)) {
                 Some(prev) => merge(prev, ev),
                 None => {
@@ -219,6 +221,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
 
     Some(Event {
         goid,
+        sources: BTreeSet::new(),
         start_unix: start,
         end_unix: end,
         subject: Some(subject.to_string()),
@@ -232,6 +235,7 @@ fn parse(obj: &[u8], goid: String, start: i64, end: i64) -> Option<Event> {
 
 /// Combine a later revision into the copy already held, field by field.
 fn merge(prev: &mut Event, ev: Event) {
+    prev.sources.extend(ev.sources);
     prev.end_unix = prev.end_unix.max(ev.end_unix);
     for (slot, value) in [
         (&mut prev.subject, ev.subject),
@@ -254,6 +258,7 @@ fn merge(prev: &mut Event, ev: Event) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    impl Index { fn fixture(&mut self, data: &[u8]) {self.observe(data, "synthetic");} }
 
     fn u16le(s: &str) -> Vec<u8> {
         s.encode_utf16().flat_map(u16::to_le_bytes).collect()
@@ -310,7 +315,7 @@ mod tests {
     #[test]
     fn decodes_a_meeting() {
         let mut idx = Index::default();
-        idx.observe(&envelope(&object(true, &[("Bo Example", "bo@example.test")])));
+        idx.fixture(&envelope(&object(true, &[("Bo Example", "bo@example.test")])));
         assert_eq!(idx.events.len(), 1, "one meeting decoded");
         let ev = idx.events.values().next().unwrap();
         assert_eq!(ev.start_unix, 1_793_000_000, "start read at +574");
@@ -326,7 +331,7 @@ mod tests {
     #[test]
     fn a_meeting_with_no_attendees_still_decodes() {
         let mut idx = Index::default();
-        idx.observe(&envelope(&object(true, &[])));
+        idx.fixture(&envelope(&object(true, &[])));
         assert_eq!(idx.events.len(), 1, "a zero-attendee block is still a block");
         assert!(idx.events.values().next().unwrap().attendees.is_empty());
     }
@@ -334,7 +339,7 @@ mod tests {
     #[test]
     fn working_hours_without_a_global_id_are_not_meetings() {
         let mut idx = Index::default();
-        idx.observe(&envelope(&object(false, &[])));
+        idx.fixture(&envelope(&object(false, &[])));
         assert!(idx.events.is_empty(), "no Global Object ID, no meeting");
         assert_eq!(idx.objects, 0, "and it is not counted as a meeting object");
     }
@@ -344,7 +349,7 @@ mod tests {
         let mut idx = Index::default();
         let one = envelope(&object(true, &[]));
         let two = envelope(&object(true, &[("Bo Example", "bo@example.test")]));
-        idx.observe(&[one, two].concat());
+        idx.fixture(&[one, two].concat());
         assert_eq!(idx.objects, 2, "both revisions seen");
         assert_eq!(idx.events.len(), 1, "one identity");
         assert_eq!(idx.events.values().next().unwrap().attendees.len(), 1, "the fuller attendee list wins");

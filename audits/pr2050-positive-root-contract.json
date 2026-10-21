@@ -1,0 +1,199 @@
+{
+  "schema": "pr2050-positive-root-contract/v2",
+  "status": "source_implemented_merge_held_for_independent_qualification",
+  "baseline_head": "9eb7a6c61c594ca7f6266ec01c2d04e650d8d73f",
+  "premise": {
+    "statement": "A positive verified allowed-mailbox to root binding is sufficient when every nonmatching, missing or conflicting root is rejected before content recovery.",
+    "synthetic_verdict": "supported",
+    "tester_root_name_required": false,
+    "runtime_safety_inferred_from_policy": false,
+    "seam": "ownership::Account::bind and Account::revisions, called by owned-db before record/schema/calendar parsing",
+    "red_first": [
+      "positive_binding_denies_unnamed_root_before_recovery",
+      "binary_positive_mail_and_event_and_unnamed_owner",
+      "legacy_retry_is_held_before_any_effect"
+    ],
+    "additional_red_checks": [
+      "nested_competing_owner_is_rejected",
+      "competing_root_inside_mailbox_is_rejected",
+      "revision_header_mutations_cannot_claim_an_allowed_root",
+      "missing_copy_keys_do_not_collapse_distinct_owned_mail"
+    ]
+  },
+  "fresh_snapshot": {
+    "path": "/Users/booko/carr-local/_to_delete/outlook-fda-probes-2026-10-21/work-ownership-a_f303e0/store.hxd",
+    "sha256": "a92b9af558e3f5e06630280262f0250f67380010269831eca69b0b101af3c050",
+    "scope": "Structural types, numeric keys and the two authorized identities only; no content decoder, profile, sidecar, names, subjects, bodies or headers.",
+    "verified_blocks": 6856,
+    "verified_payload_bytes": 121471431,
+    "excluded_payload_crc_mismatches": 15,
+    "excluded_overlapping_candidates": 3,
+    "bindings": [
+      {
+        "mailbox": 336495,
+        "root": 336224,
+        "authorized_identity_role": "allowed",
+        "observations": 30
+      },
+      {
+        "mailbox": 520243,
+        "root": 520105,
+        "authorized_identity_role": "tester",
+        "observations": 5
+      }
+    ],
+    "parent_reference_revisions_by_class": {
+      "201": 2485,
+      "202": 1119,
+      "79": 1165,
+      "107": 712
+    },
+    "parent_reference_revisions_by_root": {
+      "336224": 5465,
+      "520105": 16
+    },
+    "event_layout_positive_revisions": 702,
+    "class_107_non_event_layout_revisions": 10,
+    "final_ownership_seam_allowed_revisions": {
+      "79": 1157,
+      "107": 712,
+      "201": 2479,
+      "202": 1117
+    },
+    "qualified_intake_counts": false,
+    "difference_from_old_snapshot": "The fresh authorized identity fields bind tester mailbox 520243 to root 520105. The old snapshot had no tester identity matches. Neither result names the unidentified root 336597.",
+    "prior_observation": "Mailbox 336495 to root 336224 remains an observation, never a production constant."
+  },
+  "serialization_contract": {
+    "format_version": 105,
+    "page_size": 4096,
+    "contract_version": "hx-owner-v1",
+    "mailbox_envelope_tag": 1738,
+    "mailbox_class": 74,
+    "identity_tail_offset": 1748,
+    "identity_tail": "Two consecutive discriminator-1/u8-byte-length/exact-UTF16LE fields, equal, with second ending at the envelope end.",
+    "mailbox_root_reference_offsets": [
+      48,
+      112
+    ],
+    "revision_root_reference_offset": 112,
+    "supported_revision_tag_class_pairs": [
+      [
+        1072,
+        79
+      ],
+      [
+        1551,
+        201
+      ],
+      [
+        1870,
+        202
+      ],
+      [
+        1109,
+        107
+      ]
+    ],
+    "rejects": [
+      "competing mailbox identities or roots",
+      "unsupported or truncated mailbox framing",
+      "missing root references",
+      "nonmatching roots",
+      "overlapping/nested revision envelopes",
+      "conflicting full root references",
+      "unsupported self-header kinds or repeated keys"
+    ],
+    "configured_identity": "joe.bookout@carr.us",
+    "hardcoded_production_numeric_ids": false
+  },
+  "decisions": [
+    "One bounded session, one executor, autonomous design frontier; no approval or new Work Request.",
+    "Choose one ownership module before decoding over a post-merge Python address filter. Root and mailbox keys are distinct.",
+    "Stream binding discovery and content passes; do not retain the entire inflated store.",
+    "Use owned-db so older installed decoders reject the command before source recovery. Delete unowned db export and folder output.",
+    "Reject other roots before mail/schema/conversation/copy/calendar effects. Keep all merged and inherited donor source offsets.",
+    "Disable sidecar recovery. Allowed inline content and previews remain functional.",
+    "Persist account namespace plus source snapshot digest, binding offsets and source IDs in requests, steps, saved replies, pending_full and refresh.",
+    "Validate state before replay and unchanged-store optimization. Hold unproven legacy state intact without acknowledgment or participant inference.",
+    "Keep original red baseline evidence immutable. New v2 tests exercise actual bounded binary fixtures and actual export schema plus fake external ports.",
+    "Keep do_not_merge and defer independent block/LZ/runtime qualification; no live intake, installation, deployment or merge."
+  ],
+  "unsupported_relations": [
+    {
+      "relation": "EFMData namespace/file reference to owning root account",
+      "handling": "Excluded from owned-db; no sidecar recovery."
+    },
+    {
+      "relation": "Original source revision of legacy persisted state without provenance",
+      "handling": "Held intact before any retry or unchanged shortcut; never reconstructed from participants."
+    }
+  ],
+  "remaining_qualification": [
+    "Independent review and qualification of the new ownership contract.",
+    "PR2049 independently owns container/LZ structural exclusions. The current runtime parser files were not changed here; the earlier permissive LZ behavior remains a known merge blocker.",
+    "Real full-content recovery was not run on either private snapshot. No live or installed-runtime qualification is claimed."
+  ],
+  "design_and_debt_pass": {
+    "codebase-design": "Compared post-merge Python filtering with an ownership capability at the decoder seam. Chose one bounded parser before effects; added exported provenance validation at intake and donor-source union for subject recovery.",
+    "zero-tech-debt": "Deleted unowned db dispatch and folder output, removed folder membership state from records, omitted sidecar recovery, and updated fixtures to the actual schema. No compatibility mode or ownership-by-participant fallback."
+  },
+  "coordination": {
+    "main_rs_seam_receipt_seq": "77813",
+    "other_branch_edited": false,
+    "excluded_files_edited": false
+  },
+  "credit": {
+    "prior_CARR_predicates": "/private/tmp/room-codex-u9jpfrh4/owner-research/src/contract.rs",
+    "prior_snapshot_audit": "audits/pr2050-snapshot-ownership.json",
+    "public_review": "/private/tmp/room-codex-ol_lz4ju/synthetic-checks/security-study-result.json",
+    "public_review_sha256": "54e17d4b189292c6e6a582bf2d19d0f8e273785e6db3f8874ed30d47a63f6d78",
+    "upstream_facts": "MIT ukd1/hxstore-reverse-engineering 191b54e42757687806202f8f696e9066f0514e11, securized ancestry 804efb5f6936122b29a67e2c3836a1ce0efa3a8d, and mitchell-johnson/hxstore-decode 494723b060920c6ef78c9486b6a15a1354834dee. Existing vendor license and notices retained. No upstream complete ownership solution or permissive parser imported.",
+    "probe_modules": "Private structural probe reuses prior hardened atlas block/lz/header modules unchanged, and imports the new runtime ownership.rs directly."
+  },
+  "evidence_sha256": {
+    "src/main.rs": "ac6d08949edee92cdd95716fd0105fd2de762cfe40ef27c0ccd7e32f25de5361",
+    "src/block.rs": "61fd1ad0ae6ce4c84922b3c646f5d6da0d45bd132a0129610c3d95ab8bf7bcb5",
+    "src/lz.rs": "a2c5d20164d8295a91ef48f090660e100cdcbb5d623ba612d086ba8b21ce6e4c",
+    "src/header.rs": "6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3",
+    "structure.tsv": "6a66d2a5eabf9ed856fe4318f4e016efa6c227e5d0f8854b629265ef540a629d",
+    "premise-red.txt": "c3acf5e715014bdeb93c11339d6f213418596d1a2629482a21eb49cf0d41359b",
+    "runtime-red.txt": "48a7af764dfdf14b830ea4e974decba88ee13a3feb16f754e499e0ab8e6bc8bd",
+    "legacy-red.txt": "a551971a60e0ebd58778f589ba6c5ddc1efa683a3a18958da80d9635e526ddbc",
+    "premise-expanded-red.txt": "cb29d6404bbdd717e6b1e2f5fac09a7b88f493194b85b823be6b2868b4d54630",
+    "mailbox-root-red.txt": "22719169ccf186b86f30227fa7f9b77e884bbecd9cdc2857fd11e296c544d279",
+    "revision-header-red.txt": "775d668a0537bd54110fb9429f009e8faf9ba2557df6df7aaafe0d1b86cf40de",
+    "copy-key-red.txt": "57356434474b46ae6bb4552b6934db34b72d004d2f81f00ae591eb0c3ea470f1"
+  },
+  "original_red": {
+    "path": "audits/pr2050-account-qualification.json",
+    "sha256": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe",
+    "session_rerun_matched_before_runtime_changes": true,
+    "baseline_exit": 1
+  },
+  "verification": {
+    "rust_tests": 29,
+    "ownership_rust_tests": 7,
+    "binary_and_intake_tests": 10,
+    "original_threat_scenarios": 10,
+    "intake_tests": 71,
+    "copy_tests": 7,
+    "targeted_python_types": "3 files passed",
+    "gate_integrity": 33,
+    "full_ci": "not run; relevant hxprobe class passed; hosted CI separate"
+  },
+  "protected_artifact_sha256": {
+    "granted_helper_binary": "1b88988b05ae409016c84b5210f857a510b0fe00fbdee10e4831f190de673e59",
+    "maintained_decoder_main": "82bc98c82f618bd34525062ea11e7080df2666e5254c864377eaac26b8095b67",
+    "installed_decoder_binary": "eb19ff05fd40905791b76e0b51d29bc82d5bd6775b194f91e0f8c79ee32259e6",
+    "installer_source": "ec1c1d719320d18acacf9fadc75782ca75256b134168af171dcd8554a22ffc19",
+    "granted_helper_source": "f6f0aac7ef2d6f0992e3c57073d0e84d40c50110f713ba53e3d171bd15a10072"
+  },
+  "protected_artifact_comparison": "Helper binary/source, installer and maintained decoder source match prior recorded digests; installed decoder binary matches retained vendor BUILD-SHA256.",
+  "live_access": false,
+  "helper_or_compile_flags_changed": false,
+  "installed_binary_written": false,
+  "merge": false,
+  "granted_helper_rebuilt": false,
+  "disposable_copy_helper_fixture_compiled": true
+}

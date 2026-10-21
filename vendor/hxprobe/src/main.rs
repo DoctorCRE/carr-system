@@ -9,10 +9,8 @@
 //!
 //! ```text
 //!   hxprobe blocks <file>            verify every block, report coverage
-//!   hxprobe db     <file> [out.db] [files-dir]
-//!                                    build a SQLite database with FTS5 search;
-//!                                    files-dir is the profile's Files folder,
-//!                                    for EFMData sidecar bodies
+//!   hxprobe owned-db <file> <out.db> <allowed-identity>
+//!                                    export bounded owned mail and events; no sidecars
 //!   hxprobe map    <file> [n]        dump the named field map for n records
 //!   hxprobe find   <file> <term>     show records whose text contains <term>
 //! ```
@@ -34,6 +32,7 @@ mod folder;
 mod header;
 mod lz;
 mod record;
+mod ownership;
 mod schema;
 
 /// Memory-map a store file read-only.
@@ -207,20 +206,26 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
 }
 
 /// Parse the whole store into a SQLite database with a full-text index.
-fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
+fn cmd_db(path: &str, db_path: &str, allowed_identity: &str) {
     let mm = map(path);
     let needle = record::anchor_needle();
     let offs = block::find_all(&mm);
     println!("{} blocks -> {db_path}", offs.len());
 
-    // Folder catalogs and membership metadata can occur after the messages.
-    let mut folders = folder::Index::default();
+    let h = header::check(&mm).expect("header");
+    assert!(h.version == b'i' && h.page_size == 4096, "unsupported ownership format");
+    let account = ownership::Account::bind(offs.iter().filter_map(|&o|
+        block::parse(&mm, o).map(|b| (o, b.data))), allowed_identity)
+        .expect("missing or conflicting allowed ownership");
     let mut events = calendar::Index::default();
-    let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
-        if let Some(b) = block::parse(&mm, o) {
-            folders.observe(o, &b.data);
-            events.observe(&b.data);
+        let Some(b) = block::parse(&mm, o) else {continue};
+        let data = &b.data;
+        for (at, obj) in account.revisions(data) {
+            if obj[..2] == [0x6b, 0] {
+                let source = source_id(&account, o, at, obj);
+                events.observe(&data[at-10..at+obj.len()], &source);
+            }
         }
     }
 
@@ -231,12 +236,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     db.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
-         CREATE TABLE folders (
-             id               INTEGER PRIMARY KEY, -- local store key
-             account_id       INTEGER NOT NULL,    -- local account key
-             name             TEXT,                -- NULL if revisions disagree
-             block            INTEGER NOT NULL
-         );
          CREATE TABLE messages (
              id           INTEGER PRIMARY KEY,
              block        INTEGER,   -- file offset of the source block
@@ -265,14 +264,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              -- this row's copies share; NULL when too short to identify.
              copy_key     TEXT
          );
-         CREATE TABLE message_folders (
-             message_id INTEGER NOT NULL REFERENCES messages(id),
-             folder_id  INTEGER NOT NULL REFERENCES folders(id),
-             PRIMARY KEY (message_id, folder_id)
-         );
-         CREATE INDEX message_folders_folder ON message_folders(folder_id);
-         CREATE INDEX messages_sent ON messages(sent_unix);
-         CREATE INDEX messages_sender ON messages(sender);
          CREATE TABLE events (
              id              INTEGER PRIMARY KEY,
              goid            TEXT NOT NULL,     -- Exchange Global Object ID
@@ -293,6 +284,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
              email    TEXT
          );
          -- Counts a caller checks before trusting the export.
+         CREATE TABLE ownership (
+             contract TEXT NOT NULL, identity TEXT NOT NULL, root_key INTEGER NOT NULL,
+             mailbox_key INTEGER NOT NULL, format_version INTEGER NOT NULL, binding_sources TEXT NOT NULL
+         );
+         CREATE TABLE source_provenance (
+             kind TEXT NOT NULL, row_id INTEGER NOT NULL, source_id TEXT NOT NULL,
+             PRIMARY KEY (kind,row_id,source_id)
+         );
          CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
          CREATE VIRTUAL TABLE messages_fts USING fts5(
              sender, sender_name, recipients, subject, body,
@@ -306,18 +305,20 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     // `Topic` is a conversation-level field, so a record can legitimately hold
     // no subject of its own while its thread has one. These map each thread to
     // its known subject, and each message identity to its threads.
-    let mut convo_subject: std::collections::HashMap<String, String> = Default::default();
+    let mut convo_subject: std::collections::HashMap<String, (String, std::collections::BTreeSet<String>)> = Default::default();
     let mut convo_of: std::collections::HashMap<String, Vec<String>> = Default::default();
 
     for &o in &offs {
-        let Some(b) = block::parse(&mm, o) else { continue };
+        let Some(b) = block::parse(&mm, o) else {continue};
+        let data = &b.data;
         blocks_ok += 1;
-        let folder_links = folders.links(&b.data, &needle);
-
-        for loc in records(&b.data, &needle) {
-            let mut r = record::parse(o, &b.data, loc.anchor);
-            r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
-            let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
+        for (object_at, object) in account.revisions(data) {
+            if object[..2] == [0x6b, 0] { continue; }
+            if memchr::memmem::find_iter(object, &needle).count() != 1 { continue; }
+            let loc = records(object, &needle).into_iter().next().expect("single owned anchor");
+            let mut r = record::parse(o, object, loc.anchor);
+            r.sources.insert(source_id(&account, o, object_at, object));
+            let m = schema::build_bounded(object, loc.anchor, loc.end, loc.back);
 
             // The named map is authoritative for every field it covers: it
             // assigns slots by their position in the run sequence and checks
@@ -352,10 +353,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             r.preview = m.get(schema::Key::Preview).map(str::to_string);
             if r.html.is_some() {
                 r.body_source = Some("inline");
-            } else if let Some(html) = sidecars.body_for(loc.span, &r) {
-                r.body = record::html_to_text(&html);
-                r.html = Some(html);
-                r.body_source = Some("efm");
             }
             if r.body.split_whitespace().count() < 3 {
                 if let Some(v) = &r.preview {
@@ -382,7 +379,7 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             let key = format!("{:?}|{:?}", r.sender, r.sent_unix);
             for id in &convo_ids {
                 if let Some(sub) = &r.subject {
-                    convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
+                    convo_subject.entry(id.clone()).or_insert_with(|| (sub.clone(), r.sources.clone()));
                 }
             }
             let slot = convo_of.entry(key.clone()).or_default();
@@ -415,8 +412,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             continue;
         }
         let Some(ids) = convo_of.get(key) else { continue };
-        if let Some(sub) = ids.iter().find_map(|i| convo_subject.get(i)) {
+        if let Some((sub, sources)) = ids.iter().find_map(|i| convo_subject.get(i)) {
             rec.subject = Some(sub.clone());
+            rec.sources.extend(sources.clone());
             rec.subject_inherited = true;
             backfilled += 1;
         }
@@ -496,33 +494,15 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
     let mut keep = absorbed.iter().map(|a| !a);
     best.retain(|_| keep.next().unwrap_or(true));
-    println!(
-        "  {collapsed} copies collapsed; {} sidecar bodies linked, {} rejected, of {} files",
-        sidecars.linked,
-        sidecars.rejected,
-        sidecars.len()
-    );
+    println!("  {collapsed} copies collapsed; sidecar recovery omitted");
 
     let stored = best.len();
-    let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
-    let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
-    println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
     let tx = db.transaction().expect("tx");
+    tx.execute("INSERT INTO ownership VALUES (?1,?2,?3,?4,?5,?6)", rusqlite::params![
+        ownership::VERSION, allowed_identity, account.root as i64, account.mailbox as i64,
+        h.version as i64, account.binding_sources.iter().map(|(b,p)|format!("{b}:{p}")).collect::<Vec<_>>().join(",")
+    ]).expect("ownership");
     {
-        let mut ins_folder = tx
-            .prepare(
-                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
-            )
-            .expect("prepare folders");
-        for f in folders.folders.values() {
-            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
-                .expect("insert folder");
-        }
-        let mut ins_link = tx
-            .prepare(
-                "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
-            )
-            .expect("prepare folder links");
         let mut ins = tx
             .prepare(
                 "INSERT INTO messages
@@ -556,10 +536,10 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
-            for folder_id in &r.folder_ids {
-                ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
-                    .expect("insert folder link");
+            for source in &r.sources {
+                tx.execute("INSERT INTO source_provenance VALUES ('mail',?1,?2)",rusqlite::params![message_id,source]).expect("mail provenance");
             }
+
         }
     }
     {
@@ -581,6 +561,9 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
                 ])
                 .expect("insert event");
             let event_id = tx.last_insert_rowid();
+            for source in &ev.sources {
+                tx.execute("INSERT INTO source_provenance VALUES ('event',?1,?2)",rusqlite::params![event_id,source]).expect("event provenance");
+            }
             for a in &ev.attendees {
                 ins_attendee.execute(rusqlite::params![event_id, a.name, a.email]).expect("insert attendee");
             }
@@ -592,9 +575,6 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
             ("messages", stored),
             ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
             ("copies_collapsed", collapsed),
-            ("sidecar_files", sidecars.len()),
-            ("sidecar_linked", sidecars.linked),
-            ("sidecar_rejected", sidecars.rejected),
             ("event_objects", events.objects),
             ("event_identities", events.identities.len()),
             ("events_decoded", events.events.len()),
@@ -635,9 +615,14 @@ fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     }
 }
 
+fn source_id(account: &ownership::Account, block: usize, at: usize, obj: &[u8]) -> String {
+    let id = u64::from_le_bytes(obj[10..18].try_into().expect("object key"));
+    format!("{}:105:{}:{}:{block}:{at}:{}:{id}", ownership::VERSION, account.root, account.mailbox, obj.len())
+}
+
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
-    prev.folder_ids.extend(r.folder_ids);
+    prev.sources.extend(r.sources);
     prev.copies += r.copies;
     if prev.preview.is_none() {
         prev.preview = r.preview;
@@ -675,9 +660,8 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 
 usage:
   hxprobe blocks <file>              verify every block, report coverage
-  hxprobe db     <file> [out.db] [files-dir]
-                                     build a SQLite database (default mail.db);
-                                     files-dir reads EFMData sidecar bodies
+  hxprobe owned-db <file> <out.db> <allowed-identity>
+                                     export only bounded owned revisions; no sidecars
   hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
   hxprobe find   <file> <term> [n]   show records whose text contains <term>
 
@@ -694,10 +678,10 @@ fn main() {
 
     match args[1].as_str() {
         "blocks" => cmd_blocks(&args[2]),
-        "db" => cmd_db(
+        "owned-db" => cmd_db(
             &args[2],
             args.get(3).map(String::as_str).unwrap_or("mail.db"),
-            args.get(4).map(String::as_str),
+            args.get(4).map(String::as_str).expect("owned-db requires allowed identity"),
         ),
         "map" => cmd_map(&args[2], num(3, 4)),
         "find" => match args.get(3) {

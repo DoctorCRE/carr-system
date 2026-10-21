@@ -57,7 +57,7 @@ import sqlite3
 import subprocess
 import tempfile
 from time import monotonic, sleep
-from typing import Callable
+from typing import Callable, TypeGuard
 import uuid
 import zoneinfo
 
@@ -71,6 +71,8 @@ WORK_PREFIX = 'work-'
 LOCAL = zoneinfo.ZoneInfo('America/Chicago')
 WINDOW = (time(7, 0), time(19, 30))
 INTERNAL_DOMAIN = 'carr.us'
+ALLOWED_IDENTITY = 'joe.bookout@carr.us'
+OWNERSHIP_CONTRACT = 'hx-owner-v1'
 WRITE_VERBS = frozenset({'log-activity', 'set-next-action'})
 RECORD_REF = re.compile(r'^[CLV]-')
 EXIT = {'succeeded': 0, 'skipped': 78, 'failed': 1}
@@ -196,18 +198,81 @@ def in_window(now: datetime) -> bool:
 
 # ---- the decoded store -------------------------------------------------------
 
-def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
+def _valid_account(account: object) -> TypeGuard[dict]:
+    return (isinstance(account, dict) and account.get('contract') == OWNERSHIP_CONTRACT
+            and account.get('identity') == ALLOWED_IDENTITY and account.get('format_version') == 105
+            and all(type(account.get(k)) is int and account[k] > 0 for k in ('root_key', 'mailbox_key')))
+
+
+def _ownership_scope(account: dict) -> str:
+    return f'{account["contract"]}|{account["identity"]}|{account["root_key"]}|{account["mailbox_key"]}'
+
+
+def _valid_provenance(provenance: object, account: dict) -> bool:
+    if not isinstance(provenance, dict) or provenance.get('account') != account:
+        return False
+    digest = provenance.get('store_sha256')
+    binding = provenance.get('binding_sources')
+    if not isinstance(binding, str) or not re.fullmatch(r'[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*', binding):
+        return False
+    sources = provenance.get('source_ids')
+    if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest) or not isinstance(sources, list) or not sources:
+        return False
+    prefix = f'{OWNERSHIP_CONTRACT}:105:{account["root_key"]}:{account["mailbox_key"]}:'
+    return all(isinstance(source, str) and source.startswith(prefix)
+               and re.fullmatch(r'[0-9]+:[0-9]+:[0-9]+:[0-9]+', source[len(prefix):])
+               and all(int(n) > 0 for n in source[len(prefix):].split(':')) for source in sources)
+
+
+def _state_owned(state: dict, out: Path) -> bool:
+    if not state:
+        return not (out / REFRESH_LIST).exists() or json.loads((out / REFRESH_LIST).read_text()) == []
+    account = state.get('ownership')
+    if not _valid_account(account):
+        return False
+    for collection in ('requests', 'steps', 'pending_full'):
+        for entry in state.get(collection, {}).values():
+            if not _valid_provenance(entry.get('ownership'), account):
+                return False
+            if 'reply' in entry and not _valid_provenance(entry['reply'].get('ownership'), account):
+                return False
+    if (out / REFRESH_LIST).exists():
+        for entry in json.loads((out / REFRESH_LIST).read_text()):
+            if not _valid_provenance(entry.get('ownership'), account):
+                return False
+    return True
+
+
+def _load(db: Path, store_sha256: str) -> tuple[dict, list[dict], list[dict]]:
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
     try:
         meta = {r['key']: r['value'] for r in con.execute('SELECT key, value FROM meta')}
+        owners = [dict(r) for r in con.execute('SELECT * FROM ownership')]
+        if len(owners) != 1 or not _valid_account(owners[0]):
+            raise DecodeError('unproven allowed ownership')
+        account = owners[0]
+        binding_sources = account.pop('binding_sources')
+        if not isinstance(binding_sources, str) or not re.fullmatch(r'[0-9]+:[0-9]+(,[0-9]+:[0-9]+)*', binding_sources):
+            raise DecodeError('missing mailbox binding provenance')
+        meta['ownership'] = account
+        sources: dict[tuple[str, int], list[str]] = {}
+        for row in con.execute('SELECT kind,row_id,source_id FROM source_provenance'):
+            sources.setdefault((row['kind'], row['row_id']), []).append(row['source_id'])
         mails = [dict(r) for r in con.execute(
-            'SELECT sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
+            'SELECT id, sender, sender_name, recipients, subject, body, preview, body_kind, sent_unix, copy_key '
             'FROM messages WHERE sent_unix IS NOT NULL AND sender IS NOT NULL')]
         events = [dict(r) for r in con.execute('SELECT * FROM events')]
         attendees: dict[int, list] = {}
         for r in con.execute('SELECT event_id, name, email FROM event_attendees'):
             attendees.setdefault(r['event_id'], []).append((r['name'], (r['email'] or '').lower()))
+        for kind, rows in [('mail', mails), ('event', events)]:
+            for row in rows:
+                provenance = {'account': account, 'store_sha256': store_sha256, 'binding_sources': binding_sources,
+                              'source_ids': sorted(sources.get((kind, row['id']), []))}
+                if not _valid_provenance(provenance, account):
+                    raise DecodeError('missing or conflicting source ownership')
+                row['ownership'] = provenance
         for e in events:
             e['attendees'] = attendees.get(e['id'], [])
         return meta, mails, events
@@ -285,7 +350,8 @@ def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], l
         files = work / 'Files'
         db = work / 'store.db'
         decode(copy, files, db)
-        return _load(db)
+        with copy.open('rb') as source:
+            return _load(db, hashlib.file_digest(source, 'sha256').hexdigest())
     finally:
         _remove(work)
 
@@ -294,7 +360,10 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     """One row per email: hxprobe collapses copies; any it left are joined here, full body first."""
     rows = []
     for m in mails:
-        m['ck'], m['ident'] = mail_identity(m['copy_key'], m['sender'], m['subject'] or '', m['sent_unix'])
+        account = m['ownership']['account']
+        scope = _ownership_scope(account)
+        copy_key = m['copy_key'] or f'{m["sender"].lower()}\x1f{(m["subject"] or "").lower()}'
+        m['ck'], m['ident'] = mail_identity(scope + '|' + copy_key, m['sender'], m['subject'] or '', m['sent_unix'])
         m['full'] = m['body_kind'] == 'full' and bool((m['body'] or '').strip())
         m['text'] = (m['body'] or '').strip() or (m['preview'] or '').strip()
         rows.append(m)
@@ -303,6 +372,9 @@ def _best_copies(mails: list[dict]) -> list[dict]:
     for m in rows:
         last = out[-1] if out else None
         if last and last['ck'] == m['ck'] and m['sent_unix'] - last['first_sent'] <= COPY_WINDOW:
+            merged_sources = sorted(set(last['ownership']['source_ids'] + m['ownership']['source_ids']))
+            m['ownership'] = {**m['ownership'], 'source_ids': merged_sources}
+            last['ownership'] = m['ownership']
             if (m['full'], len(m['text'])) > (last['full'], len(last['text'])):
                 m['first_sent'], m['sent_unix'], m['ident'] = last['first_sent'], last['sent_unix'], last['ident']
                 out[-1] = m
@@ -398,11 +470,15 @@ class Run:
         self.balls: dict[str, int] = {}
         self.attempted: set[str] = set()
 
-    def write(self, verb: str, args: dict, who: str, note: str = '') -> bool:
+    def write(self, verb: str, args: dict, who: str, provenance: dict, note: str = '') -> bool:
+        if not _valid_provenance(provenance, self.state['ownership']):
+            raise CarrError('unproven write ownership')
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
-            'created_at': int(self.now.timestamp())})
+            'created_at': int(self.now.timestamp()), 'ownership': provenance})
+        if not _valid_provenance(request.get('ownership'), self.state['ownership']):
+            raise CarrError('conflicting write ownership')
         _save(self.out, self.state)
         if not request['acknowledged']:
             if args['idempotency_key'] in self.attempted:
@@ -443,7 +519,7 @@ class Run:
         return None
 
     def ball(self, ref: str, who: str, description: str, due_on: str, item_at: int, source: str,
-             only_if_none: bool = False) -> bool:
+             provenance: dict, only_if_none: bool = False) -> bool:
         """Set the ball unless a newer one stands; True once nothing is left to do."""
         existing = self.open_ball(ref)
         if existing is not None and (only_if_none or existing >= item_at):
@@ -453,7 +529,7 @@ class Run:
         note = 'no prior ball' if existing is None else 'replaced ball'
         args = {'idempotency_key': key('set-next-action', ref, source), 'ref': ref,
                 'description': description, 'due_on': due_on}
-        if not self.write('set-next-action', args, who, note):
+        if not self.write('set-next-action', args, who, provenance, note):
             return False
         self.counts['balls_set'] += 1
         self.balls[ref] = item_at
@@ -494,14 +570,14 @@ class Run:
             if not m['full']:
                 pending.setdefault(m['ident'], {'refs': refs, 'ck': m['ck'], 'sent': m['sent_unix'],
                                                 'sender_email': m['sender'].lower(),
-                                                'subject_hash': _hash(m['subject'] or '')})
+                                                'subject_hash': _hash(m['subject'] or ''), 'ownership': m['ownership']})
             steps.setdefault(m['ident'], {'ck': m['ck'], 'sent': m['sent_unix'], 'ref': refs[0],
-                                           'who': who, 'outbound': outbound,
+                                           'who': who, 'outbound': outbound, 'ownership': m['ownership'],
                                            'activity_keys': [key('log-activity', ref, m['ident']) for ref in refs]})
             ok = all([self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, m['ident']), 'ref': ref, 'kind': kind,
                 'summary': f'{label}: {m["subject"] or "(no subject)"}', 'detail': m['text'],
-                'occurred_at': _iso(m['sent_unix'])}, who, '' if m['full'] else 'preview_only') for ref in refs])
+                'occurred_at': _iso(m['sent_unix'])}, who, m['ownership'], '' if m['full'] else 'preview_only') for ref in refs])
             if not ok:
                 continue
             self.counts['logged'] += 1
@@ -530,12 +606,12 @@ class Run:
                 except Exception:
                     self.counts['model_failed'] += 1
                     continue
-                s['reply'] = {**reply, 'due_on': reply['due_on'] or self.today.isoformat()}
+                s['reply'] = {**reply, 'due_on': reply['due_on'] or self.today.isoformat(), 'ownership': m['ownership']}
                 _save(self.out, self.state)
             reply = s['reply']
             if not reply['next_step'] or self.ball(
                     s['ref'], s['who'], reply['next_step'], reply['due_on'] or self.today.isoformat(),
-                    s['sent'], f'next|{ident}'):
+                    s['sent'], f'next|{ident}', reply['ownership']):
                 del steps[ident]
 
     def full_text(self, mails: list[dict]) -> None:
@@ -555,7 +631,7 @@ class Run:
             ok = all([self.write('log-activity', {
                 'idempotency_key': key('log-activity', ref, f'fullbody|{ident}'), 'ref': ref, 'kind': 'note',
                 'summary': f'Full text of email: {m["subject"] or "(no subject)"}', 'detail': m['text'],
-                'occurred_at': _iso(p['sent'])}, p['sender_email'], 'full text follow-up') for ref in p['refs']])
+                'occurred_at': _iso(p['sent'])}, p['sender_email'], m['ownership'], 'full text follow-up') for ref in p['refs']])
             if ok:
                 self.counts['full_text_notes'] += 1
                 del pending[ident]
@@ -568,7 +644,7 @@ class Run:
         transitions: list[int] = []
         now = int(self.now.timestamp())
         for e in sorted(events, key=lambda e: e['start_unix']):
-            source = f'{e["goid"]}|{e["start_unix"]}'
+            source = f'{_ownership_scope(self.state["ownership"])}|{e["goid"]}|{e["start_unix"]}'
             if e['end_unix'] > now:
                 transitions.append(e['end_unix'])
             enters = e['start_unix'] - int(UPCOMING.total_seconds())
@@ -596,13 +672,13 @@ class Run:
                 if all([self.write('log-activity', {
                         'idempotency_key': key('log-activity', ref, source), 'ref': ref, 'kind': kind,
                         'summary': f'{kind.capitalize()}: {subject}', 'detail': e['body'] or '',
-                        'occurred_at': _iso(e['start_unix'])}, name) for ref, name in refs]):
+                        'occurred_at': _iso(e['start_unix'])}, name, e['ownership']) for ref, name in refs]):
                     logged[source] = e['end_unix']
             else:
                 self.counts['events_upcoming'] += 1
                 start = datetime.fromtimestamp(e['start_unix'], LOCAL)
                 if all([self.ball(ref, name, f'{subject} with {name}, {start:%a %b %-d %-I:%M %p}',
-                                  start.date().isoformat(), now, f'event|{source}', only_if_none=True)
+                                  start.date().isoformat(), now, f'event|{source}', e['ownership'], only_if_none=True)
                         for ref, name in refs]):
                     balled[source] = e['start_unix']
         self.state['calendar_due_at'] = min(transitions, default=None)
@@ -628,7 +704,7 @@ def _refresh_list(out: Path, pending: dict) -> int:
     entries = []
     for ident, p in sorted(pending.items(), key=lambda kv: kv[1]['sent']):
         entry = {'message_id': ident, 'subject_hash': p['subject_hash'], 'sent_utc': _iso(p['sent']),
-                 'sender_email': p['sender_email']}
+                 'sender_email': p['sender_email'], 'ownership': p['ownership']}
         if ident in opened:
             entry['opened_at'] = opened[ident]
         entries.append(entry)
@@ -688,8 +764,15 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         return Outcome('failed', 'store_missing')
     try:
         state = json.loads((out / STATE).read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
         state = {}
+    except (OSError, ValueError):
+        return Outcome('failed', 'legacy_ownership_held')
+    try:
+        if not _state_owned(state, out):
+            return Outcome('failed', 'legacy_ownership_held')
+    except (ValueError, TypeError, KeyError, AttributeError, OSError):
+        return Outcome('failed', 'legacy_ownership_held')
     info = store.stat()
     signature = [info.st_mtime_ns, info.st_size]
     now = ports.now()
@@ -706,6 +789,10 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         return Outcome('failed', str(error))
     except (DecodeError, sqlite3.Error, OSError):
         return Outcome('failed', 'decode_failed')
+    account = meta['ownership']
+    if state and state['ownership'] != account:
+        return Outcome('failed', 'ownership_changed_held')
+    state['ownership'] = account
     found = meta.get('blocks_found') or 0
     if not found or (meta.get('blocks_verified') or 0) / found < VERIFIED_MIN:
         return Outcome('failed', 'store_verification_low')
@@ -725,8 +812,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
                     if existing is not None and existing >= request['created_at']:
                         del state['requests'][args['idempotency_key']]
                         continue
-                work.write(request['verb'], args, 'pending write')
-        matcher = Matcher(ports.contacts(), ports.carr)
+                work.write(request['verb'], args, 'pending write', request['ownership'])
+        matcher = Matcher(ports.contacts() if mails or events else [], ports.carr)
         work.emails(mails, matcher, since)
         work.full_text(mails)
         work.next_steps(mails)
@@ -793,7 +880,7 @@ def _contacts(repo: Path) -> Callable[[], list]:
 def _decoder(home: Path) -> Callable[[Path, Path, Path], None]:
     def decode(copy: Path, files: Path, db: Path) -> None:
         try:
-            done = subprocess.run([str(home / HXPROBE), 'db', str(copy), str(db), str(files)],
+            done = subprocess.run([str(home / HXPROBE), 'owned-db', str(copy), str(db), ALLOWED_IDENTITY],
                                   capture_output=True, timeout=900)
         except (OSError, subprocess.TimeoutExpired):
             raise DecodeError('hxprobe did not run') from None

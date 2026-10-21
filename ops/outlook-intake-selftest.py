@@ -24,17 +24,14 @@ sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as intake
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
-SCHEMA = """
-CREATE TABLE messages (id INTEGER PRIMARY KEY, block INTEGER, sender TEXT, sender_name TEXT,
-  recipients TEXT, subject TEXT, message_id TEXT, body TEXT, html TEXT, body_words INTEGER,
-  html_bytes INTEGER, body_kind TEXT, sent_unix INTEGER, sent_utc TEXT, subject_inherited INTEGER,
-  preview TEXT, body_source TEXT, copies INTEGER, copy_key TEXT);
-CREATE TABLE events (id INTEGER PRIMARY KEY, goid TEXT NOT NULL, start_unix INTEGER NOT NULL,
-  end_unix INTEGER NOT NULL, start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, subject TEXT,
-  location TEXT, organizer_name TEXT, organizer_email TEXT, body TEXT, UNIQUE (goid, start_unix));
-CREATE TABLE event_attendees (event_id INTEGER NOT NULL, name TEXT, email TEXT);
-CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
-"""
+# Fixture rows use the decoder's actual export contract.
+import re
+schema_match = re.search(r'db.execute_batch\(\s*"(.*?)",\s*\)', (ROOT / 'vendor/hxprobe/src/main.rs').read_text(), re.S)
+assert schema_match
+SCHEMA = schema_match.group(1)
+ACCOUNT = {'contract': intake.OWNERSHIP_CONTRACT, 'identity': intake.ALLOWED_IDENTITY,
+           'root_key': 7, 'mailbox_key': 9, 'format_version': 105}
+
 CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example')
 LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
 OWNER = 'owner@example.test'
@@ -53,7 +50,8 @@ def mail(sender, sent, subject='Suite question', body='Can we meet Thursday?', n
 
 
 def ident(m):
-    return intake.mail_identity(m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
+    scope = f'{ACCOUNT["contract"]}|{ACCOUNT["identity"]}|{ACCOUNT["root_key"]}|{ACCOUNT["mailbox_key"]}'
+    return intake.mail_identity(scope + '|' + m['copy_key'], m['sender'], m['subject'], m['sent_unix'])[1]
 
 
 def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer=('Owner', OWNER)):
@@ -65,17 +63,21 @@ def event(goid, start, minutes=60, subject='Site visit', attendees=(), organizer
 def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identities=None, decoded=None):
     con = sqlite3.connect(path)
     con.executescript(SCHEMA)
-    for m in mails:
+    con.execute('INSERT INTO ownership VALUES (?,?,?,?,?,?)',
+                (ACCOUNT['contract'],ACCOUNT['identity'],7,9,105,'4096:10'))
+    for n, m in enumerate(mails, 1):
         con.execute('INSERT INTO messages(sender,sender_name,recipients,subject,body,preview,'
                     'body_kind,sent_unix,copy_key) VALUES (?,?,?,?,?,?,?,?,?)',
                     (m['sender'], m['sender_name'], m['recipients'], m['subject'],
                      m['body'] if m['body_kind'] == 'full' else '', m['body'][:200],
                      m['body_kind'], m['sent_unix'], m['copy_key']))
-    for e in events:
+        con.execute("INSERT INTO source_provenance VALUES ('mail',?,?)", (n,f'hx-owner-v1:105:7:9:4096:{n*100}:600:{n}'))
+    for n, e in enumerate(events, 1):
         cur = con.execute('INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,'
                           'organizer_name,organizer_email,body) VALUES (?,?,?,?,?,?,?,?,?,?)',
                           (e['goid'], e['start_unix'], e['end_unix'], '', '', e['subject'], e['location'],
                            e['organizer_name'], e['organizer_email'], e['body']))
+        con.execute("INSERT INTO source_provenance VALUES ('event',?,?)", (cur.lastrowid,f'hx-owner-v1:105:7:9:4096:{n*100}:1600:{n}'))
         for name, email in e['attendees']:
             con.execute('INSERT INTO event_attendees VALUES (?,?,?)', (cur.lastrowid, name, email))
     con.executemany('INSERT INTO meta VALUES (?,?)',
@@ -363,6 +365,8 @@ class IntakeTest(unittest.TestCase):
         path = self.out() / intake.REFRESH_LIST
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         [entry] = json.loads(path.read_text())
+        provenance = entry.pop('ownership')
+        self.assertTrue(intake._valid_provenance(provenance, ACCOUNT))
         self.assertEqual(entry, {'message_id': ident(m), 'sent_utc': (NOW - timedelta(hours=1)).isoformat(),
                                  'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
                                  'sender_email': 'pat@example.test'})
@@ -702,7 +706,7 @@ class IntakeTest(unittest.TestCase):
             event('G2', -timedelta(hours=6), subject='Tour of Elm suite', attendees=[('Lee Sample', 'lee@example.test')])])
         kinds = {a['ref']: a['kind'] for _, a in self.fake.writes('log-activity')}
         self.assertEqual(kinds, {'C-901': 'meeting', 'L-902': 'tour'})
-        key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"log-activity|C-901|G1|{ts(-timedelta(hours=3))}"))
+        key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"log-activity|C-901|{intake._ownership_scope(ACCOUNT)}|G1|{ts(-timedelta(hours=3))}"))
         self.assertIn(key, [a['idempotency_key'] for _, a in self.fake.writes('log-activity')])
 
     def test_an_upcoming_meeting_sets_a_dated_ball(self):
