@@ -101,13 +101,25 @@ export function deriveDealChecklist(record, sources, today) {
   return result;
 }
 
+let storageUnavailableLogged = false;
+
 export async function readDealChecklist(client, record, now = new Date()) {
-  const sources = await client.query(
-    `select id, status, body_hash from doctrine_section where id = any($1::uuid[]) /* checklist:doctrine */`,
-    [CHECKLIST_SOURCES.map(source => source.section_id)]);
-  const commissions = await client.query(
-    `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
-       from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
+  let sources, commissions;
+  try {
+    sources = await client.query(
+      `select id, status, body_hash from doctrine_section where id = any($1::uuid[]) /* checklist:doctrine */`,
+      [CHECKLIST_SOURCES.map(source => source.section_id)]);
+    commissions = await client.query(
+      `select commission_id, status, to_jsonb(received_on)#>>'{}' as received_on
+         from v_deal_room_commission where deal_id=$1 order by commission_id /* checklist:commissions */`, [record.id]);
+  } catch (error) {
+    if (error.code !== '42P01') throw error;
+    if (!storageUnavailableLogged) {
+      storageUnavailableLogged = true;
+      console.warn('Deal checklist storage unavailable.');
+    }
+    return { schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [] };
+  }
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   return deriveDealChecklist({ ...record, commissions: commissions.rows }, sources.rows, today);
 }
