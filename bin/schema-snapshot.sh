@@ -151,6 +151,7 @@ normalise_eof() {
   awk "$EOF_NORMALIZER"
 }
 CHECK=0
+DISPOSABLE_LOCAL=0
 VERIFY_ONLY=0
 OUTPUT_CANDIDATE=""
 URL=""
@@ -197,6 +198,7 @@ if [ -n "$OUTPUT_CANDIDATE" ]; then
 fi
 
 if [ -n "$URL" ]; then
+  DISPOSABLE_LOCAL=1
   printf '%s\n' "$URL" | grep -Eq '^postgres://carr_ci@127\.0\.0\.1:[0-9]{4,5}/carr_ci$' \
     || { echo "schema-snapshot: disposable source must be passwordless carr_ci on 127.0.0.1/carr_ci" >&2; exit 64; }
 else
@@ -2564,6 +2566,47 @@ SNAPSHOT_DATA_RESTORE_COMMIT
 
 if ! "$CATALOG_PY" "$REPO/ops/snapshot-seed-coverage.py" "$REPO" "$TMP"; then
   exit 1
+fi
+
+# A shadow rebuild reapplies pending migrations at a new wall-clock time.
+# Preserve recorded times by filename/checksum, and give new snapshot entries
+# a fixed epoch. Production exports still carry their actual apply times.
+if [ "$DISPOSABLE_LOCAL" = 1 ]; then
+  if ! "$CATALOG_PY" - "$OUT" "$TMP" <<'DISPOSABLE_LEDGER_TIMES'
+from pathlib import Path
+import re
+import sys
+
+ledger = re.compile(
+    rb"(?ms)^COPY public\.schema_migrations \(filename, sha256, applied_at\) FROM stdin;\n(.*?)^\\\.\n")
+
+def read_ledger(content):
+    matches = list(ledger.finditer(content))
+    if len(matches) != 1:
+        raise ValueError("expected exactly one migration ledger")
+    rows = [line.split(b"\t") for line in matches[0][1].split(b"\n") if line]
+    if not rows or any(len(row) != 3 for row in rows):
+        raise ValueError("malformed migration ledger")
+    if len({row[0] for row in rows}) != len(rows):
+        raise ValueError("duplicate migration ledger filename")
+    return matches[0], rows
+
+try:
+    _, recorded = read_ledger(Path(sys.argv[1]).read_bytes())
+    times = {(name, checksum): applied for name, checksum, applied in recorded}
+    candidate = Path(sys.argv[2])
+    content = candidate.read_bytes()
+    match, rows = read_ledger(content)
+    body = b"".join(b"\t".join((name, checksum, times.get(
+        (name, checksum), b"1970-01-01 00:00:00+00"))) + b"\n"
+        for name, checksum, _ in rows)
+    candidate.write_bytes(content[:match.start(1)] + body + content[match.end(1):])
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"schema-snapshot: cannot stabilize disposable ledger: {exc}")
+DISPOSABLE_LEDGER_TIMES
+  then
+    exit 1
+  fi
 fi
 
 # Several bounded configuration blocks are appended after pg_dump's random
