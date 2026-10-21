@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,26 @@ def main() -> int:
         print(f"  {'ok  ' if condition else 'FAIL'} {name}")
         if not condition:
             failures.append(name)
+
+    instant = datetime.fromisoformat("2026-08-17T12:20:00+00:00")
+    not_due = {"key": "fixture", "version": 1, "enabled": True,
+               "recurrence": {"cron": "21 12 * * *", "timezone": "UTC"}}
+    for workflows in ([], [not_due], [{**not_due, "enabled": False}]):
+        for mode in ("shadow", "canary", "live", "replay", "auto"):
+            with patch.object(module, "connect") as connect:
+                manifest = {"workflows": workflows}
+                rows = (module.enqueue_due_auto(manifest, instant) if mode == "auto"
+                        else module.enqueue_due(manifest, instant, mode))
+            check(f"empty enqueue {mode} with {len(workflows)} definitions opens no connection",
+                  rows == [] and connect.call_count == 0)
+    with patch.object(module, "connect") as connect:
+        try:
+            module.enqueue_due({"workflows": []}, instant, "invalid")
+            invalid_refused = False
+        except ValueError:
+            invalid_refused = True
+    check("empty enqueue still rejects an invalid mode before connecting",
+          invalid_refused and connect.call_count == 0)
 
     def canary_refuses(text: str) -> bool:
         try:
