@@ -2519,6 +2519,10 @@ function morningCostSnapshot(value) {
   } catch { return unavailable; }
 }
 
+const TODO_OWNER_PARTNER = new Map([
+  ["joe", "joe"], ["joe-local", "joe"], ["dell", "dell"], ["dell-local", "dell"],
+]);
+
 export const TOOLS = {
 
   // ===== reads (carr_reader connection) =====
@@ -3235,9 +3239,16 @@ export const TOOLS = {
       };
       const ownOrShared = (row) => !row?.owner || String(row.owner).toLowerCase() === scope.sponsor;
 
+      // Partner visibility is shared; autonomous queues stay out of the brief.
       const today = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "today-triage", {});
-        return { items: value.items.filter(ownOrShared) };
+        const items = [];
+        for (const row of value.items) {
+          const owner_partner = row?.owner ? TODO_OWNER_PARTNER.get(String(row.owner).toLowerCase()) : null;
+          if (owner_partner === undefined) continue;
+          items.push({ ...row, owner_partner });
+        }
+        return { items };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
@@ -3253,9 +3264,16 @@ export const TOOLS = {
           accounts: value.accounts.filter((row) => String(row?.account_owner || "").toLowerCase() === scope.sponsor) };
       });
       const loops = await section(async () => {
-        const value = await executeRegisteredTool(c, actor, "loop-board",
-          { kind: "open_loop", status: "open", owner: scope.sponsor, limit: 60 });
-        return { items: value.loops };
+        // loop-board is a shared read that already accepts owner 'joe' or
+        // 'dell' from any caller, so showing both partners' loops adds no
+        // authority. The caller's own loops lead.
+        const items = [];
+        for (const owner_partner of [scope.sponsor, scope.sponsor === "joe" ? "dell" : "joe"]) {
+          const value = await executeRegisteredTool(c, actor, "loop-board",
+            { kind: "open_loop", status: "open", owner: owner_partner, limit: 60 });
+          items.push(...value.loops.map((row) => ({ ...row, owner_partner })));
+        }
+        return { items };
       });
       const renewals = await section(async () => {
         const status = await c.query(
@@ -3880,11 +3898,11 @@ export const TOOLS = {
 
   "set-next-action": {
     write: true,
-    description: "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched). Defaults to your ball. Only the server-issued Hermes CoS door may name its Joe sponsor as owner; created_by remains the runtime.",
+    description: "Set ONE open ball on a subject (replaces that owner's previous open one; the other partner's stays untouched). Defaults to your ball. Any authenticated caller, agent seats included, may name owner 'joe' or 'dell'; created_by remains the real runtime.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, ref: { type: "string" },
       description: { type: "string" }, due_on: { type: "string", description: "YYYY-MM-DD, optional" },
-      owner: { type: "string", description: "optional server-derived owner; only the caller or a Hermes CoS runtime's Joe sponsor" } },
+      owner: { type: "string", description: "Optional owner. Any authenticated caller may name the caller, 'joe', or 'dell'. Defaults to the caller. created_by records the real runtime." } },
       required: ["idempotency_key","ref","description"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-action", args, async () => {
       const s = await resolveSubject(c, args.ref);
@@ -3893,7 +3911,7 @@ export const TOOLS = {
         ? actor.slug : String(args.owner).trim().toLowerCase();
       if (!permitted.includes(ownerSlug))
         throw new ToolError({ error: "owner_not_permitted", owner: ownerSlug, permitted,
-          hint: "a ball may be set for yourself; only the Hermes CoS door may hand one to its verified Joe sponsor, never Dell" });
+          hint: "a ball may be set for yourself, Joe, or Dell" });
       let ownerId = actor.id;
       if (ownerSlug !== actor.slug) {
         const owner = await c.query("select id from actor where slug=$1", [ownerSlug]);
