@@ -1,0 +1,223 @@
+{
+  "schema": "pr2050-snapshot-ownership-evidence/v1",
+  "status": "BLOCKED",
+  "runtime_changed": false,
+  "baseline_head": "af230fb7c620ef18a507bb5a92d1d0c555d6be77",
+  "snapshot": {
+    "sha256": "9014c9cf2f194afa035ec4500af1bdadde12cd5e97b4e5425813ef5386233063",
+    "bytes": 29785088,
+    "format_version": 105,
+    "page_size": 4096,
+    "block_candidates": 6674,
+    "verified_blocks": 6656,
+    "excluded_payload_crc_mismatches": 15,
+    "excluded_overlapping_candidates": 3,
+    "verified_payload_bytes": 121887299
+  },
+  "method": {
+    "scope": "Only the named immutable snapshot; verified blocks in memory; numeric structure and the two authorized identity strings only.",
+    "atlas_s1": "9e0672d7b6b7ac57faeb1cab7d86337649f48cc4",
+    "atlas_s2": "039a4d058daf643e99405dedf1faa83c7fafd1a3",
+    "atlas_s3": "54d3c06ea126f35a506e7b94abe283edeba70399",
+    "reused_parser": "atlas s3 block.rs, lz.rs, header.rs copied byte-for-byte into isolated scratch; no content decoder or installed binary was run.",
+    "format_document_sha256": "8ac4574084caffa1da5c4131d86bf69357a41f248df059c975d3928f2b276d01",
+    "private_probe_sources": {
+      "main.rs": "4f51b0378f5f2cdbb6e891796bfa80cb7c0d8f470f574cccc3110074131e4085",
+      "contract.rs": "1b104be38fd0503e40d5ab660cc6d779c8ff31f46fb0558658a84f332974432b",
+      "block.rs": "61fd1ad0ae6ce4c84922b3c646f5d6da0d45bd132a0129610c3d95ab8bf7bcb5",
+      "lz.rs": "a2c5d20164d8295a91ef48f090660e100cdcbb5d623ba612d086ba8b21ce6e4c",
+      "header.rs": "6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3"
+    },
+    "private_structural_output_sha256": "f0efb5cb9dfc4f93c7389fe813848b25a7cb72eb0800e5d7406d79d612434302",
+    "probe_in_repository": false
+  },
+  "identities": {
+    "allowed": {
+      "identity_sha256": "577047ee6425cc34f2e7a23bb904395c2bfa7b1aba3eae2e23f525812197e3f3",
+      "verified_payload_ascii_matches": 2324,
+      "verified_payload_utf16_matches": 3954,
+      "raw_file_ascii_matches": 13,
+      "raw_file_utf16_matches": 206
+    },
+    "tester": {
+      "identity_sha256": "56c285ca5b5946932f844ae2c375833b3dd6803d11d1f2316592540146eaf0ae",
+      "verified_payload_ascii_matches": 0,
+      "verified_payload_utf16_matches": 0,
+      "raw_file_ascii_matches": 0,
+      "raw_file_utf16_matches": 0
+    }
+  },
+  "snapshot_binding": {
+    "confidence": "High for this exact snapshot; observational serialization relation, not a documented wire property ID or cross-version guarantee.",
+    "identity_role": "allowed",
+    "mailbox_class": 74,
+    "mailbox_envelope_tag": 1738,
+    "mailbox_key": 336495,
+    "root_class": 73,
+    "root_key": 336224,
+    "mailbox_observations": 30,
+    "root_reverse_observations": 25,
+    "mailbox_self_key_offsets": [
+      10,
+      30,
+      38
+    ],
+    "root_reference_offsets": [
+      48,
+      112
+    ],
+    "root_reference_layout": {
+      "class": 73,
+      "zero_bytes_offset": 2,
+      "zero_bytes_count": 8,
+      "id_offsets": [
+        10,
+        30
+      ],
+      "kind_offset": 18,
+      "kind": 1,
+      "zero_owner_offset": 22,
+      "sentinel_offset": 38,
+      "sentinel_unsigned": 18446744073709551614
+    },
+    "identity_tail": "Two consecutive fields, each u32le discriminator 1, u8 byte length, then exact UTF-16LE allowed identity bytes; second field ends at object end. No address scanning fallback.",
+    "identity_relative_offsets": [
+      1753,
+      1796
+    ],
+    "root_to_mailbox_reference_offset": 2632,
+    "specimen": {
+      "block_offset": 5156352,
+      "object_payload_offset": 13090
+    },
+    "observed_conflicts": 0
+  },
+  "other_unidentified_structure": {
+    "root_to_mailbox_pairs": [
+      {
+        "root_key": 336597,
+        "mailbox_key": 336746,
+        "root_observations": 25,
+        "mailbox_observations": 1
+      }
+    ],
+    "unmapped_folder_owner_key": 336032,
+    "restriction": "Neither numeric pair is assigned to the tester identity. No other identity text was decoded or retained."
+  },
+  "revision_ownership": {
+    "confidence": "High for bounded object membership in this snapshot. No current-server-state or unique message recovery claim.",
+    "parent_reference_object_offset": 112,
+    "parent_reference_class": 73,
+    "all_observed_parent_keys": [
+      336224
+    ],
+    "mail_revision_anchors": 4269,
+    "mail_revision_anchors_by_class": {
+      "79": 973,
+      "201": 2304,
+      "202": 992
+    },
+    "mail_anchors_without_validated_parent": 0,
+    "mail_anchors_with_conflicting_parent": 0,
+    "framed_mail_objects_with_parent": 4759,
+    "event_class_objects_with_parent": 718,
+    "event_layout_revisions": 708,
+    "event_layout_distinct_local_object_ids": 125,
+    "non_event_layout_class_107_objects": 10,
+    "event_layout_check": "Bounded class 107 envelope; existing fixed GOID prefix only; start/end fields pass existing decoder numeric ranges. No complete GOID, date, participant or content string was extracted.",
+    "unique_logical_mail_count": null,
+    "unique_goid_start_event_count": null,
+    "counts_are_not_runtime_qualification": true
+  },
+  "folder_structure": {
+    "validated_catalog_keys": 235,
+    "conflicting_catalog_owner_keys": 0,
+    "catalog_keys_by_owner": {
+      "336495": 218,
+      "336032": 9,
+      "336746": 8
+    },
+    "observed_tags": {
+      "folder_class_77": 1240,
+      "message_class_202": 1870,
+      "metadata_class_191": 696
+    },
+    "pinned_folder_parser_tags": {
+      "folder_class_77": 1218,
+      "message_class_202": 1856,
+      "metadata_class_191": 712
+    },
+    "pinned_tag_observations": {
+      "folder_class_77": 0,
+      "message_class_202": 0,
+      "metadata_class_191": 0
+    },
+    "boundary": "Observed class and repeated-key structure are not permission to accept every envelope tag. Folder names were not decoded."
+  },
+  "unsupported_relations": [
+    {
+      "relation": "A local root-account or mailbox key bound to the tester identity in actual serialized data.",
+      "evidence_tried": "Full verified-payload and raw-file ASCII/UTF-16 searches for the exact tester identity; zero matches. Two root/mailbox pairs inspected structurally; only the allowed identity pair qualified. No tester-owned message/event negative specimen exists in this input."
+    },
+    {
+      "relation": "An EFMData sidecar namespace and file reference bound to the owning root account.",
+      "evidence_tried": "Pinned body.rs indexes every S0 directory by basename and checks text opening, with no account key. Only store.hxd is authorized; no sidecar or profile was opened."
+    },
+    {
+      "relation": "A legacy persisted request, saved model reply, or pending refresh entry bound to its original owning revision.",
+      "evidence_tried": "Pinned intake state writers omit ownership; the unchanged qualification replays a legacy write with zero source rows. Current-snapshot participants cannot reconstruct that lost relation."
+    }
+  ],
+  "minimum_coherent_change": [
+    "Add one decoder ownership module for bounded root/mailbox relations, exact supported serialization tags, conflict rejection, and per-revision parent references before content recovery.",
+    "Partition message identity, conversation subject recovery, copy collapse, calendar GOID/start and every exported source ID by owner. Carry bounded source offsets and contract version; reject missing/conflicting provenance.",
+    "Remove sidecar recovery from the authorized intake path until a typed account namespace is proved; inline body or owned preview can still process allowed mail.",
+    "Require allowed-owner evidence at intake load and before models, matching, writes, reports and refresh. Persist the same immutable owner, source IDs and contract version in requests, steps/replies, pending_full and refresh entries.",
+    "Check state provenance before store-unchanged handling or retry replay. Hold legacy unproven entries without replay or address-based inference; do not erase them or mark them acknowledged.",
+    "Use failing binary-derived synthetic behavior tests plus nonzero allowed mail/event controls. Do not relabel the original red qualification as green; do not install or rebuild the granted helper."
+  ],
+  "decisions": [
+    "One-session bounded structural research. Answer grill-with-docs design questions autonomously; no new narrative Markdown file or work request.",
+    "Treat local root-account key and mailbox collection key as distinct typed identities; join them through repeated references, never participants.",
+    "Preserve original qualification bytes. Stop runtime implementation because tester and sidecar/legacy ownership relations are not all evidenced.",
+    "Retain the merge hold. Structural attribution counts are positive research evidence, not permission to run intake or claim all unsafe cases blocked."
+  ],
+  "design_and_debt_pass": {
+    "codebase-design": "One decoder ownership interface is the required seam; a Python filter after globally merged rows cannot restore lost ownership.",
+    "zero-tech-debt": "No guessed runtime fields, fallback address filter, new mode or compatibility layer added. Future account contract must replace global merge keys and remove unsafe sidecar output."
+  },
+  "verification": {
+    "scratch_tests_passed": 15,
+    "scratch_new_predicate_tests": 6,
+    "scratch_existing_parser_tests": 9,
+    "new_predicates_red_before_green": true,
+    "intake_tests_passed": 71,
+    "copy_tests_passed": 7,
+    "gate_count": 33,
+    "qualification_exit_code": 1,
+    "qualification_scenarios": 10,
+    "qualified": false,
+    "qualification_matches_preserved_evidence": true,
+    "all_unsafe_cases_blocked": false,
+    "prior_evidence_sha256": {
+      "ops/outlook-intake-account-qualification.py": "593b9b42c7a6b7a757faf0339951a486d1cece35a8e9ba538f7f6005b2b87bca",
+      "audits/pr2050-account-qualification.json": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe"
+    },
+    "protected_artifact_sha256": {
+      "granted_helper_binary": "1b88988b05ae409016c84b5210f857a510b0fe00fbdee10e4831f190de673e59",
+      "maintained_decoder_main": "82bc98c82f618bd34525062ea11e7080df2666e5254c864377eaac26b8095b67",
+      "installer_source": "ec1c1d719320d18acacf9fadc75782ca75256b134168af171dcd8554a22ffc19",
+      "granted_helper_source": "f6f0aac7ef2d6f0992e3c57073d0e84d40c50110f713ba53e3d171bd15a10072"
+    },
+    "live_outlook_access": false,
+    "installed_binary_changed": false,
+    "helper_rebuilt": false,
+    "helper_source_or_compile_flags_changed": false,
+    "merge": false
+  },
+  "limits": [
+    "One immutable version-i snapshot does not establish another Outlook build or serializer variant.",
+    "No full mailbox decoder, DB export, sidecar, profile preference, credential, keychain or external model/API was used in the structural probe.",
+    "Structural revision counts are not deduplicated logical messages, GOID/start events, allowed intake writes or a passing qualification."
+  ]
+}
