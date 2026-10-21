@@ -282,7 +282,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("a run on main itself passes", r.returncode == 0, r.stdout + r.stderr)
 
     git(repo, "checkout", "-q", "-b", "deal-status-next-step")
-    migration = "0917_deal_status_next_step.sql"
+    migration = "0923_deal_status_next_step.sql"
     commit_migration(repo, migration, (REPO / "migrations" / migration).read_text())
     r = run_gate(repo, "--base", "main")
     check("deal status next step migration declares its rollback procedure",

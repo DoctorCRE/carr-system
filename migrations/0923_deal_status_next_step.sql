@@ -1,6 +1,6 @@
 -- Keep superseded steps in history without reviving them as the current plan.
 -- rollback: In a new compensating migration, restore only public.v_deal_room_board
--- from migrations/0782_deal_invoice_read_fields.sql; preserve action statuses and events.
+-- from migrations/0920_prospect_engagement_status.sql; preserve action statuses and events.
 CREATE OR REPLACE VIEW public.v_deal_room_board AS
  SELECT d.id,
     d.name,
@@ -59,4 +59,4 @@ CREATE OR REPLACE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE (d.invoiced_on IS NULL);
+  WHERE ((d.invoiced_on IS NULL) AND (c.status <> 'prospect'::text OR c.prospect_engagement_status = 'active'::text));
