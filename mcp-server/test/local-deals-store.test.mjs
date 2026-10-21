@@ -8,7 +8,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
-import { TOOLS } from '../src/tools.js';
+import { TOOLS, executeRegisteredTool } from '../src/tools.js';
 import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
 import { readCommandCenterSummary } from '../src/workspace-command-center.js';
 
@@ -70,15 +70,20 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role carr_writer; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space']) {
+    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
     }
     await restoreEventIdentity(c, schema);
+    await c.query(schema.match(/CREATE FUNCTION public\.trg_touch_row\(\)[\s\S]*?\$\$;/)[0]);
+    await c.query('create trigger client_touch before update on client for each row execute function trg_touch_row()');
+    await c.query('create trigger lead_touch before update on lead for each row execute function trg_touch_row()');
+    await c.query('create sequence ref_lead_seq start 900000');
+    await c.query('create sequence ref_client_seq start 900000');
     await c.query('alter table tool_call add primary key(idempotency_key);');
     await c.query("create view v_last_touch as select null::text subject_type, null::uuid subject_id, null::date last_touch where false;");
-    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker']) {
+    for (const name of ['v_client_account', 'v_deal_board', 'v_deal_room_board', 'v_deal_room_account', 'v_deal_room_event', 'v_deal_room_session', 'v_deal_reconciliation_read', 'v_deal_room_note', 'v_deal_room_critical_date', 'v_deal_room_action', 'v_deal_room_activity', 'v_deal_room_participant', 'v_deal_room_premises', 'v_deal_room_negotiation', 'v_deal_room_document', 'v_deal_room_phase_change', 'v_deal_room_current_lease', 'v_invoice_tracker', 'v_client_engagement_status', 'v_lead_board', 'v_lead_board_stage', 'v_lead_client_link', 'v_lead_stage_transition', 'v_lead_prospect_engagement', 'v_lead_workspace_lifecycle', 'v_lead_workspace', 'v_lead_workspace_detail']) {
       const view = schema.match(new RegExp(`CREATE VIEW public\\.${name} AS[\\s\\S]*?;`))?.[0];
       assert.ok(view, name);
       await c.query(view);
@@ -86,12 +91,15 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     }
     await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
-    await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal;");
+    await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
+    await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
     for (const [slug, sort] of [['research', 1], ['negotiation', 2], ['legal', 3], ['closed', 4]]) {
       await c.query('insert into deal_phase(slug,label,sort) values($1,$1,$2)', [slug, sort]);
     }
+    for (const [slug, sort] of [['nurture_drip',50],['opportunity',60],['archived',100],['do_not_contact',110]])
+      await c.query('insert into lead_stage(slug,label,sort) values($1,$1,$2)', [slug,sort]);
     const fixture = async national => {
       await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Practice',$2,$2)", [id(2), actor.id]);
       await c.query('insert into client(id,party_id,created_by,updated_by) values($1,$2,$3,$3)', [id(3), id(2), actor.id]);
@@ -145,6 +153,200 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await c.query('delete from doctrine_section');
       }
     });
+    await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
+      await c.query("update client set status='prospect'");
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values($1,$2,'Synthetic Parked Assignment','renewal','research','parked','other','Synthetic hold',now(),$3,$3,$3)",[id(31),id(3),actor.id]);
+      await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
+      await c.query('alter table client drop column prospect_engagement_status cascade');
+      const previousBoard = readFileSync(path.join(root,'migrations/0782_deal_invoice_read_fields.sql'),'utf8')
+        .match(/create or replace view v_deal_room_board as[\s\S]*?;/)[0];
+      await c.query(previousBoard);
+      const before = (await c.query('select * from v_deal_room_board order by id')).rows;
+      assert.deepEqual(before.map(d=>d.id),[id(4),id(31)]);
+      const clientsBefore = (await c.query('select id,status,version,updated_by from client order by id')).rows;
+      await c.query(readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8'));
+      assert.deepEqual((await c.query('select * from v_deal_room_board order by id')).rows,before);
+      assert.deepEqual((await c.query('select id,status,version,updated_by from client order by id')).rows,clientsBefore);
+      assert.deepEqual((await c.query('select prospect_engagement_status from client order by id')).rows,
+        [{prospect_engagement_status:'active'},{prospect_engagement_status:'active'}]);
+      assert.deepEqual((await c.query(`select subject_id,actor_id,cause,field,old_value,new_value,idempotency_key
+        from event where verb='backfill-prospect-engagement-status' order by subject_id`)).rows,
+        [id(3),id(6)].map(subject_id=>({subject_id,actor_id:id(99),cause:'import_migration',
+          field:'prospect_engagement_status',old_value:null,new_value:{prospect_engagement_status:'active'},
+          idempotency_key:`0915:prospect-engagement:${subject_id}`})));
+    }));
+
+    await t.test('0915 forward reverse forward preserves inactive choices and all business records', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      await c.query("insert into lead(id,registry_ref,party_id,client_id,stage,notes,score,created_by,updated_by) values($1,'L-900001',$2,$3,'opportunity','Synthetic retained plans',72,$4,$4)",[id(30),id(2),id(3),actor.id]);
+      await c.query("insert into deal_note(id,deal_id,kind,text,actor_id) values($1,$2,'note','Synthetic retained history',$3)",[id(35),id(4),actor.id]);
+      await c.query('drop view v_client_engagement_status,v_lead_prospect_engagement');
+      await c.query('alter table client drop column prospect_engagement_status cascade');
+      const forward = readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8');
+      await c.query(forward);
+      await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'synthetic-roundtrip'});
+      const records = async () => Object.fromEntries(await Promise.all(
+        ['party','client','deal','deal_note','lead','event','tool_call'].map(async table =>
+          [table,(await c.query(`select * from ${table} order by 1`)).rows])));
+      const before = await records();
+      assert.deepEqual((await c.query('select id from v_deal_room_board')).rows,[]);
+      await c.query(readFileSync(path.join(root,'ops/sql/reverse-0915-prospect-engagement.sql'),'utf8'));
+      assert.deepEqual((await c.query('select id from v_deal_room_board')).rows,[{id:id(4)}]);
+      assert.deepEqual((await c.query("select to_regclass('public.v_client_engagement_status') as view")).rows,[{view:null}]);
+      assert.deepEqual(await records(),before);
+      await c.query(forward);
+      assert.deepEqual(await records(),before);
+      assert.deepEqual((await c.query('select id from v_deal_room_board')).rows,[]);
+      await c.query('set local role carr_reader');
+      assert.equal((await TOOLS['lead-board'].handler(c,actor,{workspace:'leads',lead_id:id(30)})).detail.notes,'Synthetic retained plans');
+      assert.equal((await c.query('select prospect_engagement_status from v_client_engagement_status')).rows[0].prospect_engagement_status,'inactive');
+    }));
+
+    await t.test('pending migration installs active-only board membership and reader grants on the previous schema', async () => transaction(async () => {
+      await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
+      await c.query('alter table client drop column prospect_engagement_status cascade');
+      await c.query(readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8'));
+      await c.query(schema.match(/CREATE VIEW public\.v_deal_room_account AS[\s\S]*?;/)[0]);
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals[0].prospect_engagement_status,'active');
+      await c.query("update client set prospect_engagement_status='inactive' where id=$1",[id(3)]);
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals,[]);
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await c.query('select * from v_lead_prospect_engagement')).rows,[]);
+    }));
+
+    await t.test('a new prospect created over a lead starts active and appears on the board', async () => transaction(async () => {
+      await c.query("insert into party(id,kind,name,created_by,updated_by) values($1,'org','Synthetic Intake',$2,$2)",[id(2),actor.id]);
+      const lead = await executeRegisteredTool(c,actor,'new-lead',{
+        party_id:id(2),stage:'opportunity',idempotency_key:'synthetic-intake-lead'});
+      const client = await executeRegisteredTool(c,actor,'new-client',{
+        party_id:id(2),status:'prospect',acquisition_source:'other',idempotency_key:'synthetic-intake-client',
+        research_evidence:{sources:[{url:'https://example.com/synthetic',observed_at:'2026-01-01T00:00:00Z'}],
+          field_evidence:{practice_name:[0],address:[0],phone:[0],specialty:[0],practitioners:[0],hours:[0]},discrepancies:[]}});
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Synthetic Intake Assignment','renewal','research','joe',$3,$3)",[id(4),client.client_id,actor.id]);
+      const board = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals;
+      assert.deepEqual(board.map(d=>[d.id,d.client_id,d.prospect_engagement_status]),[[id(4),client.client_id,'active']]);
+      assert.equal((await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads[0].id,lead.lead_id);
+    }));
+
+    await t.test('automation cannot mark a prospect inactive without partner authority', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      await assert.rejects(TOOLS['set-prospect-engagement-status'].handler(c,{...actor,human:false,slug:'automation'}, {
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic automated inference',idempotency_key:'synthetic-automation'
+      }),e=>e.payload?.error==='human_confirmation_required');
+      assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.length,1);
+      assert.deepEqual((await c.query('select * from lead')).rows,[]);
+      assert.deepEqual((await c.query('select * from event')).rows,[]);
+    }));
+
+    await t.test('inactive prospects return to Leads and active prospects return to their existing deals', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect',prospect_engagement_status='active' where id=$1", [id(3)]);
+      const before = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals[0];
+      const args = {client_id:id(3),status:'inactive',base_version:before.client_version,
+        reason:'Synthetic pipeline review',idempotency_key:'synthetic-inactive'};
+      const inactive = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',args);
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals,[]);
+      const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads;
+      assert.equal(leads.length,1);
+      assert.equal(leads[0].stage,'nurture_drip');
+      assert.equal(leads[0].client_id,id(3));
+      assert.equal(leads[0].prospect_engagement_status,'inactive');
+      assert.equal(leads[0].prospect_client_version,inactive.client_version);
+      assert.deepEqual(await executeRegisteredTool(c,actor,'set-prospect-engagement-status',args),{replayed:true,...inactive});
+      const active = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        ...args,status:'active',base_version:inactive.client_version,idempotency_key:'synthetic-active'});
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.map(d=>d.id),[id(4)]);
+      const after = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads;
+      assert.equal(after.length,1);
+      assert.equal(after[0].id,leads[0].id);
+      assert.equal(after[0].stage,'opportunity');
+      assert.equal(after[0].prospect_engagement_status,'active');
+      assert.equal(after[0].prospect_client_version,active.client_version);
+      assert.deepEqual((await c.query("select old_value->>'prospect_engagement_status' as old,new_value->>'prospect_engagement_status' as new from event where subject_type='client' order by mutation_order")).rows,
+        [{old:'active',new:'inactive'},{old:'inactive',new:'active'}]);
+      assert.deepEqual((await c.query("select new_value->>'stage' as stage from event where verb='update-lead' order by mutation_order")).rows,[{stage:'opportunity'}]);
+    }));
+
+    await t.test('inactive prospect detail reads back authoritative engagement and version as carr_reader', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      const result = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic lost confirmation',idempotency_key:'synthetic-readback'});
+      await c.query('set local role carr_reader');
+      const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      assert.equal(detail.client_id,id(3));
+      assert.equal(detail.client_status,'prospect');
+      assert.equal(detail.prospect_engagement_status,'inactive');
+      assert.equal(detail.client_version,result.client_version);
+    }));
+
+    await t.test('inactive prospect accounts leave the portfolio summaries', async () => transaction(async () => {
+      await fixture(true);
+      await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=$1",[id(6)]);
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{})).accounts,[]);
+    }));
+
+    await t.test('existing linked lead, multiple deals and parking survive both engagement directions', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      await c.query("insert into lead(id,registry_ref,party_id,client_id,stage,notes,score,created_by,updated_by) values($1,'L-900001',$2,$3,'opportunity','Synthetic retained history',72,$4,$4)",[id(30),id(2),id(3),actor.id]);
+      await c.query("insert into deal(id,client_id,name,deal_type,phase,operating_state,parking_reason,parking_note,parked_at,parked_by,created_by,updated_by) values($1,$2,'Synthetic Parked Assignment','renewal','research','parked','other','Synthetic hold',now(),$3,$3,$3)",[id(31),id(3),actor.id]);
+      const inactive = await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'synthetic-linked-inactive'});
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals,[]);
+      const leads = (await TOOLS['lead-board'].handler(c,actor,{workspace:'leads',lead_id:id(30)}));
+      assert.equal(leads.detail.notes,'Synthetic retained history');
+      assert.equal(leads.detail.stage,'nurture_drip');
+      assert.equal(leads.leads.length,1);
+      await c.query('reset role');
+      await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'active',base_version:inactive.client_version,reason:'Synthetic renewed interest',idempotency_key:'synthetic-linked-active'});
+      const board = (await TOOLS['deal-room-board'].handler(c,actor,{})).deals;
+      assert.equal(board.length,2);
+      assert.equal(board.find(d=>d.id===id(31)).operating_state,'parked');
+      assert.equal(board.find(d=>d.id===id(31)).parking_note,'Synthetic hold');
+      assert.equal((await TOOLS['lead-board'].handler(c,actor,{workspace:'leads'})).leads[0].id,id(30));
+    }));
+
+    await t.test('engagement transition refuses a changed signed-in partner', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1",[id(3)]);
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'inactive',base_version:2,expected_actor:'dell',reason:'Synthetic review',idempotency_key:'synthetic-actor-switch'
+      }),e=>e.payload?.error==='account_changed');
+      assert.equal((await TOOLS['deal-room-board'].handler(c,actor,{})).deals.length,1);
+    }));
+
+    await t.test('reactivation refuses a do-not-contact party without creating a lead or audit event', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect',prospect_engagement_status='inactive' where id=$1",[id(3)]);
+      await c.query("update party set contact_state='do_not_contact' where id=$1",[id(2)]);
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
+        client_id:id(3),status:'active',base_version:2,reason:'Synthetic review',idempotency_key:'synthetic-protected-party'
+      }),e=>e.payload?.error==='prospect_party_protected');
+      assert.equal((await c.query('select count(*)::int n from lead')).rows[0].n,0);
+      assert.equal((await c.query('select count(*)::int n from event')).rows[0].n,0);
+    }));
+
+    await t.test('engagement updates reject stale versions, invalid status, empty reasons and merged clients', async () => transaction(async () => {
+      await fixture(true);
+      const args = {client_id:id(3),status:'active',base_version:1,reason:'Synthetic review',idempotency_key:'synthetic-invalid'};
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,status:'parked'}), error=>error.payload?.error==='value_not_in_declared_vocabulary');
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,reason:' '}), error=>error.payload?.error==='engagement_reason_required');
+      await c.query('update client set merged_into=$2 where id=$1',[id(3),id(6)]);
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',args), error=>error.payload?.error==='version_conflict');
+      await assert.rejects(executeRegisteredTool(c,actor,'set-prospect-engagement-status',{...args,base_version:2}), error=>error.payload?.error==='client_merged_away');
+      assert.equal((await c.query("select count(*)::int count from event where subject_type='client'")).rows[0].count,0);
+    }));
 
     await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
       await fixture(true);
@@ -154,6 +356,41 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const account = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'national_account',account_client_id:id(6)});
       assert.deepEqual(team.lost_deals, [], 'account history never leaks into team history');
       assert.deepEqual(account.lost_deals.map(d => [d.id,d.client_ref,d.workspace_kind,d.account_client_id]), [[id(4),null,'national_account',id(6)]]);
+    }));
+
+    await t.test('board and detail expose first phase start dates from occurrence history', async () => transaction(async () => {
+      await fixture(false);
+      for (const [n, phase, occurred, recorded] of [
+        [31,'research','2026-09-01T04:00:00Z','2026-09-05T12:00:00Z'],
+        [32,'negotiation','2026-09-20T15:00:00Z','2026-09-21T12:00:00Z'],
+        [33,'research','2026-10-01T15:00:00Z','2026-10-02T12:00:00Z'],
+      ]) await c.query(`insert into event(id,actor_id,verb,subject_type,subject_id,field,new_value,occurred_at,recorded_at,cause)
+        values($1,$2,'patch-deal-field','deal',$3,'phase',$4,$5,$6,'human_stated')`,
+        [id(n),actor.id,id(4),JSON.stringify({phase}),occurred,recorded]);
+      await c.query('set local role carr_reader');
+      const board = await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'});
+      const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      for (const row of [board.deals[0],detail]) assert.deepEqual(row.phase_started_on, {
+        research:'2026-08-31',negotiation:'2026-09-20',
+      });
+      assert.equal((await c.query("select has_table_privilege('carr_reader','event','select') allowed")).rows[0].allowed,false);
+      await c.query('reset role');
+      await c.query('delete from event where subject_id=$1',[id(4)]);
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'})).deals[0].phase_started_on,{});
+    }));
+
+    await t.test('repeating the current phase through the handler does not create a phase start', async () => transaction(async () => {
+      await fixture(false);
+      const written = await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: id(34), deal: id(4), field: 'phase', value: 'research', base_event_id: null,
+      });
+      assert.equal(written.ok, true);
+      await c.query('set local role carr_reader');
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+      assert.deepEqual(board.deals[0].phase_started_on, {});
+      assert.deepEqual(detail.phase_started_on, {});
     }));
 
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
@@ -190,7 +427,9 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.lease;
             delete prior.checklist;
           }
+          rowsOf(prior).forEach(row => delete row.phase_started_on);
           const oldRows = rowsOf(baseline[name]);
+          rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
           rowsOf(prior).forEach((row, index) => invoiceFields.forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));

@@ -408,6 +408,16 @@ def _to_codex(
     record_layer.enforce(entry, kind='codex-session')
     limit_s = CODEX_TIMEOUT_S if timeout_s is None else float(timeout_s)
     task = desks.desk_prompt(task)
+    if entry.get('posture') == 'record-layer':
+        if config_overrides:
+            raise DeskError('bad_codex_config', 'record-layer Codex config cannot be overridden')
+        def confined_run(argv, **options):
+            if provider_run is not None:
+                return provider_run(argv, **options)
+            return _run_headless_process(argv, options['env'], options['timeout'],
+                                         on_executor, stream_output, cwd=options['cwd'])
+        return record_layer.run_codex(entry, task, env=env, run=confined_run, timeout_s=limit_s)
+
     thread = None if fresh else entry.get("thread_id")
     # A THREAD CODEX DESKTOP HOLDS OPEN CANNOT BE RESUMED FROM HERE. Found live
     # 2026-09-27: the orchestrator's Desktop thread refused `codex exec resume`

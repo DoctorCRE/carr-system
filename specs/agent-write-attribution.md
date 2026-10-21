@@ -44,7 +44,7 @@ fixed from the client.
 ## Why it matters
 
 **The operating rules depend on the distinction.** Two-writer discipline on shared files
-and the standing gate — *"Claude drafts, Joe sends"* — both assume you can tell who wrote
+and sending on Joe's ask (decision 41906a30) both require knowing who wrote
 something. Right now you cannot.
 
 **It is already the audit's most corrosive finding, in a different form.** The import

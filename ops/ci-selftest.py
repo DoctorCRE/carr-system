@@ -202,6 +202,43 @@ def test_strict_turns_skip_into_failure():
     check("--strict failure explains why a skip counts",
           "stopped running" in out_strict.lower() or "skipped" in out_strict.lower())
 
+def test_hxprobe_runs_locked_checks_and_propagates_failures():
+    with tempfile.TemporaryDirectory(prefix="carr-hxprobe-ci-") as directory:
+        root = pathlib.Path(directory).resolve()
+        (root / "ops/config").mkdir(parents=True)
+        (root / "vendor/hxprobe").mkdir(parents=True)
+        (root / "bin").mkdir()
+        for rel in ("ops/ci.sh", "ops/ci-quarantine.py", "ops/node_test_summary.py",
+                    "ops/ci-secret-scan.py", "ops/pii_guard.py"):
+            shutil.copy2(REPO / rel, root / rel)
+        (root / "ops/config/ci-quarantine.json").write_text('{"version":1,"tests":[]}')
+        (root / "ops/config/ci-check-scope.json").write_text('{}')
+        cargo = root / "bin/cargo"
+        cargo.write_text("#!/usr/bin/env python3\n"
+                         "import json, os, sys\n"
+                         "with open(os.environ['CARR_HXPROBE_CALLS'], 'a') as log:\n"
+                         "    log.write(json.dumps([os.getcwd(), sys.argv[1:]]) + '\\n')\n"
+                         "sys.exit(1 if sys.argv[1] == os.environ.get('CARR_HXPROBE_FAIL') else 0)\n")
+        cargo.chmod(0o755)
+        calls = root / "calls.jsonl"
+        env = fixture_env()
+        env.update(PATH=str(root / "bin") + os.pathsep + os.environ["PATH"],
+                   CARR_HXPROBE_CALLS=str(calls))
+        for failure, expected in (("", ["test", "build"]), ("test", ["test"]),
+                                  ("build", ["test", "build"])):
+            calls.unlink(missing_ok=True)
+            env["CARR_HXPROBE_FAIL"] = failure
+            result = subprocess.run(["bash", str(root / "ops/ci.sh"), "--strict", "--only", "hxprobe"],
+                                    cwd=root, env=env, capture_output=True, text=True, timeout=30)
+            observed = [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
+            check(f"hxprobe propagates {failure or 'successful checks'}",
+                  result.returncode == (1 if failure else 0), result.stdout + result.stderr)
+            check(f"hxprobe runs locked commands in crate directory with {failure or 'no'} failure",
+                  observed == [[str(root / "vendor/hxprobe"),
+                                [cmd, "--locked"] if cmd == "test" else [cmd, "--release", "--locked"]]
+                               for cmd in expected], str(observed))
+
+
 def test_unknown_class_refuses():
     rc, out = run(["--only", "definitely-not-a-class"])
     check("an unknown class name exits 64, not 0", rc == 64, f"rc={rc}")
@@ -428,14 +465,15 @@ def test_each_class_runs_in_exactly_one_hosted_group():
     listed = subprocess.run(["bash", str(CI), "--list"], cwd=REPO,
                             capture_output=True, text=True, check=True).stdout
     classes = set(re.findall(r"^  ([a-z]+)\s", listed, re.MULTILINE))
-    workflow = (REPO / ".github/workflows/ci.yml").read_text()
-    block = workflow.split("        classes:\n", 1)[1].split("    #", 1)[0]
-    groups = re.findall(r'^          - "([a-z ]+)"$', block, re.MULTILINE)
-    membership = Counter(name for group in groups for name in group.split())
-    check("every hosted class runs in exactly one group",
-          bool(classes) and set(membership) == classes
-          and all(count == 1 for count in membership.values()),
-          f"classes={sorted(classes)}, membership={dict(membership)}")
+    for filename in ("ci.yml", "main-canary.yml"):
+        workflow = (REPO / ".github/workflows" / filename).read_text()
+        block = workflow.split("        classes:\n", 1)[1].split("    #", 1)[0]
+        groups = re.findall(r'^          - "([a-z ]+)"$', block, re.MULTILINE)
+        membership = Counter(name for group in groups for name in group.split())
+        check(f"every hosted class runs in exactly one {filename} group",
+              bool(classes) and set(membership) == classes
+              and all(count == 1 for count in membership.values()),
+              f"classes={sorted(classes)}, membership={dict(membership)}")
 
 
 def test_every_test_file_in_the_tree_is_collected():
@@ -1021,6 +1059,7 @@ def main(argv=None):
                test_no_green_without_running,
                test_strict_turns_skip_into_failure,
                test_unknown_class_refuses,
+               test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_migration_refuses_non_loopback,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,

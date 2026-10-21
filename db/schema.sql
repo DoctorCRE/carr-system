@@ -84333,8 +84333,17 @@ CREATE TABLE public.client (
     deal_type_label text,
     possible_duplicate_label text,
     notes text,
-    specialty_type_label text
+    specialty_type_label text,
+    prospect_engagement_status text DEFAULT 'active'::text NOT NULL,
+    CONSTRAINT client_prospect_engagement_status_check CHECK ((prospect_engagement_status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
+
+
+--
+-- Name: COLUMN client.prospect_engagement_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
 
 
 --
@@ -87752,6 +87761,19 @@ COMMENT ON VIEW public.v_client_account IS 'Every live client with the national 
 
 
 --
+-- Name: v_client_engagement_status; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_client_engagement_status AS
+ SELECT id AS client_id,
+    status AS client_status,
+    version AS client_version,
+    prospect_engagement_status
+   FROM public.client
+  WHERE (merged_into IS NULL);
+
+
+--
 -- Name: v_client_lease_radar; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -89511,7 +89533,7 @@ CREATE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE (d.invoiced_on IS NULL);
+  WHERE ((d.invoiced_on IS NULL) AND ((c.status <> 'prospect'::text) OR (c.prospect_engagement_status = 'active'::text)));
 
 
 --
@@ -89583,18 +89605,6 @@ CREATE VIEW public.v_deal_room_activity AS
    FROM (public.activity x
      JOIN public.actor a ON ((a.id = x.actor_id)))
   WHERE (x.deal_id IS NOT NULL);
-
-
---
--- Name: v_deal_room_commission; Type: VIEW; Schema: public; Owner: -
---
-
-CREATE VIEW public.v_deal_room_commission AS
- SELECT deal_id,
-    id AS commission_id,
-    status,
-    received_on
-   FROM public.commission;
 
 
 --
@@ -89761,6 +89771,19 @@ CREATE VIEW public.v_deal_room_phase_change AS
    FROM public.event e
   WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text))
   ORDER BY subject_id, e.recorded_at DESC, id DESC;
+
+
+--
+-- Name: v_deal_room_phase_start; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_phase_start AS
+ SELECT subject_id AS deal_id,
+    (new_value ->> 'phase'::text) AS phase,
+    ((min(occurred_at) AT TIME ZONE 'America/Chicago'::text))::date AS started_on
+   FROM public.event e
+  WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text) AND (NULLIF((new_value ->> 'phase'::text), ''::text) IS NOT NULL) AND ((old_value ->> 'phase'::text) IS DISTINCT FROM (new_value ->> 'phase'::text)))
+  GROUP BY subject_id, (new_value ->> 'phase'::text);
 
 
 --
@@ -90847,6 +90870,20 @@ CREATE VIEW public.v_lead_hot AS
      JOIN public.party p ON ((p.id = l.party_id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'lead'::text) AND (lt.subject_id = l.id))))
   WHERE (NOT l.suppressed);
+
+
+--
+-- Name: v_lead_prospect_engagement; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_prospect_engagement AS
+ SELECT l.id AS lead_id,
+    c.id AS prospect_client_id,
+    c.version AS prospect_client_version,
+    c.prospect_engagement_status
+   FROM (public.lead l
+     JOIN public.client c ON ((c.id = l.client_id)))
+  WHERE ((c.status = 'prospect'::text) AND (c.merged_into IS NULL));
 
 
 --
@@ -120334,6 +120371,9 @@ grant select on table public.v_claim_card to dot_reader;
 grant select on table public.v_client_account to carr_reader;
 grant select on table public.v_client_account to carr_writer;
 grant select on table public.v_client_account to dot_reader;
+grant select on table public.v_client_engagement_status to carr_reader;
+grant select on table public.v_client_engagement_status to carr_writer;
+grant select on table public.v_client_engagement_status to dot_reader;
 grant select on table public.v_client_lease_radar to carr_reader;
 grant select on table public.v_client_lease_radar to dot_reader;
 grant select on table public.v_code_finding to carr_exporter;
@@ -120398,9 +120438,6 @@ grant select on table public.v_deal_room_activity to dot_reader;
 grant select on table public.v_deal_room_board to carr_reader;
 grant select on table public.v_deal_room_board to carr_writer;
 grant select on table public.v_deal_room_board to dot_reader;
-grant select on table public.v_deal_room_commission to carr_reader;
-grant select on table public.v_deal_room_commission to carr_writer;
-grant select on table public.v_deal_room_commission to dot_reader;
 grant select on table public.v_deal_room_critical_date to carr_reader;
 grant select on table public.v_deal_room_critical_date to dot_reader;
 grant select on table public.v_deal_room_current_lease to carr_reader;
@@ -120425,6 +120462,9 @@ grant select on table public.v_deal_room_participant to dot_reader;
 grant select on table public.v_deal_room_phase_change to carr_reader;
 grant select on table public.v_deal_room_phase_change to carr_writer;
 grant select on table public.v_deal_room_phase_change to dot_reader;
+grant select on table public.v_deal_room_phase_start to carr_reader;
+grant select on table public.v_deal_room_phase_start to carr_writer;
+grant select on table public.v_deal_room_phase_start to dot_reader;
 grant select on table public.v_deal_room_premises to carr_reader;
 grant select on table public.v_deal_room_premises to carr_writer;
 grant select on table public.v_deal_room_premises to dot_reader;
@@ -120511,6 +120551,9 @@ grant select on table public.v_lead_client_link to carr_writer;
 grant select on table public.v_lead_client_link to dot_reader;
 grant select on table public.v_lead_hot to carr_reader;
 grant select on table public.v_lead_hot to dot_reader;
+grant select on table public.v_lead_prospect_engagement to carr_reader;
+grant select on table public.v_lead_prospect_engagement to carr_writer;
+grant select on table public.v_lead_prospect_engagement to dot_reader;
 grant select on table public.v_lead_stage_transition to carr_authority;
 grant select on table public.v_lead_stage_transition to carr_writer;
 grant select on table public.v_lead_stage_transition to dot_reader;
@@ -122918,7 +122961,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
-0919_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	2026-10-20 23:03:44.542371+00
+0916_deal_phase_start_dates.sql	09e479005c0a49bd54666e1ff8f82900afcbaf75e83885c13d52bb2d0444992a	2026-10-20 21:34:43.817985+00
+0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
 \.
 
 
