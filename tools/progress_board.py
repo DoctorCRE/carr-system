@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sqlite3
 import time
 import sys
 import tempfile
@@ -2415,6 +2416,37 @@ def board_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     })
 
 
+def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    from progress_orchestrator import project
+    try:
+        queue = work_queue_module().board_projection()
+    except (OSError, RuntimeError, sqlite3.Error):
+        queue = None
+    portfolio = read_json_file(state_path(ALL_REPOS_BOARD))
+    normalized = copy.deepcopy(state)
+    for task in normalized.get('tasks', {}).values():
+        normalize_task(task)
+        task['activity_status'] = activity_status(task, now_utc())
+    return {'schema': SNAPSHOT_SCHEMA, 'project': 'orchestrator', 'title': 'Orchestrator',
+            'tasks': {}, 'history': {}, 'omitted': {'live': 0, 'merged': 0, 'history': 0},
+            'orchestrator': project(normalized, queue, portfolio=portfolio)}
+
+
+def publish_orchestrator(state: dict[str, Any]) -> int:
+    from progress_orchestrator import retain_unavailable_queue
+    before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
+    snapshot = orchestrator_snapshot(state)
+    if before:
+        retain_unavailable_queue(snapshot['orchestrator'], before.get('snapshot_json', {}).get('orchestrator'))
+    args = {'board_id': 'orchestrator', 'base_version': int(before['version']) if before else 0,
+            'snapshot': snapshot}
+    call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+    after = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot') or {}
+    if after.get('snapshot_json') != snapshot:
+        raise RuntimeError('published orchestrator observation did not read back')
+    return int(after['version'])
+
+
 def hierarchy_snapshot(state: dict[str, Any], *, costs=None) -> dict[str, Any]:
     projection = repo_lib("progress_hierarchy").project(copy.deepcopy(state))
     fields = (SNAPSHOT_TASK_FIELDS - {"plan_id", "plan_ref", "title", "summary", "stage_history", "release_wait"}) | {
@@ -2493,6 +2525,8 @@ def publish_external_inventory(cache: dict[str, Any]) -> dict[str, Any]:
 def publish_board(project: str, *, costs=None, refresh_inventory: bool = True) -> dict[str, int]:
     state = read_state(project)
     board = safe_project(project)
+    if board == LAUNCHD_BOARD:
+        publish_orchestrator(state)
     before = call_verb("read-progress-board", {"board_id": board})
     remote_snapshot = before.get("snapshot")
     snapshot = board_snapshot(state, costs=costs)
