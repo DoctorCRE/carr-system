@@ -2433,11 +2433,21 @@ def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def publish_orchestrator(state: dict[str, Any]) -> int:
+    # All local publishers, including other checkouts, share this lock.
+    path = Path(tempfile.gettempdir()) / 'carr-orchestrator-publication.lock'
+    with path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _publish_orchestrator(state)
+
+
+def _publish_orchestrator(state: dict[str, Any]) -> int:
     from progress_orchestrator import retain_unavailable_queue
     before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
     snapshot = orchestrator_snapshot(state)
     view = snapshot['orchestrator']
-    if before and view['sources']['queue']['state'] == 'unavailable':
+    bank = 1 - (before or {}).get('snapshot_json', {}).get('orchestrator', {}).get('bank', 1)
+    view['bank'] = bank
+    if before:
         previous = copy.deepcopy(before.get('snapshot_json', {}).get('orchestrator'))
         if previous:
             for page in previous.get('pages', []):
@@ -2454,11 +2464,10 @@ def publish_orchestrator(state: dict[str, Any]) -> int:
         payload = {'cards': cards[offset:offset + 100]}
         if snapshot_size(payload) > SNAPSHOT_BUDGET:
             raise SnapshotTooLarge('orchestrator page exceeds publication budget; no work dropped')
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        board_id = 'orchestrator-page-' + digest
+        board_id = f'orchestrator-page-{bank}-{offset // 100}'
         saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
-        if not saved:
-            args = {'board_id': board_id, 'base_version': 0, 'snapshot': payload}
+        if not saved or saved.get('snapshot_json') != payload:
+            args = {'board_id': board_id, 'base_version': int(saved['version']) if saved else 0, 'snapshot': payload}
             call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
             saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
         if not saved or saved.get('snapshot_json') != payload:

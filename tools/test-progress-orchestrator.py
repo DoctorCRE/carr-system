@@ -17,6 +17,8 @@ class OrchestratorTests(unittest.TestCase):
         state['tasks']['p'].update(stage='merged', pr_phase='Merged', merge_sha='a'*40)
         self.assertEqual(project(state, queue)['cards'][0]['state'], 'merged')
         state['tasks']['p']['stage'] = 'live'
+        state['tasks']['p']['evidence'] = 'Matching app release contains the merge; consumer exercise passed'
+        self.assertEqual(project(state, queue)['history'][0]['delivery_evidence'], state['tasks']['p']['evidence'])
         self.assertEqual(project(state, queue)['history'][0]['state'], 'live')
 
     def test_projection_excludes_private_payloads_and_keeps_unknown_explicit(self):

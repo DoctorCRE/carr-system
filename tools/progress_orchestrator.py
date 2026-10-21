@@ -74,6 +74,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
             'state': status, 'owner': text(item.get('agent') or item.get('desk')),
             'progress': text(event.get('reason'), 'Awaiting a recorded progress update'),
             'changed_at': event.get('at'), 'prs': refs,
+            'delivery_evidence': ' '.join(text(fact.get('evidence'), '', 440) for fact in facts) if status == 'live' else '',
             'origin': 'queue', 'terminal': item.get('stage') in ('failed', 'parked') or (item.get('stage') == 'done' and status not in ('merged', 'live')),
             'area': ', '.join(sorted({ref.split('/')[4] for ref in refs})) or 'Shared portfolio'})
     for identity, task in tasks.items():
@@ -85,6 +86,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
             'state': state_of(task), 'owner': text(task.get('executor')),
             'progress': text(task.get('blocked_reason') or task.get('release_wait') or task.get('summary') or task.get('pr_phase'), 'Awaiting a recorded progress update'),
             'changed_at': task.get('updated_at'), 'prs': refs,
+            'delivery_evidence': text(task.get('evidence'), '', 440) if state_of(task) == 'live' else '',
             'origin': 'board', 'terminal': False,
             'area': {'jbookout/carr-system': 'Shared backend', 'jbookout/doctorcre-app': 'DoctorCRE app',
                      'jbookout/software-factory': 'Development tools'}.get(task.get('repo'), 'Shared portfolio')})

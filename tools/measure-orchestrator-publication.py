@@ -29,6 +29,10 @@ def call(verb, args):
     return {'ok': True}
 with patch.object(board, 'call_verb', side_effect=call), patch.object(board, 'read_json_file', return_value=portfolio), patch.object(board.work_queue_module(), 'board_projection', return_value=queue):
     board.publish_orchestrator(state)
+    initial_calls, initial_writes = len(calls), calls.count('publish-board-snapshot')
+    for i in range(10):
+        state['tasks'][list(state['tasks'])[i]]['updated_at'] = f'2026-10-21T20:00:{i:02d}Z'
+        board.publish_orchestrator(state)
 view = store['orchestrator']['snapshot_json']['orchestrator']
 cards = view['cards'] + [card for page in view['pages'] for card in store[page['board_id']]['snapshot_json']['cards']]
 assert len({c['id'] for c in cards}) == len(raw['cards']) == view['total_cards']
@@ -41,4 +45,4 @@ print(json.dumps({'observed_at': raw['observed_at'], 'raw_active': len(raw['card
     'queue_items': len(queue['items']), 'queue_chars': board.snapshot_size(queue), 'active_preserved': len(cards), 'first_page': len(view['cards']),
     'history': len(view['history']), 'omitted_completed_history': view['omitted_history'], 'state_counts': view['state_counts'],
     'manifest_chars': board.snapshot_size(store['orchestrator']['snapshot_json']), 'extra_page_chars': [board.snapshot_size(store[p['board_id']]['snapshot_json']) for p in view['pages']],
-    'first_cycle_calls': len(calls), 'first_cycle_writes': calls.count('publish-board-snapshot'), 'seconds': round(time.monotonic()-start, 3), 'legacy_failure': legacy}, indent=2))
+    'stored_rows_after_10_updates': len(store), 'first_cycle_calls': initial_calls, 'first_cycle_writes': initial_writes, 'seconds': round(time.monotonic()-start, 3), 'legacy_failure': legacy}, indent=2))
