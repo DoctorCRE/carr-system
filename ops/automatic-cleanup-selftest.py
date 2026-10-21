@@ -785,6 +785,46 @@ class ScheduledCleanupTests(unittest.TestCase):
         findings = cleanup.health_findings(fixture.repo, config, tmp_root=clones, roots={}, now=time.time())
         self.assertIn('cleanup_failed', [row['code'] for row in findings])
 
+    def test_stuck_thread_readback_exceptions_remain_bounded_when_run_budget_expires(self):
+        import machine_cleanup as cleanup
+        for failure in (TimeoutError('fixture timeout'), subprocess.TimeoutExpired('fixture readback', 30)):
+            with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                workspace = root / 'clones/room-codex-kept'
+                workspace.mkdir(parents=True)
+                (workspace / 'payload').write_text('unrecognized checkout stays intact')
+                dispatch = root / 'dispatch.jsonl'
+                dispatch.write_text(json.dumps({'thread_id': 'stuck'}) + '\n')
+                pending = {'kind': 'thread', 'thread_id': 'stuck', 'before': 100,
+                           'thread_offset': dispatch.stat().st_size}
+                receipt = root / 'out/machine-cleanup.json'
+                receipt.parent.mkdir()
+                receipt.write_text(json.dumps({'at': 1, 'last_success_at': 123, 'pending': pending}))
+                elapsed, calls = [0.0], []
+                def archive(tid, **kwargs):
+                    calls.append((tid, kwargs['dry_run']))
+                    elapsed[0] += 240
+                    raise failure
+                config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+                options = dict(hook=None, tmp_root=workspace.parent, roots={}, dispatch_path=dispatch,
+                    provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+                with patch.object(cleanup.time, 'monotonic', side_effect=lambda: elapsed[0]):
+                    for _ in range(3):
+                        report = cleanup.run(root, config, **options)
+                    self.assertTrue(report['budget_exhausted'])
+                    self.assertNotIn('pending', report)
+                    resumed = cleanup.run(root, config, **options)
+                self.assertEqual(calls, [('stuck', True)] * 3)
+                self.assertEqual(resumed['status'], 'failed', resumed)
+                self.assertFalse(resumed['budget_exhausted'])
+                self.assertEqual([row['path'] for row in resumed['kept']], [str(workspace)])
+                self.assertEqual((workspace / 'payload').read_text(), 'unrecognized checkout stays intact')
+                error = resumed['errors'][0]
+                self.assertEqual(error['readback_attempts'], 3)
+                self.assertEqual(error['thread_offset'], pending['thread_offset'])
+                self.assertEqual(error['before'], 100)
+                self.assertEqual(resumed['last_success_at'], 123)
+
     def test_worktree_slice_timeout_defers_scheduler_before_overall_deadline(self):
         import branch_retirement as retirement
         import machine_cleanup as cleanup

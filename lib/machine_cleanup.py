@@ -13,6 +13,9 @@ from job_watchdog import epoch
 from lib.cleanup_budget import BudgetExhausted, bounded, check, entries
 
 
+THREAD_RECOVERY_ATTEMPTS = 3
+
+
 def clean_clone(workspace, dispatch, *, provider, process_probe, now, older_than, dry_run, deadline=None):
     workspace = Path(workspace)
     clone = workspace / 'checkout'
@@ -221,8 +224,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         cursor = json.loads(cursor_path.read_text()) if cursor_path.exists() else {}
         now = time.time()
         deadline = time.monotonic() + policy['max_seconds']
+        stuck_threads = dict(previous.get('stuck_threads', {}))
         report = {'schema': 'machine-cleanup/v1', 'at': now, 'status': 'running', 'dry_run': dry_run,
-                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [], 'errors': [], 'deferred': [],
+                  'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [],
+                  'errors': list(stuck_threads.values()), 'deferred': [], 'stuck_threads': stuck_threads,
                   'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0, 'budget_exhausted': False}
         def finish():
             report['budget_exhausted'] |= time.monotonic() >= deadline
@@ -256,8 +261,12 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                         cursor[slot] = Path(pending['path']).name
                 elif kind == 'thread':
                     before = pending.get('before', previous['at'] - policy['thread_age_seconds'])
-                    recovered = archive_thread(pending['thread_id'], before=before,
-                        process_probe=process_probe, timeout=min(30, policy['max_seconds']), dry_run=True)
+                    try:
+                        recovered = archive_thread(pending['thread_id'], before=before,
+                            process_probe=process_probe, timeout=min(30, policy['max_seconds']), dry_run=True)
+                    except (TimeoutError, subprocess.TimeoutExpired):
+                        recovered = {**pending, 'status': 'deferred', 'budget_exhausted': True,
+                                     'reason': 'thread archive readback timed out'}
                     if recovered.get('status') == 'would_archive':
                         # The interrupted effect did not happen. Revisit dispatch evidence normally.
                         recovered = {**recovered, 'status': 'verified_no_effect',
@@ -269,9 +278,18 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                 else:
                     raise RuntimeError('unknown pending cleanup kind')
                 if recovered and recovered.get('budget_exhausted'):
-                    report.update(budget_exhausted=True, pending=pending)
-                    report['deferred'].append(recovered)
-                    return finish()
+                    if kind == 'thread':
+                        pending = {**pending, 'before': before,
+                                   'readback_attempts': pending.get('readback_attempts', 0) + 1}
+                    if kind != 'thread' or pending['readback_attempts'] < THREAD_RECOVERY_ATTEMPTS:
+                        report.update(budget_exhausted=True, pending=pending)
+                        report['deferred'].append(recovered)
+                        return finish()
+                    stuck = {**pending, 'error': 'thread_recovery_exhausted',
+                             'reason': 'thread archive remains unresolved after bounded readback attempts; kept without retry'}
+                    stuck_threads[pending['thread_id']] = stuck
+                    report['errors'].append(stuck)
+                    recovered = {**pending, 'status': 'kept', 'reason': stuck['reason']}
                 append(root / 'out/machine-cleanup-recovery.jsonl',
                        {'previous': previous, 'resolution': recovered, 'at': now})
             except (TimeoutError, subprocess.TimeoutExpired):
@@ -399,6 +417,10 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     tid = row.get('thread_id')
                     if tid:
                         processed += 1
+                        if tid in stuck_threads:
+                            cursor['thread_offset'] = stream.tell()
+                            save(cursor_path, cursor)
+                            continue
                         try:
                             latest = latest_dispatch(dispatch_path, thread_id=tid,
                                 deadline=lambda: time.monotonic() >= deadline)
