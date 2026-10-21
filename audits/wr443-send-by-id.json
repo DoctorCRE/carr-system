@@ -85,6 +85,11 @@
       "path": "Resources/Outlook.sdef",
       "sha256": "6aa5853ac9a1791a4ab4c770acb8e1706323fb2a86d2ae5c7074ed6a5368e44c",
       "size_bytes": 172571
+    },
+    {
+      "path": "Frameworks/mso30.framework/Versions/A/mso30",
+      "sha256": "0aa8cd1ee12226a171d092a9a65835923f8b7cb31330c768969458535edd815c",
+      "size_bytes": 31659328
     }
   ],
   "questions": {
@@ -272,7 +277,7 @@
           "UBF8T346G9.com.microsoft.entrabroker.EntraIdentityBrokerXPC.Mach",
           "UBF8T346G9.com.microsoft.entrabrokermacbroker.EntraIdentityBrokerXPC.Mach"
         ],
-        "related_client_identifier_source": "mso30.framework strings, universal offsets 0xb32716 and 0xb32757 in its x86_64 string output. These are Entra broker client references, not Outlook send-service declarations.",
+        "related_client_identifier_source": "mso30.framework arm64 bytes, evidence E36 and E37. These are Entra broker client references, not Outlook send-service declarations.",
         "send_service_status": "No declared external XPC send service found. Dynamically created anonymous endpoints were not exhaustively reverse engineered."
       },
       "extensions": [
@@ -657,6 +662,24 @@
       "bytes_hex": "fd7bbfa9fd03009161782f94090080d208008052aa0c80520b686938082d0a1b290500913fc100f181ffff54a9cd8952c938a8722a0786520929091baab981522a00a0722b008052002d0a1b207d1033fd7bc1a8c0035fd6",
       "symbol": "-[HxObjectID hash]",
       "meaning": "Hashes 48 bytes of hxObjectId using a 32-bit multiply-by-101 accumulator and final arithmetic mixing. Not uint64Part or a mailbox GUID."
+    },
+    {
+      "id": "E36",
+      "binary": "Frameworks/mso30.framework/Versions/A/mso30",
+      "arm64_vm_address": "0xae3d3d",
+      "arm64_slice_offset": "0xae3d3d",
+      "universal_file_offset": "0x1a27d3d",
+      "bytes_hex": "554246385433343647392e636f6d2e6d6963726f736f66742e656e74726162726f6b65722e456e7472614964656e7469747942726f6b65725850432e4d616368",
+      "meaning": "Entra broker client service-name constant. Not an Outlook send-service declaration."
+    },
+    {
+      "id": "E37",
+      "binary": "Frameworks/mso30.framework/Versions/A/mso30",
+      "arm64_vm_address": "0xae3d7e",
+      "arm64_slice_offset": "0xae3d7e",
+      "universal_file_offset": "0x1a27d7e",
+      "bytes_hex": "554246385433343647392e636f6d2e6d6963726f736f66742e656e74726162726f6b65726d616362726f6b65722e456e7472614964656e7469747942726f6b65725850432e4d616368",
+      "meaning": "Entra broker client service-name constant. Not an Outlook send-service declaration."
     }
   ],
   "tool_documentation": {
@@ -998,9 +1021,9 @@
     "unslop"
   ],
   "verification": {
-    "static_source_checks": 61,
-    "byte_ranges_compared": 35,
-    "hashed_sources_compared": 11,
+    "static_source_checks": 64,
+    "byte_ranges_compared": 37,
+    "hashed_sources_compared": 12,
     "runtime_send_tests": 0,
     "status": "pass",
     "checks": "Compare all source SHA256 values and all evidence bytes against installed files; compare app build, declared activities, intents, action catalogs, service declarations, extension enumeration, and scripting command metadata."
