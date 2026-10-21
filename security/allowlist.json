@@ -274,6 +274,12 @@
       "sha256": "21340f3ea2593a028c070e5c775d510022506b5cca5a6128442f7cd0fb9eb98f",
       "rule": "pii-email",
       "reason": "PR2050 explicitly authorizes the owning work-account and tester identities for this ownership contract and otherwise synthetic offline tests. No client data or content. This qualification binds only this reviewed blob, this exact path and this detector; no broader identity or detector exemption."
+    },
+    {
+      "path": "audits/pr2050-positive-root-contract.json",
+      "sha256": "bdd4e6c27787b7ae989bdb3a5f0678e263d3fc1c63bf66fd2fd609cd4e8e9924",
+      "rule": "generic-api-key",
+      "reason": "The finding is the verified SHA-256 of synthetic copy-identity failing-test output, labeled copy-key-red.txt, not a credential. Bound only to this reviewed audit blob, exact path and detector."
     }
   ]
 }
