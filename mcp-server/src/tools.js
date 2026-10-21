@@ -3391,6 +3391,8 @@ export const TOOLS = {
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
                 coalesce((
                   select jsonb_object_agg(latest.field,
@@ -8928,6 +8930,8 @@ registerTools({
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on, b.lane, b.outcome,
                 (select to_jsonb(pc) from v_deal_room_phase_change pc where pc.deal_id=b.id) as phase_change,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 to_jsonb(b.parked_at)#>>'{}' as parked_at, b.parked_by,
                 r.salesforce_id, r.base_version
            from v_deal_room_board b
@@ -8939,6 +8943,8 @@ registerTools({
                 case when a.account_client_id is null then 'team' else 'national_account' end as workspace_kind,
                 to_jsonb(b.closed_on)#>>'{}' as closed_on,
                 to_jsonb(b.invoiced_on)#>>'{}' as invoiced_on, b.outcome, b.lane,
+                coalesce((select jsonb_object_agg(ps.phase, to_jsonb(ps.started_on)#>>'{}')
+                            from v_deal_room_phase_start ps where ps.deal_id=b.id), '{}'::jsonb) as phase_started_on,
                 r.salesforce_id, r.base_version
            from v_deal_board b
            join v_deal_reconciliation_read r on r.id=b.id
@@ -10087,7 +10093,8 @@ registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-on
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
 // consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch, and Joe sends. Reads
+// send verb and no draft verb: a draft can never dispatch from here, and sends
+// go through Joe's own accounts when he asks (decision 41906a30). Reads
 // answer unavailable until the F10 local-store adapter lands with a reviewed
 // grant for the read-receipt writer.
 registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),

@@ -343,8 +343,8 @@ function trunc(s,n){s=String(s||"");return s.length>n?s.slice(0,n-1).trim()+"…
 function latestShort(d){return trunc(whyLine(d),150);}
 
 function enrichPrompt(d){return "Enrich "+d.name+" in the Deal Room. Here is the latest from the deal's email folder:\n\n[paste the Copilot summary here]";}
-function checkinPrompt(d){return "Draft a check-in for "+d.name+(d.company&&d.company!==d.name?" ("+d.company+")":"")+". The deal has gone quiet; latest on record: "+trunc(whyLine(d),200)+" Draft only, Joe sends.";}
-function followupPrompt(d){return "Draft a follow-up for "+d.name+(d.company&&d.company!==d.name?" ("+d.company+")":"")+" on the "+(d.phase||"open")+" deal. Where it stands: "+trunc(whyLine(d),200)+" Draft only, Joe sends.";}
+function checkinPrompt(d){return "Draft a check-in for "+d.name+(d.company&&d.company!==d.name?" ("+d.company+")":"")+". The deal has gone quiet; latest on record: "+trunc(whyLine(d),200)+" Draft it for my review.";}
+function followupPrompt(d){return "Draft a follow-up for "+d.name+(d.company&&d.company!==d.name?" ("+d.company+")":"")+" on the "+(d.phase||"open")+" deal. Where it stands: "+trunc(whyLine(d),200)+" Draft it for my review.";}
 function batchPrompt(){return "Enrich the Deal Room. Copilot summaries for several deals below:\n\n[paste the summaries here]";}
 
 function copyText(t,msg){

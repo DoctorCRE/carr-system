@@ -48,7 +48,7 @@ Fix drift in place, stamp it, report the fixes in one line. This is the change-p
 The seat can only act on signals that reach a session, and Claude sessions cannot see each other. So part of the job is making events land in the system automatically: the daily heartbeat's deal checks, a known transcript/notes drop-folder that gets swept and logged, capture prompts on the surfaces Joe already uses. When a gap shows up (an event that should have been logged but was not because it never reached a writing session), close the gap in the plumbing, not just the one record.
 
 ## Boundaries (unchanged)
-- The one permanent human gate: Claude drafts, Joe sends. Nothing external ever auto-fires. Logging internal records is in-scope; sending anything to a landlord, agent, or client is not.
+- Outbound follows Joe's ask (decision 41906a30): when Joe asks, Claude sends to a landlord, agent, or client through his own accounts, for one message or as a standing instruction for a category. With no ask, the default is a draft. Logging internal records is always in scope.
 - No fabrication: a missing date or figure is logged as owed, never invented.
 - Two-writer discipline and CARR routing stand: stamp writes, claim before touch, assume Dell's sessions may be writing too; non-CARR items route to Life AI.
 
