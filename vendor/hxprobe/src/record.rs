@@ -40,6 +40,13 @@ pub struct Record {
     /// True when the subject came from a sibling record in the same
     /// conversation rather than from this record's own bytes.
     pub subject_inherited: bool,
+    /// Outlook's own ~255-character preview, kept apart from `body` because
+    /// every revision of a message carries the same one.
+    pub preview: Option<String>,
+    /// Where the HTML came from: "inline" in the record, or an "efm" sidecar.
+    pub body_source: Option<&'static str>,
+    /// Revisions collapsed into this message.
+    pub copies: usize,
 }
 
 /// Selecting the send time from the ticks in a record.
@@ -513,7 +520,7 @@ fn undouble(t: &str) -> String {
 /// used to be duplicated; this one is kept because the body is not a UTF-16LE
 /// run and so is not part of the named map.
 pub fn parse(offset: usize, blob: &[u8], anchor: usize) -> Record {
-    let mut rec = Record { offset, ..Default::default() };
+    let mut rec = Record { offset, copies: 1, ..Default::default() };
 
     // A block holds records back to back, so bound this one at the next
     // ItemClass anchor. Without that the HTML scan runs into the following

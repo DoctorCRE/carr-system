@@ -9,7 +9,10 @@
 //!
 //! ```text
 //!   hxprobe blocks <file>            verify every block, report coverage
-//!   hxprobe db     <file> [out.db]   build a SQLite database with FTS5 search
+//!   hxprobe db     <file> [out.db] [files-dir]
+//!                                    build a SQLite database with FTS5 search;
+//!                                    files-dir is the profile's Files folder,
+//!                                    for EFMData sidecar bodies
 //!   hxprobe map    <file> [n]        dump the named field map for n records
 //!   hxprobe find   <file> <term>     show records whose text contains <term>
 //! ```
@@ -25,6 +28,8 @@ use std::fs::File;
 use memmap2::Mmap;
 
 mod block;
+mod body;
+mod calendar;
 mod folder;
 mod header;
 mod lz;
@@ -202,7 +207,7 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
 }
 
 /// Parse the whole store into a SQLite database with a full-text index.
-fn cmd_db(path: &str, db_path: &str) {
+fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
     let mm = map(path);
     let needle = record::anchor_needle();
     let offs = block::find_all(&mm);
@@ -210,9 +215,12 @@ fn cmd_db(path: &str, db_path: &str) {
 
     // Folder catalogs and membership metadata can occur after the messages.
     let mut folders = folder::Index::default();
+    let mut events = calendar::Index::default();
+    let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
     for &o in &offs {
         if let Some(b) = block::parse(&mm, o) {
             folders.observe(o, &b.data);
+            events.observe(&b.data);
         }
     }
 
@@ -249,7 +257,13 @@ fn cmd_db(path: &str, db_path: &str) {
              sent_utc     TEXT,
              -- 1 when the subject came from another record in the same
              -- conversation, because this record stores none of its own.
-             subject_inherited INTEGER
+             subject_inherited INTEGER,
+             preview      TEXT,      -- Outlook's own preview of the message
+             body_source  TEXT,      -- 'inline' or 'efm' when html is set
+             copies       INTEGER,   -- revisions collapsed into this row
+             -- sender, normalized subject and preview opening: the identity
+             -- this row's copies share; NULL when too short to identify.
+             copy_key     TEXT
          );
          CREATE TABLE message_folders (
              message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -259,6 +273,27 @@ fn cmd_db(path: &str, db_path: &str) {
          CREATE INDEX message_folders_folder ON message_folders(folder_id);
          CREATE INDEX messages_sent ON messages(sent_unix);
          CREATE INDEX messages_sender ON messages(sender);
+         CREATE TABLE events (
+             id              INTEGER PRIMARY KEY,
+             goid            TEXT NOT NULL,     -- Exchange Global Object ID
+             start_unix      INTEGER NOT NULL,
+             end_unix        INTEGER NOT NULL,
+             start_utc       TEXT NOT NULL,
+             end_utc         TEXT NOT NULL,
+             subject         TEXT,
+             location        TEXT,
+             organizer_name  TEXT,
+             organizer_email TEXT,
+             body            TEXT,
+             UNIQUE (goid, start_unix)
+         );
+         CREATE TABLE event_attendees (
+             event_id INTEGER NOT NULL REFERENCES events(id),
+             name     TEXT,
+             email    TEXT
+         );
+         -- Counts a caller checks before trusting the export.
+         CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
          CREATE VIRTUAL TABLE messages_fts USING fts5(
              sender, sender_name, recipients, subject, body,
              content='messages', content_rowid='id', tokenize='porter unicode61'
@@ -314,9 +349,17 @@ fn cmd_db(path: &str, db_path: &str) {
                 .filter(|t| Some(**t) != r.sender.as_deref())
                 .map(|t| t.to_string())
                 .collect();
+            r.preview = m.get(schema::Key::Preview).map(str::to_string);
+            if r.html.is_some() {
+                r.body_source = Some("inline");
+            } else if let Some(html) = sidecars.body_for(loc.span, &r) {
+                r.body = record::html_to_text(&html);
+                r.html = Some(html);
+                r.body_source = Some("efm");
+            }
             if r.body.split_whitespace().count() < 3 {
-                if let Some(v) = m.get(schema::Key::Preview) {
-                    r.body = v.to_string();
+                if let Some(v) = &r.preview {
+                    r.body = v.clone();
                 }
             }
 
@@ -389,9 +432,80 @@ fn cmd_db(path: &str, db_path: &str) {
         }
     }
 
+    // Collapse the copies `sender + send time` could not join. See body.rs.
+    let mut by_time: Vec<record::Record> = best.into_values().collect();
+    by_time.sort_by_key(|r| r.sent_unix);
+    let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
+    let mut first_copy: std::collections::HashMap<String, Vec<usize>> = Default::default();
+    let mut collapsed = 0usize;
+    for r in by_time {
+        let Some(key) = body::copy_key(&r) else {
+            best.push(r);
+            continue;
+        };
+        let slots = first_copy.entry(key).or_default();
+        let near = slots.iter().copied().find(|&i| match (best[i].sent_unix, r.sent_unix) {
+            (Some(a), Some(b)) => b - a <= body::COPY_WINDOW,
+            _ => false,
+        });
+        match near {
+            Some(i) => {
+                merge(&mut best[i], r);
+                collapsed += 1;
+            }
+            None => {
+                slots.push(best.len());
+                best.push(r);
+            }
+        }
+    }
+    // A revision can carry another subject (inherited from the thread, or a
+    // field the map could not claim). A preview-only message joins a full one
+    // with the same sender and opening when exactly one is within the window.
+    let full_by_opening: std::collections::HashMap<String, Vec<usize>> =
+        best.iter().enumerate().filter(|(_, r)| r.html.is_some()).fold(Default::default(), |mut m, (i, r)| {
+            if let Some(k) = body::sender_opening(r) {
+                m.entry(k).or_default().push(i);
+            }
+            m
+        });
+    let mut absorbed = vec![false; best.len()];
+    for i in 0..best.len() {
+        if best[i].html.is_some() {
+            continue;
+        }
+        let Some(k) = body::sender_opening(&best[i]) else { continue };
+        let near: Vec<usize> = full_by_opening
+            .get(&k)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&j| match (best[i].sent_unix, best[j].sent_unix) {
+                (Some(a), Some(b)) => (a - b).abs() <= body::COPY_WINDOW,
+                _ => false,
+            })
+            .collect();
+        if let [j] = near[..] {
+            let r = std::mem::take(&mut best[i]);
+            let sent = r.sent_unix.min(best[j].sent_unix);
+            merge(&mut best[j], r);
+            best[j].sent_unix = sent;
+            absorbed[i] = true;
+            collapsed += 1;
+        }
+    }
+    let mut keep = absorbed.iter().map(|a| !a);
+    best.retain(|_| keep.next().unwrap_or(true));
+    println!(
+        "  {collapsed} copies collapsed; {} sidecar bodies linked, {} rejected, of {} files",
+        sidecars.linked,
+        sidecars.rejected,
+        sidecars.len()
+    );
+
     let stored = best.len();
-    let with_folder = best.values().filter(|r| !r.folder_ids.is_empty()).count();
-    let multi_folder = best.values().filter(|r| r.folder_ids.len() > 1).count();
+    let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
+    let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
     println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
     let tx = db.transaction().expect("tx");
     {
@@ -414,13 +528,13 @@ fn cmd_db(path: &str, db_path: &str) {
                 "INSERT INTO messages
                    (block,sender,sender_name,recipients,subject,message_id,body,
                     html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
-                    subject_inherited)
+                    subject_inherited,preview,body_source,copies,copy_key)
                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
-                         datetime(?12,'unixepoch'),?13)",
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
             )
             .expect("prepare");
 
-        for r in best.values() {
+        for r in &best {
             ins.execute(rusqlite::params![
                 r.offset as i64,
                 r.sender,
@@ -435,6 +549,10 @@ fn cmd_db(path: &str, db_path: &str) {
                 if r.html.is_some() { "full" } else { "preview" },
                 r.sent_unix,
                 r.subject_inherited as i64,
+                r.preview,
+                r.body_source,
+                r.copies as i64,
+                body::copy_key(r),
             ])
             .expect("insert");
             let message_id = tx.last_insert_rowid();
@@ -444,6 +562,52 @@ fn cmd_db(path: &str, db_path: &str) {
             }
         }
     }
+    {
+        let mut ins_event = tx
+            .prepare(
+                "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
+                                    organizer_name,organizer_email,body)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8)",
+            )
+            .expect("prepare events");
+        let mut ins_attendee = tx
+            .prepare("INSERT INTO event_attendees(event_id,name,email) VALUES (?1,?2,?3)")
+            .expect("prepare attendees");
+        for ev in events.events.values() {
+            ins_event
+                .execute(rusqlite::params![
+                    ev.goid, ev.start_unix, ev.end_unix, ev.subject, ev.location,
+                    ev.organizer_name, ev.organizer_email, ev.body,
+                ])
+                .expect("insert event");
+            let event_id = tx.last_insert_rowid();
+            for a in &ev.attendees {
+                ins_attendee.execute(rusqlite::params![event_id, a.name, a.email]).expect("insert attendee");
+            }
+        }
+        let mut ins_meta = tx.prepare("INSERT INTO meta(key,value) VALUES (?1,?2)").expect("prepare meta");
+        for (key, value) in [
+            ("blocks_found", offs.len()),
+            ("blocks_verified", blocks_ok),
+            ("messages", stored),
+            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
+            ("copies_collapsed", collapsed),
+            ("sidecar_files", sidecars.len()),
+            ("sidecar_linked", sidecars.linked),
+            ("sidecar_rejected", sidecars.rejected),
+            ("event_objects", events.objects),
+            ("event_identities", events.identities.len()),
+            ("events_decoded", events.events.len()),
+        ] {
+            ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
+        }
+    }
+    println!(
+        "  {} calendar objects; {}/{} events decoded",
+        events.objects,
+        events.events.len(),
+        events.identities.len()
+    );
     tx.commit().expect("commit");
 
     db.execute_batch(
@@ -474,6 +638,10 @@ fn cmd_db(path: &str, db_path: &str) {
 /// Combine a later revision of a message into the copy already held.
 fn merge(prev: &mut record::Record, r: record::Record) {
     prev.folder_ids.extend(r.folder_ids);
+    prev.copies += r.copies;
+    if prev.preview.is_none() {
+        prev.preview = r.preview;
+    }
     if prev.subject.is_none() {
         prev.subject = r.subject;
     }
@@ -491,10 +659,13 @@ fn merge(prev: &mut record::Record, r: record::Record) {
         (Some(a), Some(b)) => b.len() > a.len(),
         _ => false,
     };
+    // The body follows the HTML it was rendered from; a preview never
+    // replaces the text of a full copy.
     if better_html {
         prev.html = r.html;
-    }
-    if r.body.len() > prev.body.len() {
+        prev.body_source = r.body_source;
+        prev.body = r.body;
+    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
         prev.body = r.body;
     }
 }
@@ -504,7 +675,9 @@ hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 
 usage:
   hxprobe blocks <file>              verify every block, report coverage
-  hxprobe db     <file> [out.db]     build a SQLite database (default mail.db)
+  hxprobe db     <file> [out.db] [files-dir]
+                                     build a SQLite database (default mail.db);
+                                     files-dir reads EFMData sidecar bodies
   hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
   hxprobe find   <file> <term> [n]   show records whose text contains <term>
 
@@ -521,7 +694,11 @@ fn main() {
 
     match args[1].as_str() {
         "blocks" => cmd_blocks(&args[2]),
-        "db" => cmd_db(&args[2], args.get(3).map(String::as_str).unwrap_or("mail.db")),
+        "db" => cmd_db(
+            &args[2],
+            args.get(3).map(String::as_str).unwrap_or("mail.db"),
+            args.get(4).map(String::as_str),
+        ),
         "map" => cmd_map(&args[2], num(3, 4)),
         "find" => match args.get(3) {
             Some(term) => cmd_find(&args[2], term, num(4, 4)),
