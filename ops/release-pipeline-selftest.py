@@ -6501,6 +6501,32 @@ class TokenCheckWrangler(Base):
     def toolchain(self) -> Path:
         return self.fx.repo / "out/release-pipeline/toolchain"
 
+    def test_cf_cache_uses_run_directory_without_changing_pinned_contents(self):
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text(
+            f"#!{sys.executable}\n"
+            "import json, os\nfrom pathlib import Path\n"
+            "override = os.environ.get('CLOUDFLARE_CF_FETCH_PATH')\n"
+            "cache = os.environ.get('MINIFLARE_CACHE_DIR')\n"
+            "modules = Path('node_modules/.mf')\n"
+            "local = Path('.wrangler/cache')\n"
+            "default = modules if modules.exists() or (not local.exists() and Path('node_modules').exists()) else local\n"
+            "path = Path(override) if override else (Path(cache) / 'cf.json' if cache else default / 'cf.json')\n"
+            "path.parent.mkdir(parents=True, exist_ok=True)\n"
+            "path.write_text('{}')\n"
+            "print(json.dumps({'cache': str(path.resolve()), 'env': dict(os.environ)}))\n")
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(rp.toolchain_digest(home) + "\n")
+        recorded = receipt.read_text()
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        result = pipe.step("wrangler-auth", [str(wrangler), "whoami"], home)
+        observed = json.loads(result.out)
+        self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir))
+        self.assertFalse((home / "node_modules/.mf").exists())
+        self.assertEqual(rp.toolchain_digest(home), recorded.strip())
+        self.assertEqual(receipt.read_text(), recorded)
+
     def test_reused_toolchain_requires_its_recorded_content_digest(self):
         for damage in ("binary", "dependency", "receipt", "escaping-link"):
             with self.subTest(damage=damage):
