@@ -7,6 +7,7 @@
     "inferred": "Interpretation implemented by the pinned reader, including heuristic selectors.",
     "unknown": "Identity or meaning has not been established."
   },
+  "decode_hypotheses": [],
   "sources": {
     "vendor/hxprobe/src/block.rs": {
       "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df",

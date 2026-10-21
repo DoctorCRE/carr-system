@@ -10,10 +10,47 @@ import sys
 SCHEMA = "outlook-hxstore-atlas/v1"
 KINDS = {"container", "record_anchor", "block_type", "record_type", "envelope_tag", "wire_field_id", "byte_offset", "string_run_selector"}
 
+ENCODING_LENGTHS = {f'u{bits}{order}': bits // 8 for bits in (16, 32, 64) for order in ('le', 'be')}
+ENCODING_LENGTHS.update({f'{kind}-{order}': 8 for kind in ('filetime', 'unix-ms', 'unix-s') for order in ('le', 'be')})
+ENCODING_LENGTHS.update({f'unix-s-u32{order}': 4 for order in ('le', 'be')})
+
+
+def validate_hypotheses(hypotheses):
+    if not isinstance(hypotheses, list):
+        raise ValueError('invalid hypotheses')
+    ids = set()
+    for h in hypotheses:
+        if set(h) != {'field_id', 'record_type', 'offset', 'length', 'encoding', 'confidence', 'evidence', 'corpus_sha256', 'manifest_field'}:
+            raise ValueError('invalid hypothesis shape')
+        if not re.fullmatch(r'object\.class\.[0-9a-f]{4}', h['record_type']):
+            raise ValueError('invalid hypothesis record type')
+        if type(h['offset']) is not int or not 10 <= h['offset'] <= 32 << 20:
+            raise ValueError('invalid object offset')
+        if type(h['length']) is not int or not 0 < h['length'] <= 65536:
+            raise ValueError('invalid hypothesis length')
+        if h['field_id'] != f"{h['record_type']}.offset.{h['offset']}" or h['field_id'] in ids:
+            raise ValueError('invalid or duplicate hypothesis field ID')
+        ids.add(h['field_id'])
+        if h['encoding'] in ENCODING_LENGTHS:
+            if h['length'] != ENCODING_LENGTHS[h['encoding']]:
+                raise ValueError('encoding length mismatch')
+        elif h['encoding'] not in {'utf-8', 'utf-16le'} or h['encoding'] == 'utf-16le' and h['length'] % 2:
+            raise ValueError('invalid hypothesis encoding')
+        if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_.-]{0,80}', h['manifest_field']):
+            raise ValueError('invalid manifest field')
+        if h['confidence'] not in {'candidate', 'confirmed'}:
+            raise ValueError('invalid hypothesis confidence')
+        if not re.fullmatch(r'[0-9a-f]{64}', h['corpus_sha256']):
+            raise ValueError('unbound hypothesis corpus')
+        if not isinstance(h['evidence'], list) or not h['evidence'] or any(not re.fullmatch(r'case-\d{2}', case) for case in h['evidence']):
+            raise ValueError('missing hypothesis evidence')
+    return hypotheses
+
 
 def validate(atlas):
     if atlas["schema"] != SCHEMA:
         raise ValueError("unsupported store atlas schema")
+    validate_hypotheses(atlas.get("decode_hypotheses", []))
     sources = atlas["sources"]
     for source in sources.values():
         if not re.fullmatch(r"[0-9a-f]{40}", source["revision"]) or not re.fullmatch(r"[0-9a-f]{64}", source["sha256"]):
@@ -73,6 +110,18 @@ def rust_names(atlas):
     lines.extend(["    ];", "    pub fn as_str(self) -> &'static str {", "        match self {"])
     lines.extend(f"            Key::{key} => {json.dumps(name, ensure_ascii=False)}," for key, name in fields)
     lines.extend(["        }", "    }", "}", ""])
+    lines.extend([
+        "pub struct ConfirmedSpan {",
+        "    pub field_id: &'static str, pub record_type: &'static str,",
+        "    pub offset: usize, pub length: usize, pub encoding: &'static str,",
+        "}",
+        "pub const CONFIRMED_SPANS: &[ConfirmedSpan] = &[",
+    ])
+    for h in atlas.get('decode_hypotheses', []):
+        if h['confidence'] == 'confirmed':
+            lines.append('    ConfirmedSpan { field_id: %s, record_type: %s, offset: %d, length: %d, encoding: %s },' %
+                         (json.dumps(h['field_id']), json.dumps(h['record_type']), h['offset'], h['length'], json.dumps(h['encoding'])))
+    lines.extend(['];', ''])
     return "\n".join(lines)
 
 
@@ -89,6 +138,8 @@ def render_store(atlas):
             revision = atlas["sources"][source]["revision"]
             lines.append(f"- [`{source}` at `{revision}`](https://github.com/jbookout/carr-system/blob/{revision}/{source}), `{evidence['symbol']}`.")
         lines.append("")
+    if atlas.get('decode_hypotheses'):
+        lines.extend(['## Decode hypotheses', '', '```json', json.dumps(atlas['decode_hypotheses'], indent=2), '```', ''])
     lines.extend(["## Source bindings", "", "```json", json.dumps(atlas["sources"], indent=2), "```", ""])
     return "\n".join(lines)
 

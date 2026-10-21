@@ -33,6 +33,7 @@ mod calendar;
 mod folder;
 mod header;
 mod lz;
+mod locate;
 mod observe;
 mod record;
 mod schema;
@@ -688,6 +689,17 @@ rewrites the file while it runs.";
 
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "locate") {
+        let result = if raw.len() == 5 { locate::run(&raw[2], &raw[3], &raw[4]) } else { Err(()) };
+        match result {
+            Ok(json) => println!("{json}"),
+            Err(()) => {
+                eprintln!("locator input rejected");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if raw.get(1).is_some_and(|arg| arg == "observe") {
         let result = if raw.len() == 3 { observe::run(&raw[2]) } else {
             Err(observe::Issue::input("arguments", "invalid_arguments"))

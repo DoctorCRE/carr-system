@@ -11,6 +11,7 @@ struct Counts {
     unknown_occurrences: usize,
     total: usize,
     decoded: usize,
+    fields: BTreeMap<String, usize>,
 }
 
 impl Counts {
@@ -115,6 +116,9 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
             total.unknown_occurrences += n.unknown_occurrences;
             total.total += n.total;
             total.decoded += n.decoded;
+            for (field, count) in n.fields {
+                *total.fields.entry(field).or_default() += count;
+            }
         }
     }
     let block_rows: Vec<_> = blocks
@@ -131,7 +135,7 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
         if n.total > n.decoded {
             unknown.push((kind, n));
         }
-        let fields = if kind.starts_with("object.class.") {
+        let mut fields = if kind.starts_with("object.class.") {
             [
                 ("envelope.offset.0", "u16le"),
                 ("envelope.offset.2", "u16le"),
@@ -147,6 +151,11 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
         } else {
             String::new()
         };
+        for (id, count) in &n.fields {
+            let wire = crate::schema::CONFIRMED_SPANS.iter().find(|h| h.field_id == id).unwrap().encoding;
+            if !fields.is_empty() { fields.push(','); }
+            fields.push_str(&format!("{{\"field_id\":\"{id}\",\"identifier_kind\":\"byte_offset\",\"wire_type\":\"{wire}\",\"occurrences\":{count}}}"));
+        }
         let percent = if n.total == 0 { "null".into() } else {
             (100.0 * n.decoded as f64 / n.total as f64).to_string()
         };
@@ -184,7 +193,58 @@ pub fn run(path: &OsStr) -> Result<String, Issue> {
     Ok(format!("{{\"schema\":\"hxprobe-observation/v1\",\"blocks\":[{}],\"records\":[{}],\"unknown_fields\":[{}],\"coverage\":{{\"block_signatures\":{signatures},\"verified_blocks\":{verified},\"unverified_blocks\":{},\"undecodable_blocks\":{undecodable},\"verified_payload_bytes\":{verified_bytes},\"decoded_bytes\":{decoded},\"decoded_byte_percent\":{percent}}},\"issues\":[{}],\"issue_counts\":[{}]}}", block_rows.join(","), record_rows.join(","), unknown_rows.join(","), signatures - verified, issue_rows.join(","), count_rows.join(",")))
 }
 
+pub struct Span {
+    pub kind: String,
+    pub start: usize,
+    pub end: usize,
+    pub decoded: usize,
+}
+
 fn observe_payload(data: &[u8], records: &mut BTreeMap<String, Counts>) -> Result<(), ()> {
+    for span in partition(data)? {
+        let mut ranges = vec![(0, span.decoded)];
+        let mut fields = Vec::new();
+        let bytes = &data[span.start..span.end];
+        for h in crate::schema::CONFIRMED_SPANS
+            .iter()
+            .filter(|h| h.record_type == span.kind)
+        {
+            let start = 10 + h.offset;
+            if let Some(value) = bytes.get(start..start + h.length) {
+                let valid = match h.encoding {
+                    "utf-8" => std::str::from_utf8(value).is_ok(),
+                    "utf-16le" => char::decode_utf16(
+                        value
+                            .chunks_exact(2)
+                            .map(|b| u16::from_le_bytes([b[0], b[1]])),
+                    )
+                    .all(|c| c.is_ok()),
+                    _ => true,
+                };
+                if valid {
+                    ranges.push((start, start + h.length));
+                    fields.push(h.field_id);
+                }
+            }
+        }
+        ranges.sort_unstable();
+        let mut end = 0;
+        let mut decoded = 0;
+        for (a, b) in ranges {
+            decoded += b.saturating_sub(a.max(end));
+            end = end.max(b);
+        }
+        let counts = records.entry(span.kind).or_default();
+        counts.add(span.end - span.start, decoded);
+        for field in fields {
+            *counts.fields.entry(field.into()).or_default() += 1;
+        }
+    }
+    Ok(())
+}
+
+pub fn partition(data: &[u8]) -> Result<Vec<Span>, ()> {
+    let mut spans = Vec::new();
     let mut cursor = 0;
     let mut gap = 0;
     while cursor + 10 <= data.len() {
@@ -201,34 +261,42 @@ fn observe_payload(data: &[u8], records: &mut BTreeMap<String, Counts>) -> Resul
             cursor += 1;
             continue;
         }
-        observe_gap(&data[gap..cursor], records);
+        partition_gap(data, gap, cursor, &mut spans);
         let class = u16::from_le_bytes(data[cursor + 10..cursor + 12].try_into().unwrap());
-        records
-            .entry(format!("object.class.{class:04x}"))
-            .or_default()
-            .add(len, 20);
+        spans.push(Span {
+            kind: format!("object.class.{class:04x}"),
+            start: cursor,
+            end,
+            decoded: 20,
+        });
         cursor = end;
         gap = end;
     }
-    observe_gap(&data[gap..], records);
-    Ok(())
+    partition_gap(data, gap, data.len(), &mut spans);
+    Ok(spans)
 }
 
-fn observe_gap(data: &[u8], records: &mut BTreeMap<String, Counts>) {
+fn partition_gap(data: &[u8], start: usize, end: usize, spans: &mut Vec<Span>) {
     let needle = crate::record::anchor_needle();
-    let anchors: Vec<_> = memchr::memmem::find_iter(data, &needle).collect();
-    let leading = anchors.first().copied().unwrap_or(data.len());
-    if leading > 0 {
-        records
-            .entry("unframed".into())
-            .or_default()
-            .add(leading, 0);
+    let anchors: Vec<_> = memchr::memmem::find_iter(&data[start..end], &needle)
+        .map(|n| start + n)
+        .collect();
+    let leading = anchors.first().copied().unwrap_or(end);
+    if leading > start {
+        spans.push(Span {
+            kind: "unframed".into(),
+            start,
+            end: leading,
+            decoded: 0,
+        });
     }
     for (i, &start) in anchors.iter().enumerate() {
-        let end = anchors.get(i + 1).copied().unwrap_or(data.len());
-        records
-            .entry("mail".into())
-            .or_default()
-            .add(end - start, needle.len());
+        let end = anchors.get(i + 1).copied().unwrap_or(end);
+        spans.push(Span {
+            kind: "mail".into(),
+            start,
+            end,
+            decoded: needle.len(),
+        });
     }
 }

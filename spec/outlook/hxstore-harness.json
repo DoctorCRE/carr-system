@@ -1,0 +1,59 @@
+{
+  "schema": "hxstore-harness-contract/v1",
+  "scope": "Offline synthetic campaign tooling. No Outlook automation, networking, account access, or store mutation.",
+  "commands": {
+    "build": "cargo build --locked --manifest-path vendor/hxprobe/Cargo.toml",
+    "corpus": "python3 ops/hxstore-harness.py corpus --account \"$TEST_ACCOUNT\" --out /tmp/hx-corpus",
+    "diff": "python3 ops/hxstore-harness.py diff /tmp/test-before.hxd /tmp/test-after.hxd --manifest /tmp/hx-corpus/manifest.json --synthetic-store",
+    "hypotheses": "python3 ops/hxstore-harness.py hypotheses --manifest /tmp/hx-corpus/manifest.json --hypotheses /tmp/hypotheses.json --atlas spec/outlook/hxstore-atlas.json",
+    "observe": "vendor/hxprobe/target/debug/hxprobe observe /tmp/test-after.hxd",
+    "verify": "python3 ops/hxstore-harness-selftest.py"
+  },
+  "corpus": {
+    "schema": "hxstore-corpus/v1",
+    "cases": 20,
+    "formats": ["plain", "html"],
+    "decoded_body_byte_lengths": [0, 1, 7, 31, 127, 255, 1023, 4095, 16384, 65536],
+    "to_counts": [1, 2, 3, 4],
+    "cc_counts": [0, 1, 2],
+    "addresses": "The required dedicated test account must use outlook.com or example.test. All other addresses use example.test.",
+    "fields": "The manifest gives every emitted MIME header and the exact decoded body. Subjects have distinct lengths and campaign markers. Nonempty bodies differ between cases. Empty bodies have no searchable encoding.",
+    "draft_and_importance": "X-Unsent is 1. Importance and X-Priority cycle low, normal, and high. Read and follow-up flags are unsupported.",
+    "import_limit": "The files round-trip as MIME templates in tests. Outlook import, Date preservation, flag handling, and HTML normalization require the orchestrator's TEST-account experiment. No runtime behavior is claimed."
+  },
+  "differential": {
+    "guard": "Requires --synthetic-store and an unchanged generated manifest. Every declared marker must occur in a verified after-copy payload. Missing markers, unsupported store headers, and corrupt blocks fail with a fixed error and no stdout.",
+    "disclosure": "No store bytes, text values, paths, or hex dumps appear in either report stream. Even the Rust locate worker emits only numerical locations and fixed record classifications.",
+    "guard_limit": "Markers establish campaign presence, not the absence of unrelated mail. Only dedicated TEST-account copies are authorized inputs.",
+    "coordinates": "file_ranges and block_offset use physical file offsets. payload_ranges, payload_offset, and record bounds use decompressed payload offsets. record_offset includes the ten-byte envelope. object_offset starts after that envelope and is null outside object bodies. All ranges are half-open.",
+    "comparison": "Byte ranges compare the same positions. Blocks pair by physical offset. Relocated blocks appear as removals and additions. No logical message identity or compressed-to-decompressed byte mapping is inferred.",
+    "record_partition": "Uses observe's envelope and mail-anchor partition. Malformed record bounds make the entire verified payload unframed. Hits across record boundaries have record_type cross_record.",
+    "encodings": "Every nonempty header, individual recipient address, and decoded body is sought as UTF-8 and UTF-16LE. Counts, body lengths, and draft flag are sought as unsigned 16-, 32-, and 64-bit integers in both byte orders. Date instants are sought as FILETIME and Unix milliseconds or seconds in both byte orders, including 32-bit Unix seconds.",
+    "limits": "Each needle reports at most 4096 locations per snapshot, with uncapped before and after occurrence totals. Search includes overlapping matches. Integer coincidences are observations, not decode confirmations. Markers are checked using occurrence totals before output is released.",
+    "resources": "The worker reads both immutable copies and retains verified decompressed blocks in memory. It does not support live or concurrently modified stores."
+  },
+  "hypothesis_file": {
+    "schema": "hxstore-decode-hypotheses/v1",
+    "corpus_sha256": "SHA-256 of the exact manifest file bytes",
+    "hypotheses": [
+      {
+        "field_id": "object.class.016a.offset.10",
+        "record_type": "object.class.016a",
+        "offset": 10,
+        "encoding": "u64le",
+        "manifest_field": "date",
+        "length": 8,
+        "confidence": "candidate",
+        "evidence": ["case-00"]
+      }
+    ]
+  },
+  "hypothesis_rules": {
+    "identity": "Field IDs name object byte offsets, never wire field IDs. Offset 10 is the first byte after the object class and reserved bytes, or record offset 20.",
+    "evidence": "Every case ID must exist in the bound corpus. manifest_field names the scalar expected value, such as subject, date, or headers.To. The importer attaches the manifest SHA-256 to each atlas hypothesis. Import replaces hypotheses with the same field ID and emits the entire validated atlas to stdout without modifying inputs. Review the emitted atlas before replacing the source file.",
+    "confirmation": "A human or research executor sets confirmed after the stated corpus cases establish the meaning, fixed length, encoding, and offset. The importer validates provenance and shape, not the scientific conclusion. Candidate hypotheses earn no coverage.",
+    "encodings": "utf-8, utf-16le, u16le, u16be, u32le, u32be, u64le, u64be, filetime-le, filetime-be, unix-ms-le, unix-ms-be, unix-s-le, unix-s-be, unix-s-u32le, unix-s-u32be",
+    "length": "Positive fixed byte length, at most 65536. Numeric widths must match the encoding. UTF-16LE lengths must be even. Variable-length fields require a future decoder rather than an oversized fixed-span claim.",
+    "coverage": "Rebuild hxprobe after importing into hxstore-atlas.json. observe credits only confirmed spans within framed matching object records. Invalid UTF-8 or UTF-16 and out-of-bounds spans receive no credit. Overlaps count once. Values never reach observe output. No confirmed discoveries ship with this harness."
+  }
+}
