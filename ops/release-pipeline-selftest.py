@@ -203,7 +203,7 @@ class FakeRunner:
             **self.outputs,
         }.get(name, "ok")
         if name == "promote" and self.live is not None:
-            upload = next(a for n, a in self.calls if n == "upload")
+            upload = next(a for n, a in reversed(self.calls) if n == "upload")
             self.live["sha"] = upload[upload.index("--release-sha") + 1]
             self.live["version"] = argv[argv.index("--promote-version") + 1]
         if name == "rollback" and self.live is not None:
@@ -1369,7 +1369,7 @@ class DurableReleaseEvidence(Base):
         for row in self.fx.records():
             self.assertEqual(row["live_identity"]["url"], "https://worker.example.invalid")
 
-    def test_failed_proof_append_cannot_advance_release_or_slices(self):
+    def test_failed_proof_append_checkpoints_live_but_cannot_ship_or_mark_slices(self):
         latest = self.fx.commit({"mcp-server/src/a.js": "1"})
         live = {"sha": self.fx.base}
         pipe = self.fx.pipeline(FakeRunner(live=live), live=live)
@@ -1382,7 +1382,9 @@ class DurableReleaseEvidence(Base):
 
         pipe.store.record = record
         self.assertEqual(pipe.tick(["worker"]), 1)
-        self.assertNotEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+        self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
+        self.assertFalse([row for row in self.fx.records() if row["status"] == "shipped"])
         self.assertEqual(self.fx.slice_marks, [])
 
     def test_proof_is_durable_before_release_checkpoint_or_slice_marker(self):
@@ -1435,7 +1437,367 @@ class RecoveryCrash(BaseException):
     pass
 
 
+class CheckpointOwnership(unittest.TestCase):
+    def test_only_checkpoint_owner_can_write_last_released_sha(self):
+        tree = ast.parse((HERE / "release-pipeline.py").read_text())
+        writes = []
+
+        class Writers(ast.NodeVisitor):
+            scope = []
+
+            def visit_ClassDef(self, node):
+                self.scope.append(node.name)
+                self.generic_visit(node)
+                self.scope.pop()
+
+            visit_FunctionDef = visit_ClassDef
+            visit_AsyncFunctionDef = visit_ClassDef
+
+            def record(self, node):
+                writes.append((".".join(self.scope), node.lineno))
+
+            def visit_Subscript(self, node):
+                if (isinstance(node.ctx, (ast.Store, ast.Del)) and isinstance(node.slice, ast.Constant)
+                        and node.slice.value == "last_released_sha"):
+                    self.record(node)
+                self.generic_visit(node)
+
+            def visit_Dict(self, node):
+                if any(isinstance(key, ast.Constant) and key.value == "last_released_sha" for key in node.keys):
+                    self.record(node)
+                self.generic_visit(node)
+
+            def visit_Call(self, node):
+                if (any(keyword.arg == "last_released_sha" for keyword in node.keywords)
+                        or (isinstance(node.func, ast.Attribute)
+                            and node.func.attr in {"setdefault", "__setitem__", "__delitem__", "pop"}
+                            and node.args and isinstance(node.args[0], ast.Constant)
+                            and node.args[0].value == "last_released_sha")):
+                    self.record(node)
+                self.generic_visit(node)
+
+        Writers().visit(tree)
+        self.assertTrue(writes, "the checkpoint owner must contain the actual state mutation")
+        self.assertEqual({scope for scope, _ in writes}, {"Pipeline.advance_checkpoint"}, writes)
+
+
 class ReleaseJournalRecovery(Base):
+    def rollback_revert_case(self):
+        prior = self.fx.commit({"mcp-server/src/a.js": "baseline"})
+        live = {"sha": self.fx.base, "version": PRIOR}
+        runner = FakeRunner(live=live, outputs={"upload": f"provider version: {PRIOR}\n"})
+        restart = lambda: self.fx.pipeline(runner, live=live)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        promoted = self.fx.commit({"mcp-server/src/a.js": "promoted"})
+        runner.outputs = {}
+        pipe = restart()
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        live.update(sha=prior, version=PRIOR)
+        reverted = self.fx.commit({"mcp-server/src/a.js": "baseline", "README.md": "revert"})
+        return prior, promoted, reverted, live, runner, restart
+
+    def test_rollback_and_runtime_revert_retire_pending_intent_before_source_only_checkpoint(self):
+        prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], reverted)
+        self.assertNotIn("pending_promotion", state)
+        retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
+        self.assertEqual([row["sha"] for row in retired], [promoted])
+        self.assertTrue(retired[0]["reason"])
+        newer = self.fx.commit({"mcp-server/src/a.js": "fix forward"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertEqual(runner.names().count("promote"), 3)
+
+    def test_checkpoint_owner_refuses_unresolved_intent_without_mutating_state(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        state = pipe.store.load()
+        before = json.loads(json.dumps(state))
+        with self.assertRaises(rp.Blocked) as caught:
+            pipe.advance_checkpoint(state, "worker", latest)
+        self.assertEqual(caught.exception.reason, "promotion_unresolved")
+        self.assertEqual(state, before)
+        self.assertEqual(pipe.store.load(), before)
+
+    def test_resolution_receipt_before_checkpoint_crash_replays_retirement_once(self):
+        prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
+        pipe = restart()
+        original = pipe.store.save
+
+        def save(state):
+            if state["worker"].get("last_released_sha") == reverted:
+                raise RecoveryCrash()
+            original(state)
+
+        with mock.patch.object(pipe.store, "save", side_effect=save), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], prior)
+        self.assertEqual(state["pending_promotion"]["sha"], promoted)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+        self.assertNotIn("pending_promotion", self.fx.state()["worker"])
+        self.assertEqual(len([row for row in self.fx.records() if row["status"] == "promotion_retired"]), 1)
+
+    def test_wrong_prior_provider_version_cannot_retire_intent_for_source_only_target(self):
+        prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
+        live["version"] = VERSION
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], prior)
+        self.assertEqual(self.fx.state()["worker"]["pending_promotion"]["sha"], promoted)
+        self.assertFalse([row for row in self.fx.records() if row["status"] == "promotion_retired"])
+        live["version"] = PRIOR
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], reverted)
+
+    def test_late_acknowledgement_of_retired_promotion_still_allows_newer_fix(self):
+        prior, promoted, reverted, live, runner, restart = self.rollback_revert_case()
+        self.assertEqual(restart().tick(["worker"]), 0)
+        live.update(sha=promoted, version=VERSION)
+        newer = self.fx.commit({"mcp-server/src/a.js": "later verified fix"})
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertGreater(len(runner.calls), before)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+
+    def test_newer_verified_release_supersedes_restored_older_pending_intent(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        earlier_state = pipe.store.load()
+        live.update(sha=self.fx.base, version=PRIOR)
+        newer = self.fx.commit({"mcp-server/src/a.js": "verified newer fix"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        pipe.store.save(earlier_state)
+        before = len(runner.calls)
+        marks = list(self.fx.slice_marks)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        self.assertEqual(self.fx.slice_marks, marks)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertNotIn("pending_promotion", self.fx.state()["worker"])
+
+    def test_clear_failed_retires_older_pending_intent_with_explicit_reason(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        store = restart().store
+        rp.clear_failed(store, "worker", fix, "operator verified rollback", repo_dir=self.fx.repo)
+        state = self.fx.state()["worker"]
+        self.assertNotIn("pending_promotion", state)
+        self.assertIsNone(state["failed_sha"])
+        retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
+        self.assertEqual([row["sha"] for row in retired], [latest])
+        self.assertEqual(retired[0]["reason"], "operator verified rollback")
+
+    def test_clear_failed_retires_crashed_intent_even_without_failure_checkpoint(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        rp.clear_failed(pipe.store, "worker", latest, "operator canceled interrupted promotion", repo_dir=self.fx.repo)
+        self.assertNotIn("pending_promotion", self.fx.state()["worker"])
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        retired = [row for row in self.fx.records() if row["status"] == "promotion_retired"]
+        self.assertEqual(retired[0]["reason"], "operator canceled interrupted promotion")
+
+    def assert_failed_live_can_fix_forward(self, latest, runner, restart):
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], latest)
+        self.assertEqual(state.get("failed_sha"), latest)
+        self.assertEqual(self.fx.slice_marks, [])
+        self.assertFalse([row for row in self.fx.records() if row["status"] == "shipped"])
+        receipts = [row for row in self.fx.records() if row["status"] == "worker_promoted"]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual((receipts[0]["sha"], receipts[0]["provider_version_id"]), (latest, VERSION))
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        fix = self.fx.commit({"mcp-server/src/a.js": "fix forward"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], fix)
+        self.assertIsNone(self.fx.state()["worker"]["failed_sha"])
+        self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_kill_between_promote_and_receipt_recovers_live_checkpoint_without_redeploy(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        original = runner.run
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if "--promote-version" in argv:
+                raise RecoveryCrash()
+            return result
+
+        with mock.patch.object(runner, "run", side_effect=run), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        self.assertEqual(live["sha"], latest)
+        self.assertNotIn("health", runner.names())
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_kill_between_receipt_and_health_keeps_verification_incomplete(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        self.assertTrue(self.fx.records(), "promotion needs a durable receipt before health")
+        self.assertEqual(self.fx.records()[-1]["status"], "worker_promoted")
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "post-promote-verification-incomplete")
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_health_failure_checkpoints_live_sha_and_allows_green_fix_forward(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        runner.health_findings = [{"key": "fixture_regression", "subject": "worker", "count": 1,
+                                   "hard_error": True, "time_rolling": False, "detail": "new failure"}]
+        self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "health")
+        self.assertEqual(self.fx.records()[-1]["status"], "failed")
+        runner.health_findings = []
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_stale_read_after_promote_retains_intent_until_exact_live_acknowledgement(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        live.update(sha=self.fx.base, version=PRIOR)
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        self.assertEqual(self.fx.state()["worker"].get("pending_promotion", {}).get("sha"), latest)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        live.update(sha=latest, version=VERSION)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_other_lane_proof_from_same_tick_cannot_suppress_worker_recovery(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        pipe.store.record_durable({"lane": "app", "sha": latest, "run_id": pipe.run_id,
+                                   "status": "release_verified"})
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_kill_on_health_failure_recovers_without_claiming_health_passed(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        original = pipe.store.save
+
+        def save(state):
+            if state["worker"].get("failed_step") == "health":
+                raise RecoveryCrash()
+            original(state)
+
+        with mock.patch.object(pipe, "health_gate", side_effect=rp.StepFailed("health", 1, "", "regression")), \
+             mock.patch.object(pipe.store, "save", side_effect=save), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_promotion_receipt_readback_failure_recovers_without_health_or_redeployment(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        original = pipe.store.readback_durable
+
+        def readback(row):
+            if row["status"] == "worker_promoted":
+                raise OSError("fixture promotion readback failure")
+            original(row)
+
+        with mock.patch.object(pipe.store, "readback_durable", side_effect=readback):
+            self.assertEqual(pipe.tick(["worker"]), 1)
+        self.assertNotIn("health", runner.names())
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def test_wrong_provider_version_cannot_authorize_a_live_checkpoint(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        live["version"] = PRIOR
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], self.fx.base)
+        self.assertIn("pending_promotion", self.fx.state()["worker"])
+        live["version"] = VERSION
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assert_failed_live_can_fix_forward(latest, runner, restart)
+
+    def pending_promotion_with_newer_failed_fix(self):
+        latest, live, runner, pipe, restart = self.case("worker")
+        with mock.patch.object(pipe, "health_gate", side_effect=RecoveryCrash()), self.assertRaises(RecoveryCrash):
+            pipe.tick(["worker"])
+        live.update(sha=self.fx.base, version=PRIOR)
+        fix = self.fx.commit({"mcp-server/src/a.js": "first fix"})
+        runner.fail_at = "staging"
+        self.assertEqual(restart().tick(["worker"]), 1)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], fix)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "staging")
+        return latest, live, runner, restart, fix
+
+    def test_older_pending_promotion_cannot_erase_a_newer_failed_fix(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        live.update(sha=latest, version=VERSION)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(len(runner.calls), before)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], latest)
+        self.assertEqual(self.fx.state()["worker"]["failed_sha"], fix)
+        self.assertEqual(self.fx.state()["worker"]["failed_step"], "staging")
+        newer = self.fx.commit({"mcp-server/src/a.js": "second fix"})
+        runner.fail_at = None
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_stale_then_current_identity_keeps_pending_source_bound_and_allows_newer_fix(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        live.update(sha=latest, version=VERSION)
+        pipe = restart()
+        before = len(runner.calls)
+        stale = {"git_sha": {"value": self.fx.base}, "worker_version": {"id": PRIOR}}
+        current = {"git_sha": {"value": latest}, "worker_version": {"id": VERSION}}
+        with mock.patch.object(pipe, "http", side_effect=[stale, current]):
+            self.assertEqual(pipe.tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["pending_promotion"]["from_sha"], self.fx.base)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(len(runner.calls), before)
+        newer = self.fx.commit({"mcp-server/src/a.js": "second fix"})
+        runner.fail_at = None
+        self.assertEqual(restart().tick(["worker"]), 0)
+        self.assertEqual(self.fx.state()["worker"]["last_released_sha"], newer)
+        self.assertNotIn("pending_promotion", self.fx.state()["worker"])
+        self.assertEqual(runner.names().count("promote"), 2)
+
+    def test_wrong_version_after_newer_failure_cannot_advance_pending_checkpoint(self):
+        latest, live, runner, restart, fix = self.pending_promotion_with_newer_failed_fix()
+        live.update(sha=latest, version=PRIOR)
+        before = len(runner.calls)
+        self.assertEqual(restart().tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], self.fx.base)
+        self.assertEqual(state["pending_promotion"]["provider_version_id"], VERSION)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(len(runner.calls), before)
+        live["version"] = VERSION
+        self.assertEqual(restart().tick(["worker"]), 0)
+        state = self.fx.state()["worker"]
+        self.assertEqual(state["last_released_sha"], latest)
+        self.assertNotIn("pending_promotion", state)
+        self.assertEqual(state["failed_sha"], fix)
+        self.assertEqual(state["failed_step"], "staging")
+        self.assertEqual(len(runner.calls), before)
+
     def case(self, lane, checkpoint=True):
         self.case_ordinal = getattr(self, "case_ordinal", 0) + 1
         latest = self.fx.commit({"mcp-server/src/a.js" if lane == "worker" else "src/worker.js": f"{lane}-{self.case_ordinal}"})
@@ -1525,28 +1887,45 @@ class ReleaseJournalRecovery(Base):
             for checkpoint in [True, False]:
                 with self.subTest(lane=lane, checkpoint=checkpoint):
                     latest, live, runner, pipe, restart = self.case(lane, checkpoint)
-                    with mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture append failed")):
+                    original = pipe.store.record_durable
+
+                    def record(row):
+                        if row["status"] != "promotion_prepared":
+                            raise OSError("fixture post-promotion append failed")
+                        original(row)
+
+                    with mock.patch.object(pipe.store, "record_durable", side_effect=record):
                         self.assertEqual(pipe.tick([lane]), 1)
                     before = len(runner.calls)
                     self.assertEqual(restart().tick([lane]), 0)
                     self.assertEqual(len(runner.calls), before)
-                    self.assertEqual(self.fx.state()[lane].get("last_released_sha"), self.fx.base if checkpoint else None)
+                    expected = latest if lane == "worker" else self.fx.base if checkpoint else None
+                    self.assertEqual(self.fx.state()[lane].get("last_released_sha"), expected)
+                    self.assertEqual(self.fx.state()[lane]["failed_sha"], latest)
                     self.assertFalse([row for row in self.fx.records() if row.get("lane") == lane and row.get("sha") == latest and row["status"] == "shipped"])
 
     def test_failed_append_after_canary_target_behind_main_never_redeploys(self):
         for checkpoint in [True, False]:
             with self.subTest(checkpoint=checkpoint):
                 latest, live, runner, pipe, restart = self.case("worker", checkpoint)
-                self.fx.commit({"docs/recovery-later.md": f"main advanced-{self.case_ordinal}"})
+                head = self.fx.commit({"docs/recovery-later.md": f"main advanced-{self.case_ordinal}"})
+                original = pipe.store.record_durable
+
+                def record(row):
+                    if row["status"] != "promotion_prepared":
+                        raise OSError("fixture post-promotion append failed")
+                    original(row)
+
                 with mock.patch.object(pipe, "release_target", return_value=latest), \
-                     mock.patch.object(pipe.store, "record_durable", side_effect=OSError("fixture append failed")):
+                     mock.patch.object(pipe.store, "record_durable", side_effect=record):
                     self.assertEqual(pipe.tick(["worker"]), 1)
                 before = len(runner.calls)
                 again = restart()
                 with mock.patch.object(again, "release_target", return_value=latest):
                     self.assertEqual(again.tick(["worker"]), 0)
                 self.assertEqual(len(runner.calls), before)
-                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), self.fx.base if checkpoint else None)
+                self.assertEqual(self.fx.state()["worker"].get("last_released_sha"), head)
+                self.assertEqual(self.fx.state()["worker"]["failed_sha"], latest)
                 self.assertFalse([row for row in self.fx.records() if row.get("lane") == "worker" and row["status"] == "shipped"])
 
     def test_restart_after_terminal_persistence_failure_finishes_original_proof(self):
@@ -1585,7 +1964,14 @@ class ReleaseJournalRecovery(Base):
             for checkpoint in [True, False]:
                 with self.subTest(lane=lane, checkpoint=checkpoint):
                     latest, live, runner, pipe, restart = self.case(lane, checkpoint)
-                    with mock.patch.object(pipe.store, "records", return_value=[]):
+                    original = pipe.store.readback_durable
+
+                    def readback(row):
+                        if row["status"] == "release_verified":
+                            raise OSError("fixture verified proof readback failed")
+                        original(row)
+
+                    with mock.patch.object(pipe.store, "readback_durable", side_effect=readback):
                         self.assertEqual(pipe.tick([lane]), 1)
                     self.assertEqual(restart().tick([lane]), 0)
                     self.assert_one_release(lane, latest, runner)

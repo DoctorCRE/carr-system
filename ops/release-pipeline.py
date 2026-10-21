@@ -385,6 +385,30 @@ class Store:
         self.record(recorded)
         self.readback_durable(recorded)
 
+    def resolve_promotion(self, state: dict, lane: str, resolution: dict) -> None:
+        pending = state[lane].get("pending_promotion")
+        if not pending:
+            return
+        if resolution.get("intent") != pending or not resolution.get("reason"):
+            raise Blocked("journal_proof_invalid", "promotion resolution does not bind the pending intent and reason")
+        receipt = resolution.get("receipt")
+        if receipt:
+            if (receipt.get("status") not in {"worker_promoted", "shipped"}
+                    or any(receipt.get(key) != pending[key] for key in
+                           ("lane", "sha", "from_sha", "run_id", "provider_version_id", "release_endpoint"))):
+                raise Blocked("journal_proof_invalid", "promotion acknowledgement differs from its original intent")
+            self.recover_durable(receipt)
+        else:
+            row = {**pending, **{key: value for key, value in resolution.items() if key != "intent"}}
+            previous = next((item for item in reversed(self.records())
+                             if all(item.get(key) == value for key, value in row.items())), None)
+            if previous:
+                self.recover_durable(previous)
+            else:
+                self.record_durable(row)
+        # The caller saves removal together with its checkpoint or clearance.
+        state[lane].pop("pending_promotion")
+
     def recover_durable(self, row: dict) -> None:
         with self.records_path.open("rb") as fh:
             os.fsync(fh.fileno())
@@ -1427,6 +1451,41 @@ class Pipeline:
             raise Blocked("bootstrap_unknown", f"{lane_cfg['live_release_url']} names no full SHA")
         return value
 
+    def advance_checkpoint(self, state: dict, lane: str, sha: str, *, resolution: dict | None = None) -> None:
+        lane_state = state.setdefault(lane, {})
+        if lane_state.get("pending_promotion"):
+            if resolution is None:
+                raise Blocked("promotion_unresolved", "checkpoint cannot advance while promotion intent is unresolved")
+            self.store.resolve_promotion(state, lane, resolution)
+        lane_state["last_released_sha"] = sha
+        if not self.dry_run:
+            self.store.save(state)
+
+    def promotion_replacement(self, state: dict, lane: str, target: str, live: dict) -> dict | None:
+        pending = state[lane].get("pending_promotion")
+        if not pending:
+            return None
+        sha = (live.get("git_sha") or {}).get("value")
+        version = (live.get("worker_version") or {}).get("id")
+        if (not SHA_RE.fullmatch(str(sha or "")) or not UUID_RE.fullmatch(str(version or ""))
+                or target == pending["sha"] or not self._at_or_before(pending["sha"], target, self.repo)
+                or not self._at_or_before(sha, target, self.repo)):
+            raise Blocked("promotion_unresolved", "replacement target has no verified live checkpoint")
+        receipt = next((row for row in reversed(self.store.records())
+                        if row.get("lane") == lane and row.get("release_endpoint") == pending["release_endpoint"]
+                        and ((row.get("status") in {"shipped", "live_identity_reconciled", "worker_promoted", "promotion_retired"}
+                              and row.get("sha") == sha and row.get("provider_version_id") == version)
+                             or (row.get("status") == "promotion_prepared"
+                                 and row.get("run_id") == pending["run_id"]
+                                 and row.get("prior_identity") == {"sha": sha, "provider_version_id": version}))), None)
+        if receipt is None:
+            raise Blocked("promotion_unresolved", "live identity does not match a durable checkpoint receipt")
+        self.store.recover_durable(receipt)
+        return {"intent": dict(pending), "status": "promotion_retired",
+                "reason": "verified live checkpoint before replacement target",
+                "resolution_evidence": {"replacement_sha": target, "sha": sha,
+                                        "provider_version_id": version, "receipt_digest": evidence_digest(receipt)}}
+
     def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
         url = lane_cfg["live_release_url"]
         try:
@@ -1453,7 +1512,7 @@ class Pipeline:
             raise Blocked("live_identity_unreadable", f"{url} names no readable full Worker identity") from exc
         lane_state = state["worker"]
         previous = lane_state.get("last_released_sha")
-        if not previous or previous == sha:
+        if lane_state.get("pending_promotion") or not previous or previous == sha:
             return live
         failure = None
         if lane_state.get("failed_sha") == sha:
@@ -1491,14 +1550,56 @@ class Pipeline:
                     self.store.record_durable(receipt)
             else:
                 self.store.record_durable(receipt)
-        lane_state["last_released_sha"] = sha
         if failure:
             lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
             lane_state.pop("failed_run_id", None)
             lane_state.pop("rejection", None)
-        if not self.dry_run:
-            self.store.save(state)
+        self.advance_checkpoint(state, "worker", sha)
         return live
+
+    def reconcile_worker_promotion(self, state: dict, main: str) -> None:
+        lane_state = state.setdefault("worker", {})
+        pending = lane_state.get("pending_promotion")
+        if not pending:
+            return
+        # Fully verified releases retain the stronger journal recovery path.
+        if any(row.get("status") == "release_verified"
+               and all(row.get(key) == pending.get(key) for key in
+                       ("lane", "sha", "from_sha", "run_id", "provider_version_id", "release_endpoint"))
+               for row in self.store.records()):
+            return
+        cfg = self.cfg["worker"]
+        if (pending.get("release_endpoint") != cfg["live_release_url"]
+                or pending.get("from_sha") != lane_state.get("last_released_sha", pending.get("from_sha"))
+                or not SHA_RE.fullmatch(str(pending.get("sha") or ""))
+                or not UUID_RE.fullmatch(str(pending.get("provider_version_id") or ""))
+                or not self._at_or_before(pending["sha"], main, self.repo)):
+            raise Blocked("journal_proof_invalid", "pending Worker promotion does not match its source and lane")
+        live = self.http(cfg["live_release_url"])
+        if ((live.get("git_sha") or {}).get("value") == pending["sha"]
+                and (live.get("worker_version") or {}).get("id") == pending["provider_version_id"]):
+            receipt = next((row for row in reversed(self.store.records())
+                            if row.get("status") == "worker_promoted"
+                            and all(row.get(key) == value for key, value in pending.items())), None)
+            if receipt:
+                self.store.recover_durable(receipt)
+            else:
+                self.store.record_durable({**pending, "status": "worker_promoted"})
+                receipt = next(row for row in reversed(self.store.records())
+                               if row.get("status") == "worker_promoted"
+                               and all(row.get(key) == value for key, value in pending.items()))
+            resolution = {"intent": dict(pending), "receipt": receipt,
+                          "reason": "exact promoted SHA and provider version acknowledged"}
+        else:
+            resolution = None
+        failed = lane_state.get("failed_sha")
+        if failed != pending["sha"] and (not failed or self._at_or_before(failed, pending["sha"], self.repo)):
+            lane_state.update({"failed_sha": pending["sha"],
+                               "failed_step": "post-promote-verification-incomplete"})
+        if resolution:
+            self.advance_checkpoint(state, "worker", pending["sha"], resolution=resolution)
+        else:
+            self.store.save(state)
 
     def tick(self, lanes: Iterable[str]) -> int:
         why = kill_switch(self.cfg)
@@ -1674,9 +1775,21 @@ class Pipeline:
         lane_state = state.setdefault(lane, {})
         lane_state.pop("rejection", None)
         lane_state.pop("failed_run_id", None)
-        lane_state.update({"last_released_sha": proof["sha"], "failed_sha": None, "failed_step": None,
+        pending = lane_state.get("pending_promotion")
+        resolution = None
+        if pending:
+            if pending["sha"] == proof["sha"]:
+                resolution = {"intent": dict(pending), "receipt": shipped,
+                              "reason": "exact promotion fully verified and shipped"}
+            else:
+                if not self._at_or_before(pending["sha"], proof["sha"], self.repo):
+                    raise Blocked("journal_proof_invalid", "verified release cannot supersede unrelated promotion intent")
+                resolution = {"intent": dict(pending), "status": "promotion_retired",
+                              "reason": "newer verified release supersedes promotion intent",
+                              "resolution_evidence": {"proof_digest": proof["proof_digest"]}}
+        lane_state.update({"failed_sha": None, "failed_step": None,
                            "last_shipped_at": shipped["ts"], "last_shipped_proof": proof["proof_digest"]})
-        self.store.save(state)
+        self.advance_checkpoint(state, lane, proof["sha"], resolution=resolution)
 
     def reconcile_release_proof(self, state: dict, lane: str, lane_cfg: dict, main: str) -> None:
         checkpoint = state.get(lane, {}).get("last_released_sha")
@@ -1765,6 +1878,8 @@ class Pipeline:
                 if not self.dry_run:
                     self.reconcile_release_proof(state, lane, lane_cfg, sha)
                     lane_state = state.setdefault(lane, {})
+                    if lane == "worker":
+                        self.reconcile_worker_promotion(state, sha)
             live = (self.reconcile_worker_identity(state, lane_cfg, sha) if lane == "worker" else
                     None if sha == lane_state.get("last_released_sha") else self.http(lane_cfg["live_release_url"]))
             base = self.last_released(state, lane, lane_cfg, live)
@@ -1828,12 +1943,20 @@ class Pipeline:
             if not needed:
                 if not self.dry_run and not lane_state.get("last_released_sha"):
                     raise Blocked("bootstrap_unreceipted", "source-only advancement has no durable prior release checkpoint")
-                self.out(f"release-pipeline[{lane}]: doc/test-only batch; nothing to release")
                 if not self.dry_run:
-                    lane_state["last_released_sha"] = sha
-                    self.store.save(state)
-                    self.store.record({"lane": lane, "sha": sha, "from_sha": base,
-                                       "status": "no_release_needed", "run_id": self.run_id})
+                    resolution = None
+                    if lane_state.get("pending_promotion"):
+                        if self.canary_verdict(self.github_factory(lane_cfg["github_repo"]), lane_cfg, sha) != "green":
+                            raise Blocked("canary_pending", "source-only replacement requires its own green canary")
+                        replacement_live = self.http(lane_cfg["live_release_url"])
+                        resolution = self.promotion_replacement(state, lane, sha, replacement_live)
+                        live_sha = replacement_live["git_sha"]["value"]
+                        if classify(self.changed_paths(live_sha, sha), lane_cfg)[0]:
+                            self.advance_checkpoint(state, lane, live_sha, resolution=resolution)
+                            return 0
+                    self.store.record_durable({"lane": lane, "sha": sha, "from_sha": base,
+                                               "status": "no_release_needed", "run_id": self.run_id})
+                    self.advance_checkpoint(state, lane, sha, resolution=resolution)
                 return 0
             if lane == "worker":
                 result = self.release_worker(lane_cfg, base, sha, state, lane)
@@ -1971,6 +2094,11 @@ class Pipeline:
         state.setdefault(lane, {}).update({
             "failed_sha": sha, "failed_step": step, "failed_run_id": self.run_id,
             "failed_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
+        if lane == "worker" and state[lane].get("pending_promotion"):
+            try:
+                self.reconcile_worker_promotion(state, self.observed_main)
+            except Exception as exc:
+                self.out(f"release-pipeline[worker]: promotion checkpoint remains pending: {type(exc).__name__}")
         owned = [wt for _, wt in self.worktrees if wt.name.startswith(f"{lane}-{sha[:12]}-")]
         if owned:
             state[lane]["failed_worktree"] = str(owned[-1])
@@ -2104,9 +2232,10 @@ class Pipeline:
 
         # Post-release proof, part 1: what production serves and how its
         # journeys fare BEFORE this release changes anything.
-        prior_version = smoke_baseline = None
+        prior_live = self.live_value(lane_cfg, lambda live: live) or {}
+        prior_version = served_version("worker", prior_live)
+        smoke_baseline = None
         if smoke_on:
-            prior_version = self.live_value(lane_cfg, lambda live: served_version("worker", live))
             smoke_baseline = self.smoke_run("worker", sha, "baseline", worker_dir=mcp)
 
         # 2-3. staging replacement and app writer
@@ -2181,29 +2310,30 @@ class Pipeline:
         # 7. promotion
         if not staging_ok:  # pragma: no cover — structural; StepFailed above already left
             raise StepFailed("promote", 1, "", "staging did not pass")
-        self.worker_promotion = {"sha": sha, "provider_version_id": version,
-                                 "release_endpoint": lane_cfg["live_release_url"]}
-        try:
-            self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
-                      env=self.deploy_env())
-        except StepFailed:
-            raise
-        except Exception as exc:
-            raise StepFailed("promote", 1, "", f"{type(exc).__name__}: {str(exc)[:300]}") from exc
+        if not self.dry_run:
+            if state[lane].get("pending_promotion"):
+                resolution = self.promotion_replacement(state, lane, sha, self.http(lane_cfg["live_release_url"]))
+                self.store.resolve_promotion(state, lane, resolution)
+            state[lane]["pending_promotion"] = {
+                "lane": lane, "sha": sha, "from_sha": base, "run_id": self.run_id,
+                "provider_version_id": version, "release_endpoint": lane_cfg["live_release_url"],
+                "live_identity": {"url": lane_cfg["live_url"]},
+                "prior_identity": {"sha": (prior_live.get("git_sha") or {}).get("value"),
+                                   "provider_version_id": prior_version}}
+            self.store.record_durable({**state[lane]["pending_promotion"], "status": "promotion_prepared"})
+            self.store.save(state)
+        self.step("promote", ["bin/deploy-worker.sh", "--promote-version", version, *budget], wt,
+                  env=self.deploy_env())
 
         # 8. live verification
         if self.dry_run:
             self.out(f"  [dry-run] GET {lane_cfg['live_release_url']} and require git_sha.value == {sha}")
         else:
-            try:
-                live = self.http(lane_cfg["live_release_url"])
-                if ((live.get("git_sha") or {}).get("value") != sha
-                        or (live.get("worker_version") or {}).get("id") != version):
-                    raise StepFailed("verify-live", 1, "", "production /release does not serve the released Worker identity")
-            except StepFailed:
-                raise
-            except Exception as exc:
-                raise StepFailed("verify-live", 1, "", f"{type(exc).__name__}: {str(exc)[:300]}") from exc
+            live = self.http(lane_cfg["live_release_url"])
+            if ((live.get("git_sha") or {}).get("value") != sha
+                    or (live.get("worker_version") or {}).get("id") != version):
+                raise StepFailed("verify-live", 1, "", "production /release does not serve the released SHA and version")
+            self.store.record_durable({**state[lane]["pending_promotion"], "status": "worker_promoted"})
         health_excused = self.health_gate(wt, health_baseline)
         post_release = self.post_release_proof(
             "worker", sha, smoke_baseline, worker_dir=mcp,
@@ -3341,6 +3471,10 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
             **({"cleared_worktree": str(moved)} if moved else {})})
     if not receipted():  # only a durable, readable receipt authorizes clearing
         raise SystemExit(f"release-pipeline[{lane}]: clearance receipt unreadable; failure NOT cleared")
+    if lane_state.get("pending_promotion"):
+        store.resolve_promotion(state, lane, {"intent": dict(lane_state["pending_promotion"]),
+            "status": "promotion_retired", "reason": reason,
+            "resolution_evidence": {"command": "clear-failed", "retirement_id": receipt_id, "cleared_sha": sha}})
     lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
     for field in ("failed_worktree_retirement", "failed_worktree", "failed_run_id", "rejection"):
         lane_state.pop(field, None)
