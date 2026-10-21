@@ -24,7 +24,7 @@ function costFixture() {
     alerts: [], action: "Finance Ops: inspect provider and driver; verify the next complete day; auto-clear when thresholds pass." };
 }
 
-function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null } = {}) {
+function client({ unavailable = null, accounts = [], renewalState = "ready", renewalRows = null, costs = costFixture(), todayRows = null, dealRows = null } = {}) {
   const queries = [];
   return {
     queries,
@@ -41,7 +41,7 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
         { display_name: "Candidate Safe", city: "Mobile", has_channel: true, pool_id: "opaque-handler-id" },
       ] };
       if (sql.includes("dealroom:closed-deals")) return { rows: [] };
-      if (sql.includes("from v_deal_room_board")) return { rows: [
+      if (sql.includes("from v_deal_room_board")) return { rows: dealRows || [
         { name: "Example Deal", owner: "joe", attention: true },
       ] };
       if (sql.includes("from v_deal_room_account")) return { rows: accounts };
@@ -158,6 +158,29 @@ test("both partners' open loops show, the caller's first, each labeled", async (
   const dell = await executeRegisteredTool(client(), DELL, "morning-brief", {});
   assert.deepEqual(joe.sections.loops.items.map((row) => [row.number, row.owner_partner]), [[7, "joe"], [8, "dell"]]);
   assert.deepEqual(dell.sections.loops.items.map((row) => [row.number, row.owner_partner]), [[8, "dell"], [7, "joe"]]);
+});
+
+test("machine-seat to-dos are shared across item kinds while deals stay sponsor-scoped", async () => {
+  const todayRows = [
+    { item_kind: "next_action", owner: "joe-local", what: "Reply about the suite tour" },
+    { item_kind: "post_call_action", owner: "joe-local", what: "A post-call action from that seat" },
+    { item_kind: "next_action", owner: "dell-local", what: "Dell's machine ball" },
+    { item_kind: "next_action", owner: "claude", what: "An agent's own ball" },
+  ];
+  const dealRows = [
+    { name: "Example Deal", owner: "joe", attention: true },
+    { name: "Seat Deal", owner: "joe-local", attention: true },
+  ];
+  const joe = await executeRegisteredTool(client({ todayRows, dealRows }), JOE, "morning-brief", {});
+  const dell = await executeRegisteredTool(client({ todayRows, dealRows }), DELL, "morning-brief", {});
+  const expected = [
+    ["Reply about the suite tour", "joe"],
+    ["A post-call action from that seat", "joe"],
+    ["Dell's machine ball", "dell"],
+  ];
+  assert.deepEqual(view(joe), expected);
+  assert.deepEqual(view(dell), expected);
+  assert.deepEqual(joe.sections.deals.items.map((row) => row.name), ["Example Deal"], "deals are not widened");
 });
 
 test("Joe's brief leads with the needs-Joe list, read through governance-queue", async () => {

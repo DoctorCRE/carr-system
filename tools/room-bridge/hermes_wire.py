@@ -5,6 +5,8 @@ import json
 import math
 from pathlib import Path
 import re
+import shlex
+import shutil
 import subprocess
 import tempfile
 import time
@@ -38,6 +40,23 @@ def native_command(raw):
     return command
 
 
+def launcher_command():
+    launcher = shutil.which('hermes')
+    if not launcher:
+        raise ValueError('Hermes native runtime unavailable')
+    for line in Path(launcher).read_text().splitlines():
+        if not line.startswith('exec '):
+            continue
+        parts = shlex.split(line)
+        if len(parts) != 4 or parts[-1] != '$@':
+            break
+        python, script = Path(parts[1]), Path(parts[2])
+        if (python.is_absolute() and python.is_file() and script.is_absolute()
+                and (script.parent / 'run_agent.py').is_file()):
+            return [str(python), '-I', '-c', 'import sys; sys.path.insert(0, ' + repr(str(script.parent)) + ')']
+    raise ValueError('Hermes native runtime unavailable; launcher is not a recognized Python runtime')
+
+
 def select_model(payload: dict, family: str) -> str:
     candidates = []
     pattern = r'(?:[^/]+/)?' + ('glm-' if family == 'glm' else 'deepseek-v?') + r'(\d+(?:\.\d+)*)(?:[-:]|$)'
@@ -53,6 +72,8 @@ def select_model(payload: dict, family: str) -> str:
 
 
 def run_task(entry: dict, task: str, *, env: dict, run, results_path, run_id) -> dict:
+    from record_layer import enforce
+    enforce(entry, kind='hermes-nous')
     accounting = {'launched': False, 'usage': {}}
     try:
         results_path = Path(results_path).absolute()
@@ -115,9 +136,12 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
             model = select_model(payload, entry['family'])
             base['model'] = model
             runtime = invoke(['hermes', '--print-runtime-command', '--module', 'hermes_cli.gateway_client'], 15)
-            if runtime.returncode:
+            if runtime.returncode and entry.get('posture') == 'record-layer':
+                command = native_command(json.dumps(launcher_command()))
+            elif runtime.returncode:
                 raise ValueError('Hermes native runtime unavailable')
-            command = native_command(runtime.stdout)
+            else:
+                command = native_command(runtime.stdout)
             quote = invoke([*command, '--quote-model', model], 15)
             accounting['price'] = json.loads(quote.stdout) if quote.returncode == 0 else None
             if not accounting['price']:
@@ -128,9 +152,12 @@ def _run_task(entry: dict, task: str, *, env: dict, run, accounting) -> dict:
                    'HERMES_SINGLE_QUERY_SESSION': '1'}
             proc = invoke([*command, '-z', task, '-m', model, '--reasoning', entry['effort'],
                     '--usage-file', str(usage_path), '--allowance-usd', accounting['allowance'],
-                    '--price-json', json.dumps(accounting['price'])])
+                    '--price-json', json.dumps(accounting['price']),
+                    *(['--posture', 'record-layer'] if entry.get('posture') == 'record-layer' else [])])
             outcome = {'status': 'completed' if proc.returncode == 0 else 'failed',
                        'exit_code': proc.returncode, 'result': (proc.stdout or '').strip()}
+            if proc.returncode and entry.get('posture') == 'record-layer':
+                outcome['detail'] = 'record-layer runtime refused; CARR tool inventory or confinement unavailable'
         except nous_budget.BudgetStop as exc:
             outcome = {'status': 'failed', 'code': 'nous_spend_stop', 'detail': str(exc)}
         except subprocess.TimeoutExpired as exc:

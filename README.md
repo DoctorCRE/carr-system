@@ -44,7 +44,7 @@ The Drive cutoff fired 2026-08-19. The generated Drive `.md` files were moved to
 ## Boundaries
 
 - This repo is PRIVATE and stays private. It is not, however, where client PII is meant to live: prospect/client PII never lives in GitHub (Joe's ruling (a), 2026-08-01; ORDER 42). The output baselines that used to carry it in full — `baselines/lead-board.html` (~60,687 emails / 218 phones) and `baselines/deal-room-panhandle.html` (91/49), moved under ORDER 42b (2026-08-06), and `baselines/renewal-radar.json` (~150 tenant/landlord names, addresses and phones), moved 2026-09-26 following the same pattern — are hash-only tracked: the full file stays LOCAL and gitignored, only its sha256 is committed (`baselines/SHA256SUMS`); see `tools/check.sh`. `backups/*.sql.age` (encrypted full DB dumps) likewise moved out of git to the R2 archive under ORDER 42b; see `bin/backup-dump.sh` and `lib/r2_archive.py`. History predating each of these conversions may still carry the full file in older commits — see `ops/order42b-history-purge.md` for the ORDER 42b purge status (it purged `lead-board.html`/`deal-room-panhandle.html`/`backups/`; the 2026-09-26 addendum there covers `renewal-radar.json`, whose prior history has not been rewritten and is pending Joe's decision). The partner boundary is open (Joe and Dell share all client details); the external publication firewall is absolute.
-- Nothing in this repo sends anything external. Generators write local files/artifacts only. Claude drafts, Joe sends — the permanent gate.
+- Generators write local files/artifacts only. Claude sends outbound messages when Joe asks, through his own accounts; with no ask, the default is a draft (decision 41906a30).
 
 ## Working-tree hygiene (2026-08-08)
 
