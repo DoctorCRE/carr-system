@@ -42,10 +42,12 @@ def main():
         sql("""create schema ops;
             create table ops.jev_call_receipt(receipt_id uuid, recorded_at timestamptz,
                 idempotency_key text, actor_id uuid, model_answered text, usage jsonb);
-            create table public.tool_call(idempotency_key text, verb text, actor_id uuid, response jsonb);
+            create table public.tool_call(idempotency_key text primary key, verb text, actor_id uuid, response jsonb);
+            create unique index on ops.jev_call_receipt(idempotency_key);
         """)
-        migration = sorted(((ROOT / 'migrations') / name for name in migration_names((ROOT / 'migrations').parent) if fnmatch.fnmatchcase(name, '*_jev_attempt*.sql')))[-1]
-        sql(read_migration(ROOT, migration.name))
+        for name in sorted(migration_names(ROOT)):
+            if fnmatch.fnmatchcase(name, '*_jev_attempt*.sql'):
+                sql(read_migration(ROOT, name))
         sql("""insert into ops.jev_call_receipt
             select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
                 clock_timestamp() - case i when 1 then interval '30 minutes' else interval '2 hours' end,
@@ -62,6 +64,31 @@ def main():
         assert usage['unknown'] == 1, usage
         assert usage['calls'] == 0 and usage['input_tokens'] == 0, usage
         print('PASS pending under one hour; abandoned over one hour; settled excluded')
+        sql("""insert into ops.jev_call_receipt
+            select md5('receipt-' || i)::uuid, now() - interval '2 days',
+                md5('attempt-' || i), md5('actor')::uuid, 'jev-attempt-pending', null
+            from generate_series(1,288000) i;
+            insert into public.tool_call
+            select idempotency_key, 'ask-jev-attempt', actor_id,
+                jsonb_build_object('receipt_id',receipt_id,'cache_hit',false)
+            from ops.jev_call_receipt where idempotency_key not in ('1','2','3');
+            insert into public.tool_call
+            select md5('unrelated-' || i), 'synthetic-other', md5('actor')::uuid,
+                jsonb_build_object('synthetic',repeat('x',300))
+            from generate_series(1,1000000) i;
+            analyze;
+        """)
+        plan = json.loads(sql('explain (analyze,buffers,format json,timing off) select ops.jev_call_receipt_integrity();'))[0]['Plan']
+        blocks = plan['Shared Hit Blocks'] + plan['Shared Read Blocks']
+        # Allow one ledger pass and eight receipt passes, without another unrelated-ledger scan for settlements.
+        budget = int(sql("select (8 * pg_relation_size('ops.jev_call_receipt') + pg_relation_size('public.tool_call')) / current_setting('block_size')::int;"))
+        assert blocks <= budget, f'audit touched {blocks} buffers, budget {budget}'
+        audit = json.loads(sql('select ops.jev_call_receipt_integrity();'))
+        assert audit['receipts_total'] == 288003, audit
+        assert audit['receipts_without_tool_call']['count'] == 0, audit
+        assert audit['daily_usage']['pending_attempts'] == 1, audit
+        assert audit['daily_usage']['abandoned_attempts'] == 288001, audit
+        print(f'PASS full audit with 288003 receipts and 1288003 ledger rows: {blocks} buffers, budget {budget}')
     return 0
 
 
