@@ -596,5 +596,33 @@ def board_projection(path=None):
     snapshot['items'] = [i for i in snapshot['items'] if i['stage'] not in TERMINAL or i['card_id'] in retained]
     history_count = len(snapshot['history'])
     snapshot['history'] = snapshot['history'][-100:]
+    def clean(value):
+        if not isinstance(value, str):
+            return value
+        if re.search(r'@|/(?:Users|home|private|tmp)/|(?:token|secret|password|authorization)\s*[:=]|[a-f0-9]{32,}', value, re.I):
+            return 'Details withheld'
+        return value.splitlines()[0][:220] if value else ''
+    event_fields = {'id', 'card_id', 'at', 'actor', 'reason', 'kind'}
+    def event(row):
+        if not row:
+            return None
+        return {key: clean(value) for key, value in row.items() if key in event_fields}
+    fields = {'card_id', 'position', 'stage', 'desk', 'ready', 'review_round', 'wr', 'slice',
+              'title', 'agent', 'family', 'model', 'effort', 'ci_state', 'active',
+              'total_time_s', 'findings_opened', 'findings_resolved', 'merge_position', 'timing_unknown'}
+    for item in snapshot['items']:
+        projected = {key: clean(value) for key, value in item.items() if key in fields}
+        projected['prs'] = [{key: ref[key] for key in ('repo', 'number', 'head') if key in ref}
+                            for ref in item.get('prs', []) if isinstance(ref, dict)
+                            and re.fullmatch(r'jbookout/(carr-system|doctorcre-app|software-factory)', str(ref.get('repo', '')))]
+        projected['merge_complete'] = bool(item.get('prs')) and all(ref in item.get('merge_receipts', []) for ref in item['prs'])
+        projected['last_event'] = event(item.get('last_event'))
+        projected['stages'] = item.get('stages', [])
+        projected['findings'] = [{key: clean(finding[key]) for key in ('id','level','summary','resolved') if key in finding}
+                                 for finding in item.get('findings', [])]
+        item.clear()
+        item.update(projected)
+    snapshot['history'] = [event(row) for row in snapshot['history']]
+    snapshot['publication'] = {key: value for key, value in snapshot.get('publication', {}).items() if key != 'error'}
     snapshot['omitted'] = {'finished': max(0, len(finished) - 20), 'events': max(0, history_count - 100)}
     return snapshot
