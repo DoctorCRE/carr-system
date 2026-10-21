@@ -147,6 +147,10 @@ def health_findings(root, config, *, tmp_root, roots, now, user_tmp_root=None):
             if count > policy['worktree_threshold']:
                 rows.append({'code': 'worktree_count:' + repo, 'detail': f'{repo} has {count} active worktrees, threshold {policy["worktree_threshold"]}'})
         receipt = json.loads((Path(root) / 'out/machine-cleanup.json').read_text())
+        if receipt.get('stuck_threads'):
+            count = len(receipt['stuck_threads'])
+            rows.append({'code': 'cleanup_stuck_threads',
+                         'detail': f'{count} stuck thread archives await readback resolution'})
         last = receipt.get('last_success_at')
         if last is None or now - last > policy['success_max_age_seconds']:
             rows.append({'code': 'cleanup_stale', 'detail': 'Machine cleanup has no success within one day'})
@@ -225,11 +229,14 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
         now = time.time()
         deadline = time.monotonic() + policy['max_seconds']
         stuck_threads = dict(previous.get('stuck_threads', {}))
+        checked_stuck_threads = set()
         report = {'schema': 'machine-cleanup/v1', 'at': now, 'status': 'running', 'dry_run': dry_run,
                   'last_success_at': previous.get('last_success_at'), 'removed': [], 'kept': [],
-                  'errors': list(stuck_threads.values()), 'deferred': [], 'stuck_threads': stuck_threads,
+                  'errors': [], 'deferred': [], 'stuck_threads': stuck_threads,
+                  'stuck_thread_count': len(stuck_threads),
                   'temp_staged_allocated_bytes': 0, 'temp_freed_bytes': 0, 'budget_exhausted': False}
         def finish():
+            report['stuck_thread_count'] = len(stuck_threads)
             report['budget_exhausted'] |= time.monotonic() >= deadline
             if report['budget_exhausted']:
                 report['deferred'].append({'kind': 'sweep', 'reason': 'cleanup budget exhausted; resume from saved cursor',
@@ -288,6 +295,7 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     stuck = {**pending, 'error': 'thread_recovery_exhausted',
                              'reason': 'thread archive remains unresolved after bounded readback attempts; kept without retry'}
                     stuck_threads[pending['thread_id']] = stuck
+                    checked_stuck_threads.add(pending['thread_id'])
                     report['errors'].append(stuck)
                     recovered = {**pending, 'status': 'kept', 'reason': stuck['reason']}
                 append(root / 'out/machine-cleanup-recovery.jsonl',
@@ -417,7 +425,22 @@ def run(root, config, *, hook, tmp_root, dispatch_path, roots, provider=None,
                     tid = row.get('thread_id')
                     if tid:
                         processed += 1
-                        if tid in stuck_threads:
+                        if tid in stuck_threads or tid in checked_stuck_threads:
+                            if tid not in checked_stuck_threads:
+                                checked_stuck_threads.add(tid)
+                                try:
+                                    resolution = archive_thread(tid, before=stuck_threads[tid]['before'],
+                                        process_probe=process_probe,
+                                        timeout=min(30, max(.1, deadline - time.monotonic())), dry_run=True)
+                                except (TimeoutError, subprocess.TimeoutExpired):
+                                    resolution = {}
+                                if not resolution.get('error') and resolution.get('status') in {
+                                        'archived', 'verified_no_effect', 'would_archive'}:
+                                    if resolution['status'] == 'would_archive':
+                                        resolution = {**resolution, 'status': 'verified_no_effect'}
+                                    append(root / 'out/machine-cleanup-recovery.jsonl',
+                                        {'previous': stuck_threads[tid], 'resolution': resolution, 'at': now})
+                                    del stuck_threads[tid]
                             cursor['thread_offset'] = stream.tell()
                             save(cursor_path, cursor)
                             continue
