@@ -1,0 +1,491 @@
+{
+  "schema": "pr2050-retry-framing-repair/v1",
+  "reviewed_head": "48ace2a975245228ddb941ec7da15c7d9d54de25",
+  "base_head": "0534c71a99fb79b91b919d79d0c0702c345ab696",
+  "do_not_merge": true,
+  "independently_qualified": false,
+  "installed_runtime_qualified": false,
+  "source_sha256": {
+    "lib/outlook_intake.py": "103f44d5a4d6f446eda7cf7d83ac22cdfa874db15774af22d675cd54f142e134",
+    "vendor/hxprobe/src/main.rs": "433a6a4fec833338b6116b4a7477f3b98e56bc10840777d244a2476abf618c9a",
+    "vendor/hxprobe/src/block.rs": "61fd1ad0ae6ce4c84922b3c646f5d6da0d45bd132a0129610c3d95ab8bf7bcb5",
+    "vendor/hxprobe/src/lz.rs": "a2c5d20164d8295a91ef48f090660e100cdcbb5d623ba612d086ba8b21ce6e4c",
+    "vendor/hxprobe/src/observe.rs": "a8d25c3450ffc1919146b8cbbab90dda7e803b3ca174e8f0d11063613354d146",
+    "ops/outlook-intake-ownership-selftest.py": "2c45a0e3f1272378af8e4489bef8b789e08f76dec723f09597cc0531a986266b",
+    "ops/outlook-intake-selftest.py": "b951452f1a14d94722c40a36f0485dd962312b5d65c1d9e5d851a03f8abb7869",
+    "ops/config/door-inventory.v1.json": "acb9ba4bde364eed6d64b161605ce0fd4a0dd608ce04cafaef75e1f46553850d",
+    "ops/outlook-intake-account-qualification.py": "5e95bdf648b8fcf3f121e5d41cba3d8d6ede5176d35aa1262ef0c5639d3a6176"
+  },
+  "reviewed_head_reproduction": {
+    "existing_tests": {
+      "run": 10,
+      "failures": 0,
+      "errors": 0
+    },
+    "forged_retry": {
+      "decoder_calls": 1,
+      "writes": 1,
+      "forged_payload_writes": 1,
+      "acknowledged": 1,
+      "models": 1
+    },
+    "trailing_input": {
+      "decoder_exit": 0,
+      "mail": 1,
+      "events": 1
+    },
+    "oversized_match": {
+      "decoder_exit": 0,
+      "mail": 1,
+      "events": 1
+    }
+  },
+  "focused_tests": {
+    "ownership_binary_intake": 14,
+    "intake": 71,
+    "intake_version": 14,
+    "tripwire": 17,
+    "copy_helper_synthetic": 7,
+    "rust": 29,
+    "observe": 11,
+    "atlas": 9,
+    "harness": 16,
+    "ci_selftest": 166
+  },
+  "repair": {
+    "state": "Write-once 0400 receipts bind all persisted state and refresh fields except the externally maintained opened_at. State validation precedes retry, refresh, model and record effects. Missing, modified or legacy evidence holds unchanged.",
+    "source": "Write-once catalogs captured only after decoder export validation bind account, actual snapshot digest, mailbox binding coordinates and the accepted source IDs. Every saved provenance and write must resolve to that catalog.",
+    "framing": "owned-db selects offsets with observe::verified_blocks before ownership binding and recovery. All passes reuse that selection and strict block/LZ decoding. The signature count still includes excluded candidates."
+  },
+  "decisions": [
+    "Use immutable evidence alongside saved state rather than a self-reported digest or provenance shape.",
+    "Keep saved proposals usable after their source leaves the current snapshot; validate their original catalog and frozen state receipt.",
+    "Retain the triage opened_at exception because it cannot change intake payloads or source selection.",
+    "Reuse reviewed nonoverlapping framing; retain offsets only between streaming passes.",
+    "Classify the original qualification executable as one_shot historical red evidence; preserve its source and existing audits.",
+    "Use exact-hash input copies, an isolated frozen scratch decoder, local counting adapters, and current plus event-eligible virtual clocks.",
+    "Retain do_not_merge and installed-runtime hold pending orchestrator qualification, independent review and green required CI.",
+    "Remove the redundant bare review-comment number after the leak guard classified it as a phone; retain exact reviewed-head provenance without weakening the guard or adding an allowlist exception."
+  ],
+  "limitations": [
+    "Evidence storage trusts the private local filesystem; these receipts do not defend against an actor able to replace the entire evidence store.",
+    "Virtual clocks and synthetic record/model adapters prove local effects only. No installed version acceptance, installed decoder qualification or live intake is claimed.",
+    "Structural coverage remains incomplete; unsupported regions remain excluded.",
+    "Broad local gates failed in unchanged migration-scheduling and credential-mint selftests. The canonical rerun was stopped after those failures. Logs remain private in /private/tmp/pr2050-gates.log."
+  ],
+  "test_first_logs": {
+    "red-retry.log": "2352ac53f23347d781bdeece06a31e55b1411e63a42272d52ccfeed603b09732",
+    "red-block-framing.log": "cedac3745bbf249de6768505bce339b43c8eef3f235485549f868216ef1e3944",
+    "ownership-final.log": "f1c6b530537345c349fd3e955b854f100675025de9d8a26b555b2209b07d1b4c",
+    "ci-selftest-canonical-final.log": "ab54b03aaea388ef11f4f995cf338f07b14de9ac8e4fe3cc1a970595fdb566db",
+    "ownership-pinned.log": "b42ed17ae8c49ee007bbe15a084756a131b6f4a5483022209d8fe9474f7d0aad"
+  },
+  "repaired_reproduction": {
+    "existing_tests": {
+      "run": 14,
+      "failures": 0,
+      "errors": 0
+    },
+    "forged_retry": {
+      "decoder_calls": 0,
+      "writes": 0,
+      "forged_payload_writes": 0,
+      "acknowledged": 0,
+      "models": 0
+    },
+    "trailing_input": {
+      "decoder_exit": 101
+    },
+    "oversized_match": {
+      "decoder_exit": 101
+    }
+  },
+  "private_runner_sha256": "7366c51632e0995a74d190fbfc1b0df9201a44aca8362879e81b3276629a7743",
+  "private_qualification_binary_sha256": "218f90aa1eae957d00ff55d8860fc50bd509502249e5cf8910307afc175b2f8f",
+  "review": {
+    "kind": "executor_self_review",
+    "independent": false,
+    "findings": [
+      "Reviewed saved-data tampering, missing evidence, inherited source unions, missing-source replay and triage opened_at behavior against the actual tests.",
+      "Found duplicate overlapping-block selection during review, wrote a failing black-box regression, then reused observe::verified_blocks.",
+      "Reproduced both reported failures on exact reviewed source before making the repair."
+    ],
+    "next": "Orchestrator must rerun qualification and independent review on the published exact head."
+  },
+  "real_private_qualification": {
+    "receipts_verified": 12,
+    "decoder_sha256": "218f90aa1eae957d00ff55d8860fc50bd509502249e5cf8910307afc175b2f8f",
+    "results": [
+      {
+        "record_id": "work",
+        "type_id": "processed",
+        "email": 56,
+        "event": 0,
+        "action": 1,
+        "model": 56,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "work",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "000-baseline",
+        "type_id": "processed",
+        "email": 55,
+        "event": 0,
+        "action": 1,
+        "model": 55,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1493,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "000-baseline",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "001-control",
+        "type_id": "processed",
+        "email": 57,
+        "event": 0,
+        "action": 1,
+        "model": 57,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1494,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "001-control",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "002-account-setup",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "002-account-setup",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "003-draft",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "003-draft",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "004-event",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "004-event",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "005-control",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "005-control",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "006-control",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "006-control",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "007-flag",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1495,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "007-flag",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "008-attachment",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1494,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:12181504:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:13751808:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044"
+        ]
+      },
+      {
+        "record_id": "008-attachment",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "009-flag",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1494,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:13751808:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:16224768:8270:2919:508044"
+        ]
+      },
+      {
+        "record_id": "009-flag",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      },
+      {
+        "record_id": "010-reply",
+        "type_id": "processed",
+        "email": 58,
+        "event": 0,
+        "action": 1,
+        "model": 58,
+        "tester_effects": 0,
+        "unknown_effects": 0,
+        "mail_rows": 1493,
+        "event_rows": 105,
+        "root_ids": [
+          336224
+        ],
+        "record_ids": [
+          "hx-owner-v1:105:336224:336495:13751808:8270:2919:508044",
+          "hx-owner-v1:105:336224:336495:15499264:62172:2919:508044",
+          "hx-owner-v1:105:336224:336495:6621696:3215:2919:508044"
+        ]
+      },
+      {
+        "record_id": "010-reply",
+        "type_id": "event-clock-processed",
+        "email": 0,
+        "event": 1,
+        "action": 0,
+        "model": 0,
+        "tester_effects": 0,
+        "unknown_effects": 0
+      }
+    ],
+    "counts": {
+      "input_count": 12,
+      "observations": 24,
+      "mail": 690,
+      "event": 12,
+      "tester_effects": 0,
+      "unknown_effects": 0
+    },
+    "scope": "Actual allowlisted immutable HxStore copies, exact supplied hashes verified before any decoding and again after effects. Local counting record/model adapters only. Current fixed clock and an event-eligible virtual clock. No live tripwire acceptance or installed-runtime qualification."
+  },
+  "private_result_sha256": "c17c11b1f4f698badb1d8dd05385c7b922aea239258c1e16d4ead41191d9a586"
+}

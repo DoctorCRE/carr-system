@@ -328,7 +328,8 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.out().stat().st_mode), 0o700)
         for path in self.out().iterdir():
             if path.is_file():
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode),
+                                 0o400 if path.name.startswith(('receipt-', 'source-')) else 0o600, path.name)
 
     def test_the_store_copy_and_decoded_database_are_deleted_after_a_run(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
@@ -721,7 +722,8 @@ class IntakeTest(unittest.TestCase):
             os.chmod(path, 0o644)
         self.run_intake([mail('pat@example.test', -timedelta(hours=1), kind='preview', body='Can we meet')])
         for path in self.out().iterdir():
-            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode),
+                                 0o400 if path.name.startswith(('receipt-', 'source-')) else 0o600, path.name)
 
     def test_a_malformed_model_reply_sets_no_ball(self):
         self.fake.model_reply = {'next_step': 'Reply', 'due_on': 'next tuesday'}

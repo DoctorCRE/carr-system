@@ -228,21 +228,77 @@ def _valid_provenance(provenance: object, account: dict) -> bool:
                and all(int(n) > 0 for n in source[len(prefix):].split(':')) for source in sources)
 
 
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(',', ':'))
+
+
+def _evidence_read(out: Path, kind: str, digest: object) -> dict:
+    if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise ValueError('missing immutable evidence')
+    path = out / f'{kind}-{digest}.json'
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd) as stream:
+        if os.fstat(stream.fileno()).st_mode & 0o777 != 0o400:
+            raise ValueError('mutable evidence')
+        text = stream.read()
+    if _hash(text) != digest:
+        raise ValueError('changed evidence')
+    return json.loads(text)
+
+
+def _evidence_put(out: Path, kind: str, value: dict) -> str:
+    text = _canonical(value)
+    digest = _hash(text)
+    path = out / f'{kind}-{digest}.json'
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    except FileExistsError:
+        if _evidence_read(out, kind, digest) != value:
+            raise ValueError('conflicting evidence')
+    else:
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+    return digest
+
+
+def _provenance_proven(out: Path, provenance: dict, account: dict) -> bool:
+    if not _valid_provenance(provenance, account):
+        return False
+    evidence = _evidence_read(out, 'source', provenance.get('evidence_sha256'))
+    return (all(provenance.get(k) == evidence.get(k) for k in ('account', 'store_sha256', 'binding_sources'))
+            and set(provenance['source_ids']) <= set(evidence['source_ids']))
+
+
+def _refresh_evidence(out: Path) -> list:
+    path = out / REFRESH_LIST
+    rows = json.loads(path.read_text()) if path.exists() else []
+    return [{k: v for k, v in row.items() if k != 'opened_at'} for row in rows]
+
+
+def _state_binding(state: dict, out: Path) -> dict:
+    return {'state_sha256': _hash(_canonical({k: v for k, v in state.items() if k != 'receipt_sha256'})),
+            'refresh_sha256': _hash(_canonical(_refresh_evidence(out)))}
+
+
 def _state_owned(state: dict, out: Path) -> bool:
     if not state:
         return not (out / REFRESH_LIST).exists() or json.loads((out / REFRESH_LIST).read_text()) == []
     account = state.get('ownership')
     if not _valid_account(account):
         return False
+    if _evidence_read(out, 'receipt', state.get('receipt_sha256')) != _state_binding(state, out):
+        return False
     for collection in ('requests', 'steps', 'pending_full'):
         for entry in state.get(collection, {}).values():
-            if not _valid_provenance(entry.get('ownership'), account):
+            if not _provenance_proven(out, entry.get('ownership'), account):
                 return False
-            if 'reply' in entry and not _valid_provenance(entry['reply'].get('ownership'), account):
+            if 'reply' in entry and not _provenance_proven(out, entry['reply'].get('ownership'), account):
                 return False
     if (out / REFRESH_LIST).exists():
         for entry in json.loads((out / REFRESH_LIST).read_text()):
-            if not _valid_provenance(entry.get('ownership'), account):
+            if not _provenance_proven(out, entry.get('ownership'), account):
                 return False
     return True
 
@@ -359,7 +415,15 @@ def _decode(home: Path, out: Path, ports: Ports):
         ports.decode(copy, files, db)
         ports.version_gate()
         with copy.open('rb') as source:
-            return _load(db, hashlib.file_digest(source, 'sha256').hexdigest())
+            meta, mails, events = _load(db, hashlib.file_digest(source, 'sha256').hexdigest())
+        if mails or events:
+            provenance = (mails + events)[0]['ownership']
+            catalog = {**provenance, 'source_ids': sorted({source for row in mails + events
+                                                        for source in row['ownership']['source_ids']})}
+            evidence = _evidence_put(out, 'source', catalog)
+            for row in mails + events:
+                row['ownership']['evidence_sha256'] = evidence
+        return meta, mails, events
     finally:
         _remove(work)
 
@@ -480,13 +544,13 @@ class Run:
 
     def write(self, verb: str, args: dict, who: str, provenance: dict, note: str = '') -> bool:
         self.ports.version_gate()
-        if not _valid_provenance(provenance, self.state['ownership']):
+        if not _provenance_proven(self.out, provenance, self.state['ownership']):
             raise CarrError('unproven write ownership')
         requests = self.state.setdefault('requests', {})
         request = requests.setdefault(args['idempotency_key'], {
             'verb': verb, 'payload': json.dumps(args), 'acknowledged': False,
             'created_at': int(self.now.timestamp()), 'ownership': provenance})
-        if not _valid_provenance(request.get('ownership'), self.state['ownership']):
+        if not _provenance_proven(self.out, request.get('ownership'), self.state['ownership']):
             raise CarrError('conflicting write ownership')
         _save(self.out, self.state)
         if not request['acknowledged']:
@@ -771,6 +835,7 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
 
 
 def _save(out: Path, state: dict) -> None:
+    state['receipt_sha256'] = _evidence_put(out, 'receipt', _state_binding(state, out))
     _private_write(out / STATE, json.dumps(state))
 
 

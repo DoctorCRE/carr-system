@@ -212,11 +212,12 @@ fn cmd_find(path: &str, term: &str, limit: usize) {
 fn cmd_db(path: &str, db_path: &str, allowed_identity: &str) {
     let mm = map(path);
     let needle = record::anchor_needle();
-    let offs = block::find_all(&mm);
-    println!("{} blocks -> {db_path}", offs.len());
-
     let h = header::check(&mm).expect("header");
     assert!(h.version == b'i' && h.page_size == 4096, "unsupported ownership format");
+    let mut offs = Vec::new();
+    let (signatures, _) = observe::verified_blocks(&mm, |off, _, _| offs.push(off))
+        .unwrap_or_else(|_| panic!("unsupported ownership framing"));
+    println!("{signatures} blocks -> {db_path}");
     let account = ownership::Account::bind(offs.iter().filter_map(|&o|
         block::parse(&mm, o).map(|b| (o, b.data))), allowed_identity)
         .expect("missing or conflicting allowed ownership");
@@ -573,7 +574,7 @@ fn cmd_db(path: &str, db_path: &str, allowed_identity: &str) {
         }
         let mut ins_meta = tx.prepare("INSERT INTO meta(key,value) VALUES (?1,?2)").expect("prepare meta");
         for (key, value) in [
-            ("blocks_found", offs.len()),
+            ("blocks_found", signatures),
             ("blocks_verified", blocks_ok),
             ("messages", stored),
             ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),

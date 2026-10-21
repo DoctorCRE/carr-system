@@ -283,6 +283,12 @@
       "class": "hand_tool",
       "reason": "The orchestrator runs this local observation collector for one reviewed headless task. It reads device and scheduler state and prints local evidence, with no activation or canonical receipt writes.",
       "evidence": "WR-000014 final source slice; ops/scheduler-observation-receipts-selftest.py exercises synthetic device, prompt, plist, and launchctl observations."
+    },
+    {
+      "path": "ops/outlook-intake-account-qualification.py",
+      "class": "one_shot",
+      "reason": "Original red ownership counterexample preserves the participant-only export failure. Its synthetic ground truth cannot qualify binary ownership and its obsolete schema must not be treated as a current green gate.",
+      "evidence": "PR2050 ownership review on head 48ace2a975245228ddb941ec7da15c7d9d54de25; ops/outlook-intake-ownership-selftest.py exercises the actual owned-db decoder and counting adapters, including persisted retry forgery and malformed compressed blocks."
     }
   ]
 }
