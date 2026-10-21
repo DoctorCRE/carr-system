@@ -166,7 +166,7 @@ class FakeRunner:
             lines.append(rp.HEALTH_COMPLETE_MARKER)
         return "\n".join(lines) + ("\n" if lines else "")
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         stem = log.stem
         name = stem.split("-", 1)[1] if stem[:2].isdigit() else stem
         self.calls.append((name, list(argv)))
@@ -260,8 +260,8 @@ def install_toolchain_wrangler(repo: Path) -> Path:
 class InstallingRunner(FakeRunner):
     """FakeRunner whose `wrangler-install` step writes the binary, as npm ci does."""
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
-        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("wrangler-install") and res.rc == 0:
             bin_ = Path(cwd) / "node_modules/.bin/wrangler"
             bin_.parent.mkdir(parents=True, exist_ok=True)
@@ -4287,7 +4287,7 @@ class CandidateStaging(Base):
         owner = self
 
         class Provider:
-            def run(self, argv, *, cwd, log, env, timeout=3600):
+            def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
                 owner.calls.append((log.stem, list(argv), dict(env)))
                 if argv[0] == "git":
                     proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True)
@@ -4500,7 +4500,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
   ', process.env.CLOUDFLARE_API_TOKEN || "none"); console.log("Worker Version ID: VERSION")');
 """.replace("VERSION", VERSION)
 
-        def run(argv, *, cwd, log, env, timeout=3600):
+        def run(argv, *, cwd, log, env, timeout=3600, read_only=()):
             if argv == ["npm", "run", "build"]:
                 build_observations.append((dict(env), list(cwd.glob("wrangler.*"))))
                 result = real.run([node, "-e", payload, str(marker)], cwd=cwd, log=log, env=env)
@@ -4512,7 +4512,7 @@ fs.writeFileSync('node_modules/wrangler/bin/wrangler.js',
                 self.assertEqual(result.rc, 0, result.out)
                 config = Path(argv[argv.index("--config") + 1]).read_text()
                 self.assertEqual(json.loads(config)["env"]["staging"]["name"], "trusted-staging")
-            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            return original(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
 
         pipe.env.update({"NODE_OPTIONS": "candidate-option", "NPM_CONFIG_USERCONFIG": "deploy-config",
                          "ARBITRARY_DEPLOY_SECRET": "synthetic"})
@@ -6212,7 +6212,7 @@ class SchemaSnapshotGhRunner(FakeRunner):
         self.list_rc = list_rc
         self.closed: list[tuple[int, str]] = []
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[:3] == ["gh", "pr", "list"]:
             self.calls.append(("gh-pr-list", list(argv)))
             assert "isCrossRepository" in argv[argv.index("--json") + 1], "fork flag not requested"
@@ -6235,7 +6235,7 @@ class SchemaSnapshotGhRunner(FakeRunner):
         if argv[:3] == ["git", "status", "--porcelain"] and log.stem.endswith("schema-diff"):
             self.calls.append(("schema-diff", list(argv)))
             return rp.Result(0, " M db/schema.sql\n")      # the shadow rewrote the snapshot
-        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+        res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("schema-pr") and res.rc == 0:
             self.open_prs[self.new_pr] = argv[argv.index("--head") + 1]
             if self.pr_create_out is not None:
@@ -6253,9 +6253,9 @@ class RealGitRunner(FakeRunner):
         self.schema = schema            # what bin/migrate-prod.sh dumps from production
         self.shadow_schema = schema if shadow_schema is None else shadow_schema   # what the PG 18 shadow writes
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[0] != "git":
-            res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            res = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
             if log.stem.endswith("migrate-apply"):
                 (Path(cwd) / "db/schema.sql").write_text(self.schema)
             if log.stem.endswith("schema-shadow"):
@@ -6275,7 +6275,7 @@ class ExactMainAppGuardRunner(RealGitRunner):
         self.guard_observations = []
         self.live = kw.get("live")
 
-    def run(self, argv, *, cwd, log, env, timeout=3600):
+    def run(self, argv, *, cwd, log, env, timeout=3600, read_only=()):
         if argv[:2] == ["node", "scripts/release-production.mjs"]:
             head = git(Path(cwd), "rev-parse", "HEAD")
             tracking = git(Path(cwd), "rev-parse", "refs/remotes/origin/main")
@@ -6286,8 +6286,8 @@ class ExactMainAppGuardRunner(RealGitRunner):
             if isinstance(self.live, dict):
                 self.live["source_commit"] = head
                 self.live["environment"] = "production"
-            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
-        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout)
+            return super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
+        result = super().run(argv, cwd=cwd, log=log, env=env, timeout=timeout, read_only=read_only)
         if log.stem.endswith("app-build") and self.on_build is not None:
             self.on_build()
         return result
@@ -6501,6 +6501,7 @@ class TokenCheckWrangler(Base):
     def toolchain(self) -> Path:
         return self.fx.repo / "out/release-pipeline/toolchain"
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
     def test_cf_cache_uses_run_directory_without_changing_pinned_contents(self):
         home = self.fx.wrangler.parents[2]
         self.fx.wrangler.write_text(
@@ -6522,10 +6523,66 @@ class TokenCheckWrangler(Base):
         wrangler = pipe.auth_wrangler()
         result = pipe.step("wrangler-auth", [str(wrangler), "whoami"], home)
         observed = json.loads(result.out)
-        self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir))
+        self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir.resolve()))
+        for name in ("HOME", "MINIFLARE_CACHE_DIR", "CLOUDFLARE_CF_FETCH_PATH", "WRANGLER_CACHE_DIR",
+                     "WRANGLER_LOG_PATH", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "TMPDIR"):
+            self.assertTrue(Path(observed["env"][name]).resolve().is_relative_to(pipe.run_dir.resolve()), name)
+        credentials = Path(observed["env"]["HOME"]) / ".config/carr"
+        self.assertTrue(credentials.is_symlink())
+        self.assertEqual(credentials.resolve(), Path(pipe.cfg["credential_dir"]).resolve())
         self.assertFalse((home / "node_modules/.mf").exists())
         self.assertEqual(rp.toolchain_digest(home), recorded.strip())
         self.assertEqual(receipt.read_text(), recorded)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS release host sandbox")
+    def test_wrangler_child_cannot_write_into_pinned_install_even_if_it_ignores_cache_env(self):
+        home = self.fx.wrangler.parents[2]
+        self.fx.wrangler.write_text(
+            f"#!{sys.executable}\n"
+            "import subprocess, sys\n"
+            "subprocess.run([sys.executable, '-c', \"from pathlib import Path; import sys; Path(sys.argv[1]).write_text('drift')\", sys.argv[1]], check=True)\n")
+        receipt = home.with_name(home.name + ".sha256")
+        receipt.write_text(rp.toolchain_digest(home) + "\n")
+        recorded = receipt.read_text()
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        for target in (home / "node_modules/injected.js", wrangler, receipt):
+            with self.subTest(target=target):
+                with self.assertRaises(rp.StepFailed):
+                    pipe.step("wrangler-auth", [str(wrangler), str(target)], home)
+                self.assertEqual(rp.toolchain_digest(home), recorded.strip())
+                self.assertEqual(receipt.read_text(), recorded)
+
+    def test_unavailable_write_sandbox_refuses_before_starting_wrangler(self):
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        with mock.patch.object(rp.sys, "platform", "linux"), \
+                mock.patch.object(rp.subprocess, "run") as command:
+            with self.assertRaises(rp.Blocked) as refusal:
+                pipe.step("wrangler-auth", [str(wrangler), "whoami"], self.fx.repo)
+        self.assertEqual(refusal.exception.reason, "toolchain_write_isolation")
+        command.assert_not_called()
+
+    def test_runtime_home_link_into_pinned_install_refuses_before_any_write(self):
+        pipe = self.fx.pipeline(rp.Runner())
+        wrangler = pipe.auth_wrangler()
+        home = wrangler.parents[2]
+        recorded = rp.toolchain_digest(home)
+        root = pipe.run_dir / "runtime"
+        root.mkdir(parents=True)
+        (root / "home").symlink_to(home, target_is_directory=True)
+        with self.assertRaises(rp.Blocked) as refusal:
+            pipe.step("wrangler-auth", [str(wrangler), "whoami"], self.fx.repo)
+        self.assertEqual(refusal.exception.reason, "toolchain_runtime_path")
+        self.assertEqual(rp.toolchain_digest(home), recorded)
+
+    def test_git_and_github_steps_keep_their_existing_login_configuration(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        for command in ("git", "gh"):
+            pipe.step("schema-" + command, [command, "--version"], self.fx.repo)
+            observed = runner.envs["schema-" + command]
+            self.assertEqual(observed, pipe.env)
 
     def test_reused_toolchain_requires_its_recorded_content_digest(self):
         for damage in ("binary", "dependency", "receipt", "escaping-link"):

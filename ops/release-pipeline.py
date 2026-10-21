@@ -164,13 +164,27 @@ class Runner:
     """Runs one command with stdin closed, output to its own log file."""
 
     def run(self, argv: list[str], *, cwd: Path, log: Path, env: dict[str, str],
-            timeout: int = 3600) -> Result:
+            timeout: int = 3600, read_only: tuple[Path, ...] = ()) -> Result:
+        command = argv
+        if read_only:
+            sandbox = Path("/usr/bin/sandbox-exec")
+            if sys.platform != "darwin" or not sandbox.is_file():
+                raise Blocked("toolchain_write_isolation", "pinned toolchain execution requires the macOS write sandbox")
+            denied = []
+            for home in read_only:
+                home = home.resolve()
+                denied.append(f'(deny file-write* (subpath {json.dumps(str(home))}) '
+                              f'(literal {json.dumps(str(home.with_name(home.name + ".sha256")))}))')
+                for parent in home.parents:
+                    denied.append(f'(deny file-write-unlink (literal {json.dumps(str(parent))}))')
+            profile = "(version 1)(allow default)" + "".join(denied)
+            command = [str(sandbox), "-p", profile, *argv]
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a", encoding="utf-8") as fh:
             fh.write(f"$ (cd {cwd}) {' '.join(argv)}\n")
             fh.flush()
             try:
-                proc = subprocess.run(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                proc = subprocess.run(command, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       text=True, timeout=timeout)
                 out, rc = proc.stdout or "", proc.returncode
@@ -182,6 +196,8 @@ class Runner:
             out = redact_text(out, known_secrets=sensitive_env_values(env))
             fh.write(out)
             fh.write(f"\n[exit {rc}]\n")
+        if read_only and out.startswith("sandbox-exec:"):
+            raise Blocked("toolchain_write_isolation", "macOS could not apply the pinned toolchain write sandbox")
         return Result(rc, out)
 
 
@@ -792,6 +808,55 @@ class Pipeline:
                           cwd=cwd, trim_output=False)
         return [path for path in output.split("\0") if path]
 
+    def runtime_env(self, env: dict[str, str]) -> dict[str, str]:
+        """Keep Wrangler and Miniflare state outside the sealed installation."""
+        root = (self.run_dir / "runtime").absolute()
+        pinned = wrangler_toolchain(self.repo, self.store.root).resolve()
+        directories = {
+            "MINIFLARE_CACHE_DIR": root / "miniflare",
+            "WRANGLER_CACHE_DIR": root / "wrangler-cache",
+            "XDG_CONFIG_HOME": root / "config",
+            "XDG_CACHE_HOME": root / "cache",
+            "WRANGLER_LOG_PATH": root / "logs",
+            "TMPDIR": root / "tmp",
+        }
+        home = root / "home"
+        config = home / ".config"
+        for path in (root, *directories.values(), home, config):
+            if (not path.resolve().is_relative_to(self.run_dir.resolve())
+                    or path.resolve().is_relative_to(pinned)):
+                raise Blocked("toolchain_runtime_path", "runtime directory resolves into the pinned toolchain or outside this run")
+        for path in directories.values():
+            path.mkdir(parents=True, exist_ok=True)
+        env = dict(env)
+        if env.get("HOME") == self.env.get("HOME"):
+            config.mkdir(parents=True, exist_ok=True)
+            carr = config / "carr"
+            credentials = expand(self.cfg.get("credential_dir", "~/.config/carr"))
+            if not carr.exists() and not carr.is_symlink():
+                carr.symlink_to(credentials, target_is_directory=True)
+            if not carr.is_symlink() or carr.resolve() != credentials.resolve():
+                raise Blocked("toolchain_runtime_path", "runtime CARR credential link has an unexpected target")
+            env["HOME"] = str(home)
+        if (Path(env["HOME"]) / ".wrangler").exists():
+            raise Blocked("toolchain_runtime_path", "legacy Wrangler configuration would bypass the per-run config directory")
+        return {**env, **{name: str(path) for name, path in directories.items()},
+                "CLOUDFLARE_CF_FETCH_PATH": str(directories["MINIFLARE_CACHE_DIR"] / "cf.json")}
+
+    def run_command(self, argv: list[str], *, cwd: Path, log: Path,
+                    env: dict[str, str] | None = None, timeout: int = 3600) -> Result:
+        for home in self.toolchain_integrity:
+            self.verify_toolchain(home)
+        env = self.env if env is None else env
+        if Path(argv[0]).name not in {"git", "gh"}:
+            env = self.runtime_env(env)
+        try:
+            return self.runner.run(argv, cwd=cwd, log=log, env=env,
+                                   timeout=timeout, read_only=tuple(self.toolchain_integrity))
+        finally:
+            for home in self.toolchain_integrity:
+                self.verify_toolchain(home)
+
     def step(self, name: str, argv: list[str], cwd: Path, *, timeout: int = 3600,
              env: dict[str, str] | None = None) -> Result:
         """Run one step, or in dry-run only print it. Nonzero is StepFailed.
@@ -801,15 +866,11 @@ class Pipeline:
         if self.dry_run:
             self.out(f"  [dry-run] (cd {cwd}) {shown}")
             return Result(0, "")
-        for home in self.toolchain_integrity:
-            if Path(argv[0]).is_relative_to(home) or (env is not None and CLOUDFLARE_TOKEN_NAME in env):
-                self.verify_toolchain(home)
         n = len(self.executed) + 1
         log = self.run_dir / f"{n:02d}-{name}.log"
         self.out(f"  -> {name}: {shown}")
         self.executed.append(name)
-        res = self.runner.run(argv, cwd=cwd, log=log, env=self.env if env is None else env,
-                              timeout=timeout)
+        res = self.run_command(argv, cwd=cwd, log=log, env=env, timeout=timeout)
         if res.rc != 0:
             raise StepFailed(name, res.rc, str(log))
         res.log = str(log)
@@ -831,8 +892,8 @@ class Pipeline:
         findings_path = self.run_dir / f"{n:02d}-{name}-findings.json"
         self.out(f"  -> {name}: ./run.sh health --findings-json {findings_path}")
         self.executed.append(name)
-        res = self.runner.run(["./run.sh", "health", "--findings-json", str(findings_path)],
-                              cwd=cwd, log=log, env=self.env, timeout=900)
+        res = self.run_command(["./run.sh", "health", "--findings-json", str(findings_path)],
+                               cwd=cwd, log=log, timeout=900)
         res.log = str(log)
         findings, complete = read_health_findings(res.out, findings_path)
         self.dependency_evidence[name] = evidence_digest({"rc": res.rc, "complete": complete, "findings": findings})
@@ -2900,7 +2961,7 @@ class Pipeline:
         log = self.run_dir / f"{n:02d}-{step}.log"
         self.out(f"  -> {step}: {' '.join(argv)}")
         self.executed.append(step)
-        result = self.runner.run(argv, cwd=self.repo, log=log, env=self.env, timeout=1800)
+        result = self.run_command(argv, cwd=self.repo, log=log, timeout=1800)
         try:
             summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
