@@ -678,7 +678,13 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     try:
         for request in list(state.get('requests', {}).values()):
             if not request['acknowledged']:
-                work.write(request['verb'], json.loads(request['payload']), 'pending write')
+                args = json.loads(request['payload'])
+                if request['verb'] == 'set-next-action':
+                    existing = work.open_ball(args['ref'])
+                    if existing is not None and existing >= request['created_at']:
+                        del state['requests'][args['idempotency_key']]
+                        continue
+                work.write(request['verb'], args, 'pending write')
         matcher = Matcher(ports.contacts(), ports.carr)
         work.emails(mails, matcher, since)
         work.full_text(mails)
