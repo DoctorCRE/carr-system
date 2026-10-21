@@ -2868,21 +2868,36 @@ def command_render(args: argparse.Namespace) -> None:
             publish_board(ALL_REPOS_BOARD)
         return
     render(args.project, discover=True)
-    if args.publish or args.project == LAUNCHD_BOARD:
+    if args.project != LAUNCHD_BOARD:
+        if args.publish:
+            publish_board(args.project)
+        return
+    # Refresh source facts before publish_board projects the Orchestrator view.
+    # Legacy publication failures must not strand the canonical portfolio.
+    portfolio_available = True
+    try:
+        build_all_repos()
+    except RuntimeError as exc:
+        log(f"all-repos rebuild failed, publishing last known state: {exc}")
+        portfolio_available = state_path(ALL_REPOS_BOARD).exists()
+    publication_error = None
+    try:
         publish_board(args.project)
-    if args.project == LAUNCHD_BOARD:
+    except Exception as exc:
+        publication_error = exc
+        log(f"{args.project} publication failed: {exc}")
+    if publication_error is None:
         poll_board_answers(args.project)
         publish_needs_joe_local()
-        # The system-wide board rides the same scheduled job, after the
-        # project board so a gh outage never holds that one back. A failed
-        # rebuild is logged and the last known board is published again.
+    if portfolio_available:
         try:
-            build_all_repos()
-        except RuntimeError as exc:
-            log(f"all-repos rebuild failed, publishing last known state: {exc}")
-            if not state_path(ALL_REPOS_BOARD).exists():
-                return
-        publish_board(ALL_REPOS_BOARD)
+            publish_board(ALL_REPOS_BOARD)
+        except Exception as exc:
+            log(f"all-repos publication failed: {exc}")
+            if publication_error is None:
+                raise
+    if publication_error is not None:
+        raise publication_error
 
 
 def publish_needs_joe_local() -> None:
