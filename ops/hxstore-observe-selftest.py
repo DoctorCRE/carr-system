@@ -97,7 +97,7 @@ class ObservationTests(unittest.TestCase):
         ])
         self.assertEqual(report['records'][0]['occurrences'], 2)
 
-    def test_rejects_inexact_lz4_without_partial_output(self):
+    def test_inexact_lz4_is_counted_without_decoding(self):
         cases = [
             store(b'hello', b'\x50helloTRAILING'),
             store(b'xxxxx', b'\x1fx\x01\x00\x00'),
@@ -105,9 +105,13 @@ class ObservationTests(unittest.TestCase):
         for data in cases:
             with self.subTest(data_length=len(data)):
                 result = self.observe(data)
-                self.assertEqual(result.returncode, 2)
-                self.assertEqual(result.stdout, b'')
-                self.assertEqual(result.stderr, b'{"error":"observation_failed"}\n')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['issues'], [
+                    {'stage': 'block', 'reason_code': 'invalid_lz4', 'block_ordinal': 1}])
+                self.assertEqual(report['coverage']['verified_payload_bytes'], 0)
+                self.assertIsNone(report['coverage']['decoded_byte_percent'])
+                self.assertEqual(report['records'], [])
 
     def test_unknown_frequency_counts_only_records_with_unframed_bytes(self):
         data = envelope(77, b'') + envelope(77) + envelope(78)
@@ -129,38 +133,81 @@ class ObservationTests(unittest.TestCase):
                          ['mail', 'object.class.004d', 'unframed'])
         self.assertEqual(report['unknown_fields'][0]['field_id'], None)
 
-    def test_malformed_inputs_fail_closed_with_fixed_errors(self):
+    def test_unusable_inputs_fail_with_fixed_taxonomy(self):
         valid = store(envelope(77))
-        header_crc = bytearray(valid)
-        header_crc[64] ^= 1
-        body_crc = bytearray(valid)
-        body_crc[-1] ^= 1
         unknown_version = bytearray(valid)
         unknown_version[8] = ord('z')
-        cases = [
-            b'SyntheticNeverEmitBadMagic' + bytes(100), bytes(8), header_crc, body_crc,
-            unknown_version, valid[:-1], store(b'x', b'\x10x\x99\x00', 5),
-            store(envelope(77)[:-1]), store(struct.pack('<HHIH', 5, 1218, 19, 0)),
-            store(SECRET) + store(envelope(77))[64:-1],
-        ]
-        for data in cases:
+        for data, reason in [(b'', 'not_store'), (bytes(8), 'not_store'),
+                             (b'SyntheticNeverEmitBadMagic' + bytes(100), 'not_store'),
+                             (unknown_version, 'unsupported_format')]:
             with self.subTest(length=len(data)):
                 result = self.observe(data)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, b'')
-                self.assertEqual(result.stderr, b'{"error":"observation_failed"}\n')
+                self.assertEqual(json.loads(result.stderr), {
+                    'stage': 'header', 'reason_code': reason, 'block_ordinal': None})
+
+    def test_block_and_record_failures_are_local_and_counted_by_reason(self):
+        good = store(envelope(77, b''))
+        header_crc = bytearray(good[64:])
+        header_crc[0] ^= 1
+        body_crc = bytearray(good[64:])
+        body_crc[-1] ^= 1
+        malformed = envelope(78, b'') + envelope(79)[:-1]
+        damaged = [
+            (header_crc, 'block', 'header_crc_mismatch'),
+            (body_crc, 'block', 'payload_crc_mismatch'),
+            (good[64:-1], 'block', 'truncated_payload'),
+            (good[64:80], 'block', 'truncated_header'),
+            (store(b'x', inflated=0)[64:], 'block', 'invalid_inflated_length'),
+            (store(b'x', b'\x10x\x99\x00', 5)[64:], 'block', 'invalid_lz4'),
+            (store(malformed)[64:], 'record', 'invalid_object_bounds'),
+        ]
+        for tail, stage, reason in damaged:
+            with self.subTest(reason=reason):
+                report = json.loads(self.observe(good + tail).stdout)
+                self.assertEqual(report['issues'], [
+                    {'stage': stage, 'reason_code': reason, 'block_ordinal': 2}])
+                self.assertEqual(report['issue_counts'], [
+                    {'stage': stage, 'reason_code': reason, 'occurrences': 1}])
+                coverage = report['coverage']
+                self.assertEqual(coverage['decoded_bytes'], 20)
+                self.assertEqual(coverage['verified_payload_bytes'],
+                                 20 + (len(malformed) if stage == 'record' else 0))
+                self.assertEqual(coverage['undecodable_blocks'], int(stage == 'record'))
+                self.assertEqual(report['records'][0]['occurrences'], 1)
+                self.assertEqual(sum(r['total_bytes'] for r in report['records']),
+                                 coverage['verified_payload_bytes'])
+        report = json.loads(self.observe(good + body_crc * 2 + good[64:]).stdout)
+        self.assertEqual(report['issue_counts'][0]['occurrences'], 2)
+        self.assertEqual([e['block_ordinal'] for e in report['issues']], [2, 3])
+
+    def test_nested_magic_is_a_local_overlapping_candidate(self):
+        data = envelope(77, struct.pack('<Q', 0x5d0245643b706a05))
+        report = json.loads(self.observe(store(data) + store(envelope(78, b''))[64:]).stdout)
+        self.assertEqual(report['issues'], [
+            {'stage': 'block', 'reason_code': 'overlapping_candidate', 'block_ordinal': 2}])
+        self.assertEqual(report['coverage']['verified_blocks'], 2)
+        self.assertEqual(report['coverage']['unverified_blocks'], 1)
 
     def test_empty_observation_has_no_invented_coverage(self):
         report = json.loads(self.observe(store(SECRET)[:64]).stdout)
-        self.assertEqual(report, {'schema': 'hxprobe-observation/v1', 'blocks': [],
-                                  'records': [], 'unknown_fields': []})
+        self.assertEqual(report['blocks'], [])
+        self.assertEqual(report['records'], [])
+        self.assertEqual(report['issues'], [])
+        self.assertEqual(report['issue_counts'], [])
+        self.assertEqual(report['coverage']['verified_payload_bytes'], 0)
+        self.assertIsNone(report['coverage']['decoded_byte_percent'])
 
     def test_argument_and_io_errors_never_echo_arguments(self):
         for args in ([], ['/SyntheticNeverEmitMissingPath'], ['a', 'SyntheticNeverEmitArgument']):
             result = subprocess.run([str(BINARY), 'observe', *args], capture_output=True)
             self.assertEqual(result.returncode, 2)
             self.assertEqual(result.stdout, b'')
-            self.assertEqual(result.stderr, b'{"error":"observation_failed"}\n')
+            self.assertEqual(json.loads(result.stderr), {
+                'stage': 'input' if len(args) == 1 else 'arguments',
+                'reason_code': 'unreadable' if len(args) == 1 else 'invalid_arguments',
+                'block_ordinal': None})
 
     def test_fixture_strings_and_byte_runs_never_reach_either_stream(self):
         strings = ['NoEmitSubjectFixture54321', 'nobody-fixture@example.test',
@@ -174,7 +221,8 @@ class ObservationTests(unittest.TestCase):
             self.assertNotIn(run, result.stdout + result.stderr)
             self.assertNotIn(run.hex().encode(), result.stdout + result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(set(report), {'schema', 'blocks', 'records', 'unknown_fields'})
+        self.assertEqual(set(report), {'schema', 'blocks', 'records', 'unknown_fields',
+                                      'coverage', 'issues', 'issue_counts'})
         self.assertEqual(set(report['records'][0]), {
             'record_type', 'occurrences', 'total_bytes', 'decoded_bytes', 'decoded_byte_percent',
             'wire_field_ids', 'decoded_field_id_percent', 'fields'})

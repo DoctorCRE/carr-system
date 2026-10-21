@@ -22,27 +22,100 @@ impl Counts {
     }
 }
 
-pub fn run(path: &OsStr) -> Result<String, ()> {
-    let file = File::open(path).map_err(|_| ())?;
+pub struct Issue {
+    pub stage: &'static str,
+    pub reason_code: &'static str,
+    pub block_ordinal: Option<usize>,
+}
+
+impl Issue {
+    pub fn input(stage: &'static str, reason_code: &'static str) -> Self {
+        Self {
+            stage,
+            reason_code,
+            block_ordinal: None,
+        }
+    }
+
+    pub fn json(&self) -> String {
+        let ordinal = self.block_ordinal.map_or("null".into(), |n| n.to_string());
+        format!(
+            "{{\"stage\":\"{}\",\"reason_code\":\"{}\",\"block_ordinal\":{ordinal}}}",
+            self.stage, self.reason_code
+        )
+    }
+}
+
+pub fn run(path: &OsStr) -> Result<String, Issue> {
+    let file = File::open(path).map_err(|_| Issue::input("input", "unreadable"))?;
+    let size = file
+        .metadata()
+        .map_err(|_| Issue::input("input", "unreadable"))?
+        .len();
+    if size < 64 {
+        return Err(Issue::input("header", "not_store"));
+    }
     // SAFETY: the caller supplies an immutable copy; this mapping is read-only.
-    let mm = unsafe { Mmap::map(&file) }.map_err(|_| ())?;
-    let h = header::check(&mm).map_err(|_| ())?;
+    let mm = unsafe { Mmap::map(&file) }.map_err(|_| Issue::input("input", "unreadable"))?;
+    let h = header::check(&mm).map_err(|_| Issue::input("header", "not_store"))?;
     if !h.known || h.page_size != 4096 {
-        return Err(());
+        return Err(Issue::input("header", "unsupported_format"));
     }
     let mut blocks: BTreeMap<u32, Counts> = BTreeMap::new();
     let mut records: BTreeMap<String, Counts> = BTreeMap::new();
     let offsets = block::find_all(&mm);
+    let signatures = offsets.len();
+    let mut issues = Vec::new();
+    let mut verified = 0;
+    let mut verified_bytes = 0;
+    let mut undecodable = 0;
     let mut previous_end = 0;
-    for off in offsets {
+    for (index, off) in offsets.into_iter().enumerate() {
         if off < previous_end {
-            return Err(());
+            issues.push(Issue {
+                stage: "block",
+                reason_code: "overlapping_candidate",
+                block_ordinal: Some(index + 1),
+            });
+            continue;
         }
-        let b = block::parse(&mm, off).ok_or(())?;
+        let b = match block::parse_checked(&mm, off) {
+            Ok(b) => b,
+            Err(error) => {
+                issues.push(Issue {
+                    stage: "block",
+                    reason_code: error.reason_code(),
+                    block_ordinal: Some(index + 1),
+                });
+                continue;
+            }
+        };
+        verified += 1;
+        verified_bytes += b.data.len();
         let compressed = u32::from_le_bytes(mm[off + 20..off + 24].try_into().unwrap()) as usize;
         previous_end = off + block::PAYLOAD + compressed;
         blocks.entry(b.kind).or_default().add(b.data.len(), 0);
-        observe_payload(&b.data, &mut records)?;
+        let mut block_records = BTreeMap::new();
+        if observe_payload(&b.data, &mut block_records).is_err() {
+            undecodable += 1;
+            issues.push(Issue {
+                stage: "record",
+                reason_code: "invalid_object_bounds",
+                block_ordinal: Some(index + 1),
+            });
+            records
+                .entry("unframed".into())
+                .or_default()
+                .add(b.data.len(), 0);
+            continue;
+        }
+        for (kind, n) in block_records {
+            let total = records.entry(kind).or_default();
+            total.occurrences += n.occurrences;
+            total.unknown_occurrences += n.unknown_occurrences;
+            total.total += n.total;
+            total.decoded += n.decoded;
+        }
     }
     let block_rows: Vec<_> = blocks
         .iter()
@@ -87,7 +160,28 @@ pub fn run(path: &OsStr) -> Result<String, ()> {
     let unknown_rows: Vec<_> = unknown.iter().map(|(kind, n)| format!(
         "{{\"record_type\":\"{kind}\",\"field_id\":null,\"wire_type\":\"unknown\",\"occurrences\":{},\"unknown_bytes\":{}}}", n.unknown_occurrences, n.total - n.decoded
     )).collect();
-    Ok(format!("{{\"schema\":\"hxprobe-observation/v1\",\"blocks\":[{}],\"records\":[{}],\"unknown_fields\":[{}]}}", block_rows.join(","), record_rows.join(","), unknown_rows.join(",")))
+    let mut issue_counts = BTreeMap::new();
+    for issue in &issues {
+        *issue_counts
+            .entry((issue.stage, issue.reason_code))
+            .or_insert(0usize) += 1;
+    }
+    let issue_rows: Vec<_> = issues.iter().map(Issue::json).collect();
+    let count_rows: Vec<_> = issue_counts
+        .iter()
+        .map(|((stage, reason), count)| {
+            format!(
+                "{{\"stage\":\"{stage}\",\"reason_code\":\"{reason}\",\"occurrences\":{count}}}"
+            )
+        })
+        .collect();
+    let decoded: usize = records.values().map(|n| n.decoded).sum();
+    let percent = if verified_bytes == 0 {
+        "null".into()
+    } else {
+        (100.0 * decoded as f64 / verified_bytes as f64).to_string()
+    };
+    Ok(format!("{{\"schema\":\"hxprobe-observation/v1\",\"blocks\":[{}],\"records\":[{}],\"unknown_fields\":[{}],\"coverage\":{{\"block_signatures\":{signatures},\"verified_blocks\":{verified},\"unverified_blocks\":{},\"undecodable_blocks\":{undecodable},\"verified_payload_bytes\":{verified_bytes},\"decoded_bytes\":{decoded},\"decoded_byte_percent\":{percent}}},\"issues\":[{}],\"issue_counts\":[{}]}}", block_rows.join(","), record_rows.join(","), unknown_rows.join(","), signatures - verified, issue_rows.join(","), count_rows.join(",")))
 }
 
 fn observe_payload(data: &[u8], records: &mut BTreeMap<String, Counts>) -> Result<(), ()> {

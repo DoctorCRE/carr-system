@@ -132,7 +132,8 @@ never reads sidecars, and writes only aggregate JSON to stdout.
 The report contains block-type counts and decompressed byte counts, record-type counts,
 structural field identifiers and wire types, decoded-byte coverage, and unknown remainder groups.
 It contains no store values, file paths, record identities, content hashes, or error excerpts.
-Errors produce empty stdout, fixed `{"error":"observation_failed"}` stderr, and exit code 2.
+Unusable input produces empty stdout and exit code 2. Stderr contains only
+`{stage, reason_code, block_ordinal}` with fixed codes and a null ordinal for input errors.
 The command validates the header, known version, 4096-byte page size, both block CRCs,
 exact LZ4 input and output lengths, nonoverlapping blocks, and envelope bounds before emitting JSON.
 
@@ -143,9 +144,18 @@ header and ten-byte object-class signature. Nested objects remain opaque.
 Mail regions outside envelopes run from an `IPM.Note` anchor to the next anchor or envelope boundary.
 Only their sixteen-byte anchor is credited. Other bytes form unframed gaps with zero decoded bytes.
 These structural counts are a conservative lower bound. They do not measure the existing heuristic
-content decoders or message recovery. Damaged or ambiguous candidates can cause refusal.
+content decoders or message recovery. Unverified blocks are skipped with a local diagnostic.
+A verified block with invalid object bounds contributes its entire payload as unframed bytes.
+No partial record interpretations from that block survive.
 
-`decoded_byte_percent` is `100 * decoded_bytes / total_bytes` for each observed record type.
+`coverage` counts signatures, verified blocks, unverified blocks, and verified but undecodable blocks.
+Its `decoded_byte_percent` is `100 * decoded_bytes / verified_payload_bytes`. CRC or LZ4 failures
+contribute no denominator bytes. Undecodable verified payloads remain in the denominator.
+`issues` lists fixed stage/reason codes with one-based signature ordinals; `issue_counts` groups them
+by stage and reason. A nested signature inside a verified compressed span is an overlapping candidate,
+not a second verified block.
+
+`records[].decoded_byte_percent` is `100 * decoded_bytes / total_bytes` for each observed record type.
 Absent record types are omitted. An unavailable denominator is not reported as zero percent.
 `wire_field_ids` and `decoded_field_id_percent` are null because numeric property framing remains
 unknown. Structural `field_id` labels carry `identifier_kind` to distinguish offsets and selectors

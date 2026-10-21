@@ -689,11 +689,13 @@ rewrites the file while it runs.";
 fn main() {
     let raw: Vec<_> = env::args_os().collect();
     if raw.get(1).is_some_and(|arg| arg == "observe") {
-        let result = if raw.len() == 3 { observe::run(&raw[2]) } else { Err(()) };
+        let result = if raw.len() == 3 { observe::run(&raw[2]) } else {
+            Err(observe::Issue::input("arguments", "invalid_arguments"))
+        };
         match result {
             Ok(json) => println!("{json}"),
-            Err(()) => {
-                eprintln!("{{\"error\":\"observation_failed\"}}");
+            Err(issue) => {
+                eprintln!("{}", issue.json());
                 std::process::exit(2);
             }
         }
