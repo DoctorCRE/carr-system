@@ -172,6 +172,7 @@ class BoardCase(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.env = os.environ.copy()
+        self.env["CARR_WORK_QUEUE_DB"] = str(self.root / "work-queue.sqlite3")
         self.env["PROGRESS_BOARD_ROOT"] = str(self.root)
         self.env["PROGRESS_BOARD_SKIP_GH"] = "1"
         self.env["PROGRESS_BOARD_SKIP_PROBE"] = "1"
