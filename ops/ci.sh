@@ -206,6 +206,15 @@ check_gates() {
   local failures="" count=0 skiplist="" gates_timed_out=0
   export CARR_HOOK_FIXTURE=1
 
+  # rustup installs the pinned toolchain before concurrent HxStore builds.
+  if [ -f vendor/hxprobe/Cargo.toml ]; then
+    if ! run_quiet "$LOGDIR/hxprobe-prepare.log" bash -c 'cd vendor/hxprobe && cargo build --locked'; then
+      fail_tail "$LOGDIR/hxprobe-prepare.log"
+      bad gates "HxStore worker preparation failed"
+      return
+    fi
+  fi
+
   local tree_before; tree_before="$(tree_fingerprint)"
 
   local scope="ops/config/ci-check-scope.json"
