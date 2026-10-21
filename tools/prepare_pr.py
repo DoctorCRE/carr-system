@@ -12,7 +12,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'ops'))
 from git_env import scrubbed_env
-from regen import OUTPUTS
+from regen import REGENERATED_OUTPUTS
 
 
 CANONICAL = Path(__file__).resolve().parents[1]
@@ -53,7 +53,7 @@ def prepare(remote: str, branch: str, head: str, main: str, receipt: Path,
         git(repo, 'merge', '--no-commit', '--no-ff', 'origin/main', check=False)
         conflicts = git(repo, 'diff', '--name-only', '--diff-filter=U').splitlines()
         for path in conflicts:
-            if path not in OUTPUTS or path in ('requirements.lock', 'mcp-server/src/scac-mutation-registry.current.generated.js'):
+            if path not in REGENERATED_OUTPUTS:
                 raise ValueError(f'source conflict requires review: {path}')
             git(repo, 'restore', '--source=origin/main', '--staged', '--worktree', '--', path)
         if git(repo, 'diff', '--name-only', '--diff-filter=U'):
