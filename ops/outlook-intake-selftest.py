@@ -472,6 +472,32 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(keys[0], keys[1], 'the retry reuses the key')
         self.assertEqual(len(self.fake.writes('log-activity')), 1)
 
+    def test_a_failed_action_retry_preserves_an_intervening_newer_joe_local_action(self):
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
+        self.fake.model_reply = {'next_step': 'Send old plan', 'due_on': None}
+        self.fake.fail_verbs = {'set-next-action'}
+        original = self.fake.carr
+
+        def server(verb, args):
+            result = original(verb, args)
+            if verb == 'set-next-action':
+                self.fake.timeline[args['ref']] = [{
+                    'verb': verb, 'summary': f"ball → joe-local: {args['description']}",
+                    'occurred_at': self.fake.now.isoformat()}]
+            return result
+
+        self.fake.carr = server
+        self.assertEqual(self.run_intake(mails).state, 'failed')
+        newer = [{'verb': 'set-next-action', 'summary': 'ball → joe-local: Call about new plan',
+                  'occurred_at': (NOW + timedelta(minutes=10)).isoformat()}]
+        self.fake.timeline['C-901'] = list(newer)
+        self.fake.fail_verbs.clear()
+        self.fake.now += timedelta(minutes=30)
+        self.assertEqual(self.run_intake(mails, touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.timeline['C-901'], newer, 'the newer action survives the retry')
+        self.assertEqual(len(self.fake.writes('set-next-action')), 1, 'no stale action is replayed')
+        self.assertEqual(self.run_intake(mails, touch=False).reason, 'store_unchanged')
+
     def test_pending_action_survives_two_write_failures_then_a_model_failure(self):
         mails = [mail('pat@example.test', -timedelta(hours=1))]
         self.fake.model_reply = {'next_step': 'Send the floor plan', 'due_on': None}
