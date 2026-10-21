@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 import time
+from typing import Any
 from unittest.mock import patch
 import progress_board as board
 sys.path.insert(0, str(Path(__file__).parent / 'room-bridge'))
@@ -16,7 +17,8 @@ state = json.loads((root / 'carr-v5.json').read_text())
 portfolio = json.loads((root / 'all-repos.json').read_text())
 queue = board_projection('/Users/booko/.config/carr/work-queue.sqlite3')
 raw = project(state, queue, portfolio=portfolio)
-store, calls = {}, []
+store: dict[str, Any] = {}
+calls: list[str] = []
 def call(verb, args):
     calls.append(verb)
     key = args['board_id']
