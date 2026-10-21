@@ -3,6 +3,7 @@ import { safeInteger, integerFields } from "./safe-integer.js";
 import { invoiceTrackerTools } from "./invoice-tracker.js";
 import { featureSwitchTools, FEATURE_VERBS, FEATURE_SWITCH_WRITES, requireFeature } from "./feature-switches.js";
 import { isCalendarDate } from "./calendar-date.js";
+import { readDealChecklist } from "./deal-checklist.js";
 import { bindReferralDeal } from "./relationship-network.js";
 import { trustedOverride, dealEvidenceEntries, requireRelationshipPartner, mergeRelationshipFields } from "./vendor-relationship.js";
 import { readLeadWorkspace, LEAD_WORKSPACE_SCHEMA, validateStageReview, lockLeadLifecycle } from "./lead-workspace.js";
@@ -9240,7 +9241,8 @@ registerTools({
                 to_jsonb(expiration_on)#>>'{}' as expiration_on,
                 options_note, evidence_kind, evidence_ref, source
            from v_deal_room_current_lease where deal_id=$1`, [s.id]);
-      return stripDealPlaceholders({ schema_version: "deal-timeline.v1", lease: lease.rows[0] || null,
+      const checklist = await readDealChecklist(c, { ...deal.rows[0], lease: lease.rows[0] || null, critical_dates: criticalDates.rows });
+      return stripDealPlaceholders({ schema_version: "deal-timeline.v1", checklist, lease: lease.rows[0] || null,
         deal_id: s.id, ...deal.rows[0], thread: thread.rows,
         critical_dates: criticalDates.rows, next_actions: actions.rows,
         activities: activities.rows, participants: participants.rows,

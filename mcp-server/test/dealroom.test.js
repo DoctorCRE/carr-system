@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import { pipelineChanges } from "../src/dealroom.js";
 import { TOOLS } from "../src/tools.js";
 import { docActivityEntry } from "../src/doc-activity.js";
+import { CHECKLIST_SOURCES } from '../src/deal-checklist.js';
 
 const ids = {
   deal: "10000000-0000-0000-0000-000000000001",
@@ -330,6 +331,7 @@ class FakeClient {
         parked_at: deal.parked_at, parked_by: deal.parked_by,
         salesforce_id: deal.salesforce_id, base_version: deal.version }] : [] };
     }
+    if (sql.includes('checklist:doctrine') || sql.includes('checklist:commissions')) return { rows: [] };
     if (sql.includes("from v_deal_room_current_lease where deal_id=$1")) return { rows: this.currentLease ? [this.currentLease] : [] };
     if (sql.includes("from v_deal_room_note")) {
       const rows = this.notes.filter(n => n.deal_id === params[0])
@@ -356,6 +358,20 @@ class FakeClient {
     throw new Error(`unhandled fake query: ${sql}`);
   }
 }
+
+test('deal detail includes the versioned checklist derived from current records', async () => {
+  const db = new FakeClient();
+  const query = db.query.bind(db);
+  db.query = async (sql, params) => {
+    if (sql.includes('checklist:doctrine')) return { rows: CHECKLIST_SOURCES.map(s => ({ id: s.section_id, body_hash: s.content_hash, status: 'active' })) };
+    if (sql.includes('checklist:commissions')) return { rows: [] };
+    return query(sql, params);
+  };
+  const result = await call('get-deal-room', db, actors.joe, { deal: 'Deal Alpha' });
+  assert.equal(result.checklist.schema_version, 'deal-checklist.v1');
+  assert.equal(result.checklist.template_state, 'current');
+  assert.equal(result.checklist.phases[0].items[0].status, 'not_recorded');
+});
 
 async function call(name, client, actor, args) {
   return TOOLS[name].handler(client, actor, args);

@@ -89610,6 +89610,18 @@ CREATE VIEW public.v_deal_room_activity AS
 
 
 --
+-- Name: v_deal_room_commission; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_commission AS
+ SELECT deal_id,
+    id AS commission_id,
+    status,
+    received_on
+   FROM public.commission;
+
+
+--
 -- Name: v_deal_room_critical_date; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -120440,6 +120452,9 @@ grant select on table public.v_deal_room_activity to dot_reader;
 grant select on table public.v_deal_room_board to carr_reader;
 grant select on table public.v_deal_room_board to carr_writer;
 grant select on table public.v_deal_room_board to dot_reader;
+grant select on table public.v_deal_room_commission to carr_reader;
+grant select on table public.v_deal_room_commission to carr_writer;
+grant select on table public.v_deal_room_commission to dot_reader;
 grant select on table public.v_deal_room_critical_date to carr_reader;
 grant select on table public.v_deal_room_critical_date to dot_reader;
 grant select on table public.v_deal_room_current_lease to carr_reader;
@@ -122965,6 +122980,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
 0916_deal_phase_start_dates.sql	09e479005c0a49bd54666e1ff8f82900afcbaf75e83885c13d52bb2d0444992a	2026-10-20 21:34:43.817985+00
 0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
+0922_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	1970-01-01 00:00:00+00
 0923_deal_status_next_step.sql	705736e4c549801b820d7844447b9c84a63c5db8a1c67c306a27debfa24d83be	1970-01-01 00:00:00+00
 \.
 
