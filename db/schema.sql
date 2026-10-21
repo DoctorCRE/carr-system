@@ -84333,8 +84333,17 @@ CREATE TABLE public.client (
     deal_type_label text,
     possible_duplicate_label text,
     notes text,
-    specialty_type_label text
+    specialty_type_label text,
+    prospect_engagement_status text DEFAULT 'active'::text NOT NULL,
+    CONSTRAINT client_prospect_engagement_status_check CHECK ((prospect_engagement_status = ANY (ARRAY['active'::text, 'inactive'::text])))
 );
+
+
+--
+-- Name: COLUMN client.prospect_engagement_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.client.prospect_engagement_status IS 'Explicit prospect engagement. Independent of lifecycle status and per-deal operating state. Active until explicitly returned to Leads.';
 
 
 --
@@ -87752,6 +87761,19 @@ COMMENT ON VIEW public.v_client_account IS 'Every live client with the national 
 
 
 --
+-- Name: v_client_engagement_status; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_client_engagement_status AS
+ SELECT id AS client_id,
+    status AS client_status,
+    version AS client_version,
+    prospect_engagement_status
+   FROM public.client
+  WHERE (merged_into IS NULL);
+
+
+--
 -- Name: v_client_lease_radar; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -89511,7 +89533,7 @@ CREATE VIEW public.v_deal_room_board AS
      LEFT JOIN public.deal_market_assignment dma ON ((dma.deal_id = d.id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'deal'::text) AND (lt.subject_id = d.id))))
      LEFT JOIN public.actor pa ON ((pa.id = d.parked_by)))
-  WHERE (d.invoiced_on IS NULL);
+  WHERE ((d.invoiced_on IS NULL) AND ((c.status <> 'prospect'::text) OR (c.prospect_engagement_status = 'active'::text)));
 
 
 --
@@ -90848,6 +90870,20 @@ CREATE VIEW public.v_lead_hot AS
      JOIN public.party p ON ((p.id = l.party_id)))
      LEFT JOIN public.v_last_touch lt ON (((lt.subject_type = 'lead'::text) AND (lt.subject_id = l.id))))
   WHERE (NOT l.suppressed);
+
+
+--
+-- Name: v_lead_prospect_engagement; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_lead_prospect_engagement AS
+ SELECT l.id AS lead_id,
+    c.id AS prospect_client_id,
+    c.version AS prospect_client_version,
+    c.prospect_engagement_status
+   FROM (public.lead l
+     JOIN public.client c ON ((c.id = l.client_id)))
+  WHERE ((c.status = 'prospect'::text) AND (c.merged_into IS NULL));
 
 
 --
@@ -120335,6 +120371,9 @@ grant select on table public.v_claim_card to dot_reader;
 grant select on table public.v_client_account to carr_reader;
 grant select on table public.v_client_account to carr_writer;
 grant select on table public.v_client_account to dot_reader;
+grant select on table public.v_client_engagement_status to carr_reader;
+grant select on table public.v_client_engagement_status to carr_writer;
+grant select on table public.v_client_engagement_status to dot_reader;
 grant select on table public.v_client_lease_radar to carr_reader;
 grant select on table public.v_client_lease_radar to dot_reader;
 grant select on table public.v_code_finding to carr_exporter;
@@ -120512,6 +120551,9 @@ grant select on table public.v_lead_client_link to carr_writer;
 grant select on table public.v_lead_client_link to dot_reader;
 grant select on table public.v_lead_hot to carr_reader;
 grant select on table public.v_lead_hot to dot_reader;
+grant select on table public.v_lead_prospect_engagement to carr_reader;
+grant select on table public.v_lead_prospect_engagement to carr_writer;
+grant select on table public.v_lead_prospect_engagement to dot_reader;
 grant select on table public.v_lead_stage_transition to carr_authority;
 grant select on table public.v_lead_stage_transition to carr_writer;
 grant select on table public.v_lead_stage_transition to dot_reader;
@@ -122920,6 +122962,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
 0916_deal_phase_start_dates.sql	09e479005c0a49bd54666e1ff8f82900afcbaf75e83885c13d52bb2d0444992a	2026-10-20 21:34:43.817985+00
+0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
 \.
 
 
