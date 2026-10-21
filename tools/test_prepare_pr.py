@@ -118,6 +118,21 @@ class PrepareTests(unittest.TestCase):
         sha = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, regen)
         self.assertEqual(self.git('show', f'{sha}:ops/config/gate-baseline.json', repo=self.remote), 'fresh')
 
+    def assert_review_only_conflict(self, path):
+        self.conflicting_branches(path)
+        with self.assertRaisesRegex(ValueError, 'source conflict requires review') as error:
+            prepare(str(self.remote), 'feature', self.head, self.main, self.receipt,
+                    lambda _: self.fail('review-only conflict must stop before regeneration'))
+        self.assertIn(path, str(error.exception))
+        self.assertEqual(self.git('rev-parse', 'feature', repo=self.remote), self.head)
+        self.assertFalse(self.receipt.exists())
+
+    def test_registry_conflict_preserves_database_metadata_for_review(self):
+        self.assert_review_only_conflict('mcp-server/src/scac-mutation-registry.current.generated.js')
+
+    def test_dependency_lock_conflict_requires_review(self):
+        self.assert_review_only_conflict('requirements.lock')
+
     def test_pr_race_before_push_refuses(self):
         def advance(repo):
             (repo / 'generated.txt').write_text('fresh\n')
