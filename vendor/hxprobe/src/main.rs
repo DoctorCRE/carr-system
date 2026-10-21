@@ -33,6 +33,7 @@ mod calendar;
 mod folder;
 mod header;
 mod lz;
+mod observe;
 mod record;
 mod schema;
 
@@ -674,6 +675,7 @@ const USAGE: &str = "\
 hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
 
 usage:
+  hxprobe observe <copy>             emit count-only structural JSON
   hxprobe blocks <file>              verify every block, report coverage
   hxprobe db     <file> [out.db] [files-dir]
                                      build a SQLite database (default mail.db);
@@ -685,6 +687,18 @@ Work on a snapshot, not the live store: Outlook holds HxStore.lock and
 rewrites the file while it runs.";
 
 fn main() {
+    let raw: Vec<_> = env::args_os().collect();
+    if raw.get(1).is_some_and(|arg| arg == "observe") {
+        let result = if raw.len() == 3 { observe::run(&raw[2]) } else { Err(()) };
+        match result {
+            Ok(json) => println!("{json}"),
+            Err(()) => {
+                eprintln!("{{\"error\":\"observation_failed\"}}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!("{USAGE}");

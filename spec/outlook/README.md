@@ -70,8 +70,8 @@ The union records observed vocabulary; it does not assert that every key combina
 Query values are omitted. Other encodings, dynamically assembled URLs, and symbol-based reconstruction
 remain outside slice 1. The scanner does not invoke any URL.
 
-The store atlas, hxprobe name migration, count-only store command, decoded-byte and field-ID
-coverage, combined drift, and launchd trigger design remain the named WR-000439 criteria.
+The criteria file tracks the store atlas, hxprobe name migration, count-only store command,
+coverage, combined drift, and launchd trigger design.
 The atlas tools do not locate profiles, read stores, install launchd jobs, or write production records.
 
 ## Documentation studied
@@ -88,7 +88,7 @@ for XML and binary plists. Declaration meanings follow Apple's
 
 [The store atlas](hxstore-atlas.json) catalogs the maintained reader's known layouts.
 [The generated store reference](hxstore-atlas.md) includes each entry and its source binding.
-This session completes `ATLAS-STORE-SOURCE`. `ATLAS-STORE-PROBE` and grammar reconciliation remain separate sessions.
+`ATLAS-STORE-SOURCE` and `ATLAS-STORE-PROBE` have synthetic verification. Grammar reconciliation remains a separate session.
 
 | Command | Result |
 | --- | --- |
@@ -119,4 +119,40 @@ Existing SQLite table and column names are separate derived outputs and retain t
 The synthetic CLI test creates its store bytes in a temporary directory. It does not read an
 Outlook app, profile, store, sidecar, or preference. It proves that an atlas rename changes both
 the real hxprobe field map and tally. It does not measure decoded-byte or wire-field-ID coverage.
-The count-only store observation command is the next criterion and is not delivered here.
+The count-only observation command below supplies the next criterion.
+
+## Count-only store observation
+
+`vendor/hxprobe/target/release/hxprobe observe <immutable-store-copy>` emits
+`hxprobe-observation/v1` JSON. The orchestrator supplies the private copy.
+This desk uses only generated synthetic fixtures. The command opens one file read-only,
+never reads sidecars, and writes only aggregate JSON to stdout.
+`python3 ops/hxstore-observe-selftest.py` tests the actual executable.
+
+The report contains block-type counts and decompressed byte counts, record-type counts,
+structural field identifiers and wire types, decoded-byte coverage, and unknown remainder groups.
+It contains no store values, file paths, record identities, content hashes, or error excerpts.
+Errors produce empty stdout, fixed `{"error":"observation_failed"}` stderr, and exit code 2.
+The command validates the header, known version, 4096-byte page size, both block CRCs,
+exact LZ4 input and output lengths, nonoverlapping blocks, and envelope bounds before emitting JSON.
+
+Record bytes partition each decompressed payload without overlap. Outermost envelope candidates
+require marker 5, a zero guard, a bounded length of at least 20, and an eight-byte zero class-signature
+suffix. Their denominator includes the envelope. Their decoded spans are the ten-byte envelope
+header and ten-byte object-class signature. Nested objects remain opaque.
+Mail regions outside envelopes run from an `IPM.Note` anchor to the next anchor or envelope boundary.
+Only their sixteen-byte anchor is credited. Other bytes form unframed gaps with zero decoded bytes.
+These structural counts are a conservative lower bound. They do not measure the existing heuristic
+content decoders or message recovery. Damaged or ambiguous candidates can cause refusal.
+
+`decoded_byte_percent` is `100 * decoded_bytes / total_bytes` for each observed record type.
+Absent record types are omitted. An unavailable denominator is not reported as zero percent.
+`wire_field_ids` and `decoded_field_id_percent` are null because numeric property framing remains
+unknown. Structural `field_id` labels carry `identifier_kind` to distinguish offsets and selectors
+from wire property IDs. No field value reaches output.
+
+`unknown_fields` groups undecoded remainder by record type with a null `field_id` and unknown wire type.
+Its occurrence count is the number of records with remainder, not the number of unidentified properties.
+Groups sort by descending occurrence count, then ascending record-type ID. Block and record types sort
+by ID. The criteria JSON records the exact contract and autonomous design decisions.
+`ATLAS-STORE-PROBE` is verified with synthetic fixtures. Grammar reconciliation remains the next session.

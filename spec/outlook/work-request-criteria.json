@@ -45,9 +45,9 @@
       "id": "S2",
       "name": "Atlas-backed hxprobe and count-only observation",
       "criteria": ["ATLAS-STORE-SOURCE", "ATLAS-STORE-PROBE"],
-      "state": "partial",
-      "completed_criteria": ["ATLAS-STORE-SOURCE"],
-      "remaining_criteria": ["ATLAS-STORE-PROBE"],
+      "state": "verified_locally",
+      "completed_criteria": ["ATLAS-STORE-SOURCE", "ATLAS-STORE-PROBE"],
+      "remaining_criteria": [],
       "depends_on": ["https://github.com/jbookout/carr-system/pull/2038"]
     },
     {
@@ -81,7 +81,14 @@
     {"id": "D13", "question": "Which public seams prove the name migration?", "answer": "Test the reference CLI and the actual hxprobe map CLI using a generated CRC-valid literal-only LZ4 block. Copy only the maintained crate, generator and atlas into a temporary tree, rename an entry, rebuild and inspect map and tally output.", "trade_off": "This proves name locality and build invalidation. It does not establish real-store decoding accuracy or wire-ID coverage."},
     {"id": "D14", "question": "How are wire IDs and first-seen versions represented?", "answer": "Distinguish containers, record anchors, block types, object classes, envelope tags, object byte offsets, string-run selectors and wire field IDs. Keep unknown IDs and first_seen_version explicitly null. Bind interpretation evidence to exact vendor revision and SHA-256.", "trade_off": "The pinned implementation establishes recognized layouts and heuristics, not the first Outlook build or empirical proof. All interpreted meanings are inferred and unresolved meanings unknown."},
     {"id": "D15", "question": "How do malformed atlas edits fail?", "answer": "Validate before generating any reference or Rust. Reject duplicate IDs, decoder keys and decoder display names, dangling parents, unsupported schemas, missing evidence and malformed provenance.", "trade_off": "Duplicate display names would collapse distinct tally entries. Invalid atlas input stops the Cargo build instead of using fallback names."},
-    {"id": "D16", "question": "Which output contract changes?", "answer": "Generate the eight named schema-map labels and their tally keys from the atlas. Stable decoder keys continue to drive extraction. SQLite table and column contracts are separate derived outputs and retain their existing names.", "trade_off": "The atlas migration does not rename persisted SQLite columns or modify decoding heuristics."}
+    {"id": "D16", "question": "Which output contract changes?", "answer": "Generate the eight named schema-map labels and their tally keys from the atlas. Stable decoder keys continue to drive extraction. SQLite table and column contracts are separate derived outputs and retain their existing names.", "trade_off": "The atlas migration does not rename persisted SQLite columns or modify decoding heuristics."},
+    {"id": "D17", "question": "What fits the next session?", "answer": "Finish ATLAS-STORE-PROBE on a new branch from 039a4d05. Include structural coverage requested with the command. Keep ATLAS-GRAMMAR-RECONCILE for the next session.", "trade_off": "One session per criterion takes priority over batching both ordered criteria into this PR."},
+    {"id": "D18", "question": "Which public seam and interface?", "answer": "Use hxprobe observe <copy> as the only test seam. One count-only JSON contract, no content flags, no sidecars. Prefer a private Rust observation module over a second Python parser or wrapping map output.", "trade_off": "A separate structural observer cannot measure the content decoders, but does not construct or format mailbox values. Synthetic fixtures exercise the actual executable."},
+    {"id": "D19", "question": "Which identifiers can be reported?", "answer": "Keep object class IDs, block types, typed layout offsets and mail anchor selectors distinct. No numeric property-ID framing is established. wire_field_ids and decoded_field_id_percent remain null; unknown field_id is null.", "trade_off": "Unknown entries group unframed remainder by record type. Their frequencies count records with remainder, not discovered numeric property IDs."},
+    {"id": "D20", "question": "What is decoded coverage?", "answer": "Partition each verified block payload into outermost bounded envelope candidates, anchor-to-next-anchor mail regions outside those envelopes, and unframed gaps. Decode only the envelope header and class signature (20 bytes) or the mail anchor (16 bytes). Count no heuristic string bytes.", "trade_off": "This is a conservative structural lower bound, not total decoder or message recovery coverage. Envelope bytes belong to the record denominator. Nested objects remain opaque. Empty record types are omitted and field-ID denominators are unavailable."},
+    {"id": "D21", "question": "Which output and failure policy?", "answer": "Emit only fixed schema labels, structural IDs, wire types and aggregate occurrence/byte counts/percentages. Accumulate before output. Fixed stderr error and exit 2 on invalid header/version/page size, CRC, LZ4, overlapping blocks, object bounds, arguments or I/O.", "trade_off": "The scan can refuse ambiguous or damaged data instead of returning partial counts. No paths, content hashes, content strings, record identities or excerpts appear in the report."},
+    {"id": "D22", "question": "Should decompression validation be isolated to observe?", "answer": "Fix lz::decode_exact for every caller. Require complete input consumption, forbid literal and match expansion beyond the declared length.", "trade_off": "Existing readers now reject malformed blocks they previously accepted. Valid synthetic decoder tests retain their behavior."},
+    {"id": "D23", "question": "How are observation ordering and privacy proved?", "answer": "Order block and record types by ID. Order unknown remainder groups by descending affected-record count then record-type ID. Test payload substitution, forbidden fixture strings/UTF-16/hex runs, exact output shape, fixed failures and immutable input.", "trade_off": "Synthetic evidence establishes the count-only contract. The orchestrator still owns the private-copy run; no real-store compatibility or coverage is claimed."}
   ],
   "not_yet_specified": [
     "Numeric field framing beyond the pinned vendor's known object envelopes requires evidence from safe synthetic work and orchestrator counts.",
@@ -106,5 +113,18 @@
     "https://docs.python.org/3/library/unittest.html",
     "https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html",
     "Local gh help and gh pr view --help; git --help; curl --help; ./run.sh --help; ops/ci.sh --help"
-  ]
+  ],
+  "observation_contract": {
+    "schema": "hxprobe-observation/v1",
+    "command": "vendor/hxprobe/target/release/hxprobe observe <immutable-store-copy>",
+    "input_owner": "Orchestrator only; desk tests use generated synthetic bytes.",
+    "record_bytes": "Serialized envelope length including its 10-byte header, mail anchor through next anchor or envelope boundary, or unframed gap. Outermost envelope candidates require marker 5, zero guard, bounded length >=20, and an 8-byte zero class-signature suffix.",
+    "decoded_bytes": "Unique structural spans only: envelope header plus class signature (20 bytes), or mail anchor (16 bytes). No content interpretation credited.",
+    "decoded_byte_percent": "100 * decoded_bytes / total_bytes per observed record type. Absent types are omitted; a zero denominator is unavailable.",
+    "wire_field_ids": null,
+    "decoded_field_id_percent": null,
+    "field_identifier_policy": "fields[].field_id identifies a structural layout position or selector with explicit identifier_kind, never a numeric wire property ID. Values of fields are never emitted.",
+    "unknown_fields": "One null-field-ID remainder group per affected record type. occurrences counts records with undecoded bytes; unknown_bytes sums their remainder. Descending occurrences then ascending record_type. No claim to have enumerated unframed numeric IDs.",
+    "scope": "Conservative structural observation, not message recovery, event identities, or full content-decoder coverage."
+  }
 }
