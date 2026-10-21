@@ -1,0 +1,715 @@
+//! `hxprobe` — a parser for `HxStore.hxd`, the New Outlook for Mac message store.
+//!
+//! The store is a paged block container: each block carries two CRC-32s and an
+//! LZ4-compressed payload holding one or more message records. Because the
+//! checksums make every block self-validating, this is a parser rather than a
+//! carver — a wrong offset fails loudly instead of yielding plausible garbage.
+//!
+//! See `SPEC.md` for the format itself. Four commands:
+//!
+//! ```text
+//!   hxprobe blocks <file>            verify every block, report coverage
+//!   hxprobe db     <file> [out.db] [files-dir]
+//!                                    build a SQLite database with FTS5 search;
+//!                                    files-dir is the profile's Files folder,
+//!                                    for EFMData sidecar bodies
+//!   hxprobe map    <file> [n]        dump the named field map for n records
+//!   hxprobe find   <file> <term>     show records whose text contains <term>
+//! ```
+//!
+//! The file is memory-mapped throughout and never read into an owned buffer, so
+//! peak RSS stays near the working set (~67 MB on a 56 MB store) rather than
+//! tracking file size.
+
+use std::collections::BTreeMap;
+use std::env;
+use std::fs::File;
+
+use memmap2::Mmap;
+
+mod block;
+mod body;
+mod calendar;
+mod folder;
+mod header;
+mod lz;
+mod record;
+mod schema;
+
+/// Memory-map a store file read-only.
+///
+/// Mapping rather than reading matters: these stores reach a gigabyte, and
+/// `read()`-ing one into a `Vec` is an easy way to exhaust a machine.
+fn map(path: &str) -> Mmap {
+    let f = File::open(path).unwrap_or_else(|e| panic!("open {path}: {e}"));
+    // SAFETY: the file is opened read-only and only read through the slice.
+    // A concurrent writer could tear reads, which is why the documented
+    // workflow is to snapshot the store while Outlook is closed.
+    let mm = unsafe { Mmap::map(&f) }.unwrap_or_else(|e| panic!("mmap {path}: {e}"));
+
+    // Check the header before doing anything else, so pointing this at the
+    // wrong file says so instead of reporting zero blocks.
+    match header::check(&mm) {
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            std::process::exit(1);
+        }
+        Ok(h) if !h.known => {
+            eprintln!(
+                "{path}: warning: store version {:?} (0x{:02x}) is untested; \
+                 known versions are 'i' (macOS) and 'h' (Windows Mail).\n\
+                 Parsing anyway: every block is checksummed, so bad data fails \
+                 loudly rather than silently.",
+                h.version as char, h.version
+            );
+        }
+        Ok(_) => {}
+    }
+    mm
+}
+
+/// One message record, located and bounded inside a decompressed block.
+struct Located<'a> {
+    /// Bytes of the record: from the previous anchor to the next.
+    span: &'a [u8],
+    /// Offset of the anchor within the block payload.
+    anchor: usize,
+    /// Distance from the anchor back to the start of the span.
+    back: usize,
+    /// Offset of the anchor's record end within the block payload.
+    end: usize,
+}
+
+/// Split a decompressed block into its records.
+///
+/// Records sit back to back with no length field, so each one is bounded by the
+/// neighbouring `IPM.Note` anchors. Without that bound fields bleed between
+/// messages and pair one message's sender with another's subject.
+fn records<'a>(data: &'a [u8], needle: &[u8]) -> Vec<Located<'a>> {
+    memchr::memmem::find_iter(data, needle)
+        .map(|anchor| {
+            let end = memchr::memmem::find(&data[anchor + 2..], needle)
+                .map_or(data.len(), |p| anchor + 2 + p);
+            let back = memchr::memmem::rfind(&data[..anchor], needle)
+                .map_or(anchor.min(2048), |p| anchor - p);
+            Located { span: &data[anchor - back..end], anchor, back, end }
+        })
+        .collect()
+}
+
+/// Verify every block in the file and report coverage.
+fn cmd_blocks(path: &str) {
+    let mm = map(path);
+    if let Ok(h) = header::check(&mm) {
+        println!(
+            "Nostromo version {:?}{}, page size {}",
+            h.version as char,
+            if h.known { "" } else { " (untested)" },
+            h.page_size
+        );
+    }
+    let offs = block::find_all(&mm);
+    let needle = record::anchor_needle();
+
+    let (mut ok, mut bytes, mut with_ipm, mut recs) = (0usize, 0usize, 0usize, 0usize);
+    let mut by_kind: BTreeMap<u32, usize> = BTreeMap::new();
+
+    for &o in &offs {
+        let Some(b) = block::parse(&mm, o) else { continue };
+        ok += 1;
+        bytes += b.data.len();
+        *by_kind.entry(b.kind).or_default() += 1;
+        let n = memchr::memmem::find_iter(&b.data, &needle).count();
+        if n > 0 {
+            with_ipm += 1;
+            recs += n;
+        }
+    }
+
+    println!("{} block signatures found", offs.len());
+    println!(
+        "verified {ok}/{} ({:.2}%), {:.1} MB decompressed",
+        offs.len(),
+        100.0 * ok as f64 / offs.len() as f64,
+        bytes as f64 / 1e6
+    );
+    println!("{with_ipm} blocks hold mail, {recs} IPM.Note records");
+    for (k, n) in &by_kind {
+        println!("  type {k:<3} {n}");
+    }
+}
+
+/// Dump the named field map for the first `n` records.
+///
+/// With `n = 0`, prints only the aggregate coverage per key — the numbers
+/// quoted in SPEC.md §6.2.
+fn cmd_map(path: &str, n: usize) {
+    let mm = map(path);
+    let needle = record::anchor_needle();
+    let mut maps = Vec::new();
+    let mut shown = 0usize;
+
+    for o in block::find_all(&mm) {
+        let Some(b) = block::parse(&mm, o) else { continue };
+        for r in records(&b.data, &needle) {
+            let m = schema::build_bounded(&b.data, r.anchor, r.end, r.back);
+            if shown < n {
+                println!("\n=== block 0x{o:08x}  anchor +{} ===", r.anchor);
+                print!("{}", m.dump());
+                shown += 1;
+            }
+            maps.push(m);
+        }
+    }
+
+    println!("\n{} records\n", maps.len());
+    for (k, v) in schema::tally(&maps) {
+        println!("  {:<20} {:>6}  {:>5.1}%", k, v, v as f64 * 100.0 / maps.len() as f64);
+    }
+}
+
+/// Show the records whose span contains `term`, with their field maps.
+///
+/// Used to check a row in the database against the bytes it came from: if a
+/// sender and a subject appear in the same map, they really are stored
+/// together.
+fn cmd_find(path: &str, term: &str, limit: usize) {
+    let mm = map(path);
+    let needle = record::anchor_needle();
+    let want: Vec<u8> = term.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    let mut shown = 0usize;
+
+    for o in block::find_all(&mm) {
+        if shown >= limit {
+            return;
+        }
+        let Some(b) = block::parse(&mm, o) else { continue };
+        // Cheap reject: skip the whole block before walking its records.
+        if memchr::memmem::find(&b.data, &want).is_none() {
+            continue;
+        }
+        for r in records(&b.data, &needle) {
+            if shown >= limit {
+                return;
+            }
+            if memchr::memmem::find(r.span, &want).is_none() {
+                continue;
+            }
+            shown += 1;
+            let m = schema::build_bounded(&b.data, r.anchor, r.end, r.back);
+            println!("\n=== block 0x{o:08x}  anchor +{}  span {} bytes ===", r.anchor, r.span.len());
+            print!("{}", m.dump());
+        }
+    }
+    if shown == 0 {
+        println!("no records contain {term:?}");
+    }
+}
+
+/// Parse the whole store into a SQLite database with a full-text index.
+fn cmd_db(path: &str, db_path: &str, files_dir: Option<&str>) {
+    let mm = map(path);
+    let needle = record::anchor_needle();
+    let offs = block::find_all(&mm);
+    println!("{} blocks -> {db_path}", offs.len());
+
+    // Folder catalogs and membership metadata can occur after the messages.
+    let mut folders = folder::Index::default();
+    let mut events = calendar::Index::default();
+    let mut sidecars = files_dir.map(|d| body::Sidecars::open(std::path::Path::new(d))).unwrap_or_default();
+    for &o in &offs {
+        if let Some(b) = block::parse(&mm, o) {
+            folders.observe(o, &b.data);
+            events.observe(&b.data);
+        }
+    }
+
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{db_path}{suffix}"));
+    }
+    let mut db = rusqlite::Connection::open(db_path).expect("open db");
+    db.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         CREATE TABLE folders (
+             id               INTEGER PRIMARY KEY, -- local store key
+             account_id       INTEGER NOT NULL,    -- local account key
+             name             TEXT,                -- NULL if revisions disagree
+             block            INTEGER NOT NULL
+         );
+         CREATE TABLE messages (
+             id           INTEGER PRIMARY KEY,
+             block        INTEGER,   -- file offset of the source block
+             sender       TEXT,
+             sender_name  TEXT,
+             recipients   TEXT,      -- comma-separated; ordering is not stored
+             subject      TEXT,
+             message_id   TEXT,
+             body         TEXT,      -- plain text, tags stripped
+             html         TEXT,      -- original HTML, when the store has it
+             body_words   INTEGER,
+             html_bytes   INTEGER,
+             -- 'full' when the store holds the whole message, 'preview' when it
+             -- holds only Outlook's ~255-character cache of it. Most messages
+             -- are preview-only: that is the format, not a parse failure.
+             body_kind    TEXT,
+             sent_unix    INTEGER,   -- earliest .NET tick in the record span
+             sent_utc     TEXT,
+             -- 1 when the subject came from another record in the same
+             -- conversation, because this record stores none of its own.
+             subject_inherited INTEGER,
+             preview      TEXT,      -- Outlook's own preview of the message
+             body_source  TEXT,      -- 'inline' or 'efm' when html is set
+             copies       INTEGER,   -- revisions collapsed into this row
+             -- sender, normalized subject and preview opening: the identity
+             -- this row's copies share; NULL when too short to identify.
+             copy_key     TEXT
+         );
+         CREATE TABLE message_folders (
+             message_id INTEGER NOT NULL REFERENCES messages(id),
+             folder_id  INTEGER NOT NULL REFERENCES folders(id),
+             PRIMARY KEY (message_id, folder_id)
+         );
+         CREATE INDEX message_folders_folder ON message_folders(folder_id);
+         CREATE INDEX messages_sent ON messages(sent_unix);
+         CREATE INDEX messages_sender ON messages(sender);
+         CREATE TABLE events (
+             id              INTEGER PRIMARY KEY,
+             goid            TEXT NOT NULL,     -- Exchange Global Object ID
+             start_unix      INTEGER NOT NULL,
+             end_unix        INTEGER NOT NULL,
+             start_utc       TEXT NOT NULL,
+             end_utc         TEXT NOT NULL,
+             subject         TEXT,
+             location        TEXT,
+             organizer_name  TEXT,
+             organizer_email TEXT,
+             body            TEXT,
+             UNIQUE (goid, start_unix)
+         );
+         CREATE TABLE event_attendees (
+             event_id INTEGER NOT NULL REFERENCES events(id),
+             name     TEXT,
+             email    TEXT
+         );
+         -- Counts a caller checks before trusting the export.
+         CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+         CREATE VIRTUAL TABLE messages_fts USING fts5(
+             sender, sender_name, recipients, subject, body,
+             content='messages', content_rowid='id', tokenize='porter unicode61'
+         );",
+    )
+    .expect("schema");
+
+    let mut blocks_ok = 0usize;
+    let mut best: std::collections::HashMap<String, record::Record> = Default::default();
+    // `Topic` is a conversation-level field, so a record can legitimately hold
+    // no subject of its own while its thread has one. These map each thread to
+    // its known subject, and each message identity to its threads.
+    let mut convo_subject: std::collections::HashMap<String, String> = Default::default();
+    let mut convo_of: std::collections::HashMap<String, Vec<String>> = Default::default();
+
+    for &o in &offs {
+        let Some(b) = block::parse(&mm, o) else { continue };
+        blocks_ok += 1;
+        let folder_links = folders.links(&b.data, &needle);
+
+        for loc in records(&b.data, &needle) {
+            let mut r = record::parse(o, &b.data, loc.anchor);
+            r.folder_ids = folder_links.get(&loc.anchor).cloned().unwrap_or_default();
+            let m = schema::build_bounded(&b.data, loc.anchor, loc.end, loc.back);
+
+            // The named map is authoritative for every field it covers: it
+            // assigns slots by their position in the run sequence and checks
+            // each against the type the protocol schema says it holds.
+            // `record::parse` supplies only what is not a string run -- the
+            // HTML body -- plus the send time, read here from the span.
+            r.sent_unix = record::read_time(loc.span);
+            // Take the map's value where it has one, but keep what
+            // `record::parse` found otherwise -- the two paths locate fields
+            // differently, and the shape-based path still covers records the
+            // map's stricter type checks reject.
+            if let Some(v) = m.get(schema::Key::SenderAddress) {
+                r.sender = Some(v.to_string());
+            }
+            if let Some(v) = m.get(schema::Key::SenderName) {
+                r.sender_name = Some(v.to_string());
+            }
+            if let Some(v) = m.get(schema::Key::InternetMessageId) {
+                r.message_id = Some(v.to_string());
+            }
+            // The subject is the exception: the map is the only path that
+            // requires the Topic/NormalizedSubject duplicate, and the
+            // shape-based fallback supplies attachment paths instead of
+            // subjects, so an empty map result must win.
+            r.subject = m.get(schema::Key::NormalizedSubject).map(str::to_string);
+            r.recipients = m
+                .all(schema::Key::Recipient)
+                .iter()
+                .filter(|t| Some(**t) != r.sender.as_deref())
+                .map(|t| t.to_string())
+                .collect();
+            r.preview = m.get(schema::Key::Preview).map(str::to_string);
+            if r.html.is_some() {
+                r.body_source = Some("inline");
+            } else if let Some(html) = sidecars.body_for(loc.span, &r) {
+                r.body = record::html_to_text(&html);
+                r.html = Some(html);
+                r.body_source = Some("efm");
+            }
+            if r.body.split_whitespace().count() < 3 {
+                if let Some(v) = &r.preview {
+                    r.body = v.clone();
+                }
+            }
+
+            // Built from every raw record, not the deduplicated set: a revision
+            // that loses the merge can still be the only one carrying the
+            // thread's subject.
+            let convo_ids: Vec<String> =
+                m.all(schema::Key::ConversationId).iter().map(|s| s.to_string()).collect();
+
+            // A record with neither a sender nor readable text is a stub.
+            if r.sender.is_none() && r.body.split_whitespace().count() < 5 {
+                continue;
+            }
+
+            // Identity is sender + send time: the only fields present on
+            // essentially every record. `InternetMessageId` is deliberately
+            // excluded -- the store reuses one across a conversation, so keying
+            // on it merges distinct messages, and pairing it with anything else
+            // splits the revisions of one. See SPEC.md 4.7.
+            let key = format!("{:?}|{:?}", r.sender, r.sent_unix);
+            for id in &convo_ids {
+                if let Some(sub) = &r.subject {
+                    convo_subject.entry(id.clone()).or_insert_with(|| sub.clone());
+                }
+            }
+            let slot = convo_of.entry(key.clone()).or_default();
+            for id in convo_ids {
+                if !slot.contains(&id) {
+                    slot.push(id);
+                }
+            }
+
+            match best.get_mut(&key) {
+                None => {
+                    best.insert(key, r);
+                }
+                // Merge field by field rather than keeping one whole record.
+                // Revisions are not uniformly complete -- one carries the
+                // subject, another the full HTML body -- so choosing a single
+                // "best" record discards fields recovered from a sibling.
+                Some(prev) => merge(prev, r),
+            }
+        }
+    }
+
+    // Back-fill subjects from the conversation. Measured over the store, 90.9 %
+    // of *records* lacking a subject share a thread identifier with one that
+    // has it; most of those merge into messages that already recovered a
+    // subject, leaving 219 messages genuinely fixed by this pass.
+    let mut backfilled = 0usize;
+    for (key, rec) in best.iter_mut() {
+        if rec.subject.is_some() {
+            continue;
+        }
+        let Some(ids) = convo_of.get(key) else { continue };
+        if let Some(sub) = ids.iter().find_map(|i| convo_subject.get(i)) {
+            rec.subject = Some(sub.clone());
+            rec.subject_inherited = true;
+            backfilled += 1;
+        }
+    }
+    println!("  {backfilled} subjects recovered from conversation threads");
+
+    // A display name equal to the subject is the subject. Extraction rejects
+    // this within a record, but a merged message can take its name from one
+    // revision and its subject from another, so the check runs again here.
+    for r in best.values_mut() {
+        if r.sender_name.is_some() && r.sender_name == r.subject {
+            r.sender_name = None;
+        }
+    }
+
+    // Collapse the copies `sender + send time` could not join. See body.rs.
+    let mut by_time: Vec<record::Record> = best.into_values().collect();
+    by_time.sort_by_key(|r| r.sent_unix);
+    let mut best: Vec<record::Record> = Vec::with_capacity(by_time.len());
+    let mut first_copy: std::collections::HashMap<String, Vec<usize>> = Default::default();
+    let mut collapsed = 0usize;
+    for r in by_time {
+        let Some(key) = body::copy_key(&r) else {
+            best.push(r);
+            continue;
+        };
+        let slots = first_copy.entry(key).or_default();
+        let near = slots.iter().copied().find(|&i| match (best[i].sent_unix, r.sent_unix) {
+            (Some(a), Some(b)) => b - a <= body::COPY_WINDOW,
+            _ => false,
+        });
+        match near {
+            Some(i) => {
+                merge(&mut best[i], r);
+                collapsed += 1;
+            }
+            None => {
+                slots.push(best.len());
+                best.push(r);
+            }
+        }
+    }
+    // A revision can carry another subject (inherited from the thread, or a
+    // field the map could not claim). A preview-only message joins a full one
+    // with the same sender and opening when exactly one is within the window.
+    let full_by_opening: std::collections::HashMap<String, Vec<usize>> =
+        best.iter().enumerate().filter(|(_, r)| r.html.is_some()).fold(Default::default(), |mut m, (i, r)| {
+            if let Some(k) = body::sender_opening(r) {
+                m.entry(k).or_default().push(i);
+            }
+            m
+        });
+    let mut absorbed = vec![false; best.len()];
+    for i in 0..best.len() {
+        if best[i].html.is_some() {
+            continue;
+        }
+        let Some(k) = body::sender_opening(&best[i]) else { continue };
+        let near: Vec<usize> = full_by_opening
+            .get(&k)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|&j| match (best[i].sent_unix, best[j].sent_unix) {
+                (Some(a), Some(b)) => (a - b).abs() <= body::COPY_WINDOW,
+                _ => false,
+            })
+            .collect();
+        if let [j] = near[..] {
+            let r = std::mem::take(&mut best[i]);
+            let sent = r.sent_unix.min(best[j].sent_unix);
+            merge(&mut best[j], r);
+            best[j].sent_unix = sent;
+            absorbed[i] = true;
+            collapsed += 1;
+        }
+    }
+    let mut keep = absorbed.iter().map(|a| !a);
+    best.retain(|_| keep.next().unwrap_or(true));
+    println!(
+        "  {collapsed} copies collapsed; {} sidecar bodies linked, {} rejected, of {} files",
+        sidecars.linked,
+        sidecars.rejected,
+        sidecars.len()
+    );
+
+    let stored = best.len();
+    let with_folder = best.iter().filter(|r| !r.folder_ids.is_empty()).count();
+    let multi_folder = best.iter().filter(|r| r.folder_ids.len() > 1).count();
+    println!("  {} folders; {with_folder}/{stored} messages linked ({multi_folder} with multiple observed folders)", folders.folders.len());
+    let tx = db.transaction().expect("tx");
+    {
+        let mut ins_folder = tx
+            .prepare(
+                "INSERT INTO folders(id,account_id,name,block) VALUES (?1,?2,?3,?4)"
+            )
+            .expect("prepare folders");
+        for f in folders.folders.values() {
+            ins_folder.execute(rusqlite::params![f.id as i64, f.account_id as i64, f.name, f.block as i64])
+                .expect("insert folder");
+        }
+        let mut ins_link = tx
+            .prepare(
+                "INSERT INTO message_folders(message_id,folder_id) VALUES (?1,?2)"
+            )
+            .expect("prepare folder links");
+        let mut ins = tx
+            .prepare(
+                "INSERT INTO messages
+                   (block,sender,sender_name,recipients,subject,message_id,body,
+                    html,body_words,html_bytes,body_kind,sent_unix,sent_utc,
+                    subject_inherited,preview,body_source,copies,copy_key)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
+                         datetime(?12,'unixepoch'),?13,?14,?15,?16,?17)",
+            )
+            .expect("prepare");
+
+        for r in &best {
+            ins.execute(rusqlite::params![
+                r.offset as i64,
+                r.sender,
+                r.sender_name,
+                (!r.recipients.is_empty()).then(|| r.recipients.join(", ")),
+                r.subject,
+                r.message_id,
+                r.body,
+                r.html,
+                r.body.split_whitespace().count() as i64,
+                r.html.as_ref().map(|h| h.len() as i64),
+                if r.html.is_some() { "full" } else { "preview" },
+                r.sent_unix,
+                r.subject_inherited as i64,
+                r.preview,
+                r.body_source,
+                r.copies as i64,
+                body::copy_key(r),
+            ])
+            .expect("insert");
+            let message_id = tx.last_insert_rowid();
+            for folder_id in &r.folder_ids {
+                ins_link.execute(rusqlite::params![message_id, *folder_id as i64])
+                    .expect("insert folder link");
+            }
+        }
+    }
+    {
+        let mut ins_event = tx
+            .prepare(
+                "INSERT INTO events(goid,start_unix,end_unix,start_utc,end_utc,subject,location,
+                                    organizer_name,organizer_email,body)
+                 VALUES (?1,?2,?3,datetime(?2,'unixepoch'),datetime(?3,'unixepoch'),?4,?5,?6,?7,?8)",
+            )
+            .expect("prepare events");
+        let mut ins_attendee = tx
+            .prepare("INSERT INTO event_attendees(event_id,name,email) VALUES (?1,?2,?3)")
+            .expect("prepare attendees");
+        for ev in events.events.values() {
+            ins_event
+                .execute(rusqlite::params![
+                    ev.goid, ev.start_unix, ev.end_unix, ev.subject, ev.location,
+                    ev.organizer_name, ev.organizer_email, ev.body,
+                ])
+                .expect("insert event");
+            let event_id = tx.last_insert_rowid();
+            for a in &ev.attendees {
+                ins_attendee.execute(rusqlite::params![event_id, a.name, a.email]).expect("insert attendee");
+            }
+        }
+        let mut ins_meta = tx.prepare("INSERT INTO meta(key,value) VALUES (?1,?2)").expect("prepare meta");
+        for (key, value) in [
+            ("blocks_found", offs.len()),
+            ("blocks_verified", blocks_ok),
+            ("messages", stored),
+            ("messages_full", best.iter().filter(|r| r.html.is_some()).count()),
+            ("copies_collapsed", collapsed),
+            ("sidecar_files", sidecars.len()),
+            ("sidecar_linked", sidecars.linked),
+            ("sidecar_rejected", sidecars.rejected),
+            ("event_objects", events.objects),
+            ("event_identities", events.identities.len()),
+            ("events_decoded", events.events.len()),
+        ] {
+            ins_meta.execute(rusqlite::params![key, value as i64]).expect("insert meta");
+        }
+    }
+    println!(
+        "  {} calendar objects; {}/{} events decoded",
+        events.objects,
+        events.events.len(),
+        events.identities.len()
+    );
+    tx.commit().expect("commit");
+
+    db.execute_batch(
+        "INSERT INTO messages_fts(rowid,sender,sender_name,recipients,subject,body)
+           SELECT id,sender,sender_name,recipients,subject,body FROM messages;
+         INSERT INTO messages_fts(messages_fts) VALUES('optimize');
+         VACUUM;",
+    )
+    .expect("index");
+
+    println!("\n{blocks_ok}/{} blocks verified, {stored} messages stored", offs.len());
+    for (label, sql) in [
+        ("sender     ", "sender IS NOT NULL"),
+        ("date       ", "sent_unix IS NOT NULL"),
+        ("sender name", "sender_name IS NOT NULL"),
+        ("subject    ", "subject IS NOT NULL"),
+        ("message-id ", "message_id IS NOT NULL"),
+        ("body       ", "body_words > 3"),
+        ("full HTML  ", "body_kind = 'full'"),
+    ] {
+        let n: i64 = db
+            .query_row(&format!("SELECT count(*) FROM messages WHERE {sql}"), [], |r| r.get(0))
+            .unwrap_or(0);
+        println!("  {label} {n:>6}  {:>5.1}%", n as f64 * 100.0 / stored as f64);
+    }
+}
+
+/// Combine a later revision of a message into the copy already held.
+fn merge(prev: &mut record::Record, r: record::Record) {
+    prev.folder_ids.extend(r.folder_ids);
+    prev.copies += r.copies;
+    if prev.preview.is_none() {
+        prev.preview = r.preview;
+    }
+    if prev.subject.is_none() {
+        prev.subject = r.subject;
+    }
+    if prev.sender_name.is_none() {
+        prev.sender_name = r.sender_name;
+    }
+    if prev.message_id.is_none() {
+        prev.message_id = r.message_id;
+    }
+    if r.recipients.len() > prev.recipients.len() {
+        prev.recipients = r.recipients;
+    }
+    let better_html = match (&prev.html, &r.html) {
+        (None, Some(_)) => true,
+        (Some(a), Some(b)) => b.len() > a.len(),
+        _ => false,
+    };
+    // The body follows the HTML it was rendered from; a preview never
+    // replaces the text of a full copy.
+    if better_html {
+        prev.html = r.html;
+        prev.body_source = r.body_source;
+        prev.body = r.body;
+    } else if prev.html.is_none() && r.body.len() > prev.body.len() {
+        prev.body = r.body;
+    }
+}
+
+const USAGE: &str = "\
+hxprobe — parse HxStore.hxd, the New Outlook for Mac message store
+
+usage:
+  hxprobe blocks <file>              verify every block, report coverage
+  hxprobe db     <file> [out.db] [files-dir]
+                                     build a SQLite database (default mail.db);
+                                     files-dir reads EFMData sidecar bodies
+  hxprobe map    <file> [n]          dump the field map for n records (0 = stats)
+  hxprobe find   <file> <term> [n]   show records whose text contains <term>
+
+Work on a snapshot, not the live store: Outlook holds HxStore.lock and
+rewrites the file while it runs.";
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 3 {
+        eprintln!("{USAGE}");
+        std::process::exit(2);
+    }
+    let num = |i: usize, d: usize| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(d);
+
+    match args[1].as_str() {
+        "blocks" => cmd_blocks(&args[2]),
+        "db" => cmd_db(
+            &args[2],
+            args.get(3).map(String::as_str).unwrap_or("mail.db"),
+            args.get(4).map(String::as_str),
+        ),
+        "map" => cmd_map(&args[2], num(3, 4)),
+        "find" => match args.get(3) {
+            Some(term) => cmd_find(&args[2], term, num(4, 4)),
+            None => {
+                eprintln!("find needs a search term\n\n{USAGE}");
+                std::process::exit(2);
+            }
+        },
+        other => {
+            eprintln!("unknown command {other:?}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    }
+}

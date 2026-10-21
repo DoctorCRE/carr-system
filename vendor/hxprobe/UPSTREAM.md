@@ -1,0 +1,75 @@
+# hxprobe source and maintenance
+
+This is CARR's maintained copy of the MIT-licensed hxprobe crate from
+[ukd1/hxstore-reverse-engineering](https://github.com/ukd1/hxstore-reverse-engineering),
+commit `191b54e42757687806202f8f696e9066f0514e11`.
+The upstream MIT license is retained in [LICENSE](LICENSE).
+
+The first import commit copies upstream `hxprobe/` verbatim into this directory
+and copies the repository's LICENSE. The next commit applies
+`vendor-patches/hxprobe-calendar-and-bodies.patch` from CARR commit
+`66ac4cc709af5265819e2612aab62d746a9faf85` in PR #2023, with only the path prefix
+changed from `hxprobe/` to `vendor/hxprobe/`.
+
+The patch adds calendar events, attendees, body previews, EFMData gzip body
+recovery, copy keys, SQLite export columns, and synthetic tests.
+The maintenance commit adds CI, this provenance record, a compiler pin, the
+build receipt, a target-directory ignore, and example-address normalization
+in three source comments. A separate digest-bound leak-guard qualification retains
+the public example addresses only in the verbatim historical import. Final
+source examples use `@example.test`. No runtime extraction logic changes beyond
+the patch.
+
+## Supply chain
+
+Source archive:
+`https://codeload.github.com/ukd1/hxstore-reverse-engineering/tar.gz/191b54e42757687806202f8f696e9066f0514e11`
+
+Archive SHA-256:
+`bbffd167a42081abc7de2f6ef6d44e14e7af2a7a004d3f060c62eb3c1a45e21c`
+
+Patch SHA-256:
+`a1ca5a3dd93a46216c9a88b42c917f83b87f23a4d1152bfc2bab36279416293a`
+
+Cargo.lock retains all 31 registry package checksums. The crate is copied into
+the repository as editable source. Transitive dependencies stay on crates.io;
+this is not a `cargo vendor` directory or an offline build.
+All maintained test and release build commands use `--locked`.
+The compiler is pinned in `rust-toolchain.toml` for rustup installations.
+[BUILD-SHA256](BUILD-SHA256) identifies the local release binary and toolchain.
+The hash is a build receipt, not a cross-platform reproducibility guarantee.
+
+`cargo-audit 0.22.2 audit --file vendor/hxprobe/Cargo.lock --json` returned
+zero vulnerabilities and zero warnings across 32 packages. The RustSec database
+contained 1,348 advisories at commit
+`e6f94f3760d5e6c54c1b05f204002263bc025524`.
+This result covers the checked lockfile against that advisory revision.
+
+## Checks and updates
+
+The `hxprobe` class in `ops/ci.sh` runs `cargo test --locked` followed by
+`cargo build --release --locked` from this directory. The PR and main-canary
+workflows register that class. A test failure stops the build and fails CI.
+The crate's 22 tests use synthetic data. Every example email address uses
+`@example.test`. No private Outlook store or profile is needed.
+
+For updates, retain a separate upstream import and CARR patch commit, review
+the lockfile changes and license, rerun the CI class and cargo-audit, and
+refresh BUILD-SHA256 for the recorded target and toolchain.
+The Outlook intake installer remains outside this slice; its source switch
+follows PR #2023.
+
+## Source study
+
+- [Upstream README](https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/README.md).
+- [Upstream SPEC](https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/SPEC.md).
+- [Cargo --locked](https://doc.rust-lang.org/cargo/commands/cargo-build.html#option-cargo-build---locked).
+- [Cargo vendoring](https://doc.rust-lang.org/cargo/commands/cargo-vendor.html).
+- [Cargo test](https://doc.rust-lang.org/cargo/commands/cargo-test.html).
+- [RustSec cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit).
+- [Rustup toolchain files](https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file).
+
+The upstream README and SPEC contain inconsistent summaries of deduplication
+and version acceptance. This copy preserves the pinned implementation and the
+specified CARR patch. Tests establish synthetic behavior, not recovery coverage
+for a real Outlook cache or compatibility with future Outlook formats.
