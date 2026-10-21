@@ -63,6 +63,85 @@ class MergeRecoveryTests(unittest.TestCase):
             self.recover(before['revision'])
         self.assertEqual(self.snapshot(), before)
 
+    def run_recovery_cli(self):
+        return subprocess.run(
+            [sys.executable, str(fixture.ENTRY), '--state', str(self.state), '--root', str(self.root),
+             'recover-work-card', self.card_id, '--expected-revision', str(self.snapshot()['revision']),
+             '--actor', 'test-operator', '--reason', 'synthetic safety regression'],
+            env=self.env, text=True, capture_output=True, timeout=30)
+
+    def test_cli_unmerged_head_drift_retains_ownership_on_repeated_attempts(self):
+        self.blocked_card()
+        self.load()['prs'][module.REPOS[1] + '#305']['head']['sha'] = self.changed
+        self.save()
+        before = self.snapshot()
+        for _ in range(2):
+            result = self.run_recovery_cli()
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(self.snapshot(), before)
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_cli_provider_merge_during_later_read_retains_ownership_and_receipts(self):
+        self.blocked_card()
+        fake = self.root / 'bin/gh'
+        source = fake.read_text()
+        hook = """
+ if n=='305' and not d.get('race_applied'):
+  d['race_applied']=True
+  d['prs']['jbookout/doctorcre-app#300'].update(merged=True,state='closed',merge_commit_sha=d['merge_sha'])
+  save()
+"""
+        target = " emit({'data':{'repository':{'pullRequest':"
+        self.assertIn(target, source)
+        fake.write_text(source.replace(target, hook + target))
+        before = self.snapshot()
+        for _ in range(2):
+            result = self.run_recovery_cli()
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            self.assertEqual(self.snapshot(), before)
+        self.assertTrue(self.load()['prs'][module.REPOS[1] + '#300']['merged'])
+        self.assertEqual(self.snapshot()['items'][0]['merge_receipts'], self.pins[:1])
+        self.assertEqual(len(self.calls('merge')), 1)
+
+    def test_cli_journal_revision_change_retains_ownership(self):
+        self.blocked_card()
+        fake = self.root / 'bin/gh'
+        source = fake.read_text()
+        hook = """
+ if n=='305':
+  import sqlite3
+  with sqlite3.connect(os.environ['REVIEW_JOURNAL']) as journal:
+   journal.execute("UPDATE entries SET note=note || ' concurrent observation' WHERE pr=300")
+"""
+        target = " emit({'data':{'repository':{'pullRequest':"
+        self.assertIn(target, source)
+        fake.write_text(source.replace(target, hook + target))
+        self.env['REVIEW_JOURNAL'] = str(self.state / 'queue.sqlite3')
+        before = self.snapshot()
+        result = self.run_recovery_cli()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('merge journal changed', result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_cli_provider_base_change_during_observation_retains_ownership(self):
+        self.blocked_card()
+        fake = self.root / 'bin/gh'
+        source = fake.read_text()
+        hook = """
+ if n=='305' and not d.get('race_applied'):
+  d['race_applied']=True
+  d['prs']['jbookout/doctorcre-app#300']['base']['ref']='different-base'
+  save()
+"""
+        target = " emit({'data':{'repository':{'pullRequest':"
+        self.assertIn(target, source)
+        fake.write_text(source.replace(target, hook + target))
+        before = self.snapshot()
+        result = self.run_recovery_cli()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('changed during recovery observation', result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
     def test_incomplete_provider_truth_retains_ownership(self):
         self.blocked_card()
         del self.load()['prs'][module.REPOS[1] + '#305']['merged']
