@@ -48,7 +48,8 @@ function client({ unavailable = null, accounts = [], renewalState = "ready", ren
       if (sql.includes("from v_deal_room_session")) return { rows: [] };
       if (sql.includes("from loop_item")) return { rows: [
         { number: 7, owner: "joe", label: "Resolve the lease item" },
-      ] };
+        { number: 8, owner: "dell", label: "Chase the broker packet" },
+      ].filter((row) => params.some((value) => String(value).toLowerCase() === row.owner)) };
       if (sql.includes("from v_renewal_decision_queue_status")) return { rows: [
         { t1_candidate_count: renewalState === "empty" ? 0 : 1, source_observed_at: "2026-08-21T06:00:00Z", freshness_state: renewalState },
       ] };
@@ -123,7 +124,43 @@ test("morning-brief filters accounts by authenticated sponsor rather than exposi
   assert.doesNotMatch(JSON.stringify(dell), /Unowned Account/);
 });
 
-test("a to-do Joe's own local machine seat set is Joe's; nothing else that seat or another owns is", async () => {
+const BOTH_TODOS = [
+  { item_kind: "next_action", owner: "joe", what: "Joe's own call" },
+  { item_kind: "next_action", owner: "joe-local", what: "Reply set from Joe's machine seat" },
+  { item_kind: "post_call_action", owner: "dell", what: "Dell's follow-up" },
+  { item_kind: "next_action", owner: "dell-local", what: "Dell's machine seat ball" },
+  { item_kind: "next_action", owner: "claude", what: "The drain queue's ball" },
+  { item_kind: "next_action", owner: "hermes-pilot", what: "The pilot's ball" },
+  { item_kind: "next_action", owner: "constructor", what: "An unknown seat ball" },
+  { item_kind: "critical_date", owner: null, what: "msa: renewal notice" },
+];
+const view = (result) => result.sections.today.items.map((row) => [row.what, row.owner_partner]);
+
+test("Joe sees Dell's to-dos and Dell sees Joe's, each row labeled with its partner", async () => {
+  const expected = [
+    ["Joe's own call", "joe"], ["Reply set from Joe's machine seat", "joe"],
+    ["Dell's follow-up", "dell"], ["Dell's machine seat ball", "dell"],
+    ["msa: renewal notice", null],
+  ];
+  const joe = await executeRegisteredTool(client({ todayRows: BOTH_TODOS }), JOE, "morning-brief", {});
+  const dell = await executeRegisteredTool(client({ todayRows: BOTH_TODOS }), DELL, "morning-brief", {});
+  assert.deepEqual(view(joe), expected);
+  assert.deepEqual(view(dell), expected);
+});
+
+test("to-dos owned by claude or any other identity stay out of the brief", async () => {
+  const joe = await executeRegisteredTool(client({ todayRows: BOTH_TODOS }), JOE, "morning-brief", {});
+  assert.doesNotMatch(JSON.stringify(joe.sections.today), /drain queue|pilot/);
+});
+
+test("both partners' open loops show, the caller's first, each labeled", async () => {
+  const joe = await executeRegisteredTool(client(), JOE, "morning-brief", {});
+  const dell = await executeRegisteredTool(client(), DELL, "morning-brief", {});
+  assert.deepEqual(joe.sections.loops.items.map((row) => [row.number, row.owner_partner]), [[7, "joe"], [8, "dell"]]);
+  assert.deepEqual(dell.sections.loops.items.map((row) => [row.number, row.owner_partner]), [[8, "dell"], [7, "joe"]]);
+});
+
+test("machine-seat to-dos are shared across item kinds while deals stay sponsor-scoped", async () => {
   const todayRows = [
     { item_kind: "next_action", owner: "joe-local", what: "Reply about the suite tour" },
     { item_kind: "post_call_action", owner: "joe-local", what: "A post-call action from that seat" },
@@ -136,8 +173,13 @@ test("a to-do Joe's own local machine seat set is Joe's; nothing else that seat 
   ];
   const joe = await executeRegisteredTool(client({ todayRows, dealRows }), JOE, "morning-brief", {});
   const dell = await executeRegisteredTool(client({ todayRows, dealRows }), DELL, "morning-brief", {});
-  assert.deepEqual(joe.sections.today.items.map((row) => row.what), ["Reply about the suite tour"]);
-  assert.deepEqual(dell.sections.today.items.map((row) => row.what), [], "Dell's seat is not widened");
+  const expected = [
+    ["Reply about the suite tour", "joe"],
+    ["A post-call action from that seat", "joe"],
+    ["Dell's machine ball", "dell"],
+  ];
+  assert.deepEqual(view(joe), expected);
+  assert.deepEqual(view(dell), expected);
   assert.deepEqual(joe.sections.deals.items.map((row) => row.name), ["Example Deal"], "deals are not widened");
 });
 
