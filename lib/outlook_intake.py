@@ -50,11 +50,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import sqlite3
 import subprocess
 import tempfile
+from time import monotonic, sleep
 from typing import Callable
 import uuid
 import zoneinfo
@@ -121,6 +123,7 @@ class Ports:
     next_step: Callable[[dict, date], dict]
     decode: Callable[[Path, Path, Path], None]
     now: Callable[[], datetime]
+    launchctl: Callable = subprocess.run
 
 
 @dataclass
@@ -212,18 +215,60 @@ def _load(db: Path) -> tuple[dict, list[dict], list[dict]]:
         con.close()
 
 
-def _snapshot(home: Path, work: Path) -> None:
+def _snapshot(home: Path, work: Path, launchctl: Callable) -> None:
     helper = home / COPY_HELPER
-    try:
-        done = subprocess.run([str(helper)], cwd=work, capture_output=True, timeout=900)
-        if done.returncode in (errno.EPERM, errno.EACCES):
-            raise PermissionError(done.returncode, 'Outlook copy denied')
+    label = f'com.carr.outlook-intake-copy.{uuid.uuid4().hex}'
+    target = f'gui/{os.getuid()}/{label}'
+    plist = work.parent / f'{label}.plist'
+    log = work.parent / f'{label}.log'
+    deadline = monotonic() + 900
+    bootstrapped = False
+
+    def launch(*args):
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired('copy', 900)
+        done = launchctl(['/bin/launchctl', *args], capture_output=True, text=True, timeout=remaining)
         if done.returncode:
-            raise DecodeError(f'Outlook copy helper exit {done.returncode}')
+            raise DecodeError(f'Outlook copy launchctl {args[0]} failed')
+        return done.stdout
+
+    try:
+        os.close(_private_fd(log, os.O_WRONLY | os.O_EXCL))
+        _private_write(plist, plistlib.dumps({
+            'Label': label, 'ProgramArguments': [str(helper)],
+            'WorkingDirectory': str(work), 'RunAtLoad': True,
+            'StandardOutPath': str(log), 'StandardErrorPath': str(log),
+            'Umask': 0o077,
+        }).decode())
+        launch('bootstrap', f'gui/{os.getuid()}', str(plist))
+        bootstrapped = True
+        while True:
+            output = launch('print', target)
+            match = re.search(r'^\s*last exit code = (-?\d+)\s*$', output, re.M)
+            if match:
+                code = int(match[1])
+                if code in (errno.EPERM, errno.EACCES):
+                    raise PermissionError(code, 'Outlook copy denied')
+                if code:
+                    raise DecodeError(f'Outlook copy helper exit {code}')
+                return
+            sleep(min(1, max(0, deadline - monotonic())))
     except PermissionError:
         raise FullDiskAccessRequired(f'grant Full Disk Access to {helper}') from None
     except subprocess.TimeoutExpired:
         raise DecodeError('Outlook copy helper timed out') from None
+    finally:
+        try:
+            done = launchctl(['/bin/launchctl', 'bootout', target],
+                             capture_output=True, text=True, timeout=30)
+            if done.returncode and bootstrapped:
+                raise DecodeError('Outlook copy helper bootout failed')
+        except subprocess.TimeoutExpired:
+            raise DecodeError('Outlook copy helper bootout timed out') from None
+        finally:
+            plist.unlink(missing_ok=True)
+            log.unlink(missing_ok=True)
 
 
 def _remove(work: Path) -> None:
@@ -232,11 +277,11 @@ def _remove(work: Path) -> None:
         raise CleanupError('private work folder left behind')
 
 
-def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None]):
+def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], launchctl: Callable):
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
-        _snapshot(home, work)
+        _snapshot(home, work, launchctl)
         files = work / 'Files'
         db = work / 'store.db'
         decode(copy, files, db)
@@ -623,7 +668,8 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             return Outcome('skipped', 'previous_run_active')
         try:
             for stale in out.glob(WORK_PREFIX + '*'):
-                _remove(stale)
+                if stale.is_dir() and not stale.is_symlink():
+                    _remove(stale)
             return _run(out, home, ports)
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
@@ -655,7 +701,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             _save(out, state)
         return Outcome('succeeded', 'store_unchanged')
     try:
-        meta, mails, events = _decode(home, out, ports.decode)
+        meta, mails, events = _decode(home, out, ports.decode, ports.launchctl)
     except FullDiskAccessRequired as error:
         return Outcome('failed', str(error))
     except (DecodeError, sqlite3.Error, OSError):

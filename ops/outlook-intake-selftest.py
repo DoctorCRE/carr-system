@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import shutil
 import sqlite3
 import stat
@@ -137,7 +138,7 @@ class Fake:
 
     def ports(self):
         return intake.Ports(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
-                            decode=self.decode, now=lambda: self.now)
+                            decode=self.decode, now=lambda: self.now, launchctl=self.test.launchctl)
 
     def writes(self, verb=None):
         return [(v, a) for v, a in self.calls if v in intake.WRITE_VERBS and (verb is None or v == verb)]
@@ -160,12 +161,40 @@ class IntakeTest(unittest.TestCase):
         (live / '7.dat').write_bytes(b'gzip-body')
         self.fake = Fake(self)
         self.fake.fixture = self.tmp / 'fixture.db'
-        copier = patch('subprocess.run', side_effect=self.copy_snapshot)
-        copier.start()
-        self.addCleanup(copier.stop)
+        self.launchctl = self.run_launchctl
+        self.launch_calls = []
+        self.agent = None
+        self.plist_path = None
 
-    def copy_snapshot(self, command, *, cwd, **kwargs):
-        self.assertEqual(command, [str(self.home / 'carr-local/bin/outlook-intake-copy')])
+    def run_launchctl(self, command, **kwargs):
+        self.launch_calls.append(command)
+        self.assertEqual(command[0], '/bin/launchctl')
+        operation = command[1]
+        if operation == 'bootstrap':
+            self.assertEqual(command[2], f'gui/{os.getuid()}')
+            self.plist_path = Path(command[3])
+            self.agent = plistlib.loads(self.plist_path.read_bytes())
+            self.assertEqual(stat.S_IMODE(self.plist_path.stat().st_mode), 0o600)
+            self.assertEqual(self.plist_path.parent, self.out())
+            self.assertFalse(self.plist_path.name.startswith('work-'))
+            self.assertRegex(self.agent['Label'], r'^com\.carr\.outlook-intake-copy\.[a-f0-9]+$')
+            self.assertEqual(self.agent['ProgramArguments'], [str(self.home / intake.COPY_HELPER)])
+            self.assertNotIn('Program', self.agent)
+            self.assertTrue(self.agent['RunAtLoad'])
+            self.assertNotIn('KeepAlive', self.agent)
+            log = Path(self.agent['StandardOutPath'])
+            self.assertEqual(self.agent['StandardErrorPath'], str(log))
+            self.assertEqual(log.parent, self.out())
+            self.assertFalse(log.name.startswith('work-'))
+            self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+            self.copy_snapshot(Path(self.agent['WorkingDirectory']))
+            return subprocess.CompletedProcess(command, 0, '', '')
+        self.assertEqual(command[2], f"gui/{os.getuid()}/{self.agent['Label']}")
+        self.assertIn(operation, ('print', 'bootout'))
+        output = 'state = exited\n\tlast exit code = 0\n' if operation == 'print' else ''
+        return subprocess.CompletedProcess(command, 0, output, '')
+
+    def copy_snapshot(self, cwd):
         shutil.copyfile(self.store, cwd / 'store.hxd')
         os.chmod(cwd / 'store.hxd', 0o600)
         shutil.copytree(self.store.parent / 'Files', cwd / 'Files')
@@ -173,7 +202,6 @@ class IntakeTest(unittest.TestCase):
             os.chmod(directory, 0o700)
             for name in files:
                 os.chmod(Path(directory) / name, 0o600)
-        return subprocess.CompletedProcess(command, 0)
 
     def run_intake(self, mails=(), events=(), touch=True, **db):
         if self.fake.fixture.exists():
@@ -188,6 +216,13 @@ class IntakeTest(unittest.TestCase):
 
     def report_text(self):
         return '\n'.join(p.read_text() for p in sorted(self.out().glob('report-*.md')))
+
+    def test_copy_runs_as_a_private_transient_launch_agent(self):
+        self.assertEqual(self.run_intake().state, 'succeeded')
+        self.assertEqual([call[1] for call in self.launch_calls], ['bootstrap', 'print', 'bootout'])
+        self.assertFalse(self.plist_path.exists())
+        self.assertFalse(Path(self.agent['StandardOutPath']).exists())
+        self.assertFalse(Path(self.agent['WorkingDirectory']).exists())
 
     def test_inbound_mail_from_a_known_address_logs_email_in_with_a_uuid5_key(self):
         m = mail('pat@example.test', -timedelta(hours=1), name='Pat Example')
@@ -717,8 +752,13 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
 
     def test_copy_permission_denied_names_the_helper_that_needs_full_disk_access(self):
-        with patch('subprocess.run', side_effect=PermissionError(errno.EPERM, 'Operation not permitted')):
-            result = self.run_intake()
+        def denied(command, **kwargs):
+            if command[1] == 'bootstrap':
+                self.run_launchctl(command, **kwargs)
+                raise PermissionError(errno.EPERM, 'Operation not permitted')
+            return self.run_launchctl(command, **kwargs)
+        self.launchctl = denied
+        result = self.run_intake()
         self.assertEqual(result.state, 'failed')
         self.assertIn(f'grant Full Disk Access to {self.home}/carr-local/bin/outlook-intake-copy',
                       intake.status_line(result))
@@ -729,16 +769,95 @@ class IntakeTest(unittest.TestCase):
 
     def test_helper_permission_exit_codes_name_full_disk_access(self):
         for code in (errno.EPERM, errno.EACCES):
-            with patch('subprocess.run', return_value=subprocess.CompletedProcess([], code)):
-                result = self.run_intake()
+            def denied(command, **kwargs):
+                done = self.run_launchctl(command, **kwargs)
+                if command[1] == 'print':
+                    done.stdout = f'last exit code = {code}\n'
+                return done
+            self.launchctl = denied
+            result = self.run_intake()
+            self.assertEqual(self.launch_calls[-1][1], 'bootout')
+            self.assertFalse(self.plist_path.exists())
             self.assertIn('grant Full Disk Access to', intake.status_line(result))
             self.assertEqual(result.state, 'failed')
 
     def test_helper_timeout_fails_and_cleans_up(self):
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('copy', 900)):
-            result = self.run_intake()
+        def stalled(command, **kwargs):
+            if command[1] == 'print':
+                self.launch_calls.append(command)
+                raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+            return self.run_launchctl(command, **kwargs)
+        self.launchctl = stalled
+        result = self.run_intake()
+        self.assertEqual(self.launch_calls[-1][1], 'bootout')
+        self.assertFalse(self.plist_path.exists())
+        self.assertFalse(Path(self.agent['StandardOutPath']).exists())
         self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
         self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
+
+    def test_copy_polling_waits_for_an_exit_code_within_one_900_second_budget(self):
+        elapsed = [0]
+        budgets = []
+        def waiting(command, **kwargs):
+            budgets.append((command[1], kwargs['timeout']))
+            done = self.run_launchctl(command, **kwargs)
+            if command[1] == 'print':
+                elapsed[0] += 450
+                done.stdout = 'state = running\nlast exit code = (never exited)\n'
+            return done
+        self.launchctl = waiting
+        with patch.object(intake, 'monotonic', side_effect=lambda: elapsed[0]), \
+                patch.object(intake, 'sleep'):
+            result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertEqual(budgets, [('bootstrap', 900), ('print', 900), ('print', 450), ('bootout', 30)])
+        self.assertEqual(self.fake.decodes, 0)
+        self.assertFalse(self.plist_path.exists())
+        self.assertFalse(Path(self.agent['WorkingDirectory']).exists())
+
+    def test_copy_bootstrap_and_print_errors_still_boot_out_and_remove_private_files(self):
+        for operation in ('bootstrap', 'print'):
+            with self.subTest(operation=operation):
+                def broken(command, **kwargs):
+                    done = self.run_launchctl(command, **kwargs)
+                    if command[1] == operation:
+                        done.returncode = 5
+                    return done
+                self.launchctl = broken
+                result = self.run_intake()
+                self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+                self.assertEqual(self.launch_calls[-1][1], 'bootout')
+                self.assertFalse(self.plist_path.exists())
+                self.assertFalse(Path(self.agent['StandardOutPath']).exists())
+                self.assertFalse(Path(self.agent['WorkingDirectory']).exists())
+
+    def test_bootout_timeout_still_removes_the_plist_log_and_work_directory(self):
+        def stuck(command, **kwargs):
+            done = self.run_launchctl(command, **kwargs)
+            if command[1] == 'bootout':
+                raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+            return done
+        self.launchctl = stuck
+        result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertFalse(self.plist_path.exists())
+        self.assertFalse(Path(self.agent['StandardOutPath']).exists())
+        self.assertFalse(Path(self.agent['WorkingDirectory']).exists())
+        self.assertEqual(self.fake.decodes, 0)
+
+    def test_stale_work_cleanup_tolerates_a_stray_file_and_preserves_other_directories(self):
+        self.out().mkdir(parents=True)
+        (self.out() / 'work-stray').write_text('fixture')
+        stale = self.out() / 'work-interrupted'
+        stale.mkdir(mode=0o700)
+        (stale / 'store.hxd').write_bytes(b'fixture')
+        retained = self.out() / 'retained'
+        retained.mkdir()
+        (retained / 'marker').write_text('keep')
+        result = self.run_intake()
+        self.assertEqual(result.state, 'succeeded')
+        self.assertFalse(stale.exists())
+        self.assertEqual((retained / 'marker').read_text(), 'keep')
 
     def test_unreachable_contacts_fail_loudly(self):
         def down():
