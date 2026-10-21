@@ -84,7 +84,6 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(view);
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
-    await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8'));
     await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal;");
@@ -107,6 +106,45 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query('begin');
       try { await fn(); } finally { await c.query('rollback'); }
     };
+
+    await t.test('deal detail survives missing checklist storage and recovers after migration 0919', async t => {
+      const warning = t.mock.method(console, 'warn', () => {});
+      const read = async () => {
+        await c.query('set role carr_reader');
+        try { return await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)}); }
+        finally { await c.query('reset role'); }
+      };
+      await fixture(false);
+      for (const source of CHECKLIST_SOURCES) await c.query("insert into doctrine_section(id,status,body_hash) values($1,'active',$2)", [source.section_id, source.content_hash]);
+      try {
+        const before = await read();
+        assert.equal(before.deal_id, id(4));
+        assert.equal(before.name, 'Synthetic Assignment');
+        assert.equal(before.schema_version, 'deal-timeline.v1');
+        assert.deepEqual(before.checklist, {
+          schema_version: 'deal-checklist.v1', template_state: 'unavailable', phases: [], due_items: [],
+        });
+        assert.deepEqual(await read(), before, 'repeated reads preserve the same detail');
+        assert.equal(warning.mock.callCount(), 1, 'missing storage logs once across reads');
+        assert.match(warning.mock.calls[0].arguments.join(' '), /checklist.*unavailable/i);
+        await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8'));
+        const after = await read();
+        assert.equal(after.checklist.template_state, 'current');
+        assert.equal(after.checklist.phases.length, 6);
+        const {checklist: beforeChecklist, ...beforeDetail} = before;
+        const {checklist: afterChecklist, ...afterDetail} = after;
+        assert.deepEqual(beforeDetail, afterDetail, 'every existing detail field survives the missing migration');
+        await c.query('revoke select on v_deal_room_commission from carr_reader');
+        await assert.rejects(read(), error => error.code === '42501', 'other database errors still propagate');
+        assert.equal(warning.mock.callCount(), 1, 'other errors are not logged as unavailable storage');
+      } finally {
+        await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8').replace('create view', 'create or replace view'));
+        await c.query('delete from deal where id=$1', [id(4)]);
+        await c.query('delete from client where id=$1', [id(3)]);
+        await c.query('delete from party where id=$1', [id(2)]);
+        await c.query('delete from doctrine_section');
+      }
+    });
 
     await t.test('national-account Lost history uses client ID when client_ref is null', async () => transaction(async () => {
       await fixture(true);
