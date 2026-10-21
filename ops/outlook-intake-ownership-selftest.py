@@ -153,6 +153,84 @@ class OwnershipTest(unittest.TestCase):
             self.assertFalse(c.execute("SELECT count(*) FROM messages WHERE body LIKE '%UNAUTHORIZED%'").fetchone()[0])
             self.assertEqual(c.execute('SELECT root_key,mailbox_key,identity FROM ownership').fetchone(),(7,9,ALLOWED))
 
+    def test_owned_export_uses_reviewed_nonoverlapping_block_framing(self):
+        _,db=self.decode(mailbox()+revision()+event()+store(b'unframed')[4096:])
+        with sqlite3.connect(db) as c:
+            meta=dict(c.execute('SELECT key,value FROM meta'))
+            self.assertEqual(meta['blocks_found'],2)
+            self.assertEqual(meta['blocks_verified'],1)
+            self.assertEqual({r[0].split(':')[4] for r in c.execute('SELECT source_id FROM source_provenance')},{'4096'})
+
+    def test_malformed_compressed_blocks_have_no_intake_effects(self):
+        for variant in ('trailing_input', 'oversized_match'):
+            with self.subTest(variant=variant):
+                payload=mailbox()+revision()+event()
+                if variant=='oversized_match':
+                    payload+=b'X'
+                raw=store(payload);block=bytearray(raw[4096:])
+                block.extend(b'\x00' if variant=='trailing_input' else b'\x01\x00')
+                struct.pack_into('<I',block,20,len(block)-40)
+                if variant=='oversized_match':
+                    struct.pack_into('<I',block,24,len(payload)+1)
+                struct.pack_into('<I',block,4,zlib.crc32(block[8:]))
+                struct.pack_into('<I',block,0,zlib.crc32(block[4:32]))
+                t=fixture.IntakeTest();t.setUp();self.addCleanup(t.doCleanups)
+                t.store.write_bytes(raw[:4096]+block)
+                binary=t.home/intake.HXPROBE;binary.parent.mkdir(parents=True);binary.symlink_to(BINARY)
+                ports=t.fake.ports();ports.decode=intake._decoder(t.home)
+                result=intake.run(t.repo,t.home,ports)
+                self.assertEqual(result.reason,'decode_failed')
+                self.assertEqual(t.fake.calls,[])
+                self.assertEqual(t.fake.model_calls,[])
+                self.assertFalse((t.out()/intake.STATE).exists())
+
+    def test_well_formed_saved_data_changes_and_missing_evidence_are_held(self):
+        for variant in ('payload', 'reply', 'pending_full', 'refresh', 'source', 'receipt'):
+            with self.subTest(variant=variant):
+                t,_=self.observe(mailbox()+revision(preview=True),fail=True)
+                path=t.out()/intake.STATE;state=json.loads(path.read_text())
+                if variant=='payload':
+                    request=next(iter(state['requests'].values()))
+                    args=json.loads(request['payload']);args['detail']='FORGED_SYNTHETIC'
+                    request['payload']=json.dumps(args)
+                elif variant=='reply':
+                    step=next(iter(state['steps'].values()))
+                    step['reply']={'next_step':'FORGED_SYNTHETIC','due_on':None,'ownership':step['ownership']}
+                elif variant=='pending_full':
+                    next(iter(state['pending_full'].values()))['refs']=['C-999']
+                elif variant=='refresh':
+                    refresh=t.out()/intake.REFRESH_LIST;rows=json.loads(refresh.read_text())
+                    rows[0]['sender_email']='forged@example.test';refresh.write_text(json.dumps(rows))
+                elif variant=='receipt':
+                    (t.out()/f"receipt-{state['receipt_sha256']}.json").unlink()
+                else:
+                    next(t.out().glob('source-*.json')).unlink()
+                path.write_text(json.dumps(state));before=path.read_bytes()
+                t.fake.calls.clear();t.fake.model_calls.clear()
+                result=intake.run(t.repo,t.home,t.fake.ports())
+                self.assertEqual(result.reason,'legacy_ownership_held')
+                self.assertEqual(t.fake.calls,[])
+                self.assertEqual(t.fake.model_calls,[])
+                self.assertEqual(path.read_bytes(),before)
+
+    def test_forged_retry_payload_and_well_formed_provenance_are_held(self):
+        t,_=self.observe(mailbox()+revision(preview=True),fail=True)
+        path=t.out()/intake.STATE
+        state=json.loads(path.read_text())
+        request=next(iter(state['requests'].values()))
+        request['ownership']['store_sha256']='0'*64
+        request['ownership']['binding_sources']='1:1'
+        request['ownership']['source_ids']=['hx-owner-v1:105:7:9:1:1:1:1']
+        payload=json.loads(request['payload']);payload['detail']='FORGED_SYNTHETIC'
+        request['payload']=json.dumps(payload)
+        path.write_text(json.dumps(state));before=path.read_bytes()
+        t.fake.calls.clear();t.fake.model_calls.clear();t.fake.fail_verbs.clear()
+        result=intake.run(t.repo,t.home,t.fake.ports())
+        self.assertEqual(result.reason,'legacy_ownership_held')
+        self.assertEqual(t.fake.writes(),[])
+        self.assertEqual(t.fake.model_calls,[])
+        self.assertEqual(path.read_bytes(),before)
+
     def test_legacy_retry_is_held_before_any_effect(self):
         t=fixture.IntakeTest();t.setUp();self.addCleanup(t.doCleanups)
         out=t.out();out.mkdir(parents=True)
