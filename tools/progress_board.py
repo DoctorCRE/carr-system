@@ -2432,7 +2432,13 @@ def orchestrator_snapshot(state: dict[str, Any]) -> dict[str, Any]:
             'orchestrator': project(normalized, queue, portfolio=portfolio)}
 
 
+def require_primary_publication() -> None:
+    if not repo_lib('machine_role').is_primary(str(REPO_ROOT)):
+        raise RuntimeError('Orchestrator publication requires this machine to be primary')
+
+
 def publish_orchestrator(state: dict[str, Any]) -> int:
+    require_primary_publication()
     # All local publishers, including other checkouts, share this lock.
     path = Path(tempfile.gettempdir()) / 'carr-orchestrator-publication.lock'
     with path.open('a') as lock:
@@ -2862,6 +2868,8 @@ def command_reconcile(args: argparse.Namespace) -> None:
 
 @with_github_read_pass
 def command_render(args: argparse.Namespace) -> None:
+    if args.project == LAUNCHD_BOARD:
+        require_primary_publication()
     if args.project == ALL_REPOS_BOARD:
         build_all_repos()
         if args.publish:

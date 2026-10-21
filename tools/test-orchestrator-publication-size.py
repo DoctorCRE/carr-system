@@ -10,6 +10,49 @@ class PublicationBoundaryTests(unittest.TestCase):
     def setUp(self):
         root = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch.object(tempfile, "tempdir", root))
+        self.enterContext(patch.object(board.repo_lib("machine_role"), "read_marker", return_value="primary"))
+
+    def test_secondary_and_invalid_roles_refuse_every_orchestrator_door(self):
+        from argparse import Namespace
+        for marker in ('secondary', 'invalid'):
+            for door in ('publisher', 'board', 'scheduled'):
+                with self.subTest(marker=marker, door=door), \
+                     patch.object(board.repo_lib('machine_role'), 'read_marker', return_value=marker), \
+                     patch.object(board, 'read_state', return_value={'project': 'carr-v5', 'tasks': {}}), \
+                     patch.object(board, 'call_verb', side_effect=RuntimeError('remote reached')) as remote, \
+                     patch.object(board, 'render') as render, patch.object(board, 'build_all_repos'):
+                    with self.assertRaisesRegex(RuntimeError, 'primary'):
+                        if door == 'publisher':
+                            board.publish_orchestrator({'tasks': {}})
+                        elif door == 'board':
+                            board.publish_board('carr-v5')
+                        else:
+                            board.command_render(Namespace(project='carr-v5', publish=True))
+                    remote.assert_not_called()
+                    render.assert_not_called()
+
+    def test_secondary_queue_publish_retains_dirty_revision_without_remote_effects(self):
+        from pathlib import Path
+        import sys
+        sys.path.insert(0, str(board.REPO_ROOT / "tools/room-bridge"))
+        from work_queue import WorkQueue
+        from work_runner import main
+        root = Path(tempfile.gettempdir())
+        db = root / 'queue.sqlite3'
+        with WorkQueue(db) as queue:
+            queue.enqueue('synthetic', desk='cx-app2', task='Synthetic work', actor='test')
+            dirty = queue.publication()['dirty']
+            with patch.object(board.repo_lib('machine_role'), 'read_marker', return_value='secondary'), \
+                 patch.dict(board.os.environ, {}), \
+                 patch.object(board, 'read_state', return_value={'project': 'carr-v5', 'tasks': {}}), \
+                 patch.object(board, 'call_verb', side_effect=RuntimeError('remote reached')) as remote:
+                self.assertEqual(main(['--db', str(db), '--registry', str(root / 'registry.json'),
+                                       '--results', str(root / 'results.jsonl'), '--publish']), 0)
+            receipt = queue.publication()
+            self.assertEqual(receipt['dirty'], dirty)
+            self.assertEqual(receipt['published'], 0)
+            self.assertIn('primary', receipt['error'])
+            remote.assert_not_called()
 
     def test_repeated_updates_reuse_page_slots(self):
         state = {'tasks': {str(i): {'title': f'Work {i}', 'stage': 'review',

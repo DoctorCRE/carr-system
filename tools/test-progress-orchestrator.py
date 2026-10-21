@@ -130,6 +130,7 @@ def publication_sequence():
         portfolio={'tasks':{'backend':{'title':'Shared search contract','status':'running','stage':'build',
                    'repo':'jbookout/carr-system'}},'github_sync':sync}
         with patch.object(tempfile, 'tempdir', tmp), \
+             patch.object(board.repo_lib('machine_role'), 'read_marker', return_value='primary'), \
              patch.dict(os.environ,{'CARR_WORK_QUEUE_DB':str(db),'PROGRESS_BOARD_ROOT':tmp}), \
              patch.object(board,'call_verb',side_effect=call), \
              patch.object(board,'read_json_file',return_value=portfolio), WorkQueue(db) as q:

@@ -171,6 +171,7 @@ class BoardCase(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
         self.enterContext(patch.object(tempfile, "tempdir", str(self.root)))
         self.enterContext(patch.dict(os.environ, {"CARR_WORK_QUEUE_DB": str(self.root / "queue.sqlite3")}))
         self.env = os.environ.copy()
@@ -1506,6 +1507,9 @@ class SharedBoardRoot(unittest.TestCase):
 
 
 class NeedsJoePublication(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(BOARD.repo_lib("machine_role"), "read_marker", return_value="primary"))
+
     def test_local_publication_failures_do_not_interrupt_other_boards(self):
         import needs_joe_local
         from argparse import Namespace

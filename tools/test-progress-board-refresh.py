@@ -11,6 +11,9 @@ import progress_board as board
 
 
 class ScheduledRefreshTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(board.repo_lib("machine_role"), "read_marker", return_value="primary"))
+
     def test_legacy_size_failure_still_refreshes_and_publishes_facts(self):
         events = []
         failure = board.SnapshotTooLarge('legacy snapshot too large')
