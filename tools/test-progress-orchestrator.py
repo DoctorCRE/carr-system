@@ -81,10 +81,15 @@ class PublicationTests(unittest.TestCase):
         state={'tasks':{'p':{'title':'Search','stage':'live','repo':'jbookout/doctorcre-app','pr':12,'pr_head':'b'*40}}}
         self.assertEqual(project(state,queue)['cards'][0]['state'],'fixing')
 
+    def test_queue_and_portfolio_references_cannot_collapse_the_same_card(self):
+        result=project({'tasks':{'search':{'title':'Shared search contract','stage':'build'}}},
+                       {'items':[{'card_id':'search','title':'Deal room search','stage':'building'}]})
+        self.assertEqual(len({card['id'] for card in result['cards']}),2)
+
     def test_queue_events_publish_and_read_back_return_merge_release_and_outage(self):
         reads = publication_sequence()
         states = [next(card['state'] for card in [*read['snapshot']['snapshot_json']['orchestrator']['cards'],
-                  *read['snapshot']['snapshot_json']['orchestrator']['history']] if card['id']=='search') for read in reads]
+                  *read['snapshot']['snapshot_json']['orchestrator']['history']] if card['id']=='queue:search') for read in reads]
         self.assertEqual(states, ['waiting','working','review','fixing','merging','merged','live','live'])
         last=reads[-1]['snapshot']['snapshot_json']['orchestrator']
         self.assertEqual(last['sources']['queue']['state'],'unavailable')

@@ -70,7 +70,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
             elif all(s in ('merged', 'live') for s in states):
                 status = 'merged'
         event = item.get('last_event') or {}
-        cards.append({'id': text(item.get('card_id'), 'work'), 'title': text(item.get('title'), 'Engineering work'),
+        cards.append({'id': 'queue:' + text(item.get('card_id'), 'work'), 'title': text(item.get('title'), 'Engineering work'),
             'state': status, 'owner': text(item.get('agent') or item.get('desk')),
             'progress': text(event.get('reason'), 'Awaiting a recorded progress update'),
             'changed_at': event.get('at'), 'prs': refs,
@@ -81,7 +81,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
         if any(ref in used for ref in refs) or task.get('status') in ('superseded', 'failed'):
             continue
         used.update(refs)
-        cards.append({'id': text(identity, 'work'), 'title': text(task.get('card_title') or task.get('title'), 'Engineering work'),
+        cards.append({'id': 'board:' + text(identity, 'work'), 'title': text(task.get('card_title') or task.get('title'), 'Engineering work'),
             'state': state_of(task), 'owner': text(task.get('executor')),
             'progress': text(task.get('blocked_reason') or task.get('release_wait') or task.get('summary') or task.get('pr_phase'), 'Awaiting a recorded progress update'),
             'changed_at': task.get('updated_at'), 'prs': refs,
