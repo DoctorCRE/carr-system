@@ -12,6 +12,8 @@ import sys
 import tempfile
 import unittest
 
+from git_env import fixture_env
+
 
 SPEC = importlib.util.spec_from_file_location(
     "outlook_atlas", Path(__file__).with_name("outlook-atlas.py")
@@ -134,7 +136,8 @@ class SurfaceTests(unittest.TestCase):
     def test_reconcile_cli_checks_pinned_audit_bytes_and_omits_values(self):
         grammar, send = self.grammar_audits()
         root = Path(self.temp.name)
-        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        env = fixture_env()
+        subprocess.run(['git', 'init', '-q', str(root)], check=True, env=env)
         audits = root / 'audits'
         audits.mkdir()
         inputs = {'survey': {'schema': 'wr443-outlook-route-survey/v1'},
@@ -143,10 +146,13 @@ class SurfaceTests(unittest.TestCase):
                  'grammar': 'wr443-deeplink-grammar.json', 'send': 'wr443-send-by-id.json'}
         for role, value in inputs.items():
             (audits / paths[role]).write_text(json.dumps(value))
-        subprocess.run(['git', '-C', str(root), 'add', *['audits/' + p for p in paths.values()]], check=True)
+        subprocess.run(['git', '-C', str(root), 'add', *['audits/' + p for p in paths.values()]],
+                       check=True, env=env)
         subprocess.run(['git', '-C', str(root), '-c', 'user.name=Synthetic',
-                        '-c', 'user.email=synthetic@example.invalid', 'commit', '-qm', 'fixture'], check=True)
-        revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+                        '-c', 'user.email=synthetic@example.invalid', 'commit', '-qm', 'fixture'],
+                       check=True, env=env)
+        revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'],
+                                           text=True, env=env).strip()
         bindings = {'schema': 'outlook-grammar-sources/v1', 'sources': [
             {'role': role, 'path': 'audits/' + paths[role], 'revision': revision,
              'sha256': hashlib.sha256((audits / paths[role]).read_bytes()).hexdigest(),
@@ -159,7 +165,7 @@ class SurfaceTests(unittest.TestCase):
         def run():
             pinned.write_text(json.dumps(bindings))
             return subprocess.run([sys.executable, script, 'reconcile', str(baseline), str(pinned)],
-                                  cwd=root, capture_output=True, text=True)
+                                  cwd=root, capture_output=True, text=True, env=env)
         result = run()
         self.assertEqual(result.returncode, 0, result.stderr)
         reconciled = json.loads(result.stdout)

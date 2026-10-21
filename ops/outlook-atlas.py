@@ -14,6 +14,8 @@ import sys
 import subprocess
 from urllib.parse import urlsplit
 
+from git_env import scrubbed_env
+
 
 SCHEMA = "outlook-surface-atlas/v1"
 PLIST_KEYS = {
@@ -312,7 +314,7 @@ def _reconcile_from_git(atlas, bindings):
                 not re.fullmatch(r"[0-9a-f]{40}", entry["revision"])):
             raise ValueError("invalid audit binding")
         raw = subprocess.run(["git", "show", f"{entry['revision']}:{entry['path']}"],
-                             check=True, capture_output=True).stdout
+                             check=True, capture_output=True, env=scrubbed_env()).stdout
         if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
             raise ValueError("audit digest mismatch")
         audits[role] = json.loads(raw)
