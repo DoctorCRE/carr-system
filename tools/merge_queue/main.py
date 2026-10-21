@@ -1394,7 +1394,7 @@ class Queue:
                 merged = (dict(repo=repo, number=n, head=e['approved']) in data.get('merge_receipts', [])
                           and e['phase'] == 'done' and e['merged_commit'])
                 unissued = (e['phase'] in ('pending', 'done', 'blocked', 'exhausted', 'conflict', 'superseded', 'review')
-                            and e['tested'] is None and e['merge_attempts'] == 0)
+                            and e['tested'] is None and e['merge_attempts'] == 0 and e['merged_commit'] is None)
                 if not (merged or unissued):
                     raise QueueChanged(f'unresolved merge journal entry {e["id"]}')
             if any(a['phase'] != 'done' for a in bounded_items('snapshot', actions)):

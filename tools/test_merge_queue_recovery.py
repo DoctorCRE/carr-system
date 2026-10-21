@@ -118,6 +118,12 @@ class MergeRecoveryTests(unittest.TestCase):
             self.q.db.execute('DELETE FROM entries WHERE pr=305')
         self.assert_refused('missing pinned journal')
 
+    def test_unconsumed_journal_merge_refuses_contradictory_provider(self):
+        self.blocked_card()
+        with self.q.db:
+            self.q.db.execute("UPDATE entries SET phase='done',merged_commit=? WHERE pr=305", (self.merge_sha,))
+        self.assert_refused('unresolved merge journal')
+
     def test_issued_or_uncertain_regeneration_refuses(self):
         self.blocked_card()
         for phase in ('issued', 'uncertain', 'planned', 'exhausted'):
