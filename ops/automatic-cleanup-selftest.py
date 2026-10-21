@@ -730,6 +730,61 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_stuck_thread_recovery_does_not_starve_other_cleanup_kinds(self):
+        import machine_cleanup as cleanup
+        fixture = fixtures.Fixture()
+        self.addCleanup(shutil.rmtree, fixture.base)
+        tree = fixture.tree('old')
+        clones = fixture.base / 'clones'
+        workspace = clones / 'room-codex-finished'
+        workspace.mkdir(parents=True)
+        clone = workspace / 'checkout'
+        fixture.git('clone', str(fixture.remote), str(clone))
+        fixture.git('switch', 'main', cwd=clone)
+        dispatch = fixture.base / 'dispatch.jsonl'
+        dispatch.write_text(''.join(json.dumps(row) + '\n' for row in (
+            {'thread_id': 'stuck', 'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'},
+            {'checkout_workspace': str(workspace), 'checkout_path': str(clone),
+             'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'},
+            {'thread_id': 'healthy', 'status': 'completed', 'dispatched_at': '2020-01-01T00:00:00Z'})))
+        receipt = fixture.repo / 'out/machine-cleanup.json'
+        receipt.parent.mkdir(exist_ok=True)
+        pending = {'kind': 'thread', 'thread_id': 'stuck', 'before': 100}
+        receipt.write_text(json.dumps({'at': 1, 'status': 'deferred', 'last_success_at': 123,
+                                      'pending': pending, 'errors': []}))
+        calls = []
+        def archive(tid, **kwargs):
+            calls.append((tid, kwargs['dry_run']))
+            if tid == 'stuck':
+                self.assertTrue(kwargs['dry_run'], 'unresolved effects must only be read back')
+                self.assertEqual(kwargs['before'], 100)
+                return {'kind': 'thread', 'thread_id': tid, 'status': 'deferred',
+                        'budget_exhausted': True, 'reason': 'fixture archive readback timed out'}
+            return {'kind': 'thread', 'thread_id': tid, 'status': 'archived'}
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        options = dict(hook=fixtures.hook, tmp_root=clones, dispatch_path=dispatch,
+            roots={'fixture/repo': fixture.repo}, provider=fixtures.FakeProvider(),
+            process_probe=lambda paths: set(), archive_thread=archive)
+        for _ in range(3):
+            report = cleanup.run(fixture.repo, config, **options)
+        self.assertFalse(workspace.exists(), 'a stuck thread must not starve clone cleanup')
+        self.assertFalse(tree.exists(), 'a stuck thread must not starve worktree cleanup')
+        self.assertIn(('healthy', False), calls)
+        self.assertEqual(report['status'], 'failed', report)
+        self.assertFalse(report['budget_exhausted'], report)
+        self.assertEqual(report['last_success_at'], 123)
+        self.assertNotIn('pending', report)
+        error = next(row for row in report['errors'] if row.get('thread_id') == 'stuck')
+        self.assertEqual(error['error'], 'thread_recovery_exhausted')
+        self.assertEqual(error['before'], 100)
+        again = cleanup.run(fixture.repo, config, **options)
+        self.assertIn(error, again['errors'])
+        self.assertEqual(calls.count(('stuck', True)), 3)
+        self.assertNotIn(('stuck', False), calls)
+        self.assertEqual(json.loads(receipt.read_text()), again)
+        findings = cleanup.health_findings(fixture.repo, config, tmp_root=clones, roots={}, now=time.time())
+        self.assertIn('cleanup_failed', [row['code'] for row in findings])
+
     def test_worktree_slice_timeout_defers_scheduler_before_overall_deadline(self):
         import branch_retirement as retirement
         import machine_cleanup as cleanup
