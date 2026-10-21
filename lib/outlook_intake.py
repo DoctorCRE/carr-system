@@ -169,7 +169,14 @@ def _private_write(path: Path, text: str) -> None:
     temp = path.with_name(path.name + '.tmp')
     with os.fdopen(_private_fd(temp, os.O_WRONLY | os.O_TRUNC), 'w') as handle:
         handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temp, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _iso(unix: int) -> str:
@@ -250,16 +257,29 @@ def _evidence_put(out: Path, kind: str, value: dict) -> str:
     text = _canonical(value)
     digest = _hash(text)
     path = out / f'{kind}-{digest}.json'
+    fd, name = tempfile.mkstemp(dir=out, prefix='.evidence-')
+    stream = None
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
-    except FileExistsError:
-        if _evidence_read(out, kind, digest) != value:
-            raise ValueError('conflicting evidence')
-    else:
-        with os.fdopen(fd, 'w') as stream:
+        stream = os.fdopen(fd, 'w')
+        with stream:
             stream.write(text)
             stream.flush()
+            os.fchmod(stream.fileno(), 0o400)
             os.fsync(stream.fileno())
+        try:
+            os.link(name, path)
+        except FileExistsError:
+            if _evidence_read(out, kind, digest) != value:
+                raise ValueError('conflicting evidence')
+        directory = os.open(out, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if stream is None:
+            os.close(fd)
+        os.unlink(name)
     return digest
 
 
@@ -277,9 +297,11 @@ def _refresh_evidence(out: Path) -> list:
     return [{k: v for k, v in row.items() if k != 'opened_at'} for row in rows]
 
 
-def _state_binding(state: dict, out: Path) -> dict:
+def _state_binding(state: dict, out: Path, refresh: list | None = None) -> dict:
+    rows = _refresh_evidence(out) if refresh is None else [
+        {k: v for k, v in row.items() if k != 'opened_at'} for row in refresh]
     return {'state_sha256': _hash(_canonical({k: v for k, v in state.items() if k != 'receipt_sha256'})),
-            'refresh_sha256': _hash(_canonical(_refresh_evidence(out)))}
+            'refresh_sha256': _hash(_canonical(rows))}
 
 
 def _state_owned(state: dict, out: Path) -> bool:
@@ -288,7 +310,18 @@ def _state_owned(state: dict, out: Path) -> bool:
     account = state.get('ownership')
     if not _valid_account(account):
         return False
-    if _evidence_read(out, 'receipt', state.get('receipt_sha256')) != _state_binding(state, out):
+    receipt = _evidence_read(out, 'receipt', state.get('receipt_sha256'))
+    if 'refresh' in receipt:
+        binding = _state_binding(state, out, receipt['refresh'])
+        if (receipt != {**binding, 'refresh': receipt['refresh'],
+                        'previous_refresh_sha256': receipt.get('previous_refresh_sha256')}
+                or _state_binding(state, out)['refresh_sha256'] not in
+                (binding['refresh_sha256'], receipt.get('previous_refresh_sha256'))):
+            return False
+        for entry in receipt['refresh']:
+            if not _provenance_proven(out, entry.get('ownership'), account):
+                return False
+    elif receipt != _state_binding(state, out):
         return False
     for collection in ('requests', 'steps', 'pending_full'):
         for entry in state.get(collection, {}).values():
@@ -769,7 +802,7 @@ class Run:
         _private_write(out / f'report-{self.now.astimezone(LOCAL):%Y%m%d-%H%M%S}.md', '\n'.join(lines) + '\n')
 
 
-def _refresh_list(out: Path, pending: dict) -> int:
+def _refresh_entries(out: Path, pending: dict) -> list:
     path = out / REFRESH_LIST
     try:
         opened = {e['message_id']: e['opened_at'] for e in json.loads(path.read_text())
@@ -783,8 +816,7 @@ def _refresh_list(out: Path, pending: dict) -> int:
         if ident in opened:
             entry['opened_at'] = opened[ident]
         entries.append(entry)
-    _private_write(path, json.dumps(entries, indent=2) + '\n')
-    return len(entries)
+    return entries
 
 
 def _prune(state: dict, now: datetime) -> None:
@@ -834,8 +866,15 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
         os.close(fd)
 
 
-def _save(out: Path, state: dict) -> None:
-    state['receipt_sha256'] = _evidence_put(out, 'receipt', _state_binding(state, out))
+def _save(out: Path, state: dict, refresh: list | None = None) -> None:
+    binding = _state_binding(state, out, refresh)
+    if refresh is not None:
+        transition = {**binding, 'refresh': refresh,
+                      'previous_refresh_sha256': _state_binding(state, out)['refresh_sha256']}
+        state['receipt_sha256'] = _evidence_put(out, 'receipt', transition)
+        _private_write(out / STATE, json.dumps(state))
+        _private_write(out / REFRESH_LIST, json.dumps(refresh, indent=2) + '\n')
+    state['receipt_sha256'] = _evidence_put(out, 'receipt', binding)
     _private_write(out / STATE, json.dumps(state))
 
 
@@ -855,6 +894,8 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             return Outcome('failed', 'legacy_ownership_held')
     except (ValueError, TypeError, KeyError, AttributeError, OSError):
         return Outcome('failed', 'legacy_ownership_held')
+    if state and 'refresh' in _evidence_read(out, 'receipt', state['receipt_sha256']):
+        _save(out, state, _refresh_entries(out, state.get('pending_full', {})))
     info = store.stat()
     signature = [info.st_mtime_ns, info.st_size]
     now = ports.now()
@@ -862,8 +903,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     if state.get('store') == signature and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
         if state.get('pending_full'):
             Run(ports, state, now, out).full_text([])
-            _refresh_list(out, state['pending_full'])
-            _save(out, state)
+            _save(out, state, _refresh_entries(out, state['pending_full']))
         return Outcome('succeeded', 'store_unchanged')
     try:
         meta, mails, events = _decode(home, out, ports)
@@ -905,17 +945,17 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable', work.counts)
     ports.version_gate()
-    refresh = _refresh_list(out, state.get('pending_full', {}))
-    if any(work.counts.values()) or work.written:
-        work.report(out, refresh)
-    counts = {**work.counts, 'needs_refresh_listed': refresh}
+    refresh = _refresh_entries(out, state.get('pending_full', {}))
+    counts = {**work.counts, 'needs_refresh_listed': len(refresh)}
     failed = 'writes_failed' if work.counts['writes_failed'] else 'model_failed' if work.counts['model_failed'] else 'steps_pending' if state.get('steps') else None
+    if not failed:
+        state.update(store=signature, high_water=int(now.timestamp()))
+        _prune(state, now)
+    _save(out, state, refresh)
+    if any(work.counts.values()) or work.written:
+        work.report(out, len(refresh))
     if failed:
-        _save(out, state)
         return Outcome('failed', failed, counts)
-    state.update(store=signature, high_water=int(now.timestamp()))
-    _prune(state, now)
-    _save(out, state)
     return Outcome('succeeded', 'processed' if work.written or any(work.counts.values()) else 'nothing_new', counts)
 
 

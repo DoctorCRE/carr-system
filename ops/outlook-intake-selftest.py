@@ -415,6 +415,153 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
         self.assertEqual(json.loads(path.read_text()), [], 'expiry persists across runs')
 
+    def test_report_failure_leaves_preview_retry_owned_and_idempotent(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+        replace = os.replace
+
+        def fail_report(source, destination):
+            if Path(destination).name.startswith('report-'):
+                raise OSError('report disk failure')
+            return replace(source, destination)
+
+        with patch.object(os, 'replace', side_effect=fail_report):
+            with self.assertRaises(OSError):
+                self.run_intake([preview])
+        writes = list(self.fake.writes())
+        result = self.run_intake([preview], touch=False)
+        self.assertEqual(result.state, 'succeeded', result)
+        self.assertEqual(self.fake.writes(), writes)
+        self.assertEqual(len(json.loads((self.out() / intake.REFRESH_LIST).read_text())), 1)
+
+    def test_interrupted_evidence_write_does_not_poison_retry(self):
+        armed = False
+        fdopen = os.fdopen
+
+        def arm(_):
+            nonlocal armed
+            armed = True
+
+        def interrupt(fd, *args, **kwargs):
+            nonlocal armed
+            if armed and args == ('w',):
+                armed = False
+                raise SystemExit('interrupted before evidence bytes')
+            return fdopen(fd, *args, **kwargs)
+
+        self.fake.on_decode = arm
+        mails = [mail('pat@example.test', -timedelta(hours=1))]
+        with patch.object(os, 'fdopen', side_effect=interrupt):
+            with self.assertRaises(SystemExit):
+                self.run_intake(mails)
+        self.assertFalse(any(p.stat().st_size == 0 for p in self.out().glob('source-*.json')))
+        self.fake.on_decode = None
+        self.assertEqual(self.run_intake(mails, touch=False).state, 'succeeded')
+        self.assertEqual(len(self.fake.writes('log-activity')), 1)
+
+    def test_interruption_after_report_replacement_keeps_effects_committed(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+        replace = os.replace
+
+        def interrupt_report(source, destination):
+            result = replace(source, destination)
+            if Path(destination).name.startswith('report-'):
+                raise SystemExit('interrupted after report publication')
+            return result
+
+        with patch.object(os, 'replace', side_effect=interrupt_report):
+            with self.assertRaises(SystemExit):
+                self.run_intake([preview])
+        writes = list(self.fake.writes())
+        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
+        self.assertEqual(self.fake.writes(), writes)
+
+    def test_refresh_publication_recovers_each_replacement_boundary(self):
+        for boundary in (1, 2, 3):
+            for after in (False, True):
+                for error in (OSError, SystemExit):
+                    with self.subTest(boundary=boundary, after=after, error=error.__name__):
+                        t = IntakeTest()
+                        t.setUp()
+                        try:
+                            preview = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+                            t.run_intake([preview])
+                            t.fake.now += timedelta(days=8)
+                            writes, models = list(t.fake.writes()), list(t.fake.model_calls)
+                            replace, count = os.replace, 0
+
+                            def interrupt(source, destination):
+                                nonlocal count
+                                if Path(destination).name in (intake.STATE, intake.REFRESH_LIST):
+                                    count += 1
+                                    if count == boundary:
+                                        if after:
+                                            replace(source, destination)
+                                        raise error('publication interrupted')
+                                return replace(source, destination)
+
+                            with patch.object(os, 'replace', side_effect=interrupt):
+                                with t.assertRaises(error):
+                                    t.run_intake([preview], touch=False)
+                            result = t.run_intake([preview], touch=False)
+                            t.assertEqual(result.state, 'succeeded', result)
+                            t.assertEqual(json.loads((t.out() / intake.REFRESH_LIST).read_text()), [])
+                            t.assertEqual(t.fake.writes(), writes)
+                            t.assertEqual(t.fake.model_calls, models)
+                            t.assertEqual(t.run_intake([preview], touch=False).reason, 'store_unchanged')
+                        finally:
+                            t.doCleanups()
+
+    def test_interrupted_generation_rejects_tamper_but_preserves_opened_at(self):
+        for changed in ('state', 'refresh', 'receipt', 'source', 'opened_at'):
+            with self.subTest(changed=changed):
+                t = IntakeTest()
+                t.setUp()
+                try:
+                    preview = mail('pat@example.test', -timedelta(hours=1), kind='preview')
+                    replace = os.replace
+
+                    def interrupt(source, destination):
+                        if Path(destination).name == intake.STATE:
+                            state = json.loads(Path(source).read_text())
+                            receipt = intake._evidence_read(t.out(), 'receipt', state['receipt_sha256'])
+                            if 'refresh' in receipt:
+                                replace(source, destination)
+                                raise SystemExit('state committed before refresh')
+                        return replace(source, destination)
+
+                    with patch.object(os, 'replace', side_effect=interrupt):
+                        with t.assertRaises(SystemExit):
+                            t.run_intake([preview])
+                    state_path = t.out() / intake.STATE
+                    state = json.loads(state_path.read_text())
+                    refresh_path = t.out() / intake.REFRESH_LIST
+                    receipt = intake._evidence_read(t.out(), 'receipt', state['receipt_sha256'])
+                    if changed == 'state':
+                        state['high_water'] = 1
+                        state_path.write_text(json.dumps(state))
+                    elif changed in ('refresh', 'opened_at'):
+                        rows = receipt['refresh']
+                        rows[0]['opened_at' if changed == 'opened_at' else 'sender_email'] = 'changed'
+                        refresh_path.write_text(json.dumps(rows))
+                    elif changed == 'receipt':
+                        (t.out() / f"receipt-{state['receipt_sha256']}.json").unlink()
+                    else:
+                        next(t.out().glob('source-*.json')).unlink()
+                    before = state_path.read_bytes()
+                    t.fake.calls.clear()
+                    t.fake.model_calls.clear()
+                    result = t.run_intake([preview], touch=False)
+                    if changed == 'opened_at':
+                        t.assertEqual(result.state, 'succeeded', result)
+                        t.assertEqual(json.loads(refresh_path.read_text())[0]['opened_at'], 'changed')
+                    else:
+                        t.assertEqual(result.reason, 'legacy_ownership_held')
+                        t.assertEqual(state_path.read_bytes(), before)
+                    t.assertEqual(t.fake.calls, [])
+                    t.assertEqual(t.fake.model_calls, [])
+                finally:
+                    t.doCleanups()
+
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
         self.run_intake([preview])
@@ -1017,6 +1164,83 @@ class StoreResolverTest(unittest.TestCase):
         with self.assertRaises(FileNotFoundError) as refusal:
             intake.resolve_store(self.home)
         self.assertIn('Main Identity/HxStore.hxd', str(refusal.exception))
+
+class EvidencePublicationTest(unittest.TestCase):
+    def test_partial_write_and_flush_failures_do_not_publish_evidence(self):
+        for operation in ('write', 'flush'):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as folder:
+                out = Path(folder)
+                fdopen = os.fdopen
+
+                class InterruptedStream:
+                    def __init__(self, fd, *args):
+                        self.stream = fdopen(fd, *args)
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args):
+                        return self.stream.__exit__(*args)
+
+                    def write(self, text):
+                        if operation == 'write':
+                            self.stream.write(text[:1])
+                            raise OSError('partial evidence write')
+                        return self.stream.write(text)
+
+                    def flush(self):
+                        self.stream.flush()
+                        raise OSError('evidence flush failed')
+
+                with patch.object(os, 'fdopen', side_effect=InterruptedStream):
+                    with self.assertRaises(OSError):
+                        intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+                self.assertEqual(list(out.iterdir()), [])
+                digest = intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+                self.assertEqual(intake._evidence_read(out, 'source', digest), {'synthetic': 'complete bytes'})
+
+    def test_interrupted_sync_and_link_leave_only_complete_published_evidence(self):
+        for operation, boundary in (('fchmod', 1), ('fsync', 1), ('fsync', 2), ('link', 1), ('unlink', 1)):
+            for after in (False, True):
+                with self.subTest(operation=operation, boundary=boundary, after=after), tempfile.TemporaryDirectory() as folder:
+                    out = Path(folder)
+                    original = getattr(os, operation)
+                    count = 0
+
+                    def interrupt(*args, **kwargs):
+                        nonlocal count
+                        count += 1
+                        if count == boundary:
+                            if after:
+                                original(*args, **kwargs)
+                            raise SystemExit('evidence publication interrupted')
+                        return original(*args, **kwargs)
+
+                    with patch.object(os, operation, side_effect=interrupt):
+                        with self.assertRaises(SystemExit):
+                            intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+                    for path in out.glob('source-*.json'):
+                        self.assertEqual(json.loads(path.read_text()), {'synthetic': 'complete bytes'})
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o400)
+                    (out / '.evidence-unpublished').write_bytes(b'partial')
+                    digest = intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+                    self.assertEqual(intake._evidence_read(out, 'source', digest), {'synthetic': 'complete bytes'})
+
+    def test_existing_evidence_is_validated_without_replacement(self):
+        with tempfile.TemporaryDirectory() as folder:
+            out = Path(folder)
+            digest = intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+            path = out / f'source-{digest}.json'
+            inode = path.stat().st_ino
+            self.assertEqual(intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'}), digest)
+            self.assertEqual(path.stat().st_ino, inode)
+            path.chmod(0o600)
+            path.write_text('{}')
+            path.chmod(0o400)
+            with self.assertRaises(ValueError):
+                intake._evidence_put(out, 'source', {'synthetic': 'complete bytes'})
+            self.assertEqual(path.read_text(), '{}')
+
 
 if __name__ == '__main__':
     unittest.main()
