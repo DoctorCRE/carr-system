@@ -86,5 +86,63 @@
     "disclosure": "Stdout contains only fixed schema/interpretation labels, structural change counts, record-type IDs, and physical record IDs. No content, headers, addresses, paths, hashes, byte values, search results, or difference ranges. No detailed artifact is written. Worker stdout and stderr are captured and never forwarded. Success has empty stderr; rejected study inputs have empty stdout, exit 2, and fixed study harness input rejected stderr (argument parsing retains the existing fixed harness error).",
     "resources": "The Rust worker reads both snapshots and verified decompressed payloads into memory. Its fixed search can retain at most 4096 hits per snapshot internally; these never reach study output. Existing whole-file comparison and memory limits apply.",
     "synthetic_guard": "The separate diff command remains unchanged and requires --synthetic-store, the intact 20-case generated manifest, and every after marker. study-diff performs no marker searches or field confirmation."
+  },
+  "version_tripwire": {
+    "schema": "outlook-version-tripwire-contract/v1",
+    "work_request": "WR-000468",
+    "criterion": "S3",
+    "blocked_products": [
+      "live account-safe intake #2050",
+      "private Studio Calendar widget, decode first"
+    ],
+    "module": "lib/outlook_version_tripwire.py",
+    "operational_adapter": "lib/outlook_version_ports.py",
+    "command": "python3 ops/outlook-version-tripwire.py",
+    "source_boundary": {
+      "interface": "require_accepted(state_dir, installed_version, source_pin)",
+      "version_shape": {
+        "version": "CFBundleShortVersionString",
+        "build": "CFBundleVersion"
+      },
+      "owner": "#2050 cx-build4. Call before snapshot/full decoder export and before any intake side effects. The owner must also preserve its decoder integrity pin.",
+      "integration_state": "pending_owner_hook; no live enablement and no claim existing intake is protected",
+      "coordination_receipt": "job:9cb83e50-a386-4bae-8329-42ef10e18805",
+      "failure": "IntakeBlocked with fixed reason; absent, malformed, mismatched or incomplete receipts fail closed."
+    },
+    "state": {
+      "custody": "Explicit caller-owned private directory; 0700 directories and 0600 atomic JSON. No default live path.",
+      "attempts": "UUIDv5 of version/build and exact source fingerprint. Durable started record before any snapshot effect.",
+      "snapshot": "Existing lib.outlook_intake._snapshot adapter only. One private helper copy per attempt. Never rebuild helper.",
+      "observation": "Existing hxprobe observe command only. Capture streams, reject stderr/nonzero exit, changed copy metadata or changed app/source. No content decoder or second store parser.",
+      "accepted": "Separate accepted.json, replaced only by explicit accept of a complete supported receipt. Attempting a version never acknowledges it.",
+      "recovery": "Revisit terminal receipts without repeating effects. A started receipt becomes blocked with reconciliation required. Never blindly repeat an interrupted helper or observer. Unobserved intermediate app versions remain missed; only the currently installed build is checked.",
+      "alerts": "Private alerts/<stable UUID>.json outbox for orchestrator custody. One durable actionable alert per version/source attempt. One fixed preflight alert for unavailable version/source. Delivery is not claimed until orchestrator acknowledges it. Every alert names the orchestrator as recipient.",
+      "alert_delivery": "Orchestrator must poll and receipt the private outbox after reviewed merge. No report-problem call, new substrate Work Request, network send or automatic retry is implemented.",
+      "source_receipts": "sources/<source fingerprint>.json retains each exact observer/source manifest; accepted baseline provenance is not overwritten by a later attempt."
+    },
+    "comparison": {
+      "baseline": "Last explicitly accepted structural map, bound to version/build and source fingerprint.",
+      "projection": "Block types, record types and field ID/identifier-kind/wire-type triples. Exclude occurrences, byte totals and coverage percentages from drift decisions.",
+      "interpretation": "Candidate differences only. Type presence/absence can vary with normal activity. Counts and presence changes do not prove a format change.",
+      "incomplete": "Any issues, issue_counts, unverified/undecodable blocks, invalid totals, unknown types or empty observations block acceptance.",
+      "scope": "Structural compatibility cannot establish account ownership or complete mail/calendar semantics."
+    },
+    "operational_path": {
+      "install": "After reviewed merge and #2050 source integration, orchestrator provisions an explicit private state directory and reviewed observer SHA-256. No LaunchAgent/config is installed here.",
+      "check": "python3 ops/outlook-version-tripwire.py check --app \"$APP\" --home \"$HOME_ROOT\" --state \"$PRIVATE_STATE\" --observer \"$OBSERVER\" --observer-sha256 \"$REVIEWED_SHA256\"",
+      "review": "Inspect private alerts and observation receipts. Research unsupported classes without granting coverage. Do not reattempt an interrupted effect without reconciling its receipt.",
+      "accept": "Use the same arguments with accept only after structural review. Unknown or incomplete observations cannot be accepted.",
+      "gate": "Use the same arguments with gate to verify acceptance; #2050 must call the Python source boundary inside the intake process, not rely on this external command.",
+      "scheduler": "Orchestrator may design/install scheduling separately after reviewed source merge; this desk does not enable jobs.",
+      "exit_codes": "check exits 3 until acceptance, including complete observations awaiting review. Accepted check/gate/accept exit 0. Rejected input or failed operation exits 2 with fixed stderr."
+    },
+    "tests": "python3 ops/outlook-version-tripwire-selftest.py",
+    "limitations": [
+      "No real Outlook bundle/store, installed helper or decoder was inspected or run in this desk.",
+      "No full mapping, live account safety, runtime hook integration, alert delivery or scheduler installation is claimed.",
+      "Versions with novel or unresolved classes remain blocked until source evidence and the atlas are reviewed.",
+      "Crash recovery refuses ambiguous operations; reconciliation is an operator task, not an automatic new snapshot.",
+      "Reviewed observer binary/source correspondence must be established by the release owner; hashing the binary binds bytes but does not prove how it was built."
+    ]
   }
 }

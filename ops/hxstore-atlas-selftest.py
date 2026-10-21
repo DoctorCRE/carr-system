@@ -86,6 +86,23 @@ class AtlasContractTests(unittest.TestCase):
             return subprocess.run([sys.executable, str(ROOT / "ops/hxstore-atlas.py"), command, str(path)],
                                   capture_output=True, text=True, timeout=10)
 
+    def test_versioned_scope_requires_rules_settings_and_explicit_unknowns(self):
+        self.atlas['versioned_map'] = {'schema': 'outlook-local-map-scope/v1', 'families': {}}
+        result = self.run_cli(self.atlas)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+
+    def test_unresolved_classes_cannot_acquire_unsupported_ownership_or_names(self):
+        for field, value in [('confidence', 'proven'), ('semantic_name', 'Event'),
+                             ('wire_property_ids', [7]), ('account_owner_relation', 'Account'),
+                             ('event_owner_relation', 'Event')]:
+            with self.subTest(field=field):
+                atlas = json.loads(ATLAS.read_text())
+                atlas['versioned_map']['unknown_record_types'][0][field] = value
+                result = self.run_cli(atlas)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+
     def test_reference_changes_when_atlas_name_changes(self):
         field = next(e for e in self.atlas["entries"] if e.get("decoder_key") == "ItemClass")
         field["name"] = "Example renamed class"

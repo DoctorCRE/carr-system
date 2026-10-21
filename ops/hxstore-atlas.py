@@ -47,10 +47,48 @@ def validate_hypotheses(hypotheses):
     return hypotheses
 
 
+LOCAL_FAMILIES = {'mail', 'calendar_events', 'calendar_recurrence', 'calendar_attendees_responses',
+                  'contacts', 'folders', 'flags_categories', 'attachments', 'accounts', 'rules', 'settings'}
+
+
+def validate_versioned_map(scope, entries):
+    if scope['schema'] != 'outlook-local-map-scope/v1' or set(scope['families']) != LOCAL_FAMILIES:
+        raise ValueError('incomplete local map scope')
+    ids = {entry['id'] for entry in entries}
+    for family in scope['families'].values():
+        if (family['status'] not in {'partial', 'unknown'} or not family['limitation']
+                or not isinstance(family['atlas_entries'], list)
+                or any(ref not in ids for ref in family['atlas_entries'])
+                or family['status'] == 'unknown' and family['atlas_entries']):
+            raise ValueError('unsupported local family coverage')
+    for pin in scope['dependency_pins'].values():
+        if not re.fullmatch(r'[0-9a-f]{40}', pin):
+            raise ValueError('unbound map dependency')
+    unknown = scope['unknown_record_types']
+    if {row['record_type'] for row in unknown} != {f'object.class.{c}' for c in ('016a', '00f7', '0071', '0105')}:
+        raise ValueError('missing explicit unknown classes')
+    for row in unknown:
+        if (row['confidence'] != 'UNKNOWN' or row['evidence_level'] != 'U'
+                or any(row[k] is not None for k in ('semantic_name', 'wire_property_ids',
+                                                    'account_owner_relation', 'event_owner_relation'))):
+            raise ValueError('unsupported unknown class meaning')
+    research = scope['reusable_research']
+    if not re.fullmatch(r'[0-9a-f]{64}', research['study_sha256']) or research['study_claim_count'] != 19:
+        raise ValueError('unbound research evidence')
+    for claim in research['claims']:
+        if not claim['evidence_level'] or not claim['limits'] or not claim['sources']:
+            raise ValueError('unsupported research claim')
+        for source in claim['sources']:
+            if not re.fullmatch(r'[0-9a-f]{40}', source['revision']) or not source['path'] or not source['url']:
+                raise ValueError('unbound research source')
+
+
 def validate(atlas):
     if atlas["schema"] != SCHEMA:
         raise ValueError("unsupported store atlas schema")
     validate_hypotheses(atlas.get("decode_hypotheses", []))
+    if "versioned_map" in atlas:
+        validate_versioned_map(atlas["versioned_map"], atlas["entries"])
     sources = atlas["sources"]
     for source in sources.values():
         if not re.fullmatch(r"[0-9a-f]{40}", source["revision"]) or not re.fullmatch(r"[0-9a-f]{64}", source["sha256"]):

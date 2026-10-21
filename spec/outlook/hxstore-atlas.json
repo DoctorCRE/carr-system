@@ -1925,5 +1925,345 @@
       "first_seen_version": null,
       "notes": "No numeric property-ID framing established by the pinned reader. Offsets and selectors above are not property IDs."
     }
-  ]
+  ],
+  "versioned_map": {
+    "schema": "outlook-local-map-scope/v1",
+    "work_request": "WR-000468",
+    "criterion": "S3",
+    "outlook_version": null,
+    "coverage_claim": "partial_source_catalog_no_real_store_measurement",
+    "families": {
+      "mail": {
+        "status": "partial",
+        "atlas_entries": [
+          "mail"
+        ],
+        "limitation": "Anchor and heuristic selectors only. Numeric field IDs and ownership are unresolved."
+      },
+      "calendar_events": {
+        "status": "partial",
+        "atlas_entries": [
+          "object.class.006b"
+        ],
+        "limitation": "Inferred calendar class and source selectors. Class also includes non-event working-hours data."
+      },
+      "calendar_recurrence": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "No supported recurrence mapping in the pinned atlas."
+      },
+      "calendar_attendees_responses": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "No supported attendee, response, organizer or owning-account relation in the pinned atlas."
+      },
+      "contacts": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "No supported local contact field map in the pinned atlas."
+      },
+      "folders": {
+        "status": "partial",
+        "atlas_entries": [
+          "object.class.004d",
+          "object.class.004f"
+        ],
+        "limitation": "Typed folder reference framing is inferred; it does not establish mailbox account ownership."
+      },
+      "flags_categories": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "No supported local flag/category map in the pinned atlas."
+      },
+      "attachments": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "Public source hints are not validated local attachment ownership or safe sidecar access."
+      },
+      "accounts": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "No authoritative account ownership relation. Global merges cannot establish ownership."
+      },
+      "rules": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "Local storage presence and mapping unknown. Full server-side rules are not assumed to exist in HxStore."
+      },
+      "settings": {
+        "status": "unknown",
+        "atlas_entries": [],
+        "limitation": "Local settings presence and mapping unknown. Profile preferences are not evidence read by this tool."
+      }
+    },
+    "dependency_pins": {
+      "pr2044": "714efd974edc5dab6048c768e1cf0f37d33bab08",
+      "pr2045": "039a4d058daf643e99405dedf1faa83c7fafd1a3",
+      "pr2047": "54d3c06ea126f35a506e7b94abe283edeba70399",
+      "pr2049_contract": "25eb99f4c9f8a2ae171c8ccff66946c1ccc8f6c3",
+      "pr2049_stack_base": "b0a33ccc47a9a6b75dd94df5264307087e52aece"
+    },
+    "unknown_record_types": [
+      {
+        "record_type": "object.class.016a",
+        "semantic_name": null,
+        "wire_property_ids": null,
+        "account_owner_relation": null,
+        "event_owner_relation": null,
+        "evidence_level": "U",
+        "confidence": "UNKNOWN",
+        "source_ref": "unknown_evidence_sources",
+        "study_pointer": "/unknown_record_types/0"
+      },
+      {
+        "record_type": "object.class.00f7",
+        "semantic_name": null,
+        "wire_property_ids": null,
+        "account_owner_relation": null,
+        "event_owner_relation": null,
+        "evidence_level": "U",
+        "confidence": "UNKNOWN",
+        "source_ref": "unknown_evidence_sources",
+        "study_pointer": "/unknown_record_types/1"
+      },
+      {
+        "record_type": "object.class.0071",
+        "semantic_name": null,
+        "wire_property_ids": null,
+        "account_owner_relation": null,
+        "event_owner_relation": null,
+        "evidence_level": "U",
+        "confidence": "UNKNOWN",
+        "source_ref": "unknown_evidence_sources",
+        "study_pointer": "/unknown_record_types/2"
+      },
+      {
+        "record_type": "object.class.0105",
+        "semantic_name": null,
+        "wire_property_ids": null,
+        "account_owner_relation": null,
+        "event_owner_relation": null,
+        "evidence_level": "U",
+        "confidence": "UNKNOWN",
+        "source_ref": "unknown_evidence_sources",
+        "study_pointer": "/unknown_record_types/3"
+      }
+    ],
+    "reusable_research": {
+      "study_schema": "hxstore-public-security-study/v1",
+      "study_sha256": "54e17d4b189292c6e6a582bf2d19d0f8e273785e6db3f8874ed30d47a63f6d78",
+      "study_claim_count": 19,
+      "evidence_levels": {
+        "S": "Static implementation inspected by prior security study at exact revision; semantics not thereby proven.",
+        "T": "Synthetic behavior or arithmetic reproduced by the prior security study. Not rerun in this desk.",
+        "O": "Upstream claimed observation, not independently reproduced against a real store.",
+        "R": "PR2050 hash-bound recorded observation; not rerun here.",
+        "U": "Unknown; no inferred semantic or ownership relation."
+      },
+      "credited_revisions": {
+        "ukd1": "191b54e42757687806202f8f696e9066f0514e11",
+        "mitchell_johnson": "494723b060920c6ef78c9486b6a15a1354834dee",
+        "securized_ancestor": "804efb5f6936122b29a67e2c3836a1ce0efa3a8d"
+      },
+      "license": "MIT; retain copyright and permission notices with substantial reuse. This change copies no decoder code.",
+      "claims": [
+        {
+          "id": "block.header",
+          "evidence_level": "S",
+          "sources": [
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/block.rs",
+              "lines": [
+                16,
+                24
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/block.rs#L16-L24"
+            },
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/block.rs",
+              "lines": [
+                54,
+                94
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/block.rs#L54-L94"
+            }
+          ],
+          "limits": "Source contract. No real block coverage reproduced."
+        },
+        {
+          "id": "block.crc_ranges",
+          "evidence_level": "S+T",
+          "sources": [
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/block.rs",
+              "lines": [
+                73,
+                94
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/block.rs#L73-L94"
+            },
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/block.rs",
+              "lines": [
+                109,
+                129
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/block.rs#L109-L129"
+            }
+          ],
+          "limits": "Synthetic arithmetic confirms reserved +32..39 is covered by body CRC, not header CRC. SPEC.md:128,704 and article incorrectly say header CRC covers it. CRC is not ownership or cryptographic authenticity."
+        },
+        {
+          "id": "python_container_conflict",
+          "evidence_level": "S+T",
+          "sources": [
+            {
+              "repository": "mitchell-johnson/hxstore-decode",
+              "revision": "494723b060920c6ef78c9486b6a15a1354834dee",
+              "path": "src/hxdecode/parser.py",
+              "lines": [
+                66,
+                95
+              ],
+              "url": "https://github.com/mitchell-johnson/hxstore-decode/blob/494723b060920c6ef78c9486b6a15a1354834dee/src/hxdecode/parser.py#L66-L95"
+            },
+            {
+              "repository": "mitchell-johnson/hxstore-decode",
+              "revision": "494723b060920c6ef78c9486b6a15a1354834dee",
+              "path": "src/hxdecode/parser.py",
+              "lines": [
+                347,
+                374
+              ],
+              "url": "https://github.com/mitchell-johnson/hxstore-decode/blob/494723b060920c6ef78c9486b6a15a1354834dee/src/hxdecode/parser.py#L347-L374"
+            },
+            {
+              "repository": "mitchell-johnson/hxstore-decode",
+              "revision": "494723b060920c6ef78c9486b6a15a1354834dee",
+              "path": "src/hxdecode/decompress.py",
+              "lines": [
+                24,
+                60
+              ],
+              "url": "https://github.com/mitchell-johnson/hxstore-decode/blob/494723b060920c6ef78c9486b6a15a1354834dee/src/hxdecode/decompress.py#L24-L60"
+            },
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/block.rs",
+              "lines": [
+                16,
+                24
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/block.rs#L16-L24"
+            }
+          ],
+          "limits": "Synthetic CRC-block fixture proves model mismatch, not that every possible historical HxStore variant uses the Rust layout."
+        },
+        {
+          "id": "serialized_envelope",
+          "evidence_level": "S+O",
+          "sources": [
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/folder.rs",
+              "lines": [
+                37,
+                61
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/folder.rs#L37-L61"
+            },
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "SPEC.md",
+              "lines": [
+                632,
+                678
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/SPEC.md#L632-L678"
+            }
+          ],
+          "limits": "Supported observations, not a general property-ID decoder. Offsets relative to envelope except where object is named."
+        },
+        {
+          "id": "timestamp_encoding",
+          "value": {
+            "epoch": "0001-01-01",
+            "unit_nanoseconds": 100,
+            "unix_epoch_ticks": 621355968000000000,
+            "integer_unix_seconds": "(ticks - 621355968000000000) / 10000000"
+          },
+          "evidence_level": "S+T",
+          "sources": [
+            {
+              "repository": "ukd1/hxstore-reverse-engineering",
+              "revision": "191b54e42757687806202f8f696e9066f0514e11",
+              "path": "hxprobe/src/record.rs",
+              "lines": [
+                77,
+                98
+              ],
+              "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/record.rs#L77-L98"
+            },
+            {
+              "repository": "mitchell-johnson/hxstore-decode",
+              "revision": "494723b060920c6ef78c9486b6a15a1354834dee",
+              "path": "src/hxdecode/extract.py",
+              "lines": [
+                405,
+                456
+              ],
+              "url": "https://github.com/mitchell-johnson/hxstore-decode/blob/494723b060920c6ef78c9486b6a15a1354834dee/src/hxdecode/extract.py#L405-L456"
+            }
+          ],
+          "limits": "Encoding arithmetic and published example reproduced. Decoder assumes UTC. Earliest-tick send-time inference is not a general schema guarantee.",
+          "name": ".NET DateTime tick arithmetic"
+        }
+      ],
+      "limitations": "Prior review evidence reused with exact source pointers. No third-party installation, execution, dependency audit, real-store observation or new semantic confirmation.",
+      "evidence_origin": "Prior security-study-result.json; evidence levels describe that study, not execution in this desk."
+    },
+    "unknown_evidence_sources": [
+      {
+        "repository": "jbookout/carr-system",
+        "revision": "54d3c06ea126f35a506e7b94abe283edeba70399",
+        "path": "vendor/hxprobe/src/observe.rs",
+        "lines": [
+          187,
+          214
+        ],
+        "url": "https://github.com/jbookout/carr-system/blob/54d3c06ea126f35a506e7b94abe283edeba70399/vendor/hxprobe/src/observe.rs#L187-L214"
+      },
+      {
+        "repository": "ukd1/hxstore-reverse-engineering",
+        "revision": "191b54e42757687806202f8f696e9066f0514e11",
+        "path": "hxprobe/src/folder.rs",
+        "lines": [
+          116,
+          240
+        ],
+        "url": "https://github.com/ukd1/hxstore-reverse-engineering/blob/191b54e42757687806202f8f696e9066f0514e11/hxprobe/src/folder.rs#L116-L240"
+      },
+      {
+        "repository": "mitchell-johnson/hxstore-decode",
+        "revision": "494723b060920c6ef78c9486b6a15a1354834dee",
+        "path": "HXSTORE.md",
+        "lines": [
+          767,
+          784
+        ],
+        "url": "https://github.com/mitchell-johnson/hxstore-decode/blob/494723b060920c6ef78c9486b6a15a1354834dee/HXSTORE.md#L767-L784"
+      }
+    ]
+  }
 }
