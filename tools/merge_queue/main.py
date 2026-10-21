@@ -23,10 +23,12 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'ops'))
+sys.path.insert(0, str(ROOT / 'tools'))
 sys.path.insert(0, str(ROOT / 'tools/room-bridge'))
 sys.path.insert(0, str(ROOT))
 from work_queue import WorkQueue, QueueChanged, default_path
 from git_env import scrubbed_env
+from regen import REGENERATED_OUTPUTS
 from lib.carr_paths import canonical_checkout
 from lib.secret_redaction import redacted_tail, sensitive_env_values
 from lib.github_rate_limit import GitHubReadBudget, GitHubReadPaused, GitHubBudgetLockTimeout, resource_for, split_response
@@ -669,7 +671,7 @@ class Queue:
     def conflict(self, repo, p):
         n, head = p['number'], p['head']['sha']
         self.fetch(repo, head)
-        base = p['base']['sha']
+        base = self.git(repo, 'rev-parse', 'origin/main').strip() if p['base']['ref'] == 'main' else p['base']['sha']
         self.fetch(repo, base)
         d = self.state / 'repos' / (repo.split('/')[-1] + '.git')
         merge = subprocess.run(['git', '-C', str(d), 'merge-tree', '--write-tree', '--name-only',
@@ -682,6 +684,10 @@ class Queue:
         files = files[:files.index('')] if '' in files else files
         if not files:
             raise RuntimeError('conflicting-files readback empty')
+        if repo == REPOS[0]:
+            files = [path for path in files if path not in REGENERATED_OUTPUTS]
+        if not files:
+            return False
         brief_dir = self.root / 'out/orch/queue/codex'
         brief_dir.mkdir(parents=True, exist_ok=True)
         brief = brief_dir / f"merge-conflict-{repo.split('/')[-1]}-{n}-{head}.txt"
@@ -698,7 +704,7 @@ class Queue:
             self.db.execute('INSERT OR IGNORE INTO actions(key,kind,repo,pr,head,payload) VALUES(?,?,?,?,?,?)',
                             (key, 'dispatch', repo, n, head, str(brief)))
             self.event(repo, n, 'conflict', f'Fix brief {brief}; files: {", ".join(files)}')
-        return True
+        return files
 
     def dispatch_conflicts(self):
         with self.runner_lock():
@@ -1141,18 +1147,17 @@ class Queue:
                     return False
                 return True
             head = p['head']['sha']
-            if p.get('mergeable') is False or p['mergeable_state'] == 'dirty':
-                if not self.conflict(repo, p):
-                    if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub conflict result is stale; waiting for recomputation'):
-                        return True
+            conflicting = p.get('mergeable') is False or p['mergeable_state'] == 'dirty'
+            if conflicting:
+                files = self.conflict(repo, p)
+                if files:
+                    self.report(e, 'conflict', f'Conflicts require review: {", ".join(files)}', 'conflict')
                     return False
-                self.report(e, 'conflict', f'Conflict brief filed for {head}', 'conflict')
-                return False
             if self.behind(repo, p) and p.get('mergeable') is True:
                 self.action('update', repo, n, head, 'main')
                 self.report(e, 'updating', f'Waiting for clean update of {head}')
                 return True
-            if p['mergeable_state'] == 'unknown' or p.get('mergeable') is None:
+            if not conflicting and (p['mergeable_state'] == 'unknown' or p.get('mergeable') is None):
                 if self.wait(e, 'mergeability', 'waiting_mergeability', 'GitHub mergeability is unknown'):
                     return True
                 return False
