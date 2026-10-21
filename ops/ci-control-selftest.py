@@ -403,7 +403,7 @@ class Controls(unittest.TestCase):
         for shaped_run, shaped_job in (
                 (run, {**job, 'name':'other'}),
                 (run, {**job, 'name':'test'}),
-                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'test'}),
+                ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'preview'}),
                 ({**run, 'name':'CI', 'path':'.github/workflows/ci.yml'}, {**job, 'name':'ops/ci.sh --strict --only gates'}),
                 ({**run, 'path':'.github/workflows/other.yml'}, job)):
             with self.subTest(run=shaped_run['path'], job=shaped_job['name']), self.assertRaises(mod.Refusal):
@@ -436,6 +436,22 @@ class Controls(unittest.TestCase):
         remote.snapshot.return_value = (run, job, pr)
         mod.rerun(remote, 123, 456, None, policy, lambda g: mod.hosted_checks(remote, g), dispatch)
         dispatch.assert_called_once_with(123, 456, 1, head)
+
+    def test_rerun_app_ci_test_job(self):
+        mod = load('ci-rerun')
+        repo, head = 'jbookout/doctorcre-app', 'b'*40
+        run = {'id':123, 'name':'CI', 'path':'.github/workflows/ci.yml', 'event':'pull_request',
+               'status':'completed', 'conclusion':'failure', 'head_sha':head, 'run_attempt':1}
+        job = {'id':456, 'run_id':123, 'name':'test', 'status':'completed', 'conclusion':'failure'}
+        pr = {'state':'open', 'head':{'sha':head}}
+        self.assertEqual(mod.admit(run, job, pr, head, repo), {'head':head, 'job':'test'})
+        for shaped_run, shaped_job, shaped_repo in (
+                (run, {**job, 'name':'preview'}, repo),
+                ({**run, 'path':'.github/workflows/other.yml'}, job, repo),
+                (run, job, 'jbookout/software-factory')):
+            with self.subTest(run=shaped_run['path'], job=shaped_job['name'], repo=shaped_repo), \
+                    self.assertRaises(mod.Refusal):
+                mod.admit(shaped_run, shaped_job, pr, head, shaped_repo)
 
     def test_rerun_unknown_repository_refused_before_validation(self):
         mod = load('ci-rerun')
