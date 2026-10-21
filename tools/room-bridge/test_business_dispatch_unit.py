@@ -137,6 +137,57 @@ class BusinessDispatchTests(unittest.TestCase):
                         self.assertIn(reason, json.dumps(item))
                         execute.assert_not_called()
 
+    def codex_business(self):
+        self.reg.register('codex', 'codex-session', posture='record-layer',
+                          model='gpt-6.1-sol', effort='medium')
+        catalog = self.root / 'models_cache.json'
+        catalog.write_text(json.dumps({'models': [{'slug': 'gpt-6.1-sol'}]}))
+        return patch.dict(os.environ, {'CODEX_HOME': str(self.root),
+                          'CODEX_API_KEY': 'synthetic', 'CARR_MCP_TOKEN': 'synthetic'})
+
+    def test_codex_is_selected_in_the_existing_routing_order(self):
+        with self.codex_business():
+            result = self.send(['send', 'business', 'Draft for someone@example.test.',
+                                '--brief', 'business', '--card-id', 'codex-isolation'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        route = self.route('codex-isolation')
+        self.assertEqual(route['chosen'], 'codex')
+        self.assertEqual([r['desk'] for r in route['skips']], ['hermes-nous', 'grok-cli'])
+
+    def test_queued_codex_canary_failure_is_terminal_without_rerouting(self):
+        with self.codex_business():
+            result = self.send(['send', 'business', 'Draft for someone@example.test.',
+                                '--brief', 'business', '--card-id', 'codex-worker'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with WorkQueue(self.db) as q, patch.object(dispatch, '_run_headless_process',
+                    return_value=subprocess.CompletedProcess([], 0,
+                        '{"file_write":"denied","network":"allowed"}', '')) as run:
+                claim = q.claim(eligible_desks={'codex'}, actor='runner', owner={})
+                work_runner.worker(q, 'codex-worker', claim['claim'], self.reg.path, self.results)
+                item = q.get('codex-worker')
+                self.assertEqual(item['stage'], 'failed')
+                self.assertIn('record_layer_canary_failed', json.dumps(item))
+                self.assertIn('network canary', json.dumps(item))
+                self.assertIsNone(q.claim(eligible_desks={'codex', 'biz-desk'}, actor='runner', owner={}))
+                self.assertEqual(run.call_count, 1)
+                self.assertEqual(run.call_args.args[0][1], 'sandbox')
+                self.assertEqual(self.route('codex-worker')['chosen'], 'codex')
+
+    def test_codex_worker_rechecks_provider_availability_after_enqueue(self):
+        with self.codex_business():
+            result = self.send(['send', 'business', 'Synthetic.', '--brief', 'business',
+                                '--card-id', 'codex-limited'])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.results.write_text(json.dumps({'kind': 'codex-session', 'status': 'quota_exhausted'}) + '\n')
+            with WorkQueue(self.db) as q, patch.object(dispatch, '_run_headless_process') as run:
+                claim = q.claim(eligible_desks={'codex'}, actor='runner', owner={})
+                work_runner.worker(q, 'codex-limited', claim['claim'], self.reg.path, self.results)
+                item = q.get('codex-limited')
+                self.assertEqual(item['stage'], 'failed')
+                self.assertIn('business_desk_unavailable', json.dumps(item))
+                self.assertIn('quota_exhausted', json.dumps(item))
+                run.assert_not_called()
+
     def test_business_footer_passes_the_phrasing_lint(self):
         self.assertEqual(dispatch._phrasing_hint((HERE / 'business-brief-footer.md').read_text()), '')
 
@@ -237,7 +288,7 @@ class BusinessDispatchTests(unittest.TestCase):
             target = dispatch.nous_budget.Ledger if kind == 'hermes-nous' else dispatch.claude_api_wire.Ledger
             with patch.object(target, 'read', return_value=state), patch.object(
                     dispatch.seat_gate, 'check', side_effect=lambda e: ('cap', 'cap')
-                    if kind == 'claude-desktop' and e['name'] == 'nous' else None):
+                    if e['name'] == 'codex' or kind == 'claude-desktop' and e['name'] == 'nous' else None):
                 result = self.send(['send', 'business', 'Read.', '--brief', 'business', '--card-id', card])
             route = self.route(card)
             if kind == 'hermes-nous':
