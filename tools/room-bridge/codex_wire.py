@@ -278,6 +278,9 @@ def archive_finished_thread(thread_id: str, *, before: float, process_probe,
             raise RuntimeError('native archive readback unavailable')
         return {**result, 'status': 'archived', 'reason': 'native thread/archive read back',
                 'descendants_checked': len(descendants)}
+    except TimeoutError:
+        return {**result, 'status': 'deferred', 'budget_exhausted': True,
+                'reason': 'Codex archive deadline exhausted; read back before retry'}
     except Exception as exc:
         return {**result, 'reason': 'Codex archive evidence unavailable or request failed',
                 'error': type(exc).__name__}

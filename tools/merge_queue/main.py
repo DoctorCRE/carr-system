@@ -124,6 +124,10 @@ def command(argv, *, cwd=None, data=None, timeout=None, observe=None, diagnostic
     if observe is not None:
         observe(p)
     checks_result = argv[:3] == ['gh', 'pr', 'checks'] and p.returncode in (1, 8) and bool(p.stdout.strip())
+    if (argv[:3] == ['gh', 'pr', 'checks'] and '--required' in argv and p.returncode == 1
+            and not p.stdout.strip() and 'no required checks reported' in p.stderr):
+        # Required checks that have not reported yet are pending, not a failed read.
+        return '[]'
     if p.returncode and not checks_result:
         stderr = '; stderr tail: ' + (redacted_tail(p.stderr, known_secrets=sensitive_env_values(os.environ)).strip() or '(empty)') if diagnostics else ''
         if argv[:3] == ['gh', 'pr', 'merge'] and 'GraphQL:' in p.stderr and any(

@@ -216,9 +216,8 @@ test("HERMES-CASE-007 — humanOnly verbs refuse on a machine actor", () => {
 // ---------- HERMES-CASE-008/009: no channels, no scheduler ----------
 
 test("HERMES-CASE-008/009 — message delivery and scheduling are absent", () => {
-  // There is no send verb in this system at all (one human gate: Claude drafts,
-  // Joe sends) and no scheduler verb. Absence is the control; this asserts the
-  // absence rather than assuming it.
+  // The hermes profile has no message-delivery verb and no scheduler verb.
+  // Absence is the control; this asserts the absence rather than assuming it.
   for (const verb of ["channel.send", "cron.create", "send-message", "schedule-task"]) {
     assert.equal(allowedIn("hermes", verb, WRITE), false, `${verb} must not be reachable`);
   }
