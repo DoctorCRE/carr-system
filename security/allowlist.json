@@ -232,6 +232,18 @@
       "sha256": "7669221ae4871f570e53b9cdffab9ed878692658da93cca3af0e96f9b41af110",
       "rule": "pii-email",
       "reason": "Public example addresses in source comments from ukd1/hxstore-reverse-engineering commit 191b54e42757687806202f8f696e9066f0514e11, retained only for the byte-verbatim import commit. Final source comments use example.test. This qualification binds only this path and the exact upstream blob; no client data or private store was used."
+    },
+    {
+      "path": "ops/outlook-intake-account-qualification.py",
+      "sha256": "41f8527b745a14fcc8b10c58afd783ea76a3182240f7e4249583ee6ad90d302a",
+      "rule": "pii-email",
+      "reason": "The PR2050 assignment explicitly requires the owning-account and tester identities in otherwise synthetic offline fixtures. No client data. This qualification binds only these reviewed bytes and this detector."
+    },
+    {
+      "path": "audits/pr2050-account-qualification.json",
+      "sha256": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe",
+      "rule": "pii-email",
+      "reason": "The PR2050 assignment explicitly requires the owning-account and tester identities in otherwise synthetic offline fixtures. No client data. This qualification binds only these reviewed bytes and this detector."
     }
   ]
 }
