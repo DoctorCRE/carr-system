@@ -741,6 +741,38 @@ class LegacyHealthPromotion(Base):
         self.assertEqual(self.fx.slice_marks, [])
         self.assertEqual([r['status'] for r in pipe.store.records()], ['failed', 'live_identity_reconciled'])
 
+    def test_legacy_display_requires_the_immediate_deploy_executable(self):
+        prefixes = ('$ (cd /fixture) echo ', '$ (cd /fixture) /bin/echo ',
+                    '$ (cd /fixture) env ', '$ (cd /fixture ',
+                    '$ (cd relative) ', '$ unsupported ', '')
+        for name in ('11-upload.log', '13-promote.log'):
+            for prefix in prefixes:
+                with self.subTest(receipt=name, prefix=prefix):
+                    pipe, state, row, runner, main = self.legacy()
+                    path = pipe.store.root / 'runs' / row['run_id'] / name
+                    first, rest = path.read_text().split('\n', 1)
+                    path.write_text(prefix + first.removeprefix('$ ') + '\n' + rest)
+                    before, records = pipe.store.load(), pipe.store.records()
+                    with self.assertRaises(rp.Blocked):
+                        pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+                    self.assertEqual(state, before)
+                    self.assertEqual(pipe.store.load(), before)
+                    self.assertEqual(pipe.store.records(), records)
+                    self.assertEqual(runner.calls, [])
+                    self.assertEqual(self.fx.slice_marks, [])
+
+    def test_legacy_runner_wrapper_preserves_literal_cwd_spaces_and_quotes(self):
+        for cwd in ('/fixture', '/fixture with spaces', "/fixture's path"):
+            with self.subTest(cwd=cwd):
+                pipe, state, row, runner, main = self.legacy()
+                for name in ('11-upload.log', '13-promote.log'):
+                    path = pipe.store.root / 'runs' / row['run_id'] / name
+                    path.write_text(path.read_text().replace('$ ', f'$ (cd {cwd}) ', 1))
+                pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+                self.assertEqual(pipe.store.load()['worker']['last_released_sha'], row['sha'])
+                self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
+                self.assertEqual(runner.calls, [])
+
     def test_legacy_receipt_contradictions_and_missing_bindings_refuse(self):
         cases = ('promote provider', 'promote source', 'duplicate upload source',
                  'upload source output', 'missing upload source output',

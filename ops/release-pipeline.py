@@ -1519,9 +1519,12 @@ class Pipeline:
                                   ('13-promote.log', f'bin/deploy-worker.sh --promote-version {version}')):
                 raw = (self.store.root / 'runs' / run_id / name).read_bytes()
                 log = raw.decode('utf-8')
-                argv, expected = shlex.split(log.splitlines()[0]), shlex.split(command)
-                start = argv.index(expected[0])
-                if (argv[start:start + len(expected)] != expected
+                display = re.fullmatch(r'\$ (?:\(cd /[^()\r\n]*\) )?(bin/deploy-worker\.sh .+)',
+                                       log.splitlines()[0])
+                if display is None:
+                    raise ValueError('unsupported provider command display')
+                argv, expected = shlex.split(display[1]), shlex.split(command)
+                if (argv[:len(expected)] != expected
                         or argv.count(expected[0]) != 1
                         or not log.rstrip().endswith('[exit 0]') or log.count('[exit ') != 1):
                     raise ValueError('provider step not acknowledged')
