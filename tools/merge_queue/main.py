@@ -1372,6 +1372,83 @@ class Queue:
             self.reconcile_merged(e)
         return [dict(r) for r in bounded_items('snapshot', self.db.execute('SELECT * FROM entries ORDER BY id'))]
 
+    def recover_work_card(self, card_id, *, expected_revision, actor, reason):
+        """End stale card ownership, retaining all journal and per-pin facts."""
+        with self.runner_lock(), self.github_scope(f'recover-work-card:{card_id}'):
+            journal = sqlite3.connect(self.state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
+            try:
+                revision = journal.execute('PRAGMA data_version').fetchone()[0]
+
+                def verify(data):
+                    evidence = self._verify_recovery_effects(data)
+                    if self._verify_recovery_effects(data) != evidence:
+                        raise QueueChanged('provider or journal changed during recovery observation')
+                    # Fence local journal writers through the work-queue commit. GitHub
+                    # has no read transaction; two matching passes only bound observation.
+                    journal.execute('BEGIN IMMEDIATE')
+                    if journal.execute('PRAGMA data_version').fetchone()[0] != revision:
+                        raise QueueChanged('merge journal changed during recovery observation')
+                    return evidence
+
+                with WorkQueue(default_path()) as work:
+                    return work.recover_merge_run(card_id, expected_revision=expected_revision,
+                                                  verify_effects=verify, actor=actor, reason=reason)
+            finally:
+                journal.close()
+
+    def _verify_recovery_effects(self, data):
+        evidence = []
+        for pin in bounded_items('snapshot', data['prs']):
+            repo, n = pin['repo'], pin['number']
+            entries = [dict(e) for e in self.db.execute(
+                'SELECT * FROM entries WHERE repo=? AND pr=? ORDER BY id', (repo, n))]
+            actions = [dict(a) for a in self.db.execute(
+                'SELECT * FROM actions WHERE repo=? AND pr=? ORDER BY key', (repo, n))]
+            if not any(e['approved'] == pin['head'] for e in entries):
+                raise QueueChanged(f'missing pinned journal evidence for {repo}#{n}')
+            for e in bounded_items('snapshot', entries):
+                merged = (dict(repo=repo, number=n, head=e['approved']) in data.get('merge_receipts', [])
+                          and e['phase'] == 'done' and e['merged_commit'])
+                unissued = (e['phase'] in ('pending', 'done', 'blocked', 'exhausted', 'conflict', 'superseded', 'review')
+                            and e['tested'] is None and e['merge_attempts'] == 0 and e['merged_commit'] is None)
+                if not (merged or unissued):
+                    raise QueueChanged(f'unresolved merge journal entry {e["id"]}')
+            if any(a['phase'] != 'done' for a in bounded_items('snapshot', actions)):
+                raise QueueChanged(f'unresolved provider action for {repo}#{n}')
+            p = self.pr(repo, n)
+            if type(p.get('merged')) is not bool or p['number'] != n:
+                raise QueueChanged(f'incomplete provider truth for {repo}#{n}')
+            if p['head']['sha'] != pin['head']:
+                raise QueueChanged(f'provider head differs from pinned head for {repo}#{n}')
+            if p.get('merged') is True:
+                if (pin not in data.get('merge_receipts', [])
+                        or not any(e['merged_commit'] == p.get('merge_commit_sha') and e['merged_commit']
+                                   for e in entries)):
+                    raise QueueChanged(f'unconsumed provider merge for {repo}#{n}')
+            elif pin in data.get('merge_receipts', []):
+                raise QueueChanged(f'provider contradicts merge receipt for {repo}#{n}')
+            pending = p['state'] == 'open' and self.merge_pending(repo, n, p['head']['sha'])
+            if pending:
+                raise QueueChanged(f'provider still owns a merge for {repo}#{n}')
+            for a in bounded_items('snapshot', actions):
+                if a['kind'] == 'regen':
+                    try:
+                        receipt = json.loads(Path(a['receipt']).read_text())
+                    except (OSError, ValueError, TypeError):
+                        raise QueueChanged('regeneration receipt is unreadable') from None
+                    if receipt != dict(head=a['head'], main=a['payload'], prepared=pin['head'], branch=p['head']['ref']):
+                        raise QueueChanged('unconsumed regeneration effect')
+            evidence.append(dict(pin=pin,
+                                 entries=[{k: e[k] for k in ('id', 'approved', 'phase', 'tested', 'merged_commit', 'merge_attempts')}
+                                          for e in entries],
+                                 actions=[{k: a[k] for k in ('key', 'kind', 'phase', 'head', 'receipt')}
+                                          for a in actions],
+                                 provider=dict(head=p['head']['sha'], branch=p['head']['ref'],
+                                               base=p['base'], state=p['state'], merged=p['merged'],
+                                               merge_commit=p.get('merge_commit_sha'),
+                                               updated_at=p.get('updated_at'), pending=pending)))
+        return evidence
+
     def reconcile(self, entry, retry=False):
         with self.runner_lock(), self.github_scope(f'reconcile:{entry}'):
             self._reconcile(entry, retry)
@@ -1651,6 +1728,11 @@ def main():
     action_reconcile = sub.add_parser('reconcile-action')
     action_reconcile.add_argument('key')
     action_reconcile.add_argument('--retry', action='store_true')
+    recover = sub.add_parser('recover-work-card', help='release a blocked merge run after journal/provider checks')
+    recover.add_argument('card_id')
+    recover.add_argument('--expected-revision', type=int, required=True)
+    recover.add_argument('--actor', required=True)
+    recover.add_argument('--reason', required=True)
     installer = sub.add_parser('install-agent')
     installer.add_argument('--output', type=Path)
     installer.add_argument('--apply', action='store_true')
@@ -1693,6 +1775,9 @@ def main():
         q.reconcile(a.entry, a.retry)
     elif a.cmd == 'reconcile-action':
         q.reconcile_action(a.key, a.retry)
+    elif a.cmd == 'recover-work-card':
+        print(json.dumps(q.recover_work_card(a.card_id, expected_revision=a.expected_revision,
+                                            actor=a.actor, reason=a.reason), indent=2))
     else:
         print(json.dumps(q.status(), indent=2))
 
