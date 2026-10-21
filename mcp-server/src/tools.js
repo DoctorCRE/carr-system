@@ -2267,12 +2267,128 @@ function assertSingleOwner(owner) {
 
 
 async function lockDealField(c, dealId, field) {
-  // Same-field writers serialize; different fields deliberately use different
-  // advisory keys and can commit independently on the same deal.
+  // Phase changes can supersede the current plan. Acquire its locks before
+  // the phase lock, matching update-deal and preventing an inverted lock order.
+  if (field === "phase") {
+    await lockDealField(c, dealId, "next_date");
+    await lockDealField(c, dealId, "next_step");
+  }
   await c.query(
     "select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0)) /* dealroom:field-lock */",
     [dealId, field],
   );
+}
+
+async function appendDealNextStep(c, actor, dealId, text, nextDate, key) {
+  assertDealRoomField("next_date", nextDate, ToolError);
+  // The step also changes next_date. Take that cell's lock first so its
+  // field history cannot race a direct date edit or undo.
+  await lockDealField(c, dealId, "next_date");
+  await lockDealField(c, dealId, "next_step");
+  const oldDate = (await c.query("select next_date::text as next_date from deal where id=$1", [dealId])).rows[0]?.next_date ?? null;
+  const prior = await c.query(
+    "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
+    [dealId],
+  );
+  const note = await c.query(
+    "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
+    [dealId, text, actor.id],
+  );
+  await c.query(
+    "update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+    [dealId, nextDate, actor.id],
+  );
+  // The Deal Room's next step and the operating system's next action are
+  // one fact, not parallel lists. Each partner still keeps one ball of
+  // their own on the deal; replacing yours drops (does not complete) it.
+  await c.query(
+    `update next_action set status='dropped', updated_by=$1
+      where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open'
+      /* dealroom:drop-prior-action */`, [actor.id, dealId]);
+  const action = await c.query(
+    `insert into next_action (subject_type, subject_id, owner_id, due_on,
+                              description, created_by, updated_by, updated_at)
+     values ('deal',$1,$2,$3,$4,$2,$2,clock_timestamp()) returning id
+     /* dealroom:add-next-action */`,
+    [dealId, actor.id, nextDate, text]);
+  await writeEvent(c, actor, "set-next-step", "deal", dealId, {
+    field: "next_step",
+    old: { next_step: prior.rows[0]?.text ?? null },
+    new: { next_step: text, next_date: nextDate },
+    recorded_at_after_lock: true,
+    idempotency_key: key,
+  });
+  await writeEvent(c, actor, "set-next-step", "deal", dealId, {
+    field: "next_date",
+    old: { next_date: oldDate },
+    new: { next_date: nextDate },
+    recorded_at_after_lock: true,
+    idempotency_key: key,
+  });
+  return { ok: true, deal_id: dealId, next_step_id: note.rows[0].id,
+    next_action_id: action.rows[0].id,
+    supersedes: prior.rows[0]?.id ?? null, created_at: note.rows[0].created_at };
+}
+
+function dealNextStepStatus(step, date) {
+  const required = !step || !date;
+  return { next_step_required: required,
+    ...(required ? { prompt: "Doc needs the new next step and date for this deal. Use set-next-step to record both." } : {}) };
+}
+
+async function supersedeOverdueDealAction(c, actor, dealId, key, verb = "add-deal-note") {
+  const partner = partnerAuthoritySlugForActor(actor);
+  if (!partner) return {};
+  const ownerIds = [actor.id];
+  if (partner !== actor.slug) {
+    const sponsor = (await c.query("select id from actor where slug=$1", [partner])).rows[0];
+    if (sponsor) ownerIds.push(sponsor.id);
+  }
+  await lockDealField(c, dealId, "next_date");
+  await lockDealField(c, dealId, "next_step");
+  const current = (await c.query(
+    `select d.next_date::text as next_date, d.next_date < current_date as overdue, d.owner,
+            n.id as action_id, b.next_step
+       from deal d left join v_deal_room_board b on b.id=d.id left join lateral (
+         select id, description from next_action where subject_type='deal' and subject_id=d.id and status='open'
+          order by updated_at desc, id desc limit 1
+       ) n on true where d.id=$1 /* dealroom:status-plan */`, [dealId])).rows[0];
+  const dropped = (await c.query(
+    `update next_action set status='dropped', updated_by=$2
+      where subject_type='deal' and subject_id=$1 and owner_id=any($3::uuid[]) and status='open'
+        and ((id=$4 and $5::boolean) or (id is distinct from $4 and due_on < current_date))
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue */`, [dealId, actor.id, ownerIds, current.action_id, current.overdue])).rows;
+  const postCall = (await c.query(
+    `update capture_post_call_action set status='dropped', updated_at=clock_timestamp(), completed_at=null
+      where deal_id=$1 and owner_id=any($2::uuid[]) and status='open' and due_on < current_date
+      returning id, description, due_on::text as due_on /* dealroom:supersede-overdue-post-call */`,
+    [dealId, ownerIds])).rows;
+  const supersededIds = [...dropped, ...postCall].map(a => a.id);
+  if (supersededIds.length) await writeEvent(c, actor, verb, "deal", dealId, {
+    field: "next_action", old: { actions: [...dropped, ...postCall] },
+    new: { superseded_action_ids: supersededIds, status: "dropped" },
+    recorded_at_after_lock: true, idempotency_key: key,
+  });
+  const replacesCurrent = dropped.some(a => a.id === current.action_id) ||
+    (!current.action_id && current.overdue && current.owner === partner);
+  if (!replacesCurrent) return { ...dealNextStepStatus(current.next_step, current.next_date),
+    ...(supersededIds.length ? { superseded_action_ids: supersededIds,
+      superseded_post_call_action_ids: postCall.map(a => a.id) } : {}) };
+  const next = (await c.query(
+    `select description, due_on::text as due_on from next_action
+      where subject_type='deal' and subject_id=$1 and status='open'
+      order by updated_at desc, id desc limit 1 /* dealroom:remaining-plan */`, [dealId])).rows[0];
+  const nextDate = next?.due_on ?? null;
+  await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+    [dealId, nextDate, actor.id]);
+  for (const [field, before, after] of [["next_date", current.next_date, nextDate],
+    ["next_step", current.next_step, next?.description ?? null]])
+    await writeEvent(c, actor, verb, "deal", dealId, {
+      field, old: { [field]: before }, new: { [field]: after, superseded_action_ids: supersededIds },
+      recorded_at_after_lock: true, idempotency_key: key,
+    });
+  return { superseded_action_ids: supersededIds, superseded_post_call_action_ids: postCall.map(a => a.id),
+    ...dealNextStepStatus(next?.description, nextDate) };
 }
 
 async function latestFieldConflict(c, dealId, field, baseEventId) {
@@ -2394,7 +2510,10 @@ async function applyDealRoomField(c, actor, dealId, field, value, idempotencyKey
       where subject_type='deal' and subject_id=$1 and field=$2 and idempotency_key=$3
       order by recorded_at desc, id desc limit 1 /* dealroom:written-event */`,
     [dealId, field, idempotencyKey]))?.rows?.[0] || null;
+  const status = field === "phase" && oldRow.rows[0].value !== value
+    ? await supersedeOverdueDealAction(c, actor, dealId, idempotencyKey, verb) : {};
   return {
+    ...status,
     old_value: oldRow.rows[0].value,
     new_value: value,
     // Null when this write carried no key to find the row by. A client that gets
@@ -3401,7 +3520,8 @@ export const TOOLS = {
       // base", never as a base of null-meaning-anything.
       const deals = await c.query(
         `select b.id, b.name, b.type, b.phase, b.owner, b.attention,
-                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.market, b.segment,
+                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
+                (b.next_step is null or b.next_date is null) as next_step_required, b.market, b.segment,
                 b.client_id, b.client_ref, b.client_name, ce.client_status, ce.client_version,
                 ce.prospect_engagement_status, b.account_client_id, b.account_client_ref,
                 b.account_name, b.account_owner, b.market_agent,
@@ -3913,6 +4033,11 @@ export const TOOLS = {
       required: ["idempotency_key","ref","description"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "set-next-action", args, async () => {
       const s = await resolveSubject(c, args.ref);
+      if (s.type === "deal") {
+        assertDealRoomField("next_date", args.due_on || null, ToolError);
+        await lockDealField(c, s.id, "next_date");
+        await lockDealField(c, s.id, "next_step");
+      }
       const permitted = permittedActionOwnerSlugs(actor);
       const ownerSlug = args.owner === undefined || args.owner === null || args.owner === ""
         ? actor.slug : String(args.owner).trim().toLowerCase();
@@ -3926,6 +4051,8 @@ export const TOOLS = {
           hint: "the selected owner has no actor row" });
         ownerId = owner.rows[0].id;
       }
+      const superseded = s.type === "deal"
+        ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-action") : {};
       // [amendment 8] Replacing an unfinished ball used to record the old one as
       // 'done'. It wasn't done — it was superseded. No-fabrication applies to
       // metadata too, and 'done' would inflate any completion measure built on this.
@@ -3938,9 +4065,12 @@ export const TOOLS = {
           where deal_id=$1 and owner_id=$2 and status='open'
           returning id,description /* capture:replace-post-call-actions */`,
         [s.id, ownerId])).rows : [];
+      const droppedPostCallIds = [...(superseded.superseded_post_call_action_ids || []), ...droppedPostCall.map(x => x.id)];
+      const oldDate = s.type === "deal" ? (await c.query(
+        "select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null : null;
       const r = await c.query(
-        `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by)
-         values ($1,$2,$3,$4,$5,$6) returning id`,
+        `insert into next_action (subject_type, subject_id, owner_id, due_on, description, created_by, updated_at)
+         values ($1,$2,$3,$4,$5,$6,clock_timestamp()) returning id`,
         [s.type, s.id, ownerId, args.due_on || null, args.description, actor.id]);
       await writeEvent(c, actor, "set-next-action", s.type, s.id,
         { old: droppedPostCall.length ? { post_call_actions: droppedPostCall.map(x =>
@@ -3948,10 +4078,18 @@ export const TOOLS = {
           new: { summary: `ball → ${ownerSlug}: ${args.description}`,
             next_action: args.description, due: args.due_on, owner: ownerSlug,
             set_by: actor.slug,
-            dropped_post_call_action_ids: droppedPostCall.map(x => x.id) },
+            dropped_post_call_action_ids: droppedPostCallIds },
           idempotency_key: args.idempotency_key });
+      if (s.type === "deal") {
+        await c.query("update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
+          [s.id, args.due_on || null, actor.id]);
+        await writeEvent(c, actor, "set-next-action", "deal", s.id, {
+          field: "next_date", old: { next_date: oldDate }, new: { next_date: args.due_on || null },
+          recorded_at_after_lock: true, idempotency_key: args.idempotency_key,
+        });
+      }
       return { ok: true, next_action_id: r.rows[0].id, subject: s, owner: ownerSlug,
-        dropped_post_call_action_ids: droppedPostCall.map(x => x.id) };
+        dropped_post_call_action_ids: droppedPostCallIds };
     }),
   },
 
@@ -4105,7 +4243,7 @@ export const TOOLS = {
 
   "update-deal": {
     write: true,
-    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder). invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
+    description: "Field-level change to a deal (deal_type, phase, segment, outcome, notes_path, salesforce_id, city, lane, invoiced_on, sf_close_date_placeholder). A changed partner phase or outcome supersedes that partner's overdue action and returns any next-step/date gap. invoiced_on (YYYY-MM-DD) marks the deal invoiced, which takes it out of the Salesforce reconciliation absence scope (V5-RW02). deal_type uses the closed deal_type_ref vocabulary. Requires base_version from a fresh read; a same-field conflict means someone else wrote the same column — ask the human, never retry blind. A version bump from a DIFFERENT field (someone else's disjoint edit) is rebased automatically and reported back as `rebased`/`rebase_receipt`; nothing about this call's own fields is ever silently changed. To move a deal to a DIFFERENT CLIENT, use reassign-deal: client_id is deliberately not settable here.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" },
       base_version: { type: "integer" },
@@ -4136,6 +4274,11 @@ export const TOOLS = {
           hint: "invoiced_on is a calendar date YYYY-MM-DD, or null to clear it" });
       // Legacy phase edits share the Deal Room event stream. Acquire its lock
       // before versionGuard can lock the deal row, matching Deal Room lock order.
+      const partnerStatus = canExercisePartnerAuthority(actor) && keys.some(k => k === "phase" || k === "outcome");
+      if (partnerStatus) {
+        await lockDealField(c, s.id, "next_date");
+        await lockDealField(c, s.id, "next_step");
+      }
       if (keys.includes("phase")) await lockDealField(c, s.id, "phase");
       // touchedFields = keys: computed BEFORE the guard so a version bump from
       // some OTHER field can be told apart from a bump on one of THESE fields.
@@ -4149,7 +4292,9 @@ export const TOOLS = {
         await writeEvent(c, actor, "update-deal", "deal", s.id,
           { field: k, old: { [k]: old[k] }, new: { [k]: args.fields[k] },
             recorded_at_after_lock: k === "phase" || k === "invoiced_on", idempotency_key: args.idempotency_key });
-      return { ok: true, updated: keys,
+      const status = partnerStatus && keys.some(k => (k === "phase" || k === "outcome") && old[k] !== args.fields[k])
+        ? await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "update-deal") : {};
+      return { ok: true, updated: keys, ...status,
                ...(guard.rebased ? { rebased: true, rebase_receipt: guard.rebase_receipt } : {}) };
     }),
   },
@@ -9010,7 +9155,8 @@ registerTools({
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       let deal = await c.query(
         `select b.id, b.name, b.phase, b.owner, b.type, b.market as city, b.segment, b.attention,
-                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step, b.client_id, b.client_ref, b.client_name,
+                to_jsonb(b.next_date)#>>'{}' as next_date, b.next_step,
+                (b.next_step is null or b.next_date is null) as next_step_required, b.client_id, b.client_ref, b.client_name,
                 b.account_client_id, b.account_client_ref, b.account_name, b.account_owner,
                 b.market_agent, to_jsonb(b.last_touch)#>>'{}' as last_touch,
                 to_jsonb(b.last_review_at)#>>'{}' as last_review_at, b.workspace_kind,
@@ -9193,22 +9339,31 @@ registerTools({
 
   "add-deal-note": {
     write: true,
-    description: "Append context or an answer to a deal's immutable thread. Existing rows are never edited or deleted.",
+    description: "Record a partner status update in the immutable deal thread. After the due date, this supersedes your overdue action, never marks it completed. Supply next_step and next_date together, or Doc prompts for the missing plan. Other partners' actions and manual attention remain unchanged.",
     inputSchema: { type: "object", properties: {
       idempotency_key: { type: "string" }, deal: { type: "string" }, text: { type: "string" },
+      next_step: { type: "string" }, next_date: { type: "string", description: "YYYY-MM-DD; required with next_step" },
     }, required: ["idempotency_key", "deal", "text"] },
     handler: async (c, actor, args) => withEnvelope(c, actor, "add-deal-note", args, async () => {
       const s = await resolveSubject(c, args.deal);
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
+      const hasPlan = args.next_step !== undefined || args.next_date !== undefined;
+      if (hasPlan && (typeof args.next_step !== "string" || !args.next_step.trim() || !isCalendarDate(args.next_date)))
+        throw new ToolError({ error: "next_step_and_date_required", hint: "supply a next step and a calendar date together" });
+      const superseded = await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key);
       const note = await c.query(
         "insert into deal_note (deal_id, kind, text, actor_id) values ($1,'note',$2,$3) returning id, created_at /* dealroom:add-note */",
         [s.id, args.text.trim(), actor.id],
       );
       await writeEvent(c, actor, "add-deal-note", "deal", s.id, {
-        field: "note", new: { note: args.text.trim() }, idempotency_key: args.idempotency_key,
+        field: "note", new: { note: args.text.trim(), superseded_action_ids: superseded.superseded_action_ids || [] }, idempotency_key: args.idempotency_key,
       });
-      return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at };
+      const plan = hasPlan ? await appendDealNextStep(c, actor, s.id,
+        args.next_step.trim(), args.next_date, args.idempotency_key) : null;
+      return { ok: true, deal_id: s.id, note_id: note.rows[0].id, created_at: note.rows[0].created_at,
+        ...(plan ? { superseded_action_ids: superseded.superseded_action_ids || [],
+          next_step_id: plan.next_step_id, next_action_id: plan.next_action_id, next_step_required: false } : superseded) };
     }),
   },
 
@@ -9224,53 +9379,8 @@ registerTools({
       if (s.type !== "deal") throw new ToolError({ error: "not_a_deal", resolved: s });
       if (typeof args.text !== "string" || !args.text.trim()) throw new ToolError({ error: "text_required" });
       assertDealRoomField("next_date", args.next_date ?? null, ToolError);
-      // The step also changes next_date. Take that cell's lock first so its
-      // field history cannot race a direct date edit or undo.
-      await lockDealField(c, s.id, "next_date");
-      await lockDealField(c, s.id, "next_step");
-      const oldDate = (await c.query("select next_date::text as next_date from deal where id=$1", [s.id])).rows[0]?.next_date ?? null;
-      const prior = await c.query(
-        "select id, text from deal_note where deal_id=$1 and kind='next_step' order by created_at desc, id desc limit 1 /* dealroom:current-step */",
-        [s.id],
-      );
-      const note = await c.query(
-        "insert into deal_note (deal_id, kind, text, actor_id, created_at) values ($1,'next_step',$2,$3,clock_timestamp()) returning id, to_jsonb(created_at)#>>'{}' as created_at /* dealroom:add-next-step */",
-        [s.id, args.text.trim(), actor.id],
-      );
-      await c.query(
-        "update deal set next_date=$2, updated_by=$3 where id=$1 /* dealroom:set-next-date */",
-        [s.id, args.next_date ?? null, actor.id],
-      );
-      // The Deal Room's next step and the operating system's next action are
-      // one fact, not parallel lists. Each partner still keeps one ball of
-      // their own on the deal; replacing yours drops (does not complete) it.
-      await c.query(
-        `update next_action set status='dropped', updated_by=$1
-          where subject_type='deal' and subject_id=$2 and owner_id=$1 and status='open'
-          /* dealroom:drop-prior-action */`, [actor.id, s.id]);
-      const action = await c.query(
-        `insert into next_action (subject_type, subject_id, owner_id, due_on,
-                                  description, created_by, updated_by)
-         values ('deal',$1,$2,$3,$4,$2,$2) returning id
-         /* dealroom:add-next-action */`,
-        [s.id, actor.id, args.next_date ?? null, args.text.trim()]);
-      await writeEvent(c, actor, "set-next-step", "deal", s.id, {
-        field: "next_step",
-        old: { next_step: prior.rows[0]?.text ?? null },
-        new: { next_step: args.text.trim(), next_date: args.next_date ?? null },
-        recorded_at_after_lock: true,
-        idempotency_key: args.idempotency_key,
-      });
-      await writeEvent(c, actor, "set-next-step", "deal", s.id, {
-        field: "next_date",
-        old: { next_date: oldDate },
-        new: { next_date: args.next_date ?? null },
-        recorded_at_after_lock: true,
-        idempotency_key: args.idempotency_key,
-      });
-      return { ok: true, deal_id: s.id, next_step_id: note.rows[0].id,
-        next_action_id: action.rows[0].id,
-        supersedes: prior.rows[0]?.id ?? null, created_at: note.rows[0].created_at };
+      await supersedeOverdueDealAction(c, actor, s.id, args.idempotency_key, "set-next-step");
+      return appendDealNextStep(c, actor, s.id, args.text.trim(), args.next_date ?? null, args.idempotency_key);
     }),
   },
 
