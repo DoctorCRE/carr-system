@@ -64,6 +64,14 @@ This is a local request ceiling using Portal prices, not a provider billing limi
     dispatch.py nous-budget
     dispatch.py send nous-builder "fix and test the build; commit, push and open a PR" --checkout new:nous-fix
 
+Business work for the partner goes to the first available record-layer desk with `--brief business`,
+which swaps the engineering footer for business-brief-footer.md. That desk runs
+with no built-in tools (no shell, no file edits) and only the CARR verbs.
+Scheduled jobs reach it through lib/business_dispatch.py.
+
+    dispatch.py register biz-nous --kind hermes-nous --family glm --effort medium --posture record-layer
+    dispatch.py send business - --brief business --card-id biz:<uuid5> --actor outlook-intake
+
 """
 
 from __future__ import annotations
@@ -105,6 +113,8 @@ import codex_ipc  # noqa: E402  — a thread Codex Desktop holds open, see the m
 import grok_wire  # noqa: E402 — authenticated public retrieval, provider metadata checked
 import hermes_wire
 import nous_budget
+import record_layer
+import business_routing
 import flash_wire  # noqa: E402  — the local Flash model as a desk, see the module
 import verb_io  # noqa: E402 — the ONE path to the record layer; see that module
 
@@ -147,6 +157,29 @@ def _phrasing_hint(task: str, *, examples_on_miss: bool = False) -> str:
     return ('Describe checks as properties to confirm. '
             + '; '.join(f"{rule['phrase']!r} -> {rule['suggestion']!r}" for rule in examples)
             + '. Use --allow-phrasing to override the local phrasing lint.')
+
+
+# A brief profile names the footer every task of that profile carries. The
+# business profile belongs only to record-layer desks, and those desks take
+# nothing else: a client task never reaches a coding seat with repo write.
+BRIEF_FOOTERS = {'engineering': 'brief-footer.md', 'business': 'business-brief-footer.md'}
+
+
+def _with_footer(task: str, brief: str) -> str:
+    for block in (HERE / BRIEF_FOOTERS[brief]).read_text(encoding='utf-8').strip().split('\n\n'):
+        if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
+            continue
+        if block not in task:
+            task += '\n\n' + block
+    return task
+
+
+def _check_brief_desk(brief: str, desk_entry) -> None:
+    record_layer = isinstance(desk_entry, dict) and desk_entry.get('posture') == 'record-layer'
+    if (brief == 'business') != record_layer:
+        raise DeskError('brief_desk_mismatch',
+                        'a business brief goes only to a record-layer desk, and a record-layer '
+                        'desk takes only business briefs')
 
 
 def _lint_phrasing(task: str, allow_phrasing: bool) -> None:
@@ -372,6 +405,7 @@ def _to_codex(
     timeout_s lets a caller with its own authority window (the Engineering
     controller's 930 s lease) pin a shorter limit than the router default.
     """
+    record_layer.enforce(entry, kind='codex-session')
     limit_s = CODEX_TIMEOUT_S if timeout_s is None else float(timeout_s)
     task = desks.desk_prompt(task)
     thread = None if fresh else entry.get("thread_id")
@@ -592,7 +626,7 @@ def _execute(request: dict, *, on_executor=None) -> dict:
         outcome = hermes_wire.run_task(entry, task, env=scrubbed_env(env), run=run_cli,
                                       results_path=request['budget_results_path'], run_id=msg_id)
     elif entry["kind"] == "flash-local":
-        outcome = flash_wire.run_task(task)
+        outcome = flash_wire.run_task(task, **({'posture': entry['posture']} if entry.get('posture') else {}))
     elif entry["kind"] == "codex-live":
         outcome = codex_wire.run_turn(
             entry["socket"], task,
@@ -638,6 +672,8 @@ def dispatch(
     checkout: str | None = None,
     on_started=None,
     allow_phrasing: bool = False,
+    brief_kind: str | None = None,
+    posture: str | None = None,
 ) -> dict:
     """Send one task to one desk. Raises DeskError when the desk is not usable.
 
@@ -661,6 +697,11 @@ def dispatch(
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             raise DeskError("desk_not_live", str(exc)) from exc
     entry = registry.resolve(name)
+    if brief_kind is not None:
+        _check_brief_desk(brief_kind, entry)
+    if posture is not None and entry.get('posture') != posture:
+        raise DeskError('brief_desk_mismatch', 'resolved desk no longer carries the queued posture')
+    record_layer.enforce(entry)
     if name in AUTOMATIC_CODEX_DESKS and entry["kind"] != "codex-session":
         raise DeskError("unsafe_automatic_desk", "automatic work requires a Codex subscription desk")
     network_access = entry.get('network_access', False)
@@ -742,6 +783,14 @@ def dispatch(
     with (_hermes_slot(env or os.environ) if entry['kind'] == 'hermes-nous' else nullcontext()), \
          (write_ownership.checkout_writer(workspace) if declared_writes or entry['kind'] == 'claude-api' else nullcontext()) as bind:
         for attempt in range(CODEX_CAPACITY_ATTEMPTS):
+            if entry.get('posture') == 'record-layer':
+                try:
+                    reason = business_routing.unavailable(
+                        entry, results_path, business_routing.limit_states(results_path))
+                except (DeskError, OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                    reason = f'execution unavailable: {type(exc).__name__}'
+                if reason:
+                    raise DeskError('business_desk_unavailable', reason)
             outcome = _execute(request, on_executor=bind)
             if (entry['kind'] not in codex_models.CODEX_KINDS
                     or outcome['status'] not in ('failed', 'capacity')
@@ -1070,6 +1119,8 @@ def main(argv: list[str]) -> int:
     r.add_argument("--sandbox", default=None,
                    choices=["read-only", "workspace-write", "danger-full-access"],
                    help="Codex sandbox for this desk; Grok posture is chosen by --retrieve")
+    r.add_argument('--posture', choices=desks.POSTURES,
+                   help='record-layer gives only CARR tools; unsupported wires refuse before launch')
     r.add_argument("--network-access", action="store_true",
                    help="opt in to read-only network access for fresh codex-live turns only")
     r.add_argument("--add-dir", dest="add_dirs", action="append", default=None,
@@ -1100,6 +1151,8 @@ def main(argv: list[str]) -> int:
                    help='requeue a stage of an existing --card-id at the tail')
     s.add_argument("name")
     s.add_argument("task")
+    s.add_argument('--brief', choices=tuple(BRIEF_FOOTERS), default='engineering',
+                   help='footer profile; business goes only to a record-layer desk')
     s.add_argument('--allow-phrasing', action='store_true',
                    help='override the local brief phrasing lint; provider policy still applies')
     s.add_argument("--family", choices=codex_models.FAMILIES)
@@ -1164,7 +1217,7 @@ def main(argv: list[str]) -> int:
                                  sandbox=getattr(a, "sandbox", None),
                                  network_access=a.network_access,
                                  add_dirs=getattr(a, "add_dirs", None), host=a.host, timeout_s=a.timeout,
-                                 provider=a.provider)
+                                 provider=a.provider, posture=a.posture)
             print(json.dumps({a.name: entry}, indent=2))
             return 0
 
@@ -1197,20 +1250,21 @@ def main(argv: list[str]) -> int:
         task = sys.stdin.read() if a.task == "-" else a.task
         if not task.strip():
             raise DeskError("empty_task", "dispatch requires a non-empty task")
-        for block in (HERE / 'brief-footer.md').read_text(encoding='utf-8').strip().split('\n\n'):
-            if block.startswith('Skills:') and re.search(r'^Skills:', task, re.M | re.I):
-                continue
-            if block not in task:
-                task += '\n\n' + block
+        task = _with_footer(task, a.brief)
         _lint_phrasing(task, a.allow_phrasing)
         # An offline host or a seat whose last probe failed is refused here,
         # with the reason, before any claim or launch (tools/room-bridge/seat_gate.py).
         desk_entry = reg.entries().get(a.name)
-        if isinstance(desk_entry, dict):
-            blocked = seat_gate.check({**desk_entry, "name": a.name})
-            if blocked:
-                raise DeskError(*blocked)
-        row = work_cli.send(a, task, reg, results)
+        if a.brief != 'business' or a.name != 'business':
+            _check_brief_desk(a.brief, desk_entry)
+        if a.brief == 'business':
+            row = work_cli.send_business(a, task, reg, results)
+        else:
+            if isinstance(desk_entry, dict):
+                blocked = seat_gate.check({**desk_entry, "name": a.name})
+                if blocked:
+                    raise DeskError(*blocked)
+            row = work_cli.send(a, task, reg, results)
         print(json.dumps(row, indent=2))
         return 0
 
