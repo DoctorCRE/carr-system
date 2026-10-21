@@ -1,10 +1,11 @@
 {
   "schema": "hxstore-harness-contract/v1",
-  "scope": "Offline synthetic campaign tooling. No Outlook automation, networking, account access, or store mutation.",
+  "scope": "Offline synthetic campaign tooling and metadata-only studies of caller-held shared immutable snapshots. No Outlook automation, networking, account access, or store mutation.",
   "commands": {
     "build": "cargo build --locked --manifest-path vendor/hxprobe/Cargo.toml",
     "corpus": "python3 ops/hxstore-harness.py corpus --account \"$TEST_ACCOUNT\" --out /tmp/hx-corpus",
     "diff": "python3 ops/hxstore-harness.py diff /tmp/test-before.hxd /tmp/test-after.hxd --manifest /tmp/hx-corpus/manifest.json --synthetic-store",
+    "study-diff": "python3 ops/hxstore-harness.py study-diff \"$BEFORE_COPY\" \"$AFTER_COPY\" --immutable-copies",
     "hypotheses": "python3 ops/hxstore-harness.py hypotheses --manifest /tmp/hx-corpus/manifest.json --hypotheses /tmp/hypotheses.json --atlas spec/outlook/hxstore-atlas.json",
     "observe": "vendor/hxprobe/target/debug/hxprobe observe /tmp/test-after.hxd",
     "verify": "python3 ops/hxstore-harness-selftest.py"
@@ -55,5 +56,35 @@
     "encodings": "utf-8, utf-16le, u16le, u16be, u32le, u32be, u64le, u64be, filetime-le, filetime-be, unix-ms-le, unix-ms-be, unix-s-le, unix-s-be, unix-s-u32le, unix-s-u32be",
     "length": "Positive fixed byte length, at most 65536. Numeric widths must match the encoding. UTF-16LE lengths must be even. Variable-length fields require a future decoder rather than an oversized fixed-span claim.",
     "coverage": "Rebuild hxprobe after importing into hxstore-atlas.json. observe credits only confirmed spans within framed matching object records. Invalid UTF-8 or UTF-16 and out-of-bounds spans receive no credit. Overlaps count once. Values never reach observe output. No confirmed discoveries ship with this harness."
+  },
+  "study_diff": {
+    "schema": "hxstore-study-diff/v1",
+    "workflow": "Keep baseline-000 and each subsequent immutable copy private on Studio. Compare consecutive copies after exactly one TEST-account draft, event, flag, attachment, or reply change. A separately captured unchanged control uses the same command. No corpus, manifest, marker import, --synthetic-store, or field hypotheses are required.",
+    "inputs": "Two caller-designated offline immutable snapshot files, including shared Main Identity copies. --immutable-copies asserts caller custody and immutability; it does not prove them or coordinate Outlook. Device, inode, size, mtime, and ctime must remain unchanged across the worker call. The command never writes inputs or copies them to an artifact.",
+    "framing": "Reuse Rust locate, checked blocks, and observe partition. locate requires a nonempty needle file; a fixed zero-byte needle satisfies that interface. All search hits and match counts are discarded. No mailbox-value decoding or second frame parser is added.",
+    "output": {
+      "schema": "Fixed hxstore-study-diff/v1 identifier.",
+      "interpretation": "Fixed candidates_only_no_causal_or_field_mapping_claim label. Shared-store activity cannot establish ownership, causality, message identity, or confirmed field mappings.",
+      "counts": {
+        "file_changed_ranges": "Number of position-aligned physical file difference ranges.",
+        "file_changed_bytes": "Sum of physical difference range lengths, including file headers and unframed file regions.",
+        "changed_blocks": "Number of changed, added, or removed checked blocks paired by physical offset.",
+        "added_blocks": "Number of blocks present only after at that physical offset.",
+        "removed_blocks": "Number of blocks present only before at that physical offset.",
+        "payload_changed_ranges": "Number of position-aligned decompressed difference ranges across changed blocks.",
+        "payload_changed_bytes": "Sum of decompressed difference range lengths.",
+        "records_before": "Number of before partition spans overlapping payload differences.",
+        "records_after": "Number of after partition spans overlapping payload differences."
+      },
+      "records_before": "Array of {record_type, record_id} for candidate before spans.",
+      "records_after": "Array of {record_type, record_id} for candidate after spans.",
+      "record_type": "Existing structural classification identifier from observe, including unframed. Hex digits within object.class identifiers name types; no byte values or hex dumps are emitted.",
+      "record_id": "Decimal physical identifier block_offset:payload_start:payload_end, with half-open decompressed span bounds. Scoped to the corresponding input snapshot. Not an Outlook message ID, stable logical identity, account ID, or proof of an addition/deletion."
+    },
+    "control": "Identical copies succeed with all counts zero and empty record lists. An unchanged GUI control can still produce background shared-store differences; those remain candidates.",
+    "limitations": "Relocated blocks appear removed/added; shifted records can appear changed by positional comparison. Header-only differences can have no changed records. Unframed spans are candidates, not successfully decoded records. File byte counts and payload byte counts are different coordinate systems.",
+    "disclosure": "Stdout contains only fixed schema/interpretation labels, structural change counts, record-type IDs, and physical record IDs. No content, headers, addresses, paths, hashes, byte values, search results, or difference ranges. No detailed artifact is written. Worker stdout and stderr are captured and never forwarded. Success has empty stderr; rejected study inputs have empty stdout, exit 2, and fixed study harness input rejected stderr (argument parsing retains the existing fixed harness error).",
+    "resources": "The Rust worker reads both snapshots and verified decompressed payloads into memory. Its fixed search can retain at most 4096 hits per snapshot internally; these never reach study output. Existing whole-file comparison and memory limits apply.",
+    "synthetic_guard": "The separate diff command remains unchanged and requires --synthetic-store, the intact 20-case generated manifest, and every after marker. study-diff performs no marker searches or field confirmation."
   }
 }

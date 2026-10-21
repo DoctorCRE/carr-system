@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic Outlook corpus, guarded differential locations, and atlas hypotheses."""
+"""Offline Outlook corpus, guarded synthetic locations, and structural study diffs."""
 import argparse
 import base64
 import hashlib
@@ -144,6 +144,49 @@ def differential(args):
     return report
 
 
+def study_diff(args):
+    if not args.immutable_copies:
+        raise ValueError('immutable copy assertion required')
+    paths = (args.before, args.after)
+    before_stats = [path.stat() for path in paths]
+    with tempfile.TemporaryDirectory() as tmp:
+        needles = Path(tmp) / 'needles'
+        # locate requires one needle; its fixed zero-byte search results never leave this worker.
+        needles.write_text('00\n')
+        result = subprocess.run([str(ROOT / 'vendor/hxprobe/target/debug/hxprobe'), 'locate',
+                                 str(args.before), str(args.after), str(needles)],
+                                capture_output=True, timeout=300)
+    after_stats = [path.stat() for path in paths]
+    for old, new in zip(before_stats, after_stats):
+        if (old.st_dev, old.st_ino, old.st_size, old.st_mtime_ns, old.st_ctime_ns) != (
+                new.st_dev, new.st_ino, new.st_size, new.st_mtime_ns, new.st_ctime_ns):
+            raise ValueError('copy changed during study')
+    if result.returncode:
+        raise ValueError('store rejected')
+    report = json.loads(result.stdout)
+    blocks = report['blocks']
+    counts = {
+        'file_changed_ranges': len(report['file_ranges']),
+        'file_changed_bytes': sum(end - start for start, end in report['file_ranges']),
+        'changed_blocks': len(blocks),
+        'added_blocks': sum(b['status'] == 'added' for b in blocks),
+        'removed_blocks': sum(b['status'] == 'removed' for b in blocks),
+        'payload_changed_ranges': sum(len(b['payload_ranges']) for b in blocks),
+        'payload_changed_bytes': sum(end - start for b in blocks for start, end in b['payload_ranges']),
+    }
+    output = {'schema': 'hxstore-study-diff/v1',
+              'interpretation': 'candidates_only_no_causal_or_field_mapping_claim', 'counts': counts}
+    for side in ('before', 'after'):
+        records = []
+        for block in blocks:
+            for record in block[f'records_{side}']:
+                records.append({'record_type': record['record_type'],
+                                'record_id': f"{block['block_offset']}:{record['start']}:{record['end']}"})
+        output[f'records_{side}'] = records
+        counts[f'records_{side}'] = len(records)
+    return output
+
+
 def import_hypotheses(args):
     manifest = load_manifest(args.manifest)
     document = json.loads(args.hypotheses.read_bytes())
@@ -192,6 +235,11 @@ def main():
     diff.add_argument('after', type=Path)
     diff.add_argument('--manifest', type=Path, required=True)
     diff.add_argument('--synthetic-store', action='store_true')
+    study = commands.add_parser('study-diff', help='count candidate structural changes in shared immutable copies')
+    study.add_argument('before', type=Path)
+    study.add_argument('after', type=Path)
+    study.add_argument('--immutable-copies', action='store_true',
+                       help='assert both inputs are offline immutable snapshots, never live stores')
     hypotheses = commands.add_parser('hypotheses', help='validate evidence and emit an augmented atlas to stdout')
     hypotheses.add_argument('--manifest', type=Path, required=True)
     hypotheses.add_argument('--hypotheses', type=Path, required=True)
@@ -202,10 +250,13 @@ def main():
             write_corpus(args.account, args.out)
         elif args.command == 'diff':
             print(json.dumps(differential(args), separators=(',', ':')))
+        elif args.command == 'study-diff':
+            print(json.dumps(study_diff(args), separators=(',', ':')))
         elif args.command == 'hypotheses':
             print(json.dumps(import_hypotheses(args), indent=2))
     except (ValueError, OSError, KeyError, TypeError, AttributeError, OverflowError, subprocess.SubprocessError):
-        print('synthetic harness input rejected', file=sys.stderr)
+        print('study harness input rejected' if args.command == 'study-diff' else
+              'synthetic harness input rejected', file=sys.stderr)
         return 2
     return 0
 
