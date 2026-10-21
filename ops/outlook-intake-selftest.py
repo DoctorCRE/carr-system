@@ -313,6 +313,20 @@ class IntakeTest(unittest.TestCase):
                                  'subject_hash': hashlib.sha256(b'Suite question').hexdigest(),
                                  'sender_email': 'pat@example.test'})
 
+    def test_preview_refresh_expires_after_eight_days_with_an_unchanged_store(self):
+        preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview')
+        self.assertEqual(self.run_intake([preview]).state, 'succeeded')
+        path = self.out() / intake.REFRESH_LIST
+        self.assertEqual(len(json.loads(path.read_text())), 1)
+        decodes, calls = self.fake.decodes, len(self.fake.calls)
+        self.fake.now += timedelta(days=8)
+        self.assertEqual(self.run_intake([preview], touch=False).state, 'succeeded')
+        self.assertEqual(json.loads(path.read_text()), [], 'expired previews leave the refresh list')
+        self.assertEqual(self.fake.decodes, decodes, 'expiry needs no decode')
+        self.assertEqual(len(self.fake.calls), calls, 'expiry needs no record call')
+        self.assertEqual(self.run_intake([preview], touch=False).reason, 'store_unchanged')
+        self.assertEqual(json.loads(path.read_text()), [], 'expiry persists across runs')
+
     def test_once_the_full_body_decodes_it_is_logged_as_a_note_and_leaves_the_list(self):
         preview = mail('pat@example.test', -timedelta(hours=1), body='Can we meet', kind='preview', copy_key='k2')
         self.run_intake([preview])
