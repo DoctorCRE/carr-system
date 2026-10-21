@@ -634,7 +634,7 @@ class GitFetchDiagnostics(Base):
 
     def test_fetch_log_redacts_username_only_url_userinfo(self):
         pipe = self.fx.pipeline(FakeRunner())
-        url = "https://opaque-fixture-access-token@github.com/example/app.git/"
+        url = "https://opaque-fixture-access-token@example.invalid/example/app.git/"
         error = f"fatal: unable to access '{url}': Authentication failed\n"
         result = subprocess.CompletedProcess([], 128, b"", error.encode())
         with mock.patch.object(rp.subprocess, "run", return_value=result):
@@ -647,7 +647,7 @@ class GitFetchDiagnostics(Base):
 
     def test_fetch_log_preserves_redaction_of_passwords_containing_slashes(self):
         pipe = self.fx.pipeline(FakeRunner())
-        url = "https://fixture-user:fixture-password/with/slashes@github.com/example/app.git/"
+        url = "https://fixture-user:fixture-password/with/slashes@example.invalid/example/app.git/"
         result = subprocess.CompletedProcess([], 128, b"", f"unable to access '{url}'".encode())
         with mock.patch.object(rp.subprocess, "run", return_value=result):
             with self.assertRaises(rp.StepFailed) as failed:
@@ -1554,6 +1554,26 @@ class DurableReleaseEvidence(Base):
 
 class RecoveryCrash(BaseException):
     pass
+
+
+class PromotionResolutionValidation(Base):
+    def test_unresolved_promotion_rejects_missing_resolution(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        state = {'worker': {'pending_promotion': {'sha': 'a' * 40}}}
+        before = json.loads(json.dumps(state))
+        with self.assertRaises(rp.Blocked) as blocked:
+            pipe.store.resolve_promotion(state, 'worker', None)
+        self.assertEqual(blocked.exception.reason, 'journal_proof_invalid')
+        self.assertEqual(state, before)
+
+    def test_replacement_rejects_non_string_live_sha_before_ancestry(self):
+        target = self.fx.commit({'mcp-server/src/a.js': 'replacement'})
+        pipe = self.fx.pipeline(FakeRunner())
+        state = {'worker': {'pending_promotion': {'sha': self.fx.base}}}
+        live = {'git_sha': {'value': int('1' * 40)}, 'worker_version': {'id': VERSION}}
+        with self.assertRaises(rp.Blocked) as blocked:
+            pipe.promotion_replacement(state, 'worker', target, live)
+        self.assertEqual(blocked.exception.reason, 'promotion_unresolved')
 
 
 class CheckpointOwnership(unittest.TestCase):

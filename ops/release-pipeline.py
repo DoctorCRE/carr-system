@@ -386,11 +386,11 @@ class Store:
         self.record(recorded)
         self.readback_durable(recorded)
 
-    def resolve_promotion(self, state: dict, lane: str, resolution: dict) -> None:
+    def resolve_promotion(self, state: dict, lane: str, resolution: dict | None) -> None:
         pending = state[lane].get("pending_promotion")
         if not pending:
             return
-        if resolution.get("intent") != pending or not resolution.get("reason"):
+        if resolution is None or resolution.get("intent") != pending or not resolution.get("reason"):
             raise Blocked("journal_proof_invalid", "promotion resolution does not bind the pending intent and reason")
         receipt = resolution.get("receipt")
         if receipt:
@@ -1467,7 +1467,8 @@ class Pipeline:
             return None
         sha = (live.get("git_sha") or {}).get("value")
         version = (live.get("worker_version") or {}).get("id")
-        if (not SHA_RE.fullmatch(str(sha or "")) or not UUID_RE.fullmatch(str(version or ""))
+        if (not isinstance(sha, str) or not SHA_RE.fullmatch(sha)
+                or not UUID_RE.fullmatch(str(version or ""))
                 or target == pending["sha"] or not self._at_or_before(pending["sha"], target, self.repo)
                 or not self._at_or_before(sha, target, self.repo)):
             raise Blocked("promotion_unresolved", "replacement target has no verified live checkpoint")
