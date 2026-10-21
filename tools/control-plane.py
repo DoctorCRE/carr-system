@@ -378,6 +378,8 @@ def enqueue_due(manifest: dict[str, Any], instant: datetime,
     if mode not in {"shadow", "canary", "live", "replay"}:
         raise ValueError(f"invalid job mode: {mode}")
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     # Resolve every deterministic canary contract before opening a database
     # transaction.  A live-equivalent command must not even produce a queued
     # canary job that could later be mistaken for acceptance evidence.
@@ -428,6 +430,8 @@ def enqueue_due_auto(manifest: dict[str, Any], instant: datetime) -> list[dict[s
     one workflow, never an ungated one.
     """
     due = due_workflows(manifest, instant)
+    if not due:
+        return []
     rows: list[dict[str, str]] = []
     with connect() as conn, conn.cursor() as cur:
         resolved = _resolve_auto_modes(cur, due)

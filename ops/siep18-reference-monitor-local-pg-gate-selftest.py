@@ -19,7 +19,7 @@ class CatalogSourceTests(unittest.TestCase):
     def test_current_catalog_uses_the_deal_vendor_reseal(self):
         self.assertEqual(
             gate.LIVE_REGISTRY_MIGRATION,
-            "migrations/0918_deal_vendor_assignments.sql",
+            "migrations/0922_deal_vendor_assignments.sql",
         )
 
     def test_resealed_current_body_handles_uppercase_and_untagged_dollars(self):
