@@ -33,6 +33,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import urllib.error
 import urllib.request
 import uuid
@@ -683,7 +684,6 @@ class Pipeline:
         self.schema_superseded_closed: list[int] = []   # older snapshot PRs closed this run
         self.observed_main = ""   # the exact main SHA this lane fetched; origin/main may be stale
         self.post_release: dict | None = None   # the post-release proof of a failed release
-        self.worker_promotion: dict | None = None
 
     # -- plumbing ---------------------------------------------------------
     def _call_verb(self, verb: str, args: dict) -> tuple[bool, Any]:
@@ -1486,6 +1486,54 @@ class Pipeline:
                 "resolution_evidence": {"replacement_sha": target, "sha": sha,
                                         "provider_version_id": version, "receipt_digest": evidence_digest(receipt)}}
 
+    def legacy_health_promotion(self, failure: dict, lane_cfg: dict, main: str) -> dict:
+        """Bind a pre-intent promotion to its immutable source and successful provider steps."""
+        try:
+            run_id = failure['run_id']
+            if (not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{6}", run_id)
+                    or failure.get('rc') != 1 or failure.get('do_migration') is not None
+                    or not isinstance(failure.get('db_ahead_of_worker'), bool)
+                    or failure['executed'][-2:] != ['promote', 'health']
+                    or failure['executed'].count('promote') != 1
+                    or failure['executed'].count('health') != 1):
+                raise ValueError('uncertain promotion effects')
+            sha, previous = failure['sha'], failure['from_sha']
+            if not SHA_RE.fullmatch(previous) or not self._at_or_before(previous, sha, self.repo):
+                raise ValueError('promotion source does not descend from checkpoint')
+            identities = []
+            for source in (previous, sha, main):
+                cfg = tomllib.loads(self.git('show', f'{source}:mcp-server/wrangler.toml'))
+                identity = {key: cfg[key] for key in ('name', 'account_id', 'routes')}
+                if not identity['name'] or not re.fullmatch(r'[0-9a-f]{32}', identity['account_id']):
+                    raise ValueError('unbound Worker account')
+                identities.append(identity)
+            host = urllib.parse.urlsplit(lane_cfg['live_release_url']).hostname
+            if (identities[1:] != identities[:-1]
+                    or not any(route.get('pattern') == host and route.get('custom_domain') is True
+                               for route in identities[0]['routes'])):
+                raise ValueError('Worker account or route changed')
+            version = failure['promotion']['provider_version_id']
+            receipts = {}
+            for name, command in (('11-upload.log', f'--upload-version --release-sha {sha}'),
+                                  ('13-promote.log', f'--promote-version {version}')):
+                raw = (self.store.root / 'runs' / run_id / name).read_bytes()
+                log = raw.decode('utf-8')
+                argv, expected = shlex.split(log.splitlines()[0]), shlex.split(command)
+                start = argv.index(expected[0])
+                if (argv[start:start + len(expected)] != expected
+                        or argv.count(expected[0]) != 1
+                        or not log.rstrip().endswith('[exit 0]') or log.count('[exit ') != 1):
+                    raise ValueError('provider step not acknowledged')
+                if name == '11-upload.log':
+                    versions = re.findall(r'provider version:\s*(' + UUID_RE.pattern + r')', log)
+                    if versions != [version]:
+                        raise ValueError('uploaded provider identity changed')
+                receipts[name] = hashlib.sha256(raw).hexdigest()
+            return {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
+                    'worker_identity': identities[0], 'health_verified': False}
+        except (KeyError, IndexError, ValueError, TypeError, OSError, StepFailed) as exc:
+            raise Blocked('live_target_unreceipted', 'legacy health failure lacks exact source and provider receipts') from exc
+
     def reconcile_worker_identity(self, state: dict, lane_cfg: dict, main: str) -> dict:
         url = lane_cfg["live_release_url"]
         try:
@@ -1515,24 +1563,43 @@ class Pipeline:
         if lane_state.get("pending_promotion") or not previous or previous == sha:
             return live
         failure = None
-        if lane_state.get("failed_sha") == sha:
+        retired = next((row for row in reversed(self.store.records())
+                        if row.get('status') == 'promotion_retired' and row.get('lane') == 'worker'
+                        and row.get('sha') == sha and row.get('provider_version_id') == version
+                        and row.get('release_endpoint') == url), None)
+        if retired:
+            self.store.recover_durable(retired)
+        if lane_state.get("failed_sha") == sha and not retired:
             failures = [row for row in self.store.records() if isinstance(row, dict)
                         and row.get("lane") == "worker" and row.get("sha") == sha
                         and row.get("status") == "failed"]
             failure = failures[-1] if failures else None
             promotion = {"sha": sha, "provider_version_id": version, "release_endpoint": url}
-            if (not failure or failure.get("step") not in {"promote", "verify-live"}
+            if (not failure or failure.get("step") not in {"promote", "verify-live", "health"}
                     or failure.get("step") != lane_state.get("failed_step")
                     or not failure.get("run_id")
                     or failure["run_id"] != lane_state.get("failed_run_id")
                     or failure.get("from_sha") != previous
                     or failure.get("promotion") != promotion
                     or not isinstance(failure.get("executed"), list)
-                    or failure["executed"][-1:] != ["promote"]):
+                    or (failure["executed"][-1:] != ["promote"] and failure.get("step") != "health")):
                 raise Blocked("live_target_unreceipted", "failed release source identity has no matching promotion evidence")
+        legacy = None
+        if failure and failure['step'] == 'health':
+            latest = next((row for row in reversed(self.store.records())
+                           if row.get('lane') == 'worker' and row.get('status') in
+                           {'failed', 'shipped', 'worker_promoted', 'promotion_retired'}), None)
+            if latest != failure:
+                raise Blocked('live_target_unreceipted', 'legacy failed journal is no longer current')
+            legacy = self.legacy_health_promotion(failure, lane_cfg, main)
         self.controller_current(state)
         if not self._at_or_before(sha, main, self.repo):
             raise Blocked("history_diverged", f"live Worker {sha[:12]} is not an ancestor of main {main[:12]}")
+        if legacy:
+            fresh = self.http(url)
+            if ((fresh.get('git_sha') or {}).get('value') != sha
+                    or (fresh.get('worker_version') or {}).get('id') != version):
+                raise Blocked('live_target_unreceipted', 'legacy promotion identity changed during recovery')
         self.out(f"release-pipeline[worker]: recorded {previous[:12]} differs from live {sha[:12]}")
         if not self.dry_run:
             receipt = {"lane": "worker", "status": "live_identity_reconciled",
@@ -1541,6 +1608,8 @@ class Pipeline:
             if failure:
                 self.store.recover_durable(failure)
                 receipt["recovered_failure"] = {"run_id": failure["run_id"], "step": failure["step"]}
+                if legacy:
+                    receipt["legacy_promotion"] = legacy
                 written = next((row for row in reversed(self.store.records())
                                 if isinstance(row, dict) and all(row.get(k) == v for k, v in receipt.items()
                                                                 if k != "run_id")), None)
@@ -1550,7 +1619,7 @@ class Pipeline:
                     self.store.record_durable(receipt)
             else:
                 self.store.record_durable(receipt)
-        if failure:
+        if failure and not legacy:
             lane_state.update({"failed_sha": None, "failed_step": None, "failed_at": None})
             lane_state.pop("failed_run_id", None)
             lane_state.pop("rejection", None)
@@ -1849,7 +1918,6 @@ class Pipeline:
         self.db_ahead_of_worker = False
         self.do_migration = None
         self.post_release = None
-        self.worker_promotion = None
         lane_cfg = self.cfg[lane]
         why = kill_switch(self.cfg, lane)
         if why:
@@ -2152,7 +2220,6 @@ class Pipeline:
                            "do_migration": self.do_migration,
                            "run_dir": str(self.run_dir), "executed": list(self.executed),
                            "dispatched": ok, "run_id": self.run_id,
-                           **({"promotion": self.worker_promotion} if self.worker_promotion else {}),
                            **({"post_release": self.post_release} if self.post_release else {}), **extra})
         if not diagnosis_key and not ok:
             self.out(f"release-pipeline[{lane}]: diagnosis dispatch FAILED: {res}")
@@ -3396,6 +3463,14 @@ def _clear_failed_locked(store: Store, lane: str, sha: str, reason: str, *, repo
     state = store.load()
     lane_state = state.get(lane) or {}
     if not lane_state.get("failed_sha"):
+        pending = lane_state.get("pending_promotion")
+        if pending:
+            if pending["sha"] != sha:
+                raise SystemExit(f"release-pipeline[{lane}]: pending promotion is {pending['sha']}, not {sha}")
+            store.resolve_promotion(state, lane, {"intent": dict(pending), "status": "promotion_retired",
+                                                 "reason": reason, "resolution_evidence": {"command": "clear-failed"}})
+            store.save(state)
+            return f"release-pipeline[{lane}]: retired pending promotion {sha[:12]} ({reason})"
         rejection = lane_state.get("rejection")
         if not rejection:
             return f"release-pipeline[{lane}]: nothing to clear"
