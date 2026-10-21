@@ -115,7 +115,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       try { await fn(); } finally { await c.query('rollback'); }
     };
 
-    await t.test('deal detail survives missing checklist storage and recovers after migration 0919', async t => {
+    await t.test('deal detail survives missing checklist storage and recovers after migration 0922', async t => {
       const warning = t.mock.method(console, 'warn', () => {});
       const read = async () => {
         await c.query('set role carr_reader');
@@ -135,7 +135,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         assert.deepEqual(await read(), before, 'repeated reads preserve the same detail');
         assert.equal(warning.mock.callCount(), 1, 'missing storage logs once across reads');
         assert.match(warning.mock.calls[0].arguments.join(' '), /checklist.*unavailable/i);
-        await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8'));
+        await c.query(readFileSync(path.join(root, 'migrations/0922_deal_checklist_commissions.sql'), 'utf8'));
         const after = await read();
         assert.equal(after.checklist.template_state, 'current');
         assert.equal(after.checklist.phases.length, 6);
@@ -146,7 +146,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await assert.rejects(read(), error => error.code === '42501', 'other database errors still propagate');
         assert.equal(warning.mock.callCount(), 1, 'other errors are not logged as unavailable storage');
       } finally {
-        await c.query(readFileSync(path.join(root, 'migrations/0919_deal_checklist_commissions.sql'), 'utf8').replace('create view', 'create or replace view'));
+        await c.query(readFileSync(path.join(root, 'migrations/0922_deal_checklist_commissions.sql'), 'utf8').replace('create view', 'create or replace view'));
         await c.query('delete from deal where id=$1', [id(4)]);
         await c.query('delete from client where id=$1', [id(3)]);
         await c.query('delete from party where id=$1', [id(2)]);
