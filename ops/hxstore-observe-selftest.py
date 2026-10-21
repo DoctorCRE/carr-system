@@ -40,7 +40,7 @@ class ObservationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         subprocess.run(['cargo', 'build', '--locked'], cwd=CRATE, check=True,
-                       capture_output=True, timeout=180)
+                       timeout=180)
 
     def observe(self, data, *args):
         with tempfile.TemporaryDirectory() as tmp:
