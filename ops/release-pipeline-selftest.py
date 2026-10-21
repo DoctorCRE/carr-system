@@ -711,9 +711,10 @@ class LegacyHealthPromotion(Base):
         version = live['version']
         (run / '11-upload.log').write_text(
             f'$ bin/deploy-worker.sh --upload-version --release-sha {row["sha"]}\n'
-            f'  provider version: {version}\n[exit 0]\n')
+            f'  provider version: {version}\n  git SHA: {row["sha"]}\n[exit 0]\n')
         (run / '13-promote.log').write_text(
-            f'$ bin/deploy-worker.sh --promote-version {version}\n[exit 0]\n')
+            f'$ bin/deploy-worker.sh --promote-version {version}\n'
+            f'  provider version: {version}\n  recorded git SHA: {row["sha"]}\n[exit 0]\n')
         identity = 'name = "carr-mcp"\naccount_id = "12ccca77eb49142a6be8eb84c0d6a3a0"\n' +                    'routes = [{pattern = "api.doctorcre.com", custom_domain = true}]\n'
         original = pipe.git
         def read(*args, **kwargs):
@@ -739,6 +740,69 @@ class LegacyHealthPromotion(Base):
         self.assertEqual(runner.calls, [])
         self.assertEqual(self.fx.slice_marks, [])
         self.assertEqual([r['status'] for r in pipe.store.records()], ['failed', 'live_identity_reconciled'])
+
+    def test_legacy_receipt_contradictions_and_missing_bindings_refuse(self):
+        cases = ('promote provider', 'promote source', 'duplicate upload source',
+                 'upload source output', 'missing upload source output',
+                 'missing promote provider', 'missing promote source',
+                 'duplicate promote provider', 'duplicate promote source',
+                 'duplicate promote argument', 'conflicting source equals argument',
+                 'malformed repeated source', 'malformed repeated provider')
+        for case in cases:
+            with self.subTest(case=case):
+                pipe, state, row, runner, main = self.legacy()
+                upload = pipe.store.root / 'runs' / row['run_id'] / '11-upload.log'
+                promote = upload.with_name('13-promote.log')
+                sha, version = row['sha'], row['promotion']['provider_version_id']
+                path = upload if 'upload' in case or 'equals' in case else promote
+                log = path.read_text()
+                if case == 'promote provider':
+                    log = log.replace(f'provider version: {version}', f'provider version: {PRIOR}')
+                elif case in ('promote source', 'upload source output'):
+                    log = log.replace(f'git SHA: {sha}', f'git SHA: {self.fx.base}')
+                elif case == 'duplicate upload source':
+                    log = log.replace(f'--release-sha {sha}', f'--release-sha {sha} --release-sha {self.fx.base}')
+                elif case == 'missing upload source output':
+                    log = log.replace(f'  git SHA: {sha}\n', '')
+                elif case == 'missing promote provider':
+                    log = log.replace(f'  provider version: {version}\n', '')
+                elif case == 'missing promote source':
+                    log = log.replace(f'  recorded git SHA: {sha}\n', '')
+                elif case == 'duplicate promote provider':
+                    log = log.replace('[exit 0]', f'provider version: {PRIOR}\n[exit 0]')
+                elif case == 'duplicate promote source':
+                    log = log.replace('[exit 0]', f'recorded git SHA: {self.fx.base}\n[exit 0]')
+                elif case == 'duplicate promote argument':
+                    log = log.replace(f'--promote-version {version}', f'--promote-version {version} --promote-version {version}')
+                elif case == 'malformed repeated source':
+                    log = log.replace('[exit 0]', f'recorded git SHA: {sha} extra\n[exit 0]')
+                elif case == 'malformed repeated provider':
+                    log = log.replace('[exit 0]', 'provider version: not a version\n[exit 0]')
+                elif case == 'conflicting source equals argument':
+                    log = log.replace(f'--release-sha {sha}', f'--release-sha {sha} --release-sha={self.fx.base}')
+                path.write_text(log)
+                before = pipe.store.load()
+                records = pipe.store.records()
+                with self.assertRaises(rp.Blocked):
+                    pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+                self.assertEqual(pipe.store.load(), before)
+                self.assertEqual(state, before)
+                self.assertEqual(pipe.store.records(), records)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(self.fx.slice_marks, [])
+
+    def test_legacy_redacted_source_outputs_retain_the_exact_source_binding(self):
+        pipe, state, row, runner, main = self.legacy()
+        for name in ('11-upload.log', '13-promote.log'):
+            path = pipe.store.root / 'runs' / row['run_id'] / name
+            log = path.read_text().replace(f'git SHA: {row["sha"]}', 'git SHA:[REDACTED]')
+            path.write_text(log)
+        pipe.reconcile_worker_identity(state, pipe.cfg['worker'], main)
+        self.assertEqual(pipe.store.load()['worker']['last_released_sha'], row['sha'])
+        self.assertEqual(pipe.store.load()['worker']['failed_step'], 'health')
+        self.assertEqual(pipe.store.load()['worker']['last_shipped_proof'], 'old-healthy-proof')
+        self.assertTrue(pipe.store.records()[0]['db_ahead_of_worker'])
+        self.assertEqual(runner.calls, [])
 
     def test_legacy_rejects_provider_source_journal_and_effect_drift(self):
         cases = {

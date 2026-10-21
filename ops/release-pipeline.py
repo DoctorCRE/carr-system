@@ -1515,8 +1515,8 @@ class Pipeline:
                 raise ValueError('Worker account or route changed')
             version = failure['promotion']['provider_version_id']
             receipts = {}
-            for name, command in (('11-upload.log', f'--upload-version --release-sha {sha}'),
-                                  ('13-promote.log', f'--promote-version {version}')):
+            for name, command in (('11-upload.log', f'bin/deploy-worker.sh --upload-version --release-sha {sha}'),
+                                  ('13-promote.log', f'bin/deploy-worker.sh --promote-version {version}')):
                 raw = (self.store.root / 'runs' / run_id / name).read_bytes()
                 log = raw.decode('utf-8')
                 argv, expected = shlex.split(log.splitlines()[0]), shlex.split(command)
@@ -1525,10 +1525,18 @@ class Pipeline:
                         or argv.count(expected[0]) != 1
                         or not log.rstrip().endswith('[exit 0]') or log.count('[exit ') != 1):
                     raise ValueError('provider step not acknowledged')
-                if name == '11-upload.log':
-                    versions = re.findall(r'provider version:\s*(' + UUID_RE.pattern + r')', log)
-                    if versions != [version]:
-                        raise ValueError('uploaded provider identity changed')
+                modes = ('--upload-version', '--promote-version')
+                if sum(arg == mode or arg.startswith(mode + '=') for arg in argv for mode in modes) != 1:
+                    raise ValueError('ambiguous provider operation')
+                for flag, wanted in (('--release-sha', sha), ('--promote-version', version)):
+                    values = [argv[i + 1] if arg == flag else arg.partition('=')[2]
+                              for i, arg in enumerate(argv) if arg == flag or arg.startswith(flag + '=')]
+                    if values and values != [wanted]:
+                        raise ValueError('ambiguous provider identity arguments')
+                versions = [value.strip() for value in re.findall(r'(?m)^[ \t]*provider version:([^\r\n]*)$', log)]
+                sources = [value.strip() for value in re.findall(r'(?m)^[ \t]*(?:recorded )?git SHA:([^\r\n]*)$', log)]
+                if versions != [version] or len(sources) != 1 or sources[0] not in {sha, '[REDACTED]'}:
+                    raise ValueError('provider receipt identity differs or is missing')
                 receipts[name] = hashlib.sha256(raw).hexdigest()
             return {'failure_digest': evidence_digest(failure), 'provider_receipts': receipts,
                     'worker_identity': identities[0], 'health_verified': False}
