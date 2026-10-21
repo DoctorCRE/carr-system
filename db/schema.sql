@@ -102883,6 +102883,13 @@ CREATE INDEX tool_call_correlation_idx ON public.tool_call USING btree (correlat
 
 
 --
+-- Name: tool_call_jev_settlement_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX tool_call_jev_settlement_idx ON public.tool_call USING btree (idempotency_key, actor_id, ((response ->> 'receipt_id'::text))) WHERE ((verb = 'ask-jev-attempt'::text) AND ((response ->> 'cache_hit'::text) = 'true'::text));
+
+
+--
 -- Name: tool_read_call_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -122982,6 +122989,7 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
 0922_deal_checklist_commissions.sql	8edbca77f0e994b1c0a18e6e0a9d0d42ab226852188107dc7141e6f3d5af539d	1970-01-01 00:00:00+00
 0923_deal_status_next_step.sql	705736e4c549801b820d7844447b9c84a63c5db8a1c67c306a27debfa24d83be	1970-01-01 00:00:00+00
+0924_jev_attempt_settlement_lookup.sql	20eb98baf8e1075c9bd90f3ab12447787b112492207c5219a085117ba8e4646d	1970-01-01 00:00:00+00
 \.
 
 
