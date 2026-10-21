@@ -1133,8 +1133,7 @@ export async function dispatch(request, env, ctx, actor) {
             "WRITE LAW (rule 14181e60): database " +
             "first — content goes through verbs, NEVER into a .md file. Writes need a fresh " +
             "idempotency_key (UUID) per intended action; mutations need base_version from a fresh read. " +
-            "version_conflict and needs_confirm are questions for the human, never auto-retried. There " +
-            "is no send tool: drafts are produced, Joe sends. If this server is unreachable mid-task, " +
+            "version_conflict and needs_confirm are questions for the human, never auto-retried. Claude sends email and other outbound messages on Joe's behalf whenever Joe asks (one message or a standing instruction); with no ask, the default is a draft (decision 41906a30). This server has no send verb; sends go through Joe's own accounts. If this server is unreachable mid-task, " +
             "STOP AND SAY SO — never improvise files. DELEGATION LATCH: when a partner says delegate, " +
             "subagent, or cheapest qualified model for an active task, that authority survives new logins " +
             "or data sources, phase changes, retries, continuation and compaction until the task ends " +

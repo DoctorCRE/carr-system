@@ -3234,10 +3234,14 @@ export const TOOLS = {
         }
       };
       const ownOrShared = (row) => !row?.owner || String(row.owner).toLowerCase() === scope.sponsor;
+      // The Outlook intake job sets Joe's to-dos as his machine seat, and
+      // set-next-action cannot name Joe from that seat: only those rows widen.
+      const ownToDo = (row) => ownOrShared(row) || (scope.sponsor === "joe"
+        && row?.item_kind === "next_action" && String(row.owner).toLowerCase() === "joe-local");
 
       const today = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "today-triage", {});
-        return { items: value.items.filter(ownOrShared) };
+        return { items: value.items.filter(ownToDo) };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
@@ -10093,7 +10097,8 @@ registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-on
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
 // consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch, and Joe sends. Reads
+// send verb and no draft verb: a draft can never dispatch from here, and sends
+// go through Joe's own accounts when he asks (decision 41906a30). Reads
 // answer unavailable until the F10 local-store adapter lands with a reviewed
 // grant for the read-receipt writer.
 registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),
