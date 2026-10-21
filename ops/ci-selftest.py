@@ -257,6 +257,30 @@ def test_migration_refuses_non_loopback():
     check("migration ACCEPTS loopback (fails on no server, not on the guard)",
           "REFUSED" not in out)
 
+def test_migration_fixtures_ignore_hosted_pr_event():
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        event = pathlib.Path(directory) / "event.json"
+        event.write_text('{}')
+        hosted = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event)}
+        for portable in ("0", "1"):
+            with patch.dict(os.environ, {**hosted, "CARR_CI_PORTABLE_ONLY": portable}):
+                rc, out = run(["--only", "migration"])
+                check(f"host portable={portable}: migration fixture reaches loose SKIP",
+                      rc == 0 and "SKIP" in out and "no CARR_CI_DATABASE_URL" in out, out)
+                rc, out = run(["--strict", "--only", "migration"])
+                check(f"host portable={portable}: migration fixture reaches strict SKIP",
+                      rc == 1 and "SKIP" in out and "no CARR_CI_DATABASE_URL" in out, out)
+                for host in ("ep-x.neon.tech", "10.0.0.5", "db.internal"):
+                    rc, out = run(["--only", "migration"],
+                                  env={"CARR_CI_DATABASE_URL": f"postgres://u:p@{host}:5432/x"})
+                    check(f"host portable={portable}: migration fixture refuses {host}",
+                          rc == 1 and "REFUSED" in out, out)
+                rc, out = run(["--only", "migration"], env=hosted)
+                check(f"host portable={portable}: explicit PR event still fails closed",
+                      rc == 1 and "cannot verify claims" in out, out)
+
 def test_secret_scanner_catches_and_respects_allow():
     with tempfile.TemporaryDirectory(prefix="carr-ci-scanner.") as tmp:
         root = pathlib.Path(tmp)
@@ -1061,6 +1085,7 @@ def main(argv=None):
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_migration_refuses_non_loopback,
+               test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
                test_types_class_catches_a_seeded_type_error,
