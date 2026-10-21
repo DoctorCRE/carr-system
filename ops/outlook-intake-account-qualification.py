@@ -23,6 +23,7 @@ source = SOURCE.read_text()
 fixture.SCHEMA = re.search(r'db.execute_batch\(\s*"(.*?)",\s*\)', source, re.S)[1]
 ALLOWED = 'joe.bookout@carr.us'
 TESTER = 'joe.b.tester@outlook.com'
+fixture.OWNER = ALLOWED
 CASES = {
     'allowed': [ALLOWED],
     'tester': [TESTER],

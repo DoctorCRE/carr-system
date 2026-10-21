@@ -244,6 +244,12 @@
       "sha256": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe",
       "rule": "pii-email",
       "reason": "The PR2050 assignment explicitly requires the owning-account and tester identities in otherwise synthetic offline fixtures. No client data. This qualification binds only these reviewed bytes and this detector."
+    },
+    {
+      "path": "ops/outlook-intake-account-qualification.py",
+      "sha256": "593b9b42c7a6b7a757faf0339951a486d1cece35a8e9ba538f7f6005b2b87bca",
+      "rule": "pii-email",
+      "reason": "The PR2050 assignment explicitly requires these two account identities in synthetic offline fixtures. This revision recognizes the fixture owning account as internal. This qualification binds only these reviewed bytes and this detector."
     }
   ]
 }
