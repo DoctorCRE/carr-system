@@ -1,6 +1,6 @@
 # Outlook format atlas
 
-Slice 1 records static application declarations in [surface-atlas.json](surface-atlas.json).
+The surface baseline records static application declarations in [surface-atlas.json](surface-atlas.json).
 The [generated reference](surface-atlas.md) renders that JSON without consulting Outlook.
 The [WR-000439 criteria](work-request-criteria.json) record the four slices, dependencies,
 autonomous design decisions, source study, and remaining acceptance criteria.
@@ -72,7 +72,7 @@ remain outside slice 1. The scanner does not invoke any URL.
 
 The store atlas, hxprobe name migration, count-only store command, decoded-byte and field-ID
 coverage, combined drift, and launchd trigger design remain the named WR-000439 criteria.
-No store reader, profile locator, launchd installation, or production writer is present here.
+The atlas tools do not locate profiles, read stores, install launchd jobs, or write production records.
 
 ## Documentation studied
 
@@ -83,3 +83,40 @@ PR #2040 supplies a static survey to reconcile when it lands.
 The extractor uses Python's [plist parser](https://docs.python.org/3/library/plistlib.html)
 for XML and binary plists. Declaration meanings follow Apple's
 [Core Foundation key reference](https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html).
+
+## Store source catalog
+
+[The store atlas](hxstore-atlas.json) catalogs the maintained reader's known layouts.
+[The generated store reference](hxstore-atlas.md) includes each entry and its source binding.
+This session completes `ATLAS-STORE-SOURCE`. `ATLAS-STORE-PROBE` and grammar reconciliation remain separate sessions.
+
+| Command | Result |
+| --- | --- |
+| `python3 ops/hxstore-atlas.py render spec/outlook/hxstore-atlas.json` | Generated Markdown reference on stdout. |
+| `python3 ops/hxstore-atlas.py rust spec/outlook/hxstore-atlas.json` | Generated Rust decoder keys and display names on stdout. |
+| `python3 ops/hxstore-atlas-selftest.py` | Seven synthetic contract and CLI tests, including rebuild after an atlas rename. |
+| `./ops/ci.sh --only hxprobe` | Existing synthetic Rust tests and locked release build. |
+
+`outlook-hxstore-atlas/v1` stores stable entry IDs with typed identifiers, names, wire types,
+decoders, confidence, evidence, and first-seen Outlook versions. Evidence binds a symbol to a
+source file at an exact commit and SHA-256. These bindings establish the catalog's provenance.
+They do not establish an Outlook version. A null `first_seen_version` means unknown.
+
+Containers, anchor regions, block types, serialized object classes, envelope tags, byte offsets,
+and string selectors are separate identifier kinds. No numeric property-ID framing is established
+by the pinned reader. Each relevant record type retains an explicit unknown wire-field entry.
+Calendar offsets 574 and 582 are relative to the object body, ten bytes after the envelope starts.
+Inferred confidence describes implemented interpretations and heuristics. Unknown means unresolved.
+No entry claims empirical proof from a store observation performed by this desk.
+
+Cargo invokes the Python 3 standard-library generator at build time. It tracks the atlas and
+generator as build inputs. The generated enum, label mapping, and tally iteration replace their
+handwritten definitions in `schema.rs`. `decoder_key` is a stable extraction identity;
+`name` is the label shown by `hxprobe map` and `find`. Editing `name` requires rebuilding hxprobe.
+There is no runtime override or fallback name table. Invalid atlas input fails the build.
+Existing SQLite table and column names are separate derived outputs and retain their contracts.
+
+The synthetic CLI test creates its store bytes in a temporary directory. It does not read an
+Outlook app, profile, store, sidecar, or preference. It proves that an atlas rename changes both
+the real hxprobe field map and tally. It does not measure decoded-byte or wire-field-ID coverage.
+The count-only store observation command is the next criterion and is not delivered here.

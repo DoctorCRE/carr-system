@@ -45,7 +45,9 @@
       "id": "S2",
       "name": "Atlas-backed hxprobe and count-only observation",
       "criteria": ["ATLAS-STORE-SOURCE", "ATLAS-STORE-PROBE"],
-      "state": "remaining",
+      "state": "partial",
+      "completed_criteria": ["ATLAS-STORE-SOURCE"],
+      "remaining_criteria": ["ATLAS-STORE-PROBE"],
       "depends_on": ["https://github.com/jbookout/carr-system/pull/2038"]
     },
     {
@@ -73,7 +75,13 @@
     {"id": "D7", "question": "What does first seen mean?", "answer": "First observed in atlas history. Preserve existing first_seen_version when extracting against a baseline.", "trade_off": "This does not claim the version in which Microsoft introduced a declaration."},
     {"id": "D8", "question": "Where do remaining criteria live?", "answer": "Keep the extension criteria and dependency map in this versioned JSON and link them from the PR. Do not mutate the production Work Request under the no-production-writes boundary.", "trade_off": "The orchestrator must reconcile these criteria into the Work Request record if needed."},
     {"id": "D9", "question": "Install a version watcher now?", "answer": "No. S4 designs the trigger after combined drift and its count-only contract exist.", "trade_off": "No automatic watch runs from slice 1."},
-    {"id": "D10", "question": "How are delivery checks run in the fresh checkout?", "answer": "Install the committed Node lockfile and mypy 2.3.0 locally, and invoke the existing leak guard with the absolute repository root used by its hooks.", "trade_off": "Local dependency directories remain ignored. No gate, global configuration or dependency manifest changes."}
+    {"id": "D10", "question": "How are delivery checks run in the fresh checkout?", "answer": "Install the committed Node lockfile and mypy 2.3.0 locally, and invoke the existing leak guard with the absolute repository root used by its hooks.", "trade_off": "Local dependency directories remain ignored. No gate, global configuration or dependency manifest changes."},
+    {"id": "D11", "question": "How much work fits this desk session?", "answer": "Deliver ATLAS-STORE-SOURCE only, following the explicit one-session-per-criterion sizing. Merge the approved vendor branch into the approved atlas base without rebasing.", "trade_off": "The count-only command and grammar reconciliation remain subsequent criteria. This PR stays open against main."},
+    {"id": "D12", "question": "Where do decoder display names live?", "answer": "Keep stable decoder_key identities and display names in hxstore-atlas.json. Generate the Key enum, name mapping and iteration list during the Cargo build. Remove the hand-maintained definitions.", "trade_off": "A runtime JSON reader would add runtime configuration and parsing. Build generation uses the repository Python 3 standard library and adds no Cargo dependency. Name edits require rebuilding hxprobe."},
+    {"id": "D13", "question": "Which public seams prove the name migration?", "answer": "Test the reference CLI and the actual hxprobe map CLI using a generated CRC-valid literal-only LZ4 block. Copy only the maintained crate, generator and atlas into a temporary tree, rename an entry, rebuild and inspect map and tally output.", "trade_off": "This proves name locality and build invalidation. It does not establish real-store decoding accuracy or wire-ID coverage."},
+    {"id": "D14", "question": "How are wire IDs and first-seen versions represented?", "answer": "Distinguish containers, record anchors, block types, object classes, envelope tags, object byte offsets, string-run selectors and wire field IDs. Keep unknown IDs and first_seen_version explicitly null. Bind interpretation evidence to exact vendor revision and SHA-256.", "trade_off": "The pinned implementation establishes recognized layouts and heuristics, not the first Outlook build or empirical proof. All interpreted meanings are inferred and unresolved meanings unknown."},
+    {"id": "D15", "question": "How do malformed atlas edits fail?", "answer": "Validate before generating any reference or Rust. Reject duplicate IDs, decoder keys and decoder display names, dangling parents, unsupported schemas, missing evidence and malformed provenance.", "trade_off": "Duplicate display names would collapse distinct tally entries. Invalid atlas input stops the Cargo build instead of using fallback names."},
+    {"id": "D16", "question": "Which output contract changes?", "answer": "Generate the eight named schema-map labels and their tally keys from the atlas. Stable decoder keys continue to drive extraction. SQLite table and column contracts are separate derived outputs and retain their existing names.", "trade_off": "The atlas migration does not rename persisted SQLite columns or modify decoding heuristics."}
   ],
   "not_yet_specified": [
     "Numeric field framing beyond the pinned vendor's known object envelopes requires evidence from safe synthetic work and orchestrator counts.",
@@ -87,7 +95,8 @@
     {"source": "PR #2038", "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df", "finding": "Maintained Rust reader is unmerged; schema names describe string-run heuristics, not numeric property IDs."},
     {"source": "upstream README.md and SPEC.md", "revision": "191b54e42757687806202f8f696e9066f0514e11", "finding": "Format evidence covers block CRC/LZ4, UTF-16 runs, ticks and object envelopes. Published recovery counts are not format-byte coverage."},
     {"source": "vendor-patches/README.md and hxprobe-calendar-and-bodies.patch", "revision": "66ac4cc709af5265819e2612aab62d746a9faf85", "finding": "Calendar class 0x006b uses offsets 574 and 582 and variable text heuristics. The body extension reads sidecars; no such read is used by this atlas slice."},
-    {"source": "PR #2040", "revision": "6da9e8ce7862bc4f63440fb5a01ad271b879204a", "finding": "Static route survey is unmerged. Its inferred builder vocabulary is not a validated invocation contract."}
+    {"source": "PR #2040", "revision": "6da9e8ce7862bc4f63440fb5a01ad271b879204a", "finding": "Static route survey is unmerged. Its inferred builder vocabulary is not a validated invocation contract."},
+    {"source": "Maintained vendor/hxprobe source", "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df", "finding": "Cataloged block types 8/16, serialized object envelopes and classes, folder reference offsets, calendar object offsets, and eight mail string-run selector keys. Numeric property-ID framing and first-seen Outlook builds remain unknown."}
   ],
   "tool_documentation": [
     "https://docs.python.org/3/library/plistlib.html",

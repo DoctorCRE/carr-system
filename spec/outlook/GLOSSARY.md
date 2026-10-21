@@ -32,3 +32,22 @@ _Avoid_: Introduction version.
 **Decoded-byte coverage**:
 The share of record bytes whose meaning has a supported interpretation, with overlapping spans counted once.
 _Avoid_: Message recovery rate.
+
+**Object class**:
+A serialized object's encoded type discriminator.
+_Avoid_: Property ID, envelope tag.
+
+**Envelope tag**:
+An encoded discriminator in the wrapper around a serialized object.
+_Avoid_: Object class, property ID.
+
+**Object offset**:
+A byte displacement measured from the start of a serialized object's body.
+_Avoid_: Wire field ID, envelope-relative offset.
+
+**Decoder key**:
+A stable identity used to select a decoded meaning independently of its display name.
+
+**Display name**:
+The human-readable label attached to a decoded meaning.
+_Avoid_: Wire field ID.
