@@ -124,7 +124,7 @@ def worker(queue, card_id, token, registry, results):
         result = dispatch.dispatch(row['desk'], row['task'], registry=Registry(registry),
                                    results_path=results, on_started=started, **options)
     except DeskError as exc:
-        result = {'status': 'failed', 'detail': str(exc), 'termination_confirmed': True}
+        result = {'status': 'failed', 'code': exc.code, 'detail': f'{exc.code}: {exc}', 'termination_confirmed': True}
     except Exception as exc:
         result = {'status': 'failed', 'detail': f'{type(exc).__name__}: {exc}',
                   'termination_confirmed': False}
