@@ -660,6 +660,10 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     now = ports.now()
     pending_writes = any(not r['acknowledged'] for r in state.get('requests', {}).values())
     if state.get('store') == signature and not state.get('steps') and not pending_writes and not _calendar_due(state, now):
+        if state.get('pending_full'):
+            Run(ports, state, now, out).full_text([])
+            _refresh_list(out, state['pending_full'])
+            _save(out, state)
         return Outcome('succeeded', 'store_unchanged')
     try:
         meta, mails, events = _decode(store, out, ports.decode)
