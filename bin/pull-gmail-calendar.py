@@ -432,9 +432,9 @@ The remaining decision is Joe's and it needs his hands and his credentials:
     myaccount.google.com/apppasswords. The puller reads mail over IMAP with that
     password. One credential, no consent screen, no token refresh, revocable in one
     click. Downside: an app password is full mailbox access — read AND (over SMTP)
-    send. That collides with the send-capability rule (secrets-inventory: SEND-class
-    credentials live only behind the human-gated route), so it would have to be
-    stored as a SEND-class secret even though this job only reads.
+    send. secrets-inventory classifies credentials by outbound
+    capability, so it would be recorded as a SEND-class secret even
+    though this job only reads.
 
   OPTION B — Reuse the OAuth client already created for the connector
     Project carr-record-layer already holds the "CARR MCP Worker" OAuth client. Add
