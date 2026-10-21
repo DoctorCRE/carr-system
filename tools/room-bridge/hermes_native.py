@@ -1,5 +1,5 @@
 """Process-owned Hermes one-shot with a shared, conservative inference allowance."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from decimal import Decimal
 import json
 import os
@@ -91,6 +91,11 @@ class CallBudget:
         if ((not caps and self.output_price) or any(type(cap) is not int or cap <= 0 for cap in caps)
                 or body.get('n', 1) != 1 or body.get('best_of', 1) != 1 or 'prediction' in body):
             self.stop()
+        if hasattr(self, 'record_tools'):
+            tools = body.get('tools', [])
+            if (not isinstance(tools, list) or any(tool.get('type') != 'function'
+                    or tool.get('function', {}).get('name') not in self.record_tools for tool in tools)):
+                raise ValueError('record-layer refused non-CARR inference tools')
         outputs = max(caps, default=0)
         messages = body.get('messages')
         if not isinstance(messages, list):
@@ -156,27 +161,73 @@ class CallBudget:
                 self.credits_path.write_text('nous credits exhausted')
 
 
-def run_native(prompt, model, reasoning, usage_file, budget):
-    import run_agent
-    from hermes_cli.oneshot import run_oneshot
-    original = run_agent.AIAgent
-    class BoundedAgent(original):
-        def __init__(self, *args, **kwargs):
-            budget.bind(kwargs.get('base_url'), kwargs.get('provider'), kwargs.get('model'))
-            kwargs.update(max_iterations=MAX_TURNS, max_tokens=budget.output_limit(slots=MAX_TURNS),
-                          fallback_model=None, skip_background_review=True)
-            super().__init__(*args, **kwargs)
-
-        def _max_tokens_param(self, value):
-            limit = budget.output_limit()
-            return super()._max_tokens_param(min(value, limit) if limit is not None else value)
-    run_agent.AIAgent = BoundedAgent
+@contextmanager
+def record_configuration():
+    from importlib import import_module
+    config = import_module('hermes_cli.config')
+    mcp_config = import_module('tools.mcp_tool_config')
+    from hermes_cli.mcp_startup import set_mcp_server_filter
+    original = config.load_config
+    servers = {'carr': {'url': 'https://api.doctorcre.com/mcp', 'auth': 'oauth'}}
+    def load(*args, **kwargs):
+        return {**original(*args, **kwargs), 'mcp_servers': servers, 'plugins': {}}
+    set_mcp_server_filter(['carr'])
+    original_mcp = mcp_config._load_mcp_config
+    config.load_config = load
+    mcp_config._load_mcp_config = lambda: servers
     try:
-        with budget.enforce():
-            return run_oneshot(prompt, model=model, provider='nous', reasoning=reasoning,
-                               usage_file=usage_file)
+        yield
     finally:
-        run_agent.AIAgent = original
+        config.load_config = original
+        mcp_config._load_mcp_config = original_mcp
+
+
+def restrict_tools(agent):
+    from tools.mcp_tool import _mcp_tool_server_names
+    tools = [tool for tool in agent.tools
+             if _mcp_tool_server_names.get(tool['function']['name']) == 'carr']
+    if not tools:
+        raise ValueError('record-layer requires live CARR tools')
+    agent.tools = tools
+    agent.valid_tool_names = {tool['function']['name'] for tool in tools}
+    return frozenset(agent.valid_tool_names)
+
+
+def run_native(prompt, model, reasoning, usage_file, budget, *, posture=None):
+    if posture == 'record-layer':
+        budget.record_tools = frozenset()
+    with record_configuration() if posture == 'record-layer' else nullcontext():
+        import run_agent
+        from hermes_cli.oneshot import run_oneshot
+        original = run_agent.AIAgent
+        class BoundedAgent(original):
+            def __init__(self, *args, **kwargs):
+                budget.bind(kwargs.get('base_url'), kwargs.get('provider'), kwargs.get('model'))
+                kwargs.update(max_iterations=MAX_TURNS, max_tokens=budget.output_limit(slots=MAX_TURNS),
+                              fallback_model=None, skip_background_review=True)
+                if posture == 'record-layer':
+                    kwargs.update(enabled_toolsets=['carr'], skip_memory=True, skip_context_files=True)
+                super().__init__(*args, **kwargs)
+                if posture == 'record-layer':
+                    self.record_tools = restrict_tools(self)
+                    budget.record_tools = self.record_tools
+
+            def _execute_tool_calls(self, assistant_message, *args, **kwargs):
+                if posture == 'record-layer':
+                    if any(call.function.name not in self.record_tools for call in assistant_message.tool_calls):
+                        raise ValueError('record-layer refused a non-CARR tool call')
+                return super()._execute_tool_calls(assistant_message, *args, **kwargs)
+
+            def _max_tokens_param(self, value):
+                limit = budget.output_limit()
+                return super()._max_tokens_param(min(value, limit) if limit is not None else value)
+        run_agent.AIAgent = BoundedAgent
+        try:
+            with budget.enforce():
+                return run_oneshot(prompt, model=model, provider='nous', reasoning=reasoning,
+                                   usage_file=usage_file, **({'toolsets': ['carr']} if posture == 'record-layer' else {}))
+        finally:
+            run_agent.AIAgent = original
 
 
 def main():
@@ -185,6 +236,7 @@ def main():
         print(json.dumps(quote_model(sys.argv[2])))
         return 0
     parser = argparse.ArgumentParser()
+    parser.add_argument('--posture', choices=['record-layer'])
     parser.add_argument('-z', required=True)
     parser.add_argument('-m', required=True)
     parser.add_argument('--reasoning', required=True)
@@ -199,7 +251,7 @@ def main():
                         ledger=Ledger(os.environ['CARR_NOUS_BUDGET_RESULTS']))
     budget.credits_path = Path(args.usage_file).with_suffix('.credits-exhausted')
     try:
-        code = run_native(args.z, args.m, args.reasoning, args.usage_file, budget)
+        code = run_native(args.z, args.m, args.reasoning, args.usage_file, budget, **({'posture': args.posture} if args.posture else {}))
     except Exception:
         code = 1
     path = Path(args.usage_file)
