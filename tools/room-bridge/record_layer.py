@@ -89,6 +89,7 @@ def run_codex(entry, task, *, env, run, timeout_s):
             config = {
                 'mcp_servers.carr.url': CARR_MCP_URL,
                 'mcp_servers.carr.required': True,
+                'mcp_servers.carr.default_tools_approval_mode': 'approve',
                 'mcp_servers.carr.bearer_token_env_var': 'CARR_MCP_TOKEN',
                 'features.shell_tool': False, 'features.view_image': False,
                 'features.multi_agent': False, 'features.apps': False,
