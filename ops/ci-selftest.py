@@ -137,6 +137,8 @@ def seeded_paths(*rels):
 def run(args, env=None, shell_cmd=None, timeout=600):
     e = dict(os.environ)
     e.pop("CARR_CI_DATABASE_URL", None)
+    e.pop("GITHUB_EVENT_NAME", None)
+    e.pop("GITHUB_EVENT_PATH", None)
     if env:
         e.update(env)
     cmd = shell_cmd if shell_cmd else [str(CI), *args]
@@ -256,6 +258,22 @@ def test_migration_refuses_non_loopback():
                   env={"CARR_CI_DATABASE_URL": "postgres://u:p@localhost:5432/x"})
     check("migration ACCEPTS loopback (fails on no server, not on the guard)",
           "REFUSED" not in out)
+
+def test_migration_fixtures_ignore_hosted_pr_event():
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as directory:
+        event = pathlib.Path(directory) / "event.json"
+        event.write_text('{}')
+        hosted = {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_EVENT_PATH": str(event)}
+        for portable in ("0", "1"):
+            with patch.dict(os.environ, {**hosted, "CARR_CI_PORTABLE_ONLY": portable}):
+                rc, out = run(["--only", "migration"])
+                check(f"host portable={portable}: migration fixture reaches loose SKIP",
+                      rc == 0 and "SKIP" in out and "no CARR_CI_DATABASE_URL" in out, out)
+                rc, out = run(["--only", "migration"], env=hosted)
+                check(f"host portable={portable}: explicit PR event still fails closed",
+                      rc == 1 and "cannot verify claims" in out, out)
 
 def test_secret_scanner_catches_and_respects_allow():
     with tempfile.TemporaryDirectory(prefix="carr-ci-scanner.") as tmp:
@@ -1061,6 +1079,7 @@ def main(argv=None):
                test_unknown_class_refuses,
                test_hxprobe_runs_locked_checks_and_propagates_failures,
                test_migration_refuses_non_loopback,
+               test_migration_fixtures_ignore_hosted_pr_event,
                test_secret_scanner_catches_and_respects_allow,
                test_dep_check_detects_a_stale_lock,
                test_types_class_catches_a_seeded_type_error,
