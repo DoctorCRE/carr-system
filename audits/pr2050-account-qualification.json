@@ -1,0 +1,318 @@
+{
+  "qualified": false,
+  "runtime_changed": false,
+  "decoder_source_sha256": "82bc98c82f618bd34525062ea11e7080df2666e5254c864377eaac26b8095b67",
+  "decoded_columns": {
+    "folders": [
+      "id",
+      "account_id",
+      "name",
+      "block"
+    ],
+    "messages": [
+      "id",
+      "block",
+      "sender",
+      "sender_name",
+      "recipients",
+      "subject",
+      "message_id",
+      "body",
+      "html",
+      "body_words",
+      "html_bytes",
+      "body_kind",
+      "sent_unix",
+      "sent_utc",
+      "subject_inherited",
+      "preview",
+      "body_source",
+      "copies",
+      "copy_key"
+    ],
+    "message_folders": [
+      "message_id",
+      "folder_id"
+    ],
+    "events": [
+      "id",
+      "goid",
+      "start_unix",
+      "end_unix",
+      "start_utc",
+      "end_utc",
+      "subject",
+      "location",
+      "organizer_name",
+      "organizer_email",
+      "body"
+    ],
+    "meta": [
+      "key",
+      "value"
+    ]
+  },
+  "observations": {
+    "allowed": {
+      "ground_truth_owners": {
+        "allowed": [
+          "joe.bookout@carr.us"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: allowed",
+        "Meeting: allowed"
+      ]
+    },
+    "tester": {
+      "ground_truth_owners": {
+        "tester": [
+          "joe.b.tester@outlook.com"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: tester",
+        "Meeting: tester"
+      ]
+    },
+    "other": {
+      "ground_truth_owners": {
+        "other": [
+          "other@example.test"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: other",
+        "Meeting: other"
+      ]
+    },
+    "missing": {
+      "ground_truth_owners": {
+        "missing": []
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: missing",
+        "Meeting: missing"
+      ]
+    },
+    "ambiguous": {
+      "ground_truth_owners": {
+        "ambiguous": [
+          "joe.bookout@carr.us",
+          "joe.b.tester@outlook.com"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: ambiguous",
+        "Meeting: ambiguous"
+      ]
+    },
+    "mixed": {
+      "ground_truth_owners": {
+        "allowed": [
+          "joe.bookout@carr.us"
+        ],
+        "tester": [
+          "joe.b.tester@outlook.com"
+        ],
+        "other": [
+          "other@example.test"
+        ],
+        "missing": [],
+        "ambiguous": [
+          "joe.bookout@carr.us",
+          "joe.b.tester@outlook.com"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 5,
+      "meeting_writes": 5,
+      "action_writes": 0,
+      "model_calls": 5,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: tester",
+        "Email from Pat Example: missing",
+        "Email from Pat Example: allowed",
+        "Email from Pat Example: ambiguous",
+        "Email from Pat Example: other",
+        "Meeting: allowed",
+        "Meeting: tester",
+        "Meeting: other",
+        "Meeting: missing",
+        "Meeting: ambiguous"
+      ]
+    },
+    "colliding_allowed_and_tester": {
+      "ground_truth_owners": {
+        "allowed": [
+          "joe.bookout@carr.us"
+        ],
+        "tester": [
+          "joe.b.tester@outlook.com"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: Shared subject",
+        "Meeting: Shared meeting"
+      ]
+    },
+    "missing_preview": {
+      "ground_truth_owners": {
+        "missing": []
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 1,
+      "action_writes": 0,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 1,
+      "summaries": [
+        "Email from Pat Example: missing",
+        "Meeting: missing"
+      ]
+    },
+    "tester_upcoming": {
+      "ground_truth_owners": {
+        "tester": [
+          "joe.b.tester@outlook.com"
+        ]
+      },
+      "mail_participants": {
+        "sender": "pat@example.test",
+        "recipients": "joe.bookout@carr.us"
+      },
+      "event_participants": {
+        "organizer": "joe.bookout@carr.us",
+        "attendee": "pat@example.test"
+      },
+      "email_writes": 1,
+      "meeting_writes": 0,
+      "action_writes": 1,
+      "model_calls": 1,
+      "reports": 1,
+      "refresh_entries": 0,
+      "summaries": [
+        "Email from Pat Example: tester"
+      ]
+    },
+    "legacy_retry": {
+      "ground_truth_owner": "joe.b.tester@outlook.com",
+      "source_rows_on_retry": 0,
+      "retry_outcome": "steps_pending",
+      "replayed_writes": 1,
+      "reports": 1
+    }
+  },
+  "missing_facts": [
+    "An authoritative local account-key to owning mailbox address mapping.",
+    "An event revision to owning account reference, independent of organizer and attendees.",
+    "Ownership preserved before message, event, conversation and sidecar revision merging.",
+    "Ownership provenance for persisted requests, next-step replies and pending refresh entries."
+  ],
+  "limitations": [
+    "Ground truth labels belong to the synthetic harness, not to decoder output.",
+    "Allowed positive control proves processing only, not verified account ownership.",
+    "No binary HxStore parsing or live account ownership was exercised."
+  ]
+}
