@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-import fnmatch
+import re
 from migration_source import migration_names, read_migration
 import json
 import os
@@ -45,9 +45,10 @@ def main():
             create table public.tool_call(idempotency_key text primary key, verb text, actor_id uuid, response jsonb);
             create unique index on ops.jev_call_receipt(idempotency_key);
         """)
-        for name in sorted(migration_names(ROOT)):
-            if fnmatch.fnmatchcase(name, '*_jev_attempt*.sql'):
-                sql(read_migration(ROOT, name))
+        audit_source = re.search(
+            r'CREATE FUNCTION ops\.jev_call_receipt_integrity\(\).*?\n\$_\$;',
+            (ROOT / 'db/schema.sql').read_text(), re.S).group()
+        sql(audit_source)
         sql("""insert into ops.jev_call_receipt
             select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
                 clock_timestamp() - case i when 1 then interval '30 minutes' else interval '2 hours' end,
@@ -78,12 +79,27 @@ def main():
             from generate_series(1,1000000) i;
             analyze;
         """)
+        before = json.loads(sql('select ops.jev_call_receipt_integrity();'))
+        for name in sorted(migration_names(ROOT)):
+            if name.endswith('_jev_attempt_settlement_lookup.sql'):
+                sql(read_migration(ROOT, name))
+        sql('analyze public.tool_call;')
+        settlement = 'select count(*) ' + audit_source.split('into v_pending, v_abandoned ')[1].split(';')[0]
+        settlement_plan = json.loads(sql(
+            'explain (analyze,buffers,format json,timing off) ' + settlement))
+        assert 'tool_call_jev_settlement_idx' in json.dumps(settlement_plan), settlement_plan
+        assert int(sql(settlement)) == 288002
+        print('PASS canonical settlement query uses partial index and preserves 288002 unsettled attempts')
         plan = json.loads(sql('explain (analyze,buffers,format json,timing off) select ops.jev_call_receipt_integrity();'))[0]['Plan']
         blocks = plan['Shared Hit Blocks'] + plan['Shared Read Blocks']
         # Allow one ledger pass and eight receipt passes, without another unrelated-ledger scan for settlements.
         budget = int(sql("select (8 * pg_relation_size('ops.jev_call_receipt') + pg_relation_size('public.tool_call')) / current_setting('block_size')::int;"))
         assert blocks <= budget, f'audit touched {blocks} buffers, budget {budget}'
         audit = json.loads(sql('select ops.jev_call_receipt_integrity();'))
+        before.pop('checked_at')
+        audit.pop('checked_at')
+        assert audit == before, (before, audit)
+        print('PASS every canonical audit field is identical before and after the index')
         assert audit['receipts_total'] == 288003, audit
         assert audit['receipts_without_tool_call']['count'] == 0, audit
         assert audit['daily_usage']['pending_attempts'] == 1, audit
