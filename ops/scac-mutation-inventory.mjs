@@ -2,7 +2,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
+import { parsers } from "../mcp-server/node_modules/prettier/plugins/acorn.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { SCAC_MUTATION_OPERATIONS, SCAC_MUTATION_REGISTRY_VERSION } from "../mcp-server/src/scac-mutation-registry.current.generated.js";
 const REPO_ROOT = fileURLToPath(new URL("../", import.meta.url));
@@ -34,8 +35,205 @@ function delegatesTo(name) {
   return [];
 }
 
+const sqlModels = new Map();
+const parents = new WeakMap();
+function walk(node, visit) {
+  if (!node || typeof node.type !== "string") return;
+  visit(node);
+  for (const value of Object.values(node)) {
+    for (const child of Array.isArray(value) ? value : [value]) {
+      if (!child || typeof child.type !== "string") continue;
+      parents.set(child, node);
+      walk(child, visit);
+    }
+  }
+}
+
+function parseSource(source) {
+  return parsers.acorn.parse(source, {});
+}
+
+function sqlModel(path) {
+  if (sqlModels.has(path)) return sqlModels.get(path);
+  const source = readFileSync(resolve(REPO_ROOT, path), "utf8");
+  const ast = parseSource(source);
+  const model = { ast, source, functions: new Map(), imports: new Map() };
+  sqlModels.set(path, model);
+  walk(ast, node => {
+    if (node.type === "FunctionDeclaration" && node.id) model.functions.set(node.id.name, node);
+    if (node.type === "VariableDeclarator" && node.id.type === "Identifier" &&
+        ["ArrowFunctionExpression", "FunctionExpression"].includes(node.init?.type))
+      model.functions.set(node.id.name, node.init);
+    if (node.type === "ImportDeclaration" && node.source.value.startsWith(".")) {
+      const importedPath = relative(REPO_ROOT, resolve(REPO_ROOT, dirname(path), node.source.value));
+      for (const binding of node.specifiers.filter(binding => binding.type === "ImportSpecifier"))
+        model.imports.set(binding.local.name, { path: importedPath, name: binding.imported.name });
+    }
+  });
+  return model;
+}
+
+function sqlText(node, source) {
+  if (!node) return "";
+  if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node.type === "TemplateLiteral") return node.quasis.map((part, i) =>
+    part.value.cooked + (node.expressions[i] ? "${" + source.slice(node.expressions[i].start, node.expressions[i].end) + "}" : "")).join("");
+  if (node.type === "BinaryExpression" && node.operator === "+")
+    return sqlText(node.left, source) + sqlText(node.right, source);
+  return "";
+}
+
+function writeTargets(sql, embedded = false) {
+  let clean = sql.replace(/\/\*[\s\S]*?\*\/|--[^\n]*/g, comment => comment.replace(/[^\n]/g, " "));
+  if (!embedded) clean = clean.replace(/'(?:''|[^'])*'/g, value => value.replace(/[^\n]/g, " "));
+  return [...clean.matchAll(/\b(?:insert\s+into|update|delete\s+from|merge\s+into)\s+(\$\{[^}]+\}|(?:"?[a-z_][a-z_0-9]*"?\.)?"?[a-z_][a-z_0-9]*"?)(?=\s|[;()'"]|$)/gi)]
+    .map(match => ({ target: match[1].replaceAll('"', "").toLowerCase(), offset: match.index }));
+}
+
+function literalLoopTables(node, variable, path) {
+  for (let parent = parents.get(node); parent; parent = parents.get(parent)) {
+    if (parent.type !== "ForOfStatement") continue;
+    const declaration = parent.left.declarations?.[0];
+    if (declaration?.id.name !== variable || parent.right.type !== "ArrayExpression") continue;
+    const values = parent.right.elements;
+    if (values.every(value => value.type === "Literal" && typeof value.value === "string"))
+      return values.map(value => value.value);
+  }
+  throw new Error(`unresolved SQL table ${variable}: ${path}`);
+}
+
+function queryWrites(node, path, source) {
+  const writes = [];
+  walk(node, child => {
+    if (child.type === "CallExpression" && child.callee.type === "MemberExpression" &&
+        child.callee.property.name === "query") {
+      for (const { target } of writeTargets(sqlText(child.arguments[0], source))) {
+        const tables = target.startsWith("${") ? literalLoopTables(child, target.slice(2, -1), path) : [target];
+        for (const table of tables) writes.push({
+          table: table.includes(".") ? table : `public.${table}`,
+          source_locator: path,
+          line: source.slice(0, child.arguments[0].start).split("\n").length,
+          caller: enclosingCaller(child),
+        });
+      }
+    }
+  });
+  return writes;
+}
+
+function handlerWrites(tool) {
+  const path = tool.registrySource;
+  const source = `const handler = ${tool.handler.toString()};`;
+  const handler = parseSource(source);
+  const tables = new Set();
+  const visited = new Set();
+  const visitFunction = (node, sourcePath, sourceText) => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    for (const write of queryWrites(node, sourcePath, sourceText)) tables.add(write.table);
+    walk(node, child => {
+      if (child.type !== "CallExpression" || child.callee.type !== "Identifier") return;
+      const name = child.callee.name;
+      // Generic dispatch is represented by delegates_to, never by traversing
+      // the registry implementation and assigning every writer to every verb.
+      if (name === "executeRegisteredTool") return;
+      const context = sqlModel(sourcePath);
+      const imported = context.imports.get(name);
+      const helperPath = imported?.path || sourcePath;
+      const helperModel = sqlModel(helperPath);
+      const helper = helperModel.functions.get(imported?.name || name);
+      if (helper) visitFunction(helper, helperPath, helperModel.source);
+    });
+  };
+  visitFunction(handler, path, source);
+  return [...tables].sort();
+}
+
+const LEGACY_TABLES = new Set(["public.client", "public.deal"]);
+const LEGACY_CENSUS_PATH = "mcp-server/src/legacy-lifecycle-callers.generated.json";
+
+function enclosingCaller(node) {
+  for (let parent = parents.get(node); parent; parent = parents.get(parent)) {
+    if (parent.type === "FunctionDeclaration" && parent.id) return parent.id.name;
+    if (parent.type === "Property" && parent.value.type === "ObjectExpression" &&
+        typeof parent.key.value === "string") return parent.key.value;
+  }
+  return null;
+}
+
+export function legacyLifecycleCensus(tools) {
+  const paths = trackedIndexEntries().map(entry => entry.path).filter(path =>
+    /^(?:mcp-server\/src|pipelines|ops|bin|tools|migrations)\//.test(path) &&
+    /\.(?:js|mjs|py|sh|sql)$/.test(path) && !/\.generated\./.test(path) &&
+    !/(?:^|\/)(?:test[^/]*|[^/]*selftest[^/]*|tests)(?:\/|\.)/.test(path)).sort();
+  const sources = paths.map(path => [path, sourceDigest(path)]);
+  const writeSites = [];
+  for (const path of paths) {
+    const source = readFileSync(resolve(REPO_ROOT, path), "utf8");
+    if (path.startsWith("mcp-server/src/") && /\.m?js$/.test(path)) {
+      const model = sqlModel(path);
+      for (const write of queryWrites(model.ast, path, source).filter(write => LEGACY_TABLES.has(write.table)))
+        writeSites.push({ ...write, kind: "runtime_sql", source_digest: sourceDigest(path) });
+    } else {
+      // Preserve newlines so locations remain exact. Migration source is
+      // historical evidence, not a claim about the deployed function catalog.
+      const clean = source.replace(/\/\*[\s\S]*?\*\/|--[^\n]*|^\s*#[^\n]*/gm,
+        comment => comment.replace(/[^\n]/g, " "));
+      for (const { target, offset } of writeTargets(clean, !path.endsWith(".sql"))) {
+        const table = target.includes(".") ? target : `public.${target}`;
+        if (LEGACY_TABLES.has(table)) writeSites.push({ table, source_locator: path,
+          line: clean.slice(0, offset).split("\n").length, caller: null,
+          kind: path.startsWith("migrations/") ? "migration_source" : "script_sql",
+          source_digest: sourceDigest(path) });
+      }
+    }
+  }
+  const pinPath = "ops/config/doctorcre-artifact.v1.json";
+  const pin = JSON.parse(readFileSync(resolve(REPO_ROOT, pinPath), "utf8"));
+  if (pin.source_commit !== "35936628aba4c7189b17f5b195c41c8ba9b782be")
+    throw new Error("DoctorCRE source pin changed; review its database writer and proxy evidence before regenerating");
+  const operations = mcpInventory(tools).filter(row => row.tables_written.some(table => LEGACY_TABLES.has(table)))
+    .map(row => ({ operation: row.operation, source_locator: row.source_locator,
+      source_digest: row.source_digest, handler_digest: sha256(tools[row.operation].handler.toString()),
+      tables_written: row.tables_written, delegates_to: row.delegates_to }));
+  const scriptPaths = [...new Set(writeSites.filter(site => site.kind === "script_sql").map(site => site.source_locator))];
+  return {
+    schema: "legacy-lifecycle-callers.v1",
+    generator: "ops/scac-mutation-inventory.mjs",
+    source_set_digest: `sha256:${sha256([...sources, [pinPath, sourceDigest(pinPath)]])}`,
+    source_count: sources.length,
+    tables: [...LEGACY_TABLES].sort(),
+    scope: "Tracked MCP runtime sources, pipeline and operational scripts, and migration SQL sources. Per-operation tables are possible direct SQL and reachable named-helper writes, including reviewed delegation edges.",
+    limitations: "Static source evidence. Generic SQL execution and generic verb dispatch remain unbounded. Migration sites include historical data repairs and function definitions, not verified deployed callers. Database triggers and live grants are not inferred from this census.",
+    retires_any_caller: false,
+    establishes_migration_readiness: false,
+    operations,
+    script_operations: scriptPaths.map(path => ({ operation: path, source_digest: sourceDigest(path),
+      tables_written: [...new Set(writeSites.filter(site => site.source_locator === path).map(site => site.table))].sort() })),
+    write_sites: writeSites.sort((a, b) => a.source_locator.localeCompare(b.source_locator) || a.line - b.line || a.table.localeCompare(b.table)),
+    doctorcre_app: {
+      repository: pin.repository, source_commit: pin.source_commit, source_locator: "src/worker.js",
+      source_digest: "sha256:80047103d4957c0948de5129057817d502499dc60d55f7800e5d89110a24b562",
+      source_url: `https://github.com/${pin.repository}/blob/${pin.source_commit}/src/worker.js#L90-L98`,
+      evidence: "Reviewed the pinned Worker, its imports, package dependencies, and service bindings. The only server source is src/worker.js. Business requests proxy to CARR; database access belongs to CARR.",
+      direct_database_writers: 0, proxy: "env.CARR.fetch",
+    },
+  };
+}
+
+export function renderLegacyLifecycleCensus(tools) {
+  return `${JSON.stringify(legacyLifecycleCensus(tools), null, 2)}\n`;
+}
+
+export function assertLegacyLifecycleCensus(tools,
+  committed = readFileSync(resolve(REPO_ROOT, LEGACY_CENSUS_PATH), "utf8")) {
+  if (committed !== renderLegacyLifecycleCensus(tools))
+    throw new Error("legacy lifecycle census is stale; run node ops/scac-mutation-inventory.mjs --write-legacy-lifecycle");
+  return true;
+}
+
 export function mcpInventory(tools = defaultTools) {
-  return Object.entries(requireTools(tools)).sort(([left], [right]) => left.localeCompare(right)).map(([name, tool]) => {
+  const rows = Object.entries(requireTools(tools)).sort(([left], [right]) => left.localeCompare(right)).map(([name, tool]) => {
     const write = tool.write === true;
     const authorityOnly = tool.authorityOnly === true;
     const humanOnly = tool.humanOnly === true;
@@ -49,6 +247,7 @@ export function mcpInventory(tools = defaultTools) {
       source_locator: tool.registrySource,
       schema_digest: sha256(tool.inputSchema || {}),
       source_digest: sourceDigest(tool.registrySource),
+      tables_written: handlerWrites(tool),
       write,
       human_only: humanOnly,
       authority_only: authorityOnly,
@@ -66,6 +265,18 @@ export function mcpInventory(tools = defaultTools) {
       classification_authorizing: false,
     };
   });
+  const byName = new Map(rows.map(row => [row.operation, row]));
+  let changed;
+  do {
+    changed = false;
+    for (const row of rows) {
+      const tables = [...new Set([...row.tables_written, ...row.delegates_to.flatMap(name =>
+        byName.get(name)?.tables_written || [])])].sort();
+      if (JSON.stringify(tables) !== JSON.stringify(row.tables_written)) changed = true;
+      row.tables_written = tables;
+    }
+  } while (changed);
+  return rows;
 }
 
 const APPLICATION_INGRESSES = [
@@ -561,7 +772,12 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     writeFileSync(path, `${current.trimEnd()}\nexport const SCAC_MUTATION_CURRENT_DB_GRANTS = Object.freeze(${JSON.stringify(contract, null, 2)});\n`);
   }
   const { TOOLS } = await import("../mcp-server/src/tools.js");
-  if (process.argv[2] === "--write-current") {
+  if (["--write-legacy-lifecycle", "--check-legacy-lifecycle"].includes(process.argv[2])) {
+    const path = resolve(REPO_ROOT, LEGACY_CENSUS_PATH);
+    if (process.argv[2] === "--write-legacy-lifecycle") writeFileSync(path, renderLegacyLifecycleCensus(TOOLS));
+    else assertLegacyLifecycleCensus(TOOLS);
+    console.log("legacy lifecycle caller census: OK (evidence only; no retirement or readiness authority)");
+  } else if (process.argv[2] === "--write-current") {
     const path = resolve(REPO_ROOT, "mcp-server/src/scac-mutation-registry.current.generated.js");
     writeFileSync(path, renderCurrentContracts(TOOLS, readFileSync(path, "utf8")));
     console.log("current MCP source contracts regenerated; DB registry and grants preserved");

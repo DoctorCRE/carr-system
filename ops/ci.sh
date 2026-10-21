@@ -1107,6 +1107,13 @@ check_binding() {
 
 check_artifact() {
   local shipping marker
+  if ! run_quiet "$LOGDIR/legacy-lifecycle-census.log" node --test ops/scac-mutation-inventory-selftest.mjs ||
+     ! run_quiet "$LOGDIR/legacy-lifecycle-freshness.log" node ops/scac-mutation-inventory.mjs --check-legacy-lifecycle; then
+    cat "$LOGDIR/legacy-lifecycle-census.log" "$LOGDIR/legacy-lifecycle-freshness.log" 2>/dev/null >&2
+    bad artifact "legacy lifecycle caller census failed or is stale"
+    return
+  fi
+  ok artifact "legacy lifecycle caller census fixture and source freshness passed"
   if ! run_quiet "$LOGDIR/doctorcre-artifact.log" "$PY" \
       tools/release-manifest.py doctorcre-artifact verify \
       --pin ops/config/doctorcre-artifact.v1.json; then

@@ -1,0 +1,689 @@
+{
+  "schema": "legacy-lifecycle-callers.v1",
+  "generator": "ops/scac-mutation-inventory.mjs",
+  "source_set_digest": "sha256:f2dbed9e2171f517a207eaed62567e16e2387a6873eb30eac889ca761441fa95",
+  "source_count": 1421,
+  "tables": [
+    "public.client",
+    "public.deal"
+  ],
+  "scope": "Tracked MCP runtime sources, pipeline and operational scripts, and migration SQL sources. Per-operation tables are possible direct SQL and reachable named-helper writes, including reviewed delegation edges.",
+  "limitations": "Static source evidence. Generic SQL execution and generic verb dispatch remain unbounded. Migration sites include historical data repairs and function definitions, not verified deployed callers. Database triggers and live grants are not inferred from this census.",
+  "retires_any_caller": false,
+  "establishes_migration_readiness": false,
+  "operations": [
+    {
+      "operation": "add-deal-note",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "b1c819c39a27b2eda3d2dc0e23ae13f547b01c1fc53817fbf242d1478496302c",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_note",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "confirm-merge",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "9ab2287823b79ead581af58d3d67d92047a0dd9e6c59c11312393a14e4ceb795",
+      "tables_written": [
+        "public.client",
+        "public.event",
+        "public.lead",
+        "public.party",
+        "public.tool_call",
+        "public.vendor"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "create-national-account",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "89ff71bc3b7f58572ffb8b12e7811916cc478b2013b3b100414ffc99220fb59c",
+      "tables_written": [
+        "public.client",
+        "public.event",
+        "public.national_account_owner",
+        "public.party",
+        "public.record_flag",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "create-national-market-deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "202a61d68c0eacb6a9b6e8e5d59c6736e68a88e2919243439a0cbe63b995f801",
+      "tables_written": [
+        "public.client",
+        "public.deal",
+        "public.deal_market_assignment",
+        "public.deal_participant",
+        "public.event",
+        "public.party",
+        "public.record_flag",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "new-client",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "8844b41a66cc5cd11df88c52ff7ce6cff20f6813b2872748ba3dc993910e2657",
+      "tables_written": [
+        "public.client",
+        "public.event",
+        "public.record_flag",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "new-deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "723fe7457ed04768ab45e67395cefed1fb0682afe4157a3a076356278ff48e1a",
+      "tables_written": [
+        "public.deal",
+        "public.event",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "patch-deal-field",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "0ef48f41baa34a2b86825fd6c08e8336fcc797c68be3a71131edf849034f757b",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_conflict",
+        "public.deal_participant",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "reassign-deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "845cab5fa4e8fb52a6af73b87334e588577f9d4d8eacd0cddd0f6c5c806b547a",
+      "tables_written": [
+        "public.deal",
+        "public.event",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "resolve-candidate",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "53b947213740197f65b0cf7fda13349e728021bfb594bdc20563edb00fee84fa",
+      "tables_written": [
+        "public.activity",
+        "public.capture_candidate",
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_conflict",
+        "public.deal_note",
+        "public.deal_participant",
+        "public.event",
+        "public.next_action",
+        "public.party_link",
+        "public.tool_call"
+      ],
+      "delegates_to": [
+        "log-activity",
+        "new-deal",
+        "patch-deal-field",
+        "set-next-step"
+      ]
+    },
+    {
+      "operation": "resolve-conflict",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "71b026be027f186e76769e5ff5e762a78246ea886c4caab9c568d1dc830ed671",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_conflict",
+        "public.deal_participant",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "revert-deal-field",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "0da4ef9137bcdf2d5108c5f0b89651f054d313c51ed2d0851858064c2a7193f8",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_participant",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "set-lead",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "b14cc85142646cfb452c72a8cda85e4675bb98298a7e3c9664b1dfed3aef0ec9",
+      "tables_written": [
+        "public.deal",
+        "public.deal_participant",
+        "public.event",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "set-next-action",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "9696a8471811a6e8262d43bf7b35cb1fe508c5ad5b6b30a6d9c237c56eb04d41",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "set-next-step",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "8e0ca1d84ca17b362abbf9a8dfaa5001228ba1c25b88d62d2a77aed2a039b7c4",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.deal_note",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "set-prospect-engagement-status",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "38e8d1b1fdf90297f9e45f56baa6163945577278adae9294248dd102fbc94f84",
+      "tables_written": [
+        "public.client",
+        "public.event",
+        "public.lead",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    },
+    {
+      "operation": "update-deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798",
+      "handler_digest": "0dd1de37c4de30909c84563cf7c2965fb1cbc0d5657ffbf798cbaf749e0d1cd2",
+      "tables_written": [
+        "public.capture_post_call_action",
+        "public.deal",
+        "public.event",
+        "public.next_action",
+        "public.tool_call"
+      ],
+      "delegates_to": []
+    }
+  ],
+  "script_operations": [
+    {
+      "operation": "ops/calendar-canary-local-pg-acceptance.py",
+      "source_digest": "25346dc1ed34017ac8b43977c8ca46cde9c8d919f12ee4ffab8419fb03514a91",
+      "tables_written": [
+        "public.client"
+      ]
+    },
+    {
+      "operation": "ops/calendar-prebrief-projection-local-pg-gate.py",
+      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd",
+      "tables_written": [
+        "public.client"
+      ]
+    },
+    {
+      "operation": "ops/control-plane-db-gate.py",
+      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7",
+      "tables_written": [
+        "public.client",
+        "public.deal"
+      ]
+    },
+    {
+      "operation": "ops/cre-lifecycle-local-pg-gate.py",
+      "source_digest": "38d66c60a88694c3582b6ed317a5a66e9ab8599521af88047aff78c94b40b121",
+      "tables_written": [
+        "public.deal"
+      ]
+    },
+    {
+      "operation": "ops/nightly-canary-local-pg-acceptance.py",
+      "source_digest": "413cf8e4de26b311285e524542ada90b773316e95f26fcd0fe3848df48d3ec9d",
+      "tables_written": [
+        "public.client"
+      ]
+    },
+    {
+      "operation": "ops/party-identity-local-pg-gate.py",
+      "source_digest": "c788deccbd064e9137451e4c36656fad85f07317050241330031876551a8999c",
+      "tables_written": [
+        "public.client"
+      ]
+    },
+    {
+      "operation": "ops/renewal-lease-ledger-local-pg-gate.py",
+      "source_digest": "4ef026fc062ced544d06f355c244b26b4876a71555274aa8900e009783671e6b",
+      "tables_written": [
+        "public.client",
+        "public.deal"
+      ]
+    },
+    {
+      "operation": "pipelines/import_wave1.py",
+      "source_digest": "ea4547d3fc8a0e06da4183af705e9c1fcbf1afb61c7ef0e667aa2d2754e7211a",
+      "tables_written": [
+        "public.client",
+        "public.deal"
+      ]
+    }
+  ],
+  "write_sites": [
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 2298,
+      "caller": "appendDealNextStep",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 2382,
+      "caller": "supersedeOverdueDealAction",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 2461,
+      "caller": "applyDealRoomField",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 2472,
+      "caller": "applyDealRoomField",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 4084,
+      "caller": "set-next-action",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 4289,
+      "caller": "update-deal",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 4344,
+      "caller": "new-deal",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 4421,
+      "caller": "reassign-deal",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 4455,
+      "caller": "set-lead",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 5069,
+      "caller": "set-prospect-engagement-status",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 5097,
+      "caller": "new-client",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 6070,
+      "caller": "confirm-merge",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 9553,
+      "caller": "create-national-account",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 9603,
+      "caller": "create-national-market-deal",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "mcp-server/src/tools.js",
+      "line": 9610,
+      "caller": "create-national-market-deal",
+      "kind": "runtime_sql",
+      "source_digest": "f14d555126e8ab508b9756b19599cc06c78f534e4c039cf94beaaca0ee07a798"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0017_vocab_ref_tables.sql",
+      "line": 77,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "714af9bfc3b0bba4943fc224e74435de84ca5ff8f5c64bb3517c81f9f05fbe0a"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0018_client_status_rationalization.sql",
+      "line": 187,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "3ee4a58a4c41340d060558cd4becb5d194cd897262ffeb5c77cb9399cec0aaea"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0028_dossier_analysis.sql",
+      "line": 81,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "47191484c11885b31cc099ab365f72f6ebe58d8f94c82244f3d10ef3061fa482"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0032_audit_repairs.sql",
+      "line": 67,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "774e2c39ba1ad2a90d5ec174347a48b3a5a65d86d35610275a563970296bce9a"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0044_fix_registry_pointers.sql",
+      "line": 39,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "13ada7eafe4620feb8fc145fa1f5ac5ec509f843289cff3dbd1462a538587732"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0044_fix_registry_pointers.sql",
+      "line": 45,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "13ada7eafe4620feb8fc145fa1f5ac5ec509f843289cff3dbd1462a538587732"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0055_repair_orphaned_roles.sql",
+      "line": 25,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "4035dad033bb35f0d2378d3ed3fbe8a4c2192608a9cd78724b68cf5343180269"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 190,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 258,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 284,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 310,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 316,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0061_national_account.sql",
+      "line": 328,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "0e2feea603aa5f2dc2c02a059ebace36388ef201d79988ae43a5f24b88cde4ea"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0074_deal_city_lane.sql",
+      "line": 55,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "785b3ea5992b18698563d792e64de8cdcb7251b5be3b16af5064f66c8b612c72"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "migrations/0079_deal_room_api.sql",
+      "line": 11,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "3bc8e46d6022c3cf74ccc7878ab2d6fd227b814fca5105bbffc06fadcc0ef0ba"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "migrations/0897_national_account_classification_correction.sql",
+      "line": 51,
+      "caller": null,
+      "kind": "migration_source",
+      "source_digest": "8e994960e976e2291a22ce08edbccbdbf7f18746c7e76cadcc5327dc541b6aa6"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/calendar-canary-local-pg-acceptance.py",
+      "line": 35,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "25346dc1ed34017ac8b43977c8ca46cde9c8d919f12ee4ffab8419fb03514a91"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/calendar-canary-local-pg-acceptance.py",
+      "line": 78,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "25346dc1ed34017ac8b43977c8ca46cde9c8d919f12ee4ffab8419fb03514a91"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/calendar-prebrief-projection-local-pg-gate.py",
+      "line": 208,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/calendar-prebrief-projection-local-pg-gate.py",
+      "line": 380,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/control-plane-db-gate.py",
+      "line": 937,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "ops/control-plane-db-gate.py",
+      "line": 941,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "ops/cre-lifecycle-local-pg-gate.py",
+      "line": 230,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "38d66c60a88694c3582b6ed317a5a66e9ab8599521af88047aff78c94b40b121"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/nightly-canary-local-pg-acceptance.py",
+      "line": 24,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "413cf8e4de26b311285e524542ada90b773316e95f26fcd0fe3848df48d3ec9d"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/party-identity-local-pg-gate.py",
+      "line": 82,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "c788deccbd064e9137451e4c36656fad85f07317050241330031876551a8999c"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "ops/renewal-lease-ledger-local-pg-gate.py",
+      "line": 74,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "4ef026fc062ced544d06f355c244b26b4876a71555274aa8900e009783671e6b"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "ops/renewal-lease-ledger-local-pg-gate.py",
+      "line": 79,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "4ef026fc062ced544d06f355c244b26b4876a71555274aa8900e009783671e6b"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "pipelines/import_wave1.py",
+      "line": 320,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "ea4547d3fc8a0e06da4183af705e9c1fcbf1afb61c7ef0e667aa2d2754e7211a"
+    },
+    {
+      "table": "public.client",
+      "source_locator": "pipelines/import_wave1.py",
+      "line": 367,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "ea4547d3fc8a0e06da4183af705e9c1fcbf1afb61c7ef0e667aa2d2754e7211a"
+    },
+    {
+      "table": "public.deal",
+      "source_locator": "pipelines/import_wave1.py",
+      "line": 385,
+      "caller": null,
+      "kind": "script_sql",
+      "source_digest": "ea4547d3fc8a0e06da4183af705e9c1fcbf1afb61c7ef0e667aa2d2754e7211a"
+    }
+  ],
+  "doctorcre_app": {
+    "repository": "jbookout/doctorcre-app",
+    "source_commit": "35936628aba4c7189b17f5b195c41c8ba9b782be",
+    "source_locator": "src/worker.js",
+    "source_digest": "sha256:80047103d4957c0948de5129057817d502499dc60d55f7800e5d89110a24b562",
+    "source_url": "https://github.com/jbookout/doctorcre-app/blob/35936628aba4c7189b17f5b195c41c8ba9b782be/src/worker.js#L90-L98",
+    "evidence": "Reviewed the pinned Worker, its imports, package dependencies, and service bindings. The only server source is src/worker.js. Business requests proxy to CARR; database access belongs to CARR.",
+    "direct_database_writers": 0,
+    "proxy": "env.CARR.fetch"
+  }
+}
