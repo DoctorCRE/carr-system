@@ -70,7 +70,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       begin create role carr_writer; exception when duplicate_object then null; end;
     end $$;`);
     // Use the committed table definitions and caller views, without production data.
-    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
+    for (const name of ['actor', 'party', 'client', 'deal', 'deal_phase', 'deal_participant', 'next_action', 'deal_note', 'national_account_owner', 'deal_market_assignment', 'deal_review_item', 'deal_review_session', 'event', 'tool_call', 'deal_conflict', 'critical_date', 'lease', 'activity', 'premises', 'negotiation_round', 'document', 'commission', 'capture_post_call_action', 'capture_post_call_candidate', 'building', 'space', 'premises_space', 'lead', 'lead_stage', 'lead_lane', 'lead_stage_move', 'record_flag']) {
       const table = schema.match(new RegExp(`CREATE TABLE public\\.${name} \\([\\s\\S]*?\\n\\);`))?.[0];
       assert.ok(table, name);
       await c.query(table);
@@ -92,6 +92,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await c.query("create table doctrine_section(id uuid primary key, status text, body_hash text)");
     await c.query("grant select on doctrine_section to carr_reader,carr_writer");
     await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
+    await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
@@ -153,6 +154,361 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
         await c.query('delete from doctrine_section');
       }
     });
+    const accept = async (deal, owner, due) => {
+      const candidate = randomUUID();
+      await c.query(`insert into capture_post_call_candidate
+        (id,session_id,idempotency_key,batch_hash,item_index,kind,deal_id,assignee_slug,action_description,due_on,evidence_quote,confidence)
+        values ($1,$2,$3,$4,0,'assigned_action',$5,$6,'Review call terms',$7,'Review call terms',1)`,
+        [candidate, randomUUID(), randomUUID(), 'a'.repeat(64), deal, owner, due]);
+      return (await TOOLS['resolve-post-call-candidate'].handler(c, actor, {
+        idempotency_key: randomUUID(), candidate_id: candidate, accept: true,
+      })).ref;
+    };
+
+    await t.test('partner status update supersedes an overdue step and flags the next-step gap', async () => transaction(async () => {
+      await fixture(true);
+      const yesterday = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: yesterday,
+      });
+      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received for review',
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace: 'all'});
+      assert.equal(board.deals[0].next_date, null, 'the superseded date must stop driving overdue');
+      assert.equal(board.deals[0].next_step, null, 'the prior step belongs only in history');
+      assert.equal(board.deals[0].next_step_required, true);
+      assert.equal(board.deals[0].attention, true, 'manual attention survives');
+      assert.equal(Number(board.accounts[0].overdue_deals), 0);
+      assert.equal(update.next_step_required, true);
+      assert.match(update.prompt, /next step.*date/i);
+      const followup = await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Further context with no new plan yet',
+      });
+      assert.equal(followup.next_step_required, true, 'the plan gap stays visible on later updates');
+      assert.match(followup.prompt, /next step.*date/i);
+
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.ok(room.thread.some(n => n.id === prior.next_step_id && n.text === 'Request revised terms'));
+      assert.ok(room.thread.some(n => n.id === update.note_id));
+      assert.ok(room.events.some(e => e.verb === 'add-deal-note' && e.field === 'next_date' &&
+        e.old_value.next_date === yesterday && e.new_value.next_date === null));
+    }));
+
+    await t.test('set-next-action keeps the current step and its date together', async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
+      await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: dates.past,
+      });
+      await TOOLS['set-next-action'].handler(c, actor, {
+        idempotency_key: randomUUID(), ref: id(4), description: 'Review the revised terms', due_on: dates.future,
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.equal(board.deals[0].next_date, dates.future);
+      assert.equal(board.deals[0].next_step, 'Review the revised terms');
+      assert.equal(board.deals[0].next_step_required, false);
+    }));
+
+    await t.test('a dated status update records the new plan once and retains attributed history', async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: dates.past,
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received',
+        next_step: 'Review revised terms', next_date: dates.future};
+      const update = await TOOLS['add-deal-note'].handler(c, actor, args);
+      const replay = await TOOLS['add-deal-note'].handler(c, actor, args);
+      assert.equal(replay.replayed, true);
+      assert.equal(replay.note_id, update.note_id);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, dates.future);
+      assert.equal(room.next_step, 'Review revised terms');
+      assert.equal(room.next_step_required, false);
+      assert.equal(room.thread.filter(n => n.text === 'Revised terms received').length, 1);
+      assert.equal(room.thread.filter(n => n.kind === 'next_step').length, 2);
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.equal(room.next_actions.find(a => a.id === update.next_action_id).status, 'open');
+    }));
+
+    await t.test('status notes preserve due-today, future, and other-partner actions', async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select current_date::text as today, (current_date+7)::text as future, (current_date-1)::text as past")).rows[0];
+      for (const day of [dates.today, dates.future]) {
+        const step = await TOOLS['set-next-step'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: day,
+        });
+        await TOOLS['add-deal-note'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Additional context before review',
+        });
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        assert.equal(room.next_date, day);
+        assert.equal(room.next_actions.find(a => a.id === step.next_action_id).status, 'open');
+      }
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      const independent = await TOOLS['set-next-step'].handler(c, dell, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Independent follow-up', next_date: dates.past,
+      });
+      await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Context from the other partner',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === independent.next_action_id).status, 'open');
+      assert.equal(room.next_date, dates.past);
+    }));
+
+    await t.test('a partner phase update supersedes the prior overdue action', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Complete terms review', next_date: past,
+      });
+      const current = await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)});
+      const update = await TOOLS['update-deal'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), base_version: current.base_version, fields: {phase: 'legal'},
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.equal(board.deals[0].next_date, null);
+      assert.equal(board.deals[0].next_step_required, true);
+      assert.equal(update.next_step_required, true);
+    }));
+
+    await t.test('Deal Room phase patches supersede overdue actions once with attributed history', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Complete terms review', next_date: past,
+      });
+      const args = {idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'legal', base_event_id: null};
+      const update = await TOOLS['patch-deal-field'].handler(c, actor, args);
+      const replay = await TOOLS['patch-deal-field'].handler(c, actor, args);
+      assert.equal(replay.replayed, true);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, null, 'phase patches must clear the expired displayed date');
+      assert.equal(room.next_step, null);
+      assert.equal(update.next_step_required, true);
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      const events = room.events.filter(e => e.verb === 'patch-deal-field' && e.field === 'next_date');
+      assert.equal(events.length, 1);
+      assert.equal(events[0].actor, 'joe');
+      assert.ok(events[0].recorded_at);
+      assert.deepEqual(events[0].new_value.superseded_action_ids, [prior.next_action_id]);
+    }));
+
+    for (const writer of ['add-deal-note', 'set-next-step', 'set-next-action', 'patch-deal-field', 'update-deal'])
+      await t.test(`${writer} supersedes accepted overdue Call Mode actions without completing them`, async () => transaction(async () => {
+        await fixture(false);
+        const dates = (await c.query("select (current_date-1)::text as past, current_date::text as today, (current_date+7)::text as future")).rows[0];
+        const dell = {...actor, id: id(7), slug: 'dell'};
+        await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+        await c.query("insert into deal(id,client_id,name,deal_type,phase,owner,created_by,updated_by) values($1,$2,'Other Synthetic Assignment','renewal','research','joe',$3,$3)", [id(9), id(3), actor.id]);
+        await TOOLS['set-next-step'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: dates.past,
+        });
+        const expired = await accept(id(4), 'joe', dates.past);
+        const preserved = [await accept(id(4), 'joe', dates.today), await accept(id(4), 'joe', dates.future),
+          await accept(id(4), 'dell', dates.past)];
+        const otherDeal = await accept(id(9), 'joe', dates.past);
+        const args = {idempotency_key: randomUUID(), deal: id(4)};
+        if (writer === 'add-deal-note') Object.assign(args, {text: 'Terms received', next_step: 'Review revised terms', next_date: dates.future});
+        if (writer === 'set-next-step') Object.assign(args, {text: 'Review revised terms', next_date: dates.future});
+        if (writer === 'set-next-action') Object.assign(args, {ref: id(4), description: 'Review revised terms', due_on: dates.future});
+        if (writer === 'patch-deal-field') Object.assign(args, {field: 'phase', value: 'legal', base_event_id: null});
+        if (writer === 'update-deal') Object.assign(args, {fields: {phase: 'legal'}, base_version:
+          (await TOOLS['read-deal-reconciliation'].handler(c, actor, {deal: id(4)})).base_version});
+        const update = await TOOLS[writer].handler(c, actor, args);
+        if (writer === 'set-next-action') assert.ok(update.dropped_post_call_action_ids.includes(expired),
+          'replacement receipts must include expired Call Mode actions');
+        assert.equal((await TOOLS[writer].handler(c, actor, args)).replayed, true);
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped', 'expired accepted actions must be superseded');
+        // set-next-action explicitly replaces all of this owner's actions, including future ones.
+        for (const action of writer === 'set-next-action' ? preserved.slice(2) : preserved)
+          assert.equal(room.next_actions.find(a => a.id === action).status, 'open');
+        const other = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(9)});
+        assert.equal(other.next_actions.find(a => a.id === otherDeal).status, 'open');
+        const events = room.events.filter(e => e.verb === writer && e.field === 'next_action' && e.new_value.superseded_action_ids?.includes(expired));
+        assert.equal(events.length, 1, 'supersession must retain one attributed event on retry');
+        assert.equal(events[0].actor, 'joe');
+        assert.ok(events[0].recorded_at);
+        assert.equal(room.attention, true);
+      }));
+
+    await t.test('explicit completion and replacement preserve each partner Call Mode history', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [id(7)]);
+      const completedId = await accept(id(4), 'joe', past);
+      const independent = await accept(id(4), 'dell', past);
+      const completed = await TOOLS['complete-action'].handler(c, actor, {
+        idempotency_key: randomUUID(), ref: id(4), outcome: 'Reviewed call terms',
+      });
+      assert.equal(completed.count, 1);
+      assert.equal(completed.completed[0].source, 'post_call_action');
+      const replacedId = await accept(id(4), 'joe', past);
+      const replacement = await TOOLS['set-next-action'].handler(c, actor, {
+        idempotency_key: randomUUID(), ref: id(4), description: 'Review updated terms', due_on: past,
+      });
+      assert.deepEqual(replacement.dropped_post_call_action_ids, [replacedId]);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === completedId).status, 'done');
+      assert.equal(room.next_actions.find(a => a.id === replacedId).status, 'dropped');
+      assert.equal(room.next_actions.find(a => a.id === independent).status, 'open');
+      assert.equal(room.next_actions.find(a => a.id === replacement.next_action_id).description, 'Review updated terms');
+    }));
+
+    for (const operation of ['unchanged patch', 'undo', 'conflict resolution'])
+      await t.test(`${operation} applies phase supersession only after a real change`, async () => transaction(async () => {
+        await fixture(false);
+        const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+        const automatic = operation === 'unchanged patch' ? null : await TOOLS['patch-deal-field'].handler(c,
+          {...actor, human: false, via: 'mcp', client_id: 'agent'}, {
+            idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'legal', base_event_id: null,
+          });
+        const prior = await TOOLS['set-next-step'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Review terms', next_date: past,
+        });
+        if (operation === 'unchanged patch') await TOOLS['patch-deal-field'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'research', base_event_id: null,
+        });
+        if (operation === 'undo') await TOOLS['revert-deal-field'].handler(c, actor, {
+          idempotency_key: randomUUID(), event_id: automatic.event_id,
+        });
+        if (operation === 'conflict resolution') {
+          const conflict = await TOOLS['patch-deal-field'].handler(c, actor, {
+            idempotency_key: randomUUID(), deal: id(4), field: 'phase', value: 'negotiation', base_event_id: null,
+          });
+          assert.equal(conflict.ok, false);
+          const unchanged = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+          assert.equal(unchanged.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+          await TOOLS['resolve-conflict'].handler(c, actor, {
+            idempotency_key: randomUUID(), conflict_id: conflict.conflict.id, winner: 'b',
+          });
+        }
+        const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+        assert.equal(room.next_date, operation === 'unchanged patch' ? past : null);
+        assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status,
+          operation === 'unchanged patch' ? 'open' : 'dropped');
+      }));
+
+    await t.test('native sponsor updates audit expired Call Mode actions behind a future current plan', async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
+      await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Review revised terms', next_date: dates.future,
+      });
+      const expired = await accept(id(4), 'joe', dates.past);
+      const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
+      await TOOLS['add-deal-note'].handler(c, native, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Partner supplied updated terms',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, dates.future);
+      assert.equal(room.next_step, 'Review revised terms');
+      assert.equal(room.next_actions.find(a => a.id === expired).status, 'dropped');
+      assert.ok(room.events.some(e => e.actor === 'codex' && e.field === 'next_action' &&
+        e.new_value.superseded_action_ids.includes(expired) && e.recorded_at));
+    }));
+
+    await t.test('a verified native partner update supersedes the sponsor action with runtime attribution', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request revised terms', next_date: past,
+      });
+      const native = {id: id(8), slug: 'codex', human: false, native_agent_verified: true, sponsoring_human_slug: 'joe'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'codex','Synthetic Runtime','automation',true)", [native.id]);
+      await TOOLS['add-deal-note'].handler(c, native, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Revised terms received from partner',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, null);
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'dropped');
+      assert.ok(room.events.some(e => e.verb === 'add-deal-note' && e.field === 'next_date' && e.actor === 'codex'));
+    }));
+
+    for (const reschedule of ['future', 'past']) await t.test(`status updates respect a ${reschedule} date reschedule`, async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Review terms', next_date: dates[reschedule === 'future' ? 'past' : 'future'],
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+      await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), field: 'next_date', value: dates[reschedule],
+        base_event_id: board.deals[0].field_base.next_date.id,
+      });
+      await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Partner progress update',
+      });
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_date, reschedule === 'future' ? dates.future : null);
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status,
+        reschedule === 'future' ? 'open' : 'dropped');
+    }));
+
+    await t.test('a remaining partner plan supplies the next step and date consistently', async () => transaction(async () => {
+      await fixture(false);
+      const dates = (await c.query("select (current_date-1)::text as past, (current_date+7)::text as future")).rows[0];
+      const dell = {...actor, id: id(7), slug: 'dell'};
+      await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'dell','Synthetic Partner Two','human',true)", [dell.id]);
+      await TOOLS['set-next-step'].handler(c, dell, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Review proposed terms', next_date: dates.future,
+      });
+      await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request proposed terms', next_date: dates.past,
+      });
+      const update = await TOOLS['add-deal-note'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Proposed terms received',
+      });
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {});
+      assert.equal(board.deals[0].next_step, 'Review proposed terms');
+      assert.equal(board.deals[0].next_date, dates.future);
+      assert.equal(board.deals[0].next_step_required, false);
+      assert.equal(update.next_step_required, false);
+      assert.equal(update.prompt, undefined);
+    }));
+
+    await t.test('incomplete replacement plans are refused before changing status history', async () => transaction(async () => {
+      await fixture(false);
+      const past = (await c.query("select (current_date-1)::text as day")).rows[0].day;
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Request terms', next_date: past,
+      });
+      for (const fields of [{next_step: 'Review terms'}, {next_date: '2026-02-30'}, {next_date: past}]) {
+        await assert.rejects(TOOLS['add-deal-note'].handler(c, actor, {
+          idempotency_key: randomUUID(), deal: id(4), text: 'Status update', ...fields,
+        }), e => e.payload?.error === 'next_step_and_date_required');
+      }
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      assert.equal(room.thread.length, 1);
+      assert.equal(room.next_date, past);
+    }));
+
+    await t.test('overdue migration replay preserves inactive prospect board membership and retained history', async () => transaction(async () => {
+      await fixture(false);
+      await c.query("update client set status='prospect' where id=$1", [id(3)]);
+      const prior = await TOOLS['set-next-step'].handler(c, actor, {
+        idempotency_key: randomUUID(), deal: id(4), text: 'Synthetic retained plan', next_date: '2027-01-01',
+      });
+      await executeRegisteredTool(c, actor, 'set-prospect-engagement-status', {
+        client_id: id(3), status: 'inactive', base_version: 2,
+        reason: 'Synthetic deferral', idempotency_key: 'synthetic-overdue-inactive',
+      });
+      await c.query(readFileSync(path.join(root, 'migrations/0923_deal_status_next_step.sql'), 'utf8'));
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c, actor, {})).deals, []);
+      assert.deepEqual((await TOOLS['deal-board'].handler(c)).deals, []);
+      const room = await TOOLS['get-deal-room'].handler(c, actor, {deal: id(4)});
+      assert.equal(room.next_actions.find(a => a.id === prior.next_action_id).status, 'open');
+      assert.ok(room.thread.some(n => n.id === prior.next_step_id));
+    }));
+
     await t.test('migration preserves every existing board prospect and audits the active backfill', async () => transaction(async () => {
       await fixture(true);
       await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'system','Synthetic System','system',true)",[id(99)]);
@@ -430,7 +786,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
           rowsOf(prior).forEach(row => delete row.phase_started_on);
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
-          rowsOf(prior).forEach((row, index) => invoiceFields.forEach(field => {
+          rowsOf(prior).forEach((row, index) => [...invoiceFields, 'next_step_required'].forEach(field => {
             if (!Object.hasOwn(oldRows[index], field)) delete row[field];
           }));
           assert.deepEqual(prior, baseline[name], `${name}: additive response only`);
