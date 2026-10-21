@@ -6524,12 +6524,10 @@ class TokenCheckWrangler(Base):
         result = pipe.step("wrangler-auth", [str(wrangler), "whoami"], home)
         observed = json.loads(result.out)
         self.assertTrue(Path(observed["cache"]).is_relative_to(pipe.run_dir.resolve()))
-        for name in ("HOME", "MINIFLARE_CACHE_DIR", "CLOUDFLARE_CF_FETCH_PATH", "WRANGLER_CACHE_DIR",
+        self.assertEqual(observed["env"]["HOME"], pipe.env["HOME"])
+        for name in ("MINIFLARE_CACHE_DIR", "CLOUDFLARE_CF_FETCH_PATH", "WRANGLER_CACHE_DIR",
                      "WRANGLER_LOG_PATH", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "TMPDIR"):
             self.assertTrue(Path(observed["env"][name]).resolve().is_relative_to(pipe.run_dir.resolve()), name)
-        credentials = Path(observed["env"]["HOME"]) / ".config/carr"
-        self.assertTrue(credentials.is_symlink())
-        self.assertEqual(credentials.resolve(), Path(pipe.cfg["credential_dir"]).resolve())
         self.assertFalse((home / "node_modules/.mf").exists())
         self.assertEqual(rp.toolchain_digest(home), recorded.strip())
         self.assertEqual(receipt.read_text(), recorded)
@@ -6563,14 +6561,14 @@ class TokenCheckWrangler(Base):
         self.assertEqual(refusal.exception.reason, "toolchain_write_isolation")
         command.assert_not_called()
 
-    def test_runtime_home_link_into_pinned_install_refuses_before_any_write(self):
+    def test_runtime_cache_link_into_pinned_install_refuses_before_any_write(self):
         pipe = self.fx.pipeline(rp.Runner())
         wrangler = pipe.auth_wrangler()
         home = wrangler.parents[2]
         recorded = rp.toolchain_digest(home)
         root = pipe.run_dir / "runtime"
         root.mkdir(parents=True)
-        (root / "home").symlink_to(home, target_is_directory=True)
+        (root / "miniflare").symlink_to(home, target_is_directory=True)
         with self.assertRaises(rp.Blocked) as refusal:
             pipe.step("wrangler-auth", [str(wrangler), "whoami"], self.fx.repo)
         self.assertEqual(refusal.exception.reason, "toolchain_runtime_path")
@@ -6583,6 +6581,19 @@ class TokenCheckWrangler(Base):
             pipe.step("schema-" + command, [command, "--version"], self.fx.repo)
             observed = runner.envs["schema-" + command]
             self.assertEqual(observed, pipe.env)
+
+    def test_non_wrangler_steps_preserve_home_for_nested_git_and_github(self):
+        runner = FakeRunner()
+        pipe = self.fx.pipeline(runner)
+        home = self.fx.repo / "login-home"
+        (home / ".wrangler").mkdir(parents=True)
+        pipe.env["HOME"] = str(home)
+        for index, argv in enumerate((
+                ["./run.sh", "health"], ["npm", "ci"],
+                ["bin/deploy-worker.sh"], ["python", "ops/smoke.py"])):
+            name = f"home-check-{index}"
+            pipe.step(name, argv, self.fx.repo)
+            self.assertEqual(runner.envs[name]["HOME"], str(home), argv)
 
     def test_command_before_toolchain_install_does_not_need_package_files(self):
         pipe = self.fx.pipeline(FakeRunner())

@@ -820,26 +820,12 @@ class Pipeline:
             "WRANGLER_LOG_PATH": root / "logs",
             "TMPDIR": root / "tmp",
         }
-        home = root / "home"
-        config = home / ".config"
-        for path in (root, *directories.values(), home, config):
+        for path in (root, *directories.values()):
             if (not path.resolve().is_relative_to(self.run_dir.resolve())
                     or path.resolve().is_relative_to(pinned)):
                 raise Blocked("toolchain_runtime_path", "runtime directory resolves into the pinned toolchain or outside this run")
         for path in directories.values():
             path.mkdir(parents=True, exist_ok=True)
-        env = dict(env)
-        if env.get("HOME") == self.env.get("HOME"):
-            config.mkdir(parents=True, exist_ok=True)
-            carr = config / "carr"
-            credentials = expand(self.cfg.get("credential_dir", "~/.config/carr"))
-            if not carr.exists() and not carr.is_symlink():
-                carr.symlink_to(credentials, target_is_directory=True)
-            if not carr.is_symlink() or carr.resolve() != credentials.resolve():
-                raise Blocked("toolchain_runtime_path", "runtime CARR credential link has an unexpected target")
-            env["HOME"] = str(home)
-        if (Path(env["HOME"]) / ".wrangler").exists():
-            raise Blocked("toolchain_runtime_path", "legacy Wrangler configuration would bypass the per-run config directory")
         return {**env, **{name: str(path) for name, path in directories.items()},
                 "CLOUDFLARE_CF_FETCH_PATH": str(directories["MINIFLARE_CACHE_DIR"] / "cf.json")}
 
