@@ -1375,10 +1375,26 @@ class Queue:
     def recover_work_card(self, card_id, *, expected_revision, actor, reason):
         """End stale card ownership, retaining all journal and per-pin facts."""
         with self.runner_lock(), self.github_scope(f'recover-work-card:{card_id}'):
-            with WorkQueue(default_path()) as work:
-                return work.recover_merge_run(card_id, expected_revision=expected_revision,
-                                              verify_effects=self._verify_recovery_effects,
-                                              actor=actor, reason=reason)
+            journal = sqlite3.connect(self.state / 'queue.sqlite3', timeout=BOUNDS['sqlite']['seconds'])
+            try:
+                revision = journal.execute('PRAGMA data_version').fetchone()[0]
+
+                def verify(data):
+                    evidence = self._verify_recovery_effects(data)
+                    if self._verify_recovery_effects(data) != evidence:
+                        raise QueueChanged('provider or journal changed during recovery observation')
+                    # Fence local journal writers through the work-queue commit. GitHub
+                    # has no read transaction; two matching passes only bound observation.
+                    journal.execute('BEGIN IMMEDIATE')
+                    if journal.execute('PRAGMA data_version').fetchone()[0] != revision:
+                        raise QueueChanged('merge journal changed during recovery observation')
+                    return evidence
+
+                with WorkQueue(default_path()) as work:
+                    return work.recover_merge_run(card_id, expected_revision=expected_revision,
+                                                  verify_effects=verify, actor=actor, reason=reason)
+            finally:
+                journal.close()
 
     def _verify_recovery_effects(self, data):
         evidence = []
@@ -1402,8 +1418,10 @@ class Queue:
             p = self.pr(repo, n)
             if type(p.get('merged')) is not bool or p['number'] != n:
                 raise QueueChanged(f'incomplete provider truth for {repo}#{n}')
+            if p['head']['sha'] != pin['head']:
+                raise QueueChanged(f'provider head differs from pinned head for {repo}#{n}')
             if p.get('merged') is True:
-                if (pin not in data.get('merge_receipts', []) or p['head']['sha'] != pin['head']
+                if (pin not in data.get('merge_receipts', [])
                         or not any(e['merged_commit'] == p.get('merge_commit_sha') and e['merged_commit']
                                    for e in entries)):
                     raise QueueChanged(f'unconsumed provider merge for {repo}#{n}')
@@ -1418,16 +1436,17 @@ class Queue:
                         receipt = json.loads(Path(a['receipt']).read_text())
                     except (OSError, ValueError, TypeError):
                         raise QueueChanged('regeneration receipt is unreadable') from None
-                    if (receipt != dict(head=a['head'], main=a['payload'], prepared=pin['head'], branch=p['head']['ref'])
-                            or p['head']['sha'] != pin['head']):
+                    if receipt != dict(head=a['head'], main=a['payload'], prepared=pin['head'], branch=p['head']['ref']):
                         raise QueueChanged('unconsumed regeneration effect')
             evidence.append(dict(pin=pin,
                                  entries=[{k: e[k] for k in ('id', 'approved', 'phase', 'tested', 'merged_commit', 'merge_attempts')}
                                           for e in entries],
                                  actions=[{k: a[k] for k in ('key', 'kind', 'phase', 'head', 'receipt')}
                                           for a in actions],
-                                 provider=dict(head=p['head']['sha'], state=p['state'],
-                                               merged=p.get('merged'), pending=pending)))
+                                 provider=dict(head=p['head']['sha'], branch=p['head']['ref'],
+                                               base=p['base'], state=p['state'], merged=p['merged'],
+                                               merge_commit=p.get('merge_commit_sha'),
+                                               updated_at=p.get('updated_at'), pending=pending)))
         return evidence
 
     def reconcile(self, entry, retry=False):
