@@ -1,11 +1,16 @@
 import copy
 import json
+import tempfile
 import unittest
 from unittest.mock import patch
 import progress_board as board
 
 
 class PublicationBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        root = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(tempfile, "tempdir", root))
+
     def test_repeated_updates_reuse_page_slots(self):
         state = {'tasks': {str(i): {'title': f'Work {i}', 'stage': 'review',
             'updated_at': '2026-01-01T00:00:00Z'} for i in range(1000)}}
