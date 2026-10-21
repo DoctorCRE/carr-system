@@ -250,6 +250,30 @@
       "sha256": "593b9b42c7a6b7a757faf0339951a486d1cece35a8e9ba538f7f6005b2b87bca",
       "rule": "pii-email",
       "reason": "The PR2050 assignment explicitly requires these two account identities in synthetic offline fixtures. This revision recognizes the fixture owning account as internal. This qualification binds only these reviewed bytes and this detector."
+    },
+    {
+      "path": "audits/pr2050-positive-root-contract.json",
+      "sha256": "bdd4e6c27787b7ae989bdb3a5f0678e263d3fc1c63bf66fd2fd609cd4e8e9924",
+      "rule": "pii-email",
+      "reason": "PR2050 explicitly authorizes the owning work-account and tester identities for this ownership contract and otherwise synthetic offline tests. No client data or content. This qualification binds only this reviewed blob, this exact path and this detector; no broader identity or detector exemption."
+    },
+    {
+      "path": "lib/outlook_intake.py",
+      "sha256": "5b68f65073f23e51b38113e9a734a848f5b08f3d28781fb0906e0584aab4f816",
+      "rule": "pii-email",
+      "reason": "PR2050 explicitly authorizes the owning work-account and tester identities for this ownership contract and otherwise synthetic offline tests. No client data or content. This qualification binds only this reviewed blob, this exact path and this detector; no broader identity or detector exemption."
+    },
+    {
+      "path": "ops/outlook-intake-ownership-selftest.py",
+      "sha256": "d7b02c004b723dd0de3286ad56fffc46ca1ba7aafb94fe9dce3a0382cb1a2af5",
+      "rule": "pii-email",
+      "reason": "PR2050 explicitly authorizes the owning work-account and tester identities for this ownership contract and otherwise synthetic offline tests. No client data or content. This qualification binds only this reviewed blob, this exact path and this detector; no broader identity or detector exemption."
+    },
+    {
+      "path": "vendor/hxprobe/src/ownership.rs",
+      "sha256": "21340f3ea2593a028c070e5c775d510022506b5cca5a6128442f7cd0fb9eb98f",
+      "rule": "pii-email",
+      "reason": "PR2050 explicitly authorizes the owning work-account and tester identities for this ownership contract and otherwise synthetic offline tests. No client data or content. This qualification binds only this reviewed blob, this exact path and this detector; no broader identity or detector exemption."
     }
   ]
 }
