@@ -165,4 +165,30 @@ from wire property IDs. No field value reaches output.
 Its occurrence count is the number of records with remainder, not the number of unidentified properties.
 Groups sort by descending occurrence count, then ascending record-type ID. Block and record types sort
 by ID. The criteria JSON records the exact contract and autonomous design decisions.
-`ATLAS-STORE-PROBE` is verified with synthetic fixtures. Grammar reconciliation remains the next session.
+`ATLAS-STORE-PROBE` is verified with synthetic fixtures.
+
+
+## Audited reconstructed grammar
+
+`python3 ops/outlook-atlas.py reconcile spec/outlook/surface-atlas.json spec/outlook/grammar-sources.json`
+emits a reconciled atlas to stdout. It reads only the three pinned audit paths from local git objects.
+Fetch the pinned revisions before regeneration. It verifies each audit SHA-256, the observed build,
+and every referenced binary source hash against the saved atlas. It never reads the installed app.
+The manifest records exact PR revisions and observed merge status. PR #2040 is merged.
+PRs #2041 and #2042 were open at the pinned heads, so their integration remains provisional.
+
+`url_reconstructed` entries extract routes and action query keys from audited arm64 constants and
+traced dispatch. `url_query_vocabulary` lists each host's recognized getter keys separately.
+Evidence carries original universal-binary offsets, lengths, VM addresses, range hashes, audit IDs,
+and symbols where the audit provides them. Query values and instruction excerpts are omitted.
+This is audit-guided reconstruction, not a general disassembler for unexamined builds.
+
+The literal `emails/message/open` and reconstructed `emails/open/message` remain separate entries.
+The canonical `emails/send` branch returns false without consuming query keys. IDs belong to
+`open/message`; the account keys are `account` and fallback `from`, not `accountID`.
+Recognized keys do not establish visible effects. All reconstructed entries have inferred
+confidence and untested runtime acceptance. No URL or send probe runs.
+
+Extraction with a reconciled baseline retains the audited grammar only when the exact build and
+referenced source hashes match. Changed binaries require a new audit instead of stale grammar.
+Diffs separate route/key changes from audit evidence and reconciliation provenance changes.

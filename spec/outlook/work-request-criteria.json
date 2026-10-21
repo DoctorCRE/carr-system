@@ -66,13 +66,14 @@
       "criteria": [
         "ATLAS-GRAMMAR-RECONCILE"
       ],
-      "state": "remaining",
+      "state": "verified_locally_against_pinned_audits",
       "depends_on": [
         "S1",
         "PR #2040",
         "wr443-deeplink-grammar",
         "wr443-send-by-id"
-      ]
+      ],
+      "merge_status": "PR #2040 merged; PRs #2041 and #2042 open at pinned source revisions. No merge is inferred."
     },
     {
       "id": "S4",
@@ -252,11 +253,41 @@
       "question": "Which bytes belong in coverage?",
       "answer": "Use all verified decompressed bytes. If structural parsing fails, discard the block-local record counts and count its entire verified payload as unframed.",
       "trade_off": "This loses tentative interpretations from that block but avoids partial credit and inflated coverage. Unverified block bytes have no trusted decompressed size and are excluded."
+    },
+    {
+      "id": "D28",
+      "question": "Does the session include grammar reconciliation?",
+      "answer": "The latest assignment authorizes the corrupt-block fix plus ATLAS-GRAMMAR-RECONCILE in the same draft PR. S4 remains separate.",
+      "trade_off": "Supersedes the earlier one-criterion stop in D17 for this explicit continuation."
+    },
+    {
+      "id": "D29",
+      "question": "How do assembled constants become atlas grammar?",
+      "answer": "Use audit-guided extraction from getter vocabulary and traced dispatch. Read the three audits at exact git revisions, verify SHA-256, match build and all referenced binary hashes to the saved atlas, then emit four reconstructed routes and two host query vocabularies.",
+      "trade_off": "No general ARM disassembler or new installed-app scan. A changed binary or build requires a new audit. Retain assembled grammar on extraction only while its exact sources match."
+    },
+    {
+      "id": "D30",
+      "question": "Which source and merge evidence is authoritative?",
+      "answer": "Bind PR #2040 merge 913029145c56534c1b6d516bd88a0d43950b5551, PR #2041 head 7432eac46324f2e4db8f9e852d9402c630bfb1af, and PR #2042 head 8f69356aac9162b1b03ffa4b3c7b33e38872cdcb. The last two were open in GitHub readback.",
+      "trade_off": "Branch source was explicitly permitted. Reconciliation is provisional until their merge evidence is refreshed; no claim they have landed."
+    },
+    {
+      "id": "D31",
+      "question": "Which grammar differences survive reconciliation?",
+      "answer": "Keep literal emails/message/open distinct from reconstructed emails/open/message. Keep recognized host keys distinct from keys read by an action. emails/send consumes no query keys and returns false in the audited canonical branch. account and fallback from select an account; immutableID belongs to open/message.",
+      "trade_off": "All reconstructed entries are inferred. Runtime acceptance remains untested, and UI or locked-screen delivery is not inferred from static forwarding."
+    },
+    {
+      "id": "D32",
+      "question": "Which public seams prove reconciliation?",
+      "answer": "Use reconcile_surface, extract_surface with a baseline, diff_surface, render_surface, and the actual reconcile CLI over a synthetic git repository. Test byte/hash binding, source/build changes, disagreement, query-key drift, evidence-only drift, and regeneration.",
+      "trade_off": "Fixtures prove the extraction contract. The saved real atlas is reconciled against static audit artifacts only; no app or store data is read."
     }
   ],
   "not_yet_specified": [
     "Numeric field framing beyond the pinned vendor's known object envelopes requires evidence from safe synthetic work and orchestrator counts.",
-    "Reconstructed grammar merge details depend on the final landed outputs of the three WR-000443 jobs."
+    "Refresh merge evidence for pinned PRs #2041/#2042 when they land; source reconciliation currently uses their explicitly permitted branches."
   ],
   "out_of_scope": [
     "Outlook launch, URL invocation, Apple events, profile/store/data/preference access by this desk",

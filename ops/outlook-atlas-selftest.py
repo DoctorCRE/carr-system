@@ -95,7 +95,7 @@ class SurfaceTests(unittest.TestCase):
                          for key in ['email_keys', 'email_send_false', 'event_keys']],
         }
         send = {
-            'schema': 'wr443-send-by-id/v1',
+            'schema': 'wr443-outlook-static-send-audit/v1',
             'sources': [{'path': 'MacOS/Microsoft Outlook', 'size_bytes': len(raw),
                          'sha256': hashlib.sha256(raw).hexdigest()}],
             'questions': {
@@ -130,6 +130,86 @@ class SurfaceTests(unittest.TestCase):
         self.assertNotIn('SECRET', json.dumps(result))
         self.assertEqual(before, self.extract(), 'reconciliation must not mutate its input')
         self.assertEqual(result, self.extract(result), 'bound reconstruction must regenerate')
+
+    def test_reconcile_cli_checks_pinned_audit_bytes_and_omits_values(self):
+        grammar, send = self.grammar_audits()
+        root = Path(self.temp.name)
+        subprocess.run(['git', 'init', '-q', str(root)], check=True)
+        audits = root / 'audits'
+        audits.mkdir()
+        inputs = {'survey': {'schema': 'wr443-outlook-route-survey/v1'},
+                  'grammar': grammar, 'send': send}
+        paths = {'survey': 'wr443-outlook-route-survey.json',
+                 'grammar': 'wr443-deeplink-grammar.json', 'send': 'wr443-send-by-id.json'}
+        for role, value in inputs.items():
+            (audits / paths[role]).write_text(json.dumps(value))
+        subprocess.run(['git', '-C', str(root), 'add', *['audits/' + p for p in paths.values()]], check=True)
+        subprocess.run(['git', '-C', str(root), '-c', 'user.name=Synthetic',
+                        '-c', 'user.email=synthetic@example.invalid', 'commit', '-qm', 'fixture'], check=True)
+        revision = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+        bindings = {'schema': 'outlook-grammar-sources/v1', 'sources': [
+            {'role': role, 'path': 'audits/' + paths[role], 'revision': revision,
+             'sha256': hashlib.sha256((audits / paths[role]).read_bytes()).hexdigest(),
+             'pr': 2040 + i, 'state': 'OPEN', 'merge_commit': None, 'merged_at': None}
+            for i, role in enumerate(inputs)]}
+        pinned = root / 'bindings.json'
+        baseline = root / 'baseline.json'
+        baseline.write_text(json.dumps(self.extract()))
+        script = str(Path(__file__).with_name('outlook-atlas.py'))
+        def run():
+            pinned.write_text(json.dumps(bindings))
+            return subprocess.run([sys.executable, script, 'reconcile', str(baseline), str(pinned)],
+                                  cwd=root, capture_output=True, text=True)
+        result = run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reconciled = json.loads(result.stdout)
+        self.assertEqual(len(reconciled['reconciliation']['provenance']['sources']), 3)
+        self.assertNotIn('SECRET', result.stdout)
+        bindings['sources'][0]['sha256'] = '0' * 64
+        invalid = run()
+        self.assertEqual(invalid.returncode, 2)
+        self.assertEqual(invalid.stdout, '')
+        self.assertEqual(json.loads(invalid.stderr)['error'], 'atlas_input_invalid_or_changed')
+
+    def test_audited_source_or_build_changes_require_new_reconstruction(self):
+        grammar, send = self.grammar_audits()
+        before = self.extract()
+        reconciled = atlas.reconcile_surface(before, grammar, send, {'sources': []})
+        self.binary(b'changed synthetic instructions')
+        with self.assertRaisesRegex(ValueError, 'binary or build'):
+            self.extract(reconciled)
+        self.grammar_audits()
+        self.metadata['CFBundleVersion'] = '16.115.456'
+        self.write_info()
+        with self.assertRaisesRegex(ValueError, 'binary or build'):
+            atlas.extract_surface(self.app, '16.115.456', reconciled)
+        for audit in (grammar, send):
+            bad = copy.deepcopy(audit)
+            bad['schema'] = 'unsupported'
+            with self.assertRaisesRegex(ValueError, 'schema'):
+                atlas.reconcile_surface(before, bad if audit is grammar else grammar,
+                                         bad if audit is send else send, {'sources': []})
+        contradictory = copy.deepcopy(send)
+        contradictory['questions']['1_emails_send']['any_query_keys_consumed'] = True
+        with self.assertRaisesRegex(ValueError, 'disagree'):
+            atlas.reconcile_surface(before, grammar, contradictory, {'sources': []})
+
+    def test_reconstructed_drift_separates_query_vocabulary_and_audit_provenance(self):
+        grammar, send = self.grammar_audits()
+        before = atlas.reconcile_surface(self.extract(), grammar, send, {'sources': []})
+        grammar['emails']['recognized_query_keys'].append('signature')
+        after = atlas.reconcile_surface(before, grammar, send, {'sources': []})
+        diff = atlas.diff_surface(before, after)
+        self.assertEqual([e['kind'] for e in diff['changed'].values()], ['url_query_vocabulary'])
+        evidence = copy.deepcopy(after)
+        evidence['reconciliation']['provenance']['sources'] = [{'state': 'MERGED'}]
+        diff = atlas.diff_surface(after, evidence)
+        self.assertEqual(diff['changed'], {})
+        self.assertTrue(diff['reconciliation_changes'])
+        reference = atlas.render_surface(before)
+        self.assertIn('Synthetic.rawValue', reference)
+        self.assertIn('byte 32, length 4', reference)
+        self.assertIn('unhandled_false', reference)
 
     def test_non_macho_resources_are_not_url_evidence(self):
         resource = self.app / "Contents/Resources/example.txt"
