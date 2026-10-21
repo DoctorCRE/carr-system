@@ -77,6 +77,26 @@ class ObservationTests(unittest.TestCase):
         changed = self.observe(store(data.replace(SECRET, b'X' * len(SECRET))))
         self.assertEqual(result.stdout, changed.stdout)
 
+    def test_corrupt_block_does_not_abort_or_dilute_verified_coverage(self):
+        good = store(envelope(77, b''))
+        corrupt = bytearray(store(SECRET)[64:])
+        corrupt[-1] ^= 1
+        result = self.observe(good + corrupt + good[64:])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report['coverage'], {
+            'block_signatures': 3, 'verified_blocks': 2, 'unverified_blocks': 1,
+            'undecodable_blocks': 0, 'verified_payload_bytes': 40,
+            'decoded_bytes': 40, 'decoded_byte_percent': 100,
+        })
+        self.assertEqual(report['issues'], [
+            {'stage': 'block', 'reason_code': 'payload_crc_mismatch', 'block_ordinal': 2},
+        ])
+        self.assertEqual(report['issue_counts'], [
+            {'stage': 'block', 'reason_code': 'payload_crc_mismatch', 'occurrences': 1},
+        ])
+        self.assertEqual(report['records'][0]['occurrences'], 2)
+
     def test_rejects_inexact_lz4_without_partial_output(self):
         cases = [
             store(b'hello', b'\x50helloTRAILING'),
