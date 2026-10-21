@@ -15,7 +15,10 @@ The patch adds calendar events, attendees, body previews, EFMData gzip body
 recovery, copy keys, SQLite export columns, and synthetic tests.
 The maintenance commit adds CI, this provenance record, a compiler pin, the
 build receipt, a target-directory ignore, and example-address normalization
-in three source comments. No runtime extraction logic changes beyond the patch.
+in three source comments. A separate digest-bound leak-guard qualification retains
+the public example addresses only in the verbatim historical import. Final
+source examples use `@example.test`. No runtime extraction logic changes beyond
+the patch.
 
 ## Supply chain
 
