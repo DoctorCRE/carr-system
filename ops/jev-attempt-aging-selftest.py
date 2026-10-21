@@ -64,7 +64,7 @@ def main():
         print('PASS pending under one hour; abandoned over one hour; settled excluded')
         sql("""insert into ops.jev_call_receipt
             select ('00000000-0000-0000-0000-' || lpad(i::text,12,'0'))::uuid,
-                now() - interval '2 hours', i::text,
+                case when i in (8,9) then now() - interval '2 hours' else now() end, i::text,
                 '00000000-0000-0000-0000-000000000099',
                 case when i in (8,9) then 'jev-attempt-pending' else 'synthetic-answer' end,
                 case i when 4 then '{"input_tokens":10}'::jsonb
