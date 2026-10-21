@@ -6,10 +6,10 @@
 //! NUL-terminated UTF-16LE runs around the `IPM.Note` anchor:
 //!
 //! ```text
-//!    -84  sender address       "no-reply@example-mailer.net"
+//!    -84  sender address       "no-reply@example.test"
 //!    -44  sender display name  "Security Verification"
 //!      0  ItemClass            "IPM.Note"            <- anchor
-//!    +18  Message-ID           "<9e0ce892-...@example-esp.net>"
+//!    +18  Message-ID           "<9e0ce892-...@example.test>"
 //!   +116  body / preview       "Your Verification Code Hi Alice, ..."
 //! ```
 //!
@@ -373,7 +373,7 @@ fn is_opaque_blob(t: &str) -> bool {
     if t.starts_with("eyJ") {
         return true;
     }
-    // A MIME Content-ID for an inline image: "image001.png@01DD024D.A7640430".
+    // A MIME Content-ID for an inline image: "image001.png@example.test".
     // These sit among the text fields and read as addresses, but they name an
     // attachment part, not a person or a subject.
     if let Some((local, domain)) = t.split_once('@') {
