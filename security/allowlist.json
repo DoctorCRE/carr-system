@@ -280,6 +280,12 @@
       "sha256": "bdd4e6c27787b7ae989bdb3a5f0678e263d3fc1c63bf66fd2fd609cd4e8e9924",
       "rule": "generic-api-key",
       "reason": "The finding is the verified SHA-256 of synthetic copy-identity failing-test output, labeled copy-key-red.txt, not a credential. Bound only to this reviewed audit blob, exact path and detector."
+    },
+    {
+      "path": "lib/outlook_intake.py",
+      "sha256": "7b7be653c56ead48001e4c83f46231e8b22991db36c974922b5069a2ca320649",
+      "rule": "pii-email",
+      "reason": "PR2050 authorizes this exact owning work-account identity. The tripwire integration changes these source bytes without adding identity data. Binds only this path, reviewed blob and detector."
     }
   ]
 }

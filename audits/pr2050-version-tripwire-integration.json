@@ -1,0 +1,231 @@
+{
+  "schema": "pr2050-version-tripwire-integration/v1",
+  "synthetic_tests_passed": true,
+  "independently_qualified": false,
+  "installed_runtime_qualified": false,
+  "production_held": true,
+  "upstream_tripwire_commit": "82b48be427c8fa94e2df1e7ec6c6280d891640cd",
+  "pr2049_dependency_commit": "4c42ef5fb0da91bb273e899044558c80a41a91e8",
+  "source_sha256": {
+    "lib/outlook_intake.py": "7b7be653c56ead48001e4c83f46231e8b22991db36c974922b5069a2ca320649",
+    "lib/outlook_version_tripwire.py": "4ac406d95511ebbd5e0e8ae619a86854d1f7333f86706c1a364ea3c8f15530e7",
+    "lib/outlook_version_ports.py": "895e84b33c36b9f53f6a41dce2ba7eb3b40c21b4f8e61a4f6db51262877d73fb",
+    "ops/outlook-intake-version-selftest.py": "edbcdfad4f52bad432c90d7483ae006be56e5d285ed7aebff1a7897d04072805",
+    "ops/outlook-intake-selftest.py": "24d53435a412c6bdb0ee13e30285bd4e5b9dea9aee47bcad10ccb4b6bfd57c20",
+    "ops/outlook-intake-ownership-selftest.py": "d7b02c004b723dd0de3286ad56fffc46ca1ba7aafb94fe9dce3a0382cb1a2af5",
+    "vendor/hxprobe/src/main.rs": "d91535c26f9b55fce45cf0b10fddfe7adf2baa73c83e6789053201d06031f254",
+    "vendor/hxprobe/src/ownership.rs": "21340f3ea2593a028c070e5c775d510022506b5cca5a6128442f7cd0fb9eb98f"
+  },
+  "original_ownership_red_sha256": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe",
+  "historical_ownership_qualification": {
+    "path": "audits/pr2050-ownership-contract-qualification.json",
+    "sha256": "921aea99c8d1abe56d4be30196164e47526fe0b198d00f5cf220bfacb4c7a889",
+    "source_commit": "48ace2a975245228ddb941ec7da15c7d9d54de25",
+    "preserved_unchanged": true
+  },
+  "first_red": {
+    "tests_run": 5,
+    "failures": 4,
+    "allowed_control_passed": true,
+    "output_sha256": "01bc29ea1c7c4520b5b9cbfb3251eb2dcc3399d8e4c1bd2321fd473b2cbbbc98",
+    "output": "FF.FF\n======================================================================\nFAIL: test_changed_version_blocks_unchanged_store_refresh_and_retry (__main__.IntakeVersionTest.test_changed_version_blocks_unchanged_store_refresh_and_retry)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 100, in test_changed_version_blocks_unchanged_store_refresh_and_retry\n    self.assertEqual(result.reason,'version_not_accepted')\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'store_unchanged' != 'version_not_accepted'\n- store_unchanged\n+ version_not_accepted\n\n\n======================================================================\nFAIL: test_changed_version_or_source_cannot_reuse_acceptance (__main__.IntakeVersionTest.test_changed_version_or_source_cannot_reuse_acceptance)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 80, in test_changed_version_or_source_cannot_reuse_acceptance\n    self.assert_held()\n    ~~~~~~~~~~~~~~~~^^\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 60, in assert_held\n    self.assertEqual((result.state,result.reason),('failed','version_not_accepted'))\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Tuples differ: ('succeeded', 'processed') != ('failed', 'version_not_accepted')\n\nFirst differing element 0:\n'succeeded'\n'failed'\n\n- ('succeeded', 'processed')\n+ ('failed', 'version_not_accepted')\n\n======================================================================\nFAIL: test_incomplete_or_modified_observation_blocks (__main__.IntakeVersionTest.test_incomplete_or_modified_observation_blocks)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 90, in test_incomplete_or_modified_observation_blocks\n    self.assert_held()\n    ~~~~~~~~~~~~~~~~^^\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 60, in assert_held\n    self.assertEqual((result.state,result.reason),('failed','version_not_accepted'))\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Tuples differ: ('succeeded', 'processed') != ('failed', 'version_not_accepted')\n\nFirst differing element 0:\n'succeeded'\n'failed'\n\n- ('succeeded', 'processed')\n+ ('failed', 'version_not_accepted')\n\n======================================================================\nFAIL: test_missing_receipt_blocks_before_snapshot_export_or_intake (__main__.IntakeVersionTest.test_missing_receipt_blocks_before_snapshot_export_or_intake)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 68, in test_missing_receipt_blocks_before_snapshot_export_or_intake\n    self.assert_held()\n    ~~~~~~~~~~~~~~~~^^\n  File \"/private/tmp/room-codex-ppj4vdzx/checkout/ops/outlook-intake-version-selftest.py\", line 60, in assert_held\n    self.assertEqual((result.state,result.reason),('failed','version_not_accepted'))\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Tuples differ: ('succeeded', 'processed') != ('failed', 'version_not_accepted')\n\nFirst differing element 0:\n'succeeded'\n'failed'\n\n- ('succeeded', 'processed')\n+ ('failed', 'version_not_accepted')\n\n----------------------------------------------------------------------\nRan 5 tests in 0.048s\n\nFAILED (failures=4)\n"
+  },
+  "adapter_red": {
+    "tests_run": 14,
+    "errors": 1,
+    "error": "TypeError: _snapshot() missing 1 required positional argument: launchctl",
+    "output_sha256": "077a3aec65787012023f33ee4949cafbd1e5f4d79886693294a831d770c98489"
+  },
+  "verification": {
+    "version_intake": 14,
+    "existing_intake": 71,
+    "ownership_binary_intake": 10,
+    "version_tripwire": 17,
+    "observer": 11,
+    "atlas": 9,
+    "harness": 16,
+    "rust": 29,
+    "leak_guard": 44,
+    "python_type_files": 1317,
+    "gate_integrity": 33
+  },
+  "log_sha256": {
+    "tripwire-adapter-red.txt": "077a3aec65787012023f33ee4949cafbd1e5f4d79886693294a831d770c98489",
+    "tripwire-atlas.txt": "42d6a1849efc2313350a6965149a4f3eb1a89a5f24f94918a186484fdc44f0eb",
+    "tripwire-debug-build.txt": "065841af713f6253aa7ce986592587bd86938979c90883fa767c8b2fe080eebe",
+    "tripwire-harness.txt": "21a0eae3815819131456c00a7ab8c4b826ef67f99d9776bbc123b4c7164f8371",
+    "tripwire-intake-existing.txt": "10add479d1724e71a13ca6546e84e1bc985a863e8fe1ad45fc6c98a3564fd203",
+    "tripwire-intake-green.txt": "82ad758a93fcb959bfef7b6bf46843d6b817bf5a3cda38a1aa6cf3e178546470",
+    "tripwire-intake-red.txt": "01bc29ea1c7c4520b5b9cbfb3251eb2dcc3399d8e4c1bd2321fd473b2cbbbc98",
+    "tripwire-leakguard.txt": "9249aa2622ebd7a0a8ca5e629a597d939ffe68486190add9a5d5964241969a42",
+    "tripwire-observe.txt": "90ac2120c933e70f8dd0ec89d68423ff0dbb514ed3e06e3f39e71684a4b073aa",
+    "tripwire-ownership.txt": "868432c41e4cc24023e9a489396a1250a0eacde7e0cd9798323e296b0906fddc",
+    "tripwire-rust.txt": "81119cd3620fe15596bf1b093a7916bcf7280535af99d3bed8098ea15301ecf7",
+    "tripwire-types.txt": "7a115c915e38340cb5faedcabc60e86379c6ef5d3c656769bf1bf35d005ed7ce",
+    "tripwire-upstream.txt": "db397f084ba7a0ff125819cb8a535efd46ec8f27a24570144c06005c098e55a7"
+  },
+  "guard_contract": {
+    "required_port": "version_gate",
+    "hook": "require_accepted(state_dir, installed_version, source_pin)",
+    "fixed_failure": "failed/version_not_accepted",
+    "state_dir": "out/outlook-version-tripwire",
+    "required_consumer_config": "consumer.json with exactly app, observer, observer_sha256; absolute paths; observer must resolve to the intake decoder",
+    "no_live_config_written": true,
+    "accepted_receipt_created_by_consumer": false,
+    "checks": [
+      "before intake directory, snapshot, export, replay, unchanged-store optimization",
+      "after snapshot and export, before row load",
+      "before record write persistence and model call",
+      "after model reply, before reply persistence",
+      "before refresh, report and watermark"
+    ],
+    "unchanged_store_and_pending_retries_held_intact": true,
+    "missing_mismatching_incomplete_receipts_have_no_snapshot_export_intake_effect": true,
+    "same_binary_pinned_for_observer_and_intake": true
+  },
+  "decisions": [
+    "Reuse upstream receipt parser and OperationalPorts unchanged; no competing parser or acceptance implementation.",
+    "Required guard callback has no default. Synthetic positive fixtures use actual Tripwire.check/accept receipts.",
+    "Bind explicit trusted app/binary inputs to the same decoder intake executes; do not infer approval from current binary hash.",
+    "Support both real snapshot callers with one optional executor seam; monitor defaults to subprocess.run and intake injects its executor.",
+    "Merge dependency commits, never replace or rebuild installed helpers; preserve do_not_merge for independent review."
+  ],
+  "ownership_requalification": {
+    "schema": "pr2050-ownership-qualification/v2",
+    "synthetic_contract_tests_passed": true,
+    "tests_run": 10,
+    "runtime_source_changed": true,
+    "binary_sha256": "12e9fe353fa362523057a574ff78328675469159336a21c2a719e244666f8ec0",
+    "source_sha256": {
+      "lib/outlook_intake.py": "7b7be653c56ead48001e4c83f46231e8b22991db36c974922b5069a2ca320649",
+      "vendor/hxprobe/src/main.rs": "d91535c26f9b55fce45cf0b10fddfe7adf2baa73c83e6789053201d06031f254",
+      "vendor/hxprobe/src/ownership.rs": "21340f3ea2593a028c070e5c775d510022506b5cca5a6128442f7cd0fb9eb98f",
+      "vendor/hxprobe/src/calendar.rs": "dc00a856e1d6f6420c9acac293f86ffba5adf53e5b381b5204182ff4cb4b0bb2",
+      "vendor/hxprobe/src/record.rs": "1571dd3dab06102041c7c83de3a1f4395c03e64140cfea0d548f10180373b3d3",
+      "ops/outlook-intake-ownership-selftest.py": "d7b02c004b723dd0de3286ad56fffc46ca1ba7aafb94fe9dce3a0382cb1a2af5",
+      "ops/outlook-intake-selftest.py": "24d53435a412c6bdb0ee13e30285bd4e5b9dea9aee47bcad10ccb4b6bfd57c20"
+    },
+    "independently_qualified": false,
+    "installed_runtime_qualified": false,
+    "original_red_sha256": "73a20f9d539347d02f966ccfc8ddbf230045a2299e6c0f8db7582281ecb48bfe",
+    "observations": {
+      "legacy_retry": {
+        "outcome": "legacy_ownership_held",
+        "source_rows_on_retry": 0,
+        "decodes": 0,
+        "replayed_writes": 0,
+        "models": 0,
+        "reports": 0
+      },
+      "allowed": {
+        "outcome": "processed",
+        "emails": 1,
+        "meetings": 1,
+        "actions": 0,
+        "models": 1,
+        "contacts": 1,
+        "reads": 0,
+        "reports": 1,
+        "refresh": 0
+      },
+      "tester": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      },
+      "other": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      },
+      "missing": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      },
+      "ambiguous": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      },
+      "mixed": {
+        "outcome": "processed",
+        "emails": 1,
+        "meetings": 1,
+        "actions": 0,
+        "models": 1,
+        "contacts": 1,
+        "reads": 0,
+        "reports": 1,
+        "refresh": 0
+      },
+      "colliding_allowed_and_tester": {
+        "outcome": "processed",
+        "emails": 1,
+        "meetings": 1,
+        "actions": 0,
+        "models": 1,
+        "contacts": 1,
+        "reads": 0,
+        "reports": 1,
+        "refresh": 0
+      },
+      "missing_preview": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      },
+      "tester_upcoming": {
+        "outcome": "nothing_new",
+        "emails": 0,
+        "meetings": 0,
+        "actions": 0,
+        "models": 0,
+        "contacts": 0,
+        "reads": 0,
+        "reports": 0,
+        "refresh": 0
+      }
+    }
+  },
+  "installed_artifact_sha256": {
+    "/Users/booko/carr-local/bin/outlook-intake-copy": "1b88988b05ae409016c84b5210f857a510b0fe00fbdee10e4831f190de673e59",
+    "/Users/booko/carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe": "eb19ff05fd40905791b76e0b51d29bc82d5bd6775b194f91e0f8c79ee32259e6",
+    "/Users/booko/carr-local/hxstore-reverse-engineering/hxprobe/src/main.rs": "82bc98c82f618bd34525062ea11e7080df2666e5254c864377eaac26b8095b67"
+  },
+  "unsupported_relations": [
+    "EFMData namespace to owning root remains unproved; sidecar recovery remains omitted.",
+    "Legacy persisted entries without ownership provenance remain held; participants cannot reconstruct ownership."
+  ],
+  "scope": "Synthetic fixtures and scratch binaries only. No live profile, sidecar, store or immutable snapshot reads in this follow-up. No installation, enabling, sends, deployment or merge."
+}

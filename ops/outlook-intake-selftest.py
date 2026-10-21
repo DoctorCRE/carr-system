@@ -22,6 +22,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lib import outlook_intake as intake
+from lib import outlook_version_tripwire as tripwire
 
 NOW = datetime(2026, 10, 20, 15, 0, tzinfo=timezone.utc)
 # Fixture rows use the decoder's actual export contract.
@@ -88,6 +89,32 @@ def write_db(path: Path, mails=(), events=(), found=1000, verified=999, identiti
     con.close()
 
 
+VERSION={'version':'16.102','build':'25101416'}
+PIN='a'*64
+
+
+def observation():
+    return {'schema':'hxprobe-observation/v1',
+            'blocks':[{'block_type':8,'occurrences':1,'payload_bytes':20}],
+            'records':[{'record_type':'mail','occurrences':1,'total_bytes':20,'decoded_bytes':16,
+                        'decoded_byte_percent':80,'wire_field_ids':None,'decoded_field_id_percent':None,
+                        'fields':[{'field_id':'mail.selector.ItemClass','identifier_kind':'string_run_selector',
+                                   'wire_type':'utf16le-run','occurrences':1}]}],
+            'unknown_fields':[{'record_type':'mail','field_id':None,'wire_type':'unknown','occurrences':1,'unknown_bytes':4}],
+            'coverage':{'block_signatures':1,'verified_blocks':1,'unverified_blocks':0,'undecodable_blocks':0,
+                        'verified_payload_bytes':20,'decoded_bytes':16,'decoded_byte_percent':80},
+            'issues':[],'issue_counts':[]}
+
+
+def accept_version(root,version=VERSION,pin=PIN):
+    monitor=tripwire.Tripwire(root,pin,{'mail'})
+    def snapshot(work):
+        (work/'store.hxd').write_bytes(b'SyntheticOnly')
+    result=monitor.check(version,snapshot,lambda _:observation())
+    assert result['status']=='review_required'
+    monitor.accept(version)
+
+
 class Fake:
     """The record layer, the contact export, the model and the decoder."""
 
@@ -140,7 +167,8 @@ class Fake:
 
     def ports(self):
         return intake.Ports(carr=self.carr, contacts=self.contacts, next_step=self.next_step,
-                            decode=self.decode, now=lambda: self.now, launchctl=self.test.launchctl)
+                            decode=self.decode, now=lambda: self.now, launchctl=self.test.launchctl,
+                            version_gate=lambda: tripwire.require_accepted(self.test.tmp / 'tripwire', VERSION, PIN))
 
     def writes(self, verb=None):
         return [(v, a) for v, a in self.calls if v in intake.WRITE_VERBS and (verb is None or v == verb)]
@@ -155,6 +183,7 @@ class IntakeTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
         self.home = self.tmp / 'home'
+        accept_version(self.tmp / 'tripwire')
         self.store = self.home / 'Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/Main Identity/HxStore.hxd'
         self.store.parent.mkdir(parents=True)
         self.store.write_bytes(b'Nostromo-fixture')

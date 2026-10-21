@@ -1,8 +1,9 @@
 """Outlook intake: Joe's mail and calendar into the record layer, by code.
 
 Every 30 minutes from 07:00 to 19:00 local (com.carr.outlook-intake) this reads
-a private copy of Main Identity's HxStore.hxd and its EFMData body sidecars,
-never the live files, decodes it with the pinned hxprobe fork
+a private copy of Main Identity's HxStore.hxd. The ownership-gated decoder
+uses only owned inline content or previews and omits EFMData recovery. It decodes
+the copy with the pinned hxprobe fork
 (vendor-patches/hxprobe-calendar-and-bodies.patch), and writes what it finds
 through the named record-layer verbs:
 
@@ -60,6 +61,8 @@ from time import monotonic, sleep
 from typing import Callable, TypeGuard
 import uuid
 import zoneinfo
+
+from lib.outlook_version_tripwire import IntakeBlocked, require_accepted
 
 HXPROBE = Path('carr-local/hxstore-reverse-engineering/hxprobe/target/release/hxprobe')
 COPY_HELPER = Path('carr-local/bin/outlook-intake-copy')
@@ -125,6 +128,7 @@ class Ports:
     next_step: Callable[[dict, date], dict]
     decode: Callable[[Path, Path, Path], None]
     now: Callable[[], datetime]
+    version_gate: Callable[[], None]
     launchctl: Callable = subprocess.run
 
 
@@ -280,7 +284,8 @@ def _load(db: Path, store_sha256: str) -> tuple[dict, list[dict], list[dict]]:
         con.close()
 
 
-def _snapshot(home: Path, work: Path, launchctl: Callable) -> None:
+def _snapshot(home: Path, work: Path, launchctl: Callable | None = None) -> None:
+    runner = launchctl if launchctl is not None else subprocess.run
     helper = home / COPY_HELPER
     label = f'com.carr.outlook-intake-copy.{uuid.uuid4().hex}'
     target = f'gui/{os.getuid()}/{label}'
@@ -293,7 +298,7 @@ def _snapshot(home: Path, work: Path, launchctl: Callable) -> None:
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise subprocess.TimeoutExpired('copy', 900)
-        done = launchctl(['/bin/launchctl', *args], capture_output=True, text=True, timeout=remaining)
+        done = runner(['/bin/launchctl', *args], capture_output=True, text=True, timeout=remaining)
         if done.returncode:
             raise DecodeError(f'Outlook copy launchctl {args[0]} failed')
         return done.stdout
@@ -325,7 +330,7 @@ def _snapshot(home: Path, work: Path, launchctl: Callable) -> None:
         raise DecodeError('Outlook copy helper timed out') from None
     finally:
         try:
-            done = launchctl(['/bin/launchctl', 'bootout', target],
+            done = runner(['/bin/launchctl', 'bootout', target],
                              capture_output=True, text=True, timeout=30)
             if done.returncode and bootstrapped:
                 raise DecodeError('Outlook copy helper bootout failed')
@@ -342,14 +347,17 @@ def _remove(work: Path) -> None:
         raise CleanupError('private work folder left behind')
 
 
-def _decode(home: Path, out: Path, decode: Callable[[Path, Path, Path], None], launchctl: Callable):
+def _decode(home: Path, out: Path, ports: Ports):
+    ports.version_gate()
     work = Path(tempfile.mkdtemp(prefix=WORK_PREFIX, dir=out))
     try:
         copy = work / 'store.hxd'
-        _snapshot(home, work, launchctl)
+        _snapshot(home, work, ports.launchctl)
+        ports.version_gate()
         files = work / 'Files'
         db = work / 'store.db'
-        decode(copy, files, db)
+        ports.decode(copy, files, db)
+        ports.version_gate()
         with copy.open('rb') as source:
             return _load(db, hashlib.file_digest(source, 'sha256').hexdigest())
     finally:
@@ -471,6 +479,7 @@ class Run:
         self.attempted: set[str] = set()
 
     def write(self, verb: str, args: dict, who: str, provenance: dict, note: str = '') -> bool:
+        self.ports.version_gate()
         if not _valid_provenance(provenance, self.state['ownership']):
             raise CarrError('unproven write ownership')
         requests = self.state.setdefault('requests', {})
@@ -601,11 +610,13 @@ class Run:
                     self.counts['steps_pending'] += 1
                     continue
                 m = {**found[0], 'outbound': s['outbound']}
+                self.ports.version_gate()
                 try:
                     reply = parse_reply({'is_error': False, 'structured_output': self.ports.next_step(m, self.today)})
                 except Exception:
                     self.counts['model_failed'] += 1
                     continue
+                self.ports.version_gate()
                 s['reply'] = {**reply, 'due_on': reply['due_on'] or self.today.isoformat(), 'ownership': m['ownership']}
                 _save(self.out, self.state)
             reply = s['reply']
@@ -733,6 +744,10 @@ def _calendar_due(state: dict, now: datetime) -> bool:
 def run(repo: Path, home: Path, ports: Ports) -> Outcome:
     if not in_window(ports.now()):
         return Outcome('skipped', 'outside_window')
+    try:
+        ports.version_gate()
+    except IntakeBlocked:
+        return Outcome('failed', 'version_not_accepted')
     out = repo / OUT
     out.mkdir(parents=True, exist_ok=True)
     os.chmod(out, 0o700)
@@ -749,6 +764,8 @@ def run(repo: Path, home: Path, ports: Ports) -> Outcome:
             return _run(out, home, ports)
         except CleanupError:
             return Outcome('failed', 'cleanup_failed')
+        except IntakeBlocked:
+            return Outcome('failed', 'version_not_accepted')
     finally:
         os.close(fd)
 
@@ -784,11 +801,12 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
             _save(out, state)
         return Outcome('succeeded', 'store_unchanged')
     try:
-        meta, mails, events = _decode(home, out, ports.decode, ports.launchctl)
+        meta, mails, events = _decode(home, out, ports)
     except FullDiskAccessRequired as error:
         return Outcome('failed', str(error))
     except (DecodeError, sqlite3.Error, OSError):
         return Outcome('failed', 'decode_failed')
+    ports.version_gate()
     account = meta['ownership']
     if state and state['ownership'] != account:
         return Outcome('failed', 'ownership_changed_held')
@@ -821,6 +839,7 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
     except CarrError:
         _save(out, state)
         return Outcome('failed', 'carr_unreachable', work.counts)
+    ports.version_gate()
     refresh = _refresh_list(out, state.get('pending_full', {}))
     if any(work.counts.values()) or work.written:
         work.report(out, refresh)
@@ -836,6 +855,28 @@ def _run(out: Path, home: Path, ports: Ports) -> Outcome:
 
 
 # ---- production ports --------------------------------------------------------
+
+def _version_gate(repo: Path, home: Path) -> Callable[[], None]:
+    """Use explicitly provisioned receipt inputs; absence never accepts a version."""
+    state = repo / 'out/outlook-version-tripwire'
+
+    def check() -> None:
+        # The adapter imports _snapshot, so import it only after intake is loaded.
+        from lib.outlook_version_ports import OperationalPorts
+        try:
+            config = json.loads((state / 'consumer.json').read_text())
+            if not isinstance(config, dict) or set(config) != {'app', 'observer', 'observer_sha256'}:
+                raise IntakeBlocked('consumer_config_invalid')
+            app, observer = Path(config['app']), Path(config['observer'])
+            if not app.is_absolute() or not observer.is_absolute() or observer.resolve() != (home / HXPROBE).resolve():
+                raise IntakeBlocked('consumer_decoder_mismatch')
+            adapter = OperationalPorts(home, app, observer, config['observer_sha256'])
+            require_accepted(state, adapter.version, adapter.source_pin)
+            adapter._unchanged()
+        except (OSError, ValueError, TypeError, KeyError):
+            raise IntakeBlocked('consumer_binding_unavailable') from None
+    return check
+
 
 def _carr(repo: Path) -> Callable[[str, dict], dict]:
     def call(verb: str, args: dict) -> dict:
@@ -893,7 +934,8 @@ def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     home = Path.home()
     ports = Ports(carr=_carr(repo), contacts=_contacts(repo), next_step=ask_model,
-                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc))
+                  decode=_decoder(home), now=lambda: datetime.now(timezone.utc),
+                  version_gate=_version_gate(repo, home))
     outcome = run(repo, home, ports)
     print(status_line(outcome))
     return EXIT[outcome.state]
