@@ -730,6 +730,75 @@ class CleanupHealthTests(unittest.TestCase):
 
 
 class ScheduledCleanupTests(unittest.TestCase):
+    def test_clean_run_after_thread_recovery_exhaustion_advances_last_success(self):
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            receipt = root / 'out/machine-cleanup.json'
+            receipt.parent.mkdir()
+            pending = {'kind': 'thread', 'thread_id': 'stuck', 'before': 100,
+                       'readback_attempts': 2}
+            receipt.write_text(json.dumps({'at': 1, 'last_success_at': 123, 'pending': pending}))
+            def archive(tid, **kwargs):
+                self.assertTrue(kwargs['dry_run'])
+                return {'kind': 'thread', 'thread_id': tid, 'status': 'deferred',
+                        'budget_exhausted': True}
+            options = dict(hook=None, tmp_root=root, roots={}, dispatch_path=root / 'absent',
+                provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+            exhausted = cleanup.run(root, config, **options)
+            self.assertEqual(exhausted['status'], 'failed')
+            self.assertEqual(exhausted['errors'][0]['error'], 'thread_recovery_exhausted')
+            report = cleanup.run(root, config, **options)
+            self.assertEqual(report['status'], 'completed', report)
+            self.assertGreater(report['last_success_at'], 123)
+            self.assertEqual(report['errors'], [])
+            self.assertEqual(report['stuck_thread_count'], 1)
+            self.assertIn('stuck', report['stuck_threads'])
+            self.assertEqual(json.loads(receipt.read_text()), report)
+            findings = cleanup.health_findings(root, config, tmp_root=root, roots={}, now=time.time())
+            self.assertEqual([row['code'] for row in findings], ['cleanup_stuck_threads'])
+            self.assertIn('1', findings[0]['detail'])
+
+    def test_stuck_thread_later_resolved_is_removed_from_map(self):
+        import machine_cleanup as cleanup
+        config = watchdog.load_config(ROOT / 'ops/config/job-watchdog.json')
+        for status in ('archived', 'verified_no_effect', 'would_archive'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                receipt = root / 'out/machine-cleanup.json'
+                receipt.parent.mkdir()
+                stuck = {'kind': 'thread', 'thread_id': 'stuck', 'before': 100,
+                         'readback_attempts': 3, 'error': 'thread_recovery_exhausted'}
+                receipt.write_text(json.dumps({'at': 1, 'last_success_at': 123,
+                    'stuck_threads': {'stuck': stuck}, 'errors': [stuck]}))
+                dispatch = root / 'dispatch.jsonl'
+                dispatch.write_text((json.dumps({'thread_id': 'stuck'}) + '\n') * 2)
+                calls = []
+                resolution = [False]
+                def archive(tid, **kwargs):
+                    calls.append((tid, kwargs['dry_run']))
+                    self.assertTrue(kwargs['dry_run'], 'stuck effects must only be read back')
+                    self.assertEqual(kwargs['before'], 100)
+                    if not resolution[0]:
+                        raise TimeoutError('still unresolved')
+                    return {'kind': 'thread', 'thread_id': tid, 'status': status}
+                options = dict(hook=None, tmp_root=root, roots={}, dispatch_path=dispatch,
+                    provider=object(), process_probe=lambda paths: set(), archive_thread=archive)
+                retained = cleanup.run(root, config, **options)
+                self.assertEqual(retained['status'], 'completed', retained)
+                self.assertIn('stuck', retained['stuck_threads'])
+                resolution[0] = True
+                report = cleanup.run(root, config, **options)
+                self.assertNotIn('stuck', report['stuck_threads'], report)
+                self.assertEqual(report['stuck_thread_count'], 0)
+                self.assertEqual(report['status'], 'completed')
+                self.assertEqual(report['errors'], [])
+                self.assertEqual(calls, [('stuck', True)] * 2)
+                self.assertEqual(json.loads(receipt.read_text()), report)
+                findings = cleanup.health_findings(root, config, tmp_root=root, roots={}, now=time.time())
+                self.assertEqual(findings, [])
+
     def test_stuck_thread_recovery_does_not_starve_other_cleanup_kinds(self):
         import machine_cleanup as cleanup
         fixture = fixtures.Fixture()
@@ -778,12 +847,15 @@ class ScheduledCleanupTests(unittest.TestCase):
         self.assertEqual(error['error'], 'thread_recovery_exhausted')
         self.assertEqual(error['before'], 100)
         again = cleanup.run(fixture.repo, config, **options)
-        self.assertIn(error, again['errors'])
-        self.assertEqual(calls.count(('stuck', True)), 3)
+        self.assertEqual(again['errors'], [])
+        self.assertEqual(again['status'], 'completed')
+        self.assertEqual(again['stuck_threads']['stuck'], error)
+        self.assertEqual(calls.count(('stuck', True)), 4)
         self.assertNotIn(('stuck', False), calls)
         self.assertEqual(json.loads(receipt.read_text()), again)
         findings = cleanup.health_findings(fixture.repo, config, tmp_root=clones, roots={}, now=time.time())
-        self.assertIn('cleanup_failed', [row['code'] for row in findings])
+        self.assertIn('cleanup_stuck_threads', [row['code'] for row in findings])
+        self.assertNotIn('cleanup_failed', [row['code'] for row in findings])
 
     def test_stuck_thread_readback_exceptions_remain_bounded_when_run_budget_expires(self):
         import machine_cleanup as cleanup
@@ -814,12 +886,13 @@ class ScheduledCleanupTests(unittest.TestCase):
                     self.assertTrue(report['budget_exhausted'])
                     self.assertNotIn('pending', report)
                     resumed = cleanup.run(root, config, **options)
-                self.assertEqual(calls, [('stuck', True)] * 3)
-                self.assertEqual(resumed['status'], 'failed', resumed)
-                self.assertFalse(resumed['budget_exhausted'])
+                self.assertEqual(calls, [('stuck', True)] * 4)
+                self.assertEqual(resumed['status'], 'deferred', resumed)
+                self.assertTrue(resumed['budget_exhausted'])
                 self.assertEqual([row['path'] for row in resumed['kept']], [str(workspace)])
                 self.assertEqual((workspace / 'payload').read_text(), 'unrecognized checkout stays intact')
-                error = resumed['errors'][0]
+                self.assertEqual(resumed['errors'], [])
+                error = resumed['stuck_threads']['stuck']
                 self.assertEqual(error['readback_attempts'], 3)
                 self.assertEqual(error['thread_offset'], pending['thread_offset'])
                 self.assertEqual(error['before'], 100)
