@@ -34,8 +34,8 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 """
 CLIENT = intake.Contact(email='pat@example.test', ref='C-901', name='Pat Example')
 LEAD = intake.Contact(email='lee@example.test', ref='L-902', name='Lee Sample')
-OWNER = 'owner@' + intake.INTERNAL_DOMAIN
-PARTNER = 'partner@' + intake.INTERNAL_DOMAIN
+OWNER = 'owner@example.test'
+PARTNER = 'partner@example.test'
 
 
 def ts(delta: timedelta) -> int:
@@ -143,6 +143,9 @@ class Fake:
 
 class IntakeTest(unittest.TestCase):
     def setUp(self):
+        internal = patch.object(intake, '_internal', side_effect=lambda address: address.lower() in (OWNER, PARTNER))
+        internal.start()
+        self.addCleanup(internal.stop)
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.repo = self.tmp / 'repo'
@@ -193,7 +196,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.contacts_rows.append(intake.Contact(PARTNER, 'V-903', 'Internal Row'))
         self.run_intake([mail(PARTNER, -timedelta(hours=1), recipients=OWNER)])
         self.assertEqual(self.fake.writes(), [])
-        self.assertNotIn('carr.us', self.report_text().split('## Unmatched', 1)[-1])
+        self.assertNotIn('example.test', self.report_text().split('## Unmatched', 1)[-1])
 
     def test_a_second_run_over_the_same_mail_writes_nothing(self):
         mails = [mail('pat@example.test', -timedelta(hours=1))]
@@ -231,12 +234,12 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual([a['ref'] for _, a in self.fake.writes('log-activity')], ['C-901', 'L-902'])
 
     def test_unmatched_people_are_reported_by_name_and_domain_only(self):
-        self.run_intake([mail('stranger@unknown.example', -timedelta(hours=1), name='Sam Stranger')])
+        self.run_intake([mail('stranger@example.test', -timedelta(hours=1), name='Sam Stranger')])
         self.assertEqual(self.fake.writes(), [])
         text = self.report_text()
         self.assertIn('Sam Stranger', text)
-        self.assertIn('unknown.example', text)
-        self.assertNotIn('stranger@unknown.example', text)
+        self.assertIn('example.test', text)
+        self.assertNotIn('stranger@example.test', text)
 
     def test_report_and_state_are_private(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1))])
@@ -252,7 +255,7 @@ class IntakeTest(unittest.TestCase):
 
     def test_a_unique_exact_name_matches_when_no_address_does(self):
         self.fake.parties['Rae Named'] = [{'name': 'Rae Named', 'ref': 'L-904', 'kind': 'lead', 'merged': False}]
-        self.run_intake([mail('rae@elsewhere.example', -timedelta(hours=1), name='Rae Named')])
+        self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
         [(_, args)] = self.fake.writes('log-activity')
         self.assertEqual(args['ref'], 'L-904')
 
@@ -260,7 +263,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.parties['Rae Named'] = [
             {'name': 'Rae Named', 'ref': 'L-904', 'kind': 'lead', 'merged': False},
             {'name': 'Rae Named', 'ref': 'C-905', 'kind': 'client', 'merged': False}]
-        self.run_intake([mail('rae@elsewhere.example', -timedelta(hours=1), name='Rae Named')])
+        self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
         self.assertEqual(self.fake.writes(), [])
         self.assertIn('Rae Named', self.report_text())
 
@@ -268,7 +271,7 @@ class IntakeTest(unittest.TestCase):
         self.fake.parties['Rae Named'] = [
             {'name': 'Rae Namedson', 'ref': 'L-904', 'kind': 'lead', 'merged': False},
             {'name': 'Rae Named', 'ref': 'L-906', 'kind': 'lead', 'merged': True}]
-        self.run_intake([mail('rae@elsewhere.example', -timedelta(hours=1), name='Rae Named')])
+        self.run_intake([mail('rae@example.test', -timedelta(hours=1), name='Rae Named')])
         self.assertEqual(self.fake.writes(), [])
 
     def test_an_address_shared_by_two_records_is_ambiguous(self):
@@ -389,7 +392,7 @@ class IntakeTest(unittest.TestCase):
 
     def test_one_model_call_per_new_matched_email_and_none_for_unmatched(self):
         self.run_intake([mail('pat@example.test', -timedelta(hours=1)),
-                         mail('stranger@unknown.example', -timedelta(hours=1), subject='Spam')])
+                         mail('stranger@example.test', -timedelta(hours=1), subject='Spam')])
         self.assertEqual(len(self.fake.model_calls), 1)
 
     def test_a_next_step_sets_a_ball_when_none_exists(self):

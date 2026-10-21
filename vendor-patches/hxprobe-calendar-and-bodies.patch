@@ -282,12 +282,12 @@ new file mode 100644
 +
 +    #[test]
 +    fn copies_share_a_key_and_replies_do_not() {
-+        let a = rec("pat@example.com", "Re: Suite question", "Thanks, Thursday at ten works for the tour.");
-+        let b = rec("Pat@Example.com", "Suite question", "Thanks,  Thursday at ten works for the tour!");
-+        let reply = rec("pat@example.com", "Re: Suite question", "One more thing about parking at the site.");
++        let a = rec("pat@example.test", "Re: Suite question", "Thanks, Thursday at ten works for the tour.");
++        let b = rec("Pat@example.test", "Suite question", "Thanks,  Thursday at ten works for the tour!");
++        let reply = rec("pat@example.test", "Re: Suite question", "One more thing about parking at the site.");
 +        assert_eq!(copy_key(&a), copy_key(&b), "prefix, case and spacing do not split a message");
 +        assert_ne!(copy_key(&a), copy_key(&reply), "a different opening is a different message");
-+        assert_eq!(copy_key(&rec("pat@example.com", "x", "ok")), None, "too little text to identify");
++        assert_eq!(copy_key(&rec("pat@example.test", "x", "ok")), None, "too little text to identify");
 +    }
 +
 +    #[test]
@@ -311,7 +311,7 @@ new file mode 100644
 +        }
 +        let mut sidecars = Sidecars::open(&dir);
 +        assert_eq!(sidecars.len(), 2, "the S0 number is not hard-coded");
-+        let r = rec("pat@example.com", "Suite", "Thanks, Thursday at ten works for the tour.");
++        let r = rec("pat@example.test", "Suite", "Thanks, Thursday at ten works for the tour.");
 +        let wrong = u16le("EFMData/2222.dat");
 +        assert_eq!(sidecars.body_for(&wrong, &r), None, "a neighbour's sidecar is rejected");
 +        let right = [u16le("EFMData/2222.dat"), vec![0, 0], u16le("EFMData/1111.dat")].concat();
@@ -610,7 +610,7 @@ new file mode 100644
 +        }
 +        obj.extend(lp("America/Chicago"));
 +        obj.extend(lp("US/Central"));
-+        for field in ["Quarterly Site Review", "Example Room", "Ada Example", "ada@example.com",
++        for field in ["Quarterly Site Review", "Example Room", "Ada Example", "ada@example.test",
 +                      "Owner Example", "Agenda line one\r\nline two", "Quarterly Site Review"] {
 +            obj.extend(u16le(field));
 +            obj.extend([0, 0]);
@@ -637,17 +637,17 @@ new file mode 100644
 +    #[test]
 +    fn decodes_a_meeting() {
 +        let mut idx = Index::default();
-+        idx.observe(&envelope(&object(true, &[("Bo Example", "bo@example.org")])));
++        idx.observe(&envelope(&object(true, &[("Bo Example", "bo@example.test")])));
 +        assert_eq!(idx.events.len(), 1, "one meeting decoded");
 +        let ev = idx.events.values().next().unwrap();
 +        assert_eq!(ev.start_unix, 1_793_000_000, "start read at +574");
 +        assert_eq!(ev.end_unix, 1_793_003_600, "end read at +582");
 +        assert_eq!(ev.subject.as_deref(), Some("Quarterly Site Review"), "subject is the field written twice");
 +        assert_eq!(ev.location.as_deref(), Some("Example Room"), "location follows the subject");
-+        assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.com"), "organizer address");
++        assert_eq!(ev.organizer_email.as_deref(), Some("ada@example.test"), "organizer address");
 +        assert_eq!(ev.organizer_name.as_deref(), Some("Ada Example"), "organizer name precedes the address");
 +        assert_eq!(ev.body.as_deref(), Some("Agenda line one\r\nline two"), "notes");
-+        assert_eq!(ev.attendees, vec![Attendee { name: "Bo Example".into(), email: "bo@example.org".into() }]);
++        assert_eq!(ev.attendees, vec![Attendee { name: "Bo Example".into(), email: "bo@example.test".into() }]);
 +    }
 +
 +    #[test]
@@ -670,7 +670,7 @@ new file mode 100644
 +    fn revisions_merge_into_one_event() {
 +        let mut idx = Index::default();
 +        let one = envelope(&object(true, &[]));
-+        let two = envelope(&object(true, &[("Bo Example", "bo@example.org")]));
++        let two = envelope(&object(true, &[("Bo Example", "bo@example.test")]));
 +        idx.observe(&[one, two].concat());
 +        assert_eq!(idx.objects, 2, "both revisions seen");
 +        assert_eq!(idx.events.len(), 1, "one identity");
