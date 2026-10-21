@@ -2,6 +2,7 @@
 """Offline tests for the Outlook intake. Made-up fixtures and fake ports only:
 no Outlook store, no record layer, no model."""
 from datetime import datetime, timedelta, timezone
+import errno
 import fcntl
 import hashlib
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -158,6 +160,20 @@ class IntakeTest(unittest.TestCase):
         (live / '7.dat').write_bytes(b'gzip-body')
         self.fake = Fake(self)
         self.fake.fixture = self.tmp / 'fixture.db'
+        copier = patch('subprocess.run', side_effect=self.copy_snapshot)
+        copier.start()
+        self.addCleanup(copier.stop)
+
+    def copy_snapshot(self, command, *, cwd, **kwargs):
+        self.assertEqual(command, [str(self.home / 'carr-local/bin/outlook-intake-copy')])
+        shutil.copyfile(self.store, cwd / 'store.hxd')
+        os.chmod(cwd / 'store.hxd', 0o600)
+        shutil.copytree(self.store.parent / 'Files', cwd / 'Files')
+        for directory, _, files in os.walk(cwd / 'Files'):
+            os.chmod(directory, 0o700)
+            for name in files:
+                os.chmod(Path(directory) / name, 0o600)
+        return subprocess.CompletedProcess(command, 0)
 
     def run_intake(self, mails=(), events=(), touch=True, **db):
         if self.fake.fixture.exists():
@@ -700,6 +716,30 @@ class IntakeTest(unittest.TestCase):
         self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
         self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
 
+    def test_copy_permission_denied_names_the_helper_that_needs_full_disk_access(self):
+        with patch('subprocess.run', side_effect=PermissionError(errno.EPERM, 'Operation not permitted')):
+            result = self.run_intake()
+        self.assertEqual(result.state, 'failed')
+        self.assertIn(f'grant Full Disk Access to {self.home}/carr-local/bin/outlook-intake-copy',
+                      intake.status_line(result))
+        self.assertEqual(self.fake.calls, [])
+        self.assertEqual(self.fake.decodes, 0)
+        self.assertFalse((self.out() / intake.STATE).exists())
+        self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
+
+    def test_helper_permission_exit_codes_name_full_disk_access(self):
+        for code in (errno.EPERM, errno.EACCES):
+            with patch('subprocess.run', return_value=subprocess.CompletedProcess([], code)):
+                result = self.run_intake()
+            self.assertIn('grant Full Disk Access to', intake.status_line(result))
+            self.assertEqual(result.state, 'failed')
+
+    def test_helper_timeout_fails_and_cleans_up(self):
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('copy', 900)):
+            result = self.run_intake()
+        self.assertEqual((result.state, result.reason), ('failed', 'decode_failed'))
+        self.assertEqual([p for p in self.out().iterdir() if p.is_dir()], [])
+
     def test_unreachable_contacts_fail_loudly(self):
         def down():
             raise intake.CarrError('views unreachable')
@@ -738,6 +778,11 @@ class IntakeTest(unittest.TestCase):
 
 
 class ScheduleTest(unittest.TestCase):
+    def test_intake_runs_only_on_the_studio_primary_role(self):
+        from lib.launchd_scope import allowed_on_machine
+        self.assertTrue(allowed_on_machine('com.carr.outlook-intake.plist', True))
+        self.assertFalse(allowed_on_machine('com.carr.outlook-intake.plist', False))
+
     def test_the_plist_runs_every_half_hour_from_seven_to_seven_under_the_scheduler(self):
         import plistlib
         from lib.launchd_calendar import calendar_for_window
@@ -750,7 +795,7 @@ class ScheduleTest(unittest.TestCase):
                          ['{{REPO}}/bin/run-scheduled.sh', 'outlook-intake', 'outlook.intake'])
         services = json.loads((ROOT / 'ops/config/services.json').read_text())['services']
         [env] = [s for s in services if s['key'] == 'outlook-intake'][0]['environments']
-        self.assertEqual(env['runs_on'], 'secondary')
+        self.assertEqual(env['runs_on'], 'primary')
         self.assertGreaterEqual(env['expected_cadence_seconds'] + env['cadence_grace_seconds'], 12 * 3600 + 1800,
                                 'the overnight stand-down plus the spool flush is not stale')
         self.assertEqual(plist['Umask'], 0o077)
@@ -806,42 +851,18 @@ class StoreResolverTest(unittest.TestCase):
         expected = self.store('Main Identity')
         self.assertEqual(intake.resolve_store(self.home), expected)
 
-    def test_main_profile(self):
-        expected = self.store('Main Profile')
+    def test_other_profiles_and_store_override_do_not_widen_the_copy_scope(self):
+        expected = self.store('Main Identity')
+        newer = self.store('Main Profile')
+        os.utime(newer, ns=(2**62, 2**62))
+        os.environ['CARR_OUTLOOK_STORE'] = str(newer)
         self.assertEqual(intake.resolve_store(self.home), expected)
 
-    def test_no_store_names_the_searched_directory(self):
-        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
+    def test_no_main_identity_store_names_the_fixed_path(self):
+        self.store('Main Profile')
+        with self.assertRaises(FileNotFoundError) as refusal:
             intake.resolve_store(self.home)
-        self.assertIn(str(self.profiles), str(refusal.exception))
-        self.assertIn(str(self.profiles), '\n'.join(logs.output))
-
-    def test_newest_store_wins_and_is_logged(self):
-        older = self.store('Main Identity')
-        newer = self.store('Main Profile')
-        for old, new in ((older, newer), (newer, older)):
-            os.utime(old, ns=(1_000_000_000, 1_000_000_000))
-            os.utime(new, ns=(2_000_000_000, 2_000_000_000))
-            with self.assertLogs(level='WARNING') as logs:
-                self.assertEqual(intake.resolve_store(self.home), new)
-            self.assertIn(str(new), '\n'.join(logs.output))
-
-    def test_override_takes_precedence(self):
-        self.store('Main Identity')
-        override = self.home / 'chosen.hxd'
-        override.write_bytes(b'synthetic-override')
-        os.environ['CARR_OUTLOOK_STORE'] = str(override)
-        self.assertEqual(intake.resolve_store(self.home), override)
-
-    def test_invalid_override_refuses_without_fallback(self):
-        self.store('Main Identity')
-        override = self.home / 'missing.hxd'
-        os.environ['CARR_OUTLOOK_STORE'] = str(override)
-        with self.assertLogs(level='ERROR') as logs, self.assertRaises(FileNotFoundError) as refusal:
-            intake.resolve_store(self.home)
-        self.assertIn('CARR_OUTLOOK_STORE', str(refusal.exception))
-        self.assertIn(str(override), str(refusal.exception))
-        self.assertIn(str(override), '\n'.join(logs.output))
+        self.assertIn('Main Identity/HxStore.hxd', str(refusal.exception))
 
 if __name__ == '__main__':
     unittest.main()

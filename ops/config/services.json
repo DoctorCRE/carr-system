@@ -105,10 +105,10 @@
         {
           "environment": "production",
           "deploy_mechanism": "ops/launchd/com.carr.outlook-intake.plist",
-          "runs_on": "secondary",
+          "runs_on": "primary",
           "expected_cadence_seconds": 1800,
           "cadence_grace_seconds": 45000,
-          "notes": "Runs on the Mac that holds Joe's Outlook store, today the MacBook (role secondary). Fires every 30 minutes from 07:00 to 19:00 local and never overnight, so the record layer can sleep; the 07:00 run catches up from the high-water mark. The grace spans the honest worst case the way rules-refresh's does: the twelve-hour overnight stand-down from 19:00 to 07:00 plus up to 1800s for the succeeded row to leave the local spool. A run whose store is unchanged copies and decodes nothing and makes no record-layer call; its succeeded or skipped row rides the local spool (tools/ops-spool.py) to the next com.carr.run-spool-flush, while a failed row is written directly. Run rows carry counts only; the report, state and needs-refresh list stay private in out/outlook-intake/. Installed by bin/install-outlook-intake.sh."
+          "notes": "Runs only on the Mac Studio (role primary), using Joe's Main Identity Outlook profile. Fires every 30 minutes from 07:00 to 19:00 local and never overnight, so the record layer can sleep; the 07:00 run catches up from the high-water mark. The grace spans the honest worst case the way rules-refresh's does: the twelve-hour overnight stand-down from 19:00 to 07:00 plus up to 1800s for the succeeded row to leave the local spool. A run whose store is unchanged copies and decodes nothing and makes no record-layer call; its succeeded or skipped row rides the local spool (tools/ops-spool.py) to the next com.carr.run-spool-flush, while a failed row is written directly. Run rows carry counts only; the report, state and needs-refresh list stay private in out/outlook-intake/. Installed by bin/install-outlook-intake.sh."
         }
       ]
     },
