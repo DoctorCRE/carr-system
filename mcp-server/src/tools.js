@@ -10093,7 +10093,8 @@ registerTools(journeyOneClockDoorTools({ withEnvelope, ToolError }), "journey-on
 // DoctorCRE V5-J103: the governed correspondence store. Two reads
 // (correspondence-readiness, read-correspondence-thread) and the humanOnly
 // consent pair, each partner only for their own carr.us mailbox. There is no
-// send verb and no draft verb: a draft can never dispatch, and Joe sends. Reads
+// send verb and no draft verb: a draft can never dispatch from here, and sends
+// go through Joe's own accounts when he asks (decision 41906a30). Reads
 // answer unavailable until the F10 local-store adapter lands with a reviewed
 // grant for the read-receipt writer.
 registerTools(governedCorrespondenceStoreTools({ withEnvelope, writeEvent, ToolError }),
