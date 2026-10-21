@@ -3234,10 +3234,14 @@ export const TOOLS = {
         }
       };
       const ownOrShared = (row) => !row?.owner || String(row.owner).toLowerCase() === scope.sponsor;
+      // The Outlook intake job sets Joe's to-dos as his machine seat, and
+      // set-next-action cannot name Joe from that seat: only those rows widen.
+      const ownToDo = (row) => ownOrShared(row) || (scope.sponsor === "joe"
+        && row?.item_kind === "next_action" && String(row.owner).toLowerCase() === "joe-local");
 
       const today = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "today-triage", {});
-        return { items: value.items.filter(ownOrShared) };
+        return { items: value.items.filter(ownToDo) };
       });
       const claimCard = await section(async () => {
         const value = await executeRegisteredTool(c, actor, "claim-card", { limit: 5, include_needs_contact: false });
