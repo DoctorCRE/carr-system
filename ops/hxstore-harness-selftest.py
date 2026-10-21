@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / 'ops/hxstore-harness.py'
 BINARY = ROOT / 'vendor/hxprobe/target/debug/hxprobe'
 spec = importlib.util.spec_from_file_location('observation_fixtures', ROOT / 'ops/hxstore-observe-selftest.py')
+if spec is None or spec.loader is None:
+    raise ImportError("observation fixture loader unavailable")
 fixtures = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(fixtures)
 
@@ -44,7 +46,7 @@ class HarnessTests(unittest.TestCase):
             result = self.run_cli('study-diff', before, after, '--immutable-copies')
             self.assertEqual((result.returncode, result.stderr), (0, b''), result.stderr)
             report = json.loads(result.stdout)
-            self.assertEqual(set(report), {'schema', 'interpretation', 'counts', 'records_before', 'records_after'})
+            self.assertEqual(set(report), {'schema', 'interpretation', 'counts', 'coverage', 'records_before', 'records_after'})
             self.assertEqual(report['schema'], 'hxstore-study-diff/v1')
             self.assertEqual(report['interpretation'], 'candidates_only_no_causal_or_field_mapping_claim')
             self.assertEqual(report['counts']['changed_blocks'], 1)
@@ -78,7 +80,7 @@ class HarnessTests(unittest.TestCase):
             counts = json.loads(result.stdout)['counts']
             self.assertEqual((counts['file_changed_ranges'], counts['file_changed_bytes'], counts['changed_blocks']), (1, 1, 0))
 
-    def test_study_diff_preserves_old_new_partitions_and_unframed_candidates(self):
+    def test_study_diff_preserves_old_new_partitions_and_excludes_unframed_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             before, after = root / 'before', root / 'after'
@@ -97,7 +99,88 @@ class HarnessTests(unittest.TestCase):
             after.write_bytes(fixtures.store(b'UNFRAMED'))
             result = self.run_cli('study-diff', before, after, '--immutable-copies')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)['records_after'], [{'record_type': 'unframed', 'record_id': '64:0:8'}])
+            report = json.loads(result.stdout)
+            self.assertEqual(report['records_after'], [])
+            self.assertEqual(report['counts']['unframed_payload_changed_bytes'], 8)
+            self.assertEqual(report['coverage']['after']['exclusions'], {'unframed': 1})
+            self.assertFalse(report['coverage']['complete'])
+
+    def test_study_diff_excludes_damaged_spans_and_counts_unverified_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            before, after = root / 'PRIVATE-before', root / 'PRIVATE-after'
+            good = fixtures.store(fixtures.envelope(362, b'CONTROL0'))
+            bad = bytearray(fixtures.store(fixtures.envelope(247, b'PRIVATE'))[64:])
+            bad[-1] ^= 1
+            nested = fixtures.store(fixtures.envelope(113, struct.pack('<Q', 0x5d0245643b706a05)))[64:]
+            unframed = fixtures.store(b'PRIVATE-UNFRAMED')[64:]
+            invalid = fixtures.store(fixtures.envelope(261, b'PRIVATE')[:-1])[64:]
+            original = good + bad + nested + unframed + invalid
+            before.write_bytes(original)
+            after.write_bytes(original)
+            control = self.run_cli('study-diff', before, after, '--immutable-copies')
+            self.assertEqual((control.returncode, control.stderr), (0, b''))
+            report = json.loads(control.stdout)
+            self.assertTrue(all(n == 0 for n in report['counts'].values()))
+            self.assertFalse(report['coverage']['complete'])
+            for side in ('before', 'after'):
+                coverage = report['coverage'][side]
+                self.assertEqual(coverage['verified_blocks'], 4)
+                self.assertEqual(coverage['unverified_blocks'], 2)
+                self.assertEqual(coverage['unframed_payload_bytes'], 16 + 26)
+                self.assertEqual(coverage['exclusions'], {
+                    'payload_crc_mismatch': 1, 'overlapping_candidate': 1,
+                    'unframed': 1, 'invalid_object_bounds': 1})
+            changed = bytearray(original)
+            changed[len(good) + len(bad) - 1] ^= 2
+            after.write_bytes(changed)
+            result = self.run_cli('study-diff', before, after, '--immutable-copies')
+            report = json.loads(result.stdout)
+            self.assertEqual(report['counts']['unverified_file_changed_bytes'], 1)
+            self.assertEqual(report['counts']['changed_blocks'], 0)
+            self.assertEqual(report['records_before'], [])
+            self.assertEqual(report['records_after'], [])
+            changed_good = fixtures.store(fixtures.envelope(362, b'CONTROL1'))
+            after.write_bytes(changed_good + changed[len(good):])
+            result = self.run_cli('study-diff', before, after, '--immutable-copies')
+            report = json.loads(result.stdout)
+            self.assertEqual(report['counts']['changed_blocks'], 1)
+            self.assertEqual(report['counts']['payload_changed_bytes'], 1)
+            self.assertEqual(report['counts']['unverified_file_changed_bytes'], 1)
+            expected = [{'record_type': 'object.class.016a', 'record_id': '64:0:28'}]
+            self.assertEqual(report['records_before'], expected)
+            self.assertEqual(report['records_after'], expected)
+            self.assertFalse(report['coverage']['complete'])
+            for secret in (b'PRIVATE', b'CONTROL', str(root).encode(), b'50524956415445'):
+                self.assertNotIn(secret, result.stdout + result.stderr)
+            self.assertEqual(before.read_bytes(), original)
+
+    def test_study_diff_counts_unframed_mutations_and_truncated_exclusions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            before, after = root / 'before', root / 'after'
+            good = fixtures.store(fixtures.envelope(362, b'VERIFIED'))
+            malformed = fixtures.envelope(261, b'PRIVATE')[:-1]
+            for payload in (b'UNFRAMED0', malformed):
+                before.write_bytes(good + fixtures.store(payload)[64:])
+                after.write_bytes(good + fixtures.store(payload[:-1] + b'1')[64:])
+                result = self.run_cli('study-diff', before, after, '--immutable-copies')
+                self.assertEqual((result.returncode, result.stderr), (0, b''))
+                report = json.loads(result.stdout)
+                self.assertEqual(report['counts']['payload_changed_bytes'], 1)
+                self.assertEqual(report['counts']['unframed_payload_changed_bytes'], 1)
+                self.assertEqual(report['records_before'], [])
+                self.assertEqual(report['records_after'], [])
+                self.assertFalse(report['coverage']['complete'])
+            before.write_bytes(good + fixtures.store(fixtures.envelope(247))[64:-1])
+            after.write_bytes(before.read_bytes())
+            result = self.run_cli('study-diff', before, after, '--immutable-copies')
+            self.assertEqual((result.returncode, result.stderr), (0, b''))
+            report = json.loads(result.stdout)
+            self.assertTrue(all(n == 0 for n in report['counts'].values()))
+            self.assertEqual(report['coverage']['before']['verified_blocks'], 1)
+            self.assertEqual(report['coverage']['before']['exclusions'], {'truncated_payload': 1})
+            self.assertFalse(report['coverage']['complete'])
 
     def test_study_diff_rejects_missing_assertion_and_bad_inputs_without_disclosure(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -107,7 +190,7 @@ class HarnessTests(unittest.TestCase):
             after.write_bytes(before.read_bytes())
             result = self.run_cli('study-diff', before, after)
             self.assertEqual((result.returncode, result.stdout, result.stderr), (2, b'', b'study harness input rejected\n'))
-            for data in (b'PRIVATE@example.test', before.read_bytes()[:-1]):
+            for data in (b'PRIVATE@example.test', b''):
                 after.write_bytes(data)
                 result = self.run_cli('study-diff', before, after, '--immutable-copies')
                 self.assertEqual((result.returncode, result.stdout, result.stderr), (2, b'', b'study harness input rejected\n'))
