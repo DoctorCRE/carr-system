@@ -1388,6 +1388,8 @@ class Queue:
                 'SELECT * FROM entries WHERE repo=? AND pr=? ORDER BY id', (repo, n))]
             actions = [dict(a) for a in self.db.execute(
                 'SELECT * FROM actions WHERE repo=? AND pr=? ORDER BY key', (repo, n))]
+            if not any(e['approved'] == pin['head'] for e in entries):
+                raise QueueChanged(f'missing pinned journal evidence for {repo}#{n}')
             for e in bounded_items('snapshot', entries):
                 merged = (dict(repo=repo, number=n, head=e['approved']) in data.get('merge_receipts', [])
                           and e['phase'] == 'done' and e['merged_commit'])
