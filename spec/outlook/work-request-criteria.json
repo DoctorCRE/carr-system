@@ -1,0 +1,101 @@
+{
+  "schema": "outlook-atlas-work-map/v1",
+  "work_request": "WR-000439",
+  "destination": "A versioned store and application atlas with one source for decoder names, generated references, privacy-safe drift detection, and measured decoding coverage.",
+  "record_scope": "Repository criteria for the WR-000439 extension. No production Work Request was created or amended in this desk.",
+  "acceptance_criteria": [
+    {
+      "id": "ATLAS-SURFACE-BASELINE",
+      "text": "Extract plist schemes, document types and roles, activities, supported intents, App Intents actions and parameters, PlugIns, and literal ms-outlook host/path/query-key grammar into spec/outlook/surface-atlas.json. Include version, source hashes, pointers or offsets, uncertainty, and generated reference. Compare versions with structured new/removed/changed output. Test synthetic bundles only."
+    },
+    {
+      "id": "ATLAS-STORE-SOURCE",
+      "text": "After PR #2038 lands, maintain spec/outlook/hxstore-atlas.json for every known block and record type and field ID with name, wire type, decoder, proven/inferred/unknown confidence, evidence, and first-seen Outlook version. Distinguish wire IDs, object offsets, string-run selectors, and decoded output names. Unknown IDs remain explicit. hxprobe reads names from this atlas; generate the human reference from it."
+    },
+    {
+      "id": "ATLAS-STORE-PROBE",
+      "text": "Add a synthetic-tested count-only hxprobe command for the orchestrator's private-copy run. Emit only record/block/field IDs, wire types, byte counts and occurrence counts. Never emit strings, payload bytes, identities, hashes of content, paths, or error excerpts from the store. Validate CRC, decompression and object bounds. Orchestrator returns counts; this desk never reads a store."
+    },
+    {
+      "id": "ATLAS-GRAMMAR-RECONCILE",
+      "text": "When PR #2040, wr443-deeplink-grammar and wr443-send-by-id land, bind their exact revisions and merge evidence into surface-atlas.json. Add extraction of routes and query keys assembled from binary constants, with symbol/offset evidence and inferred confidence. Preserve differences between literal grammar, reconstructed grammar and runtime acceptance. No URL invocation or send probe is part of this criterion."
+    },
+    {
+      "id": "ATLAS-DRIFT-COMBINED",
+      "text": "Given an Outlook build, regenerate both atlases and emit one structured diff for new/removed/changed fields, wire types, keys, routes and intents. Preserve first-seen history and compare semantic changes separately from evidence changes. Refuse incompatible schemas, version mismatches, incomplete reads and malformed formats. Store observations must use the count-only contract."
+    },
+    {
+      "id": "ATLAS-COVERAGE",
+      "text": "Using synthetic fixtures and orchestrator-returned counts, report decoded-byte percentage and decoded-field-ID percentage by record type. Define denominators and unknown handling, count unique covered byte spans without overlap, report zero denominators as unavailable, and order unknown IDs by frequency with stable tie breaks. Do not substitute message recovery percentage for format-byte coverage."
+    },
+    {
+      "id": "ATLAS-LAUNCHD-DESIGN",
+      "text": "Design, do not install, a launchd version-change trigger. Read CFBundleVersion, compare with the last successful build, run combined drift, and prepare ./run.sh call report-problem with bounded diff summary and stable idempotency key. Specify missed updates, retries, failures, duplicate suppression and atomic state replacement. No LaunchAgent, profile, preference or credential changes."
+    }
+  ],
+  "slices": [
+    {
+      "id": "S1",
+      "name": "Static application baseline and drift",
+      "criteria": ["ATLAS-SURFACE-BASELINE"],
+      "state": "verified_locally",
+      "depends_on": []
+    },
+    {
+      "id": "S2",
+      "name": "Atlas-backed hxprobe and count-only observation",
+      "criteria": ["ATLAS-STORE-SOURCE", "ATLAS-STORE-PROBE"],
+      "state": "remaining",
+      "depends_on": ["https://github.com/jbookout/carr-system/pull/2038"]
+    },
+    {
+      "id": "S3",
+      "name": "Reconcile reconstructed application grammar",
+      "criteria": ["ATLAS-GRAMMAR-RECONCILE"],
+      "state": "remaining",
+      "depends_on": ["S1", "PR #2040", "wr443-deeplink-grammar", "wr443-send-by-id"]
+    },
+    {
+      "id": "S4",
+      "name": "Combined drift, measured coverage and trigger design",
+      "criteria": ["ATLAS-DRIFT-COMBINED", "ATLAS-COVERAGE", "ATLAS-LAUNCHD-DESIGN"],
+      "state": "remaining",
+      "depends_on": ["S2", "S3", "orchestrator count-only private-copy run"]
+    }
+  ],
+  "decisions": [
+    {"id": "D1", "question": "What is slice 1?", "answer": "Deliver the independent static bundle baseline and drift. Keep the unmerged hxprobe dependency out of this PR.", "trade_off": "The store atlas remains an explicit later criterion."},
+    {"id": "D2", "question": "Are schema.rs names numeric field IDs?", "answer": "No. Preserve wire IDs, offsets and heuristic string selectors as distinct concepts.", "trade_off": "A field-name list cannot establish byte or ID coverage."},
+    {"id": "D3", "question": "Which module interface?", "answer": "Use extract_surface, diff_surface and render_surface with a thin stdout-only CLI and no public extractor registry.", "trade_off": "A future binary format may require internal changes. Three independent designs favored keeping format details local."},
+    {"id": "D4", "question": "How are tests and input failures handled?", "answer": "Test the module and CLI with generated synthetic app bundles. Require exact CFBundleVersion, refuse malformed metadata, and report skipped symlinks.", "trade_off": "Unreadable or unsupported inputs fail instead of producing a partial success."},
+    {"id": "D5", "question": "What counts as drift?", "answer": "Compare semantic identities and fields separately from hashes and evidence offsets. Retain all literal offsets.", "trade_off": "Consumers must inspect source_changes as well as semantic changes."},
+    {"id": "D6", "question": "How strong is binary grammar evidence?", "answer": "In slice 1 extract ASCII ms-outlook literals from identified Mach-O files. Emit host, path and query keys, omit query values, and make no runtime claim.", "trade_off": "Routes assembled from constants remain unknown until S3."},
+    {"id": "D7", "question": "What does first seen mean?", "answer": "First observed in atlas history. Preserve existing first_seen_version when extracting against a baseline.", "trade_off": "This does not claim the version in which Microsoft introduced a declaration."},
+    {"id": "D8", "question": "Where do remaining criteria live?", "answer": "Keep the extension criteria and dependency map in this versioned JSON and link them from the PR. Do not mutate the production Work Request under the no-production-writes boundary.", "trade_off": "The orchestrator must reconcile these criteria into the Work Request record if needed."},
+    {"id": "D9", "question": "Install a version watcher now?", "answer": "No. S4 designs the trigger after combined drift and its count-only contract exist.", "trade_off": "No automatic watch runs from slice 1."},
+    {"id": "D10", "question": "How are delivery checks run in the fresh checkout?", "answer": "Install the committed Node lockfile and mypy 2.3.0 locally, and invoke the existing leak guard with the absolute repository root used by its hooks.", "trade_off": "Local dependency directories remain ignored. No gate, global configuration or dependency manifest changes."}
+  ],
+  "not_yet_specified": [
+    "Numeric field framing beyond the pinned vendor's known object envelopes requires evidence from safe synthetic work and orchestrator counts.",
+    "Reconstructed grammar merge details depend on the final landed outputs of the three WR-000443 jobs."
+  ],
+  "out_of_scope": [
+    "Outlook launch, URL invocation, Apple events, profile/store/data/preference access by this desk",
+    "Microsoft 365, Graph, SMTP, EWS, decryption, production writes, LaunchAgent installation and merge"
+  ],
+  "source_study": [
+    {"source": "PR #2038", "revision": "57ca38424bb7cae5721e673f9aaf78d166b113df", "finding": "Maintained Rust reader is unmerged; schema names describe string-run heuristics, not numeric property IDs."},
+    {"source": "upstream README.md and SPEC.md", "revision": "191b54e42757687806202f8f696e9066f0514e11", "finding": "Format evidence covers block CRC/LZ4, UTF-16 runs, ticks and object envelopes. Published recovery counts are not format-byte coverage."},
+    {"source": "vendor-patches/README.md and hxprobe-calendar-and-bodies.patch", "revision": "66ac4cc709af5265819e2612aab62d746a9faf85", "finding": "Calendar class 0x006b uses offsets 574 and 582 and variable text heuristics. The body extension reads sidecars; no such read is used by this atlas slice."},
+    {"source": "PR #2040", "revision": "6da9e8ce7862bc4f63440fb5a01ad271b879204a", "finding": "Static route survey is unmerged. Its inferred builder vocabulary is not a validated invocation contract."}
+  ],
+  "tool_documentation": [
+    "https://docs.python.org/3/library/plistlib.html",
+    "https://docs.python.org/3/library/argparse.html",
+    "https://docs.python.org/3/library/mmap.html",
+    "https://docs.python.org/3/library/hashlib.html",
+    "https://docs.python.org/3/library/unittest.html",
+    "https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html",
+    "Local gh help and gh pr view --help; git --help; curl --help; ./run.sh --help; ops/ci.sh --help"
+  ]
+}
