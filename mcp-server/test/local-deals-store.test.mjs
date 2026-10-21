@@ -88,6 +88,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query(view);
       await c.query(`grant select on ${name} to carr_reader,carr_writer`);
     }
+    await c.query(readFileSync(path.join(root, 'migrations/0916_deal_phase_start_dates.sql'), 'utf8'));
     await c.query("create view v_ref_index as select 'deal'::text subject_type, id subject_id from deal union all select 'lead', id from lead;");
     await c.query("grant select on v_ref_index to carr_reader");
     await c.query("insert into actor(id,slug,display_name,kind,active) values($1,'joe','Synthetic Partner','human',true)", [actor.id]);
@@ -124,7 +125,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       const before = (await c.query('select * from v_deal_room_board order by id')).rows;
       assert.deepEqual(before.map(d=>d.id),[id(4),id(31)]);
       const clientsBefore = (await c.query('select id,status,version,updated_by from client order by id')).rows;
-      await c.query(readFileSync(path.join(root,'migrations/0915_prospect_engagement_status.sql'),'utf8'));
+      await c.query(readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8'));
       assert.deepEqual((await c.query('select * from v_deal_room_board order by id')).rows,before);
       assert.deepEqual((await c.query('select id,status,version,updated_by from client order by id')).rows,clientsBefore);
       assert.deepEqual((await c.query('select prospect_engagement_status from client order by id')).rows,
@@ -144,7 +145,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       await c.query("insert into deal_note(id,deal_id,kind,text,actor_id) values($1,$2,'note','Synthetic retained history',$3)",[id(35),id(4),actor.id]);
       await c.query('drop view v_client_engagement_status,v_lead_prospect_engagement');
       await c.query('alter table client drop column prospect_engagement_status cascade');
-      const forward = readFileSync(path.join(root,'migrations/0915_prospect_engagement_status.sql'),'utf8');
+      const forward = readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8');
       await c.query(forward);
       await executeRegisteredTool(c,actor,'set-prospect-engagement-status',{
         client_id:id(3),status:'inactive',base_version:2,reason:'Synthetic deferral',idempotency_key:'synthetic-roundtrip'});
@@ -168,7 +169,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
     await t.test('pending migration installs active-only board membership and reader grants on the previous schema', async () => transaction(async () => {
       await c.query('drop view v_client_engagement_status, v_lead_prospect_engagement');
       await c.query('alter table client drop column prospect_engagement_status cascade');
-      await c.query(readFileSync(path.join(root,'migrations/0915_prospect_engagement_status.sql'),'utf8'));
+      await c.query(readFileSync(path.join(root,'migrations/0920_prospect_engagement_status.sql'),'utf8'));
       await c.query(schema.match(/CREATE VIEW public\.v_deal_room_account AS[\s\S]*?;/)[0]);
       await fixture(false);
       await c.query("update client set status='prospect' where id=$1",[id(3)]);
@@ -316,6 +317,41 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
       assert.deepEqual(account.lost_deals.map(d => [d.id,d.client_ref,d.workspace_kind,d.account_client_id]), [[id(4),null,'national_account',id(6)]]);
     }));
 
+    await t.test('board and detail expose first phase start dates from occurrence history', async () => transaction(async () => {
+      await fixture(false);
+      for (const [n, phase, occurred, recorded] of [
+        [31,'research','2026-09-01T04:00:00Z','2026-09-05T12:00:00Z'],
+        [32,'negotiation','2026-09-20T15:00:00Z','2026-09-21T12:00:00Z'],
+        [33,'research','2026-10-01T15:00:00Z','2026-10-02T12:00:00Z'],
+      ]) await c.query(`insert into event(id,actor_id,verb,subject_type,subject_id,field,new_value,occurred_at,recorded_at,cause)
+        values($1,$2,'patch-deal-field','deal',$3,'phase',$4,$5,$6,'human_stated')`,
+        [id(n),actor.id,id(4),JSON.stringify({phase}),occurred,recorded]);
+      await c.query('set local role carr_reader');
+      const board = await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'});
+      const detail = await TOOLS['get-deal-room'].handler(c,actor,{deal:id(4)});
+      for (const row of [board.deals[0],detail]) assert.deepEqual(row.phase_started_on, {
+        research:'2026-08-31',negotiation:'2026-09-20',
+      });
+      assert.equal((await c.query("select has_table_privilege('carr_reader','event','select') allowed")).rows[0].allowed,false);
+      await c.query('reset role');
+      await c.query('delete from event where subject_id=$1',[id(4)]);
+      await c.query('set local role carr_reader');
+      assert.deepEqual((await TOOLS['deal-room-board'].handler(c,actor,{workspace:'team'})).deals[0].phase_started_on,{});
+    }));
+
+    await t.test('repeating the current phase through the handler does not create a phase start', async () => transaction(async () => {
+      await fixture(false);
+      const written = await TOOLS['patch-deal-field'].handler(c, actor, {
+        idempotency_key: id(34), deal: id(4), field: 'phase', value: 'research', base_event_id: null,
+      });
+      assert.equal(written.ok, true);
+      await c.query('set local role carr_reader');
+      const board = await TOOLS['deal-room-board'].handler(c, actor, {workspace:'team'});
+      const detail = await TOOLS['get-deal-room'].handler(c, actor, {deal:id(4)});
+      assert.deepEqual(board.deals[0].phase_started_on, {});
+      assert.deepEqual(detail.phase_started_on, {});
+    }));
+
     const invoiceFields = ['invoiced_on', 'closed_on', 'lane', 'outcome'];
     const readInvoiceDeals = async () => ({
       'deal-board': await TOOLS['deal-board'].handler(c),
@@ -349,6 +385,7 @@ test('Local Deals PostgreSQL caller and evidence regressions', { skip: !bin && !
             delete prior.schema_version;
             delete prior.lease;
           }
+          rowsOf(prior).forEach(row => delete row.phase_started_on);
           const oldRows = rowsOf(baseline[name]);
           rowsOf(prior).forEach(row => { for (const field of ['client_status','client_version','prospect_engagement_status']) delete row[field]; });
           rowsOf(prior).forEach((row, index) => invoiceFields.forEach(field => {

@@ -24,20 +24,18 @@ WHY GMAIL CAN DO WHAT CARR CANNOT: Google still issues app passwords. That is th
 exact facility CARR's tenant denies. The credential is scoped to mail, revocable
 at any time from Joe's Google account, and useless for anything else.
 
-THE ALLOWLIST IS THE SAFETY, AND IT IS STRUCTURAL. This file CAN send, which
-nothing else in the system may do. It is bounded by a hardcoded recipient list of
+THE ALLOWLIST IS THE SAFETY, AND IT IS STRUCTURAL. This file CAN send, and is bounded by a hardcoded recipient list of
 the two partners' own addresses. A send to any other address is refused before a
-connection is opened — not by discipline, not by a prompt, by the code. The
-standing rule it implements is "nothing external ever auto-fires; the send
-whitelist is Joe's own address only." A client, a vendor, a landlord, a listing
+connection is opened — not by discipline, not by a prompt, by the code. This file's
+whitelist is Joe's own address only; sending to anyone else is outside this file and
+goes through Joe's own accounts when he asks (decision 41906a30). A client, a vendor, a landlord, a listing
 agent can never be reached from here, and widening this list is a decision for
 Joe, in writing, not a convenience edit.
 
 WHAT JOE DOES WITH IT: the mail lands in his CARR inbox carrying the exact text he
 intends to send. He forwards it, deletes the forwarded header block, types the
-real recipient, and sends from his own carr.us identity. Claude never touches the
-outbound message to the actual recipient. The human gate is intact and is now the
-only way anything reaches a third party.
+real recipient, and sends from his own carr.us identity. This file never sends to the
+actual recipient; that send is Joe's, or Claude's when Joe asks (decision 41906a30).
 
 SETUP (once, Joe's hands only — Claude never sees this value)
   App password from https://myaccount.google.com/apppasswords (needs 2-Step

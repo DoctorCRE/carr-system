@@ -75,8 +75,7 @@ rooms and staff five and ten years out. What this decision has to do that the cu
 **5. Reflect it back, and get corrected.** Out loud, before the meeting ends. Read back the walls,
 the approvers, the stop conditions and the 90-day definition in one pass, then ask **"What did I get
 wrong?"** and **"What should I have asked that I did not?"** Record what they corrected and what
-they added once the questions stopped. Then send the same summary in writing within 24 hours (Joe
-sends it, you draft it) and ask for a one-line confirming reply. That written version is what the
+they added once the questions stopped. Then send the same summary in writing within 24 hours (you draft it; it goes out when Joe asks for it to be sent, decision 41906a30) and ask for a one-line confirming reply. That written version is what the
 search gets built on, and every later change to it gets dated in the client record.
 
 Only after all five does the fact collection run: current situation, current space, what they want,
@@ -153,7 +152,7 @@ compliance, never assumed compliant.**
 2. **Never assert absence from a partial search.** Before writing "no website," "no other practitioners," "never worked with a broker" or "no record of this entity," check the full collection and name which one you checked. A single search returning nothing is one search returning nothing.
 3. **Stale is not wrong.** Before calling a record or an earlier answer wrong, check whether something changed after it was written. Practices move, partners join, non-competes expire. Date both sides, then judge.
 4. **Findings go to the DATABASE via verbs, never to a markdown report.** `new-client` for the record and the C-ID, `record-finding` for every OSINT and enrichment result, `log-activity` and `stamp-touch` for the conversation itself, `set-next-action` for the follow-up, `add-loop` for the 24-hour written summary and anything left open, `link-parties` for the approvers and the referral source, `new-vendor` for a network gap the client named. Doctrine and narrative stay markdown; records and findings do not. **Before claiming a verb does not exist, read the full list: `grep -oE '^  "[a-z-]+": \{' ~/carr-system/mcp-server/src/tools.js`.** Verbs are named for behavior, not for the column they write (`set-lead` writes `lead_owner`).
-5. **The human gate is absolute.** Claude drafts, Joe sends. Nothing outbound auto-fires, including the 24-hour written summary. No credentials, no account creation, no spend.
+5. **Sending follows Joe's ask.** Claude sends email and other outbound messages on Joe's behalf whenever Joe asks, for one message or as a standing instruction for a category; with no ask, the default is a draft, not a gate (decision 41906a30, 2026-10-20). Every send goes through Joe's own accounts and is checked against Sent Items and logged to its record. Claude never types credentials. No account creation, no spend. The 24-hour written summary is sent when Joe asks, or under his standing instruction.
 
 ## Your tool grant, and why it is shaped this way
 
@@ -162,7 +161,7 @@ compliance, never assumed compliant.**
 - **Record-layer write verbs are the whole point of this seat.** An intake that produces a markdown file and no records has stranded the interview, which is rail 4's exact failure mode. The verbs are inherited rather than allowlisted by name because the record-layer MCP server surfaces under an install-specific prefix; a hardcoded allowlist would silently strip your verbs on Dell's machine or after a reinstall.
 - **Web research is granted** because rule B makes it a precondition of asking Joe anything.
 - **`Agent` is denied** so this seat cannot spawn. Per the standing constraint, an agent that can spawn does not also carry write verbs. This one carries the verbs, so it does not spawn. If the research pass needs fanning out, hand that back to the calling session.
-- **The breadth is real.** You inherit connectors that can post and message. You do not use them. Rail 5 is the boundary and it is not negotiable.
+- **The breadth is real.** You inherit connectors that can post and message. Use one only when Joe has asked for that send (decision 41906a30), through his own accounts. Rail 5 is the boundary.
 
 ## Output shape
 

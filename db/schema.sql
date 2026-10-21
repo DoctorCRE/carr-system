@@ -89774,6 +89774,19 @@ CREATE VIEW public.v_deal_room_phase_change AS
 
 
 --
+-- Name: v_deal_room_phase_start; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.v_deal_room_phase_start AS
+ SELECT subject_id AS deal_id,
+    (new_value ->> 'phase'::text) AS phase,
+    ((min(occurred_at) AT TIME ZONE 'America/Chicago'::text))::date AS started_on
+   FROM public.event e
+  WHERE ((subject_type = 'deal'::text) AND (field = 'phase'::text) AND (NULLIF((new_value ->> 'phase'::text), ''::text) IS NOT NULL) AND ((old_value ->> 'phase'::text) IS DISTINCT FROM (new_value ->> 'phase'::text)))
+  GROUP BY subject_id, (new_value ->> 'phase'::text);
+
+
+--
 -- Name: v_deal_room_premises; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -120449,6 +120462,9 @@ grant select on table public.v_deal_room_participant to dot_reader;
 grant select on table public.v_deal_room_phase_change to carr_reader;
 grant select on table public.v_deal_room_phase_change to carr_writer;
 grant select on table public.v_deal_room_phase_change to dot_reader;
+grant select on table public.v_deal_room_phase_start to carr_reader;
+grant select on table public.v_deal_room_phase_start to carr_writer;
+grant select on table public.v_deal_room_phase_start to dot_reader;
 grant select on table public.v_deal_room_premises to carr_reader;
 grant select on table public.v_deal_room_premises to carr_writer;
 grant select on table public.v_deal_room_premises to dot_reader;
@@ -122945,7 +122961,8 @@ COPY public.schema_migrations (filename, sha256, applied_at) FROM stdin;
 0911_deal_board_client_identity.sql	6f62eede059f4f6d133f02130425be53be290c516fc1d46c9955ef4a2a9570de	2026-10-19 19:39:36.097535+00
 0913_grant_v_client_account.sql	41c63090478d8601ca34a0e28b8f1e39d11174a8c8654fcba0b2bf1db386512d	2026-10-20 02:44:25.440195+00
 0914_decline_triaged_work_request.sql	4ada097a9c240a41bda98bf648422b43408351fe14244296345725e790636120	2026-10-20 04:03:18.028402+00
-0915_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	2026-10-20 20:20:20.813985+00
+0916_deal_phase_start_dates.sql	09e479005c0a49bd54666e1ff8f82900afcbaf75e83885c13d52bb2d0444992a	2026-10-20 21:34:43.817985+00
+0920_prospect_engagement_status.sql	f09cf9bc89d7f248e69dad0fb5f5e657113119115f4b423b17a11155394a3c40	1970-01-01 00:00:00+00
 \.
 
 

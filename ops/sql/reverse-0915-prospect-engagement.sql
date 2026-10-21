@@ -1,7 +1,7 @@
 -- Apply only after rolling back the engagement consumers, with writes paused.
 -- Run this file in one transaction with psql --single-transaction -v ON_ERROR_STOP=1.
 -- Keep the column, values, versions, audit and lead links for a lossless re-enable.
--- Re-enable by applying migrations/0915_prospect_engagement_status.sql in one transaction.
+-- Re-enable by applying migrations/0920_prospect_engagement_status.sql in one transaction.
 -- Keep the migration ledger entry. This reverses behavior, not recorded history.
 create or replace view v_deal_room_board as
 select d.id, d.name, d.deal_type as type, d.phase, d.owner, d.attention,

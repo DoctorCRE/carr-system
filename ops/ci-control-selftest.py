@@ -84,7 +84,7 @@ class Controls(unittest.TestCase):
                     matrix = wf['jobs']['classes']['strategy']['matrix']
                     excluded = expression(matrix['exclude'], e)
                     groups = [g for g in matrix['classes'] if {'classes': g} not in excluded]
-                    self.assertEqual(groups, matrix['classes'][:1] if draft else matrix['classes'])
+                    self.assertEqual(excluded, [{'classes': 'gates'}, {'classes': 'migration'}] if draft else [])
                     self.assertTrue(expression(wf['jobs']['checks']['if'], e))
                     self.assertEqual(load('ci-evidence').class_groups(), matrix['classes'])
                 elif filename == 'db-acceptance.yml':
@@ -118,13 +118,20 @@ class Controls(unittest.TestCase):
         groups=mod.class_groups()
         jobs=[{'name':'ops/ci.sh --strict --only '+g,'status':'completed','conclusion':'success'} for g in groups]
         self.assertEqual(mod.verdict(jobs,groups)[0],0)
-        jobs[1]['conclusion']='failure';jobs[2]['conclusion']='cancelled'
+        gates_group = next(g for g in groups if 'gates' in g.split())
+        migration_group = next(g for g in groups if 'migration' in g.split())
+        by_group = {g: next(j for j in jobs if j['name'] == 'ops/ci.sh --strict --only '+g) for g in groups}
+        by_group[gates_group]['conclusion']='failure';by_group[migration_group]['conclusion']='cancelled'
         rc, lines=mod.verdict(jobs,groups)
         self.assertNotEqual(rc,0)
         self.assertIn('gates: FAILED',lines);self.assertIn('migration: CANCELLED',lines)
+        self.assertIn('hxprobe: PASSED',lines)
         for c in groups[0].split(): self.assertIn(c+': PASSED',lines)
-        self.assertNotEqual(mod.verdict(jobs[:-1],groups)[0],0)
-        self.assertIn('migration: MISSING',mod.verdict(jobs[:-1],groups)[1])
+        missing_migration = [j for j in jobs if j['name'] != 'ops/ci.sh --strict --only '+migration_group]
+        missing_rc, missing_lines = mod.verdict(missing_migration,groups)
+        self.assertNotEqual(missing_rc,0)
+        self.assertIn('migration: MISSING',missing_lines)
+        self.assertIn('hxprobe: PASSED',missing_lines)
         self.assertNotEqual(mod.verdict(jobs+[jobs[0]],groups)[0],0)
         for conclusion in ('skipped','timed_out','neutral',None):
             changed=[{**j,'conclusion':conclusion} for j in jobs]
