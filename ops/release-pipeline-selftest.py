@@ -6584,6 +6584,13 @@ class TokenCheckWrangler(Base):
             observed = runner.envs["schema-" + command]
             self.assertEqual(observed, pipe.env)
 
+    def test_command_before_toolchain_install_does_not_need_package_files(self):
+        pipe = self.fx.pipeline(FakeRunner())
+        for name in rp.TOOLCHAIN_FILES:
+            (self.fx.repo / "mcp-server" / name).unlink()
+        result = pipe.step("check", ["python", "--version"], self.fx.repo)
+        self.assertEqual(result.rc, 0)
+
     def test_reused_toolchain_requires_its_recorded_content_digest(self):
         for damage in ("binary", "dependency", "receipt", "escaping-link"):
             with self.subTest(damage=damage):

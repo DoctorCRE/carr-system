@@ -811,7 +811,7 @@ class Pipeline:
     def runtime_env(self, env: dict[str, str]) -> dict[str, str]:
         """Keep Wrangler and Miniflare state outside the sealed installation."""
         root = (self.run_dir / "runtime").absolute()
-        pinned = wrangler_toolchain(self.repo, self.store.root).resolve()
+        pinned = (self.store.root / "toolchain").resolve()
         directories = {
             "MINIFLARE_CACHE_DIR": root / "miniflare",
             "WRANGLER_CACHE_DIR": root / "wrangler-cache",
