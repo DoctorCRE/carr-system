@@ -2436,8 +2436,36 @@ def publish_orchestrator(state: dict[str, Any]) -> int:
     from progress_orchestrator import retain_unavailable_queue
     before = call_verb('read-progress-board', {'board_id': 'orchestrator'}).get('snapshot')
     snapshot = orchestrator_snapshot(state)
-    if before:
-        retain_unavailable_queue(snapshot['orchestrator'], before.get('snapshot_json', {}).get('orchestrator'))
+    view = snapshot['orchestrator']
+    if before and view['sources']['queue']['state'] == 'unavailable':
+        previous = copy.deepcopy(before.get('snapshot_json', {}).get('orchestrator'))
+        if previous:
+            for page in previous.get('pages', []):
+                saved = call_verb('read-progress-board', {'board_id': page['board_id']}).get('snapshot')
+                if not saved or saved['version'] != page['version']:
+                    raise RuntimeError('previous orchestrator page unavailable; observation retained')
+                previous['cards'].extend(saved['snapshot_json']['cards'])
+            retain_unavailable_queue(view, previous)
+    cards = sorted(view['cards'], key=lambda card: (card.get('changed_at') or '', card['id']), reverse=True)
+    view['total_cards'] = len(cards)
+    view['state_counts'] = dict(Counter(card['state'] for card in cards))
+    view['cards'], view['pages'] = cards[:100], []
+    for offset in range(100, len(cards), 100):
+        payload = {'cards': cards[offset:offset + 100]}
+        if snapshot_size(payload) > SNAPSHOT_BUDGET:
+            raise SnapshotTooLarge('orchestrator page exceeds publication budget; no work dropped')
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        board_id = 'orchestrator-page-' + digest
+        saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved:
+            args = {'board_id': board_id, 'base_version': 0, 'snapshot': payload}
+            call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})
+            saved = call_verb('read-progress-board', {'board_id': board_id}).get('snapshot')
+        if not saved or saved.get('snapshot_json') != payload:
+            raise RuntimeError('orchestrator page did not read back')
+        view['pages'].append({'board_id': board_id, 'version': int(saved['version']), 'count': len(payload['cards'])})
+    if snapshot_size(snapshot) > SNAPSHOT_BUDGET:
+        raise SnapshotTooLarge('orchestrator manifest exceeds publication budget; previous observation retained')
     args = {'board_id': 'orchestrator', 'base_version': int(before['version']) if before else 0,
             'snapshot': snapshot}
     call_verb('publish-board-snapshot', {**args, 'idempotency_key': stable_key('publish-board-snapshot', args)})

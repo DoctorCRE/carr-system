@@ -85,7 +85,7 @@ def project(state, queue, *, portfolio=None, observed_at=None):
             'state': state_of(task), 'owner': text(task.get('executor')),
             'progress': text(task.get('blocked_reason') or task.get('release_wait') or task.get('summary') or task.get('pr_phase'), 'Awaiting a recorded progress update'),
             'changed_at': task.get('updated_at'), 'prs': refs,
-            'origin': 'board', 'terminal': task.get('activity_status') == 'stale',
+            'origin': 'board', 'terminal': False,
             'area': {'jbookout/carr-system': 'Shared backend', 'jbookout/doctorcre-app': 'DoctorCRE app',
                      'jbookout/software-factory': 'Development tools'}.get(task.get('repo'), 'Shared portfolio')})
     history = sorted((c for c in cards if c['state'] == 'live' or c['terminal']), key=lambda c: c['changed_at'] or '', reverse=True)
