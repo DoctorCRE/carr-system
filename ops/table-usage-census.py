@@ -164,9 +164,6 @@ def collect_catalog(conn):
             left join pg_stat_user_tables s on s.relid=c.oid
             left join pg_stat_database d on d.datname=current_database()
             where n.nspname in ('public','ops') and c.relkind in ('r','p','f')
-              and not exists (select 1 from pg_depend dep
-                              where dep.classid='pg_class'::regclass and dep.objid=c.oid
-                                and dep.deptype='e')
             order by n.nspname,c.relname
         """).fetchall()
         functions = cur.execute("""
