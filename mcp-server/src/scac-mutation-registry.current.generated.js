@@ -1786,7 +1786,7 @@ export const SCAC_MUTATION_OPERATIONS = Object.freeze({
   "propose-ready-plan": {
     "ingress_key": "mcp-tool:propose-ready-plan",
     "source_locator": "mcp-server/src/work-request-intake.js",
-    "schema_digest": "be3795ab3bdd9188edef276bc0243a239fd27654274f0babc50f32c5368c8cb0",
+    "schema_digest": "0b383948846e27a6e8fcb31f6917ed4de693978c1e6206ee6076fadd8161664a",
     "write": true,
     "human_only": false,
     "authority_only": false,

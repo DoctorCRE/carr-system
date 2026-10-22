@@ -173,7 +173,7 @@ def fixture(cur, mutate_envelope=None, *, session_state: str = "claimed", lease_
              returning id""",
         (work_request_id, uuid.uuid4(), Jsonb({}), section_id, revision_id, "b" * 64,
          Jsonb([]), Jsonb({"source_merge": {"schema_version": "source-merge-scope.v1",
-           "repository": "DoctorCRE/carr-system", "base_branch": "main",
+           "repository": "jbookout/carr-system", "base_branch": "main",
            "authorized_paths": source_merge_paths}} if source_merge_paths else {}), accepted_plan_hash, accepted_plan_ref),
     )[0]
     one(
