@@ -527,46 +527,38 @@ def main():
             and not (Path(mod.TASKS_SRC) / "calendar-prebrief-am" / "SKILL.md").exists()
         )
 
-        # THE REPO-HYGIENE JANITOR IS HELD AS A DEFINITION, AND BOTH HALVES OF
-        # THAT MEAN SOMETHING. Its absence from the machine is the intended
-        # state, so check must stay silent about it; a copy that HAS been
-        # installed is a live-effect gate that was skipped, so check must fail
-        # even though the installed bytes are the repo's own. The second half is
-        # the one that would rot quietly: an install performed from this very
-        # repo produces byte-identical output, so an equality-based comparison
-        # would have called it clean.
-        janitor_plist = "com.carr.repo-hygiene-janitor.plist"
-        janitor_held = janitor_plist in mod.launchd_hold.DEFINITION_ONLY
-        janitor_repo_body = (
-            Path(REPO) / "ops" / "launchd" / janitor_plist
+        definition_plist = "com.carr.resource-collector.plist"
+        definition_held = definition_plist in mod.launchd_hold.DEFINITION_ONLY
+        definition_repo_body = (
+            Path(REPO) / "ops" / "launchd" / definition_plist
         ).read_text(encoding="utf-8")
-        janitor_src = home / "definition-only-launchagents"
-        janitor_src.mkdir()
+        definition_src = home / "definition-only-launchagents"
+        definition_src.mkdir()
         original_launchd_src = mod.LAUNCHD_SRC
-        mod.LAUNCHD_SRC = str(janitor_src)
+        mod.LAUNCHD_SRC = str(definition_src)
         try:
-            janitor_absence_silent = (
+            definition_absence_silent = (
                 mod.definition_only_installed_plists() == []
-                and not any(janitor_plist in label for label, _, _ in mod.pairs())
+                and not any(definition_plist in label for label, _, _ in mod.pairs())
             )
             # Byte-identical to the repo definition, which is exactly what an
             # unauthorized `launchctl load` of this file would leave behind.
-            (janitor_src / janitor_plist).write_text(janitor_repo_body, encoding="utf-8")
-            janitor_installed_detected = (
-                mod.definition_only_installed_plists() == [janitor_plist]
+            (definition_src / definition_plist).write_text(definition_repo_body, encoding="utf-8")
+            definition_installed_detected = (
+                mod.definition_only_installed_plists() == [definition_plist]
                 # Still not an ordinary tracked pair: it is reported by presence.
-                and not any(janitor_plist in label for label, _, _ in mod.pairs())
+                and not any(definition_plist in label for label, _, _ in mod.pairs())
             )
-            janitor_check_out = io.StringIO()
-            with contextlib.redirect_stdout(janitor_check_out):
-                janitor_check_rc = mod.cmd_check()
-            janitor_check_output = janitor_check_out.getvalue()
+            definition_check_out = io.StringIO()
+            with contextlib.redirect_stdout(definition_check_out):
+                definition_check_rc = mod.cmd_check()
+            definition_check_output = definition_check_out.getvalue()
         finally:
             mod.LAUNCHD_SRC = original_launchd_src
-        janitor_install_rejected = (
-            janitor_check_rc == 1
-            and "DEFINITION ONLY, MUST NOT BE INSTALLED" in janitor_check_output
-            and janitor_plist in janitor_check_output
+        definition_install_rejected = (
+            definition_check_rc == 1
+            and "DEFINITION ONLY, MUST NOT BE INSTALLED" in definition_check_output
+            and definition_plist in definition_check_output
         )
 
         # A hooks block that invokes a script the machine does not have must
@@ -874,12 +866,12 @@ def main():
          hooks_path_reported_informationally),
         ("the hooksPath conformance test accepts only the default and an "
          "absolute path that resolves here", conformance_boundary),
-        ("the repo-hygiene janitor agent is held as a definition only",
-         janitor_held),
-        ("check accepts the janitor agent's intended absence in silence",
-         janitor_absence_silent),
-        ("check rejects an installed janitor agent even byte-identical to the repo",
-         janitor_installed_detected and janitor_install_rejected),
+        ("the resource collector agent is held as a definition only",
+         definition_held),
+        ("check accepts the resource collector's intended absence in silence",
+         definition_absence_silent),
+        ("check rejects an installed resource collector even byte-identical to the repo",
+         definition_installed_detected and definition_install_rejected),
         ("fresh install creates the LaunchAgents directory",
          launchd_dir_created),
         # THE PLIST PARSE CHECK MOVED OUT, to ops/launchd-plist-portable-selftest.py.
