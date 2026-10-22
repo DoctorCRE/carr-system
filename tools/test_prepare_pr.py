@@ -54,6 +54,13 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(self.git('show', f'{sha}:generated.txt', repo=self.remote), 'fresh')
         self.assertEqual(json.loads(self.receipt.read_text())['prepared'], sha)
 
+    def test_regeneration_against_new_main_produces_only_merge_commits(self):
+        def regen(repo):
+            (repo / 'generated.txt').write_text('fresh\n')
+        sha = prepare(str(self.remote), 'feature', self.head, self.main, self.receipt, regen)
+        self.assertEqual(self.git('log', '--format=%H', '--no-merges', '--first-parent',
+                                  f'{self.head}..{sha}', repo=self.remote), '')
+
     def test_clone_borrows_reference_objects_and_survives_a_missing_reference(self):
         clones = []
         real_git = prepare_pr.git
