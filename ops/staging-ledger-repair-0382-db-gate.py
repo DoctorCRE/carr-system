@@ -92,7 +92,7 @@ def connected_identity_is_disposable(
         environment.get("GITHUB_ACTIONS", "").lower() == "true"
         and environment.get("CI", "").lower() == "true"
         and environment.get("RUNNER_ENVIRONMENT") == "github-hosted"
-        and environment.get("GITHUB_REPOSITORY") == "jbookout/carr-system"
+        and environment.get("GITHUB_REPOSITORY") == "DoctorCRE/carr-system"
     )
     # GitHub's PostgreSQL service is reached through an explicit localhost
     # port published from Docker.  The server and client therefore observe the
