@@ -182,8 +182,48 @@ class Tripwire:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, 'carr-outlook-tripwire/v1/' + _digest(identity)))
 
     def _dirs(self):
-        for name in ('attempts', 'alerts', 'snapshots'):
+        for name in ('attempts', 'alerts', 'snapshots', 'reconciliations'):
             (self.root / name).mkdir(mode=0o700, exist_ok=True)
+
+    def _retry_receipt(self, attempt):
+        if attempt['status'] != 'blocked' or attempt['reason'] not in {
+                'snapshot_failed', 'decoder_failed', 'interrupted_requires_reconciliation'}:
+            raise IntakeBlocked('attempt_not_retryable')
+        return {'schema': 'outlook-version-reconciliation/v1', 'attempt_id': attempt['id'],
+                'attempt_sha256': _digest(attempt),
+                'retry_id': str(uuid.uuid5(uuid.NAMESPACE_URL, 'carr-outlook-retry/v1/' + attempt['id']))}
+
+    def _current(self, version):
+        identity = self._attempt(version)
+        while (self.root / 'reconciliations' / (identity + '.json')).exists():
+            attempt = _read(self.root / 'attempts' / (identity + '.json'))
+            receipt = _read(self.root / 'reconciliations' / (identity + '.json'))
+            if (attempt['id'] != identity or attempt['version'] != version
+                    or attempt['source_pin'] != self.source or receipt != self._retry_receipt(attempt)):
+                raise IntakeBlocked('reconciliation_receipt_invalid')
+            identity = receipt['retry_id']
+        return identity
+
+    def reconcile(self, version, attempt_id):
+        if str(uuid.UUID(attempt_id)) != attempt_id:
+            raise IntakeBlocked('invalid_attempt_id')
+        with _lock(self.root):
+            self._dirs()
+            current = self._current(version)
+            attempt = _read(self.root / 'attempts' / (attempt_id + '.json'))
+            if (attempt['id'] != attempt_id or attempt['version'] != version
+                    or attempt['source_pin'] != self.source):
+                raise IntakeBlocked('reconciliation_identity_mismatch')
+            receipt = self._retry_receipt(attempt)
+            path = self.root / 'reconciliations' / (attempt_id + '.json')
+            if path.exists():
+                if _read(path) != receipt:
+                    raise IntakeBlocked('reconciliation_receipt_invalid')
+                return receipt
+            if current != attempt_id:
+                raise IntakeBlocked('attempt_not_current')
+            _write(path, receipt)
+            return receipt
 
     def _finish(self, path, attempt):
         _write(path, attempt)
@@ -205,9 +245,9 @@ class Tripwire:
         return attempt
 
     def check(self, version, snapshot, observe):
-        attempt_id = self._attempt(version)
         with _lock(self.root):
             self._dirs()
+            attempt_id = self._current(version)
             path = self.root / 'attempts' / (attempt_id + '.json')
             if path.exists():
                 attempt = _read(path)
@@ -270,7 +310,7 @@ class Tripwire:
 
     def accept(self, version):
         with _lock(self.root):
-            attempt = _read(self.root / 'attempts' / (self._attempt(version) + '.json'))
+            attempt = _read(self.root / 'attempts' / (self._current(version) + '.json'))
             if attempt['status'] != 'review_required':
                 raise IntakeBlocked('observation_not_acceptable')
             report = _read(self.root / 'snapshots' / attempt['id'] / 'observation.json')
@@ -283,6 +323,8 @@ def _accepted(root, installed_version, source_pin):
     accepted = _read(root / 'accepted.json')
     if accepted['version'] != installed_version or accepted['source_pin'] != source_pin:
         raise IntakeBlocked('version_or_source_not_accepted')
+    if Tripwire(root, source_pin, set())._current(installed_version) != accepted['id']:
+        raise IntakeBlocked('acceptance_attempt_not_current')
     attempt = _read(root / 'attempts' / (accepted['id'] + '.json'))
     report = _read(root / 'snapshots' / accepted['id'] / 'observation.json')
     if (attempt != accepted or accepted['status'] != 'review_required'

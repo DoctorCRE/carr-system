@@ -1,14 +1,33 @@
-daf4b910a503ee3e84b03b073eb73dea81f93cd29c46188fba2c042d00259b55  target/release/hxprobe
-
-Command: cargo build --release --locked
-Target: aarch64-apple-darwin
-cargo 1.99.1 (5f94df478 2026-08-27) (Homebrew)
-rustc 1.99.1 (58cf8f9c3 2026-10-13) (Homebrew)
-binary: rustc
-commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
-commit-date: 2026-10-13
-host: aarch64-apple-darwin
-release: 1.99.1
-LLVM version: 23.1.3
-
-This records one local build. Other targets and linkers produce different hashes.
+69004328b1d2125cd3e690662a3a4b21784e9e4eac475404ae7bf9db98e9ff8c  target/release/hxprobe
+722b61284f252acc0b8f0636eec48af3206307e73939bed00a154d8be5e1d66e  Cargo.toml
+b5818a28cf1fd7661b110aa1387623301c59b5c32b1779f2bc6a8e2398561de4  Cargo.lock
+ca67e66659a82661386e5a08471c913cb8b3f7c7ce37592207d3f513589a41c2  rust-toolchain.toml
+385518396fdfc9661ebe1e9ac9805484397329c46a9c87c34f490af434dc56eb  build.rs
+61fd1ad0ae6ce4c84922b3c646f5d6da0d45bd132a0129610c3d95ab8bf7bcb5  src/block.rs
+ac7130b31bc06e000598c5acfe019942316900010d8ccb4f95a9be4a651bc499  src/body.rs
+dc00a856e1d6f6420c9acac293f86ffba5adf53e5b381b5204182ff4cb4b0bb2  src/calendar.rs
+af4abd79a95f36a325e0d12e9994df80add60851e9c54bc88cd7a4c6e1c9b6d8  src/folder.rs
+6e774497fed3d077d89437525e0106d2975954675f4db763079991a0556eb3a3  src/header.rs
+e4d98f416c673fa20721f06708653c4fc34edaca037f5d16898db837841b9b7c  src/locate.rs
+a2c5d20164d8295a91ef48f090660e100cdcbb5d623ba612d086ba8b21ce6e4c  src/lz.rs
+433a6a4fec833338b6116b4a7477f3b98e56bc10840777d244a2476abf618c9a  src/main.rs
+a8d25c3450ffc1919146b8cbbab90dda7e803b3ca174e8f0d11063613354d146  src/observe.rs
+21340f3ea2593a028c070e5c775d510022506b5cca5a6128442f7cd0fb9eb98f  src/ownership.rs
+1571dd3dab06102041c7c83de3a1f4395c03e64140cfea0d548f10180373b3d3  src/record.rs
+47fd4026480b8dd131d32653c6e06b457d580061f2261293cb7d2194d1309fd5  src/schema.rs
+e3673daf15314b147a4012de3b4a5ccef5311207c7c23957c8538e66f23a1afe  src/study.rs
+e23f97d8d741b19832f694e0e92e0b3deddb35fec5163303965f171e7e4f0756  ../../spec/outlook/hxstore-atlas.json
+70a2479c0609917771eb414e5f92c59ced92f950891c62c783b8caa531d2137b  ../../ops/hxstore-atlas.py
+# Observed local build, not an installed-runtime qualification receipt.
+# Build: cargo build --release --locked
+# Verify from vendor/hxprobe: shasum -a 256 -c BUILD-SHA256
+# Target: aarch64-apple-darwin
+# cargo 1.99.1 (5f94df478 2026-08-27) (Homebrew)
+# rustc 1.99.1 (58cf8f9c3 2026-10-13) (Homebrew)
+# binary: rustc
+# commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+# commit-date: 2026-10-13
+# host: aarch64-apple-darwin
+# release: 1.99.1
+# LLVM version: 23.1.3
+# Other build paths, targets, and linkers may produce different binary hashes.

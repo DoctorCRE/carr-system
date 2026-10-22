@@ -19,15 +19,24 @@ def main():
     args = None
     try:
         parser = Parser(description=__doc__)
-        parser.add_argument('command', choices=('check', 'accept', 'gate'))
+        parser.add_argument('command', choices=('check', 'accept', 'gate', 'reconcile'))
+        parser.add_argument('--attempt-id')
         parser.add_argument('--app', type=Path, required=True)
         parser.add_argument('--home', type=Path, required=True)
         parser.add_argument('--state', type=Path, required=True)
         parser.add_argument('--observer', type=Path, required=True)
         parser.add_argument('--observer-sha256', required=True)
         args = parser.parse_args()
+        if (args.command == 'reconcile') != bool(args.attempt_id):
+            raise ValueError('invalid_attempt_argument')
         ports = OperationalPorts(args.home, args.app, args.observer, args.observer_sha256)
         monitor = Tripwire(args.state, ports.source_pin, known_record_types())
+        if args.command == 'reconcile':
+            ports._unchanged()
+            receipt = monitor.reconcile(ports.version, args.attempt_id)
+            print(json.dumps({'schema': 'outlook-version-status/v1', 'status': 'retry_authorized',
+                              'attempt_id': receipt['attempt_id'], 'retry_id': receipt['retry_id']}))
+            return 0
         if args.command == 'check':
             with _lock(args.state):
                 sources = args.state / 'sources'

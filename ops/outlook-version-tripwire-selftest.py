@@ -147,6 +147,77 @@ class TripwireTest(unittest.TestCase):
         self.assertEqual(self.poll(), result)
         self.assertEqual(len(list((self.root / 'alerts').glob('*.json'))), 1)
 
+    def test_reconcile_failed_copy_preserves_attempt_and_requires_fresh_review(self):
+        def fail(_):
+            raise OSError('synthetic copy failure')
+        failed = self.monitor.check(VERSION, fail, self.observe)
+        path = self.root / 'attempts' / (failed['id'] + '.json')
+        before = path.read_bytes()
+        alert = self.root / 'alerts' / (failed['id'] + '.json')
+        alert_before = alert.read_bytes()
+        retry = self.monitor.reconcile(VERSION, failed['id'])
+        self.assertNotEqual(retry['retry_id'], failed['id'])
+        self.assertEqual(self.monitor.reconcile(VERSION, failed['id']), retry)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(alert.read_bytes(), alert_before)
+        self.assertEqual(self.calls, [])
+        with self.assertRaises(tripwire.IntakeBlocked):
+            tripwire.require_accepted(self.root, VERSION, PIN)
+        observed = self.poll()
+        self.assertEqual(observed['id'], retry['retry_id'])
+        self.assertEqual(observed['status'], 'review_required')
+        self.assertEqual(self.calls, ['snapshot', 'observe'])
+        self.assertEqual(len(list((self.root / 'attempts').glob('*.json'))), 2)
+        self.monitor.accept(VERSION)
+        tripwire.require_accepted(self.root, VERSION, PIN)
+        self.assertEqual(self.poll()['status'], 'accepted')
+        receipt_path = self.root / 'reconciliations' / (failed['id'] + '.json')
+        receipt_path.write_text('{}')
+        with self.assertRaises(tripwire.IntakeBlocked):
+            tripwire.require_accepted(self.root, VERSION, PIN)
+
+    def test_interrupted_retry_chain_retains_all_attempts_and_rejects_changed_receipts(self):
+        def interrupt(work):
+            self.snapshot(work)
+            raise KeyboardInterrupt()
+        with self.assertRaises(KeyboardInterrupt):
+            self.monitor.check(VERSION, interrupt, self.observe)
+        first = self.poll()
+        receipt = self.monitor.reconcile(VERSION, first['id'])
+        def fail(_):
+            raise RuntimeError('synthetic decoder failure')
+        second = self.monitor.check(VERSION, self.snapshot, fail)
+        self.assertEqual(second['id'], receipt['retry_id'])
+        self.assertEqual(second['reason'], 'decoder_failed')
+        self.monitor.reconcile(VERSION, second['id'])
+        third = self.poll()
+        self.assertEqual(third['status'], 'review_required')
+        self.assertEqual(len(list((self.root / 'attempts').glob('*.json'))), 3)
+        self.assertEqual(len(list((self.root / 'snapshots').iterdir())), 3)
+        self.assertEqual(len(list((self.root / 'alerts').glob('*.json'))), 3)
+        with self.assertRaises(tripwire.IntakeBlocked):
+            self.monitor.reconcile(VERSION, third['id'])
+        with self.assertRaises(tripwire.IntakeBlocked):
+            tripwire.Tripwire(self.root, 'b' * 64, {'mail'}).reconcile(VERSION, first['id'])
+        path = self.root / 'attempts' / (first['id'] + '.json')
+        changed = json.loads(path.read_text())
+        changed['reason'] = 'decoder_failed'
+        path.write_text(json.dumps(changed))
+        with self.assertRaises(tripwire.IntakeBlocked):
+            self.poll()
+
+    def test_reconcile_rejects_structurally_invalid_or_unknown_observations(self):
+        self.report['issues'] = [{'stage': 'block', 'reason_code': 'payload_crc_mismatch', 'block_ordinal': 1}]
+        failed = self.poll()
+        with self.assertRaises(tripwire.IntakeBlocked):
+            self.monitor.reconcile(VERSION, failed['id'])
+        self.report = observation()
+        self.report['records'][0]['record_type'] = 'object.class.ffff'
+        self.report['unknown_fields'][0]['record_type'] = 'object.class.ffff'
+        unknown = self.poll(NEXT)
+        with self.assertRaises(tripwire.IntakeBlocked):
+            self.monitor.reconcile(NEXT, unknown['id'])
+
     def test_source_gate_stops_consumer_effects_until_acceptance(self):
         consumed = []
         def consume(pin=PIN):
@@ -329,6 +400,29 @@ class TripwireTest(unittest.TestCase):
                  redirect_stdout(output):
                 self.assertEqual(cli.main(), expected)
             self.assertNotIn(self.temp.name, output.getvalue())
+
+    def test_cli_reconcile_uses_reviewed_attempt_without_snapshot_or_acceptance(self):
+        root = Path(__file__).resolve().parents[1]
+        spec = importlib.util.spec_from_file_location('version_retry_cli', root / 'ops/outlook-version-tripwire.py')
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        from types import SimpleNamespace
+        ports = SimpleNamespace(version=VERSION, source_pin=PIN, manifest={},
+                                snapshot=self.snapshot, observe=self.observe, _unchanged=lambda: None)
+        def fail(_):
+            raise OSError('synthetic failure')
+        failed = self.monitor.check(VERSION, fail, self.observe)
+        arguments = ['--app', self.temp.name, '--home', self.temp.name, '--state', str(self.root),
+                     '--observer', self.temp.name, '--observer-sha256', PIN]
+        output = io.StringIO()
+        with patch.object(cli, 'OperationalPorts', return_value=ports), \
+             patch.object(cli, 'known_record_types', return_value={'mail'}), \
+             patch.object(sys, 'argv', ['tripwire', 'reconcile', *arguments, '--attempt-id', failed['id']]), \
+             redirect_stdout(output):
+            self.assertEqual(cli.main(), 0)
+        self.assertEqual(json.loads(output.getvalue())['status'], 'retry_authorized')
+        self.assertEqual(self.calls, [])
+        self.assertFalse((self.root / 'accepted.json').exists())
 
 
 if __name__ == '__main__':
