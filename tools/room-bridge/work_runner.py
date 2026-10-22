@@ -121,6 +121,7 @@ def worker(queue, card_id, token, registry, results):
     row = queue.execution(card_id, token)
     options = json.loads(row['options'])
     options.pop('codex', None)
+    options.pop('required_skills', None)
     results = Path(options.pop('result_path', results))
     registry = Path(options.pop('registry_path', registry))
     def started(entry):

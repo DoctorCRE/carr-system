@@ -70,8 +70,8 @@ def hosted_verdict():
     scope = needs['scope']
     full = scope.get('outputs', {}).get('full') if scope['result'] == 'success' else None
     draft = os.environ.get('CI_DRAFT') == 'true'
-    results = {name: needs[name]['result'] for name in ('classes', 'migration-fixtures')}
-    allowed = {'classes': {'success'}, 'migration-fixtures': {'success'}}
+    results = {name: needs[name]['result'] for name in ('classes', 'migration-fixtures', 'fallow')}
+    allowed = {'classes': {'success'}, 'migration-fixtures': {'success'}, 'fallow': {'success'}}
     if full == 'false' or draft:
         allowed['migration-fixtures'].add('skipped')
     lines = [f"{name}: {'PASSED' if result == 'success' else str(result).upper()}"
