@@ -42,7 +42,7 @@ jobs:
   classes:
     # Dispatch immediately; migration classifies locally with the same scope owner.
     if: ${{ !cancelled() }}
-    name: ${{ matrix.gate_shard == 2 && 'Gates selftests shard 2 of 2' || format('ops/ci.sh --strict --only {0}', matrix.classes) }}
+    name: ${{ matrix.gate_shard == 2 && matrix.job_names.gates_shard_2.name || matrix.job_names[matrix.classes].name }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -58,6 +58,13 @@ jobs:
           - "gates"
           - "hxprobe"
           - "dependency"
+        job_names:
+          - migration: {name: "ops/ci.sh --strict --only migration", classes: "migration"}
+            "pushfloor unit types contract secret binding artifact freshness": {name: "ops/ci.sh --strict --only pushfloor unit types contract secret binding artifact freshness", classes: "pushfloor unit types contract secret binding artifact freshness"}
+            gates: {name: "ops/ci.sh --strict --only gates", classes: "gates"}
+            gates_shard_2: {name: "Gates selftests shard 2 of 2", classes: "gates"}
+            hxprobe: {name: "ops/ci.sh --strict --only hxprobe", classes: "hxprobe"}
+            dependency: {name: "ops/ci.sh --strict --only dependency", classes: "dependency"}
         # The second dimension partitions only gates. Drafts keep their fast classes.
         exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
