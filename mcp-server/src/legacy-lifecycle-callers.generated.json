@@ -1,7 +1,7 @@
 {
   "schema": "legacy-lifecycle-callers.v1",
   "generator": "ops/scac-mutation-inventory.mjs",
-  "source_set_digest": "sha256:3edd627bdc222b87fad74262e491818f2ffae7d55e915e3fda47f6ae40d71dc1",
+  "source_set_digest": "sha256:7ba3c51dad0bd816f89025424fbd5a704edeaa401c69f309fad8bdaad20cb25b",
   "source_count": 1428,
   "tables": [
     "public.client",
@@ -263,14 +263,14 @@
     },
     {
       "operation": "ops/calendar-prebrief-projection-local-pg-gate.py",
-      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd",
+      "source_digest": "c8cacf8228138024157abfce61ae43f09450c530e23d009e37822be0d2d24f47",
       "tables_written": [
         "public.client"
       ]
     },
     {
       "operation": "ops/control-plane-db-gate.py",
-      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7",
+      "source_digest": "a8ae054aa5a1ea6b41607a93f572996ec81e03d288945b2f9320f6a1bcefaa21",
       "tables_written": [
         "public.client",
         "public.deal"
@@ -585,7 +585,7 @@
       "line": 208,
       "caller": null,
       "kind": "script_sql",
-      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd"
+      "source_digest": "c8cacf8228138024157abfce61ae43f09450c530e23d009e37822be0d2d24f47"
     },
     {
       "table": "public.client",
@@ -593,7 +593,7 @@
       "line": 380,
       "caller": null,
       "kind": "script_sql",
-      "source_digest": "80c554a11c75c21ea6ccf4a8e8b54dadbc5b385ce3d9ecb0a635a4dd1e1f63dd"
+      "source_digest": "c8cacf8228138024157abfce61ae43f09450c530e23d009e37822be0d2d24f47"
     },
     {
       "table": "public.client",
@@ -601,7 +601,7 @@
       "line": 937,
       "caller": null,
       "kind": "script_sql",
-      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7"
+      "source_digest": "a8ae054aa5a1ea6b41607a93f572996ec81e03d288945b2f9320f6a1bcefaa21"
     },
     {
       "table": "public.deal",
@@ -609,7 +609,7 @@
       "line": 941,
       "caller": null,
       "kind": "script_sql",
-      "source_digest": "c16a41c36eb8656c947e60881d128bc3000f23b34a5badfb2687667f7a4edfb7"
+      "source_digest": "a8ae054aa5a1ea6b41607a93f572996ec81e03d288945b2f9320f6a1bcefaa21"
     },
     {
       "table": "public.deal",
