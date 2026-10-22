@@ -23,6 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Any match runs the full lane. fnmatch `*` crosses `/`, so `dir/*` is a tree.
 FULL_PATTERNS = (
     'migrations/*', 'db/*', 'lib/*', 'ops/*', 'tools/*', 'bin/*',
+    'control-room/contracts/*', 'pipelines/*',
+    'audits/guidance-migration-manifest.v1.tsv', 'runbooks/rollback-worker.md',
     'mcp-server/src/*', 'mcp-server/test/*',
     'mcp-server/package.json', 'mcp-server/package-lock.json',
     'run.sh', 'requirements*', '.python-version', '.nvmrc',

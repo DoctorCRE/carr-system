@@ -1,4 +1,5 @@
 """Selftest for ops/db-acceptance-scope.py."""
+import ast
 import importlib.util
 import json
 import os
@@ -53,6 +54,34 @@ for path in ('mcp-server/test/find-rule-supersedes.test.mjs', 'mcp-server/test/c
              'mcp-server/test/lead-workspace-pg.test.mjs', 'tools/test-f03-production-migration.py',
              'ops/f03-receipt-validator.candidate.sql'):
     check(f'{path} runs the full lane', scope.needs_full([path]))
+
+# ROOT-relative resources are inputs even when they live outside database directories.
+tracked = set(subprocess.run(['git', 'ls-files'], cwd=repo, env=ENV,
+                             capture_output=True, text=True, check=True).stdout.splitlines())
+def resource_parts(node):
+    if isinstance(node, ast.Name) and node.id in ('ROOT', 'REPO'):
+        return []
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        left, right = resource_parts(node.left), resource_parts(node.right)
+        if left is not None and right is not None:
+            return left + right
+    return None
+
+programs = {path for path in (repo / 'ops').glob('*-gate.py') if '# ci: db-gate' in path.read_text()}
+programs.update((repo / 'ops').glob('*local-pg-acceptance.py'))
+resources = set()
+for program in programs:
+    for node in ast.walk(ast.parse(program.read_text())):
+        parts = resource_parts(node)
+        if parts:
+            relative = Path(*parts).as_posix()
+            if relative in tracked:
+                resources.add(relative)
+check('inventory inspects at least 70 database proof programs', len(programs) >= 70)
+for path in sorted(resources):
+    check(f'database proof resource {path} runs the lane', scope.needs_full([path]))
 
 # A rename out of a protected tree must list the old path (--no-renames).
 with tempfile.TemporaryDirectory() as tmp:
