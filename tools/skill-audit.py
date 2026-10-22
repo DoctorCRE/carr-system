@@ -7,6 +7,7 @@ from html import escape
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import sys
 import time as clock
@@ -106,7 +107,14 @@ def head_evidence(window, head):
     evidence = []
     for i, event in enumerate(window['events']):
         command = event.get('command', '')
-        if event.get('exit_code') != 0 or not re.search(r'\bgit\s+(?:-C\s+\S+\s+)?(?:push|commit|rev-parse|show|log)\b', command):
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            continue
+        verb = 3 if tokens[1:2] == ['-C'] else 1
+        if (event.get('exit_code') != 0 or not tokens or tokens[0] != 'git'
+                or len(tokens) <= verb or tokens[verb] not in ('push', 'commit', 'rev-parse', 'show', 'log')
+                or '\n' in command or any(t in (';', '&&', '||', '|', '&', '>', '>>', '<') for t in tokens)):
             continue
         hashes = re.findall(r'(?<![0-9a-f])[0-9a-f]{8,40}(?![0-9a-f])', event.get('output', ''))
         if not any(head.startswith(value) for value in hashes):

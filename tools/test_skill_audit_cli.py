@@ -29,7 +29,8 @@ class PrAuditTests(unittest.TestCase):
         self.assertNotEqual(report['verdict'], 'VERIFIED')
 
     def test_head_hash_in_echo_or_failed_command_is_not_binding(self):
-        for window in [self.window(command='echo current head'), self.window(code=1),
+        for window in [self.window(command='echo current head'), self.window(command='echo git rev-parse HEAD'),
+                       self.window(command='python3 -c \"print(\'git rev-parse HEAD\')\"'), self.window(code=1),
                        self.window(output='b' * 40)]:
             with self.subTest(window=window):
                 report = cli.audit_pr('example/repo#12', {'head': {'sha': 'a' * 40}}, '', [window])
