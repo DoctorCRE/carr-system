@@ -24,7 +24,11 @@ before(async () => {
   const data = path.join(fixture.root, 'data');
   await fixture.run(path.join(bin, 'initdb'), ['-D', data, '-U', 'fixture', '--auth=trust', '--no-locale']);
   await fixture.run(path.join(bin, 'pg_ctl'), ['-D', data, '-l', path.join(fixture.root, 'server.log'), '-o', `-k ${fixture.root} -h ''`, '-w', 'start']);
-  db = new pg.Client({ host: fixture.root, user: 'fixture', database: 'postgres' });
+  db = new pg.Client({ host: fixture.root, user: 'fixture', database: 'postgres', types: {
+    // Match the Worker's UTC DATE serialization regardless of the test host's timezone.
+    getTypeParser: (oid, format) => oid === 1082
+      ? value => new Date(`${value}T00:00:00.000Z`) : pg.types.getTypeParser(oid, format),
+  } });
   await db.connect();
   await db.query(`create table triage_fixture (
     item_kind text, id uuid, subject_type text, subject_id uuid, owner text,
@@ -72,7 +76,7 @@ test('due actions reach the exact app brief consumer before a full page of futur
   assert.equal(new Set([...first.items, ...next.items].map(row => row.id)).size, 52);
 });
 
-test('morning brief filters autonomous backlog before its page and places imminent critical dates first', async () => {
+test('morning brief filters autonomous backlog before its page and places due actions before imminent dates', async () => {
   const near = (await db.query("select (current_date + 3)::text as day")).rows[0].day;
   await rows([
     ...Array.from({ length: 55 }, (_, i) => [i + 1, 'next_action', 'claude', '2020-01-01']),
@@ -81,8 +85,8 @@ test('morning brief filters autonomous backlog before its page and places immine
     [63, 'critical_date', null, near],
   ]);
   const result = await executeRegisteredTool(db, JOE, 'morning-brief', {});
-  assert.deepEqual(result.sections.today.items.map(row => row.id), [id(63), id(61), id(62)]);
-  assert.deepEqual(result.sections.today.items.map(row => row.owner_partner), [null, 'joe', 'dell']);
+  assert.deepEqual(result.sections.today.items.map(row => row.id), [id(61), id(62), id(63)]);
+  assert.deepEqual(result.sections.today.items.map(row => row.owner_partner), ['joe', 'dell', null]);
   assert.equal(result.sections.today.total, 3);
   assert.equal(result.sections.today.has_more, false);
   assert.equal(result.sections.today.next_cursor, null);
@@ -128,8 +132,8 @@ test('imminent critical dates survive more than one page of overdue critical dat
   ]);
   const first = (await executeRegisteredTool(db, JOE, 'morning-brief', {})).sections.today;
   assert.equal(first.items.length, 50);
-  assert.equal(first.items[0].id, id(61));
-  assert.equal(first.items[1].id, id(62));
+  assert.equal(first.items[0].id, id(62));
+  assert.equal(first.items[1].id, id(61));
   assert.equal(first.total, 57);
   assert.equal(first.has_more, true);
   const next = await call({ owners: 'partners', cursor: first.next_cursor });
@@ -156,7 +160,7 @@ test('malformed cursor dates and keys refuse before SQL', async () => {
     item_kind: 'next_action', id: id(1) };
   for (const patch of [
     { v: 2 }, { owners: 'all' }, { on: '0000-01-01' }, { due_on: '0000-01-01' },
-    { on: '2026-02-30' }, { due_on: '2026-01-01T00:00:00Z' }, { rank: 2 },
+    { on: '2026-02-30' }, { due_on: '2026-01-01T00:00:00Z' }, { rank: 3 },
     { item_kind: 'unknown' }, { id: 'not-an-id' },
   ]) await assert.rejects(executeRegisteredTool(noQuery, JOE, 'today-triage',
     { owners: 'partners', cursor: btoa(JSON.stringify({ ...valid, ...patch })) }),

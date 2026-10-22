@@ -3325,7 +3325,7 @@ export const TOOLS = {
 
   "today-triage": {
     write: false,
-    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Critical dates due today through 14 days lead; remaining rows follow oldest-first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
+    description: "What needs attention now: due actions, critical dates inside 14 days, and untriaged ingest. Due and overdue actions lead, then critical dates due today through 14 days, then remaining rows. Each group sorts oldest-first, with kind and id breaking ties. Optional owners='partners' selects both partners, machine seats, and unowned rows before limiting; default 'all' preserves shared triage. Optional limit is 1..50 (default 50). Pass next_cursor as cursor with the same owners filter to continue. Returns items, total for the filtered queue, has_more, and next_cursor. Continuation uses live rows and pins ordering to the first page's business date; it is not a snapshot.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       owners: { type: "string", enum: ["all", "partners"] },
       limit: { type: "integer", minimum: 1, maximum: 50 },
@@ -3342,7 +3342,7 @@ export const TOOLS = {
           if (typeof args.cursor !== "string" || !args.cursor.length || args.cursor.length > 1000) throw Error();
           after = JSON.parse(atob(args.cursor));
           if (!after || after.v !== 1 || after.owners !== owners || !isCalendarDate(after.on) || after.on < "0001-01-01"
-              || ![0, 1].includes(after.rank)
+              || ![0, 1, 2].includes(after.rank)
               || !(after.due_on === null || (isCalendarDate(after.due_on) && after.due_on >= "0001-01-01"))
               || !["next_action", "post_call_action", "critical_date", "ingest"].includes(after.item_kind)
               || typeof after.id !== "string" || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(after.id)) throw Error();
@@ -3350,9 +3350,11 @@ export const TOOLS = {
       }
       const rows = (await c.query(`with scoped as (
         select *, due_on::text as triage_due_on, coalesce($4::date, current_date)::text as triage_on,
-          case when item_kind = 'critical_date'
+          case when item_kind in ('next_action', 'post_call_action')
+            and due_on <= coalesce($4::date, current_date) then 0
+            when item_kind = 'critical_date'
             and due_on between coalesce($4::date, current_date) and coalesce($4::date, current_date) + 14
-            then 0 else 1 end as triage_rank
+            then 1 else 2 end as triage_rank
         from v_today_triage
         where ($1::text = 'all' or owner is null or lower(owner) = any($2::text[]))
       ), totals as (select count(*) as triage_total from scoped)
