@@ -226,12 +226,7 @@ class TripwireTest(unittest.TestCase):
         observer = root / 'observer'
         observer.write_bytes(b'synthetic observer')
         digest = hashlib.sha256(observer.read_bytes()).hexdigest()
-        _, manifest = ports.source_binding(observer, digest)
         repo = root / 'repo'
-        for name in manifest['sources']:
-            target = repo / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((ports.ROOT / name).read_bytes())
         helper = root / COPY_HELPER
         helper.parent.mkdir(parents=True)
         helper.write_text('#!' + sys.executable + '\n' +
@@ -246,7 +241,10 @@ class TripwireTest(unittest.TestCase):
         helper.chmod(0o700)
         destination = root / 'receipt'
         destination.mkdir(mode=0o700)
-        with patch.object(ports, 'ROOT', repo):
+        def snapshot(home, work):
+            subprocess.run([str(home / COPY_HELPER)], cwd=work, check=True, capture_output=True)
+
+        with patch.object(ports, 'OUT', repo / OUT), patch.object(ports, '_snapshot', snapshot):
             adapter = ports.OperationalPorts(root, app, observer, digest)
             adapter.snapshot(destination)
         self.assertEqual((destination / 'store.hxd').read_bytes(), b'synthetic store')

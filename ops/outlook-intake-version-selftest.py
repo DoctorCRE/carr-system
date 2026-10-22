@@ -208,12 +208,14 @@ class IntakeVersionTest(unittest.TestCase):
         self.assert_held()
 
     def test_monitor_and_intake_share_the_snapshot_executor_seam(self):
+        from lib import outlook_version_ports as version_ports
         from lib.outlook_version_ports import OperationalPorts
         _,config,binary,app=self.configure_consumer()
         adapter=OperationalPorts(self.t.home,app,binary,config['observer_sha256'])
         work=self.t.out()/'work-monitor'
         work.mkdir(parents=True)
-        with patch.object(fixture.intake.subprocess,'run',side_effect=self.t.launchctl):
+        with patch.object(version_ports, 'OUT', self.t.out()), \
+             patch.object(fixture.intake.subprocess,'run',side_effect=self.t.launchctl):
             adapter.snapshot(work)
         self.assertEqual((work/'store.hxd').read_bytes(),self.t.store.read_bytes())
         self.assertEqual([c[1] for c in self.t.launch_calls],['bootstrap','print','bootout'])
