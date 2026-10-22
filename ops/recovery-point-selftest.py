@@ -137,7 +137,7 @@ def cloud_fixture(fixture: dict) -> tuple[dict, list[list[str]]]:
             "PATH": str(bin_dir),
             "CARR_TEST_GH_FIXTURE": str(fixture_path),
             "CARR_TEST_GH_LOG": str(log_path),
-            "GITHUB_REPOSITORY": "jbookout/carr-system",
+            "GITHUB_REPOSITORY": "DoctorCRE/carr-system",
         })
         from lib.github_rate_limit import GitHubReadBudget
         budget = GitHubReadBudget(
@@ -169,7 +169,7 @@ def provider_fixture(*, artifact_hours: float = 2.0, run_attempt: int = 2,
     created = (now - timedelta(hours=artifact_hours)).isoformat().replace("+00:00", "Z")
     run_created = (now - timedelta(hours=run_created_hours)).isoformat().replace("+00:00", "Z")
     identity = {
-        "repository": "jbookout/carr-system", "run_id": run_id,
+        "repository": "DoctorCRE/carr-system", "run_id": run_id,
         "run_attempt": run_attempt, "head_sha": head,
     }
     artifact = {
@@ -369,7 +369,7 @@ def main() -> int:
             runner.side_effect = subprocess.TimeoutExpired(["gh"], 30)
         delays: list[float] = []
         reader = rp.GitHubReader(gh="gh", runner=runner, sleep=delays.append)
-        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "jbookout/carr-system"}), \
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "DoctorCRE/carr-system"}), \
              mock.patch.object(rp.shutil, "which", return_value="gh"), \
              mock.patch.object(rp, "GitHubReader", return_value=reader):
             failed_api = rp.cloud_path(repo="/fixture")
@@ -441,7 +441,7 @@ def main() -> int:
                                   "PATH": str(root),
                                   "CARR_TEST_GH_FIXTURE": str(fixture),
                                   "CARR_TEST_GH_LOG": str(root / "calls.jsonl"),
-                                  "GITHUB_REPOSITORY": "jbookout/carr-system",
+                                  "GITHUB_REPOSITORY": "DoctorCRE/carr-system",
                                   "CARR_GITHUB_READ_BUDGET": str(root / "github-budget.json"),
                                   "GH_LIMITER_DIR": str(root / "fake-gh-limiter"),
                               })
