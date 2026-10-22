@@ -98,7 +98,7 @@ class ReaperTests(unittest.TestCase):
             self.assertEqual(candidates, [])
 
     def test_named_protections_and_live_node_parent(self):
-        for args in ['com.carr.any-job', 'tools/merge_queue/main.py', 'dot-relay.py',
+        for args in ['com.carr.any-job', 'dot-relay.py',
                      'dot-feeder.py', 'dot-supervisor.py', 'dispatch.py', 'codex', 'node test.js']:
             p = replace(self.p, args=self.p.args + '; ' + args)
             with self.subTest(args=args):
@@ -277,7 +277,7 @@ class ReaperTests(unittest.TestCase):
 
     def test_revalidate_before_term_and_kill(self):
         for p in [replace(self.p, ppid=9), replace(self.p, started='reused'),
-                  replace(self.p, args='merge_queue/main.py'), replace(self.p, cpu=2)]:
+                  replace(self.p, args='background_job/main.py'), replace(self.p, cpu=2)]:
             with self.subTest(process=p):
                 self.assertEqual(self.run_fixture(changed=p)[1], [])
 
