@@ -110,6 +110,13 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
                               env={**self.env, 'FAKE_MODE': mode},
                               capture_output=True, text=True, timeout=90)
 
+    def pin_weekly_window(self):
+        # Two runs seconds apart must share one schedule window; an hourly cron splits them at the top of the hour.
+        path = self.repo/'ops/headless-tasks/tasks.json'
+        settings = json.loads(path.read_text())
+        settings['tasks']['test-task']['cron'] = '0 9 * * 4'
+        path.write_text(json.dumps(settings))
+
     def ledger(self):
         return [json.loads(s) for s in (self.repo / 'out/headless/test-task/ledger.jsonl').read_text().splitlines()]
 
@@ -208,6 +215,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertEqual(calls[0][:2], ['call', 'add-loop'])
 
     def test_double_fire_skips_but_failure_can_retry(self):
+        self.pin_weekly_window()
         self.assertEqual(self.run_task('failure').returncode, 7)
         self.assertEqual(self.run_task().returncode, 0)
         (self.home / 'args.json').unlink()
@@ -384,6 +392,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertEqual(json.loads(calls[0][-1])['idempotency_key'], json.loads(calls[1][-1])['idempotency_key'])
 
     def test_07_torn_ledger_recovers_and_corruption_is_reported(self):
+        self.pin_weekly_window()
         folder = self.repo/'out/headless/test-task'
         folder.mkdir(parents=True)
         (folder/'ledger.jsonl').write_text('{"status":"failed"}\n{"status":')
@@ -419,6 +428,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
             self.assertEqual(len({json.loads(c[-1])['idempotency_key'] for c in calls}), 2)
 
     def test_intact_final_ledger_row_without_newline_survives_append(self):
+        self.pin_weekly_window()
         folder = self.repo/'out/headless/test-task'
         folder.mkdir(parents=True)
         (folder/'ledger.jsonl').write_text('{"status":"failed"}')
@@ -497,6 +507,7 @@ print(sys.argv[sys.argv.index('--correlation')+1]+' aa000000-0000-4000-8000-0000
         self.assertEqual(json.loads((folder/'pending-runs.json').read_text()),[])
 
     def test_10_terminal_append_crash_recovers_canonical_receipt_before_skip(self):
+        self.pin_weekly_window()
         driver = (f'import sys,os;sys.path.insert(0,{str(REPO)!r});'
                   'from lib import headless_tasks as h; real=h.append_ledger;\n'
                   'def crash(path,row):\n'
