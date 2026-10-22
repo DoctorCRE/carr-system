@@ -53,12 +53,13 @@ jobs:
         # Keep gates and migration in separate jobs. Every class
         # must appear in exactly one group (ops/ci-selftest.py verifies this).
         classes:
-          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
           - "hxprobe"
+          - "dependency"
         # The second dimension partitions only gates. Drafts keep their fast classes.
-        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"pushfloor unit types contract secret dependency binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"pushfloor unit types contract secret dependency binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
+        exclude: ${{ fromJSON(github.event_name == 'pull_request' && github.event.pull_request.draft && '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"hxprobe","gate_shard":2},{"classes":"gates"},{"classes":"migration"}]' || '[{"classes":"dependency","gate_shard":2},{"classes":"pushfloor unit types contract secret binding artifact freshness","gate_shard":2},{"classes":"migration","gate_shard":2},{"classes":"hxprobe","gate_shard":2}]') }}
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:
@@ -201,7 +202,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [reconstruction, equivalence, shadow, gates]
+        part: [reconstruction, equivalence, shadow, gates-serial, gates-isolated, acceptance]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -234,18 +235,18 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Prove independent migration fixture
-        if: matrix.part != 'gates'
+        if: matrix.part != 'acceptance' && !startsWith(matrix.part, 'gates-')
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_SHADOW_ARTIFACT_DIR: ${{ runner.temp }}/migration-shadow
         run: ops/ci.sh --strict --only migration --migration-part "${{ matrix.part }}"
-      - name: Prove database gates on their own migrated cluster
-        if: matrix.part == 'gates'
+      - name: Prove database programs on their own migrated cluster
+        if: matrix.part == 'acceptance' || startsWith(matrix.part, 'gates-')
         env:
           CARR_CI_PORTABLE_ONLY: "1"
           CARR_LOCAL_PG_ALLOW_HOSTED: "1"
           CARR_LOCAL_PG_BIN_DIR: /usr/lib/postgresql/17/bin
-        run: python ops/local-pg-ci.py --class migration --migration-part gates
+        run: python ops/local-pg-ci.py --class migration --migration-part "${{ matrix.part }}"
       - name: Retain a regenerated schema on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

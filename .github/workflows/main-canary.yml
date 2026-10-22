@@ -48,10 +48,11 @@ jobs:
       fail-fast: false
       matrix:
         classes:
-          - "pushfloor unit types contract secret dependency binding artifact freshness"
+          - "pushfloor unit types contract secret binding artifact freshness"
           - "gates"
           - "migration"
           - "hxprobe"
+          - "dependency"
     timeout-minutes: ${{ matrix.classes == 'migration' && 45 || 20 }}
 
     services:

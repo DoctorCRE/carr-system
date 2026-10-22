@@ -55,8 +55,7 @@ class Controls(unittest.TestCase):
         commands = install['run'].splitlines()
         self.assertEqual(commands, ['npm --prefix mcp-server ci --no-audit',
                                     'npm --prefix practice-plugin ci --no-audit'])
-        self.assertTrue(any('dependency' in group for group in
-                            wf['jobs']['classes']['strategy']['matrix']['classes']))
+        self.assertIn('dependency', wf['jobs']['classes']['strategy']['matrix']['classes'])
         # The strict class, rather than install's informational audit, retains
         # the existing vulnerability policy and fails on unavailable reports.
         self.assertIn('["npm", "audit", "--omit=dev", "--audit-level=high", "--json"]',

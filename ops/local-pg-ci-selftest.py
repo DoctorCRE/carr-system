@@ -296,7 +296,7 @@ check("core partition remains strict and runs the full acceptance manifest",
       result == 0 and any(event[-3:] == ("--strict", "--migration-part", "core") for event in core_events)
       and any(event[-1].endswith("tools/test-f03-production-migration.py") for event in core_events)
       and any("--verify-only" in event for event in core_events))
-for part in ("proofs", "gates"):
+for part in ("proofs", "gates", "gates-serial", "gates-isolated", "acceptance"):
     start = len(events)
     try:
         with patch.object(mod, "find_postgres_binaries", return_value=fake_bins), \
@@ -309,7 +309,7 @@ for part in ("proofs", "gates"):
     check(f"{part} partition runs strictly", result == 0 and any(
         event[-3:] == ("--strict", "--migration-part", part) for event in calls))
     acceptance = any(event[-1].endswith("tools/test-f03-production-migration.py") for event in calls)
-    check(f"{part} partition owns the intended acceptance programs", acceptance == (part == "proofs"))
+    check(f"{part} partition owns the intended acceptance programs", acceptance == (part == "acceptance"))
 
 for invalid_part in ("fixtures", "unknown"):
     try:
