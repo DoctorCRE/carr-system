@@ -60,7 +60,7 @@ CLASS_ORDER="pushfloor unit types contract gates secret dependency migration bin
 class_desc() {
   case "$1" in
     hxprobe) echo "vendored HxStore reader tests and release build with locked dependencies" ;;
-    freshness) echo "source includes the current main revision" ;;
+    freshness) echo "integration index has no unresolved merge entries" ;;
     pushfloor)  echo "seeded defect that must not leave the machine (local pre-push floor)" ;;
     unit)       echo "seeded failing unit test" ;;
     types)      echo "seeded shape mistake in a data hand-off" ;;
@@ -146,10 +146,13 @@ check_unit() {
 }
 
 check_freshness() {
-  if git merge-base --is-ancestor origin/main HEAD; then
-    ok freshness "source includes origin/main"
+  local unresolved
+  if ! unresolved="$(git ls-files --unmerged)"; then
+    bad freshness "integration index could not be read"
+  elif [ -n "$unresolved" ]; then
+    bad freshness "integration tree has unresolved merge entries"
   else
-    bad freshness "merge origin/main before pushing"
+    ok freshness "integration index has no unresolved merge entries"
   fi
 }
 
