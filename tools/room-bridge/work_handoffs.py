@@ -100,14 +100,14 @@ class Handoffs:
     def _advance(self, row, desks):
         data = json.loads(row['data'])
         if row['stage'] == 'merging' and data.get('handoff', {}).get('approved_head'):
-            self._repin(row, data)
+            self._repin(row, data, desks)
             return
         if row['stage'] != 'review':
             return
         completion = data.get('completion', {})
         result = data.get('last_result', {})
         if completion.get('stage') == 'review' and data.get('handoff'):
-            self._review(row, data, result)
+            self._review(row, data, result, desks)
             return
         if (result.get('status') != 'completed' or result.get('termination_confirmed') is False
                 or completion.get('stage') not in ('building', 'fixing')):
@@ -115,12 +115,26 @@ class Handoffs:
         pin = result_pr(result)
         if pin is None:
             return
+        if completion['stage'] == 'fixing' and pin in data['prs']:
+            builder = data['handoff']['builder']
+            task = (f"no new commits for {pin['repo']} PR #{pin['number']} at {pin['head']}. "
+                    f"Make the requested source fixes before returning.\nFindings: {json.dumps(data['findings'])}\n\n"
+                    + builder['task'])
+            self.queue.handoff(row, stage='fixing', desk=builder['desk'], task=task,
+                               options=json.loads(row['options']), data=data, reason='no new commits')
+            return
+        self._queue_review(row, data, pin, desks, reason='builder completion queued independent review')
+
+    def _queue_review(self, row, data, pin, desks, *, reason):
+        completion = data.get('completion', {})
+        result = data.get('last_result', {})
         builder = data.get('handoff', {}).get('builder') or {
             'desk': completion['desk'], 'task': row['task'],
             'options': json.loads(row['options']),
             'family': (model_family(result) or model_family({'kind': data.get('executor_kind', '')})
                        or model_family(desks.get(completion['desk'], {})))}
-        builder['family'] = model_family(result) or builder['family']
+        if completion.get('stage') in ('building', 'fixing'):
+            builder['family'] = model_family(result) or builder['family']
         reviewer = next((name for name, entry in sorted(desks.items())
                          if 'review' in name and entry.get('posture') != 'record-layer'
                          and entry.get('kind') in ('codex-session', 'codex-live', 'claude-api', 'grok-cli', 'hermes-nous')
@@ -129,6 +143,7 @@ class Handoffs:
         if reviewer is None:
             return
         data['prs'] = [pin]
+        data['ci_state'] = 'unknown'
         data['handoff'] = {'builder': builder, 'reviewer': reviewer}
         options = {'fresh': True, 'checkout': f"new:review-{pin['number']}-{pin['head'][:8]}",
                    'codex': desks[reviewer]['kind'].startswith('codex'),
@@ -141,11 +156,11 @@ class Handoffs:
         task += '\n' + (HERE / 'brief-footer.md').read_text()
         try:
             self.queue.handoff(row, stage='review', desk=reviewer, task=task, options=options,
-                               data=data, reason='builder completion queued independent review')
+                               data=data, reason=reason)
         except QueueChanged:
             return
 
-    def _review(self, row, data, result):
+    def _review(self, row, data, result, desks):
         if result.get('status') != 'completed' or result.get('termination_confirmed') is False:
             return
         pin = data['prs'][0]
@@ -162,12 +177,18 @@ class Handoffs:
         started = data['handoff'].get('review_started_at')
         if not started or datetime.fromisoformat(comment['created_at']) < datetime.fromisoformat(started).replace(microsecond=0):
             return
+        if snapshot['head'] != pin['head'] and not self.provider.main_merges_only(pin, snapshot['head']):
+            self._queue_review(row, data, {**pin, 'head': snapshot['head']}, desks,
+                               reason='source head changed; fresh review')
+            return
         lines = comment['body'].splitlines()
         if lines[0] == 'REQUEST_CHANGES':
-            if len(lines) < 2 or lines[1] != f"Reviewed-SHA: {pin['head']}" or snapshot['head'] != pin['head']:
+            if len(lines) < 2 or lines[1] != f"Reviewed-SHA: {pin['head']}":
                 return
             if not snapshot.get('same_repo', True):
                 return
+            pin = {**pin, 'head': snapshot['head']}
+            data['prs'] = [pin]
             builder = data['handoff']['builder']
             data['findings'].append({'id': f"comment-{comment['id']}", 'level': 'P1',
                                      'summary': '\n'.join(lines[2:]), 'resolved': False})
@@ -185,8 +206,6 @@ class Handoffs:
             return
         reviewed = pin['head']
         if snapshot['head'] != reviewed:
-            if not self.provider.main_merges_only(pin, snapshot['head']):
-                return
             pin = {**pin, 'head': snapshot['head']}
             data['prs'] = [pin]
         data['ci_state'] = snapshot['ci_state']
@@ -199,12 +218,14 @@ class Handoffs:
         except QueueChanged:
             return
 
-    def _repin(self, row, data):
+    def _repin(self, row, data, desks):
         pin = data['prs'][0]
         snapshot = self.provider.pr(pin)
         if snapshot['state'] != 'open' or snapshot['head'] == pin['head']:
             return
         if not self.provider.main_merges_only(pin, snapshot['head']):
+            self._queue_review(row, data, {**pin, 'head': snapshot['head']}, desks,
+                               reason='source head changed; fresh review')
             return
         data['prs'] = [{**pin, 'head': snapshot['head']}]
         data['ci_state'] = snapshot['ci_state']

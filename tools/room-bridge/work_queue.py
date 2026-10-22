@@ -252,7 +252,8 @@ class WorkQueue:
             token = str(uuid.uuid4())
             data = json.loads(selected['data'])
             data.pop('last_result', None)
-            if selected['stage'] == 'review' and data.get('handoff'):
+            if (os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1'
+                    and selected['stage'] == 'review' and data.get('handoff')):
                 data['handoff']['review_started_at'] = timestamp()
             self.db.execute('UPDATE items SET data=? WHERE card_id=?', (json.dumps(data), card))
             self.db.execute('UPDATE items SET claim=?,owner=?,ready=0,review_round=review_round+? WHERE card_id=?',
@@ -279,7 +280,8 @@ class WorkQueue:
             data = json.loads(old['data'])
             data.update({k: result[k] for k in ('model', 'effort', 'family') if result.get(k)})
             data['last_result'] = result
-            data['completion'] = {'stage': old['stage'], 'desk': old['desk'], 'claim': token}
+            if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1':
+                data['completion'] = {'stage': old['stage'], 'desk': old['desk'], 'claim': token}
             status = result.get('status')
             # Delivered turns still own their desk. Their session must report completion.
             if status in ('delivered', 'delivered_live', 'backgrounded'):

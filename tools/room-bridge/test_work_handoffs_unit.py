@@ -91,6 +91,62 @@ class HandoffTests(unittest.TestCase):
         git('merge', '--no-ff', 'main', '-m', 'merge main')
         return root, git, old, git('rev-parse', 'HEAD')
 
+    def source_move(self, verdict='APPROVE', *, merging=False, rounds=1):
+        root, git, old, _ = self.git_heads()
+        self.provider.main_merges_only = lambda pin, head: work_handoffs.main_merges_only(
+            root, pin['head'], head, 'main')
+        self.provider.snapshot['head'] = old
+        self.finish('builder', {'status': 'completed', 'pr': {**PR, 'head': old}})
+        self.flow.tick()
+        current = old
+        for number in range(1, rounds):
+            self.review('REQUEST_CHANGES', head=current)
+            self.flow.tick()
+            (root / 'feature').write_text(f'fix {number}')
+            git('add', 'feature')
+            git('commit', '-m', 'fix finding')
+            current = git('rev-parse', 'HEAD')
+            self.provider.snapshot['head'] = current
+            self.finish('builder', {'status': 'completed', 'pr': {**PR, 'head': current}})
+            self.flow.tick()
+        self.review(verdict, head=current)
+        if merging:
+            self.flow.tick()
+            self.assertEqual(self.queue.get('job')['stage'], 'merging')
+        effects = len(self.provider.released)
+        (root / 'feature').write_text('new author change')
+        git('add', 'feature')
+        git('commit', '-m', 'author changes source after review')
+        moved = git('rev-parse', 'HEAD')
+        self.provider.snapshot['head'] = moved
+        self.flow.tick()
+        card = self.queue.get('job')
+        self.assertEqual((card['stage'], card['ready'], card['review_round']),
+                         ('blocked', False, 3) if rounds == 3 else ('review', True, rounds))
+        self.assertEqual(self.queue.merge_order()['entries'], [])
+        self.assertEqual(len(self.provider.released), effects)
+        if rounds == 3:
+            self.assertEqual(card['last_event']['reason'], 'round cap')
+        else:
+            self.assertEqual(card['prs'][0]['head'], moved)
+            self.assertEqual(card['ci_state'], 'unknown')
+            self.assertIn(moved, self.queue.candidates()[0]['task'])
+            with WorkQueue(self.path) as restarted:
+                Handoffs(restarted, self.desks, self.provider).tick()
+                self.assertEqual(len(restarted.candidates()), 1)
+
+    def test_source_change_after_rejection_queues_review_of_new_head(self):
+        self.source_move('REQUEST_CHANGES')
+
+    def test_source_change_after_merge_admission_queues_review_of_new_head(self):
+        self.source_move(merging=True)
+
+    def test_source_change_on_third_review_blocks_instead_of_starting_fourth(self):
+        self.source_move(rounds=3)
+
+    def test_source_change_after_approval_receipt_queues_review_of_new_head(self):
+        self.source_move()
+
     def test_review_cannot_reuse_a_comment_from_before_its_claim(self):
         self.build()
         self.flow.tick()
@@ -141,6 +197,50 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(self.queue.get('job')['stage'], 'review')
         self.assertTrue(self.queue.get('second')['ready'])
         self.assertFalse(self.provider.released)
+
+    def test_unchanged_fix_returns_to_builder_without_spending_review_round(self):
+        self.build()
+        self.flow.tick()
+        self.review('REQUEST_CHANGES')
+        self.flow.tick()
+        for _ in range(2):
+            self.finish('builder', {'status': 'completed', 'pr': PR})
+            self.flow.tick()
+            card = self.queue.get('job')
+            self.assertEqual((card['stage'], card['desk'], card['ready'], card['review_round']),
+                             ('fixing', 'builder', True, 1))
+            self.assertEqual(card['last_event']['reason'], 'no new commits')
+            self.assertIn('no new commits', self.queue.candidates()[0]['task'])
+            self.assertIn('preserve ordering', self.queue.candidates()[0]['task'])
+            self.assertEqual(self.queue.merge_order()['entries'], [])
+            self.flow.tick()
+            self.assertEqual(len(self.queue.candidates()), 1)
+        self.assertFalse(self.provider.released)
+
+    def test_flag_unset_finish_does_not_add_completion_metadata(self):
+        with patch.dict(os.environ):
+            os.environ.pop('CARR_WORK_AUTO_HANDOFFS', None)
+            self.build()
+        self.assertNotIn('completion', self.queue.get('job'))
+
+    def test_flag_off_worker_does_not_add_executor_kind_or_change_prompt(self):
+        claim = self.queue.claim(eligible_desks={'builder'}, actor='test', owner={})
+        def dispatch_call(desk, task, *, on_started, **kwargs):
+            self.assertEqual(task, 'Build queue transitions')
+            on_started({'name': 'builder', 'kind': 'codex-session', 'family': 'sol'})
+            return {'status': 'completed'}
+        with patch.dict(os.environ, {'CARR_WORK_AUTO_HANDOFFS': '0'}), \
+             patch.object(dispatch, 'dispatch', side_effect=dispatch_call):
+            work_runner.worker(self.queue, 'job', claim['claim'], self.path.parent / 'registry.json',
+                               self.path.parent / 'results.jsonl')
+        self.assertNotIn('executor_kind', self.queue.get('job'))
+
+    def test_flag_off_review_claim_does_not_write_handoff_metadata(self):
+        self.build()
+        self.flow.tick()
+        with patch.dict(os.environ, {'CARR_WORK_AUTO_HANDOFFS': '0'}):
+            self.queue.claim(eligible_desks={'claude-reviewer'}, actor='test', owner={})
+        self.assertNotIn('review_started_at', self.queue.get('job')['handoff'])
 
     def test_off_flag_and_manual_park_leave_completion_unadvanced(self):
         self.build()
@@ -251,6 +351,21 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(sum('DELETE' in call for call in effects), 1)
         self.assertEqual(responses, [])
 
+    def test_main_merge_after_rejection_returns_existing_findings_to_builder(self):
+        root, git, old, new = self.git_heads()
+        self.provider.main_merges_only = lambda pin, head: work_handoffs.main_merges_only(
+            root, pin['head'], head, 'main')
+        self.finish('builder', {'status': 'completed', 'pr': {**PR, 'head': old}})
+        self.flow.tick()
+        self.review('REQUEST_CHANGES', head=old)
+        self.provider.snapshot['head'] = new
+        self.flow.tick()
+        card = self.queue.get('job')
+        self.assertEqual((card['stage'], card['desk'], card['ready'], card['review_round']),
+                         ('fixing', 'builder', True, 1))
+        self.assertEqual(card['prs'][0]['head'], new)
+        self.assertFalse(self.provider.released)
+
     def test_main_merge_between_review_and_completion_keeps_the_approval(self):
         root, git, old, new = self.git_heads()
         self.provider.main_merges_only = lambda pin, head: work_handoffs.main_merges_only(root, pin['head'], head, 'main')
@@ -288,12 +403,15 @@ class HandoffTests(unittest.TestCase):
 
     def test_third_rejection_blocks_with_round_cap_and_never_queues_fourth(self):
         self.build()
+        current = HEAD
         for round_number in range(1, 4):
             self.flow.tick()
-            self.review('REQUEST_CHANGES')
+            self.review('REQUEST_CHANGES', head=current)
             self.flow.tick()
             if round_number < 3:
-                self.finish('builder', {'status': 'completed', 'pr': PR})
+                current = chr(ord('a') + round_number) * 40
+                self.provider.snapshot['head'] = current
+                self.finish('builder', {'status': 'completed', 'pr': {**PR, 'head': current}})
         self.flow.tick()
         card = self.queue.get('job')
         self.assertEqual((card['stage'], card['ready'], card['review_round']), ('blocked', False, 3))

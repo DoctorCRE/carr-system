@@ -127,7 +127,9 @@ def worker(queue, card_id, token, registry, results):
                     not model_family(entry) or model_family(entry) == builder['family']):
                 raise DeskError('reviewer_family_changed', 'review requires a different builder model family')
         queue.update(card_id, actor='worker', reason='executor resolved at start',
-                     agent=entry.get('name', row['desk']), executor_kind=entry.get('kind', ''),
+                     agent=entry.get('name', row['desk']),
+                     **({'executor_kind': entry.get('kind', '')}
+                        if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1' else {}),
                      **{k: entry[k] for k in ('model', 'effort', 'family') if entry.get(k)})
     task = row['task']
     if os.environ.get('CARR_WORK_AUTO_HANDOFFS') == '1' and row['stage'] in ('building', 'fixing'):
